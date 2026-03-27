@@ -1,0 +1,18 @@
+#!/bin/sh
+# gobot pre-commit hook
+# Runs go vet and the full test suite before every commit.
+# A non-zero exit from either command aborts the commit.
+#
+# Install: cp scripts/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "--- go vet ./..."
+go vet ./...
+
+echo "--- go test -mod=vendor ./..."
+go test -mod=vendor ./...
+
+echo "--- pre-commit: all checks passed"
