@@ -24,7 +24,9 @@ The Python nanobot at `../nanobot/` runs in parallel until Go reaches feature pa
 | Pre-commit hook (checked in) | `scripts/hooks/pre-commit` |
 | Python source to port from | `..\nanobot\strategery\logic\` |
 
-## Package Map (Phase 2 — ported from `strategery/logic/`)
+## Package Map
+
+### Phase 2 — ported from `strategery/logic/` (complete)
 
 | Package | Source | Status |
 |---------|--------|--------|
@@ -37,7 +39,16 @@ The Python nanobot at `../nanobot/` runs in parallel until Go reaches feature pa
 | `internal/memory/` | `memory_logic.py` | Done |
 | `internal/provider/` | `provider_logic.py` | Done |
 | `internal/infra/` | `infra_logic.py` | Done |
+| `internal/telegram/` | `telegram.py` (pure logic) | Done |
 | `internal/context/` | `checkpoint_logic.py` | In Progress |
+
+### Phase 3 — runtime packages (in progress)
+
+| Package | Source | Status |
+|---------|--------|--------|
+| `internal/cron/` | `cron_logic.py` | Done — `KindCron` expression parsing stubbed (Phase 4) |
+| `internal/telegram/` | — | Not started |
+| `internal/reporter/` | — | Not started |
 
 ## Common Commands
 
