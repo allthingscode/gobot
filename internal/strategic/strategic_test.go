@@ -144,3 +144,28 @@ func TestCLIXMLStripper_PropagatesToolError(t *testing.T) {
 		t.Errorf("expected nil result on error, got %v", result)
 	}
 }
+
+func TestCLIXMLStripper_NonStringOutput(t *testing.T) {
+	cb := strategic.CLIXMLStripper()
+	// output value is an int, not a string — type assertion fails, should passthrough nil
+	input := map[string]any{"output": 42}
+	result, err := cb(nil, stubTool{"echo_tool"}, nil, input, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil result for non-string output, got %v", result)
+	}
+}
+
+func TestCLIXMLStripper_MissingOutputKey(t *testing.T) {
+	cb := strategic.CLIXMLStripper()
+	input := map[string]any{"something_else": "value"}
+	result, err := cb(nil, stubTool{"echo_tool"}, nil, input, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil result for missing output key, got %v", result)
+	}
+}
