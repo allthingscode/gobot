@@ -54,6 +54,15 @@ go vet ./...
 go build -mod=vendor ./cmd/gobot/
 ```
 
+## Reference Documents
+
+The `docs/references/` directory contains best practices and design patterns for this project:
+- `01-cobra-cli.md`: Cobra CLI structure and `RunE`.
+- `02-sqlite-pure-go.md`: Pure Go SQLite, WAL mode, and concurrency.
+- `03-go-testing.md`: Table-driven tests, parallelization, and `t.Helper()`.
+- `04-go-architecture.md`: Project layout, interfaces, and error wrapping.
+- `05-openclaw-design.md`: OpenClaw Gateway architecture, Pi runtime, and session model.
+
 ## Epic Reference
 
 Full roadmap: EPIC-001 in the nanobot private feature backlog.
