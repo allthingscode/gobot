@@ -36,6 +36,7 @@ The Python nanobot at `../nanobot/` runs in parallel until Go reaches feature pa
 | `internal/reflection/` | `reflection_logic.py` | Done |
 | `internal/memory/` | `memory_logic.py` | Done |
 | `internal/provider/` | `provider_logic.py` | Done |
+| `internal/infra/` | `infra_logic.py` | Done |
 | `internal/context/` | `checkpoint_logic.py` | In Progress |
 
 ## Common Commands
