@@ -1,0 +1,20 @@
+# Compiled binaries
+*.exe
+*.exe~
+/gobot.exe
+
+# Test cache
+*.test
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit
+.env
+config.local.json
