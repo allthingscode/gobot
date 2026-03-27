@@ -31,6 +31,9 @@ func openDB(storageRoot string) (*sql.DB, error) {
 		return nil, fmt.Errorf("openDB: set WAL mode: %w", err)
 	}
 
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	return db, nil
 }
 
