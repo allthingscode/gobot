@@ -44,6 +44,7 @@ type GeminiConfig struct {
 type StrategicConfig struct {
 	UserEmail    string `json:"user_email"`
 	StorageRoot  string `json:"storage_root"`
+	Mandate      string `json:"mandate"`
 	UseGoBridge  bool   `json:"use_go_bridge"`
 	GoBridgePort int    `json:"go_bridge_port"`
 }
