@@ -24,9 +24,10 @@ type Probes struct {
 }
 
 type result struct {
-	name   string
-	ok     bool
-	detail string
+	name     string
+	ok       bool
+	detail   string
+	critical bool // if true, failure halts startup
 }
 
 // tokenExpiry is a minimal struct for reading the expiry field from OAuth2 token files.
@@ -51,27 +52,36 @@ func Run(cfg *config.Config, probes *Probes) error {
 
 	secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
 
+	// Critical checks halt startup on failure.
+	// Advisory checks print [WARN] but never block the bot from starting.
+	r := func(c result, crit bool) result { c.critical = crit; return c }
+
 	checks := []result{
-		checkStorageRoot(cfg),
-		checkWorkspace(cfg),
-		checkLogs(cfg),
-		checkAPIKey(cfg),
-		checkTelegram(cfg.TelegramToken(), p.ProbeTelegram),
-		checkGeminiLive(apiKey, p.ProbeGemini),
-		checkGoogleToken(secretsRoot),
-		checkGmailToken(secretsRoot),
-		checkJobsDir(cfg),
+		r(checkStorageRoot(cfg), true),
+		r(checkWorkspace(cfg), true),
+		r(checkLogs(cfg), false),
+		r(checkAPIKey(cfg), true),
+		r(checkTelegram(cfg.TelegramToken(), p.ProbeTelegram), true),
+		r(checkGeminiLive(apiKey, p.ProbeGemini), false),
+		r(checkGoogleToken(secretsRoot), false),
+		r(checkGmailToken(secretsRoot), false),
+		r(checkJobsDir(cfg), false),
 	}
 
 	fmt.Println("gobot doctor")
 	fmt.Println("============")
 
-	anyFail := false
+	anyCriticalFail := false
 	for _, c := range checks {
-		icon := "OK "
-		if !c.ok {
+		var icon string
+		switch {
+		case c.ok:
+			icon = "OK "
+		case c.critical:
 			icon = "ERR"
-			anyFail = true
+			anyCriticalFail = true
+		default:
+			icon = "WRN"
 		}
 		fmt.Printf("  [%s] %-22s", icon, c.name)
 		if c.detail != "" {
@@ -82,8 +92,8 @@ func Run(cfg *config.Config, probes *Probes) error {
 
 	fmt.Printf("\n%d checks in %s\n", len(checks), time.Since(start).Round(time.Millisecond))
 
-	if anyFail {
-		return fmt.Errorf("one or more health checks failed")
+	if anyCriticalFail {
+		return fmt.Errorf("one or more critical health checks failed")
 	}
 	return nil
 }
@@ -92,31 +102,31 @@ func checkStorageRoot(cfg *config.Config) result {
 	root := cfg.StorageRoot()
 	info, err := os.Stat(root)
 	if err != nil {
-		return result{"storage root", false, fmt.Sprintf("%s: %v", root, err)}
+		return result{name: "storage root", ok: false, detail: fmt.Sprintf("%s: %v", root, err)}
 	}
 	if !info.IsDir() {
-		return result{"storage root", false, fmt.Sprintf("%s is not a directory", root)}
+		return result{name: "storage root", ok: false, detail: fmt.Sprintf("%s is not a directory", root)}
 	}
-	return result{"storage root", true, root}
+	return result{name: "storage root", ok: true, detail: root}
 }
 
 func checkWorkspace(cfg *config.Config) result {
 	ws := filepath.Join(cfg.StorageRoot(), "workspace")
 	tmp, err := os.CreateTemp(ws, "gobot-doctor-*")
 	if err != nil {
-		return result{"workspace writable", false, fmt.Sprintf("%s: %v", ws, err)}
+		return result{name: "workspace writable", ok: false, detail: fmt.Sprintf("%s: %v", ws, err)}
 	}
 	tmp.Close()
 	os.Remove(tmp.Name())
-	return result{"workspace writable", true, ws}
+	return result{name: "workspace writable", ok: true, detail: ws}
 }
 
 func checkLogs(cfg *config.Config) result {
 	logs := filepath.Join(cfg.StorageRoot(), "logs")
 	if err := os.MkdirAll(logs, 0o755); err != nil {
-		return result{"logs directory", false, fmt.Sprintf("%v", err)}
+		return result{name: "logs directory", ok: false, detail: fmt.Sprintf("%v", err)}
 	}
-	return result{"logs directory", true, logs}
+	return result{name: "logs directory", ok: true, detail: logs}
 }
 
 func checkAPIKey(cfg *config.Config) result {
@@ -125,42 +135,42 @@ func checkAPIKey(cfg *config.Config) result {
 		key = os.Getenv("GOOGLE_API_KEY")
 	}
 	if key == "" {
-		return result{"gemini api key", false, "not found in config or GOOGLE_API_KEY env"}
+		return result{name: "gemini api key", ok: false, detail: "not found in config or GOOGLE_API_KEY env"}
 	}
 	masked := key[:4] + "..." + key[len(key)-4:]
 	slog.Debug("api key found", "masked", masked)
-	return result{"gemini api key", true, masked}
+	return result{name: "gemini api key", ok: true, detail: masked}
 }
 
 // checkTelegram validates the Telegram bot token.
 // If probe is nil, only the presence of the token is verified.
 func checkTelegram(token string, probe func(string) (string, error)) result {
 	if token == "" {
-		return result{"telegram", false, "token not configured"}
+		return result{name: "telegram", ok: false, detail: "token not configured"}
 	}
 	if probe == nil {
-		return result{"telegram", true, "token present (live check skipped)"}
+		return result{name: "telegram", ok: true, detail: "token present (live check skipped)"}
 	}
 	username, err := probe(token)
 	if err != nil {
-		return result{"telegram", false, err.Error()}
+		return result{name: "telegram", ok: false, detail: err.Error()}
 	}
-	return result{"telegram", true, username}
+	return result{name: "telegram", ok: true, detail: username}
 }
 
 // checkGeminiLive validates the Gemini API key with a live API call.
 // If probe is nil, only the presence of the key is verified.
 func checkGeminiLive(apiKey string, probe func(string) error) result {
 	if apiKey == "" {
-		return result{"gemini live", false, "no api key"}
+		return result{name: "gemini live", ok: false, detail: "no api key"}
 	}
 	if probe == nil {
-		return result{"gemini live", true, "key present (live check skipped)"}
+		return result{name: "gemini live", ok: true, detail: "key present (live check skipped)"}
 	}
 	if err := probe(apiKey); err != nil {
-		return result{"gemini live", false, err.Error()}
+		return result{name: "gemini live", ok: false, detail: err.Error()}
 	}
-	return result{"gemini live", true, "model responded"}
+	return result{name: "gemini live", ok: true, detail: "model responded"}
 }
 
 // checkGoogleToken reads secrets/google_token.json and reports the token expiry.
@@ -178,25 +188,25 @@ func checkTokenFile(name, path string) result {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return result{name, false, fmt.Sprintf("not found: %s", path)}
+			return result{name: name, ok: false, detail: fmt.Sprintf("not found: %s", path)}
 		}
-		return result{name, false, err.Error()}
+		return result{name: name, ok: false, detail: err.Error()}
 	}
 	var tok tokenExpiry
 	if err := json.Unmarshal(data, &tok); err != nil {
-		return result{name, false, fmt.Sprintf("invalid JSON: %v", err)}
+		return result{name: name, ok: false, detail: fmt.Sprintf("invalid JSON: %v", err)}
 	}
 	if tok.Expiry.IsZero() {
-		return result{name, true, "present (no expiry field)"}
+		return result{name: name, ok: true, detail: "present (no expiry field)"}
 	}
 	days := int(time.Until(tok.Expiry).Hours() / 24)
 	if days < 0 {
-		return result{name, false, fmt.Sprintf("EXPIRED %d days ago", -days)}
+		return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d days ago", -days)}
 	}
 	if days == 0 {
-		return result{name, true, "expires today — consider refreshing"}
+		return result{name: name, ok: true, detail: "expires today — consider refreshing"}
 	}
-	return result{name, true, fmt.Sprintf("valid, expires in %d days", days)}
+	return result{name: name, ok: true, detail: fmt.Sprintf("valid, expires in %d days", days)}
 }
 
 // checkJobsDir verifies the cron jobs directory exists and has .md job files.
@@ -204,7 +214,7 @@ func checkJobsDir(cfg *config.Config) result {
 	dir := filepath.Join(cfg.StorageRoot(), "workspace", "jobs")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return result{"jobs directory", false, fmt.Sprintf("%s: %v", dir, err)}
+		return result{name: "jobs directory", ok: false, detail: fmt.Sprintf("%s: %v", dir, err)}
 	}
 	count := 0
 	for _, e := range entries {
@@ -213,7 +223,7 @@ func checkJobsDir(cfg *config.Config) result {
 		}
 	}
 	if count == 0 {
-		return result{"jobs directory", true, fmt.Sprintf("%s (no .md jobs)", dir)}
+		return result{name: "jobs directory", ok: true, detail: fmt.Sprintf("%s (no .md jobs)", dir)}
 	}
-	return result{"jobs directory", true, fmt.Sprintf("%d job(s) in %s", count, dir)}
+	return result{name: "jobs directory", ok: true, detail: fmt.Sprintf("%d job(s) in %s", count, dir)}
 }
