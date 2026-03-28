@@ -137,10 +137,15 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 					slog.Warn("telegram: message from unlisted chat ID dropped", "chatID", update.Message.Chat.ID)
 					continue
 				}
+				var senderID int64
+				if update.Message.From != nil {
+					senderID = update.Message.From.ID
+				}
 				out <- bot.InboundMessage{
 					ChatID:    update.Message.Chat.ID,
 					MessageID: msgID,
 					ThreadID:  0,
+					SenderID:  senderID,
 					Text:      update.Message.Text,
 				}
 			}

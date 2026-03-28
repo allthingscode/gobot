@@ -115,19 +115,39 @@ func TestSessionKey(t *testing.T) {
 		name     string
 		chatID   int64
 		threadID int64
+		senderID int64
 		want     string
 	}{
-		{"DM no thread", 12345, 0, "telegram:12345"},
-		{"topic thread", 12345, 99, "telegram:12345:99"},
-		{"group chat", -100123, 0, "telegram:-100123"},
-		{"group topic", -100123, 5, "telegram:-100123:5"},
+		{"DM no thread", 12345, 0, 12345, "telegram:12345"},
+		{"DM no thread no sender", 12345, 0, 0, "telegram:12345"},
+		{"DM topic thread", 12345, 99, 12345, "telegram:12345:99"},
+		{"group with sender", -100123, 0, 456, "telegram:-100123:456"},
+		{"group no sender", -100123, 0, 0, "telegram:-100123"},
+		{"group two users isolated", -100123, 0, 100, "telegram:-100123:100"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := SessionKey(tt.chatID, tt.threadID); got != tt.want {
-				t.Errorf("SessionKey(%d, %d) = %q, want %q", tt.chatID, tt.threadID, got, tt.want)
+			if got := SessionKey(tt.chatID, tt.threadID, tt.senderID); got != tt.want {
+				t.Errorf("SessionKey(%d, %d, %d) = %q, want %q", tt.chatID, tt.threadID, tt.senderID, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSessionKey_GroupIsolation(t *testing.T) {
+	// Two different senders in the same group must get different session keys.
+	key1 := SessionKey(-1001234567890, 0, 100)
+	key2 := SessionKey(-1001234567890, 0, 200)
+	if key1 == key2 {
+		t.Errorf("users 100 and 200 in same group got identical session keys: %q", key1)
+	}
+}
+
+func TestSessionKey_DMNotDoubled(t *testing.T) {
+	// DM: chatID == senderID — must not produce "telegram:12345:12345".
+	key := SessionKey(12345, 0, 12345)
+	if key != "telegram:12345" {
+		t.Errorf("DM session key = %q, want %q", key, "telegram:12345")
 	}
 }
 

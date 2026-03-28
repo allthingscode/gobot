@@ -18,6 +18,7 @@ type InboundMessage struct {
 	ChatID    int64
 	MessageID int64
 	ThreadID  int64 // 0 for non-topic (DM/group) chats
+	SenderID  int64 // Telegram user ID of the sender (from Message.From.ID)
 	Text      string
 }
 
@@ -63,13 +64,26 @@ func New(api API, handler Handler) *Bot {
 }
 
 // SessionKey returns the routing key for a message.
-// Format: "telegram:<chatID>" for DMs/plain groups.
 //
-//	"telegram:<chatID>:<threadID>" for topic threads (threadID > 0).
+// Format:
+//   - DM (chatID > 0):           "telegram:<chatID>"
+//   - DM topic (chatID > 0):     "telegram:<chatID>:<threadID>"
+//   - Group (chatID < 0):        "telegram:<chatID>:<senderID>"
+//
+// Group chats use a per-user key so each sender has an isolated context.
+// Cron sessions use the "cron:" prefix and are unaffected.
 //
 // Mirrors DetectThreadMetadata in internal/telegram and session_key_override
 // in strategery/patches/telegram.py.
-func SessionKey(chatID, threadID int64) string {
+func SessionKey(chatID, threadID, senderID int64) string {
+	if chatID < 0 {
+		// Group or supergroup: isolate per sender.
+		if senderID > 0 {
+			return fmt.Sprintf("telegram:%d:%d", chatID, senderID)
+		}
+		return fmt.Sprintf("telegram:%d", chatID)
+	}
+	// DM: factor in topic thread if present.
 	if threadID > 0 {
 		return fmt.Sprintf("telegram:%d:%d", chatID, threadID)
 	}
@@ -152,7 +166,7 @@ func (b *Bot) Run(ctx context.Context) error {
 
 // dispatch processes a single inbound message and sends a reply if non-empty.
 func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
-	sessionKey := SessionKey(msg.ChatID, msg.ThreadID)
+	sessionKey := SessionKey(msg.ChatID, msg.ThreadID, msg.SenderID)
 	slog.Info("bot: message received", "session", sessionKey, "text", msg.Text)
 
 	// Start typing indicator
