@@ -1,7 +1,9 @@
 package context
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -88,6 +90,9 @@ func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, message
 		return false, nil
 	}
 
+	sum := sha256.Sum256(stateJSON)
+	checksum := hex.EncodeToString(sum[:])
+
 	tx, err := m.db.Begin()
 	if err != nil {
 		return false, fmt.Errorf("SaveSnapshot: begin tx: %w", err)
@@ -95,8 +100,8 @@ func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, message
 	defer tx.Rollback() //nolint:errcheck
 
 	if _, err := tx.Exec(
-		`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
-		threadID, iteration, string(stateJSON),
+		`INSERT INTO checkpoints (thread_id, iteration, state, checksum) VALUES (?, ?, ?, ?)`,
+		threadID, iteration, string(stateJSON), checksum,
 	); err != nil {
 		return false, fmt.Errorf("SaveSnapshot: insert checkpoint: %w", err)
 	}
@@ -116,7 +121,7 @@ func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, message
 // LoadLatest returns the most recent snapshot for a thread, or nil if none exists.
 func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error) {
 	row := m.db.QueryRow(
-		`SELECT iteration, state FROM checkpoints
+		`SELECT iteration, state, checksum FROM checkpoints
 		 WHERE thread_id = ?
 		 ORDER BY iteration DESC, checkpoint_id DESC
 		 LIMIT 1`,
@@ -125,11 +130,20 @@ func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error)
 
 	var iteration int
 	var stateJSON string
-	if err := row.Scan(&iteration, &stateJSON); err != nil {
+	var checksumNS sql.NullString
+	if err := row.Scan(&iteration, &stateJSON, &checksumNS); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("LoadLatest: scan checkpoint: %w", err)
+	}
+
+	if checksumNS.Valid && checksumNS.String != "" {
+		computedSum := sha256.Sum256([]byte(stateJSON))
+		computed := hex.EncodeToString(computedSum[:])
+		if computed != checksumNS.String {
+			return nil, fmt.Errorf("LoadLatest: checksum mismatch for thread %s (stored %s, computed %s)", threadID, checksumNS.String, computed)
+		}
 	}
 
 	var messages []StrategicMessage

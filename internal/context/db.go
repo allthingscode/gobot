@@ -37,6 +37,38 @@ func openDB(storageRoot string) (*sql.DB, error) {
 	return db, nil
 }
 
+// addChecksumColumnIfMissing adds a checksum TEXT column to the checkpoints
+// table if it does not already exist. It is idempotent and safe to call on
+// both fresh and existing databases.
+func addChecksumColumnIfMissing(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(checkpoints)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var typeStr string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typeStr, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "checksum" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = db.Exec("ALTER TABLE checkpoints ADD COLUMN checksum TEXT")
+	return err
+}
+
 // initSchema creates the threads and checkpoints tables if they do not exist.
 func initSchema(db *sql.DB) error {
 	_, err := db.Exec(`
@@ -64,6 +96,10 @@ func initSchema(db *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("initSchema: create checkpoints: %w", err)
+	}
+
+	if err := addChecksumColumnIfMissing(db); err != nil {
+		return fmt.Errorf("initSchema: add checksum column: %w", err)
 	}
 
 	return nil

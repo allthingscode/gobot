@@ -488,3 +488,70 @@ func TestGetCheckpointManager_Singleton(t *testing.T) {
 		t.Error("expected same instance on second call (singleton)")
 	}
 }
+
+// ── Checksum tests ────────────────────────────────────────────────────────────
+
+func TestSaveSnapshot_StoresChecksum(t *testing.T) {
+	m := newTestManager(t)
+	if err := m.CreateThread("t1", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	content := MessageContent{Str: strPtr("hello")}
+	msgs := []StrategicMessage{{Role: "user", Content: &content}}
+	ok, err := m.SaveSnapshot("t1", 1, msgs)
+	if err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+
+	var checksum string
+	if err := m.db.QueryRow(`SELECT checksum FROM checkpoints WHERE thread_id = 't1'`).Scan(&checksum); err != nil {
+		t.Fatalf("query checksum: %v", err)
+	}
+	if checksum == "" {
+		t.Error("expected non-empty checksum")
+	}
+	if len(checksum) != 64 {
+		t.Errorf("expected checksum length 64 (SHA-256 hex), got %d: %q", len(checksum), checksum)
+	}
+}
+
+func TestLoadLatest_ChecksumMismatch(t *testing.T) {
+	m := newTestManager(t)
+	if err := m.CreateThread("t1", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	content := MessageContent{Str: strPtr("hello")}
+	msgs := []StrategicMessage{{Role: "user", Content: &content}}
+	if _, err := m.SaveSnapshot("t1", 1, msgs); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	// Corrupt the stored checksum.
+	m.db.Exec(`UPDATE checkpoints SET checksum = ? WHERE thread_id = ?`, "deadbeef", "t1")
+
+	_, err := m.LoadLatest("t1")
+	if err == nil {
+		t.Error("expected error due to checksum mismatch, got nil")
+	}
+}
+
+func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) {
+	m := newTestManager(t)
+	if err := m.CreateThread("t1", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	// Insert a legacy checkpoint row without the checksum column (defaults to NULL).
+	m.db.Exec(`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
+		"t1", 1, `[{"role":"user","content":"hi"}]`)
+
+	snap, err := m.LoadLatest("t1")
+	if err != nil {
+		t.Fatalf("expected nil error for legacy row, got: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot for legacy row, got nil")
+	}
+}
