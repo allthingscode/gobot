@@ -12,16 +12,19 @@ import (
 
 const awarenessMaxJournalChars = 4000
 
-// loadSystemPrompt builds the combined system prompt from SOUL.md (identity),
-// AWARENESS.md (operational context), and today's journal continuity block.
-// Returns an empty string if no source has content.
+// loadSystemPrompt builds the combined system prompt from:
+//  1. .private/SOUL.md     — behavior rules (how to respond)
+//  2. .private/IDENTITY.md — who Matthew is (personal context)
+//  3. AWARENESS.md         — how this system works (paths, cron, journal)
+//  4. Journal continuity   — recent activity (auto-injected)
+//  5. Live schedule        — today's calendar + tasks (best-effort)
 func loadSystemPrompt(storageRoot string) string {
 	var parts []string
 
-	// SOUL.md — agent identity document. Look next to the binary first,
-	// then fall back to the storage workspace. Silently skipped if absent.
-	if soulData := loadSoulMD(storageRoot); soulData != "" {
-		parts = append(parts, soulData)
+	for _, name := range []string{"SOUL.md", "IDENTITY.md"} {
+		if data := loadPrivateFile(storageRoot, name); data != "" {
+			parts = append(parts, data)
+		}
 	}
 
 	awarenessPath := filepath.Join(storageRoot, "workspace", "AWARENESS.md")
@@ -33,7 +36,6 @@ func loadSystemPrompt(storageRoot string) string {
 		parts = append(parts, continuity)
 	}
 
-	// Inject live calendar and tasks — best-effort, never fatal.
 	secretsRoot := filepath.Join(storageRoot, "secrets")
 	if schedule := loadScheduleContext(secretsRoot); schedule != "" {
 		parts = append(parts, schedule)
@@ -42,20 +44,15 @@ func loadSystemPrompt(storageRoot string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// loadSoulMD reads SOUL.md from .private/ next to the binary (dev) or
-// {storageRoot}/workspace/SOUL.md (deployed copy). Returns empty string if not found.
-func loadSoulMD(storageRoot string) string {
+// loadPrivateFile reads a file from .private/ next to the binary (dev) or
+// {storageRoot}/workspace/ (production fallback). Returns empty string if not found.
+func loadPrivateFile(storageRoot, filename string) string {
 	candidates := []string{
-		// Deployed copy in storage workspace (copy here for production use)
-		filepath.Join(storageRoot, "workspace", "SOUL.md"),
+		filepath.Join(storageRoot, "workspace", filename),
 	}
 	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
 		candidates = append([]string{
-			// .private/SOUL.md next to the binary (dev environment)
-			filepath.Join(dir, ".private", "SOUL.md"),
-			// SOUL.md directly next to the binary
-			filepath.Join(dir, "SOUL.md"),
+			filepath.Join(filepath.Dir(exe), ".private", filename),
 		}, candidates...)
 	}
 	for _, p := range candidates {
@@ -67,9 +64,8 @@ func loadSoulMD(storageRoot string) string {
 }
 
 // loadScheduleContext fetches today's calendar events and open tasks and
-// returns a Markdown-formatted block for injection into the system prompt.
-// Returns an empty string if credentials are missing or any API call fails —
-// schedule context is best-effort and must never block startup.
+// returns a Markdown block for injection into the system prompt.
+// Best-effort — never blocks startup on failure.
 func loadScheduleContext(secretsRoot string) string {
 	var parts []string
 
@@ -95,22 +91,20 @@ func loadScheduleContext(secretsRoot string) string {
 
 // ensureAwarenessFile writes a default AWARENESS.md into
 // {storageRoot}/workspace/ if the file does not already exist.
-// It is safe to call on every startup - it is a no-op when the file is present.
+// Safe to call on every startup — no-op when the file is present.
 func ensureAwarenessFile(storageRoot string) {
 	awarenessPath := filepath.Join(storageRoot, "workspace", "AWARENESS.md")
 	if _, err := os.Stat(awarenessPath); err == nil {
-		return // already exists - user may have customised it
+		return
 	}
 	if err := os.MkdirAll(filepath.Dir(awarenessPath), 0o755); err != nil {
 		return
 	}
-	content := buildAwarenessContent(storageRoot)
-	_ = os.WriteFile(awarenessPath, []byte(content), 0o644)
+	_ = os.WriteFile(awarenessPath, []byte(buildAwarenessContent(storageRoot)), 0o644)
 }
 
-// buildAwarenessContent returns the default AWARENESS.md content with
-// storageRoot substituted in. Kept as a separate function so it can be
-// tested without touching the filesystem.
+// buildAwarenessContent returns the default AWARENESS.md content.
+// Kept separate so it can be tested without filesystem side effects.
 func buildAwarenessContent(storageRoot string) string {
 	cronItemsDir := filepath.Join(storageRoot, "workspace", "jobs")
 	return "# STRATEGIC AWARENESS\n" +
@@ -126,12 +120,9 @@ func buildAwarenessContent(storageRoot string) string {
 		"\n" +
 		"## MEMORY & CONTINUITY\n" +
 		"- **Daily Journal:** `" + filepath.Join(storageRoot, "workspace", "journal", "YYYY-MM-DD.md") + "`\n" +
-		"- **Chronological Continuity:** A rolling journal snippet is automatically injected into your\n" +
-		"  context on every turn so you always have the immediate state of play.\n" +
-		"- **Long-Term Memory:** Stored in the checkpoint database at\n" +
-		"  `" + filepath.Join(storageRoot, "workspace", "checkpoints.db") + "`.\n" +
+		"- **Chronological Continuity:** A rolling journal snippet is injected into context on every turn.\n" +
+		"- **Long-Term Memory:** Checkpoint database at `" + filepath.Join(storageRoot, "workspace", "checkpoints.db") + "`.\n" +
 		"\n" +
 		"## OPERATOR MANDATES\n" +
-		"- **Zero Drive-Root Writes:** Never write to drive roots. All output goes under `" + storageRoot + "`.\n" +
-		"- **Retired Files:** `HISTORY.md` is retired and read-only.\n"
+		"- **Zero Drive-Root Writes:** Never write to drive roots. All output goes under `" + storageRoot + "`.\n"
 }
