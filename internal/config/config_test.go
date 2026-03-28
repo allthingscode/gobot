@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// errReader is an io.Reader that always returns an error.
 type errReader struct{}
 
 func (errReader) Read(_ []byte) (int, error) { return 0, errors.New("read error") }
@@ -27,7 +26,6 @@ func TestDecode_NoBOM(t *testing.T) {
 }
 
 func TestDecode_WithBOM(t *testing.T) {
-	// UTF-8 BOM prefix followed by valid JSON
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	json := []byte(`{"providers":{"gemini":{"apiKey":"test-key"}}}`)
 	input := append(bom, json...)
@@ -42,7 +40,6 @@ func TestDecode_WithBOM(t *testing.T) {
 }
 
 func TestDecode_MissingField_DoesNotError(t *testing.T) {
-	// Partial config — missing fields should zero-value, not error
 	cfg, err := decode(bytes.NewReader([]byte(`{}`)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -61,7 +58,7 @@ func TestDecode_MalformedJSON(t *testing.T) {
 
 func TestStorageRoot_Default(t *testing.T) {
 	cfg := &Config{}
-	if cfg.StorageRoot() != `D:\Nanobot_Storage` {
+	if cfg.StorageRoot() != `D:\Gobot_Storage` {
 		t.Errorf("got %q, want default storage root", cfg.StorageRoot())
 	}
 }
@@ -89,8 +86,8 @@ func TestGeminiAPIKey_Empty(t *testing.T) {
 
 func TestDefaultConfigPath(t *testing.T) {
 	got := DefaultConfigPath()
-	if !strings.HasSuffix(got, filepath.Join(".nanobot", "config.json")) {
-		t.Errorf("DefaultConfigPath() = %q, want suffix .nanobot/config.json", got)
+	if !strings.HasSuffix(got, filepath.Join(".gobot", "config.json")) {
+		t.Errorf("DefaultConfigPath() = %q, want suffix .gobot/config.json", got)
 	}
 }
 
@@ -127,7 +124,6 @@ func TestDecode_ReadError(t *testing.T) {
 }
 
 func TestDecode_OnlyBOM(t *testing.T) {
-	// BOM with no subsequent JSON — should fail JSON parsing, not panic.
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	_, err := decode(bytes.NewReader(bom))
 	if err == nil {
@@ -135,12 +131,48 @@ func TestDecode_OnlyBOM(t *testing.T) {
 	}
 }
 
-// Ensure Load() wires to DefaultConfigPath without panicking.
-// We don't assert a specific value since the real config may or may not exist.
 func TestLoad_DoesNotPanic(t *testing.T) {
-	// Swallow both success and "file not found" — just must not panic.
 	_, _ = Load()
 }
 
-// Satisfy the io import so errReader compiles cleanly.
+func TestTelegramConfig_AllowFrom(t *testing.T) {
+	json := `{"channels":{"telegram":{"token":"tok","allowFrom":["111","222"]}}}`
+	cfg, err := decode(bytes.NewReader([]byte(json)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Channels.Telegram.Token != "tok" {
+		t.Errorf("token: got %q, want %q", cfg.Channels.Telegram.Token, "tok")
+	}
+	if len(cfg.Channels.Telegram.AllowFrom) != 2 {
+		t.Errorf("allowFrom length: got %d, want 2", len(cfg.Channels.Telegram.AllowFrom))
+	}
+	if cfg.Channels.Telegram.AllowFrom[0] != "111" {
+		t.Errorf("allowFrom[0]: got %q, want %q", cfg.Channels.Telegram.AllowFrom[0], "111")
+	}
+}
+
+func TestTelegramToken_FromConfig(t *testing.T) {
+	cfg := &Config{Channels: ChannelsConfig{Telegram: TelegramConfig{Token: "cfg-token"}}}
+	if cfg.TelegramToken() != "cfg-token" {
+		t.Errorf("got %q, want cfg-token", cfg.TelegramToken())
+	}
+}
+
+func TestTelegramToken_EnvFallback(t *testing.T) {
+	cfg := &Config{}
+	t.Setenv("TELEGRAM_BOT_TOKEN", "env-token")
+	if cfg.TelegramToken() != "env-token" {
+		t.Errorf("got %q, want env-token", cfg.TelegramToken())
+	}
+}
+
+func TestTelegramToken_Empty(t *testing.T) {
+	cfg := &Config{}
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	if cfg.TelegramToken() != "" {
+		t.Errorf("got %q, want empty", cfg.TelegramToken())
+	}
+}
+
 var _ io.Reader = errReader{}

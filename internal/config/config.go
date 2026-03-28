@@ -12,15 +12,16 @@ import (
 // bomPrefix is the UTF-8 byte order mark written by some Windows editors.
 var bomPrefix = []byte{0xEF, 0xBB, 0xBF}
 
-// Config mirrors the relevant fields of ~/.nanobot/config.json.
+// Config mirrors the relevant fields of ~/.gobot/config.json.
 type Config struct {
 	Agents    AgentsConfig    `json:"agents"`
+	Channels  ChannelsConfig  `json:"channels"`
 	Providers ProvidersConfig `json:"providers"`
 	Strategic StrategicConfig `json:"strategic_edition"`
 }
 
 type AgentsConfig struct {
-	Defaults  AgentDefaults            `json:"defaults"`
+	Defaults    AgentDefaults               `json:"defaults"`
 	Specialists map[string]SpecialistConfig `json:"specialists"`
 }
 
@@ -33,12 +34,21 @@ type SpecialistConfig struct {
 	Model string `json:"model"`
 }
 
+type ChannelsConfig struct {
+	Telegram TelegramConfig `json:"telegram"`
+}
+
 type ProvidersConfig struct {
 	Gemini GeminiConfig `json:"gemini"`
 }
 
 type GeminiConfig struct {
 	APIKey string `json:"apiKey"`
+}
+
+type TelegramConfig struct {
+	Token     string   `json:"token"`
+	AllowFrom []string `json:"allowFrom"`
 }
 
 type StrategicConfig struct {
@@ -49,12 +59,12 @@ type StrategicConfig struct {
 	GoBridgePort int    `json:"go_bridge_port"`
 }
 
-// StorageRoot returns the configured storage root, defaulting to D:/Nanobot_Storage.
+// StorageRoot returns the configured storage root, defaulting to D:\Gobot_Storage.
 func (c *Config) StorageRoot() string {
 	if c.Strategic.StorageRoot != "" {
 		return c.Strategic.StorageRoot
 	}
-	return `D:\Nanobot_Storage`
+	return `D:\Gobot_Storage`
 }
 
 // GeminiAPIKey returns the Gemini API key from config.
@@ -62,10 +72,19 @@ func (c *Config) GeminiAPIKey() string {
 	return c.Providers.Gemini.APIKey
 }
 
-// DefaultConfigPath returns ~/.nanobot/config.json.
+// TelegramToken returns the Telegram bot token from config,
+// falling back to the TELEGRAM_BOT_TOKEN environment variable.
+func (c *Config) TelegramToken() string {
+	if t := c.Channels.Telegram.Token; t != "" {
+		return t
+	}
+	return os.Getenv("TELEGRAM_BOT_TOKEN")
+}
+
+// DefaultConfigPath returns ~/.gobot/config.json.
 func DefaultConfigPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".nanobot", "config.json")
+	return filepath.Join(home, ".gobot", "config.json")
 }
 
 // Load reads and parses the config from the default path.

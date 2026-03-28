@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/genai"
@@ -65,10 +66,12 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 			},
 		}
 	}
+	slog.Debug("gemini: calling GenerateContent", "session", sessionKey, "model", r.model, "messages", len(contents))
 	resp, err := r.client.Models.GenerateContent(ctx, r.model, contents, cfg)
 	if err != nil {
 		return "", nil, fmt.Errorf("gemini generate: %w", err)
 	}
+	slog.Debug("gemini: GenerateContent returned", "session", sessionKey, "candidates", len(resp.Candidates))
 
 	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
 		return "", nil, fmt.Errorf("gemini: no candidates returned")

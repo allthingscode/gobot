@@ -41,6 +41,10 @@ func (m *mockAPI) Send(_ context.Context, msg OutboundMessage) error {
 	return nil
 }
 
+func (m *mockAPI) Typing(_ context.Context, _, _ int64) func() {
+	return func() {}
+}
+
 func (m *mockAPI) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -74,6 +78,9 @@ func (m *mockAPIWithError) Updates(ctx context.Context, timeout int) (<-chan Inb
 }
 func (m *mockAPIWithError) Send(ctx context.Context, msg OutboundMessage) error {
 	return m.fallback.Send(ctx, msg)
+}
+func (m *mockAPIWithError) Typing(ctx context.Context, chatID, threadID int64) func() {
+	return m.fallback.Typing(ctx, chatID, threadID)
 }
 func (m *mockAPIWithError) Stop() { m.fallback.Stop() }
 

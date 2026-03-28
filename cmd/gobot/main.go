@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ func main() {
 		cmdReauth(),
 		cmdCheckpoints(),
 		cmdResume(),
+		cmdSimulate(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -63,10 +65,10 @@ func cmdInit() *cobra.Command {
 		Short: "Create workspace directories on D: drive",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dirs := []string{
-				`D:\Nanobot_Storage\workspace`,
-				`D:\Nanobot_Storage\logs`,
-				`D:\Nanobot_Storage\workspace\projects`,
-				`D:\Nanobot_Storage\workspace\sessions`,
+				`D:\Gobot_Storage\workspace`,
+				`D:\Gobot_Storage\logs`,
+				`D:\Gobot_Storage\workspace\projects`,
+				`D:\Gobot_Storage\workspace\sessions`,
 			}
 			for _, d := range dirs {
 				if err := os.MkdirAll(d, 0o755); err != nil {
@@ -99,6 +101,7 @@ type dispatchHandler struct {
 }
 
 func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
+	slog.Debug("handler: dispatching to session manager", "session", sessionKey)
 	return h.mgr.Dispatch(ctx, sessionKey, msg.Text)
 }
 
@@ -111,9 +114,21 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			token := os.Getenv("TELEGRAM_BOT_TOKEN")
+
+			// Setup logging to file and stderr
+			logPath := filepath.Join(cfg.StorageRoot(), "logs", "gobot.log")
+			logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err == nil {
+				// Use a multi-writer to send logs to both file and stderr
+				handler := slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), &slog.HandlerOptions{Level: slog.LevelDebug})
+				slog.SetDefault(slog.New(handler))
+				defer logFile.Close()
+			}
+
+			// Prioritize token from config.json, then environment.
+			token := cfg.TelegramToken()
 			if token == "" {
-				return fmt.Errorf("TELEGRAM_BOT_TOKEN environment variable not set")
+				return fmt.Errorf("telegram token not set: add channels.telegram.token to config or set TELEGRAM_BOT_TOKEN env var")
 			}
 			ctx := cmd.Context()
 			genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -125,7 +140,7 @@ func cmdRun() *cobra.Command {
 			}
 			model := cfg.Agents.Defaults.Model
 			if model == "" {
-				model = "gemini-2.5-flash"
+				model = "gemini-3-flash-preview"
 			}
 
 			ensureAwarenessFile(cfg.StorageRoot())
@@ -141,7 +156,7 @@ func cmdRun() *cobra.Command {
 			}
 			mgr := agent.NewSessionManager(runner, store, model)
 			handler := &dispatchHandler{mgr: mgr}
-			api, err := newTgAPI(token)
+			api, err := newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
 			if err != nil {
 				return fmt.Errorf("telegram: %w", err)
 			}
@@ -271,6 +286,49 @@ func cmdResume() *cobra.Command {
 				fmt.Printf("[%s] %s\n\n", m.Role, text)
 			}
 			fmt.Printf("To continue this session, send a message from Telegram using session key: %s\n", threadID)
+			return nil
+		},
+	}
+}
+
+func cmdSimulate() *cobra.Command {
+	return &cobra.Command{
+		Use:   "simulate <prompt>",
+		Short: "Simulate a user message locally",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prompt := args[0]
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			ctx := cmd.Context()
+			genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
+				APIKey:  cfg.GeminiAPIKey(),
+				Backend: genai.BackendGeminiAPI,
+			})
+			if err != nil {
+				return fmt.Errorf("genai client: %w", err)
+			}
+			model := cfg.Agents.Defaults.Model
+			if model == "" {
+				model = "gemini-3-flash-preview"
+			}
+
+			systemPrompt := loadSystemPrompt(cfg.StorageRoot())
+			runner := newGeminiRunner(genaiClient, model, systemPrompt)
+
+			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
+			mgr := agent.NewSessionManager(runner, store, model)
+
+			fmt.Printf("--- Simulating Prompt ---\n%s\n\n", prompt)
+			fmt.Println("Waiting for response...")
+			reply, err := mgr.Dispatch(ctx, "cli-sim", prompt)
+			if err != nil {
+				return fmt.Errorf("dispatch: %w", err)
+			}
+
+			fmt.Printf("\n--- Agent Response ---\n%s\n", reply)
 			return nil
 		},
 	}

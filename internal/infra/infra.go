@@ -15,7 +15,7 @@ import (
 // Ported from resolve_strategic_media_path in infra_logic.py.
 func ResolveMediaPath(storageRoot, channelName string) string {
 	if storageRoot == "" {
-		storageRoot = "D:/Nanobot_Storage"
+		storageRoot = "D:/Gobot_Storage"
 	}
 
 	path := filepath.Join(storageRoot, "workspace", "media")

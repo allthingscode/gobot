@@ -38,6 +38,8 @@ type API interface {
 	Updates(ctx context.Context, timeout int) (<-chan InboundMessage, error)
 	// Send delivers an outbound message.
 	Send(ctx context.Context, msg OutboundMessage) error
+	// Typing starts a periodic typing indicator. Returns a stop function.
+	Typing(ctx context.Context, chatID, threadID int64) func()
 	// Stop signals the API to stop delivering updates.
 	Stop()
 }
@@ -132,6 +134,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		}
 		retryDelay = initialDelay // reset on successful connect
 
+		slog.Debug("bot: update stream connected, draining messages")
 	drain:
 		for {
 			select {
@@ -150,6 +153,12 @@ func (b *Bot) Run(ctx context.Context) error {
 // dispatch processes a single inbound message and sends a reply if non-empty.
 func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 	sessionKey := SessionKey(msg.ChatID, msg.ThreadID)
+	slog.Info("bot: message received", "session", sessionKey, "text", msg.Text)
+
+	// Start typing indicator
+	stopTyping := b.api.Typing(ctx, msg.ChatID, msg.ThreadID)
+	defer stopTyping()
+
 	reply, err := b.handler.Handle(ctx, sessionKey, msg)
 	if err != nil {
 		slog.Error("bot: handler error", "session", sessionKey, "err", err)
@@ -165,6 +174,8 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 	}
 	if err := b.api.Send(ctx, out); err != nil {
 		slog.Error("bot: send error", "session", sessionKey, "err", err)
+	} else {
+		slog.Info("bot: message sent", "session", sessionKey)
 	}
 }
 
