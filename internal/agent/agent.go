@@ -50,6 +50,7 @@ type SessionManager struct {
 	store       CheckpointStore // may be nil
 	model       string
 	storageRoot string    // may be ""; used for journal writes on compaction
+	logger      SessionLogger // may be nil; set via SetLogger
 	mu          sync.Map  // key: sessionKey (string) → *sync.Mutex
 }
 
@@ -69,6 +70,12 @@ func NewSessionManager(runner Runner, store CheckpointStore, model string) *Sess
 // desired. An empty root disables journal writes.
 func (m *SessionManager) SetStorageRoot(root string) {
 	m.storageRoot = root
+}
+
+// SetLogger configures a SessionLogger that receives a copy of the conversation
+// after every successful SaveSnapshot. If nil, no logging is performed.
+func (m *SessionManager) SetLogger(l SessionLogger) {
+	m.logger = l
 }
 
 // Dispatch delivers userMessage to the runner under a per-session lock.
@@ -134,6 +141,12 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 		iteration++
 		if _, saveErr := m.store.SaveSnapshot(sessionKey, iteration, updated); saveErr != nil {
 			slog.Warn("agent: SaveSnapshot failed", "session", sessionKey, "err", saveErr)
+		}
+		// Write markdown session log (F-037).
+		if m.logger != nil {
+			if logErr := m.logger.Log(sessionKey, iteration, updated); logErr != nil {
+				slog.Warn("agent: session log write failed", "session", sessionKey, "err", logErr)
+			}
 		}
 	}
 

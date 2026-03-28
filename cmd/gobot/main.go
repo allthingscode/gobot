@@ -212,6 +212,7 @@ func cmdRun() *cobra.Command {
 			}
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetStorageRoot(cfg.StorageRoot())
+			mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
 			handler := &dispatchHandler{mgr: mgr, memory: memStore}
 			var gateHandler bot.Handler = handler
 			if store != nil {

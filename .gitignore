@@ -22,3 +22,6 @@ config.local.json
 # Strategic Private Data
 .private/
 .gemini/
+
+# Gemini CLI task handoff file (overwritten each task, not source)
+_current_task.md
