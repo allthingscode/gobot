@@ -8,12 +8,14 @@ import (
 
 	"google.golang.org/genai"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/memory"
 )
 
 type geminiRunner struct {
 	client       *genai.Client
 	model        string
 	systemPrompt string
+	memStore     *memory.MemoryStore // may be nil; used for RAG context injection
 }
 
 func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
@@ -58,12 +60,30 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		contents = append(contents, c)
 	}
 
+	// RAG: inject relevant historical context from long-term memory.
+	systemPrompt := r.systemPrompt
+	if r.memStore != nil {
+		if userText := lastUserText(messages); !memory.ShouldSkipRAG(userText) {
+			if results, _ := r.memStore.Search(userText, 5); len(results) > 0 {
+				filtered := memory.FilterRAGResults(results, 0.0)
+				if block, n := memory.FormatRAGBlock(filtered); n > 0 {
+					slog.Debug("gemini: injecting RAG context", "session", sessionKey, "entries", n)
+					if systemPrompt != "" {
+						systemPrompt = block + "\n\n" + systemPrompt
+					} else {
+						systemPrompt = block
+					}
+				}
+			}
+		}
+	}
+
 	cfg := &genai.GenerateContentConfig{
 		Tools: []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}},
 	}
-	if r.systemPrompt != "" {
+	if systemPrompt != "" {
 		cfg.SystemInstruction = &genai.Content{
-			Parts: []*genai.Part{{Text: r.systemPrompt}},
+			Parts: []*genai.Part{{Text: systemPrompt}},
 		}
 	}
 	slog.Debug("gemini: calling GenerateContent", "session", sessionKey, "model", r.model, "messages", len(contents))
@@ -92,4 +112,14 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 	updatedMessages := append(messages, newMsg)
 
 	return text, updatedMessages, nil
+}
+
+// lastUserText returns the text of the last user message in messages, or "".
+func lastUserText(messages []agentctx.StrategicMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && messages[i].Content != nil && messages[i].Content.Str != nil {
+			return *messages[i].Content.Str
+		}
+	}
+	return ""
 }

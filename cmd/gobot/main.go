@@ -21,6 +21,7 @@ import (
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/google"
+	"github.com/allthingscode/gobot/internal/memory"
 )
 
 const version = "0.1.0"
@@ -43,6 +44,7 @@ func main() {
 		cmdSimulate(),
 		cmdCalendar(),
 		cmdTasks(),
+		cmdMemory(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -109,12 +111,19 @@ func cmdDoctor() *cobra.Command {
 }
 
 type dispatchHandler struct {
-	mgr *agent.SessionManager
+	mgr    *agent.SessionManager
+	memory *memory.MemoryStore // may be nil
 }
 
 func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
 	slog.Debug("handler: dispatching to session manager", "session", sessionKey)
-	return h.mgr.Dispatch(ctx, sessionKey, msg.Text)
+	reply, err := h.mgr.Dispatch(ctx, sessionKey, msg.Text)
+	if err == nil && h.memory != nil && reply != "" {
+		if indexErr := h.memory.Index(sessionKey, reply); indexErr != nil {
+			slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
+		}
+	}
+	return reply, err
 }
 
 func cmdRun() *cobra.Command {
@@ -169,12 +178,21 @@ func cmdRun() *cobra.Command {
 			}
 			runner := newGeminiRunner(genaiClient, model, systemPrompt)
 
+			// Init long-term memory store (non-fatal if it fails).
+			memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
+			if memErr != nil {
+				slog.Warn("run: memory store unavailable, running without long-term memory", "err", memErr)
+			} else {
+				runner.memStore = memStore
+				defer memStore.Close()
+			}
+
 			store, storeErr := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			if storeErr != nil {
 				slog.Warn("run: checkpoint store unavailable, running statelessly", "err", storeErr)
 			}
 			mgr := agent.NewSessionManager(runner, store, model)
-			handler := &dispatchHandler{mgr: mgr}
+			handler := &dispatchHandler{mgr: mgr, memory: memStore}
 			api, err := newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
 			if err != nil {
 				return fmt.Errorf("telegram: %w", err)
@@ -451,6 +469,39 @@ func cmdTasks() *cobra.Command {
 	}
 
 	cmd.AddCommand(listCmd, addCmd)
+	return cmd
+}
+
+func cmdMemory() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "memory",
+		Short: "Manage long-term memory index",
+	}
+
+	rebuildCmd := &cobra.Command{
+		Use:   "rebuild",
+		Short: "Re-index all session logs from workspace/sessions into the memory database",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			store, err := memory.NewMemoryStore(cfg.StorageRoot())
+			if err != nil {
+				return fmt.Errorf("memory store: %w", err)
+			}
+			defer store.Close()
+			sessionDir := filepath.Join(cfg.StorageRoot(), "workspace", "sessions")
+			n, err := store.Rebuild(sessionDir)
+			if err != nil {
+				return fmt.Errorf("rebuild: %w", err)
+			}
+			fmt.Printf("Memory index rebuilt: %d session files indexed.\n", n)
+			return nil
+		},
+	}
+
+	cmd.AddCommand(rebuildCmd)
 	return cmd
 }
 
