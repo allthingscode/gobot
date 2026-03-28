@@ -12,13 +12,18 @@ import (
 
 // ParseModularJobFile parses a Markdown file with YAML-style front-matter into a Job.
 func ParseModularJobFile(path string) (*Job, error) {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("open file: %w", err)
+		return nil, fmt.Errorf("read file: %w", err)
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	// Strip UTF-8 BOM if present
+	bom := []byte{0xEF, 0xBB, 0xBF}
+	if len(data) >= 3 && data[0] == bom[0] && data[1] == bom[1] && data[2] == bom[2] {
+		data = data[3:]
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	var frontMatter []string
 	var body []string
 	inFrontMatter := false

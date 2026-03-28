@@ -76,8 +76,8 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 			}
 
 			u := tgbotapi.NewUpdate(offset)
-			u.Timeout = 0 // Short poll for debugging
-			slog.Debug("telegram: polling for updates", "offset", offset, "timeout", 0)
+			u.Timeout = 30 // Long poll
+			slog.Debug("telegram: polling for updates", "offset", offset, "timeout", 30)
 			updates, err := t.client.GetUpdates(u)
 			if err != nil {
 				slog.Error("telegram: GetUpdates failed", "err", err)

@@ -18,3 +18,6 @@ Thumbs.db
 # Secrets — never commit
 .env
 config.local.json
+
+# Strategic Private Data
+.private/

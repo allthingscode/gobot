@@ -62,8 +62,11 @@ gobot has reached feature parity for the core agent loop and is production-ready
 | `cmd/gobot/runner.go` | `geminiRunner` via genai SDK with system prompt support | Done |
 | `cmd/gobot/cron.go` | `cronDispatcher` + scheduler wired into `gobot run` | Done |
 | `cmd/gobot/awareness.go` | AWARENESS.md auto-generation + system prompt loading | Done |
-| `cmd/gobot/main.go` | Full CLI: `run`, `reauth`, `checkpoints`, `resume`, `doctor`, `init`, `version` | Done |
+gobot has reached feature parity for the core agent loop and is production-ready.
+The modular cron system is active with real jobs migrated from Nanobot.
 
+## Hard Mandates
+...
 ### Phase 5 — hardening (complete)
 
 | File | Description | Status |
@@ -72,17 +75,18 @@ gobot has reached feature parity for the core agent loop and is production-ready
 | `internal/cron/batch_test.go` | 17 table-driven tests for batch loader | Done |
 | `cmd/gobot/awareness.go` | `ensureAwarenessFile` — writes default AWARENESS.md on first run | Done |
 | `cmd/gobot/telegram.go` | `isDuplicate` — 5-min TTL dedup map (prevents double-dispatch on flaps) | Done |
-| `cmd/gobot/main.go` | `gobot checkpoints` + `gobot resume` Cobra commands | Done |
+| `cmd/gobot/main.go` | `gobot checkpoints` + `gobot resume` + `gobot simulate` commands | Done |
+
+### Phase 6 — advanced orchestration (planned)
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| `internal/agent/tools/` | Tool registry and execution framework | Planned |
+| Spawn tool | Subagent orchestration (background tasks) | Planned |
+| SQLite Memory | Searchable long-term memory (FTS5) | Planned |
 
 ### Deferred (Python nanobot owns these)
-
-| Feature | Why deferred |
-|---------|-------------|
-| Spawn tool / subagent orchestration | Requires genai SDK function-calling wiring + multi-agent infra |
-| Vector memory / RAG (ChromaDB) | Major undertaking; not blocking core loop |
-| Strategic Reviewer Crew | Dev/audit tool; CrewAI is Python-only |
-
-## Common Commands
+...
 
 ```powershell
 # Run all tests

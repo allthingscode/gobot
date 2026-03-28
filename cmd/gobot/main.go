@@ -120,7 +120,7 @@ func cmdRun() *cobra.Command {
 			logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err == nil {
 				// Use a multi-writer to send logs to both file and stderr
-				handler := slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), &slog.HandlerOptions{Level: slog.LevelDebug})
+				handler := slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
 				slog.SetDefault(slog.New(handler))
 				defer logFile.Close()
 			}
