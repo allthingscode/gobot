@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,6 +48,7 @@ func main() {
 		cmdTasks(),
 		cmdMemory(),
 		cmdEmail(),
+		cmdAuthorize(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -211,12 +213,21 @@ func cmdRun() *cobra.Command {
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetStorageRoot(cfg.StorageRoot())
 			handler := &dispatchHandler{mgr: mgr, memory: memStore}
+			var gateHandler bot.Handler = handler
+			if store != nil {
+				if pairingStore, pErr := agentctx.NewPairingStore(store.DB()); pErr != nil {
+					slog.Warn("run: pairing store unavailable, DM pairing disabled", "err", pErr)
+				} else {
+					gateHandler = bot.NewPairingHandler(pairingStore, handler)
+					slog.Info("run: DM pairing enabled")
+				}
+			}
 			api, err := newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
 			if err != nil {
 				return fmt.Errorf("telegram: %w", err)
 			}
 
-			b := bot.New(api, handler)
+			b := bot.New(api, gateHandler)
 
 			// Start cron scheduler in background.
 			storePath := filepath.Join(cfg.StorageRoot(), "workspace", "jobs.json")
@@ -556,6 +567,46 @@ func cmdEmail() *cobra.Command {
 				return err
 			}
 			fmt.Println("Success! Email sent.")
+			return nil
+		},
+	}
+}
+
+func cmdAuthorize() *cobra.Command {
+	return &cobra.Command{
+		Use:   "authorize <code-or-chat-id>",
+		Short: "Authorize a Telegram user by pairing code or numeric chat ID",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			arg := args[0]
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			store, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
+			if err != nil {
+				return fmt.Errorf("checkpoint store: %w", err)
+			}
+			pairingStore, err := agentctx.NewPairingStore(store.DB())
+			if err != nil {
+				return fmt.Errorf("pairing store: %w", err)
+			}
+
+			// Try as a pairing code first.
+			if chatID, err := pairingStore.AuthorizeByCode(arg); err == nil {
+				fmt.Printf("Authorized chat ID %d via pairing code.\n", chatID)
+				return nil
+			}
+
+			// Fall back to direct chat ID authorization.
+			chatID, err := strconv.ParseInt(arg, 10, 64)
+			if err != nil {
+				return fmt.Errorf("authorize: %q is not a valid pairing code or numeric chat ID", arg)
+			}
+			if err := pairingStore.AuthorizeByChatID(chatID, "operator"); err != nil {
+				return fmt.Errorf("authorize: %w", err)
+			}
+			fmt.Printf("Authorized chat ID %d directly.\n", chatID)
 			return nil
 		},
 	}

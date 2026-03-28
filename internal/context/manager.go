@@ -186,6 +186,12 @@ func (m *CheckpointManager) CompleteThread(threadID string) error {
 	return err
 }
 
+// DB returns the underlying *sql.DB so callers can share the connection for
+// additional tables (e.g. PairingStore) without opening a second handle.
+func (m *CheckpointManager) DB() *sql.DB {
+	return m.db
+}
+
 // ListResumable returns all active threads that have at least one checkpoint,
 // ordered by most-recently-updated first.
 func (m *CheckpointManager) ListResumable() ([]ResumableThread, error) {
