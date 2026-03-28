@@ -12,6 +12,9 @@ cd "$(git rev-parse --show-toplevel)"
 echo "--- go vet ./..."
 go vet ./...
 
+echo "--- staticcheck ./..."
+staticcheck ./...
+
 echo "--- go test -mod=vendor ./..."
 go test -mod=vendor ./...
 

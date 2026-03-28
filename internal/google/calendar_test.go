@@ -1,8 +1,12 @@
 package google
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFormatEventsMarkdown_Empty(t *testing.T) {
@@ -80,5 +84,86 @@ func TestFormatEventTime_InvalidFallsBack(t *testing.T) {
 	got := formatEventTime(raw, false)
 	if got != raw {
 		t.Errorf("expected raw fallback for invalid date, got %q", got)
+	}
+}
+
+func TestListUpcomingEventsWithClient(t *testing.T) {
+	cases := []struct {
+		name      string
+		items     []map[string]any
+		wantCount int
+		wantAllDay bool
+		wantSummary string
+	}{
+		{
+			name: "timed event",
+			items: []map[string]any{
+				{
+					"id": "1", "summary": "Team Sync",
+					"start": map[string]string{"dateTime": "2026-03-28T09:00:00Z"},
+					"end":   map[string]string{"dateTime": "2026-03-28T10:00:00Z"},
+				},
+			},
+			wantCount:   1,
+			wantSummary: "Team Sync",
+			wantAllDay:  false,
+		},
+		{
+			name: "all-day event",
+			items: []map[string]any{
+				{
+					"id": "2", "summary": "Company Holiday",
+					"start": map[string]string{"date": "2026-03-28"},
+					"end":   map[string]string{"date": "2026-03-29"},
+				},
+			},
+			wantCount:   1,
+			wantSummary: "Company Holiday",
+			wantAllDay:  true,
+		},
+		{
+			name:      "empty calendar",
+			items:     []map[string]any{},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"items": tc.items})
+			}))
+			defer srv.Close()
+
+			dir := t.TempDir()
+			writeToken(t, dir, storedToken{
+				Token:  "access",
+				Expiry: time.Now().Add(1 * time.Hour),
+			})
+
+			client := redirectClient(calendarBaseURL, srv.URL)
+			events, err := listUpcomingEventsWithClient(dir, 10, client)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(events) != tc.wantCount {
+				t.Fatalf("want %d events, got %d", tc.wantCount, len(events))
+			}
+			if tc.wantCount > 0 {
+				if events[0].Summary != tc.wantSummary {
+					t.Errorf("want summary %q, got %q", tc.wantSummary, events[0].Summary)
+				}
+				if events[0].AllDay != tc.wantAllDay {
+					t.Errorf("want AllDay=%v, got %v", tc.wantAllDay, events[0].AllDay)
+				}
+			}
+		})
+	}
+}
+
+func TestListUpcomingEventsWithClient_AuthError(t *testing.T) {
+	_, err := listUpcomingEventsWithClient(t.TempDir(), 10, http.DefaultClient)
+	if err == nil {
+		t.Fatal("expected error for missing token file")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/genai"
@@ -95,7 +96,7 @@ func cmdDoctor() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config load failed: %w", err)
 			}
-			return doctor.Run(cfg)
+			return doctor.Run(cfg, liveProbes())
 		},
 	}
 }
@@ -119,8 +120,15 @@ func cmdRun() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 
-			// Setup logging to file and stderr
-			logPath := filepath.Join(cfg.StorageRoot(), "logs", "gobot.log")
+			// Pre-flight diagnostics — mirrors nanobot strategic_launcher.py
+			if err := doctor.Run(cfg, nil); err != nil {
+				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
+			}
+
+			// Setup logging to timestamped file and stderr
+			now := time.Now().Format("20060102_150405")
+			logName := fmt.Sprintf("gobot_%s.log", now)
+			logPath := filepath.Join(cfg.StorageRoot(), "logs", logName)
 			logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err == nil {
 				// Use a multi-writer to send logs to both file and stderr
@@ -306,6 +314,12 @@ func cmdSimulate() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
+
+			// Pre-flight diagnostics — mirrors nanobot strategic_launcher.py
+			if err := doctor.Run(cfg, nil); err != nil {
+				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
+			}
+
 			ctx := cmd.Context()
 			genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
 				APIKey:  cfg.GeminiAPIKey(),

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,6 +78,91 @@ func TestBearerToken_NoRefreshToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no refresh_token")
 	}
+}
+
+func TestAPIGet_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			t.Errorf("want Authorization: Bearer tok, got %q", r.Header.Get("Authorization"))
+		}
+		json.NewEncoder(w).Encode(map[string]string{"id": "evt1"})
+	}))
+	defer srv.Close()
+
+	var got struct {
+		ID string `json:"id"`
+	}
+	if err := apiGet("tok", srv.URL, srv.Client(), &got); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != "evt1" {
+		t.Errorf("want evt1, got %q", got.ID)
+	}
+}
+
+func TestAPIGet_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"not found"}}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	err := apiGet("tok", srv.URL, srv.Client(), &struct{}{})
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}
+
+func TestAPIPost_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("want POST, got %s", r.Method)
+		}
+		json.NewEncoder(w).Encode(map[string]string{"id": "new-id-123"})
+	}))
+	defer srv.Close()
+
+	var got struct {
+		ID string `json:"id"`
+	}
+	err := apiPost("tok", srv.URL, map[string]string{"title": "test"}, srv.Client(), &got)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != "new-id-123" {
+		t.Errorf("want new-id-123, got %q", got.ID)
+	}
+}
+
+func TestAPIPost_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := apiPost("tok", srv.URL, map[string]string{}, srv.Client(), &struct{}{})
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+// redirectClient returns an *http.Client that rewrites the URL prefix from → to.
+// Used in tests to redirect production API base URLs to httptest servers.
+func redirectClient(from, to string) *http.Client {
+	return &http.Client{Transport: &prefixRewriter{from: from, to: to}}
+}
+
+type prefixRewriter struct{ from, to string }
+
+func (r *prefixRewriter) RoundTrip(req *http.Request) (*http.Response, error) {
+	rawURL := strings.Replace(req.URL.String(), r.from, r.to, 1)
+	newURL, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	r2 := req.Clone(req.Context())
+	r2.URL = newURL
+	r2.Host = newURL.Host
+	return http.DefaultTransport.RoundTrip(r2)
 }
 
 // writeToken marshals tok and writes to dir/google_token.json.

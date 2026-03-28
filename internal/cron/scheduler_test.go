@@ -2,20 +2,25 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 type mockDispatcher struct {
-	called bool
-	payload Payload
+	payloads  []Payload
+	failFirst bool
+	failErr   error
 }
 
 func (m *mockDispatcher) Dispatch(ctx context.Context, p Payload) error {
-	m.called = true
-	m.payload = p
+	m.payloads = append(m.payloads, p)
+	if m.failFirst && len(m.payloads) == 1 {
+		return m.failErr
+	}
 	return nil
 }
 
@@ -151,7 +156,7 @@ func TestSchedulerPoll(t *testing.T) {
 	}
 
 	// 3. Verify dispatch was called
-	if !dispatcher.called {
+	if len(dispatcher.payloads) == 0 {
 		t.Errorf("expected dispatcher to be called")
 	}
 
@@ -165,4 +170,58 @@ func TestSchedulerPoll(t *testing.T) {
 
 	// 5. Verify next run was calculated (atTime is 1000, so it's not in future if now > 1000)
 	// Our test runs now, which is > 1000, so ComputeNextRun(KindAt, 1000) should be 0.
+}
+
+func TestSchedulerPoll_FailureAlert(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	atTime := int64(1000)
+	initialStore := Store{
+		Jobs: []Job{
+			{
+				ID:      "job1",
+				Name:    "Morning Briefing",
+				Enabled: true,
+				Schedule: Schedule{Kind: KindAt, AtMS: &atTime},
+				Payload:  Payload{Channel: "telegram", To: "telegram:999", Message: "hello"},
+				State:    JobState{NextRunAtMS: 500},
+			},
+		},
+	}
+	data, _ := initialStore.EncodeJSON()
+	_ = os.WriteFile(storePath, data, 0644)
+
+	dispatcher := &mockDispatcher{
+		failFirst: true,
+		failErr:   errors.New("gemini: rate limit"),
+	}
+	s := NewScheduler(storePath, "", dispatcher)
+
+	ctx := context.Background()
+	if err := s.poll(ctx); err != nil {
+		t.Fatalf("poll failed: %v", err)
+	}
+
+	// Expect two dispatches: original job (failed) + failure alert
+	if len(dispatcher.payloads) != 2 {
+		t.Fatalf("want 2 dispatches (job + alert), got %d", len(dispatcher.payloads))
+	}
+
+	alert := dispatcher.payloads[1]
+	if alert.Channel != "telegram" {
+		t.Errorf("alert channel: want telegram, got %q", alert.Channel)
+	}
+	if alert.To != "telegram:999" {
+		t.Errorf("alert to: want telegram:999, got %q", alert.To)
+	}
+	if !strings.Contains(alert.Message, "Morning Briefing") {
+		t.Errorf("alert message should contain job name, got %q", alert.Message)
+	}
+	if !strings.Contains(alert.Message, "gemini: rate limit") {
+		t.Errorf("alert message should contain error text, got %q", alert.Message)
+	}
+	if s.store.Jobs[0].State.FailureCount != 1 {
+		t.Errorf("want FailureCount=1, got %d", s.store.Jobs[0].State.FailureCount)
+	}
 }

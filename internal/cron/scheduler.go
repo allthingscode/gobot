@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -152,6 +153,14 @@ func (s *Scheduler) poll(ctx context.Context) error {
 				if err := s.dispatcher.Dispatch(ctx, job.Payload); err != nil {
 					slog.Error("Job dispatch failed", "id", job.ID, "error", err)
 					s.store.Jobs[i].State.FailureCount++
+					alert := Payload{
+						Channel: job.Payload.Channel,
+						To:      job.Payload.To,
+						Message: fmt.Sprintf("⚠️ Job %q failed: %v", job.Name, err),
+					}
+					if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
+						slog.Error("Job failure alert could not be sent", "id", job.ID, "err", alertErr)
+					}
 				} else {
 					s.store.Jobs[i].State.SuccessCount++
 				}
