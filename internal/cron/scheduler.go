@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	robfigcron "github.com/robfig/cron/v3"
 )
 
 // Dispatcher defines the interface for sending job messages.
@@ -47,10 +49,23 @@ func ComputeNextRun(s Schedule, nowMS int64) int64 {
 			return nowMS + *s.EveryMS
 		}
 	case KindCron:
-		// For Phase 3, we don't include a full cron parser (like croniter)
-		// unless specifically requested, as it adds heavy dependencies.
-		// We'll stub it for now or use a lightweight approach if needed.
-		slog.Warn("Cron schedule kind not yet implemented in Go port")
+		if s.Expr == "" {
+			return 0
+		}
+		loc := time.UTC
+		if s.TZ != "" {
+			if l, err := time.LoadLocation(s.TZ); err == nil {
+				loc = l
+			}
+		}
+		parser := robfigcron.NewParser(robfigcron.Minute | robfigcron.Hour | robfigcron.Dom | robfigcron.Month | robfigcron.Dow)
+		schedule, err := parser.Parse(s.Expr)
+		if err != nil {
+			slog.Warn("KindCron: invalid cron expression", "expr", s.Expr, "err", err)
+			return 0
+		}
+		now := time.UnixMilli(nowMS).In(loc)
+		return schedule.Next(now).UnixMilli()
 	}
 	return 0
 }

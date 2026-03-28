@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type mockDispatcher struct {
@@ -52,6 +53,68 @@ func TestComputeNextRun(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ComputeNextRun(tt.schedule, tt.nowMS); got != tt.want {
 				t.Errorf("ComputeNextRun() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComputeNextRunKindCron(t *testing.T) {
+	// Monday 2026-01-05 00:00:00 UTC
+	monday := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
+	mondayMS := monday.UnixMilli()
+
+	// Saturday 2026-01-10 09:01:00 UTC
+	saturdayAfter9 := time.Date(2026, 1, 10, 9, 1, 0, 0, time.UTC)
+	saturdayAfter9MS := saturdayAfter9.UnixMilli()
+
+	tests := []struct {
+		name     string
+		schedule Schedule
+		nowMS    int64
+		wantMS   int64
+	}{
+		{
+			name:     "every day at 09:00 UTC",
+			schedule: Schedule{Kind: KindCron, Expr: "0 9 * * *"},
+			nowMS:    mondayMS,
+			// same Monday at 09:00 UTC
+			wantMS: time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC).UnixMilli(),
+		},
+		{
+			name:     "weekdays only 09:00 - now is Saturday after 9",
+			schedule: Schedule{Kind: KindCron, Expr: "0 9 * * 1-5"},
+			nowMS:    saturdayAfter9MS,
+			// next Monday 09:00 UTC
+			wantMS: time.Date(2026, 1, 12, 9, 0, 0, 0, time.UTC).UnixMilli(),
+		},
+		{
+			name:     "invalid expression returns 0",
+			schedule: Schedule{Kind: KindCron, Expr: "not-a-cron"},
+			nowMS:    mondayMS,
+			wantMS:   0,
+		},
+		{
+			name:     "empty expr returns 0",
+			schedule: Schedule{Kind: KindCron, Expr: ""},
+			nowMS:    mondayMS,
+			wantMS:   0,
+		},
+		{
+			name: "with valid timezone America/New_York in January (EST = UTC-5)",
+			// 09:00 EST = 14:00 UTC
+			schedule: Schedule{Kind: KindCron, Expr: "0 9 * * *", TZ: "America/New_York"},
+			nowMS:    mondayMS, // midnight UTC = 19:00 previous evening EST, so 09:00 same day EST is still ahead
+			wantMS:   time.Date(2026, 1, 5, 14, 0, 0, 0, time.UTC).UnixMilli(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ComputeNextRun(tt.schedule, tt.nowMS)
+			if got != tt.wantMS {
+				t.Errorf("ComputeNextRun() = %v (%s), want %v (%s)",
+					got, time.UnixMilli(got).UTC(),
+					tt.wantMS, time.UnixMilli(tt.wantMS).UTC())
 			}
 		})
 	}
