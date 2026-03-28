@@ -42,15 +42,21 @@ func loadSystemPrompt(storageRoot string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// loadSoulMD reads SOUL.md from next to the binary, falling back to
-// {storageRoot}/workspace/SOUL.md. Returns empty string if not found.
+// loadSoulMD reads SOUL.md from .private/ next to the binary (dev) or
+// {storageRoot}/workspace/SOUL.md (deployed copy). Returns empty string if not found.
 func loadSoulMD(storageRoot string) string {
-	// Prefer a copy in the workspace so it survives binary updates.
 	candidates := []string{
+		// Deployed copy in storage workspace (copy here for production use)
 		filepath.Join(storageRoot, "workspace", "SOUL.md"),
 	}
 	if exe, err := os.Executable(); err == nil {
-		candidates = append([]string{filepath.Join(filepath.Dir(exe), "SOUL.md")}, candidates...)
+		dir := filepath.Dir(exe)
+		candidates = append([]string{
+			// .private/SOUL.md next to the binary (dev environment)
+			filepath.Join(dir, ".private", "SOUL.md"),
+			// SOUL.md directly next to the binary
+			filepath.Join(dir, "SOUL.md"),
+		}, candidates...)
 	}
 	for _, p := range candidates {
 		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
