@@ -111,6 +111,26 @@ The `docs/references/` directory contains best practices and design patterns for
 - `04-go-architecture.md`: Project layout, interfaces, and error wrapping.
 - `05-openclaw-design.md`: OpenClaw Gateway architecture, Pi runtime, and session model.
 
+## Dev Crew Protocol (Subagent Coordination)
+
+Background agents are used to parallelize boilerplate work (writing tool implementations, tests, etc.). Follow this protocol to avoid file conflicts and confusion:
+
+### Agent prompts must include:
+```
+Write all files using the Write tool. Do NOT return code as text.
+At the end, list every file you wrote with its path and line count.
+```
+
+### Claude's responsibilities:
+- **Do not touch files an agent owns** until its completion notification fires.
+- Note which files each background agent owns before launching.
+- After notification: read the written files, verify correctness, then run `go test -mod=vendor ./...`.
+- Never assume agent output is correct — always verify before committing.
+
+### Work split:
+- **Agents handle**: boilerplate Tool implementations, test scaffolding, schema wrappers around existing internal packages.
+- **Claude handles**: architecture decisions, security constraints, wiring into `main.go`, running the pre-commit hook, and committing.
+
 ## Epic Reference
 
 Full roadmap: EPIC-001 in the nanobot private feature backlog.
