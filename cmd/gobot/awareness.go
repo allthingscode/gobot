@@ -1,10 +1,12 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/allthingscode/gobot/internal/google"
 	"github.com/allthingscode/gobot/internal/memory"
 )
 
@@ -25,7 +27,40 @@ func loadSystemPrompt(storageRoot string) string {
 		parts = append(parts, continuity)
 	}
 
+	// Inject live calendar and tasks — best-effort, never fatal.
+	secretsRoot := filepath.Join(storageRoot, "secrets")
+	if schedule := loadScheduleContext(secretsRoot); schedule != "" {
+		parts = append(parts, schedule)
+	}
+
 	return strings.Join(parts, "\n\n")
+}
+
+// loadScheduleContext fetches today's calendar events and open tasks and
+// returns a Markdown-formatted block for injection into the system prompt.
+// Returns an empty string if credentials are missing or any API call fails —
+// schedule context is best-effort and must never block startup.
+func loadScheduleContext(secretsRoot string) string {
+	var parts []string
+
+	events, err := google.ListUpcomingEvents(secretsRoot, 10)
+	if err != nil {
+		slog.Debug("schedule context: calendar unavailable", "err", err)
+	} else if md := google.FormatEventsMarkdown(events); md != "" {
+		parts = append(parts, md)
+	}
+
+	tasks, err := google.ListTasks(secretsRoot, "@default")
+	if err != nil {
+		slog.Debug("schedule context: tasks unavailable", "err", err)
+	} else if md := google.FormatTasksMarkdown(tasks); md != "" {
+		parts = append(parts, md)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return "## TODAY'S CONTEXT (live)\n" + strings.Join(parts, "\n")
 }
 
 // ensureAwarenessFile writes a default AWARENESS.md into

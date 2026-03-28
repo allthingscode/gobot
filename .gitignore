@@ -21,3 +21,4 @@ config.local.json
 
 # Strategic Private Data
 .private/
+.gemini/

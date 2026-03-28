@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/genai"
@@ -20,6 +21,7 @@ import (
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/gmail"
+	"github.com/allthingscode/gobot/internal/google"
 )
 
 const version = "0.1.0"
@@ -40,6 +42,8 @@ func main() {
 		cmdCheckpoints(),
 		cmdResume(),
 		cmdSimulate(),
+		cmdCalendar(),
+		cmdTasks(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -332,6 +336,101 @@ func cmdSimulate() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func cmdCalendar() *cobra.Command {
+	var maxResults int
+	cmd := &cobra.Command{
+		Use:   "calendar",
+		Short: "List upcoming Google Calendar events",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			events, err := google.ListUpcomingEvents(secretsRoot, maxResults)
+			if err != nil {
+				return fmt.Errorf("calendar: %w", err)
+			}
+			if len(events) == 0 {
+				fmt.Println("No upcoming events.")
+				return nil
+			}
+			for _, ev := range events {
+				marker := ""
+				if ev.AllDay {
+					marker = " (all day)"
+				}
+				loc := ""
+				if ev.Location != "" {
+					loc = "  @ " + ev.Location
+				}
+				fmt.Printf("%s%s  %s%s\n", ev.Start, marker, ev.Summary, loc)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVarP(&maxResults, "max", "n", 10, "maximum number of events to show")
+	return cmd
+}
+
+func cmdTasks() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "tasks",
+		Short: "Manage Google Tasks",
+	}
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List open tasks",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			tasks, err := google.ListTasks(secretsRoot, "@default")
+			if err != nil {
+				return fmt.Errorf("tasks: %w", err)
+			}
+			if len(tasks) == 0 {
+				fmt.Println("No open tasks.")
+				return nil
+			}
+			for _, task := range tasks {
+				due := ""
+				if task.Due != "" {
+					due = "  (due " + task.Due[:10] + ")"
+				}
+				fmt.Printf("[ ] %s%s\n", task.Title, due)
+			}
+			return nil
+		},
+	}
+
+	addCmd := &cobra.Command{
+		Use:   "add <title>",
+		Short: "Create a new task",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			title := strings.Join(args, " ")
+			id, err := google.CreateTask(secretsRoot, "@default", title, "")
+			if err != nil {
+				return fmt.Errorf("create task: %w", err)
+			}
+			fmt.Printf("Task created: %s (id: %s)\n", title, id)
+			return nil
+		},
+	}
+
+	cmd.AddCommand(listCmd, addCmd)
+	return cmd
 }
 
 // extractMessageText returns the plain-text content of a StrategicMessage.
