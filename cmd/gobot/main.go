@@ -1,4 +1,4 @@
-// gobot — Strategic Edition agent runtime (Go)
+// gobot - Strategic Edition agent runtime (Go)
 package main
 
 import (
@@ -27,7 +27,7 @@ func main() {
 	root := &cobra.Command{
 		Use:   "gobot",
 		Short: "Strategic Edition agent runtime",
-		Long:  "gobot — the Go-native runtime for Nanobot Strategic Edition.",
+		Long:  "gobot - the Go-native runtime for Nanobot Strategic Edition.",
 	}
 
 	root.AddCommand(
@@ -126,6 +126,7 @@ func cmdRun() *cobra.Command {
 				model = "gemini-2.5-flash"
 			}
 
+			ensureAwarenessFile(cfg.StorageRoot())
 			systemPrompt := loadSystemPrompt(cfg.StorageRoot())
 			if systemPrompt != "" {
 				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
