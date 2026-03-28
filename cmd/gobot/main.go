@@ -125,7 +125,13 @@ func cmdRun() *cobra.Command {
 			if model == "" {
 				model = "gemini-2.5-flash"
 			}
-			runner := newGeminiRunner(genaiClient, model)
+
+			systemPrompt := loadSystemPrompt(cfg.StorageRoot())
+			if systemPrompt != "" {
+				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
+			}
+			runner := newGeminiRunner(genaiClient, model, systemPrompt)
+
 			store, storeErr := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			if storeErr != nil {
 				slog.Warn("run: checkpoint store unavailable, running statelessly", "err", storeErr)

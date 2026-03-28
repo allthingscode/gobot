@@ -10,12 +10,13 @@ import (
 )
 
 type geminiRunner struct {
-	client *genai.Client
-	model  string
+	client       *genai.Client
+	model        string
+	systemPrompt string
 }
 
-func newGeminiRunner(client *genai.Client, model string) *geminiRunner {
-	return &geminiRunner{client: client, model: model}
+func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
+	return &geminiRunner{client: client, model: model, systemPrompt: systemPrompt}
 }
 
 // Run converts []StrategicMessage to []*genai.Content, calls GenerateContent,
@@ -56,7 +57,15 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		contents = append(contents, c)
 	}
 
-	resp, err := r.client.Models.GenerateContent(ctx, r.model, contents, nil)
+	var cfg *genai.GenerateContentConfig
+	if r.systemPrompt != "" {
+		cfg = &genai.GenerateContentConfig{
+			SystemInstruction: &genai.Content{
+				Parts: []*genai.Part{{Text: r.systemPrompt}},
+			},
+		}
+	}
+	resp, err := r.client.Models.GenerateContent(ctx, r.model, contents, cfg)
 	if err != nil {
 		return "", nil, fmt.Errorf("gemini generate: %w", err)
 	}
