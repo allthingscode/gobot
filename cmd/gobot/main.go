@@ -20,6 +20,7 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
+	"github.com/allthingscode/gobot/internal/gmail"
 	"github.com/allthingscode/gobot/internal/google"
 	"github.com/allthingscode/gobot/internal/memory"
 )
@@ -45,6 +46,7 @@ func main() {
 		cmdCalendar(),
 		cmdTasks(),
 		cmdMemory(),
+		cmdEmail(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -218,7 +220,10 @@ func cmdRun() *cobra.Command {
 			// Start cron scheduler in background.
 			storePath := filepath.Join(cfg.StorageRoot(), "workspace", "jobs.json")
 			itemsDir := filepath.Join(cfg.StorageRoot(), "workspace", "jobs")
-			cronDisp := &cronDispatcher{mgr: mgr, b: b, storageRoot: cfg.StorageRoot()}
+			// Cron jobs use an ephemeral session manager (nil store) so they never
+			// share checkpoint history with DM conversations (F-013).
+			cronMgr := agent.NewSessionManager(runner, nil, model)
+			cronDisp := &cronDispatcher{mgr: cronMgr, b: b, storageRoot: cfg.StorageRoot()}
 			scheduler := cron.NewScheduler(storePath, itemsDir, cronDisp)
 			go func() {
 				if err := scheduler.Run(ctx); err != nil && err != context.Canceled {
@@ -518,6 +523,41 @@ func cmdMemory() *cobra.Command {
 
 	cmd.AddCommand(rebuildCmd)
 	return cmd
+}
+
+func cmdEmail() *cobra.Command {
+	return &cobra.Command{
+		Use:   "email <subject> <body>",
+		Short: "Send a manual test email",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			subject := args[0]
+			body := args[1]
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			userEmail := cfg.Strategic.UserEmail
+			if userEmail == "" {
+				return fmt.Errorf("strategic_edition.user_email not set in config")
+			}
+
+			// Gmail service uses secretsRoot/gmail/token.json
+			gmailSecrets := filepath.Join(secretsRoot, "gmail")
+			svc, err := gmail.NewService(gmailSecrets)
+			if err != nil {
+				return fmt.Errorf("auth: %w", err)
+			}
+
+			fmt.Printf("Sending test email to %s...\n", userEmail)
+			if err := svc.Send(userEmail, subject, body); err != nil {
+				return err
+			}
+			fmt.Println("Success! Email sent.")
+			return nil
+		},
+	}
 }
 
 // extractMessageText returns the plain-text content of a StrategicMessage.

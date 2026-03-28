@@ -34,11 +34,11 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 	channel, to, silent := cron.ResolveRoutableChannel(p, d.storageRoot)
 
 	if silent {
-		sessionKey := p.To
-		if sessionKey == "" {
+		if p.To == "" {
 			slog.Warn("unroutable cron job", "channel", channel, "to", to)
 			return nil
 		}
+		sessionKey := "cron:" + p.To
 		slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", true)
 		_, err := d.mgr.Dispatch(ctx, sessionKey, "[SILENT] "+p.Message)
 		return err
@@ -49,8 +49,9 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 		return nil
 	}
 
-	slog.Info("dispatching cron job", "sessionKey", to, "silent", false)
-	response, err := d.mgr.Dispatch(ctx, to, p.Message)
+	sessionKey := "cron:" + to
+	slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", false)
+	response, err := d.mgr.Dispatch(ctx, sessionKey, p.Message)
 	if err != nil {
 		return err
 	}

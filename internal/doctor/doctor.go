@@ -178,9 +178,9 @@ func checkGoogleToken(secretsRoot string) result {
 	return checkTokenFile("google token", filepath.Join(secretsRoot, "google_token.json"))
 }
 
-// checkGmailToken reads secrets/token.json and reports the token expiry.
+// checkGmailToken reads secrets/gmail/token.json and reports the token expiry.
 func checkGmailToken(secretsRoot string) result {
-	return checkTokenFile("gmail token", filepath.Join(secretsRoot, "token.json"))
+	return checkTokenFile("gmail token", filepath.Join(secretsRoot, "gmail", "token.json"))
 }
 
 // checkTokenFile reads a token JSON file and reports its expiry.
@@ -199,14 +199,23 @@ func checkTokenFile(name, path string) result {
 	if tok.Expiry.IsZero() {
 		return result{name: name, ok: true, detail: "present (no expiry field)"}
 	}
-	days := int(time.Until(tok.Expiry).Hours() / 24)
-	if days < 0 {
-		return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d days ago", -days)}
+
+	if time.Now().After(tok.Expiry) {
+		diff := time.Since(tok.Expiry)
+		if diff < 24*time.Hour {
+			return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d hour(s) ago", int(diff.Hours()))}
+		}
+		return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d day(s) ago", int(diff.Hours()/24))}
 	}
-	if days == 0 {
-		return result{name: name, ok: true, detail: "expires today — consider refreshing"}
+
+	remaining := time.Until(tok.Expiry)
+	if remaining < 1*time.Hour {
+		return result{name: name, ok: true, detail: fmt.Sprintf("expires in %d minute(s) — REFRESH SOON", int(remaining.Minutes()))}
 	}
-	return result{name: name, ok: true, detail: fmt.Sprintf("valid, expires in %d days", days)}
+	if remaining < 24*time.Hour {
+		return result{name: name, ok: true, detail: fmt.Sprintf("expires in %d hour(s)", int(remaining.Hours()))}
+	}
+	return result{name: name, ok: true, detail: fmt.Sprintf("valid, expires in %d day(s)", int(remaining.Hours()/24))}
 }
 
 // checkJobsDir verifies the cron jobs directory exists and has .md job files.
