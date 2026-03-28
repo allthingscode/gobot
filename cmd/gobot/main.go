@@ -187,6 +187,11 @@ func cmdRun() *cobra.Command {
 				defer memStore.Close()
 			}
 
+			// Register tools: spawn subagent (F-001).
+			runner.tools = []Tool{
+				newSpawnTool(genaiClient, model, nil, memStore),
+			}
+
 			store, storeErr := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			if storeErr != nil {
 				slog.Warn("run: checkpoint store unavailable, running statelessly", "err", storeErr)
