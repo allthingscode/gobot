@@ -16,13 +16,13 @@ type Dispatcher interface {
 
 // Scheduler handles the lifecycle of scheduled jobs.
 type Scheduler struct {
-	storePath    string
-	itemsDir     string
-	dispatcher   Dispatcher
-	pollInterval time.Duration
-	store        *Store
-	lastMtime    int64
-	lastSize     int64
+	storePath        string
+	itemsDir         string
+	dispatcher       Dispatcher
+	pollInterval     time.Duration
+	store            *Store
+	lastMtime        int64
+	lastSize         int64
 	lastModularMtime float64
 }
 
@@ -107,8 +107,28 @@ func (s *Scheduler) poll(ctx context.Context) error {
 		}
 	}
 
-	// 2. Check for modular changes (HEARTBEAT.md handled in separate logic usually)
-	// For now, we focus on the core store.
+	// 2. Check for modular job changes.
+	if s.itemsDir != "" {
+		if changed, newMtime := DetectModularChange(s.itemsDir, s.lastModularMtime); changed {
+			modularJobs, err := LoadModularJobs(s.itemsDir)
+			if err != nil {
+				slog.Warn("Cron: failed to load modular jobs", "err", err)
+			} else {
+				stateCache := make(map[string]JobState)
+				if s.store != nil {
+					for _, j := range s.store.Jobs {
+						stateCache[j.ID] = j.State
+					}
+				}
+				if s.store == nil {
+					s.store = &Store{}
+				}
+				s.store.Jobs = MergeModularJobs(s.store.Jobs, modularJobs, stateCache)
+				s.lastModularMtime = newMtime
+				slog.Info("Cron: loaded modular jobs", "count", len(modularJobs))
+			}
+		}
+	}
 
 	// 3. Trigger due jobs
 	nowMS := time.Now().UnixNano() / 1e6
@@ -124,10 +144,10 @@ func (s *Scheduler) poll(ctx context.Context) error {
 
 		if job.State.NextRunAtMS > 0 && nowMS >= job.State.NextRunAtMS {
 			slog.Info("Triggering job", "id", job.ID, "name", job.Name)
-			
+
 			s.store.Jobs[i].State.RunCount++
 			s.store.Jobs[i].State.LastRunAtMS = nowMS
-			
+
 			if s.dispatcher != nil {
 				if err := s.dispatcher.Dispatch(ctx, job.Payload); err != nil {
 					slog.Error("Job dispatch failed", "id", job.ID, "error", err)
