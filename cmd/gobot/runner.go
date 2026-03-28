@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"golang.org/x/time/rate"
 	"google.golang.org/genai"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/resilience"
 )
 
 // maxToolIterations caps the tool-call/response loop within a single Run call.
@@ -24,10 +27,20 @@ type geminiRunner struct {
 	systemPrompt string
 	memStore     *memory.MemoryStore // may be nil; used for RAG context injection
 	tools        []Tool              // registered tools exposed to Gemini as FunctionDeclarations
+	breaker      *resilience.Breaker // circuit breaker for Gemini API calls
+	limiter      *rate.Limiter       // token-bucket rate limiter for Gemini API calls
 }
 
 func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
-	return &geminiRunner{client: client, model: model, systemPrompt: systemPrompt}
+	return &geminiRunner{
+		client:       client,
+		model:        model,
+		systemPrompt: systemPrompt,
+		// Trip after 5 consecutive failures within 60s; attempt recovery after 300s.
+		breaker: resilience.New("gemini", 5, 60*time.Second, 300*time.Second),
+		// 3 requests/second burst; conservative default for shared Gemini quota.
+		limiter: rate.NewLimiter(rate.Every(time.Second), 3),
+	}
 }
 
 // Run converts []StrategicMessage to []*genai.Content, then drives a
@@ -128,9 +141,23 @@ func (r *geminiRunner) retryGenerateContent(ctx context.Context, contents []*gen
 				delay = maxDelay
 			}
 		}
-		resp, err := r.client.Models.GenerateContent(ctx, r.model, contents, cfg)
+		// Rate-limit: acquire a token before each attempt.
+		if waitErr := r.limiter.Wait(ctx); waitErr != nil {
+			return nil, waitErr
+		}
+
+		var resp *genai.GenerateContentResponse
+		err := r.breaker.Execute(func() error {
+			var callErr error
+			resp, callErr = r.client.Models.GenerateContent(ctx, r.model, contents, cfg)
+			return callErr
+		})
 		if err == nil {
 			return resp, nil
+		}
+		// Circuit open: fail immediately without retrying.
+		if errors.Is(err, resilience.ErrCircuitOpen) {
+			return nil, err
 		}
 		if !bot.IsTransientError(err) {
 			return nil, err
