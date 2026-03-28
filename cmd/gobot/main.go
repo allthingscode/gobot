@@ -1,4 +1,4 @@
-// gobot - Strategic Edition agent runtime (Go)
+﻿// gobot - Strategic Edition agent runtime (Go)
 package main
 
 import (
@@ -23,7 +23,9 @@ import (
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/gmail"
 	"github.com/allthingscode/gobot/internal/google"
+
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/memory/consolidator"
 )
 
 const version = "0.1.0"
@@ -115,8 +117,9 @@ func cmdDoctor() *cobra.Command {
 }
 
 type dispatchHandler struct {
-	mgr    *agent.SessionManager
-	memory *memory.MemoryStore // may be nil
+	mgr         *agent.SessionManager
+	memory       *memory.MemoryStore       // may be nil
+	consolidator *consolidator.Consolidator // may be nil
 }
 
 func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
@@ -126,6 +129,9 @@ func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot
 		if indexErr := h.memory.Index(sessionKey, reply); indexErr != nil {
 			slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
 		}
+	}
+	if err == nil && h.consolidator != nil && reply != "" {
+		h.consolidator.ConsolidateAsync(sessionKey, reply)
 	}
 	return reply, err
 }
@@ -140,7 +146,7 @@ func cmdRun() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 
-			// Pre-flight diagnostics — mirrors nanobot strategic_launcher.py
+			// Pre-flight diagnostics â€” mirrors nanobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
 				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
 			}
@@ -207,7 +213,7 @@ func cmdRun() *cobra.Command {
 			if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
 				tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
 			} else {
-				slog.Warn("run: send_email tool disabled — strategic_edition.user_email not set in config")
+				slog.Warn("run: send_email tool disabled â€” strategic_edition.user_email not set in config")
 			}
 			runner.tools = tools
 
@@ -224,6 +230,10 @@ func cmdRun() *cobra.Command {
 			mgr.SetHooks(hooks)
 			runner.SetHooks(hooks)
 			handler := &dispatchHandler{mgr: mgr, memory: memStore}
+			if memStore != nil {
+				handler.consolidator = consolidator.New(runner, memStore)
+				slog.Info("run: memory consolidation enabled")
+			}
 			var gateHandler bot.Handler = handler
 			if store != nil {
 				if pairingStore, pErr := agentctx.NewPairingStore(store.DB()); pErr != nil {
@@ -383,7 +393,7 @@ func cmdSimulate() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 
-			// Pre-flight diagnostics — mirrors nanobot strategic_launcher.py
+			// Pre-flight diagnostics â€” mirrors nanobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
 				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
 			}
@@ -638,3 +648,12 @@ func extractMessageText(m agentctx.StrategicMessage) string {
 	}
 	return "(no text content)"
 }
+
+
+
+
+
+
+
+
+

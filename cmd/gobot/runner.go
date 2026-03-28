@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"context"
@@ -33,6 +33,7 @@ type geminiRunner struct {
 	hooks        *agent.Hooks        // may be nil; set via SetHooks
 }
 
+
 func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
 	return &geminiRunner{
 		client:       client,
@@ -43,6 +44,28 @@ func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *g
 		// 3 requests/second burst; conservative default for shared Gemini quota.
 		limiter: rate.NewLimiter(rate.Every(time.Second), 3),
 	}
+}
+
+// RunText makes a single-turn LLM call with the given prompt text and returns
+// the model's text response. Used by the memory consolidator (F-028).
+func (r *geminiRunner) RunText(ctx context.Context, prompt string) (string, error) {
+	contents := []*genai.Content{
+		{Parts: []*genai.Part{{Text: prompt}}, Role: "user"},
+	}
+	resp, err := r.client.Models.GenerateContent(ctx, r.model, contents, nil)
+	if err != nil {
+		return "", fmt.Errorf("RunText: %w", err)
+	}
+	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+		return "", nil
+	}
+	var sb strings.Builder
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if part.Text != "" {
+			sb.WriteString(part.Text)
+		}
+	}
+	return sb.String(), nil
 }
 
 // SetHooks configures lifecycle hooks for this runner.
@@ -79,7 +102,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 
 		funcCalls := resp.FunctionCalls()
 		if len(funcCalls) == 0 {
-			// Terminal response — extract text and return.
+			// Terminal response â€” extract text and return.
 			text := extractResponseText(resp)
 			newMsg := agentctx.StrategicMessage{
 				Role:    "assistant",
@@ -207,7 +230,7 @@ func (r *geminiRunner) buildConfig(messages []agentctx.StrategicMessage) *genai.
 		tools = append(tools, &genai.Tool{FunctionDeclarations: decls})
 	}
 
-	// Run PrePrompt hooks (F-012) — allow features to inject into system prompt.
+	// Run PrePrompt hooks (F-012) â€” allow features to inject into system prompt.
 	if r.hooks != nil {
 		systemPrompt = r.hooks.RunPrePrompt(context.Background(), systemPrompt)
 	}
@@ -268,3 +291,6 @@ func lastUserText(messages []agentctx.StrategicMessage) string {
 	}
 	return ""
 }
+
+
+
