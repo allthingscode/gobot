@@ -187,10 +187,20 @@ func cmdRun() *cobra.Command {
 				defer memStore.Close()
 			}
 
-			// Register tools: spawn subagent (F-001).
-			runner.tools = []Tool{
+			// Register tools.
+			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			tools := []Tool{
 				newSpawnTool(genaiClient, model, nil, memStore),
+				newListCalendarTool(secretsRoot),
+				newListTasksTool(secretsRoot),
+				newCreateTaskTool(secretsRoot),
 			}
+			if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
+				tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
+			} else {
+				slog.Warn("run: send_email tool disabled — strategic_edition.user_email not set in config")
+			}
+			runner.tools = tools
 
 			store, storeErr := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			if storeErr != nil {
