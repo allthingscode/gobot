@@ -195,10 +195,15 @@ func cmdRun() *cobra.Command {
 			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
 			tools := []Tool{
 				newSpawnTool(genaiClient, model, nil, memStore),
+			}
+			if memStore != nil {
+				tools = append(tools, newSearchMemoryTool(memStore))
+			}
+			tools = append(tools, []Tool{
 				newListCalendarTool(secretsRoot),
 				newListTasksTool(secretsRoot),
 				newCreateTaskTool(secretsRoot),
-			}
+			}...)
 			if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
 				tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
 			} else {
