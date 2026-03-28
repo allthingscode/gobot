@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	robfigcron "github.com/robfig/cron/v3"
@@ -137,7 +138,18 @@ func (s *Scheduler) poll(ctx context.Context) error {
 		return nil
 	}
 
+	// dueJob captures the state needed to dispatch a single job concurrently.
+	type dueJob struct {
+		index   int
+		id      string
+		name    string
+		payload Payload
+		sched   Schedule
+	}
+
 	changed := false
+	var due []dueJob
+
 	for i, job := range s.store.Jobs {
 		if !job.Enabled {
 			continue
@@ -153,30 +165,61 @@ func (s *Scheduler) poll(ctx context.Context) error {
 
 		if job.State.NextRunAtMS > 0 && nowMS >= job.State.NextRunAtMS {
 			slog.Info("Triggering job", "id", job.ID, "name", job.Name)
-
 			s.store.Jobs[i].State.RunCount++
 			s.store.Jobs[i].State.LastRunAtMS = nowMS
+			due = append(due, dueJob{
+				index:   i,
+				id:      job.ID,
+				name:    job.Name,
+				payload: job.Payload,
+				sched:   job.Schedule,
+			})
+			changed = true
+		}
+	}
 
-			if s.dispatcher != nil {
-				if err := s.dispatcher.Dispatch(ctx, job.Payload); err != nil {
-					slog.Error("Job dispatch failed", "id", job.ID, "error", err)
-					s.store.Jobs[i].State.FailureCount++
+	// Fan-out: dispatch all due jobs concurrently, then apply results.
+	if len(due) > 0 && s.dispatcher != nil {
+		type dispatchResult struct {
+			index int
+			err   error
+		}
+		results := make(chan dispatchResult, len(due))
+		var wg sync.WaitGroup
+		for _, dj := range due {
+			wg.Add(1)
+			go func(dj dueJob) {
+				defer wg.Done()
+				err := s.dispatcher.Dispatch(ctx, dj.payload)
+				if err != nil {
+					slog.Error("Job dispatch failed", "id", dj.id, "error", err)
 					alert := Payload{
-						Channel: job.Payload.Channel,
-						To:      job.Payload.To,
-						Message: fmt.Sprintf("⚠️ Job %q failed: %v", job.Name, err),
+						Channel: dj.payload.Channel,
+						To:      dj.payload.To,
+						Message: fmt.Sprintf("⚠️ Job %q failed: %v", dj.name, err),
 					}
 					if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
-						slog.Error("Job failure alert could not be sent", "id", job.ID, "err", alertErr)
+						slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
 					}
-				} else {
-					s.store.Jobs[i].State.SuccessCount++
 				}
-			}
+				results <- dispatchResult{index: dj.index, err: err}
+			}(dj)
+		}
+		wg.Wait()
+		close(results)
 
-			// Schedule next run
-			s.store.Jobs[i].State.NextRunAtMS = ComputeNextRun(job.Schedule, nowMS)
-			changed = true
+		for r := range results {
+			if r.err != nil {
+				s.store.Jobs[r.index].State.FailureCount++
+			} else {
+				s.store.Jobs[r.index].State.SuccessCount++
+			}
+			s.store.Jobs[r.index].State.NextRunAtMS = ComputeNextRun(s.store.Jobs[r.index].Schedule, nowMS)
+		}
+	} else if len(due) > 0 {
+		// No dispatcher configured: still advance the schedule.
+		for _, dj := range due {
+			s.store.Jobs[dj.index].State.NextRunAtMS = ComputeNextRun(dj.sched, nowMS)
 		}
 	}
 
