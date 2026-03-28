@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/memory"
 )
 
 // Runner executes one agentic turn.
@@ -45,10 +46,11 @@ type CheckpointStore interface {
 // Concurrent calls with the same sessionKey are queued; concurrent calls
 // with different sessionKeys proceed in parallel.
 type SessionManager struct {
-	runner Runner
-	store  CheckpointStore // may be nil
-	model  string
-	mu     sync.Map // key: sessionKey (string) → *sync.Mutex
+	runner      Runner
+	store       CheckpointStore // may be nil
+	model       string
+	storageRoot string    // may be ""; used for journal writes on compaction
+	mu          sync.Map  // key: sessionKey (string) → *sync.Mutex
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -60,6 +62,13 @@ func NewSessionManager(runner Runner, store CheckpointStore, model string) *Sess
 		store:  store,
 		model:  model,
 	}
+}
+
+// SetStorageRoot configures the storage root used for journal writes on
+// context compaction. Call this after NewSessionManager when journaling is
+// desired. An empty root disables journal writes.
+func (m *SessionManager) SetStorageRoot(root string) {
+	m.storageRoot = root
 }
 
 // Dispatch delivers userMessage to the runner under a per-session lock.
@@ -96,6 +105,16 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 				slog.Warn("agent: CreateThread failed (continuing statelessly)", "session", sessionKey, "err", createErr)
 			}
 		}
+	}
+
+	// Compact context if the history has grown too large (F-015).
+	if compacted, dropped := CompactMessages(messages, DefaultMaxContextMessages, DefaultKeepContextMessages); dropped > 0 {
+		slog.Info("agent: compacted context", "session", sessionKey, "dropped", dropped, "remaining", len(compacted))
+		if m.storageRoot != "" {
+			entry := fmt.Sprintf("Session %s: compacted %d messages (kept %d)", sessionKey, dropped, len(compacted))
+			memory.WriteJournalEntry(m.storageRoot, entry)
+		}
+		messages = compacted
 	}
 
 	// Append the incoming user message.

@@ -209,6 +209,7 @@ func cmdRun() *cobra.Command {
 				slog.Warn("run: checkpoint store unavailable, running statelessly", "err", storeErr)
 			}
 			mgr := agent.NewSessionManager(runner, store, model)
+			mgr.SetStorageRoot(cfg.StorageRoot())
 			handler := &dispatchHandler{mgr: mgr, memory: memStore}
 			api, err := newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
 			if err != nil {
