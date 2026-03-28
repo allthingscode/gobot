@@ -65,13 +65,22 @@ func cmdVersion() *cobra.Command {
 func cmdInit() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Create workspace directories on D: drive",
+		Short: "Create gobot workspace directories under the configured storage root",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			root := cfg.StorageRoot()
 			dirs := []string{
-				`D:\Gobot_Storage\workspace`,
-				`D:\Gobot_Storage\logs`,
-				`D:\Gobot_Storage\workspace\projects`,
-				`D:\Gobot_Storage\workspace\sessions`,
+				filepath.Join(root, "workspace"),
+				filepath.Join(root, "workspace", "jobs"),
+				filepath.Join(root, "workspace", "journal"),
+				filepath.Join(root, "workspace", "sessions"),
+				filepath.Join(root, "workspace", "projects"),
+				filepath.Join(root, "workspace", "reports"),
+				filepath.Join(root, "logs"),
+				filepath.Join(root, "secrets"),
 			}
 			for _, d := range dirs {
 				if err := os.MkdirAll(d, 0o755); err != nil {
@@ -79,7 +88,7 @@ func cmdInit() *cobra.Command {
 				}
 				fmt.Printf("  ok  %s\n", d)
 			}
-			fmt.Println("init complete.")
+			fmt.Printf("init complete. storage root: %s\n", root)
 			return nil
 		},
 	}
