@@ -4,7 +4,8 @@
 
 **gobot** is the Go port of the Nanobot Strategic Edition (EPIC-001, Strategy A).
 Module: `github.com/allthingscode/gobot`
-The Python nanobot at `../nanobot/` runs in parallel until Go reaches feature parity.
+The Python nanobot at `../nanobot/` is in Maintenance Mode (reference only).
+gobot has reached feature parity for the core agent loop and is production-ready.
 
 ## Hard Mandates
 
@@ -57,15 +58,29 @@ The Python nanobot at `../nanobot/` runs in parallel until Go reaches feature pa
 | `internal/gmail/` | Pure-Go Gmail OAuth2 + delivery | Done |
 | `internal/agent/` | Per-session serialization, `SessionManager`, `StripSilent` | Done |
 | `internal/bot/` | Telegram polling runtime, `IsTransientError`, backoff | Done |
-| `cmd/gobot/telegram.go` | tgbotapi v5 adapter implementing `bot.API` | Done |
-| `cmd/gobot/runner.go` | `geminiRunner` implementing `agent.Runner` via genai SDK | Done |
-| `cmd/gobot/main.go` | `gobot run` + `gobot reauth` commands wired | Done |
+| `cmd/gobot/telegram.go` | tgbotapi v5 adapter + message deduplication | Done |
+| `cmd/gobot/runner.go` | `geminiRunner` via genai SDK with system prompt support | Done |
+| `cmd/gobot/cron.go` | `cronDispatcher` + scheduler wired into `gobot run` | Done |
+| `cmd/gobot/awareness.go` | AWARENESS.md auto-generation + system prompt loading | Done |
+| `cmd/gobot/main.go` | Full CLI: `run`, `reauth`, `checkpoints`, `resume`, `doctor`, `init`, `version` | Done |
 
-### Phase 4 — in progress
+### Phase 5 — hardening (complete)
 
 | File | Description | Status |
 |------|-------------|--------|
-| `cmd/gobot/cron.go` | `cronDispatcher` + scheduler wired into `gobot run` | In Progress |
+| `internal/cron/batch.go` | `ParseModularJobFile` + `LoadModularJobs` (.md front-matter parser) | Done |
+| `internal/cron/batch_test.go` | 17 table-driven tests for batch loader | Done |
+| `cmd/gobot/awareness.go` | `ensureAwarenessFile` — writes default AWARENESS.md on first run | Done |
+| `cmd/gobot/telegram.go` | `isDuplicate` — 5-min TTL dedup map (prevents double-dispatch on flaps) | Done |
+| `cmd/gobot/main.go` | `gobot checkpoints` + `gobot resume` Cobra commands | Done |
+
+### Deferred (Python nanobot owns these)
+
+| Feature | Why deferred |
+|---------|-------------|
+| Spawn tool / subagent orchestration | Requires genai SDK function-calling wiring + multi-agent infra |
+| Vector memory / RAG (ChromaDB) | Major undertaking; not blocking core loop |
+| Strategic Reviewer Crew | Dev/audit tool; CrewAI is Python-only |
 
 ## Common Commands
 
