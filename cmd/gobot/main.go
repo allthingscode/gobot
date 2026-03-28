@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,7 +20,6 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
-	"github.com/allthingscode/gobot/internal/gmail"
 	"github.com/allthingscode/gobot/internal/google"
 )
 
@@ -195,24 +193,24 @@ func cmdRun() *cobra.Command {
 func cmdReauth() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reauth",
-		Short: "Check Gmail OAuth2 token status",
+		Short: "Interactive Google/Gmail OAuth2 re-authorization",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
 			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
-			_, err = gmail.NewService(secretsRoot)
-			if errors.Is(err, gmail.ErrNeedsReauth) {
-				fmt.Println("Gmail token expired or missing.")
-				fmt.Println("Run the Python oauth tool: python -m strategery.oauth")
-				return nil
+
+			// Scopes required for gobot
+			scopes := []string{
+				"https://www.googleapis.com/auth/tasks",
+				"https://www.googleapis.com/auth/calendar.readonly",
+				"https://www.googleapis.com/auth/gmail.send",
+				"https://www.googleapis.com/auth/gmail.readonly",
 			}
-			if err != nil {
-				return fmt.Errorf("gmail: %w", err)
-			}
-			fmt.Println("Gmail token OK.")
-			return nil
+
+			fmt.Println("Starting Go-native interactive authorization...")
+			return google.AuthorizeInteractive(secretsRoot, scopes)
 		},
 	}
 }

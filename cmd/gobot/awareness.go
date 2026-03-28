@@ -12,11 +12,17 @@ import (
 
 const awarenessMaxJournalChars = 4000
 
-// loadSystemPrompt builds the combined system prompt from AWARENESS.md
-// (if present) and today's journal continuity block.
-// Returns an empty string if neither source has content.
+// loadSystemPrompt builds the combined system prompt from SOUL.md (identity),
+// AWARENESS.md (operational context), and today's journal continuity block.
+// Returns an empty string if no source has content.
 func loadSystemPrompt(storageRoot string) string {
 	var parts []string
+
+	// SOUL.md — agent identity document. Look next to the binary first,
+	// then fall back to the storage workspace. Silently skipped if absent.
+	if soulData := loadSoulMD(storageRoot); soulData != "" {
+		parts = append(parts, soulData)
+	}
 
 	awarenessPath := filepath.Join(storageRoot, "workspace", "AWARENESS.md")
 	if data, err := os.ReadFile(awarenessPath); err == nil && len(data) > 0 {
@@ -34,6 +40,24 @@ func loadSystemPrompt(storageRoot string) string {
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// loadSoulMD reads SOUL.md from next to the binary, falling back to
+// {storageRoot}/workspace/SOUL.md. Returns empty string if not found.
+func loadSoulMD(storageRoot string) string {
+	// Prefer a copy in the workspace so it survives binary updates.
+	candidates := []string{
+		filepath.Join(storageRoot, "workspace", "SOUL.md"),
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append([]string{filepath.Join(filepath.Dir(exe), "SOUL.md")}, candidates...)
+	}
+	for _, p := range candidates {
+		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return ""
 }
 
 // loadScheduleContext fetches today's calendar events and open tasks and
