@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,10 +13,24 @@ import (
 	"time"
 )
 
-const tokenRefreshURL = "https://oauth2.googleapis.com/token"
+const (
+	tokenRefreshURL = "https://oauth2.googleapis.com/token"
+	authURL         = "https://accounts.google.com/o/oauth2/v2/auth"
+)
+
+// clientSecrets mirrors the format of client_secrets.json.
+type clientSecrets struct {
+	Installed struct {
+		ClientID     string   `json:"client_id"`
+		ProjectID    string   `json:"project_id"`
+		AuthURI      string   `json:"auth_uri"`
+		TokenURI     string   `json:"token_uri"`
+		ClientSecret string   `json:"client_secret"`
+		RedirectURIs []string `json:"redirect_uris"`
+	} `json:"installed"`
+}
 
 // storedToken mirrors the JSON written by google-auth-library (Python).
-// Compatible with both gmail/token.json and google_token.json formats.
 type storedToken struct {
 	Token        string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
@@ -23,6 +38,139 @@ type storedToken struct {
 	ClientID     string    `json:"client_id"`
 	ClientSecret string    `json:"client_secret"`
 	Expiry       time.Time `json:"expiry"`
+}
+
+// AuthorizeInteractive starts a local server to handle the OAuth2 callback,
+// prints the auth URL, and returns the exchanged token.
+func AuthorizeInteractive(secretsRoot string, scopes []string) error {
+	secretsPath := filepath.Join(secretsRoot, "client_secrets.json")
+	data, err := os.ReadFile(secretsPath)
+	if err != nil {
+		return fmt.Errorf("client_secrets.json missing: %w", err)
+	}
+	var secrets clientSecrets
+	if err := json.Unmarshal(data, &secrets); err != nil {
+		return fmt.Errorf("invalid client_secrets.json: %w", err)
+	}
+
+	// Use a fixed port 8080 to match most client secrets
+	port := 8080
+	redirectURI := fmt.Sprintf("http://localhost:%d", port)
+
+	v := url.Values{}
+	v.Set("client_id", secrets.Installed.ClientID)
+	v.Set("redirect_uri", redirectURI)
+	v.Set("response_type", "code")
+	v.Set("scope", strings.Join(scopes, " "))
+	v.Set("access_type", "offline")
+	v.Set("prompt", "consent") // Force refresh token
+
+	fullAuthURL := authURL + "?" + v.Encode()
+
+	fmt.Println("Please open the following URL in your browser to authorize gobot:")
+	fmt.Println("\n" + fullAuthURL + "\n")
+
+	// Start local server to catch the code
+	codeChan := make(chan string)
+	errChan := make(chan error)
+
+	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	if err != nil {
+		return fmt.Errorf("failed to listen on localhost:%d: %w", port, err)
+	}
+	defer l.Close()
+
+	srv := &http.Server{}
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			fmt.Fprintf(w, "No code found in redirect. Check gobot logs.")
+			errChan <- fmt.Errorf("no code in redirect")
+			return
+		}
+		fmt.Fprintf(w, "Authorization successful! You can close this tab and return to your terminal.")
+		codeChan <- code
+	})
+
+	go func() {
+		if err := srv.Serve(l); err != http.ErrServerClosed {
+			errChan <- err
+		}
+	}()
+
+	var code string
+	select {
+	case code = <-codeChan:
+		// success
+	case err := <-errChan:
+		return fmt.Errorf("auth server error: %w", err)
+	case <-time.After(5 * time.Minute):
+		return fmt.Errorf("timeout waiting for browser authorization")
+	}
+
+	// Exchange code for token
+	token, err := exchangeCode(code, secrets.Installed.ClientID, secrets.Installed.ClientSecret, redirectURI)
+	if err != nil {
+		return fmt.Errorf("token exchange: %w", err)
+	}
+
+	// Save to both google_token.json and gmail/token.json for compatibility
+	tokenJSON, _ := json.MarshalIndent(token, "", "  ")
+
+	googlePath := GoogleTokenPath(secretsRoot)
+	if err := os.WriteFile(googlePath, tokenJSON, 0600); err != nil {
+		return fmt.Errorf("failed to save google_token.json: %w", err)
+	}
+
+	gmailDir := filepath.Join(secretsRoot, "gmail")
+	os.MkdirAll(gmailDir, 0755)
+	gmailPath := filepath.Join(gmailDir, "token.json")
+	if err := os.WriteFile(gmailPath, tokenJSON, 0600); err != nil {
+		return fmt.Errorf("failed to save gmail token: %w", err)
+	}
+
+	fmt.Printf("Successfully saved tokens to %s and %s\n", googlePath, gmailPath)
+	return nil
+}
+
+func exchangeCode(code, clientID, clientSecret, redirectURI string) (*storedToken, error) {
+	resp, err := http.PostForm(tokenRefreshURL, url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"redirect_uri":  {redirectURI},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		TokenURI     string `json:"token_uri"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		Error        string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("exchange response: %w", err)
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("google error: %s", result.Error)
+	}
+
+	return &storedToken{
+		Token:        result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		TokenURI:     tokenRefreshURL,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Expiry:       time.Now().Add(time.Duration(result.ExpiresIn) * time.Second),
+	}, nil
 }
 
 func (t *storedToken) expired() bool {
