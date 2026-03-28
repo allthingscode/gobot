@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/memory"
 )
 
@@ -45,7 +47,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 
 	for iter := 0; iter < maxToolIterations; iter++ {
 		slog.Debug("gemini: calling GenerateContent", "session", sessionKey, "model", r.model, "messages", len(contents), "iter", iter)
-		resp, err := r.client.Models.GenerateContent(ctx, r.model, contents, cfg)
+		resp, err := r.retryGenerateContent(ctx, contents, cfg)
 		if err != nil {
 			return "", nil, fmt.Errorf("gemini generate: %w", err)
 		}
@@ -101,6 +103,41 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, fc *g
 		}
 	}
 	return "", fmt.Errorf("unknown tool: %s", fc.Name)
+}
+
+// retryGenerateContent calls GenerateContent with exponential backoff on transient errors.
+// Makes up to maxGenRetries additional attempts after the first failure; initial delay 1s,
+// doubling each retry, capped at 30s. Non-transient errors are returned immediately.
+func (r *geminiRunner) retryGenerateContent(ctx context.Context, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+	const maxGenRetries = 3
+	const initialDelay = 1 * time.Second
+	const maxDelay = 30 * time.Second
+
+	delay := initialDelay
+	var lastErr error
+	for attempt := 0; attempt <= maxGenRetries; attempt++ {
+		if attempt > 0 {
+			slog.Warn("gemini: transient error, retrying", "attempt", attempt, "delay", delay, "err", lastErr)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			delay *= 2
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+		}
+		resp, err := r.client.Models.GenerateContent(ctx, r.model, contents, cfg)
+		if err == nil {
+			return resp, nil
+		}
+		if !bot.IsTransientError(err) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("%d retries exhausted: %w", maxGenRetries, lastErr)
 }
 
 // buildConfig assembles the GenerateContentConfig for a Run call.
