@@ -40,15 +40,32 @@ The Python nanobot at `../nanobot/` runs in parallel until Go reaches feature pa
 | `internal/provider/` | `provider_logic.py` | Done |
 | `internal/infra/` | `infra_logic.py` | Done |
 | `internal/telegram/` | `telegram.py` (pure logic) | Done |
-| `internal/context/` | `checkpoint_logic.py` | In Progress |
+| `internal/context/` | `checkpoint_logic.py` | Done |
 
-### Phase 3 — runtime packages (in progress)
+### Phase 3 — runtime packages (complete)
 
 | Package | Source | Status |
 |---------|--------|--------|
-| `internal/cron/` | `cron_logic.py` | Done — `KindCron` expression parsing stubbed (Phase 4) |
-| `internal/telegram/` | — | Not started |
-| `internal/reporter/` | — | Not started |
+| `internal/cron/` | `cron_logic.py` | Done |
+| `internal/telegram/` | `telegram.py` (pure logic) | Done |
+| `internal/reporter/` | `strategic_email_reporter.py` (pure logic) | Done |
+
+### Phase 4 — integration layer (complete)
+
+| Package / File | Description | Status |
+|----------------|-------------|--------|
+| `internal/gmail/` | Pure-Go Gmail OAuth2 + delivery | Done |
+| `internal/agent/` | Per-session serialization, `SessionManager`, `StripSilent` | Done |
+| `internal/bot/` | Telegram polling runtime, `IsTransientError`, backoff | Done |
+| `cmd/gobot/telegram.go` | tgbotapi v5 adapter implementing `bot.API` | Done |
+| `cmd/gobot/runner.go` | `geminiRunner` implementing `agent.Runner` via genai SDK | Done |
+| `cmd/gobot/main.go` | `gobot run` + `gobot reauth` commands wired | Done |
+
+### Phase 4 — in progress
+
+| File | Description | Status |
+|------|-------------|--------|
+| `cmd/gobot/cron.go` | `cronDispatcher` + scheduler wired into `gobot run` | In Progress |
 
 ## Common Commands
 

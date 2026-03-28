@@ -16,6 +16,7 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/gmail"
 )
@@ -135,8 +136,21 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("telegram: %w", err)
 			}
-			slog.Info("gobot starting", "model", model)
+
 			b := bot.New(api, handler)
+
+			// Start cron scheduler in background.
+			storePath := filepath.Join(cfg.StorageRoot(), "workspace", "jobs.json")
+			itemsDir := filepath.Join(cfg.StorageRoot(), "workspace", "jobs")
+			cronDisp := &cronDispatcher{mgr: mgr, b: b, storageRoot: cfg.StorageRoot()}
+			scheduler := cron.NewScheduler(storePath, itemsDir, cronDisp)
+			go func() {
+				if err := scheduler.Run(ctx); err != nil && err != context.Canceled {
+					slog.Error("cron scheduler stopped", "err", err)
+				}
+			}()
+
+			slog.Info("gobot starting", "model", model)
 			return b.Run(ctx)
 		},
 	}
