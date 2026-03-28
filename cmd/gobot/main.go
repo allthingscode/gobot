@@ -16,6 +16,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/audit"
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
@@ -158,8 +159,8 @@ func cmdRun() *cobra.Command {
 			logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err == nil {
 				// Use a multi-writer to send logs to both file and stderr
-				handler := slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
-				slog.SetDefault(slog.New(handler))
+				baseHandler := slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
+				slog.SetDefault(slog.New(audit.NewRedactingHandler(baseHandler)))
 				defer logFile.Close()
 			}
 
