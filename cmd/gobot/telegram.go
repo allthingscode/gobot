@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/allthingscode/gobot/internal/bot"
 )
 
 type tgAPI struct {
-	client *tgbotapi.BotAPI
+	client   *tgbotapi.BotAPI
+	seenMsgs sync.Map // int64 (MessageID) -> time.Time (first-seen timestamp)
 }
 
 func newTgAPI(token string) (*tgAPI, error) {
@@ -18,6 +21,30 @@ func newTgAPI(token string) (*tgAPI, error) {
 		return nil, fmt.Errorf("tgbotapi: %w", err)
 	}
 	return &tgAPI{client: client}, nil
+}
+
+const dedupTTL = 5 * time.Minute
+
+// isDuplicate reports whether msgID was already seen within dedupTTL.
+// Stores msgID on first call; evicts expired entries on every call.
+func (t *tgAPI) isDuplicate(msgID int64) bool {
+	now := time.Now()
+
+	// Opportunistically evict expired entries.
+	t.seenMsgs.Range(func(k, v any) bool {
+		if now.Sub(v.(time.Time)) >= dedupTTL {
+			t.seenMsgs.Delete(k)
+		}
+		return true
+	})
+
+	if v, ok := t.seenMsgs.Load(msgID); ok {
+		if now.Sub(v.(time.Time)) < dedupTTL {
+			return true
+		}
+	}
+	t.seenMsgs.Store(msgID, now)
+	return false
 }
 
 // Updates bridges tgbotapi updates to bot.InboundMessage.
@@ -44,9 +71,13 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 				if update.Message == nil || update.Message.Text == "" {
 					continue
 				}
+				msgID := int64(update.Message.MessageID)
+				if t.isDuplicate(msgID) {
+					continue
+				}
 				out <- bot.InboundMessage{
 					ChatID:    update.Message.Chat.ID,
-					MessageID: int64(update.Message.MessageID),
+					MessageID: msgID,
 					ThreadID:  0,
 					Text:      update.Message.Text,
 				}
