@@ -58,12 +58,12 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		contents = append(contents, c)
 	}
 
-	var cfg *genai.GenerateContentConfig
+	cfg := &genai.GenerateContentConfig{
+		Tools: []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}},
+	}
 	if r.systemPrompt != "" {
-		cfg = &genai.GenerateContentConfig{
-			SystemInstruction: &genai.Content{
-				Parts: []*genai.Part{{Text: r.systemPrompt}},
-			},
+		cfg.SystemInstruction = &genai.Content{
+			Parts: []*genai.Part{{Text: r.systemPrompt}},
 		}
 	}
 	slog.Debug("gemini: calling GenerateContent", "session", sessionKey, "model", r.model, "messages", len(contents))

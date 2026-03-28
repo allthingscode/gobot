@@ -143,6 +143,14 @@ func (s *Scheduler) poll(ctx context.Context) error {
 			continue
 		}
 
+		// Initialize NextRunAtMS on first load (new jobs have zero value).
+		if job.State.NextRunAtMS == 0 {
+			s.store.Jobs[i].State.NextRunAtMS = ComputeNextRun(job.Schedule, nowMS)
+			slog.Info("Cron: scheduled new job", "id", job.ID, "nextRunAt", time.UnixMilli(s.store.Jobs[i].State.NextRunAtMS))
+			changed = true
+			continue
+		}
+
 		if job.State.NextRunAtMS > 0 && nowMS >= job.State.NextRunAtMS {
 			slog.Info("Triggering job", "id", job.ID, "name", job.Name)
 

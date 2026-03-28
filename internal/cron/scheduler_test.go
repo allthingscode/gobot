@@ -172,6 +172,48 @@ func TestSchedulerPoll(t *testing.T) {
 	// Our test runs now, which is > 1000, so ComputeNextRun(KindAt, 1000) should be 0.
 }
 
+func TestSchedulerPoll_InitializesNewJob(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	// Write store with a job that has NextRunAtMS=0 (first-load zero value).
+	initialStore := Store{
+		Jobs: []Job{
+			{
+				ID:       "job1",
+				Name:     "Morning Briefing",
+				Enabled:  true,
+				Schedule: Schedule{Kind: KindCron, Expr: "45 8 * * *"},
+				Payload:  Payload{Channel: "telegram", To: "telegram:999", Message: "good morning"},
+				State:    JobState{NextRunAtMS: 0},
+			},
+		},
+	}
+	data, _ := initialStore.EncodeJSON()
+	_ = os.WriteFile(storePath, data, 0644)
+
+	dispatcher := &mockDispatcher{}
+	s := NewScheduler(storePath, "", dispatcher)
+
+	ctx := context.Background()
+	if err := s.poll(ctx); err != nil {
+		t.Fatalf("poll failed: %v", err)
+	}
+
+	// Job should NOT fire on the initialization poll.
+	if len(dispatcher.payloads) != 0 {
+		t.Errorf("new job must not fire on initialization poll, got %d dispatches", len(dispatcher.payloads))
+	}
+
+	// NextRunAtMS must now be set to a future time.
+	if s.store.Jobs[0].State.NextRunAtMS == 0 {
+		t.Errorf("NextRunAtMS should be initialized after first poll, got 0")
+	}
+	if s.store.Jobs[0].State.NextRunAtMS <= time.Now().UnixMilli() {
+		t.Errorf("NextRunAtMS should be in the future, got %d", s.store.Jobs[0].State.NextRunAtMS)
+	}
+}
+
 func TestSchedulerPoll_FailureAlert(t *testing.T) {
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "jobs.json")
