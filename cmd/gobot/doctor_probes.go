@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/doctor"
@@ -15,11 +15,15 @@ import (
 func liveProbes() *doctor.Probes {
 	return &doctor.Probes{
 		ProbeTelegram: func(token string) (string, error) {
-			client, err := tgbotapi.NewBotAPI(token)
+			client, err := telego.NewBot(token)
 			if err != nil {
 				return "", err
 			}
-			return "@" + client.Self.UserName, nil
+			self, err := client.GetMe(context.Background())
+			if err != nil {
+				return "", err
+			}
+			return "@" + self.Username, nil
 		},
 		ProbeGemini: func(apiKey string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

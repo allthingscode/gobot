@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/bot"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 )
 
-// mdV2CodeRe matches fenced code blocks (```...```) and inline code (`...`)
+// mdV2CodeRe matches fenced code blocks (```...```) and inline code (`)
 // so they can be preserved unchanged during MarkdownV2 escaping.
 var mdV2CodeRe = regexp.MustCompile("(?s)(```[\\s\\S]*?```|`[^`\\n]+`)")
 
@@ -47,19 +47,21 @@ func convertToMarkdownV2(text string) string {
 }
 
 type tgAPI struct {
-	client    *tgbotapi.BotAPI
-	seenMsgs  sync.Map       // int64 (MessageID) -> time.Time (first-seen timestamp)
-	allowFrom map[int64]bool // nil or empty = allow all
+	client    *telego.Bot
+	seenMsgs  sync.Map
+	allowFrom map[int64]bool
 }
 
-// newTgAPI creates a tgAPI. allowFrom is a list of permitted chat ID strings;
-// pass nil or empty slice to allow all senders.
 func newTgAPI(token string, allowFrom []string) (*tgAPI, error) {
-	client, err := tgbotapi.NewBotAPI(token)
+	client, err := telego.NewBot(token)
 	if err != nil {
-		return nil, fmt.Errorf("tgbotapi: %w", err)
+		return nil, fmt.Errorf("telego: %w", err)
 	}
-	slog.Info("telegram: bot connected", "username", client.Self.UserName)
+	self, err := client.GetMe(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("telego GetMe: %w", err)
+	}
+	slog.Info("telegram: bot connected", "username", self.Username)
 
 	af := make(map[int64]bool, len(allowFrom))
 	for _, s := range allowFrom {
@@ -67,7 +69,6 @@ func newTgAPI(token string, allowFrom []string) (*tgAPI, error) {
 			af[id] = true
 		}
 	}
-
 	return &tgAPI{client: client, allowFrom: af}, nil
 }
 
@@ -97,10 +98,9 @@ func (t *tgAPI) isDuplicate(msgID int64) bool {
 
 func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMessage, error) {
 	out := make(chan bot.InboundMessage)
-
 	go func() {
 		defer close(out)
-		offset := -1 // Start with -1 to clear old updates and get latest
+		offset := 0
 		for {
 			select {
 			case <-ctx.Done():
@@ -108,10 +108,10 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 			default:
 			}
 
-			u := tgbotapi.NewUpdate(offset)
-			u.Timeout = 30 // Long poll
-			slog.Debug("telegram: polling for updates", "offset", offset, "timeout", 30)
-			updates, err := t.client.GetUpdates(u)
+			updates, err := t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
+				Offset:  offset,
+				Timeout: 30,
+			})
 			if err != nil {
 				slog.Error("telegram: GetUpdates failed", "err", err)
 				time.Sleep(5 * time.Second)
@@ -119,10 +119,7 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 			}
 
 			for _, update := range updates {
-				// After the first successful get with -1, we switch to normal offset logic
-				if offset == -1 {
-					offset = update.UpdateID + 1
-				} else if update.UpdateID >= offset {
+				if update.UpdateID >= offset {
 					offset = update.UpdateID + 1
 				}
 				slog.Debug("telegram: raw update received", "update_id", update.UpdateID)
@@ -144,31 +141,34 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 				out <- bot.InboundMessage{
 					ChatID:    update.Message.Chat.ID,
 					MessageID: msgID,
-					ThreadID:  0,
+					ThreadID:  int64(update.Message.MessageThreadID),
 					SenderID:  senderID,
 					Text:      update.Message.Text,
 				}
 			}
 		}
 	}()
-
 	return out, nil
 }
 
-// Typing sends a periodic "typing" action to Telegram.
-// Returns a function that, when called, stops the periodic updates.
 func (t *tgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {
 	stop := make(chan struct{})
 
-	// Send initial typing indicator immediately
-	slog.Debug("telegram: sending initial typing action", "chat_id", chatID)
-	action := tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping)
-	_, err := t.client.Request(action)
-	if err != nil {
-		slog.Debug("telegram: initial typing action failed", "err", err)
-	} else {
-		slog.Debug("telegram: initial typing action sent")
+	sendTyping := func() {
+		params := &telego.SendChatActionParams{
+			ChatID: telego.ChatID{ID: chatID},
+			Action: telego.ChatActionTyping,
+		}
+		if threadID > 0 {
+			params.MessageThreadID = int(threadID)
+		}
+		if err := t.client.SendChatAction(ctx, params); err != nil {
+			slog.Debug("telegram: typing action failed", "err", err)
+		}
 	}
+
+	slog.Debug("telegram: sending initial typing action", "chat_id", chatID)
+	sendTyping()
 
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -180,40 +180,36 @@ func (t *tgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {
 			case <-stop:
 				return
 			case <-ticker.C:
-				_, _ = t.client.Request(action)
+				sendTyping()
 			}
 		}
 	}()
 
-	return func() {
-		close(stop)
-	}
+	return func() { close(stop) }
 }
 
-// Send delivers an OutboundMessage using Telegram MarkdownV2 mode.
-// Text is converted via convertToMarkdownV2: code blocks are preserved verbatim
-// and all other special characters are escaped, so parse errors cannot occur.
-// Falls back to plain text only if the API rejects the converted message.
-// Sets ReplyToMessageID if msg.ReplyToID > 0.
 func (t *tgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
-	mc := tgbotapi.NewMessage(msg.ChatID, convertToMarkdownV2(msg.Text))
-	mc.ParseMode = tgbotapi.ModeMarkdownV2
-	if msg.ReplyToID > 0 {
-		mc.ReplyToMessageID = int(msg.ReplyToID)
+	params := &telego.SendMessageParams{
+		ChatID:    telego.ChatID{ID: msg.ChatID},
+		Text:      convertToMarkdownV2(msg.Text),
+		ParseMode: telego.ModeMarkdownV2,
 	}
-	_, err := t.client.Send(mc)
+	if msg.ThreadID > 0 {
+		params.MessageThreadID = int(msg.ThreadID)
+	}
+	if msg.ReplyToID > 0 {
+		params.ReplyParameters = &telego.ReplyParameters{MessageID: int(msg.ReplyToID)}
+	}
+	_, err := t.client.SendMessage(ctx, params)
 	if err != nil && strings.Contains(err.Error(), "can't parse entities") {
-		// Defensive fallback: send original text as plain
-		mc.ParseMode = ""
-		mc.Text = msg.Text
-		_, err = t.client.Send(mc)
+		params.ParseMode = ""
+		params.Text = msg.Text
+		_, err = t.client.SendMessage(ctx, params)
 	}
 	if err != nil {
-		return fmt.Errorf("tgbotapi send: %w", err)
+		return fmt.Errorf("telego send: %w", err)
 	}
 	return nil
 }
 
-func (t *tgAPI) Stop() {
-	t.client.StopReceivingUpdates()
-}
+func (t *tgAPI) Stop() {}
