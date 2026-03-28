@@ -213,6 +213,11 @@ func cmdRun() *cobra.Command {
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetStorageRoot(cfg.StorageRoot())
 			mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
+
+			// F-012: create shared Hooks instance and wire into both SessionManager and runner.
+			hooks := &agent.Hooks{}
+			mgr.SetHooks(hooks)
+			runner.SetHooks(hooks)
 			handler := &dispatchHandler{mgr: mgr, memory: memStore}
 			var gateHandler bot.Handler = handler
 			if store != nil {

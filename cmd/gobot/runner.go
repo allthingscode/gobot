@@ -11,6 +11,7 @@ import (
 	"golang.org/x/time/rate"
 	"google.golang.org/genai"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/memory"
@@ -29,6 +30,7 @@ type geminiRunner struct {
 	tools        []Tool              // registered tools exposed to Gemini as FunctionDeclarations
 	breaker      *resilience.Breaker // circuit breaker for Gemini API calls
 	limiter      *rate.Limiter       // token-bucket rate limiter for Gemini API calls
+	hooks        *agent.Hooks        // may be nil; set via SetHooks
 }
 
 func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
@@ -41,6 +43,12 @@ func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *g
 		// 3 requests/second burst; conservative default for shared Gemini quota.
 		limiter: rate.NewLimiter(rate.Every(time.Second), 3),
 	}
+}
+
+// SetHooks configures lifecycle hooks for this runner.
+// PrePrompt hooks are applied in buildConfig before each Gemini call.
+func (r *geminiRunner) SetHooks(h *agent.Hooks) {
+	r.hooks = h
 }
 
 // Run converts []StrategicMessage to []*genai.Content, then drives a
@@ -197,6 +205,11 @@ func (r *geminiRunner) buildConfig(messages []agentctx.StrategicMessage) *genai.
 			decls[i] = t.Declaration()
 		}
 		tools = append(tools, &genai.Tool{FunctionDeclarations: decls})
+	}
+
+	// Run PrePrompt hooks (F-012) — allow features to inject into system prompt.
+	if r.hooks != nil {
+		systemPrompt = r.hooks.RunPrePrompt(context.Background(), systemPrompt)
 	}
 
 	cfg := &genai.GenerateContentConfig{Tools: tools}

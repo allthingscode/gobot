@@ -51,6 +51,7 @@ type SessionManager struct {
 	model       string
 	storageRoot string    // may be ""; used for journal writes on compaction
 	logger      SessionLogger // may be nil; set via SetLogger
+	hooks       *Hooks    // may be nil; set via SetHooks
 	mu          sync.Map  // key: sessionKey (string) → *sync.Mutex
 }
 
@@ -76,6 +77,12 @@ func (m *SessionManager) SetStorageRoot(root string) {
 // after every successful SaveSnapshot. If nil, no logging is performed.
 func (m *SessionManager) SetLogger(l SessionLogger) {
 	m.logger = l
+}
+
+// SetHooks configures the lifecycle hooks for this SessionManager.
+// Call this at startup before the first Dispatch. Hooks run in registration order.
+func (m *SessionManager) SetHooks(h *Hooks) {
+	m.hooks = h
 }
 
 // Dispatch delivers userMessage to the runner under a per-session lock.
@@ -112,6 +119,11 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 				slog.Warn("agent: CreateThread failed (continuing statelessly)", "session", sessionKey, "err", createErr)
 			}
 		}
+	}
+
+	// Run PreHistory hooks (F-012) — filter/transform history before compaction and dispatch.
+	if m.hooks != nil {
+		messages = m.hooks.RunPreHistory(ctx, messages)
 	}
 
 	// Compact context if the history has grown too large (F-015).
