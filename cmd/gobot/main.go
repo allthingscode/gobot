@@ -156,12 +156,19 @@ func cmdRun() *cobra.Command {
 			now := time.Now().Format("20060102_150405")
 			logName := fmt.Sprintf("gobot_%s.log", now)
 			logPath := filepath.Join(cfg.StorageRoot(), "logs", logName)
-			logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err == nil {
+			logFile, logErr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			var baseHandler slog.Handler
+			if logErr == nil {
 				// Use a multi-writer to send logs to both file and stderr
-				baseHandler := slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
-				slog.SetDefault(slog.New(audit.NewRedactingHandler(baseHandler)))
+				baseHandler = slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
 				defer logFile.Close()
+			} else {
+				baseHandler = slog.NewTextHandler(os.Stderr, nil)
+			}
+			// Always install redaction — PII protection must not depend on log file health.
+			slog.SetDefault(slog.New(audit.NewRedactingHandler(baseHandler)))
+			if logErr != nil {
+				slog.Warn("failed to open log file, logging to stderr only", "err", logErr)
 			}
 
 			// Prioritize token from config.json, then environment.
@@ -198,10 +205,18 @@ func cmdRun() *cobra.Command {
 				defer memStore.Close()
 			}
 
+			// Build specialist model map from config (agent_type -> model override).
+			specialistModels := make(map[string]string, len(cfg.Agents.Specialists))
+			for agentType, sc := range cfg.Agents.Specialists {
+				if sc.Model != "" {
+					specialistModels[agentType] = sc.Model
+				}
+			}
+
 			// Register tools.
 			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
 			tools := []Tool{
-				newSpawnTool(genaiClient, model, nil, memStore),
+				newSpawnTool(genaiClient, model, nil, specialistModels, memStore),
 			}
 			if memStore != nil {
 				tools = append(tools, newSearchMemoryTool(memStore))

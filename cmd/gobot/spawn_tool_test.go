@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -32,7 +33,7 @@ func (m *mockRunner) Run(_ context.Context, _ string, messages []agentctx.Strate
 // newTestSpawnTool builds a SpawnTool backed by a mockRunner factory.
 func newTestSpawnTool(runner agent.Runner, prompts map[string]string) *SpawnTool {
 	return &SpawnTool{
-		runnerFactory: func(_ string) agent.Runner { return runner },
+		runnerFactory: func(_, _ string) agent.Runner { return runner },
 		model:         "test-model",
 		specialistPrompts: prompts,
 	}
@@ -137,7 +138,7 @@ func TestSpawnTool_Execute(t *testing.T) {
 				if err == nil {
 					t.Fatal("Execute() expected error, got nil")
 				}
-				if tc.wantErrSubstr != "" && !contains(err.Error(), tc.wantErrSubstr) {
+				if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
 					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
 				}
 				return
@@ -159,7 +160,7 @@ func TestSpawnTool_Execute(t *testing.T) {
 func TestSpawnTool_SubAgentSessionKey(t *testing.T) {
 	var capturedKey string
 	tool := &SpawnTool{
-		runnerFactory: func(_ string) agent.Runner {
+		runnerFactory: func(_, _ string) agent.Runner {
 			return &captureKeyRunner{capture: &capturedKey}
 		},
 		model: "test-model",
@@ -171,6 +172,54 @@ func TestSpawnTool_SubAgentSessionKey(t *testing.T) {
 	wantPrefix := "agent:writer:telegram:999"
 	if capturedKey != wantPrefix {
 		t.Errorf("sub-agent session key = %q, want %q", capturedKey, wantPrefix)
+	}
+}
+
+func TestSpawnTool_SpecialistModelOverride(t *testing.T) {
+	var capturedModel string
+	tool := &SpawnTool{
+		runnerFactory: func(model, _ string) agent.Runner {
+			capturedModel = model
+			return &mockRunner{response: "done"}
+		},
+		model: "default-model",
+		specialistModels: map[string]string{
+			"architect": "pro-model",
+		},
+	}
+	_, err := tool.Execute(context.Background(), "parent:1", map[string]any{
+		"agent_type": "architect",
+		"objective":  "Design the system.",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedModel != "pro-model" {
+		t.Errorf("want model %q, got %q", "pro-model", capturedModel)
+	}
+}
+
+func TestSpawnTool_UnknownTypeUsesDefaultModel(t *testing.T) {
+	var capturedModel string
+	tool := &SpawnTool{
+		runnerFactory: func(model, _ string) agent.Runner {
+			capturedModel = model
+			return &mockRunner{response: "done"}
+		},
+		model: "default-model",
+		specialistModels: map[string]string{
+			"architect": "pro-model",
+		},
+	}
+	_, err := tool.Execute(context.Background(), "parent:1", map[string]any{
+		"agent_type": "unknown-type",
+		"objective":  "Do something.",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedModel != "default-model" {
+		t.Errorf("want default model %q, got %q", "default-model", capturedModel)
 	}
 }
 
@@ -212,12 +261,5 @@ func TestDefaultSpecialistPrompt(t *testing.T) {
 }
 
 func contains(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && func() bool {
-		for i := 0; i <= len(s)-len(sub); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
-		}
-		return false
-	}())
+	return strings.Contains(s, sub)
 }

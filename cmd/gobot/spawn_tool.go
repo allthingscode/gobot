@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	spawnToolName    = "spawn_subagent"
-	spawnMaxTimeout  = 5 * time.Minute
+	spawnToolName   = "spawn_subagent"
+	spawnMaxTimeout = 5 * time.Minute
 )
 
 // SpawnTool implements Tool and enables the main agent to delegate complex
@@ -26,31 +26,36 @@ const (
 //
 // Sub-agent session keys: "agent:<agent_type>:<parent_session_key>"
 type SpawnTool struct {
-	// runnerFactory creates a new Runner for the given system prompt.
+	// runnerFactory creates a new Runner for the given model and system prompt.
 	// Using a factory keeps SpawnTool testable without a live Gemini client.
-	runnerFactory func(systemPrompt string) agent.Runner
+	runnerFactory func(model, systemPrompt string) agent.Runner
 
-	// model is passed to NewSessionManager for traceability.
+	// model is the default model used when no specialist override is configured.
 	model string
 
 	// specialistPrompts maps agent_type -> system prompt override.
 	// Falls back to defaultSpecialistPrompt when absent.
 	specialistPrompts map[string]string
 
+	// specialistModels maps agent_type -> model override.
+	// Falls back to s.model when absent.
+	specialistModels map[string]string
+
 	// memStore is optional; if set, sub-agents get RAG context too.
 	memStore *memory.MemoryStore
 }
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from client/model.
-func newSpawnTool(client *genai.Client, model string, specialistPrompts map[string]string, memStore *memory.MemoryStore) *SpawnTool {
+func newSpawnTool(client *genai.Client, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore) *SpawnTool {
 	return &SpawnTool{
-		runnerFactory: func(systemPrompt string) agent.Runner {
-			r := newGeminiRunner(client, model, systemPrompt)
+		runnerFactory: func(m, systemPrompt string) agent.Runner {
+			r := newGeminiRunner(client, m, systemPrompt)
 			r.memStore = memStore
 			return r
 		},
 		model:             model,
 		specialistPrompts: specialistPrompts,
+		specialistModels:  specialistModels,
 		memStore:          memStore,
 	}
 }
@@ -70,7 +75,7 @@ func (s *SpawnTool) Declaration() *genai.FunctionDeclaration {
 				},
 				"objective": {
 					Type:        genai.TypeString,
-					Description: "The specific, self-contained task or question for the sub-agent to complete. Be explicit — the sub-agent has no conversation context.",
+					Description: "The specific, self-contained task or question for the sub-agent to complete. Be explicit -- the sub-agent has no conversation context.",
 				},
 			},
 			Required: []string{"agent_type", "objective"},
@@ -94,21 +99,30 @@ func (s *SpawnTool) Execute(ctx context.Context, parentSessionKey string, args m
 		systemPrompt = defaultSpecialistPrompt(agentType)
 	}
 
-	subRunner := s.runnerFactory(systemPrompt)
-	// Sub-agents are ephemeral — no checkpoint store.
-	subMgr := agent.NewSessionManager(subRunner, nil, s.model)
+	// Resolve model: specialist override -> default.
+	model := s.specialistModels[agentType]
+	if model == "" {
+		model = s.model
+	}
+
+	subRunner := s.runnerFactory(model, systemPrompt)
+	// Sub-agents are ephemeral -- no checkpoint store.
+	subMgr := agent.NewSessionManager(subRunner, nil, model)
 
 	subKey := fmt.Sprintf("agent:%s:%s", agentType, parentSessionKey)
+	start := time.Now()
+	slog.Info("spawn: starting sub-agent", "type", agentType, "model", model, "parent", parentSessionKey, "subKey", subKey)
 
 	subCtx, cancel := context.WithTimeout(ctx, spawnMaxTimeout)
 	defer cancel()
 
-	slog.Info("spawn: starting sub-agent", "type", agentType, "parent", parentSessionKey, "subKey", subKey)
 	reply, err := subMgr.Dispatch(subCtx, subKey, objective)
+	elapsed := time.Since(start)
 	if err != nil {
+		slog.Error("spawn: sub-agent failed", "subKey", subKey, "model", model, "elapsed", elapsed, "err", err)
 		return "", fmt.Errorf("spawn %s: %w", agentType, err)
 	}
-	slog.Info("spawn: sub-agent complete", "subKey", subKey, "replyLen", len(reply))
+	slog.Info("spawn: sub-agent complete", "subKey", subKey, "model", model, "elapsed", elapsed, "replyLen", len(reply))
 	return reply, nil
 }
 
@@ -116,9 +130,9 @@ func (s *SpawnTool) Execute(ctx context.Context, parentSessionKey string, args m
 func defaultSpecialistPrompt(agentType string) string {
 	switch agentType {
 	case "researcher":
-		return "You are a focused research specialist. Research the given topic thoroughly using available search tools and return a concise, factual, well-structured report. Do not ask clarifying questions — work with what you have and deliver your best findings."
+		return "You are a focused research specialist. Research the given topic thoroughly using available search tools and return a concise, factual, well-structured report. Do not ask clarifying questions -- work with what you have and deliver your best findings."
 	case "analyst":
-		return "You are a strategic analyst. Analyze the given data or situation and return actionable insights in a structured format. Be direct and evidence-based. Do not ask clarifying questions — deliver your analysis."
+		return "You are a strategic analyst. Analyze the given data or situation and return actionable insights in a structured format. Be direct and evidence-based. Do not ask clarifying questions -- deliver your analysis."
 	case "writer":
 		return "You are a professional writer and editor. Produce clear, well-structured content based on the given objective. Deliver the final written output directly without preamble."
 	default:
