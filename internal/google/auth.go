@@ -11,12 +11,20 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/secrets"
 )
 
 const (
 	tokenRefreshURL = "https://oauth2.googleapis.com/token"
 	authURL         = "https://accounts.google.com/o/oauth2/v2/auth"
 )
+
+// tokenStore returns a SecretsStore whose storage root is derived from secretsRoot.
+// secretsRoot is always {storageRoot}/secrets, so storageRoot = filepath.Dir(secretsRoot).
+func tokenStore(secretsRoot string) *secrets.SecretsStore {
+	return secrets.NewSecretsStore(filepath.Dir(secretsRoot))
+}
 
 // clientSecrets mirrors the format of client_secrets.json.
 type clientSecrets struct {
@@ -43,14 +51,24 @@ type storedToken struct {
 // AuthorizeInteractive starts a local server to handle the OAuth2 callback,
 // prints the auth URL, and returns the exchanged token.
 func AuthorizeInteractive(secretsRoot string, scopes []string) error {
-	secretsPath := filepath.Join(secretsRoot, "client_secrets.json")
-	data, err := os.ReadFile(secretsPath)
-	if err != nil {
-		return fmt.Errorf("client_secrets.json missing: %w", err)
-	}
-	var secrets clientSecrets
-	if err := json.Unmarshal(data, &secrets); err != nil {
-		return fmt.Errorf("invalid client_secrets.json: %w", err)
+	// Try reading client credentials from DPAPI first.
+	store := tokenStore(secretsRoot)
+	clientID, _ := store.Get("google_client_id")
+	clientSecret, _ := store.Get("google_client_secret")
+
+	if clientID == "" || clientSecret == "" {
+		// Fall back to client_secrets.json
+		secretsPath := filepath.Join(secretsRoot, "client_secrets.json")
+		data, err := os.ReadFile(secretsPath)
+		if err != nil {
+			return fmt.Errorf("client_secrets.json missing (and DPAPI keys not set): %w", err)
+		}
+		var cs clientSecrets
+		if err := json.Unmarshal(data, &cs); err != nil {
+			return fmt.Errorf("invalid client_secrets.json: %w", err)
+		}
+		clientID = cs.Installed.ClientID
+		clientSecret = cs.Installed.ClientSecret
 	}
 
 	// Use a fixed port 8080 to match most client secrets
@@ -58,7 +76,7 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	redirectURI := fmt.Sprintf("http://localhost:%d", port)
 
 	v := url.Values{}
-	v.Set("client_id", secrets.Installed.ClientID)
+	v.Set("client_id", clientID)
 	v.Set("redirect_uri", redirectURI)
 	v.Set("response_type", "code")
 	v.Set("scope", strings.Join(scopes, " "))
@@ -109,9 +127,16 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	}
 
 	// Exchange code for token
-	token, err := exchangeCode(code, secrets.Installed.ClientID, secrets.Installed.ClientSecret, redirectURI)
+	token, err := exchangeCode(code, clientID, clientSecret, redirectURI)
 	if err != nil {
 		return fmt.Errorf("token exchange: %w", err)
+	}
+
+	// Save token to DPAPI for secure storage.
+	if tokenJSON, marshalErr := json.MarshalIndent(token, "", "  "); marshalErr == nil {
+		if saveErr := store.Set("google_oauth_token", string(tokenJSON)); saveErr == nil {
+			fmt.Println("Saved OAuth token to DPAPI secure storage.")
+		}
 	}
 
 	// Save to both google_token.json and gmail/token.json for compatibility
@@ -194,6 +219,27 @@ func BearerToken(secretsRoot string) (string, error) {
 
 // bearerTokenWithClient is the testable inner implementation.
 func bearerTokenWithClient(secretsRoot string, client *http.Client) (string, error) {
+	// Try DPAPI first; fall back to google_token.json if key is absent or DPAPI unavailable.
+	store := tokenStore(secretsRoot)
+	if tokenJSON, err := store.Get("google_oauth_token"); err == nil && tokenJSON != "" {
+		var tok storedToken
+		if jsonErr := json.Unmarshal([]byte(tokenJSON), &tok); jsonErr == nil {
+			if tok.expired() {
+				if tok.RefreshToken == "" {
+					return "", fmt.Errorf("google token expired and no refresh_token present")
+				}
+				if refreshErr := refreshToken(&tok, client); refreshErr != nil {
+					return "", fmt.Errorf("google token refresh: %w", refreshErr)
+				}
+				// Persist refreshed token back to DPAPI.
+				if updated, marshalErr := json.Marshal(tok); marshalErr == nil {
+					_ = store.Set("google_oauth_token", string(updated))
+				}
+			}
+			return tok.Token, nil
+		}
+	}
+
 	tokenPath := GoogleTokenPath(secretsRoot)
 	data, err := os.ReadFile(tokenPath)
 	if err != nil {

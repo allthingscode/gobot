@@ -7,6 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/allthingscode/gobot/internal/secrets"
 )
 
 // bomPrefix is the UTF-8 byte order mark written by some Windows editors.
@@ -52,11 +55,21 @@ type TelegramConfig struct {
 }
 
 type StrategicConfig struct {
-	UserEmail    string `json:"user_email"`
-	StorageRoot  string `json:"storage_root"`
-	Mandate      string `json:"mandate"`
-	UseGoBridge  bool   `json:"use_go_bridge"`
-	GoBridgePort int    `json:"go_bridge_port"`
+	UserEmail    string            `json:"user_email"`
+	StorageRoot  string            `json:"storage_root"`
+	Mandate      string            `json:"mandate"`
+	UseGoBridge  bool              `json:"use_go_bridge"`
+	GoBridgePort int               `json:"go_bridge_port"`
+	MCPServers   []MCPServerConfig `json:"mcp_servers"`
+}
+
+// MCPServerConfig describes an MCP server and its environment variables.
+// Env values that are empty strings are filled from DPAPI at runtime.
+type MCPServerConfig struct {
+	Name    string            `json:"name"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
 }
 
 // StorageRoot returns the configured storage root, defaulting to D:\Gobot_Storage.
@@ -89,21 +102,64 @@ func (c *Config) WorkspacePath(subpath ...string) string {
 
 // GeminiAPIKey returns the Gemini API key. Priority order:
 // 1. config.json field
-// 2. GEMINI_API_KEY environment variable (for CI / DPAPI-free environments)
+// 2. DPAPI secrets store (gemini_api_key)
+// 3. GEMINI_API_KEY environment variable (for CI / DPAPI-free environments)
 func (c *Config) GeminiAPIKey() string {
 	if c.Providers.Gemini.APIKey != "" {
 		return c.Providers.Gemini.APIKey
+	}
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	if val, _ := store.Get("gemini_api_key"); val != "" {
+		return val
 	}
 	return os.Getenv("GEMINI_API_KEY")
 }
 
 // TelegramToken returns the Telegram bot token from config,
-// falling back to the TELEGRAM_BOT_TOKEN environment variable.
+// falling back to the DPAPI secrets store or TELEGRAM_BOT_TOKEN environment variable.
 func (c *Config) TelegramToken() string {
 	if t := c.Channels.Telegram.Token; t != "" {
 		return t
 	}
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	if val, _ := store.Get("telegram_token"); val != "" {
+		return val
+	}
 	return os.Getenv("TELEGRAM_BOT_TOKEN")
+}
+
+// MCPEnvFor returns the resolved environment variables for the named MCP server.
+// For each env var, if the config value is empty, it is fetched from DPAPI under
+// the key "mcp_env_{serverName}_{varName}" (both lowercased).
+// Config values always take precedence over DPAPI values.
+// Returns an empty map if the server is not found or has no env vars.
+func (c *Config) MCPEnvFor(serverName string) map[string]string {
+	return c.mcpEnvFor(serverName, secrets.NewSecretsStore(c.StorageRoot()))
+}
+
+// mcpEnvFor is the testable inner implementation of MCPEnvFor.
+func (c *Config) mcpEnvFor(serverName string, store *secrets.SecretsStore) map[string]string {
+	env := make(map[string]string)
+	for _, srv := range c.Strategic.MCPServers {
+		if srv.Name != serverName {
+			continue
+		}
+		for varName, val := range srv.Env {
+			if val != "" {
+				env[varName] = val
+				continue
+			}
+			// Value is empty — try DPAPI fallback.
+			key := fmt.Sprintf("mcp_env_%s_%s",
+				strings.ToLower(serverName),
+				strings.ToLower(varName))
+			if v, _ := store.Get(key); v != "" {
+				env[varName] = v
+			}
+		}
+		return env
+	}
+	return env
 }
 
 // DefaultConfigPath returns ~/.gobot/config.json.

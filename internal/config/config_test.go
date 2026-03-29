@@ -169,7 +169,8 @@ func TestGeminiAPIKey(t *testing.T) {
 }
 
 func TestGeminiAPIKey_Empty(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: t.TempDir()}}
+	t.Setenv("GEMINI_API_KEY", "")
 	if cfg.GeminiAPIKey() != "" {
 		t.Errorf("expected empty key, got %q", cfg.GeminiAPIKey())
 	}
@@ -251,7 +252,7 @@ func TestTelegramToken_FromConfig(t *testing.T) {
 }
 
 func TestTelegramToken_EnvFallback(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: t.TempDir()}}
 	t.Setenv("TELEGRAM_BOT_TOKEN", "env-token")
 	if cfg.TelegramToken() != "env-token" {
 		t.Errorf("got %q, want env-token", cfg.TelegramToken())
@@ -259,10 +260,100 @@ func TestTelegramToken_EnvFallback(t *testing.T) {
 }
 
 func TestTelegramToken_Empty(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: t.TempDir()}}
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	if cfg.TelegramToken() != "" {
 		t.Errorf("got %q, want empty", cfg.TelegramToken())
+	}
+}
+
+func TestMCPEnvFor_StaticValues(t *testing.T) {
+	cfg := &Config{
+		Strategic: StrategicConfig{
+			MCPServers: []MCPServerConfig{
+				{
+					Name:    "google-ai-search",
+					Command: "node",
+					Args:    []string{"server.js"},
+					Env:     map[string]string{"GOOGLE_AI_API_KEY": "static-key-123"},
+				},
+			},
+		},
+	}
+	env := cfg.MCPEnvFor("google-ai-search")
+	if env["GOOGLE_AI_API_KEY"] != "static-key-123" {
+		t.Errorf("got %q, want %q", env["GOOGLE_AI_API_KEY"], "static-key-123")
+	}
+}
+
+func TestMCPEnvFor_UnknownServer(t *testing.T) {
+	cfg := &Config{}
+	env := cfg.MCPEnvFor("nonexistent-server")
+	if len(env) != 0 {
+		t.Errorf("expected empty map, got %v", env)
+	}
+}
+
+func TestMCPEnvFor_NoServers(t *testing.T) {
+	cfg := &Config{Strategic: StrategicConfig{}}
+	env := cfg.MCPEnvFor("any-server")
+	if len(env) != 0 {
+		t.Errorf("expected empty map, got %v", env)
+	}
+}
+
+func TestMCPEnvFor_EmptyValue_NoFallback(t *testing.T) {
+	// When env value is empty and DPAPI has no matching key, the var is omitted.
+	cfg := &Config{
+		Strategic: StrategicConfig{
+			StorageRoot: t.TempDir(),
+			MCPServers: []MCPServerConfig{
+				{
+					Name: "my-server",
+					Env:  map[string]string{"SECRET_KEY": ""},
+				},
+			},
+		},
+	}
+	env := cfg.MCPEnvFor("my-server")
+	if _, ok := env["SECRET_KEY"]; ok {
+		t.Errorf("expected SECRET_KEY to be absent (no DPAPI value), got %q", env["SECRET_KEY"])
+	}
+}
+
+func TestMCPDecode_MCPServers(t *testing.T) {
+	input := `{
+        "strategic_edition": {
+            "storage_root": "D:\\Gobot_Storage",
+            "mcp_servers": [
+                {
+                    "name": "search-srv",
+                    "command": "npx",
+                    "args": ["-y", "search-server"],
+                    "env": {"API_KEY": "abc123", "DEBUG": ""}
+                }
+            ]
+        }
+    }`
+	cfg, err := decode(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("unexpected decode error: %v", err)
+	}
+	if len(cfg.Strategic.MCPServers) != 1 {
+		t.Fatalf("expected 1 MCP server, got %d", len(cfg.Strategic.MCPServers))
+	}
+	srv := cfg.Strategic.MCPServers[0]
+	if srv.Name != "search-srv" {
+		t.Errorf("name: got %q, want %q", srv.Name, "search-srv")
+	}
+	if srv.Command != "npx" {
+		t.Errorf("command: got %q, want %q", srv.Command, "npx")
+	}
+	if len(srv.Args) != 2 {
+		t.Errorf("args: got %v, want 2 elements", srv.Args)
+	}
+	if srv.Env["API_KEY"] != "abc123" {
+		t.Errorf("env[API_KEY]: got %q, want %q", srv.Env["API_KEY"], "abc123")
 	}
 }
 
