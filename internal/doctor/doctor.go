@@ -30,9 +30,10 @@ type result struct {
 	critical bool // if true, failure halts startup
 }
 
-// tokenExpiry is a minimal struct for reading the expiry field from OAuth2 token files.
+// tokenExpiry is a minimal struct for reading the expiry field and refresh_token from OAuth2 token files.
 type tokenExpiry struct {
-	Expiry time.Time `json:"expiry"`
+	Expiry       time.Time `json:"expiry"`
+	RefreshToken string    `json:"refresh_token"`
 }
 
 // Run performs all health checks and prints a report. Returns non-nil if any check fails.
@@ -196,26 +197,43 @@ func checkTokenFile(name, path string) result {
 	if err := json.Unmarshal(data, &tok); err != nil {
 		return result{name: name, ok: false, detail: fmt.Sprintf("invalid JSON: %v", err)}
 	}
+
+	hasRefresh := tok.RefreshToken != ""
+
 	if tok.Expiry.IsZero() {
-		return result{name: name, ok: true, detail: "present (no expiry field)"}
+		detail := "present (no expiry field)"
+		if hasRefresh {
+			detail += " — will refresh"
+		}
+		return result{name: name, ok: true, detail: detail}
 	}
 
 	if time.Now().After(tok.Expiry) {
+		if hasRefresh {
+			return result{name: name, ok: true, detail: "access token timed out — will refresh automatically"}
+		}
 		diff := time.Since(tok.Expiry)
 		if diff < 24*time.Hour {
-			return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d hour(s) ago", int(diff.Hours()))}
+			return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d hour(s) ago (no refresh token)", int(diff.Hours()))}
 		}
-		return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d day(s) ago", int(diff.Hours()/24))}
+		return result{name: name, ok: false, detail: fmt.Sprintf("EXPIRED %d day(s) ago (no refresh token)", int(diff.Hours()/24))}
 	}
 
 	remaining := time.Until(tok.Expiry)
+	detail := ""
 	if remaining < 1*time.Hour {
-		return result{name: name, ok: true, detail: fmt.Sprintf("expires in %d minute(s) — REFRESH SOON", int(remaining.Minutes()))}
+		detail = fmt.Sprintf("expires in %d minute(s)", int(remaining.Minutes()))
+	} else if remaining < 24*time.Hour {
+		detail = fmt.Sprintf("expires in %d hour(s)", int(remaining.Hours()))
+	} else {
+		detail = fmt.Sprintf("valid, expires in %d day(s)", int(remaining.Hours()/24))
 	}
-	if remaining < 24*time.Hour {
-		return result{name: name, ok: true, detail: fmt.Sprintf("expires in %d hour(s)", int(remaining.Hours()))}
+
+	if hasRefresh {
+		detail += " — will refresh automatically"
 	}
-	return result{name: name, ok: true, detail: fmt.Sprintf("valid, expires in %d day(s)", int(remaining.Hours()/24))}
+
+	return result{name: name, ok: true, detail: detail}
 }
 
 // checkJobsDir verifies the cron jobs directory exists and has .md job files.

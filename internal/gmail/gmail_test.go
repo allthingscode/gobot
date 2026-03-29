@@ -211,13 +211,63 @@ func TestSend_HTMLWrapped(t *testing.T) {
 		t.Fatalf("base64 decode: %v", err)
 	}
 	mimeStr := string(decoded)
-	if !strings.Contains(mimeStr, "Content-Type: text/html") {
-		t.Errorf("expected HTML content-type in MIME, got: %s", mimeStr)
+	// Top-level must be multipart/alternative.
+	if !strings.Contains(mimeStr, "multipart/alternative") {
+		t.Errorf("expected multipart/alternative content-type, got: %s", truncate(mimeStr, 300))
 	}
+	// Must include the HTML part.
+	if !strings.Contains(mimeStr, "Content-Type: text/html") {
+		t.Errorf("expected text/html part in multipart, got: %s", truncate(mimeStr, 300))
+	}
+	// Must include the CSS wrapper.
 	if !strings.Contains(mimeStr, "container") {
 		t.Errorf("expected CSS wrapper (container class) in body, got: %s", truncate(mimeStr, 300))
 	}
+	// Must include the plain-text part.
+	if !strings.Contains(mimeStr, "Content-Type: text/plain") {
+		t.Errorf("expected text/plain fallback part, got: %s", truncate(mimeStr, 300))
+	}
+	// Must include the boundary.
+	if !strings.Contains(mimeStr, multipartBoundary) {
+		t.Errorf("expected MIME boundary %q in message, got: %s", multipartBoundary, truncate(mimeStr, 300))
+	}
 }
+
+func TestSend_Multipart_HasPlainPart(t *testing.T) {
+	var capturedPayload map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&capturedPayload)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"id": "msg-003"})
+	}))
+	defer srv.Close()
+
+	s := &gmailSender{
+		accessToken: "test-token",
+		endpoint:    srv.URL,
+		httpClient:  http.DefaultClient,
+	}
+
+	if err := s.Send("user@example.com", "Report", "<h2>Summary</h2><p>All systems nominal.</p>"); err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+
+	raw := capturedPayload["raw"]
+	decoded, err := base64.URLEncoding.DecodeString(raw)
+	if err != nil {
+		t.Fatalf("base64 decode: %v", err)
+	}
+	mimeStr := string(decoded)
+
+	// Plain text part must contain the text stripped of HTML tags.
+	if !strings.Contains(mimeStr, "Summary") {
+		t.Errorf("plain-text part should contain stripped heading text, got: %s", truncate(mimeStr, 500))
+	}
+	if !strings.Contains(mimeStr, "All systems nominal.") {
+		t.Errorf("plain-text part should contain paragraph text, got: %s", truncate(mimeStr, 500))
+	}
+}
+
 
 func TestSend_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

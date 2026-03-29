@@ -40,7 +40,7 @@ func (s *SendEmailTool) Declaration() *genai.FunctionDeclaration {
 				},
 				"body": {
 					Type:        genai.TypeString,
-					Description: "Email body as plain text.",
+					Description: "Email body. Use HTML for best results: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists. Plain text is also accepted.",
 				},
 			},
 			Required: []string{"subject", "body"},

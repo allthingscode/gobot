@@ -139,9 +139,11 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 	return nil
 }
 
+const multipartBoundary = "gobot_alt_20260328"
+
 // Send delivers an email via the Gmail API.
-// body may be plain text or HTML; HTML bodies are detected and CSS-wrapped via reporter.WrapHTML.
-// Returns an error on delivery failure; callers should fall back to reporter.FallbackNotify.
+// HTML bodies (detected by reporter.WrapHTML) are sent as multipart/alternative
+// with a text/plain fallback; plain-text bodies are sent as text/plain.
 func (s *gmailSender) Send(to, subject, body string) error {
 	wrapped := reporter.WrapHTML(body)
 	isHTML := wrapped != body
@@ -149,14 +151,34 @@ func (s *gmailSender) Send(to, subject, body string) error {
 	var sb strings.Builder
 	sb.WriteString("To: " + to + "\r\n")
 	sb.WriteString("Subject: " + mime.QEncoding.Encode("UTF-8", subject) + "\r\n")
+	sb.WriteString("MIME-Version: 1.0\r\n")
+
 	if isHTML {
-		sb.WriteString("MIME-Version: 1.0\r\n")
+		plainText := reporter.StripHTML(wrapped)
+		sb.WriteString("Content-Type: multipart/alternative; boundary=\"" + multipartBoundary + "\"\r\n")
+		sb.WriteString("\r\n")
+
+		// Part 1: plain text
+		sb.WriteString("--" + multipartBoundary + "\r\n")
+		sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+		sb.WriteString("\r\n")
+		sb.WriteString(plainText)
+		sb.WriteString("\r\n\r\n")
+
+		// Part 2: HTML
+		sb.WriteString("--" + multipartBoundary + "\r\n")
 		sb.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+		sb.WriteString("\r\n")
+		sb.WriteString(wrapped)
+		sb.WriteString("\r\n\r\n")
+
+		// Closing boundary
+		sb.WriteString("--" + multipartBoundary + "--\r\n")
 	} else {
 		sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+		sb.WriteString("\r\n")
+		sb.WriteString(body)
 	}
-	sb.WriteString("\r\n")
-	sb.WriteString(wrapped)
 
 	raw := base64.URLEncoding.EncodeToString([]byte(sb.String()))
 	payload, err := json.Marshal(map[string]string{"raw": raw})
@@ -183,3 +205,4 @@ func (s *gmailSender) Send(to, subject, body string) error {
 	}
 	return nil
 }
+

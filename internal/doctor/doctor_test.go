@@ -18,14 +18,15 @@ func cfgWithRoot(root string) *config.Config {
 	}
 }
 
-// writeTokenJSON writes a minimal token file with the given expiry to dir/filename.
-func writeTokenJSON(t *testing.T, dir, filename string, expiry time.Time) string {
+// writeTokenJSON writes a minimal token file with the given expiry and optional refresh token to dir/filename.
+func writeTokenJSON(t *testing.T, dir, filename string, expiry time.Time, refreshToken string) string {
 	t.Helper()
 	type tok struct {
-		Token  string    `json:"token"`
-		Expiry time.Time `json:"expiry,omitempty"`
+		Token        string    `json:"token"`
+		Expiry       time.Time `json:"expiry,omitempty"`
+		RefreshToken string    `json:"refresh_token,omitempty"`
 	}
-	data, err := json.Marshal(tok{Token: "access_token", Expiry: expiry})
+	data, err := json.Marshal(tok{Token: "access_token", Expiry: expiry, RefreshToken: refreshToken})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func TestCheckTokenFile_NoExpiry(t *testing.T) {
 
 func TestCheckTokenFile_Valid(t *testing.T) {
 	dir := t.TempDir()
-	writeTokenJSON(t, dir, "tok.json", time.Now().Add(30*24*time.Hour))
+	writeTokenJSON(t, dir, "tok.json", time.Now().Add(30*24*time.Hour), "")
 
 	r := checkTokenFile("test token", filepath.Join(dir, "tok.json"))
 	if !r.ok {
@@ -270,13 +271,23 @@ func TestCheckTokenFile_Valid(t *testing.T) {
 	}
 }
 
-func TestCheckTokenFile_Expired(t *testing.T) {
+func TestCheckTokenFile_ExpiredNoRefresh(t *testing.T) {
 	dir := t.TempDir()
-	writeTokenJSON(t, dir, "tok.json", time.Now().Add(-48*time.Hour))
+	writeTokenJSON(t, dir, "tok.json", time.Now().Add(-48*time.Hour), "")
 
 	r := checkTokenFile("test token", filepath.Join(dir, "tok.json"))
 	if r.ok {
-		t.Error("expected ok=false for expired token")
+		t.Error("expected ok=false for expired token with no refresh token")
+	}
+}
+
+func TestCheckTokenFile_ExpiredWithRefresh(t *testing.T) {
+	dir := t.TempDir()
+	writeTokenJSON(t, dir, "tok.json", time.Now().Add(-48*time.Hour), "some_refresh_token")
+
+	r := checkTokenFile("test token", filepath.Join(dir, "tok.json"))
+	if !r.ok {
+		t.Errorf("expected ok=true for expired token with refresh token, got: %s", r.detail)
 	}
 }
 
@@ -322,11 +333,11 @@ func TestRun_AllChecksPass(t *testing.T) {
 	// Setup required subdirs for doctor
 	os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755)
 	os.MkdirAll(filepath.Join(root, "logs"), 0o755)
-	os.MkdirAll(filepath.Join(root, "secrets"), 0o755)
+	os.MkdirAll(filepath.Join(root, "secrets", "gmail"), 0o755)
 
 	// Mock valid token files
-	writeTokenJSON(t, filepath.Join(root, "secrets"), "google_token.json", time.Now().Add(1*time.Hour))
-	writeTokenJSON(t, filepath.Join(root, "secrets"), "token.json", time.Now().Add(1*time.Hour))
+	writeTokenJSON(t, filepath.Join(root, "secrets"), "google_token.json", time.Now().Add(1*time.Hour), "")
+	writeTokenJSON(t, filepath.Join(root, "secrets", "gmail"), "token.json", time.Now().Add(1*time.Hour), "")
 
 	t.Setenv("GOOGLE_API_KEY", "test-key-for-run-1234")
 

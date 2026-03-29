@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -75,4 +76,23 @@ func WrapHTML(body string) string {
 	}
 
 	return style + body
+}
+
+// htmlTagRe matches any HTML tag for stripping purposes.
+var htmlTagRe = regexp.MustCompile(`<[^>]+>`)
+
+// StripHTML removes HTML tags from s to produce a plain-text fallback.
+// Block-level closing tags are replaced with newlines for readability.
+// Used to generate the text/plain part of multipart emails.
+func StripHTML(html string) string {
+	s := html
+	for _, tag := range []string{"</p>", "</div>", "</h1>", "</h2>", "</h3>", "<br>", "<br/>", "<br />"} {
+		s = strings.ReplaceAll(s, tag, "\n")
+	}
+	s = htmlTagRe.ReplaceAllString(s, "")
+	// Collapse runs of blank lines down to one.
+	for strings.Contains(s, "\n\n\n") {
+		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+	}
+	return strings.TrimSpace(s)
 }

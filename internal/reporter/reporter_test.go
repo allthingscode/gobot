@@ -208,3 +208,45 @@ func TestWrapHTML(t *testing.T) {
 		})
 	}
 }
+
+func TestStripHTML(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "plain text unchanged",
+			input: "Hello world",
+			want:  "Hello world",
+		},
+		{
+			name:  "strips tags",
+			input: "<h1>Title</h1><p>Body text</p>",
+			want:  "Title\nBody text",
+		},
+		{
+			name:  "br becomes newline",
+			input: "Line one<br>Line two",
+			want:  "Line one\nLine two",
+		},
+		{
+			name:  "collapses excess blank lines",
+			input: "<p>First</p>\n\n\n<p>Second</p>",
+			want:  "First\n\nSecond",
+		},
+		{
+			name:  "trims leading/trailing whitespace",
+			input: "  <p>Hello</p>  ",
+			want:  "Hello",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := StripHTML(tc.input)
+			if got != tc.want {
+				t.Errorf("StripHTML(%q)\n got: %q\nwant: %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
