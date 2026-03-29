@@ -29,7 +29,11 @@ import (
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
 )
 
-const version = "0.1.0"
+var (
+	version    = "dev"     // overridden at build time via -ldflags
+	commitHash = "unknown" // overridden at build time via -ldflags
+	buildTime  = "unknown" // overridden at build time via -ldflags
+)
 
 func main() {
 	root := &cobra.Command{
@@ -64,10 +68,12 @@ func main() {
 func cmdVersion() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print gobot version and Go runtime info",
+		Short: "Print gobot version and build info",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("gobot %s\n", version)
-			fmt.Printf("go runtime: %s\n", goVersion())
+			fmt.Printf("gobot version %s\n", version)
+			fmt.Printf("  commit: %s\n", commitHash)
+			fmt.Printf("  built:  %s\n", buildTime)
+			fmt.Printf("  go:     %s\n", goVersion())
 		},
 	}
 }
