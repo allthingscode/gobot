@@ -3,6 +3,7 @@
 package gmail
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/reporter"
+	"github.com/allthingscode/gobot/internal/resilience"
 )
 
 // ErrNeedsReauth is returned when the OAuth2 token is expired and cannot be refreshed
@@ -186,23 +188,25 @@ func (s *gmailSender) Send(to, subject, body string) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, s.endpoint, strings.NewReader(string(payload)))
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+s.accessToken)
-	req.Header.Set("Content-Type", "application/json")
+	return resilience.Do(context.Background(), resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
+		req, err := http.NewRequest(http.MethodPost, s.endpoint, strings.NewReader(string(payload)))
+		if err != nil {
+			return fmt.Errorf("build request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+s.accessToken)
+		req.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("gmail request: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("gmail request: %w", err)
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("gmail API %d: %s", resp.StatusCode, string(respBody))
-	}
-	return nil
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			return &resilience.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(respBody)}
+		}
+		return nil
+	})
 }
 
