@@ -25,3 +25,4 @@ config.local.json
 
 # Gemini CLI task handoff file (overwritten each task, not source)
 _current_task.md
+.aider*

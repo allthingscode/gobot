@@ -34,11 +34,11 @@ func TestRedactString(t *testing.T) {
 	}{
 		{"clean string", "hello world", "hello world"},
 		{"empty", "", ""},
-		{"gemini key", "key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456", "key=[REDACTED]"},
-		{"oauth token", "token=ya29.abcdefghijklmnopqrstuvwxyz", "token=[REDACTED]"},
-		{"slack token", "tok=xoxb-123456789-abcdefghij", "tok=[REDACTED]"},
+		{"gemini key", "key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456", "key=[REDACTED]"}, // FAKE KEY FOR TESTING
+		{"oauth token", "token=ya29.abcdefghijklmnopqrstuvwxyz", "token=[REDACTED]"}, // FAKE KEY FOR TESTING
+		{"slack token", "tok=xoxb-123456789-abcdefghij", "tok=[REDACTED]"}, // FAKE KEY FOR TESTING
 		{"no trigger prefix", "some random log message", "some random log message"},
-		{"mixed content", "key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456 user=alice", "key=[REDACTED] user=alice"},
+		{"mixed content", "key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456 user=alice", "key=[REDACTED] user=alice"}, // FAKE KEY FOR TESTING
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,7 +54,7 @@ func TestRedactingHandler_RedactsMessage(t *testing.T) {
 	cap := &captureHandler{}
 	h := NewRedactingHandler(cap)
 	logger := slog.New(h)
-	logger.Info("secret=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456")
+	logger.Info("secret=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456") // FAKE KEY FOR TESTING
 	if strings.Contains(cap.buf.String(), "AIzaSy") {
 		t.Errorf("log output contains unredacted key: %s", cap.buf.String())
 	}
@@ -67,7 +67,7 @@ func TestRedactingHandler_RedactsAttrValue(t *testing.T) {
 	cap := &captureHandler{}
 	h := NewRedactingHandler(cap)
 	logger := slog.New(h)
-	logger.Info("connecting", "token", "ya29.supersecrettoken123456")
+	logger.Info("connecting", "token", "ya29.supersecrettoken123456") // FAKE KEY FOR TESTING
 	if strings.Contains(cap.buf.String(), "ya29.") {
 		t.Errorf("log output contains unredacted OAuth token: %s", cap.buf.String())
 	}
@@ -88,7 +88,7 @@ func TestRedactingHandler_PIIDebugMode(t *testing.T) {
 	cap := &captureHandler{}
 	h := NewRedactingHandler(cap)
 	logger := slog.New(h)
-	logger.Info("key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456")
+	logger.Info("key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456") // FAKE KEY FOR TESTING
 	// Redaction disabled — original value must be present.
 	if !strings.Contains(cap.buf.String(), "AIzaSy") {
 		t.Errorf("PII_DEBUG_MODE: expected unredacted output, got: %s", cap.buf.String())

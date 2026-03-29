@@ -220,14 +220,18 @@ func (r *geminiRunner) buildConfig(messages []agentctx.StrategicMessage) *genai.
 		}
 	}
 
-	// Build tool list: Google Search grounding + registered function tools.
-	tools := []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}
+	// Build tool list. We cannot mix GoogleSearch with FunctionDeclarations
+	// without 'include_server_side_tool_invocations' config (which the SDK lacks).
+	var tools []*genai.Tool
 	if len(r.tools) > 0 {
 		decls := make([]*genai.FunctionDeclaration, len(r.tools))
 		for i, t := range r.tools {
 			decls[i] = t.Declaration()
 		}
 		tools = append(tools, &genai.Tool{FunctionDeclarations: decls})
+	} else {
+		// Only use Grounding if no custom tools are present.
+		tools = append(tools, &genai.Tool{GoogleSearch: &genai.GoogleSearch{}})
 	}
 
 	// Run PrePrompt hooks (F-012) â€” allow features to inject into system prompt.
