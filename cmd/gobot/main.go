@@ -285,6 +285,18 @@ func cmdRun() *cobra.Command {
 				}
 			}()
 
+			// Start health heartbeat in background (F-023).
+			{
+				var alertChatID int64
+				if len(cfg.Channels.Telegram.AllowFrom) > 0 {
+					alertChatID, _ = strconv.ParseInt(cfg.Channels.Telegram.AllowFrom[0], 10, 64)
+				}
+				gmailSecretsPath := filepath.Join(cfg.SecretsRoot(), "gmail")
+				hb := newHeartbeatRunner(liveProbes(), api, alertChatID, cfg.StorageRoot(), cfg.GeminiAPIKey(), token, gmailSecretsPath)
+				go hb.Run(ctx)
+				slog.Info("gobot: heartbeat started", "interval", "15m")
+			}
+
 			slog.Info("gobot starting", "model", model)
 			return b.Run(ctx)
 		},

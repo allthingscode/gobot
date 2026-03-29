@@ -21,6 +21,9 @@ type Probes struct {
 	ProbeTelegram func(token string) (username string, err error)
 	// ProbeGemini validates the Gemini API key with a minimal live call.
 	ProbeGemini func(apiKey string) error
+	// ProbeGmail validates Gmail OAuth2 credentials can produce an access token.
+	// gmailSecretsPath is the directory containing token.json (e.g. secrets/gmail).
+	ProbeGmail func(gmailSecretsPath string) error
 }
 
 type result struct {

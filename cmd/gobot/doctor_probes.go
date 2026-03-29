@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"time"
 
 	"github.com/mymmrac/telego"
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/doctor"
+	"github.com/allthingscode/gobot/internal/gmail"
 )
 
 // liveProbes returns doctor.Probes backed by real Telegram and Gemini API calls.
@@ -39,6 +41,13 @@ func liveProbes() *doctor.Probes {
 				[]*genai.Content{{Parts: []*genai.Part{{Text: "ping"}}}},
 				nil,
 			)
+			return err
+		},
+		ProbeGmail: func(gmailSecretsPath string) error {
+			// gmailSecretsPath is the directory containing token.json.
+			// gmail.NewService expects the directory path directly.
+			tokenDir := filepath.Dir(filepath.Join(gmailSecretsPath, "token.json"))
+			_, err := gmail.NewService(tokenDir)
 			return err
 		},
 	}
