@@ -87,9 +87,14 @@ func (c *Config) WorkspacePath(subpath ...string) string {
 	return filepath.Join(parts...)
 }
 
-// GeminiAPIKey returns the Gemini API key from config.
+// GeminiAPIKey returns the Gemini API key. Priority order:
+// 1. config.json field
+// 2. GEMINI_API_KEY environment variable (for CI / DPAPI-free environments)
 func (c *Config) GeminiAPIKey() string {
-	return c.Providers.Gemini.APIKey
+	if c.Providers.Gemini.APIKey != "" {
+		return c.Providers.Gemini.APIKey
+	}
+	return os.Getenv("GEMINI_API_KEY")
 }
 
 // TelegramToken returns the Telegram bot token from config,
