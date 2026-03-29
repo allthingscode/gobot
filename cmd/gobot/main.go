@@ -221,6 +221,7 @@ func cmdRun() *cobra.Command {
 			tools := []Tool{
 				newSpawnTool(genaiClient, model, nil, specialistModels, memStore),
 			}
+			tools = append(tools, newShellExecTool(cfg.WorkspacePath()))
 			if memStore != nil {
 				tools = append(tools, newSearchMemoryTool(memStore))
 			}
