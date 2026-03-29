@@ -81,16 +81,15 @@ func cmdInit() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			root := cfg.StorageRoot()
 			dirs := []string{
-				filepath.Join(root, "workspace"),
-				filepath.Join(root, "workspace", "jobs"),
-				filepath.Join(root, "workspace", "journal"),
-				filepath.Join(root, "workspace", "sessions"),
-				filepath.Join(root, "workspace", "projects"),
-				filepath.Join(root, "workspace", "reports"),
-				filepath.Join(root, "logs"),
-				filepath.Join(root, "secrets"),
+				cfg.WorkspacePath(),
+				cfg.WorkspacePath("jobs"),
+				cfg.WorkspacePath("journal"),
+				cfg.WorkspacePath("sessions"),
+				cfg.WorkspacePath("projects"),
+				cfg.WorkspacePath("reports"),
+				cfg.LogsRoot(),
+				cfg.SecretsRoot(),
 			}
 			for _, d := range dirs {
 				if err := os.MkdirAll(d, 0o755); err != nil {
@@ -98,7 +97,7 @@ func cmdInit() *cobra.Command {
 				}
 				fmt.Printf("  ok  %s\n", d)
 			}
-			fmt.Printf("init complete. storage root: %s\n", root)
+			fmt.Printf("init complete. storage root: %s\n", cfg.StorageRoot())
 			return nil
 		},
 	}
@@ -156,7 +155,7 @@ func cmdRun() *cobra.Command {
 			// Setup logging to timestamped file and stderr
 			now := time.Now().Format("20060102_150405")
 			logName := fmt.Sprintf("gobot_%s.log", now)
-			logPath := filepath.Join(cfg.StorageRoot(), "logs", logName)
+			logPath := cfg.LogPath(logName)
 			logFile, logErr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			var baseHandler slog.Handler
 			if logErr == nil {
@@ -187,8 +186,8 @@ func cmdRun() *cobra.Command {
 			}
 			model := cfg.DefaultModel()
 
-			ensureAwarenessFile(cfg.StorageRoot())
-			systemPrompt := loadSystemPrompt(cfg.StorageRoot())
+			ensureAwarenessFile(cfg)
+			systemPrompt := loadSystemPrompt(cfg)
 			if systemPrompt != "" {
 				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 			}
@@ -424,7 +423,7 @@ func cmdSimulate() *cobra.Command {
 			}
 			model := cfg.DefaultModel()
 
-			systemPrompt := loadSystemPrompt(cfg.StorageRoot())
+			systemPrompt := loadSystemPrompt(cfg)
 			runner := newGeminiRunner(genaiClient, model, systemPrompt)
 
 			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())

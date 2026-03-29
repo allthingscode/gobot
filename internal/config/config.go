@@ -85,6 +85,16 @@ func (c *Config) SecretsRoot() string {
 	return filepath.Join(c.StorageRoot(), "secrets")
 }
 
+// LogsRoot returns the path to the logs directory under StorageRoot.
+func (c *Config) LogsRoot() string {
+	return filepath.Join(c.StorageRoot(), "logs")
+}
+
+// LogPath returns the path to a specific log file under LogsRoot.
+func (c *Config) LogPath(filename string) string {
+	return filepath.Join(c.LogsRoot(), filename)
+}
+
 // DefaultModel returns the configured default model, falling back to gemini-3-flash-preview.
 func (c *Config) DefaultModel() string {
 	if c.Agents.Defaults.Model != "" {

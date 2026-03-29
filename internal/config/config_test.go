@@ -97,6 +97,22 @@ func TestSecretsRoot(t *testing.T) {
 	}
 }
 
+func TestLogsRoot(t *testing.T) {
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs` }}
+	want := filepath.Join(`E:\Logs`, "logs")
+	if got := cfg.LogsRoot(); got != want {
+		t.Errorf("LogsRoot() = %q, want %q", got, want)
+	}
+}
+
+func TestLogPath(t *testing.T) {
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs` }}
+	want := filepath.Join(`E:\Logs`, "logs", "gobot.log")
+	if got := cfg.LogPath("gobot.log"); got != want {
+		t.Errorf("LogPath() = %q, want %q", got, want)
+	}
+}
+
 func TestDefaultModel(t *testing.T) {
 	tests := []struct {
 		name  string

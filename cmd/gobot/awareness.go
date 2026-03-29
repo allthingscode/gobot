@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/google"
 	"github.com/allthingscode/gobot/internal/memory"
 )
@@ -18,25 +19,25 @@ const awarenessMaxJournalChars = 4000
 //  3. AWARENESS.md         — how this system works (paths, cron, journal)
 //  4. Journal continuity   — recent activity (auto-injected)
 //  5. Live schedule        — today's calendar + tasks (best-effort)
-func loadSystemPrompt(storageRoot string) string {
+func loadSystemPrompt(cfg *config.Config) string {
 	var parts []string
 
 	for _, name := range []string{"SOUL.md", "IDENTITY.md"} {
-		if data := loadPrivateFile(storageRoot, name); data != "" {
+		if data := loadPrivateFile(cfg, name); data != "" {
 			parts = append(parts, data)
 		}
 	}
 
-	awarenessPath := filepath.Join(storageRoot, "workspace", "AWARENESS.md")
+	awarenessPath := cfg.WorkspacePath("AWARENESS.md")
 	if data, err := os.ReadFile(awarenessPath); err == nil && len(data) > 0 {
 		parts = append(parts, strings.TrimSpace(string(data)))
 	}
 
-	if continuity := memory.GetJournalContinuity(storageRoot, awarenessMaxJournalChars); continuity != "" {
+	if continuity := memory.GetJournalContinuity(cfg.StorageRoot(), awarenessMaxJournalChars); continuity != "" {
 		parts = append(parts, continuity)
 	}
 
-	secretsRoot := filepath.Join(storageRoot, "secrets")
+	secretsRoot := cfg.SecretsRoot()
 	if schedule := loadScheduleContext(secretsRoot); schedule != "" {
 		parts = append(parts, schedule)
 	}
@@ -46,9 +47,9 @@ func loadSystemPrompt(storageRoot string) string {
 
 // loadPrivateFile reads a file from .private/ next to the binary (dev) or
 // {storageRoot}/workspace/ (production fallback). Returns empty string if not found.
-func loadPrivateFile(storageRoot, filename string) string {
+func loadPrivateFile(cfg *config.Config, filename string) string {
 	candidates := []string{
-		filepath.Join(storageRoot, "workspace", filename),
+		cfg.WorkspacePath(filename),
 	}
 	if exe, err := os.Executable(); err == nil {
 		candidates = append([]string{
@@ -92,21 +93,22 @@ func loadScheduleContext(secretsRoot string) string {
 // ensureAwarenessFile writes a default AWARENESS.md into
 // {storageRoot}/workspace/ if the file does not already exist.
 // Safe to call on every startup — no-op when the file is present.
-func ensureAwarenessFile(storageRoot string) {
-	awarenessPath := filepath.Join(storageRoot, "workspace", "AWARENESS.md")
+func ensureAwarenessFile(cfg *config.Config) {
+	awarenessPath := cfg.WorkspacePath("AWARENESS.md")
 	if _, err := os.Stat(awarenessPath); err == nil {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(awarenessPath), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(awarenessPath, []byte(buildAwarenessContent(storageRoot)), 0o644)
+	_ = os.WriteFile(awarenessPath, []byte(buildAwarenessContent(cfg)), 0o644)
 }
 
 // buildAwarenessContent returns the default AWARENESS.md content.
 // Kept separate so it can be tested without filesystem side effects.
-func buildAwarenessContent(storageRoot string) string {
-	cronItemsDir := filepath.Join(storageRoot, "workspace", "jobs")
+func buildAwarenessContent(cfg *config.Config) string {
+	storageRoot := cfg.StorageRoot()
+	cronItemsDir := cfg.WorkspacePath("jobs")
 	return "# STRATEGIC AWARENESS\n" +
 		"- **Workspace Root:** " + storageRoot + "\n" +
 		"- **System Role:** Strategic Orchestrator\n" +
@@ -119,9 +121,9 @@ func buildAwarenessContent(storageRoot string) string {
 		"- **Trigger:** The scheduler automatically loads these files and converts them into cron jobs.\n" +
 		"\n" +
 		"## MEMORY & CONTINUITY\n" +
-		"- **Daily Journal:** `" + filepath.Join(storageRoot, "workspace", "journal", "YYYY-MM-DD.md") + "`\n" +
+		"- **Daily Journal:** `" + cfg.WorkspacePath("journal", "YYYY-MM-DD.md") + "`\n" +
 		"- **Chronological Continuity:** A rolling journal snippet is injected into context on every turn.\n" +
-		"- **Long-Term Memory:** Checkpoint database at `" + filepath.Join(storageRoot, "workspace", "checkpoints.db") + "`.\n" +
+		"- **Long-Term Memory:** Checkpoint database at `" + cfg.WorkspacePath("checkpoints.db") + "`.\n" +
 		"\n" +
 		"## OPERATOR MANDATES\n" +
 		"- **Zero Drive-Root Writes:** Never write to drive roots. All output goes under `" + storageRoot + "`.\n"
