@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -257,6 +258,62 @@ func TestDefaultSpecialistPrompt(t *testing.T) {
 				t.Errorf("defaultSpecialistPrompt(%q) returned empty string", tc.agentType)
 			}
 		})
+	}
+}
+
+// ── iterLimitRunner ────────────────────────────────────────────────────────────
+
+func TestIterLimitRunner_AllowsUpToMax(t *testing.T) {
+	inner := &mockRunner{response: "ok"}
+	limited := &iterLimitRunner{inner: inner, max: spawnMaxIterations}
+	ctx := context.Background()
+
+	for i := 0; i < spawnMaxIterations; i++ {
+		_, _, err := limited.Run(ctx, "key", nil)
+		if err != nil {
+			t.Fatalf("call %d: unexpected error: %v", i+1, err)
+		}
+	}
+	if inner.called != spawnMaxIterations {
+		t.Errorf("inner.called = %d, want %d", inner.called, spawnMaxIterations)
+	}
+}
+
+func TestIterLimitRunner_StopsAtLimit(t *testing.T) {
+	inner := &mockRunner{response: "ok"}
+	limited := &iterLimitRunner{inner: inner, max: spawnMaxIterations}
+	ctx := context.Background()
+
+	// exhaust the limit
+	for i := 0; i < spawnMaxIterations; i++ {
+		limited.Run(ctx, "key", nil) //nolint:errcheck
+	}
+
+	// next call must fail
+	_, _, err := limited.Run(ctx, "key", nil)
+	if err == nil {
+		t.Fatal("expected error after max iterations, got nil")
+	}
+	wantSub := fmt.Sprintf("exceeded maximum iterations (%d)", spawnMaxIterations)
+	if !strings.Contains(err.Error(), wantSub) {
+		t.Errorf("error %q does not contain %q", err.Error(), wantSub)
+	}
+	// inner must NOT have been called on the failing iteration
+	if inner.called != spawnMaxIterations {
+		t.Errorf("inner.called = %d after limit, want %d", inner.called, spawnMaxIterations)
+	}
+}
+
+func TestIterLimitRunner_CountTracked(t *testing.T) {
+	inner := &mockRunner{response: "ok"}
+	limited := &iterLimitRunner{inner: inner, max: 10}
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		limited.Run(ctx, "key", nil) //nolint:errcheck
+	}
+	if limited.count != 3 {
+		t.Errorf("count = %d, want 3", limited.count)
 	}
 }
 

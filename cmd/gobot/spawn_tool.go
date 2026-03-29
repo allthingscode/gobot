@@ -9,12 +9,14 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 )
 
 const (
-	spawnToolName   = "spawn_subagent"
-	spawnMaxTimeout = 5 * time.Minute
+	spawnToolName      = "spawn_subagent"
+	spawnMaxTimeout    = 5 * time.Minute
+	spawnMaxIterations = 5
 )
 
 // SpawnTool implements Tool and enables the main agent to delegate complex
@@ -43,6 +45,23 @@ type SpawnTool struct {
 
 	// memStore is optional; if set, sub-agents get RAG context too.
 	memStore *memory.MemoryStore
+}
+
+// iterLimitRunner wraps a Runner and enforces a maximum number of Run calls.
+// Each call increments count; when count exceeds max, Run returns an error without
+// calling inner. This prevents sub-agents from looping indefinitely.
+type iterLimitRunner struct {
+	inner agent.Runner
+	max   int
+	count int
+}
+
+func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+	r.count++
+	if r.count > r.max {
+		return "", nil, fmt.Errorf("spawn: sub-agent exceeded maximum iterations (%d)", r.max)
+	}
+	return r.inner.Run(ctx, sessionKey, messages)
 }
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from client/model.
@@ -106,8 +125,10 @@ func (s *SpawnTool) Execute(ctx context.Context, parentSessionKey string, args m
 	}
 
 	subRunner := s.runnerFactory(model, systemPrompt)
+	// Wrap in an iteration limiter (F-001: max 5 iterations to prevent infinite loops).
+	limitedRunner := &iterLimitRunner{inner: subRunner, max: spawnMaxIterations}
 	// Sub-agents are ephemeral -- no checkpoint store.
-	subMgr := agent.NewSessionManager(subRunner, nil, model)
+	subMgr := agent.NewSessionManager(limitedRunner, nil, model)
 
 	subKey := fmt.Sprintf("agent:%s:%s", agentType, parentSessionKey)
 	start := time.Now()
@@ -122,7 +143,7 @@ func (s *SpawnTool) Execute(ctx context.Context, parentSessionKey string, args m
 		slog.Error("spawn: sub-agent failed", "subKey", subKey, "model", model, "elapsed", elapsed, "err", err)
 		return "", fmt.Errorf("spawn %s: %w", agentType, err)
 	}
-	slog.Info("spawn: sub-agent complete", "subKey", subKey, "model", model, "elapsed", elapsed, "replyLen", len(reply))
+	slog.Info("spawn: sub-agent complete", "subKey", subKey, "model", model, "elapsed", elapsed, "replyLen", len(reply), "iterations", limitedRunner.count)
 	return reply, nil
 }
 
