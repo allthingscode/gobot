@@ -67,6 +67,26 @@ func (c *Config) StorageRoot() string {
 	return `D:\Gobot_Storage`
 }
 
+// SecretsRoot returns the path to the secrets directory under StorageRoot.
+func (c *Config) SecretsRoot() string {
+	return filepath.Join(c.StorageRoot(), "secrets")
+}
+
+// DefaultModel returns the configured default model, falling back to gemini-3-flash-preview.
+func (c *Config) DefaultModel() string {
+	if c.Agents.Defaults.Model != "" {
+		return c.Agents.Defaults.Model
+	}
+	return "gemini-3-flash-preview"
+}
+
+// WorkspacePath returns the path to a resource under {StorageRoot}/workspace/.
+// Subpath elements are joined after the workspace directory.
+func (c *Config) WorkspacePath(subpath ...string) string {
+	parts := append([]string{c.StorageRoot(), "workspace"}, subpath...)
+	return filepath.Join(parts...)
+}
+
 // GeminiAPIKey returns the Gemini API key from config.
 func (c *Config) GeminiAPIKey() string {
 	return c.Providers.Gemini.APIKey

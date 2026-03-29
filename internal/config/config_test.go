@@ -70,6 +70,97 @@ func TestStorageRoot_Override(t *testing.T) {
 	}
 }
 
+func TestSecretsRoot(t *testing.T) {
+	tests := []struct {
+		name        string
+		storageRoot string
+		want        string
+	}{
+		{
+			name:        "default storage root",
+			storageRoot: "",
+			want:        filepath.Join(`D:\Gobot_Storage`, "secrets"),
+		},
+		{
+			name:        "custom storage root",
+			storageRoot: `E:\Custom`,
+			want:        filepath.Join(`E:\Custom`, "secrets"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.storageRoot}}
+			if got := cfg.SecretsRoot(); got != tc.want {
+				t.Errorf("SecretsRoot() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		{
+			name:  "configured model",
+			model: "gemini-2-flash",
+			want:  "gemini-2-flash",
+		},
+		{
+			name:  "empty falls back to default",
+			model: "",
+			want:  "gemini-3-flash-preview",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Agents: AgentsConfig{Defaults: AgentDefaults{Model: tc.model}}}
+			if got := cfg.DefaultModel(); got != tc.want {
+				t.Errorf("DefaultModel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWorkspacePath(t *testing.T) {
+	tests := []struct {
+		name    string
+		root    string
+		subpath []string
+		want    string
+	}{
+		{
+			name:    "no subpath",
+			root:    `D:\Gobot_Storage`,
+			subpath: nil,
+			want:    filepath.Join(`D:\Gobot_Storage`, "workspace"),
+		},
+		{
+			name:    "one subpath element",
+			root:    `D:\Gobot_Storage`,
+			subpath: []string{"jobs"},
+			want:    filepath.Join(`D:\Gobot_Storage`, "workspace", "jobs"),
+		},
+		{
+			name:    "multiple subpath elements",
+			root:    `D:\Gobot_Storage`,
+			subpath: []string{"journal", "2026-01-01.md"},
+			want:    filepath.Join(`D:\Gobot_Storage`, "workspace", "journal", "2026-01-01.md"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.root}}
+			got := cfg.WorkspacePath(tc.subpath...)
+			if got != tc.want {
+				t.Errorf("WorkspacePath(%v) = %q, want %q", tc.subpath, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGeminiAPIKey(t *testing.T) {
 	cfg := &Config{Providers: ProvidersConfig{Gemini: GeminiConfig{APIKey: "my-key"}}}
 	if cfg.GeminiAPIKey() != "my-key" {

@@ -184,10 +184,7 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("genai client: %w", err)
 			}
-			model := cfg.Agents.Defaults.Model
-			if model == "" {
-				model = "gemini-3-flash-preview"
-			}
+			model := cfg.DefaultModel()
 
 			ensureAwarenessFile(cfg.StorageRoot())
 			systemPrompt := loadSystemPrompt(cfg.StorageRoot())
@@ -214,7 +211,7 @@ func cmdRun() *cobra.Command {
 			}
 
 			// Register tools.
-			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			secretsRoot := cfg.SecretsRoot()
 			tools := []Tool{
 				newSpawnTool(genaiClient, model, nil, specialistModels, memStore),
 			}
@@ -269,8 +266,8 @@ func cmdRun() *cobra.Command {
 			b := bot.New(api, gateHandler)
 
 			// Start cron scheduler in background.
-			storePath := filepath.Join(cfg.StorageRoot(), "workspace", "jobs.json")
-			itemsDir := filepath.Join(cfg.StorageRoot(), "workspace", "jobs")
+			storePath := cfg.WorkspacePath("jobs.json")
+			itemsDir := cfg.WorkspacePath("jobs")
 			// Cron jobs use an ephemeral session manager (nil store) so they never
 			// share checkpoint history with DM conversations (F-013).
 			cronMgr := agent.NewSessionManager(runner, nil, model)
@@ -297,7 +294,7 @@ func cmdReauth() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			secretsRoot := cfg.SecretsRoot()
 
 			// Scopes required for gobot
 			scopes := []string{
@@ -424,10 +421,7 @@ func cmdSimulate() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("genai client: %w", err)
 			}
-			model := cfg.Agents.Defaults.Model
-			if model == "" {
-				model = "gemini-3-flash-preview"
-			}
+			model := cfg.DefaultModel()
 
 			systemPrompt := loadSystemPrompt(cfg.StorageRoot())
 			runner := newGeminiRunner(genaiClient, model, systemPrompt)
@@ -458,7 +452,7 @@ func cmdCalendar() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			secretsRoot := cfg.SecretsRoot()
 			events, err := google.ListUpcomingEvents(secretsRoot, maxResults)
 			if err != nil {
 				return fmt.Errorf("calendar: %w", err)
@@ -499,7 +493,7 @@ func cmdTasks() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			secretsRoot := cfg.SecretsRoot()
 			tasks, err := google.ListTasks(secretsRoot, "@default")
 			if err != nil {
 				return fmt.Errorf("tasks: %w", err)
@@ -528,7 +522,7 @@ func cmdTasks() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			secretsRoot := cfg.SecretsRoot()
 			title := strings.Join(args, " ")
 			id, err := google.CreateTask(secretsRoot, "@default", title, "")
 			if err != nil {
@@ -562,7 +556,7 @@ func cmdMemory() *cobra.Command {
 				return fmt.Errorf("memory store: %w", err)
 			}
 			defer store.Close()
-			sessionDir := filepath.Join(cfg.StorageRoot(), "workspace", "sessions")
+			sessionDir := cfg.WorkspacePath("sessions")
 			n, err := store.Rebuild(sessionDir)
 			if err != nil {
 				return fmt.Errorf("rebuild: %w", err)
@@ -588,7 +582,7 @@ func cmdEmail() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
+			secretsRoot := cfg.SecretsRoot()
 			userEmail := cfg.Strategic.UserEmail
 			if userEmail == "" {
 				return fmt.Errorf("strategic_edition.user_email not set in config")
