@@ -23,6 +23,9 @@ config.local.json
 .private/
 .gemini/
 
+# Vendor dependencies
+vendor/
+
 # Gemini CLI task handoff file (overwritten each task, not source)
 _current_task.md
 .aider*
