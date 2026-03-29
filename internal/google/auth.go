@@ -309,3 +309,28 @@ func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any
 	}
 	return json.Unmarshal(respBody, dest)
 }
+
+// apiPatch performs an authenticated PATCH with a JSON body and decodes the
+// JSON response into dest.
+func apiPatch(accessToken, apiURL string, body any, client *http.Client, dest any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal body: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, apiURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("PATCH %s: %w", apiURL, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("google API %d: %s", resp.StatusCode, string(respBody))
+	}
+	return json.Unmarshal(respBody, dest)
+}

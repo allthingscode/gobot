@@ -147,7 +147,7 @@ func cmdRun() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 
-			// Pre-flight diagnostics â€” mirrors nanobot strategic_launcher.py
+			// Pre-flight diagnostics â€" mirrors nanobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
 				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
 			}
@@ -225,11 +225,13 @@ func cmdRun() *cobra.Command {
 				newListCalendarTool(secretsRoot),
 				newListTasksTool(secretsRoot),
 				newCreateTaskTool(secretsRoot),
+				newCompleteTaskTool(secretsRoot),
+				newUpdateTaskTool(secretsRoot),
 			}...)
 			if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
 				tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
 			} else {
-				slog.Warn("run: send_email tool disabled â€” strategic_edition.user_email not set in config")
+				slog.Warn("run: send_email tool disabled -- strategic_edition.user_email not set in config")
 			}
 			runner.tools = tools
 
@@ -409,7 +411,7 @@ func cmdSimulate() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 
-			// Pre-flight diagnostics â€” mirrors nanobot strategic_launcher.py
+			// Pre-flight diagnostics â€" mirrors nanobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
 				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
 			}

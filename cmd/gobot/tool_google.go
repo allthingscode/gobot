@@ -186,3 +186,109 @@ func (t *CreateTaskTool) Execute(_ context.Context, _ string, args map[string]an
 	}
 	return fmt.Sprintf("Task created: %s (id: %s)", title, id), nil
 }
+
+// -- CompleteTaskTool -----------------------------------------------------------
+
+const completeTaskToolName = "complete_task"
+
+type CompleteTaskTool struct{ secretsRoot string }
+
+func newCompleteTaskTool(secretsRoot string) *CompleteTaskTool {
+	return &CompleteTaskTool{secretsRoot: secretsRoot}
+}
+
+func (t *CompleteTaskTool) Name() string { return completeTaskToolName }
+
+func (t *CompleteTaskTool) Declaration() *genai.FunctionDeclaration {
+	return &genai.FunctionDeclaration{
+		Name:        completeTaskToolName,
+		Description: "Mark a Google Task as completed. Use the task ID returned by list_tasks.",
+		Parameters: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"task_id": {
+					Type:        genai.TypeString,
+					Description: "The ID of the task to complete. Required.",
+				},
+				"tasklist_id": {
+					Type:        genai.TypeString,
+					Description: "The task list ID. Defaults to \"@default\".",
+				},
+			},
+			Required: []string{"task_id"},
+		},
+	}
+}
+
+func (t *CompleteTaskTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+	taskID, _ := args["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		return "", fmt.Errorf("complete_task: task_id is required")
+	}
+	tasklistID, _ := args["tasklist_id"].(string)
+	if err := google.CompleteTask(t.secretsRoot, tasklistID, taskID); err != nil {
+		return "", fmt.Errorf("complete_task: %w", err)
+	}
+	return fmt.Sprintf("Task %s marked as completed.", taskID), nil
+}
+
+// -- UpdateTaskTool -------------------------------------------------------------
+
+const updateTaskToolName = "update_task"
+
+type UpdateTaskTool struct{ secretsRoot string }
+
+func newUpdateTaskTool(secretsRoot string) *UpdateTaskTool {
+	return &UpdateTaskTool{secretsRoot: secretsRoot}
+}
+
+func (t *UpdateTaskTool) Name() string { return updateTaskToolName }
+
+func (t *UpdateTaskTool) Declaration() *genai.FunctionDeclaration {
+	return &genai.FunctionDeclaration{
+		Name:        updateTaskToolName,
+		Description: "Update an existing Google Task's title, notes, or due date. Use the task ID returned by list_tasks. Only provide the fields you want to change.",
+		Parameters: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"task_id": {
+					Type:        genai.TypeString,
+					Description: "The ID of the task to update. Required.",
+				},
+				"title": {
+					Type:        genai.TypeString,
+					Description: "New title for the task. Omit to leave unchanged.",
+				},
+				"notes": {
+					Type:        genai.TypeString,
+					Description: "New notes for the task. Omit to leave unchanged.",
+				},
+				"due": {
+					Type:        genai.TypeString,
+					Description: "New due date in RFC3339 format (e.g. 2026-04-01T00:00:00Z). Omit to leave unchanged.",
+				},
+				"tasklist_id": {
+					Type:        genai.TypeString,
+					Description: "The task list ID. Defaults to \"@default\".",
+				},
+			},
+			Required: []string{"task_id"},
+		},
+	}
+}
+
+func (t *UpdateTaskTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+	taskID, _ := args["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		return "", fmt.Errorf("update_task: task_id is required")
+	}
+	tasklistID, _ := args["tasklist_id"].(string)
+	title, _ := args["title"].(string)
+	notes, _ := args["notes"].(string)
+	due, _ := args["due"].(string)
+
+	if err := google.UpdateTask(t.secretsRoot, tasklistID, taskID, title, notes, due); err != nil {
+		return "", fmt.Errorf("update_task: %w", err)
+	}
+	return fmt.Sprintf("Task %s updated.", taskID), nil
+}

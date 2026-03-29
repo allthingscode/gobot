@@ -99,24 +99,78 @@ func createTaskWithClient(secretsRoot, tasklistID, title, notes string, client *
 
 // FormatTasksMarkdown returns a Markdown bullet list of open tasks for use in
 // the system prompt. Returns empty string when tasks is empty.
+// Task IDs are included so the agent can reference them in complete_task / update_task.
 func FormatTasksMarkdown(tasks []Task) string {
 	if len(tasks) == 0 {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("### ✅ Open Tasks\n")
+	sb.WriteString("### \u2705 Open Tasks\n")
 	for _, task := range tasks {
 		title := task.Title
 		if title == "" {
 			title = "(untitled)"
 		}
 		if task.Due != "" {
-			sb.WriteString(fmt.Sprintf("- [ ] %s _(due %s)_\n", title, formatDueDate(task.Due)))
+			sb.WriteString(fmt.Sprintf("- [ ] %s _(due %s)_ [id:%s]\n", title, formatDueDate(task.Due), task.ID))
 		} else {
-			sb.WriteString(fmt.Sprintf("- [ ] %s\n", title))
+			sb.WriteString(fmt.Sprintf("- [ ] %s [id:%s]\n", title, task.ID))
 		}
 	}
 	return sb.String()
+}
+
+// CompleteTask marks a task as completed.
+// tasklistID defaults to "@default" if empty.
+func CompleteTask(secretsRoot, tasklistID, taskID string) error {
+	return completeTaskWithClient(secretsRoot, tasklistID, taskID, http.DefaultClient)
+}
+
+func completeTaskWithClient(secretsRoot, tasklistID, taskID string, client *http.Client) error {
+	token, err := bearerTokenWithClient(secretsRoot, client)
+	if err != nil {
+		return fmt.Errorf("tasks auth: %w", err)
+	}
+	if tasklistID == "" {
+		tasklistID = "@default"
+	}
+	apiURL := fmt.Sprintf("%s/lists/%s/tasks/%s", tasksBaseURL, tasklistID, taskID)
+	var updated struct{}
+	return apiPatch(token, apiURL, map[string]string{"status": "completed"}, client, &updated)
+}
+
+// UpdateTask modifies the title, notes, and/or due date of an existing task.
+// Pass empty string for any field you do not want to change.
+// tasklistID defaults to "@default" if empty.
+// Returns an error if no fields are provided.
+func UpdateTask(secretsRoot, tasklistID, taskID, title, notes, due string) error {
+	return updateTaskWithClient(secretsRoot, tasklistID, taskID, title, notes, due, http.DefaultClient)
+}
+
+func updateTaskWithClient(secretsRoot, tasklistID, taskID, title, notes, due string, client *http.Client) error {
+	token, err := bearerTokenWithClient(secretsRoot, client)
+	if err != nil {
+		return fmt.Errorf("tasks auth: %w", err)
+	}
+	if tasklistID == "" {
+		tasklistID = "@default"
+	}
+	body := map[string]string{}
+	if title != "" {
+		body["title"] = title
+	}
+	if notes != "" {
+		body["notes"] = notes
+	}
+	if due != "" {
+		body["due"] = due
+	}
+	if len(body) == 0 {
+		return fmt.Errorf("update_task: at least one field (title, notes, due) must be provided")
+	}
+	apiURL := fmt.Sprintf("%s/lists/%s/tasks/%s", tasksBaseURL, tasklistID, taskID)
+	var updated struct{}
+	return apiPatch(token, apiURL, body, client, &updated)
 }
 
 // formatDueDate trims a Google Tasks due date (RFC3339) to a short date string.
