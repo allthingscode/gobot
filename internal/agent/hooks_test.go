@@ -139,5 +139,64 @@ func (r *recordingRunner) Run(ctx context.Context, sessionKey string, messages [
 	return resp, messages, nil
 }
 
+// ── PostTool hooks ──────────────────────────────────────────────────────────
+
+func TestHooks_PostTool_NoHooks(t *testing.T) {
+	h := &Hooks{}
+	got := h.RunPostTool(context.Background(), "my_tool", "original result")
+	if got != "original result" {
+		t.Errorf("got %q, want %q", got, "original result")
+	}
+}
+
+func TestHooks_PostTool_SingleHook(t *testing.T) {
+	h := &Hooks{}
+	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
+		return result + " [SANITIZED]"
+	})
+	got := h.RunPostTool(context.Background(), "tool", "raw")
+	if got != "raw [SANITIZED]" {
+		t.Errorf("got %q, want %q", got, "raw [SANITIZED]")
+	}
+}
+
+func TestHooks_PostTool_ChainOrder(t *testing.T) {
+	h := &Hooks{}
+	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string { return result + "_A" })
+	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string { return result + "_B" })
+	got := h.RunPostTool(context.Background(), "tool", "X")
+	if got != "X_A_B" {
+		t.Errorf("got %q, want %q", got, "X_A_B")
+	}
+}
+
+func TestHooks_PostTool_ToolNamePassed(t *testing.T) {
+	h := &Hooks{}
+	var capturedName string
+	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
+		capturedName = toolName
+		return result
+	})
+	h.RunPostTool(context.Background(), "my_special_tool", "data")
+	if capturedName != "my_special_tool" {
+		t.Errorf("toolName = %q, want %q", capturedName, "my_special_tool")
+	}
+}
+
+func TestHooks_PostTool_ChainTransforms(t *testing.T) {
+	// Each hook receives the output of the previous, not the original.
+	h := &Hooks{}
+	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
+		return strings.ToUpper(result)
+	})
+	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
+		return "[" + result + "]"
+	})
+	got := h.RunPostTool(context.Background(), "tool", "hello")
+	if got != "[HELLO]" {
+		t.Errorf("got %q, want %q", got, "[HELLO]")
+	}
+}
+
 // Ensure strings is used (suppress unused import if test file is standalone).
 var _ = strings.Contains

@@ -123,6 +123,10 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 				slog.Warn("gemini: tool execution failed", "tool", fc.Name, "err", execErr)
 				response = map[string]any{"error": execErr.Error()}
 			} else {
+				// Run PostTool hooks (F-012) — transform tool results before returning to agent.
+				if r.hooks != nil {
+					result = r.hooks.RunPostTool(ctx, fc.Name, result)
+				}
 				response = map[string]any{"output": result}
 			}
 			responseParts = append(responseParts, genai.NewPartFromFunctionResponse(fc.Name, response))
