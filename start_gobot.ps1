@@ -6,6 +6,15 @@
 $AppPath    = $PSScriptRoot
 $GobotExe   = Join-Path $AppPath "gobot.exe"
 $LogDir     = "D:\Gobot_Storage\logs"
+$ConfigPath = "C:\Users\HayesChiefOfStaff\.gobot\config.json"
+$PythonExe  = "C:\Users\HayesChiefOfStaff\Documents\nanobot\nanoClaw\Scripts\python.exe"
+
+# --- JSON Auto-Formatting ---
+if (Test-Path $ConfigPath) {
+    Write-Host "Reformatting config.json for readability..." -ForegroundColor Gray
+    $PathForPython = $ConfigPath.Replace('\', '/')
+    & $PythonExe -c "import json; d=json.load(open('$PathForPython', 'r', encoding='utf-8-sig')); json.dump(d, open('$PathForPython', 'w', encoding='utf-8-sig'), indent=4, ensure_ascii=False)"
+}
 
 if (-not (Test-Path $GobotExe)) {
     Write-Host "Error: gobot.exe not found at $GobotExe" -ForegroundColor Red
