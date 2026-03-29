@@ -33,8 +33,8 @@ func (m *mockRunner) Run(_ context.Context, _ string, messages []agentctx.Strate
 // newTestSpawnTool builds a SpawnTool backed by a mockRunner factory.
 func newTestSpawnTool(runner agent.Runner, prompts map[string]string) *SpawnTool {
 	return &SpawnTool{
-		runnerFactory: func(_, _ string) agent.Runner { return runner },
-		model:         "test-model",
+		runnerFactory:     func(_, _ string) agent.Runner { return runner },
+		model:             "test-model",
 		specialistPrompts: prompts,
 	}
 }

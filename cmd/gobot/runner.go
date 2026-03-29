@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/agent"
-	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/bot"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
@@ -32,7 +32,6 @@ type geminiRunner struct {
 	limiter      *rate.Limiter       // token-bucket rate limiter for Gemini API calls
 	hooks        *agent.Hooks        // may be nil; set via SetHooks
 }
-
 
 func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
 	return &geminiRunner{
@@ -295,6 +294,3 @@ func lastUserText(messages []agentctx.StrategicMessage) string {
 	}
 	return ""
 }
-
-
-

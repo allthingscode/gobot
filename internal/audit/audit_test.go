@@ -65,7 +65,7 @@ var current = map[string]string{
 
 func TestBuildReport_ContainsCurrentTag(t *testing.T) {
 	models := []audit.ModelInfo{
-		makeModel("models/gemini-3-flash-preview", "", ""),        // empty DisplayName — exercises fallback
+		makeModel("models/gemini-3-flash-preview", "", ""), // empty DisplayName — exercises fallback
 		makeModel("models/gemini-2.5-flash-lite", "Gemini Flash Lite", ""),
 		makeModel("models/gemini-3-pro-preview", "Gemini 3 Pro", ""),
 	}

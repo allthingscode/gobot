@@ -1,6 +1,7 @@
 package gmail
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -158,7 +159,8 @@ func TestSend_PlainText(t *testing.T) {
 		httpClient:  http.DefaultClient,
 	}
 
-	if err := s.Send("user@example.com", "Hello", "plain text body"); err != nil {
+	if err := s.Send(context.Background(), "user@example.com",
+		"Hello", "plain text body"); err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
 	if capturedAuth != "Bearer test-token" {
@@ -199,7 +201,8 @@ func TestSend_HTMLWrapped(t *testing.T) {
 		httpClient:  http.DefaultClient,
 	}
 
-	if err := s.Send("user@example.com", "Report", "<h1>Title</h1><p>Body</p>"); err != nil {
+	if err := s.Send(context.Background(), "user@example.com",
+		"Report", "<h1>Title</h1><p>Body</p>"); err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
 	raw := capturedPayload["raw"]
@@ -248,7 +251,8 @@ func TestSend_Multipart_HasPlainPart(t *testing.T) {
 		httpClient:  http.DefaultClient,
 	}
 
-	if err := s.Send("user@example.com", "Report", "<h2>Summary</h2><p>All systems nominal.</p>"); err != nil {
+	if err := s.Send(context.Background(), "user@example.com",
+		"Report", "<h2>Summary</h2><p>All systems nominal.</p>"); err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
 
@@ -268,7 +272,6 @@ func TestSend_Multipart_HasPlainPart(t *testing.T) {
 	}
 }
 
-
 func TestSend_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -282,7 +285,7 @@ func TestSend_APIError(t *testing.T) {
 		httpClient:  http.DefaultClient,
 	}
 
-	err := s.Send("user@example.com", "Test", "body")
+	err := s.Send(context.Background(), "user@example.com", "Test", "body")
 	if err == nil {
 		t.Fatal("expected error for API 401")
 	}

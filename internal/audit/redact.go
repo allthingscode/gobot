@@ -11,7 +11,7 @@ import (
 // redactPatterns are compiled once at init. Each pattern matches a secret prefix
 // followed by the token body; the entire match is replaced with [REDACTED].
 var redactPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`AIzaSy[A-Za-z0-9_\-]{33}`),   // Google / Gemini API key
+	regexp.MustCompile(`AIzaSy[A-Za-z0-9_\-]{33}`),    // Google / Gemini API key
 	regexp.MustCompile(`ya29\.[A-Za-z0-9_\-\.]{10,}`), // Google OAuth access token
 	regexp.MustCompile(`xoxb-[A-Za-z0-9\-]+`),         // Slack bot token
 }

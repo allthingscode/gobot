@@ -16,7 +16,7 @@ func TestBuildIntegrity(t *testing.T) {
 		}
 	}()
 
-	// We don't execute it (to avoid starting the bot), 
+	// We don't execute it (to avoid starting the bot),
 	// just ensure the command tree is buildable.
 	root := &cobra.Command{
 		Use: "gobot",

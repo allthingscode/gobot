@@ -95,12 +95,12 @@ func TestScheduler_DispatchesDueJob(t *testing.T) {
 	nowMS := time.Now().UnixNano() / 1e6
 	jobs := []Job{
 		{
-			ID:      "job1",
-			Name:    "Job One",
-			Enabled: true,
-			Payload: Payload{Channel: "telegram", To: "123", Message: "hello"},
+			ID:       "job1",
+			Name:     "Job One",
+			Enabled:  true,
+			Payload:  Payload{Channel: "telegram", To: "123", Message: "hello"},
 			Schedule: Schedule{Kind: KindEvery, EveryMS: int64Ptr(60_000)},
-			State:   JobState{NextRunAtMS: nowMS - 1000},
+			State:    JobState{NextRunAtMS: nowMS - 1000},
 		},
 	}
 	storePath := writeJobsJSON(t, dir, jobs)
@@ -138,12 +138,12 @@ func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 	jobs := make([]Job, n)
 	for i := range jobs {
 		jobs[i] = Job{
-			ID:      fmt.Sprintf("job%d", i),
-			Name:    fmt.Sprintf("Job %d", i),
-			Enabled: true,
-			Payload: Payload{Channel: "telegram", To: "123", Message: fmt.Sprintf("msg%d", i)},
+			ID:       fmt.Sprintf("job%d", i),
+			Name:     fmt.Sprintf("Job %d", i),
+			Enabled:  true,
+			Payload:  Payload{Channel: "telegram", To: "123", Message: fmt.Sprintf("msg%d", i)},
 			Schedule: Schedule{Kind: KindEvery, EveryMS: int64Ptr(60_000)},
-			State:   JobState{NextRunAtMS: nowMS - 1000},
+			State:    JobState{NextRunAtMS: nowMS - 1000},
 		}
 	}
 	storePath := writeJobsJSON(t, dir, jobs)
@@ -179,12 +179,12 @@ func TestScheduler_StateUpdated_AfterDispatch(t *testing.T) {
 	nowMS := time.Now().UnixNano() / 1e6
 	jobs := []Job{
 		{
-			ID:      "job1",
-			Name:    "Job One",
-			Enabled: true,
-			Payload: Payload{Channel: "telegram", To: "123", Message: "hello"},
+			ID:       "job1",
+			Name:     "Job One",
+			Enabled:  true,
+			Payload:  Payload{Channel: "telegram", To: "123", Message: "hello"},
 			Schedule: Schedule{Kind: KindEvery, EveryMS: int64Ptr(60_000)},
-			State:   JobState{NextRunAtMS: nowMS - 1000},
+			State:    JobState{NextRunAtMS: nowMS - 1000},
 		},
 	}
 	storePath := writeJobsJSON(t, dir, jobs)
@@ -210,11 +210,11 @@ func TestScheduler_DisabledJobNotDispatched(t *testing.T) {
 	nowMS := time.Now().UnixNano() / 1e6
 	jobs := []Job{
 		{
-			ID:      "job1",
-			Enabled: false,
-			Payload: Payload{Channel: "telegram", To: "123", Message: "nope"},
+			ID:       "job1",
+			Enabled:  false,
+			Payload:  Payload{Channel: "telegram", To: "123", Message: "nope"},
 			Schedule: Schedule{Kind: KindEvery, EveryMS: int64Ptr(60_000)},
-			State:   JobState{NextRunAtMS: nowMS - 1000},
+			State:    JobState{NextRunAtMS: nowMS - 1000},
 		},
 	}
 	storePath := writeJobsJSON(t, dir, jobs)
@@ -243,11 +243,11 @@ func TestScheduler_AtomicDispatchCounter(t *testing.T) {
 	jobs := make([]Job, n)
 	for i := range jobs {
 		jobs[i] = Job{
-			ID:      fmt.Sprintf("j%d", i),
-			Enabled: true,
-			Payload: Payload{Channel: "telegram", To: "123", Message: fmt.Sprintf("m%d", i)},
+			ID:       fmt.Sprintf("j%d", i),
+			Enabled:  true,
+			Payload:  Payload{Channel: "telegram", To: "123", Message: fmt.Sprintf("m%d", i)},
 			Schedule: Schedule{Kind: KindEvery, EveryMS: int64Ptr(60_000)},
-			State:   JobState{NextRunAtMS: nowMS - 1000},
+			State:    JobState{NextRunAtMS: nowMS - 1000},
 		}
 	}
 	storePath := writeJobsJSON(t, dir, jobs)

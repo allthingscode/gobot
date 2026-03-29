@@ -49,10 +49,10 @@ type SessionManager struct {
 	runner      Runner
 	store       CheckpointStore // may be nil
 	model       string
-	storageRoot string    // may be ""; used for journal writes on compaction
+	storageRoot string        // may be ""; used for journal writes on compaction
 	logger      SessionLogger // may be nil; set via SetLogger
-	hooks       *Hooks    // may be nil; set via SetHooks
-	mu          sync.Map  // key: sessionKey (string) → *sync.Mutex
+	hooks       *Hooks        // may be nil; set via SetHooks
+	mu          sync.Map      // key: sessionKey (string) → *sync.Mutex
 }
 
 // NewSessionManager creates a SessionManager backed by runner.

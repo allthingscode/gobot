@@ -1,4 +1,4 @@
-﻿// gobot - Strategic Edition agent runtime (Go)
+// gobot - Strategic Edition agent runtime (Go)
 package main
 
 import (
@@ -118,8 +118,8 @@ func cmdDoctor() *cobra.Command {
 }
 
 type dispatchHandler struct {
-	mgr         *agent.SessionManager
-	memory       *memory.MemoryStore       // may be nil
+	mgr          *agent.SessionManager
+	memory       *memory.MemoryStore        // may be nil
 	consolidator *consolidator.Consolidator // may be nil
 }
 
@@ -596,7 +596,7 @@ func cmdEmail() *cobra.Command {
 			}
 
 			fmt.Printf("Sending test email to %s...\n", userEmail)
-			if err := svc.Send(userEmail, subject, body); err != nil {
+			if err := svc.Send(context.Background(), userEmail, subject, body); err != nil {
 				return err
 			}
 			fmt.Println("Success! Email sent.")
@@ -660,12 +660,3 @@ func extractMessageText(m agentctx.StrategicMessage) string {
 	}
 	return "(no text content)"
 }
-
-
-
-
-
-
-
-
-

@@ -59,8 +59,8 @@ func TestPruneContext_ToolResponseRetainedWithAssistant(t *testing.T) {
 	recent := time.Now().Format(time.RFC3339)
 	msgs := []map[string]any{
 		{
-			"role":    "assistant",
-			"content": "calling tool",
+			"role":      "assistant",
+			"content":   "calling tool",
 			"timestamp": recent,
 			"tool_calls": []any{
 				map[string]any{"id": "call-123"},

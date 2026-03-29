@@ -52,10 +52,10 @@ type ToolCallContent struct {
 // "type" field. Use NewContentItem / ContentItem.Unwrap to work with values.
 type ContentItem struct {
 	// Exactly one of the following will be non-nil after unmarshalling.
-	Text    *TextContent
+	Text     *TextContent
 	Thinking *ThinkingContent
-	Image   *ImageContent
-	Tool    *ToolCallContent
+	Image    *ImageContent
+	Tool     *ToolCallContent
 }
 
 // typeProbe extracts just the "type" discriminator from raw JSON.
@@ -153,11 +153,11 @@ func (m MessageContent) MarshalJSON() ([]byte, error) {
 // StrategicMessage is a single entry in the agent conversation history.
 // It mirrors the Pydantic StrategicMessage in checkpoint_logic.py.
 type StrategicMessage struct {
-	Role             string                   `json:"role"`
-	Content          *MessageContent          `json:"content,omitempty"`
-	Name             *string                  `json:"name,omitempty"`
-	ToolCallID       *string                  `json:"tool_call_id,omitempty"`
-	ToolCalls        []map[string]any         `json:"tool_calls,omitempty"`
-	ReasoningContent *string                  `json:"reasoning_content,omitempty"`
-	ThinkingBlocks   []map[string]any         `json:"thinking_blocks,omitempty"`
+	Role             string           `json:"role"`
+	Content          *MessageContent  `json:"content,omitempty"`
+	Name             *string          `json:"name,omitempty"`
+	ToolCallID       *string          `json:"tool_call_id,omitempty"`
+	ToolCalls        []map[string]any `json:"tool_calls,omitempty"`
+	ReasoningContent *string          `json:"reasoning_content,omitempty"`
+	ThinkingBlocks   []map[string]any `json:"thinking_blocks,omitempty"`
 }

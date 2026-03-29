@@ -19,7 +19,7 @@ type CalendarEvent struct {
 	Start        string // ISO 8601 dateTime or date string
 	End          string
 	Location     string
-	AllDay       bool // true when the event has no time component (date-only)
+	AllDay       bool   // true when the event has no time component (date-only)
 	CalendarName string // e.g. "Work", "Family", "Holidays in United States"
 }
 

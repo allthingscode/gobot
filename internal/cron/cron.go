@@ -34,11 +34,11 @@ type Payload struct {
 
 // JobState tracks the execution history of a job.
 type JobState struct {
-	LastRunAtMS   int64 `json:"lastRunAtMs"`
-	NextRunAtMS   int64 `json:"nextRunAtMs"`
-	RunCount      int   `json:"runCount"`
-	SuccessCount  int   `json:"successCount"`
-	FailureCount  int   `json:"failureCount"`
+	LastRunAtMS  int64 `json:"lastRunAtMs"`
+	NextRunAtMS  int64 `json:"nextRunAtMs"`
+	RunCount     int   `json:"runCount"`
+	SuccessCount int   `json:"successCount"`
+	FailureCount int   `json:"failureCount"`
 }
 
 // Job represents a single scheduled task.

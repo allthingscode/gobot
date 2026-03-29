@@ -63,9 +63,9 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 			return nil
 		}
 		out := bot.OutboundMessage{
-			ChatID:    chatID,
-			ThreadID:  threadID,
-			Text:      response,
+			ChatID:   chatID,
+			ThreadID: threadID,
+			Text:     response,
 		}
 		if err := d.b.Send(ctx, out); err != nil {
 			slog.Error("failed to send cron response", "err", err, "sessionKey", to)
@@ -78,8 +78,9 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 // parseSessionKey parses "telegram:12345" or "telegram:12345:7"
 // into chatID and threadID. Returns error if the key is malformed.
 // Examples:
-//   "telegram:12345"    -> chatID=12345, threadID=0
-//   "telegram:12345:7"  -> chatID=12345, threadID=7
+//
+//	"telegram:12345"    -> chatID=12345, threadID=0
+//	"telegram:12345:7"  -> chatID=12345, threadID=7
 func parseSessionKey(sessionKey string) (chatID, threadID int64, err error) {
 	parts := strings.Split(sessionKey, ":")
 	if len(parts) < 2 || len(parts) > 3 {

@@ -35,22 +35,22 @@ func TestComputeNextRun(t *testing.T) {
 		want     int64
 	}{
 		{
-			name: "kind at - in future",
+			name:     "kind at - in future",
 			schedule: Schedule{Kind: KindAt, AtMS: &atTime},
-			nowMS: 1000,
-			want: 2000,
+			nowMS:    1000,
+			want:     2000,
 		},
 		{
-			name: "kind at - in past",
+			name:     "kind at - in past",
 			schedule: Schedule{Kind: KindAt, AtMS: &atTime},
-			nowMS: 3000,
-			want: 0,
+			nowMS:    3000,
+			want:     0,
 		},
 		{
-			name: "kind every",
+			name:     "kind every",
 			schedule: Schedule{Kind: KindEvery, EveryMS: &everyInterval},
-			nowMS: 5000,
-			want: 6000,
+			nowMS:    5000,
+			want:     6000,
 		},
 	}
 
@@ -134,12 +134,12 @@ func TestSchedulerPoll(t *testing.T) {
 	initialStore := Store{
 		Jobs: []Job{
 			{
-				ID:      "job1",
-				Name:    "Test Job",
-				Enabled: true,
+				ID:       "job1",
+				Name:     "Test Job",
+				Enabled:  true,
 				Schedule: Schedule{Kind: KindAt, AtMS: &atTime},
-				Payload: Payload{Channel: "telegram", Message: "test"},
-				State: JobState{NextRunAtMS: 500}, // Already due
+				Payload:  Payload{Channel: "telegram", Message: "test"},
+				State:    JobState{NextRunAtMS: 500}, // Already due
 			},
 		},
 	}
@@ -222,9 +222,9 @@ func TestSchedulerPoll_FailureAlert(t *testing.T) {
 	initialStore := Store{
 		Jobs: []Job{
 			{
-				ID:      "job1",
-				Name:    "Morning Briefing",
-				Enabled: true,
+				ID:       "job1",
+				Name:     "Morning Briefing",
+				Enabled:  true,
 				Schedule: Schedule{Kind: KindAt, AtMS: &atTime},
 				Payload:  Payload{Channel: "telegram", To: "telegram:999", Message: "hello"},
 				State:    JobState{NextRunAtMS: 500},

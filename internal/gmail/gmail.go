@@ -53,7 +53,7 @@ func (t *storedToken) expired() bool {
 
 // Sender delivers email messages. Implemented by gmailSender; mockable in tests.
 type Sender interface {
-	Send(to, subject, body string) error
+	Send(ctx context.Context, to, subject, body string) error
 }
 
 // gmailSender is the production Sender backed by the Gmail REST API.
@@ -146,7 +146,7 @@ const multipartBoundary = "gobot_alt_20260328"
 // Send delivers an email via the Gmail API.
 // HTML bodies (detected by reporter.WrapHTML) are sent as multipart/alternative
 // with a text/plain fallback; plain-text bodies are sent as text/plain.
-func (s *gmailSender) Send(to, subject, body string) error {
+func (s *gmailSender) Send(ctx context.Context, to, subject, body string) error {
 	wrapped := reporter.WrapHTML(body)
 	isHTML := wrapped != body
 
@@ -188,8 +188,8 @@ func (s *gmailSender) Send(to, subject, body string) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	return resilience.Do(context.Background(), resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
-		req, err := http.NewRequest(http.MethodPost, s.endpoint, strings.NewReader(string(payload)))
+	return resilience.Do(ctx, resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, strings.NewReader(string(payload)))
 		if err != nil {
 			return fmt.Errorf("build request: %w", err)
 		}
@@ -209,4 +209,3 @@ func (s *gmailSender) Send(to, subject, body string) error {
 		return nil
 	})
 }
-

@@ -1,4 +1,4 @@
-﻿package consolidator
+package consolidator
 
 import (
 	"context"

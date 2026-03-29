@@ -9,8 +9,8 @@ import (
 
 // mockMemorySearcher is a test double for memorySearcher.
 type mockMemorySearcher struct {
-	results []map[string]any
-	err     error
+	results   []map[string]any
+	err       error
 	lastQuery string
 	lastLimit int
 }

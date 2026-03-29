@@ -358,4 +358,3 @@ func TestRun_FailsOnBadStorageRoot(t *testing.T) {
 		t.Error("expected Run to return error for missing storage root")
 	}
 }
-

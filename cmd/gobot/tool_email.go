@@ -51,7 +51,7 @@ func (s *SendEmailTool) Declaration() *genai.FunctionDeclaration {
 // Execute sends an email to the hardcoded userEmail using args["subject"] and
 // args["body"]. The "to" address is never read from args. Returns a
 // confirmation string on success.
-func (s *SendEmailTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (s *SendEmailTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
 	subject, _ := args["subject"].(string)
 	body, _ := args["body"].(string)
 
@@ -67,7 +67,7 @@ func (s *SendEmailTool) Execute(_ context.Context, _ string, args map[string]any
 		return "", fmt.Errorf("send_email: auth: %w", err)
 	}
 
-	if err := svc.Send(s.userEmail, subject, body); err != nil {
+	if err := svc.Send(ctx, s.userEmail, subject, body); err != nil {
 		return "", fmt.Errorf("send_email: %w", err)
 	}
 
