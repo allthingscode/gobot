@@ -29,8 +29,7 @@ type AgentsConfig struct {
 }
 
 type AgentDefaults struct {
-	Model     string `json:"model"`
-	Workspace string `json:"workspace"`
+	Model string `json:"model"`
 }
 
 type SpecialistConfig struct {
@@ -55,12 +54,10 @@ type TelegramConfig struct {
 }
 
 type StrategicConfig struct {
-	UserEmail    string            `json:"user_email"`
-	StorageRoot  string            `json:"storage_root"`
-	Mandate      string            `json:"mandate"`
-	UseGoBridge  bool              `json:"use_go_bridge"`
-	GoBridgePort int               `json:"go_bridge_port"`
-	MCPServers   []MCPServerConfig `json:"mcp_servers"`
+	UserEmail   string            `json:"user_email"`
+	StorageRoot string            `json:"storage_root"`
+	Mandate     string            `json:"mandate"`
+	MCPServers  []MCPServerConfig `json:"mcp_servers"`
 }
 
 // MCPServerConfig describes an MCP server and its environment variables.
