@@ -4,47 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/bot"
-	"github.com/mymmrac/telego"
+	"github.com/allthingscode/gobot/internal/telegram"
+	telego "github.com/mymmrac/telego"
 )
-
-// mdV2CodeRe matches fenced code blocks (```...```) and inline code (`)
-// so they can be preserved unchanged during MarkdownV2 escaping.
-var mdV2CodeRe = regexp.MustCompile("(?s)(```[\\s\\S]*?```|`[^`\\n]+`)")
-
-// escapeMarkdownV2Chars escapes all Telegram MarkdownV2 special characters in s.
-// The backslash is escaped first to avoid double-escaping.
-func escapeMarkdownV2Chars(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	for _, ch := range []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"} {
-		s = strings.ReplaceAll(s, ch, `\`+ch)
-	}
-	return s
-}
-
-// convertToMarkdownV2 prepares text for Telegram ModeMarkdownV2.
-// Fenced code blocks and inline code are preserved verbatim.
-// All other MarkdownV2 special characters in surrounding text are escaped
-// so they render literally and never cause a parse error.
-func convertToMarkdownV2(text string) string {
-	parts := mdV2CodeRe.Split(text, -1)
-	codes := mdV2CodeRe.FindAllString(text, -1)
-
-	var b strings.Builder
-	for i, part := range parts {
-		b.WriteString(escapeMarkdownV2Chars(part))
-		if i < len(codes) {
-			b.WriteString(codes[i])
-		}
-	}
-	return b.String()
-}
 
 type tgAPI struct {
 	client    *telego.Bot
@@ -191,8 +159,8 @@ func (t *tgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {
 func (t *tgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	params := &telego.SendMessageParams{
 		ChatID:    telego.ChatID{ID: msg.ChatID},
-		Text:      convertToMarkdownV2(msg.Text),
-		ParseMode: telego.ModeMarkdownV2,
+		Text:      telegram.ToHTML(msg.Text),
+		ParseMode: telego.ModeHTML,
 	}
 	if msg.ThreadID > 0 {
 		params.MessageThreadID = int(msg.ThreadID)
