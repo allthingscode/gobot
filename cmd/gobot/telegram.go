@@ -42,9 +42,10 @@ func newTgAPI(token string, allowFrom []string) (*tgAPI, error) {
 
 const dedupTTL = 5 * time.Minute
 
-// isDuplicate reports whether msgID was already seen within dedupTTL.
-// Stores msgID on first call; evicts expired entries on every call.
-func (t *tgAPI) isDuplicate(msgID int64) bool {
+// isDuplicate reports whether key was already seen within dedupTTL.
+// key must be "chatID:messageID" to avoid false positives across chats.
+// Stores key on first call; evicts expired entries on every call.
+func (t *tgAPI) isDuplicate(key string) bool {
 	now := time.Now()
 
 	// Opportunistically evict expired entries.
@@ -55,12 +56,12 @@ func (t *tgAPI) isDuplicate(msgID int64) bool {
 		return true
 	})
 
-	if v, ok := t.seenMsgs.Load(msgID); ok {
+	if v, ok := t.seenMsgs.Load(key); ok {
 		if now.Sub(v.(time.Time)) < dedupTTL {
 			return true
 		}
 	}
-	t.seenMsgs.Store(msgID, now)
+	t.seenMsgs.Store(key, now)
 	return false
 }
 
@@ -94,8 +95,9 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 				if update.Message == nil || update.Message.Text == "" {
 					continue
 				}
-				msgID := int64(update.Message.MessageID)
-				if t.isDuplicate(msgID) {
+		msgID := int64(update.Message.MessageID)
+		dedupKey := fmt.Sprintf("%d:%d", update.Message.Chat.ID, msgID)
+		if t.isDuplicate(dedupKey) {
 					continue
 				}
 				if len(t.allowFrom) > 0 && !t.allowFrom[update.Message.Chat.ID] {
