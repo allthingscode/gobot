@@ -20,6 +20,7 @@ type Config struct {
 	Agents    AgentsConfig    `json:"agents"`
 	Channels  ChannelsConfig  `json:"channels"`
 	Providers ProvidersConfig `json:"providers"`
+	Tools     ToolsConfig     `json:"tools"`
 	Strategic StrategicConfig `json:"strategic_edition"`
 }
 
@@ -53,17 +54,27 @@ type TelegramConfig struct {
 	AllowFrom []string `json:"allowFrom"`
 }
 
-type StrategicConfig struct {
-	UserEmail   string            `json:"user_email"`
-	StorageRoot string            `json:"storage_root"`
-	Mandate     string            `json:"mandate"`
-	MCPServers  []MCPServerConfig `json:"mcp_servers"`
+// ExecConfig holds settings for the shell_exec tool.
+type ExecConfig struct {
+	Timeout int `json:"timeout"` // seconds; 0 means use tool default
 }
 
-// MCPServerConfig describes an MCP server and its environment variables.
-// Env values that are empty strings are filled from DPAPI at runtime.
+// ToolsConfig maps to the top-level "tools" key in config.json.
+type ToolsConfig struct {
+	Exec       ExecConfig                 `json:"exec"`
+	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+}
+
+type StrategicConfig struct {
+	UserEmail   string `json:"user_email"`
+	StorageRoot string `json:"storage_root"`
+	Mandate     string `json:"mandate"`
+}
+
+// MCPServerConfig describes one MCP server entry under tools.mcpServers.
+// The server name is the map key, not a field. Env values that are empty
+// strings are resolved from DPAPI at runtime.
 type MCPServerConfig struct {
-	Name    string            `json:"name"`
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
@@ -147,26 +158,36 @@ func (c *Config) MCPEnvFor(serverName string) map[string]string {
 // mcpEnvFor is the testable inner implementation of MCPEnvFor.
 func (c *Config) mcpEnvFor(serverName string, store *secrets.SecretsStore) map[string]string {
 	env := make(map[string]string)
-	for _, srv := range c.Strategic.MCPServers {
-		if srv.Name != serverName {
-			continue
-		}
-		for varName, val := range srv.Env {
-			if val != "" {
-				env[varName] = val
-				continue
-			}
-			// Value is empty — try DPAPI fallback.
-			key := fmt.Sprintf("mcp_env_%s_%s",
-				strings.ToLower(serverName),
-				strings.ToLower(varName))
-			if v, _ := store.Get(key); v != "" {
-				env[varName] = v
-			}
-		}
+	srv, ok := c.Tools.MCPServers[serverName]
+	if !ok {
 		return env
 	}
+	for varName, val := range srv.Env {
+		if val != "" {
+			env[varName] = val
+			continue
+		}
+		// Value is empty — try DPAPI fallback.
+		key := fmt.Sprintf("mcp_env_%s_%s",
+			strings.ToLower(serverName),
+			strings.ToLower(varName))
+		if v, _ := store.Get(key); v != "" {
+			env[varName] = v
+		}
+	}
 	return env
+}
+
+// defaultExecTimeout is the fallback shell exec timeout in seconds (2 minutes).
+const defaultExecTimeout = 120
+
+// ExecTimeout returns the configured shell exec timeout in seconds,
+// defaulting to defaultExecTimeout if not set.
+func (c *Config) ExecTimeout() int {
+	if c.Tools.Exec.Timeout > 0 {
+		return c.Tools.Exec.Timeout
+	}
+	return defaultExecTimeout
 }
 
 // DefaultConfigPath returns ~/.gobot/config.json.

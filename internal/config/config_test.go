@@ -285,10 +285,9 @@ func TestTelegramToken_Empty(t *testing.T) {
 
 func TestMCPEnvFor_StaticValues(t *testing.T) {
 	cfg := &Config{
-		Strategic: StrategicConfig{
-			MCPServers: []MCPServerConfig{
-				{
-					Name:    "google-ai-search",
+		Tools: ToolsConfig{
+			MCPServers: map[string]MCPServerConfig{
+				"google-ai-search": {
 					Command: "node",
 					Args:    []string{"server.js"},
 					Env:     map[string]string{"GOOGLE_AI_API_KEY": "static-key-123"},
@@ -319,14 +318,12 @@ func TestMCPEnvFor_NoServers(t *testing.T) {
 }
 
 func TestMCPEnvFor_EmptyValue_NoFallback(t *testing.T) {
-	// When env value is empty and DPAPI has no matching key, the var is omitted.
 	cfg := &Config{
-		Strategic: StrategicConfig{
-			StorageRoot: t.TempDir(),
-			MCPServers: []MCPServerConfig{
-				{
-					Name: "my-server",
-					Env:  map[string]string{"SECRET_KEY": ""},
+		Strategic: StrategicConfig{StorageRoot: t.TempDir()},
+		Tools: ToolsConfig{
+			MCPServers: map[string]MCPServerConfig{
+				"my-server": {
+					Env: map[string]string{"SECRET_KEY": ""},
 				},
 			},
 		},
@@ -337,30 +334,30 @@ func TestMCPEnvFor_EmptyValue_NoFallback(t *testing.T) {
 	}
 }
 
-func TestMCPDecode_MCPServers(t *testing.T) {
+func TestDecode_MCPServers(t *testing.T) {
+	// Mirrors the actual tools.mcpServers layout in ~/.gobot/config.json.
 	input := `{
-        "strategic_edition": {
-            "storage_root": "D:\\Gobot_Storage",
-            "mcp_servers": [
-                {
-                    "name": "search-srv",
-                    "command": "npx",
-                    "args": ["-y", "search-server"],
-                    "env": {"API_KEY": "abc123", "DEBUG": ""}
-                }
-            ]
-        }
-    }`
+		"tools": {
+			"exec": {"timeout": 180},
+			"mcpServers": {
+				"search-srv": {
+					"command": "npx",
+					"args": ["-y", "search-server"],
+					"env": {"API_KEY": "abc123", "DEBUG": ""}
+				}
+			}
+		}
+	}`
 	cfg, err := decode(bytes.NewReader([]byte(input)))
 	if err != nil {
 		t.Fatalf("unexpected decode error: %v", err)
 	}
-	if len(cfg.Strategic.MCPServers) != 1 {
-		t.Fatalf("expected 1 MCP server, got %d", len(cfg.Strategic.MCPServers))
+	if len(cfg.Tools.MCPServers) != 1 {
+		t.Fatalf("expected 1 MCP server, got %d", len(cfg.Tools.MCPServers))
 	}
-	srv := cfg.Strategic.MCPServers[0]
-	if srv.Name != "search-srv" {
-		t.Errorf("name: got %q, want %q", srv.Name, "search-srv")
+	srv, ok := cfg.Tools.MCPServers["search-srv"]
+	if !ok {
+		t.Fatal("expected server key 'search-srv' not found")
 	}
 	if srv.Command != "npx" {
 		t.Errorf("command: got %q, want %q", srv.Command, "npx")
@@ -370,6 +367,23 @@ func TestMCPDecode_MCPServers(t *testing.T) {
 	}
 	if srv.Env["API_KEY"] != "abc123" {
 		t.Errorf("env[API_KEY]: got %q, want %q", srv.Env["API_KEY"], "abc123")
+	}
+	if cfg.Tools.Exec.Timeout != 180 {
+		t.Errorf("exec.timeout: got %d, want 180", cfg.Tools.Exec.Timeout)
+	}
+}
+
+func TestExecTimeout_Default(t *testing.T) {
+	cfg := &Config{}
+	if got := cfg.ExecTimeout(); got != 120 {
+		t.Errorf("ExecTimeout() = %d, want 120 (default)", got)
+	}
+}
+
+func TestExecTimeout_Configured(t *testing.T) {
+	cfg := &Config{Tools: ToolsConfig{Exec: ExecConfig{Timeout: 180}}}
+	if got := cfg.ExecTimeout(); got != 180 {
+		t.Errorf("ExecTimeout() = %d, want 180", got)
 	}
 }
 
