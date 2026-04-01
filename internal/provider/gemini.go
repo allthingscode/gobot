@@ -46,11 +46,12 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		Role: "assistant",
 	}
 
-	// Extract text content and thinking
+	// Extract text content, thinking, and tool calls in order
 	var textParts []string
 	var lastThoughtSig []byte
 	for _, part := range candidate.Content.Parts {
-		if part.Thought {
+		switch {
+		case part.Thought:
 			msg.ThinkingBlocks = append(msg.ThinkingBlocks, map[string]any{
 				"text":              part.Text,
 				"thought_signature": part.ThoughtSignature,
@@ -63,30 +64,30 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 				combined := *msg.ReasoningContent + "\n" + part.Text
 				msg.ReasoningContent = &combined
 			}
-		} else if part.Text != "" {
+
+		case part.FunctionCall != nil:
+			tc := map[string]any{
+				"name": part.FunctionCall.Name,
+				"args": part.FunctionCall.Args,
+			}
+			// If this part itself has a signature, or we saw one just before it
+			sig := part.ThoughtSignature
+			if len(sig) == 0 {
+				sig = lastThoughtSig
+			}
+			if len(sig) > 0 {
+				tc["thought_signature"] = sig
+			}
+			msg.ToolCalls = append(msg.ToolCalls, tc)
+
+		case part.Text != "":
 			textParts = append(textParts, part.Text)
 		}
 	}
+
 	if len(textParts) > 0 {
 		text := strings.Join(textParts, "\n")
 		msg.Content = &agentctx.MessageContent{Str: &text}
-	}
-
-	// Extract tool calls
-	funcCalls := resp.FunctionCalls()
-	if len(funcCalls) > 0 {
-		msg.ToolCalls = make([]map[string]any, len(funcCalls))
-		for i, fc := range funcCalls {
-			tc := map[string]any{
-				"name": fc.Name,
-				"args": fc.Args,
-			}
-			// If we have a thought signature from this turn, attach it.
-			if len(lastThoughtSig) > 0 {
-				tc["thought_signature"] = lastThoughtSig
-			}
-			msg.ToolCalls[i] = tc
-		}
 	}
 
 	usage := TokenUsage{}
