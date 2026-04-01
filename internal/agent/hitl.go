@@ -40,6 +40,11 @@ func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey string, toolNa
 		return "", nil
 	}
 
+	// F-048: Auto-approve cron jobs (scheduled tasks)
+	if strings.HasPrefix(sessionKey, "cron:") {
+		return "", nil
+	}
+
 	approved, err := m.RequestApproval(ctx, sessionKey, toolName, args)
 	if err != nil {
 		return "", err
