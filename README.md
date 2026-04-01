@@ -55,9 +55,14 @@ Clone the repository and build the binary using the provided scripts:
 
 ### Configuration
 
-1.  **Initialize:** Run `./gobot init` to create the storage structure (defaults to `D:\Gobot_Storage`).
-2.  **Configure:** Place your `config.json` in `~/.gobot/config.json` with your Gemini and Telegram credentials.
-3.  **Authorize:** Run `./gobot reauth` to link your Google Workspace account via interactive OAuth2.
+1.  **Initialize:** Run `./gobot init` to create the storage structure. This automatically generates a template at `~/.gobot/config.json`.
+    *   The default storage root is now `~/gobot_data`.
+    *   Use the `--root` flag to specify a custom path (e.g., `./gobot init --root D:\MyGobot`).
+2.  **Configure:** Open `~/.gobot/config.json` and fill in your `apiKey` (Gemini) and `telegram.token`.
+3.  **Authorize:** Link your Google Workspace account for Calendar, Tasks, and Gmail integration:
+    *   Download your `client_secrets.json` from the Google Cloud Console.
+    *   Place it in the `secrets` directory inside your storage root (e.g., `~/gobot_data/secrets/client_secrets.json`).
+    *   Run `./gobot reauth` and follow the interactive prompts.
 
 ## Usage
 

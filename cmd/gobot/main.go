@@ -80,14 +80,43 @@ func cmdVersion() *cobra.Command {
 }
 
 func cmdInit() *cobra.Command {
-	return &cobra.Command{
+	var rootFlag string
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create gobot workspace directories under the configured storage root",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath := config.DefaultConfigPath()
+			_, statErr := os.Stat(configPath)
+			configMissing := os.IsNotExist(statErr)
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
+
+			// If missing, setup a baseline template
+			if configMissing {
+				cfg.Agents.Defaults.Model = "gemini-3-flash-preview"
+				cfg.Agents.Defaults.MaxTokens = 8192
+				cfg.Agents.Defaults.MaxToolIterations = 25
+				cfg.Agents.Defaults.MemoryWindow = 50
+			}
+
+			// Override root if flag is provided
+			if rootFlag != "" {
+				cfg.Strategic.StorageRoot = rootFlag
+			}
+
+			// Write config if it was missing or if we updated the root
+			if configMissing || rootFlag != "" {
+				if err := cfg.Save(configPath); err != nil {
+					return fmt.Errorf("failed to save config: %w", err)
+				}
+				if configMissing {
+					fmt.Printf("Generated default config at %s\n", configPath)
+				}
+			}
+
 			dirs := []string{
 				cfg.WorkspacePath(),
 				cfg.WorkspacePath("jobs"),
@@ -108,6 +137,8 @@ func cmdInit() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&rootFlag, "root", "", "Custom storage root directory")
+	return cmd
 }
 
 func cmdDoctor() *cobra.Command {

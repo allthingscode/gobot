@@ -113,12 +113,28 @@ type MCPServerConfig struct {
 	Env     map[string]string `json:"env"`
 }
 
-// StorageRoot returns the configured storage root, defaulting to D:\Gobot_Storage.
+// StorageRoot returns the configured storage root, defaulting to ~/gobot_data.
 func (c *Config) StorageRoot() string {
 	if c.Strategic.StorageRoot != "" {
 		return c.Strategic.StorageRoot
 	}
-	return `D:\Gobot_Storage`
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return `D:\Gobot_Storage`
+	}
+	return filepath.Join(home, "gobot_data")
+}
+
+// Save marshals the config to JSON and writes it to the specified path.
+func (c *Config) Save(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	return os.WriteFile(path, data, 0600)
 }
 
 // SecretsRoot returns the path to the secrets directory under StorageRoot.
@@ -234,6 +250,9 @@ func Load() (*Config, error) {
 func LoadFrom(path string) (*Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return &Config{}, nil
+		}
 		return nil, fmt.Errorf("open config %s: %w", path, err)
 	}
 	defer f.Close()

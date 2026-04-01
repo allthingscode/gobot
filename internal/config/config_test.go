@@ -59,8 +59,30 @@ func TestDecode_MalformedJSON(t *testing.T) {
 
 func TestStorageRoot_Default(t *testing.T) {
 	cfg := &Config{}
-	if cfg.StorageRoot() != `D:\Gobot_Storage` {
-		t.Errorf("got %q, want default storage root", cfg.StorageRoot())
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, "gobot_data")
+	if home == "" {
+		want = `D:\Gobot_Storage`
+	}
+	if cfg.StorageRoot() != want {
+		t.Errorf("got %q, want %q", cfg.StorageRoot(), want)
+	}
+}
+
+func TestSave(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{
+		Strategic: StrategicConfig{UserEmail: "test@example.com"},
+	}
+	if err := cfg.Save(tmp); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	cfg2, err := LoadFrom(tmp)
+	if err != nil {
+		t.Fatalf("LoadFrom failed: %v", err)
+	}
+	if cfg2.Strategic.UserEmail != "test@example.com" {
+		t.Errorf("got email %q, want %q", cfg2.Strategic.UserEmail, "test@example.com")
 	}
 }
 
@@ -72,6 +94,12 @@ func TestStorageRoot_Override(t *testing.T) {
 }
 
 func TestSecretsRoot(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	defaultRoot := filepath.Join(home, "gobot_data")
+	if home == "" {
+		defaultRoot = `D:\Gobot_Storage`
+	}
+
 	tests := []struct {
 		name        string
 		storageRoot string
@@ -80,7 +108,7 @@ func TestSecretsRoot(t *testing.T) {
 		{
 			name:        "default storage root",
 			storageRoot: "",
-			want:        filepath.Join(`D:\Gobot_Storage`, "secrets"),
+			want:        filepath.Join(defaultRoot, "secrets"),
 		},
 		{
 			name:        "custom storage root",
@@ -219,9 +247,12 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
-	_, err := LoadFrom(filepath.Join(t.TempDir(), "nonexistent.json"))
-	if err == nil {
-		t.Fatal("expected error for missing file, got nil")
+	cfg, err := LoadFrom(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected empty config for missing file, got nil")
 	}
 }
 
