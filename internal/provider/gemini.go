@@ -103,8 +103,11 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 			continue
 		}
 		role := msg.Role
-		if role == "assistant" {
+		switch role {
+		case "assistant":
 			role = "model"
+		case "tool":
+			role = "user"
 		}
 		c := &genai.Content{Role: role}
 		
