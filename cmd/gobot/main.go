@@ -159,6 +159,7 @@ type dispatchHandler struct {
 	mgr          *agent.SessionManager
 	memory       *memory.MemoryStore        // may be nil
 	consolidator *consolidator.Consolidator // may be nil
+	hitl         *agent.HITLManager         // may be nil
 }
 
 func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
@@ -173,6 +174,13 @@ func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot
 		h.consolidator.ConsolidateAsync(sessionKey, reply)
 	}
 	return reply, err
+}
+
+func (h *dispatchHandler) HandleCallback(ctx context.Context, cb bot.InboundCallback) error {
+	if h.hitl != nil {
+		return h.hitl.HandleCallback(ctx, cb)
+	}
+	return nil
 }
 
 func cmdRun() *cobra.Command {
@@ -290,6 +298,16 @@ func cmdRun() *cobra.Command {
 
 			// F-012: create shared Hooks instance and wire into both SessionManager and runner.
 			hooks := &agent.Hooks{}
+
+			api, err := newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
+			if err != nil {
+				return fmt.Errorf("telegram: %w", err)
+			}
+
+			// F-048: HITL Approval Framework
+			hitl := agent.NewHITLManager(api, []string{"shell_exec", "send_email"})
+			hooks.RegisterPreTool(hitl.PreToolHook)
+
 			mgr.SetHooks(hooks)
 			runner.SetHooks(hooks)
 			handler := &dispatchHandler{mgr: mgr, memory: memStore}
@@ -297,7 +315,14 @@ func cmdRun() *cobra.Command {
 				handler.consolidator = consolidator.New(runner, memStore)
 				slog.Info("run: memory consolidation enabled")
 			}
+
+			// Wrap handler with HITL and Pairing gates
 			var gateHandler bot.Handler = handler
+
+			// Add HITL callback handling to the handler chain
+			// We can wrap the handler or let dispatchHandler implement HandleCallback
+			handler.hitl = hitl
+
 			if store != nil {
 				if pairingStore, pErr := agentctx.NewPairingStore(store.DB()); pErr != nil {
 					slog.Warn("run: pairing store unavailable, DM pairing disabled", "err", pErr)
@@ -305,10 +330,6 @@ func cmdRun() *cobra.Command {
 					gateHandler = bot.NewPairingHandler(pairingStore, handler)
 					slog.Info("run: DM pairing enabled")
 				}
-			}
-			api, err := newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
-			if err != nil {
-				return fmt.Errorf("telegram: %w", err)
 			}
 
 			b := bot.New(api, gateHandler)

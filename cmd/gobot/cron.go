@@ -75,6 +75,25 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 	return nil
 }
 
+// Alert sends a failure notification directly via Telegram, bypassing the agent
+// runner. This prevents a cascading failure when the runner itself is the error source.
+func (d *cronDispatcher) Alert(ctx context.Context, p cron.Payload) error {
+	_, to, _ := cron.ResolveRoutableChannel(p, d.storageRoot)
+	if to == "" {
+		slog.Warn("cronDispatcher.Alert: unroutable payload, dropping", "channel", p.Channel)
+		return nil
+	}
+	chatID, threadID, err := parseSessionKey(to)
+	if err != nil {
+		return fmt.Errorf("cronDispatcher.Alert: %w", err)
+	}
+	return d.b.Send(ctx, bot.OutboundMessage{
+		ChatID:   chatID,
+		ThreadID: threadID,
+		Text:     p.Message,
+	})
+}
+
 // parseSessionKey parses "telegram:12345" or "telegram:12345:7"
 // into chatID and threadID. Returns error if the key is malformed.
 // Examples:

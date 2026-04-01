@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -195,6 +196,78 @@ func TestHooks_PostTool_ChainTransforms(t *testing.T) {
 	got := h.RunPostTool(context.Background(), "tool", "hello")
 	if got != "[HELLO]" {
 		t.Errorf("got %q, want %q", got, "[HELLO]")
+	}
+}
+
+// ── PreTool hooks ───────────────────────────────────────────────────────────
+
+func TestHooks_PreTool_NoHooks(t *testing.T) {
+	h := &Hooks{}
+	got, err := h.RunPreTool(context.Background(), "sess", "tool", nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+}
+
+func TestHooks_PreTool_SingleHook_Pass(t *testing.T) {
+	h := &Hooks{}
+	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
+		return "", nil // continue
+	})
+	got, err := h.RunPreTool(context.Background(), "sess", "tool", nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+}
+
+func TestHooks_PreTool_SingleHook_Override(t *testing.T) {
+	h := &Hooks{}
+	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
+		return "INTERCEPTED", nil
+	})
+	got, err := h.RunPreTool(context.Background(), "sess", "tool", nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got != "INTERCEPTED" {
+		t.Errorf("got %q, want %q", got, "INTERCEPTED")
+	}
+}
+
+func TestHooks_PreTool_ChainOrder(t *testing.T) {
+	h := &Hooks{}
+	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
+		return "", nil // Pass
+	})
+	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
+		return "B", nil // Override
+	})
+	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
+		return "C", nil // Should not be reached
+	})
+	got, err := h.RunPreTool(context.Background(), "sess", "tool", nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got != "B" {
+		t.Errorf("got %q, want %q", got, "B")
+	}
+}
+
+func TestHooks_PreTool_ErrorAborts(t *testing.T) {
+	h := &Hooks{}
+	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
+		return "", fmt.Errorf("some error") // Abort
+	})
+	_, err := h.RunPreTool(context.Background(), "sess", "tool", nil)
+	if err == nil {
+		t.Error("expected error, got nil")
 	}
 }
 

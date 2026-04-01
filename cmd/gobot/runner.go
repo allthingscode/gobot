@@ -124,14 +124,33 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		for _, fc := range funcCalls {
 			toolSeq = append(toolSeq, fc.Name)
 			slog.Info("gemini: tool call", "session", sessionKey, "tool", fc.Name, "iter", iter)
-			result, execErr := r.executeTool(ctx, sessionKey, fc)
+
+			var result string
+			var execErr error
+			var skipExec bool
+
+			// Run PreTool hooks (F-048) -- allow interception/approval.
+			if r.hooks != nil {
+				override, err := r.hooks.RunPreTool(ctx, sessionKey, fc.Name, fc.Args)
+				if err != nil {
+					execErr = err
+				} else if override != "" {
+					result = override
+					skipExec = true
+				}
+			}
+
+			if execErr == nil && !skipExec {
+				result, execErr = r.executeTool(ctx, sessionKey, fc)
+			}
+
 			var response map[string]any
 			if execErr != nil {
 				slog.Warn("gemini: tool execution failed", "tool", fc.Name, "err", execErr)
 				response = map[string]any{"error": execErr.Error()}
 			} else {
 				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.
-				if r.hooks != nil {
+				if r.hooks != nil && !skipExec {
 					result = r.hooks.RunPostTool(ctx, fc.Name, result)
 				}
 				response = map[string]any{"output": result}

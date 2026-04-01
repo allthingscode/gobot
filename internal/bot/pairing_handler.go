@@ -23,7 +23,6 @@ func NewPairingHandler(store PairingStorer, inner Handler) *PairingHandler {
 	return &PairingHandler{store: store, inner: inner}
 }
 
-// Handle checks authorization and either delegates to the inner handler or returns a pairing code reply.
 func (h *PairingHandler) Handle(ctx context.Context, sessionKey string, msg InboundMessage) (string, error) {
 	authorized, err := h.store.IsAuthorized(msg.ChatID)
 	if err != nil {
@@ -45,4 +44,16 @@ func (h *PairingHandler) Handle(ctx context.Context, sessionKey string, msg Inbo
 		"You are not authorized to use this bot.\n\nYour pairing code is: %s\n\nGive this code to the operator to request access.",
 		code,
 	), nil
+}
+
+// HandleCallback checks authorization and delegates to the inner handler for authorized users.
+func (h *PairingHandler) HandleCallback(ctx context.Context, cb InboundCallback) error {
+	authorized, err := h.store.IsAuthorized(cb.ChatID)
+	if err != nil {
+		return err
+	}
+	if !authorized {
+		return fmt.Errorf("unauthorized callback from %d", cb.ChatID)
+	}
+	return h.inner.HandleCallback(ctx, cb)
 }

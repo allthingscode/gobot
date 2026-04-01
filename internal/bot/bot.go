@@ -22,6 +22,21 @@ type InboundMessage struct {
 	Text      string
 }
 
+// Button represents an inline keyboard button.
+type Button struct {
+	Text string
+	Data string
+}
+
+// InboundCallback is a normalized callback query from an inline button.
+type InboundCallback struct {
+	ChatID     int64
+	MessageID  int64
+	SenderID   int64
+	Data       string
+	SessionKey string
+}
+
 // OutboundMessage is a message to send via Telegram.
 type OutboundMessage struct {
 	ChatID    int64
@@ -37,8 +52,12 @@ type API interface {
 	// Updates returns a channel of inbound messages. The channel is closed
 	// when Stop() is called or ctx is cancelled.
 	Updates(ctx context.Context, timeout int) (<-chan InboundMessage, error)
+	// Callbacks returns a channel of inbound callback queries.
+	Callbacks(ctx context.Context) (<-chan InboundCallback, error)
 	// Send delivers an outbound message.
 	Send(ctx context.Context, msg OutboundMessage) error
+	// SendWithButtons delivers a message with inline keyboard buttons.
+	SendWithButtons(ctx context.Context, msg OutboundMessage, buttons [][]Button) error
 	// Typing starts a periodic typing indicator. Returns a stop function.
 	Typing(ctx context.Context, chatID, threadID int64) func()
 	// Stop signals the API to stop delivering updates.
@@ -50,6 +69,7 @@ type API interface {
 // Implementations must be safe for concurrent use.
 type Handler interface {
 	Handle(ctx context.Context, sessionKey string, msg InboundMessage) (string, error)
+	HandleCallback(ctx context.Context, cb InboundCallback) error
 }
 
 // Bot is the Telegram polling runtime.
@@ -125,10 +145,23 @@ func (b *Bot) Run(ctx context.Context) error {
 	const maxDelay = 60 * time.Second
 	retryDelay := initialDelay
 
+	callbacks, err := b.api.Callbacks(ctx)
+	if err != nil {
+		return fmt.Errorf("bot: Callbacks failed: %w", err)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case cb, ok := <-callbacks:
+			if ok {
+				go func() {
+					if err := b.handler.HandleCallback(ctx, cb); err != nil {
+						slog.Error("bot: HandleCallback failed", "err", err)
+					}
+				}()
+			}
 		default:
 		}
 
@@ -154,6 +187,14 @@ func (b *Bot) Run(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
+			case cb, ok := <-callbacks:
+				if ok {
+					go func() {
+						if err := b.handler.HandleCallback(ctx, cb); err != nil {
+							slog.Error("bot: HandleCallback failed", "err", err)
+						}
+					}()
+				}
 			case msg, ok := <-updates:
 				if !ok {
 					break drain // channel closed — reconnect
@@ -196,4 +237,9 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 // Send delivers a message via the underlying API.
 func (b *Bot) Send(ctx context.Context, msg OutboundMessage) error {
 	return b.api.Send(ctx, msg)
+}
+
+// SendWithButtons delivers a message with buttons via the underlying API.
+func (b *Bot) SendWithButtons(ctx context.Context, msg OutboundMessage, buttons [][]Button) error {
+	return b.api.SendWithButtons(ctx, msg, buttons)
 }

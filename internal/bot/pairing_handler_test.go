@@ -40,6 +40,10 @@ func (m *mockInnerHandler) Handle(ctx context.Context, sessionKey string, msg In
 	return m.reply, m.err
 }
 
+func (m *mockInnerHandler) HandleCallback(ctx context.Context, cb InboundCallback) error {
+	return nil
+}
+
 func TestPairingHandler_AuthorizedUser_DelegatesToInner(t *testing.T) {
 	store := &mockPairingStore{
 		authorizedIDs: map[int64]bool{1: true},

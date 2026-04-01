@@ -12,6 +12,7 @@ import (
 
 type mockDispatcher struct {
 	payloads  []Payload
+	alerts    []Payload
 	failFirst bool
 	failErr   error
 }
@@ -21,6 +22,11 @@ func (m *mockDispatcher) Dispatch(ctx context.Context, p Payload) error {
 	if m.failFirst && len(m.payloads) == 1 {
 		return m.failErr
 	}
+	return nil
+}
+
+func (m *mockDispatcher) Alert(ctx context.Context, p Payload) error {
+	m.alerts = append(m.alerts, p)
 	return nil
 }
 
@@ -245,12 +251,15 @@ func TestSchedulerPoll_FailureAlert(t *testing.T) {
 		t.Fatalf("poll failed: %v", err)
 	}
 
-	// Expect two dispatches: original job (failed) + failure alert
-	if len(dispatcher.payloads) != 2 {
-		t.Fatalf("want 2 dispatches (job + alert), got %d", len(dispatcher.payloads))
+	// Original job dispatch must fail once.
+	if len(dispatcher.payloads) != 1 {
+		t.Fatalf("want 1 dispatch (job only), got %d", len(dispatcher.payloads))
 	}
-
-	alert := dispatcher.payloads[1]
+	// Alert must go through Alert(), not Dispatch().
+	if len(dispatcher.alerts) != 1 {
+		t.Fatalf("want 1 alert, got %d", len(dispatcher.alerts))
+	}
+	alert := dispatcher.alerts[0]
 	if alert.Channel != "telegram" {
 		t.Errorf("alert channel: want telegram, got %q", alert.Channel)
 	}

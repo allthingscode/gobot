@@ -95,9 +95,9 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 				if update.Message == nil || update.Message.Text == "" {
 					continue
 				}
-		msgID := int64(update.Message.MessageID)
-		dedupKey := fmt.Sprintf("%d:%d", update.Message.Chat.ID, msgID)
-		if t.isDuplicate(dedupKey) {
+				msgID := int64(update.Message.MessageID)
+				dedupKey := fmt.Sprintf("%d:%d", update.Message.Chat.ID, msgID)
+				if t.isDuplicate(dedupKey) {
 					continue
 				}
 				if len(t.allowFrom) > 0 && !t.allowFrom[update.Message.Chat.ID] {
@@ -114,6 +114,60 @@ func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMes
 					ThreadID:  int64(update.Message.MessageThreadID),
 					SenderID:  senderID,
 					Text:      update.Message.Text,
+				}
+			}
+		}
+	}()
+	return out, nil
+}
+
+func (t *tgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, error) {
+	out := make(chan bot.InboundCallback)
+	go func() {
+		defer close(out)
+		offset := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			updates, err := t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
+				Offset:  offset,
+				Timeout: 30,
+			})
+			if err != nil {
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			for _, update := range updates {
+				if update.UpdateID >= offset {
+					offset = update.UpdateID + 1
+				}
+				if update.CallbackQuery == nil {
+					continue
+				}
+				cb := update.CallbackQuery
+				var chatID int64
+				var msgID int64
+				if cb.Message != nil {
+					chatID = cb.Message.GetChat().ID
+					msgID = int64(cb.Message.GetMessageID())
+				}
+
+				// Answer callback immediately to stop loading spinner
+				_ = t.client.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+					CallbackQueryID: cb.ID,
+				})
+
+				out <- bot.InboundCallback{
+					ChatID:     chatID,
+					MessageID:  msgID,
+					SenderID:   cb.From.ID,
+					Data:       cb.Data,
+					SessionKey: bot.SessionKey(chatID, 0, cb.From.ID),
 				}
 			}
 		}
@@ -178,6 +232,34 @@ func (t *tgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	}
 	if err != nil {
 		return fmt.Errorf("telego send: %w", err)
+	}
+	return nil
+}
+
+func (t *tgAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, buttons [][]bot.Button) error {
+	rows := make([][]telego.InlineKeyboardButton, len(buttons))
+	for i, row := range buttons {
+		rows[i] = make([]telego.InlineKeyboardButton, len(row))
+		for j, btn := range row {
+			rows[i][j] = telego.InlineKeyboardButton{
+				Text:         btn.Text,
+				CallbackData: btn.Data,
+			}
+		}
+	}
+
+	params := &telego.SendMessageParams{
+		ChatID:      telego.ChatID{ID: msg.ChatID},
+		Text:        telegram.ToHTML(msg.Text),
+		ParseMode:   telego.ModeHTML,
+		ReplyMarkup: &telego.InlineKeyboardMarkup{InlineKeyboard: rows},
+	}
+	if msg.ThreadID > 0 {
+		params.MessageThreadID = int(msg.ThreadID)
+	}
+	_, err := t.client.SendMessage(ctx, params)
+	if err != nil {
+		return fmt.Errorf("telego SendWithButtons: %w", err)
 	}
 	return nil
 }

@@ -12,15 +12,19 @@ import (
 // ── Mock API ──────────────────────────────────────────────────────────────────
 
 type mockAPI struct {
-	updates chan InboundMessage
-	sent    []OutboundMessage
-	sendErr error
-	stopped bool
-	mu      sync.Mutex
+	updates   chan InboundMessage
+	callbacks chan InboundCallback
+	sent      []OutboundMessage
+	sendErr   error
+	stopped   bool
+	mu        sync.Mutex
 }
 
 func newMockAPI(msgs ...InboundMessage) *mockAPI {
-	m := &mockAPI{updates: make(chan InboundMessage, len(msgs))}
+	m := &mockAPI{
+		updates:   make(chan InboundMessage, len(msgs)+10),
+		callbacks: make(chan InboundCallback, 10),
+	}
 	for _, msg := range msgs {
 		m.updates <- msg
 	}
@@ -31,7 +35,21 @@ func (m *mockAPI) Updates(_ context.Context, _ int) (<-chan InboundMessage, erro
 	return m.updates, nil
 }
 
+func (m *mockAPI) Callbacks(_ context.Context) (<-chan InboundCallback, error) {
+	return m.callbacks, nil
+}
+
 func (m *mockAPI) Send(_ context.Context, msg OutboundMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+func (m *mockAPI) SendWithButtons(_ context.Context, msg OutboundMessage, _ [][]Button) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.sendErr != nil {
@@ -76,8 +94,14 @@ func (m *mockAPIWithError) Updates(ctx context.Context, timeout int) (<-chan Inb
 	}
 	return m.fallback.Updates(ctx, timeout)
 }
+func (m *mockAPIWithError) Callbacks(ctx context.Context) (<-chan InboundCallback, error) {
+	return m.fallback.Callbacks(ctx)
+}
 func (m *mockAPIWithError) Send(ctx context.Context, msg OutboundMessage) error {
 	return m.fallback.Send(ctx, msg)
+}
+func (m *mockAPIWithError) SendWithButtons(ctx context.Context, msg OutboundMessage, buttons [][]Button) error {
+	return m.fallback.SendWithButtons(ctx, msg, buttons)
 }
 func (m *mockAPIWithError) Typing(ctx context.Context, chatID, threadID int64) func() {
 	return m.fallback.Typing(ctx, chatID, threadID)
@@ -98,6 +122,10 @@ func (h *mockHandler) Handle(_ context.Context, sessionKey string, _ InboundMess
 	defer h.mu.Unlock()
 	h.calls = append(h.calls, sessionKey)
 	return h.response, h.err
+}
+
+func (h *mockHandler) HandleCallback(_ context.Context, _ InboundCallback) error {
+	return nil
 }
 
 func (h *mockHandler) getCalls() []string {
@@ -368,6 +396,10 @@ func (h *callCountHandler) Handle(_ context.Context, _ string, _ InboundMessage)
 		return h.responses[i], h.errs[i]
 	}
 	return "", nil
+}
+
+func (h *callCountHandler) HandleCallback(_ context.Context, _ InboundCallback) error {
+	return nil
 }
 
 func (h *callCountHandler) callCount() int {

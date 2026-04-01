@@ -16,6 +16,13 @@ type Dispatcher interface {
 	Dispatch(ctx context.Context, p Payload) error
 }
 
+// Alerter is an optional interface a Dispatcher may implement to send failure
+// notifications directly, bypassing the agent runner. If the dispatcher does
+// not implement Alerter, the scheduler falls back to Dispatch.
+type Alerter interface {
+	Alert(ctx context.Context, p Payload) error
+}
+
 // Scheduler handles the lifecycle of scheduled jobs.
 type Scheduler struct {
 	storePath        string
@@ -198,8 +205,14 @@ func (s *Scheduler) poll(ctx context.Context) error {
 						To:      dj.payload.To,
 						Message: fmt.Sprintf("⚠️ Job %q failed: %v", dj.name, err),
 					}
-					if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
-						slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
+					if a, ok := s.dispatcher.(Alerter); ok {
+						if alertErr := a.Alert(ctx, alert); alertErr != nil {
+							slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
+						}
+					} else {
+						if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
+							slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
+						}
 					}
 				}
 				results <- dispatchResult{index: dj.index, err: err}
