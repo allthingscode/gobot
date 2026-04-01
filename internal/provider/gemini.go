@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/genai"
@@ -95,9 +96,10 @@ func (p *GeminiProvider) Models() []ModelInfo {
 
 func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage) []*genai.Content {
 	contents := make([]*genai.Content, 0, len(messages))
-	for _, msg := range messages {
+	for i, msg := range messages {
 		// A message is valid if it has content, tool calls, or is a tool response (Name set).
 		if msg.Content == nil && len(msg.ToolCalls) == 0 && msg.Name == nil {
+			slog.Debug("gemini: skipping empty message", "index", i, "role", msg.Role)
 			continue
 		}
 		role := msg.Role
@@ -108,14 +110,13 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		
 		// Handle text content
 		if msg.Content != nil {
-			if msg.Content.Str != nil {
+			if msg.Content.Str != nil && *msg.Content.Str != "" {
 				c.Parts = append(c.Parts, &genai.Part{Text: *msg.Content.Str})
 			} else {
 				for _, item := range msg.Content.Items {
-					if item.Text != nil {
+					if item.Text != nil && item.Text.Text != "" {
 						c.Parts = append(c.Parts, &genai.Part{Text: item.Text.Text})
 					}
-					// Note: Image and other types can be added here as needed
 				}
 			}
 		}
@@ -124,22 +125,20 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		for _, tc := range msg.ToolCalls {
 			name, _ := tc["name"].(string)
 			args, _ := tc["args"].(map[string]any)
-			c.Parts = append(c.Parts, &genai.Part{
-				FunctionCall: &genai.FunctionCall{
-					Name: name,
-					Args: args,
-				},
-			})
+			if name != "" {
+				c.Parts = append(c.Parts, &genai.Part{
+					FunctionCall: &genai.FunctionCall{
+						Name: name,
+						Args: args,
+					},
+				})
+			}
 		}
 
 		// Handle tool results (user turn)
 		if msg.Role == "tool" || (msg.Role == "user" && msg.ToolCallID != nil) {
-			// In our schema, tool results often come in a message with Role="user" (Gemini requirement)
-			// or Role="tool" (generic).
-			// If it has a Name and Content, it's a function response.
 			if msg.Name != nil && msg.Content != nil && msg.Content.Str != nil {
 				var res map[string]any
-				// Try to parse content as JSON if it's a map, otherwise wrap it
 				if err := json.Unmarshal([]byte(*msg.Content.Str), &res); err != nil {
 					res = map[string]any{"output": *msg.Content.Str}
 				}
@@ -150,6 +149,8 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		// Final safety check: if we somehow ended up with no parts, don't add the content.
 		if len(c.Parts) > 0 {
 			contents = append(contents, c)
+		} else {
+			slog.Debug("gemini: message yielded no parts, omitting", "index", i, "role", msg.Role)
 		}
 	}
 	return contents
