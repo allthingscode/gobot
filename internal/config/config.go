@@ -66,9 +66,19 @@ type ToolsConfig struct {
 }
 
 type StrategicConfig struct {
-	UserEmail   string `json:"user_email"`
-	StorageRoot string `json:"storage_root"`
-	Mandate     string `json:"mandate"`
+	UserEmail         string `json:"user_email"`
+	StorageRoot       string `json:"storage_root"`
+	Mandate           string `json:"mandate"`
+	MaxToolIterations int    `json:"max_tool_iterations,omitempty"`
+}
+
+// EffectiveMaxToolIterations returns the configured tool iteration cap,
+// defaulting to 25 if unset or zero.
+func (c *Config) EffectiveMaxToolIterations() int {
+	if c.Strategic.MaxToolIterations > 0 {
+		return c.Strategic.MaxToolIterations
+	}
+	return 25
 }
 
 // MCPServerConfig describes one MCP server entry under tools.mcpServers.

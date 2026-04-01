@@ -20,17 +20,17 @@ import (
 
 // maxToolIterations caps the tool-call/response loop within a single Run call.
 // Prevents infinite loops when the model keeps requesting tools.
-const maxToolIterations = 10
 
 type geminiRunner struct {
-	client       *genai.Client
-	model        string
-	systemPrompt string
-	memStore     *memory.MemoryStore // may be nil; used for RAG context injection
-	tools        []Tool              // registered tools exposed to Gemini as FunctionDeclarations
-	breaker      *resilience.Breaker // circuit breaker for Gemini API calls
-	limiter      *rate.Limiter       // token-bucket rate limiter for Gemini API calls
-	hooks        *agent.Hooks        // may be nil; set via SetHooks
+	client            *genai.Client
+	model             string
+	systemPrompt      string
+	memStore          *memory.MemoryStore // may be nil; used for RAG context injection
+	tools             []Tool              // registered tools exposed to Gemini as FunctionDeclarations
+	breaker           *resilience.Breaker // circuit breaker for Gemini API calls
+	limiter           *rate.Limiter       // token-bucket rate limiter for Gemini API calls
+	hooks             *agent.Hooks        // may be nil; set via SetHooks
+	maxToolIterations int
 }
 
 func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
@@ -41,7 +41,8 @@ func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *g
 		// Trip after 5 consecutive failures within 60s; attempt recovery after 300s.
 		breaker: resilience.New("gemini", 5, 60*time.Second, 300*time.Second),
 		// 3 requests/second burst; conservative default for shared Gemini quota.
-		limiter: rate.NewLimiter(rate.Every(time.Second), 3),
+		limiter:           rate.NewLimiter(rate.Every(time.Second), 3),
+		maxToolIterations: 25,
 	}
 }
 
@@ -88,7 +89,10 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 	contents := r.messagesToContents(messages)
 	cfg := r.buildConfig(messages)
 
-	for iter := 0; iter < maxToolIterations; iter++ {
+	// toolSeq records the tool names called across all iterations for diagnostics.
+	toolSeq := make([]string, 0, r.maxToolIterations*2)
+
+	for iter := 0; iter < r.maxToolIterations; iter++ {
 		slog.Debug("gemini: calling GenerateContent", "session", sessionKey, "model", r.model, "messages", len(contents), "iter", iter)
 		resp, err := r.retryGenerateContent(ctx, contents, cfg)
 		if err != nil {
@@ -101,7 +105,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 
 		funcCalls := resp.FunctionCalls()
 		if len(funcCalls) == 0 {
-			// Terminal response â€” extract text and return.
+			// Terminal response -- extract text and return.
 			text := extractResponseText(resp)
 			newMsg := agentctx.StrategicMessage{
 				Role:    "assistant",
@@ -116,6 +120,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		// Execute each function call and collect FunctionResponse parts.
 		responseParts := make([]*genai.Part, 0, len(funcCalls))
 		for _, fc := range funcCalls {
+			toolSeq = append(toolSeq, fc.Name)
 			slog.Info("gemini: tool call", "session", sessionKey, "tool", fc.Name, "iter", iter)
 			result, execErr := r.executeTool(ctx, sessionKey, fc)
 			var response map[string]any
@@ -123,7 +128,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 				slog.Warn("gemini: tool execution failed", "tool", fc.Name, "err", execErr)
 				response = map[string]any{"error": execErr.Error()}
 			} else {
-				// Run PostTool hooks (F-012) — transform tool results before returning to agent.
+				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.
 				if r.hooks != nil {
 					result = r.hooks.RunPostTool(ctx, fc.Name, result)
 				}
@@ -138,7 +143,12 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		})
 	}
 
-	return "", nil, fmt.Errorf("gemini: tool dispatch loop exceeded %d iterations", maxToolIterations)
+	slog.Error("gemini: tool loop exhausted",
+		"session", sessionKey,
+		"iterations", r.maxToolIterations,
+		"tool_sequence", strings.Join(toolSeq, " -> "),
+	)
+	return "", nil, fmt.Errorf("gemini: tool dispatch loop exceeded %d iterations", r.maxToolIterations)
 }
 
 // executeTool dispatches a FunctionCall to the matching registered Tool.
@@ -237,7 +247,7 @@ func (r *geminiRunner) buildConfig(messages []agentctx.StrategicMessage) *genai.
 		tools = append(tools, &genai.Tool{GoogleSearch: &genai.GoogleSearch{}})
 	}
 
-	// Run PrePrompt hooks (F-012) â€” allow features to inject into system prompt.
+	// Run PrePrompt hooks (F-012) -- allow features to inject into system prompt.
 	if r.hooks != nil {
 		systemPrompt = r.hooks.RunPrePrompt(context.Background(), systemPrompt)
 	}

@@ -220,7 +220,7 @@ func cmdRun() *cobra.Command {
 			// Register tools.
 			secretsRoot := cfg.SecretsRoot()
 			tools := []Tool{
-				newSpawnTool(genaiClient, model, nil, specialistModels, memStore),
+				newSpawnTool(genaiClient, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
 			}
 			tools = append(tools, newShellExecTool(cfg.WorkspacePath()))
 			if memStore != nil {

@@ -387,4 +387,23 @@ func TestExecTimeout_Configured(t *testing.T) {
 	}
 }
 
+func TestEffectiveMaxToolIterations(t *testing.T) {
+	tests := []struct {
+		name string
+		val  int
+		want int
+	}{
+		{"zero value defaults to 25", 0, 25},
+		{"explicit value", 50, 50},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Strategic: StrategicConfig{MaxToolIterations: tc.val}}
+			if got := cfg.EffectiveMaxToolIterations(); got != tc.want {
+				t.Errorf("EffectiveMaxToolIterations() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 var _ io.Reader = errReader{}
