@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -47,23 +48,23 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	// Extract text content and thinking
 	var textParts []string
+	var lastThoughtSig []byte
 	for _, part := range candidate.Content.Parts {
-		if part.Text != "" {
-			if part.Thought {
-				msg.ThinkingBlocks = append(msg.ThinkingBlocks, map[string]any{
-					"text":              part.Text,
-					"thought_signature": part.ThoughtSignature,
-				})
-				// reasoningContent is used for display/logging
-				if msg.ReasoningContent == nil {
-					msg.ReasoningContent = &part.Text
-				} else {
-					combined := *msg.ReasoningContent + "\n" + part.Text
-					msg.ReasoningContent = &combined
-				}
+		if part.Thought {
+			msg.ThinkingBlocks = append(msg.ThinkingBlocks, map[string]any{
+				"text":              part.Text,
+				"thought_signature": part.ThoughtSignature,
+			})
+			lastThoughtSig = part.ThoughtSignature
+			// reasoningContent is used for display/logging
+			if msg.ReasoningContent == nil {
+				msg.ReasoningContent = &part.Text
 			} else {
-				textParts = append(textParts, part.Text)
+				combined := *msg.ReasoningContent + "\n" + part.Text
+				msg.ReasoningContent = &combined
 			}
+		} else if part.Text != "" {
+			textParts = append(textParts, part.Text)
 		}
 	}
 	if len(textParts) > 0 {
@@ -76,10 +77,15 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if len(funcCalls) > 0 {
 		msg.ToolCalls = make([]map[string]any, len(funcCalls))
 		for i, fc := range funcCalls {
-			msg.ToolCalls[i] = map[string]any{
+			tc := map[string]any{
 				"name": fc.Name,
 				"args": fc.Args,
 			}
+			// If we have a thought signature from this turn, attach it.
+			if len(lastThoughtSig) > 0 {
+				tc["thought_signature"] = lastThoughtSig
+			}
+			msg.ToolCalls[i] = tc
 		}
 	}
 
@@ -153,12 +159,25 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		for _, tc := range msg.ToolCalls {
 			name, _ := tc["name"].(string)
 			args, _ := tc["args"].(map[string]any)
+			
+			var sig []byte
+			if rawSig, ok := tc["thought_signature"]; ok {
+				switch v := rawSig.(type) {
+				case []byte:
+					sig = v
+				case string:
+					// In JSON, []byte is base64 encoded string
+					sig, _ = base64.StdEncoding.DecodeString(v)
+				}
+			}
+
 			if name != "" {
 				c.Parts = append(c.Parts, &genai.Part{
 					FunctionCall: &genai.FunctionCall{
 						Name: name,
 						Args: args,
 					},
+					ThoughtSignature: sig,
 				})
 			}
 		}
