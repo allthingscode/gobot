@@ -112,7 +112,13 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 			if update.UpdateID >= offset {
 				offset = update.UpdateID + 1
 			}
-			slog.Debug("telegram: raw update received", "update_id", update.UpdateID)
+			slog.Info("telegram: raw update received", 
+				"updateID", update.UpdateID, 
+				"hasMessage", update.Message != nil, 
+				"hasCallback", update.CallbackQuery != nil,
+				"hasEditedMessage", update.EditedMessage != nil,
+				"hasChannelPost", update.ChannelPost != nil,
+			)
 
 			// Handle Messages
 			if update.Message != nil && update.Message.Text != "" {
@@ -122,6 +128,7 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 					if len(t.allowFrom) > 0 && !t.allowFrom[update.Message.Chat.ID] {
 						slog.Warn("telegram: message from unlisted chat ID dropped", "chatID", update.Message.Chat.ID)
 					} else {
+						slog.Info("telegram: message received", "chatID", update.Message.Chat.ID, "text", update.Message.Text)
 						var senderID int64
 						if update.Message.From != nil {
 							senderID = update.Message.From.ID
@@ -144,6 +151,7 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 			// Handle Callback Queries
 			if update.CallbackQuery != nil {
 				cb := update.CallbackQuery
+				slog.Info("telegram: callback query received", "id", cb.ID, "data", cb.Data, "from", cb.From.ID)
 				var chatID int64
 				var msgID int64
 				if cb.Message != nil {
@@ -156,6 +164,7 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 					CallbackQueryID: cb.ID,
 				})
 
+				slog.Debug("telegram: forwarding callback to channel", "id", cb.ID, "reqID", cb.Data)
 				select {
 				case t.cbChan <- bot.InboundCallback{
 					ChatID:     chatID,
@@ -164,6 +173,7 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 					Data:       cb.Data,
 					SessionKey: bot.SessionKey(chatID, 0, cb.From.ID),
 				}:
+					slog.Debug("telegram: callback sent to channel", "id", cb.ID)
 				case <-ctx.Done():
 					return
 				}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,6 +136,7 @@ func (m *HITLManager) HandleCallback(ctx context.Context, cb bot.InboundCallback
 	}
 
 	approved := action == "approve"
+	slog.Info("HITL: callback received", "reqID", reqID, "action", action, "chatID", cb.ChatID)
 	ch <- approved
 
 	status := "Approved"

@@ -107,6 +107,8 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 func (p *GeminiProvider) Models() []ModelInfo {
 	// Return a static list or fetch from API. For now, static is fine.
 	return []ModelInfo{
+		{ID: "gemini-3.1-pro-preview", SupportsToolUse: true, SupportsThinking: true},
+		{ID: "gemini-3-flash-preview", SupportsToolUse: true, SupportsThinking: true},
 		{ID: "gemini-2.0-flash", SupportsToolUse: true, SupportsThinking: true},
 		{ID: "gemini-2.0-flash-lite-preview-02-05", SupportsToolUse: true, SupportsThinking: true},
 		{ID: "gemini-2.0-pro-exp-02-05", SupportsToolUse: true, SupportsThinking: true},

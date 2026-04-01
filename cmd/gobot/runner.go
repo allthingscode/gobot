@@ -169,7 +169,8 @@ func (r *GenericRunner) Run(ctx context.Context, sessionKey string, messages []a
 			if execErr == nil && !skipExec {
 				result, execErr = r.executeTool(ctx, sessionKey, name, args)
 				if execErr == nil {
-					slog.Debug("runner: tool result", "tool", name, "result", result)
+					slog.Info("runner: tool result", "tool", name, "result_len", len(result))
+					slog.Debug("runner: tool result detail", "tool", name, "result", result)
 				}
 			}
 

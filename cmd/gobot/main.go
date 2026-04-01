@@ -190,6 +190,46 @@ func (h *dispatchHandler) HandleCallback(ctx context.Context, cb bot.InboundCall
 	return nil
 }
 
+const (
+	sendEmailToolName    = "send_email"
+	readTextFileToolName = "read_text_file"
+)
+
+// ReadTextFileTool implements Tool and reads a file from the workspace.
+type ReadTextFileTool struct {
+	workspace string
+}
+
+func (t *ReadTextFileTool) Name() string { return readTextFileToolName }
+func (t *ReadTextFileTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
+		Name:        readTextFileToolName,
+		Description: "Read the complete contents of a text file from the workspace.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{
+					"type":        "string",
+					"description": "The absolute or relative path to the file.",
+				},
+			},
+			"required": []string{"path"},
+		},
+	}
+}
+
+func (t *ReadTextFileTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		return "", fmt.Errorf("read_text_file: path is required")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read_text_file: %w", err)
+	}
+	return string(data), nil
+}
+
 // registerTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
 func registerTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore) []Tool {
 	specialistModels := make(map[string]string, len(cfg.Agents.Specialists))
@@ -203,6 +243,7 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
 	secretsRoot := cfg.SecretsRoot()
 	tools := []Tool{
 		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
+		&ReadTextFileTool{workspace: cfg.WorkspacePath()},
 	}
 	tools = append(tools, newShellExecTool(cfg.WorkspacePath(), cfg.ExecTimeout()))
 

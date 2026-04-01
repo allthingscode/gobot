@@ -8,11 +8,6 @@ import (
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
-const sendEmailToolName = "send_email"
-
-// SendEmailTool implements Tool and sends an email via Gmail.
-// For security, the recipient address is fixed at construction time and is
-// never accepted from the model — Gemini may only supply subject and body.
 type SendEmailTool struct {
 	secretsRoot string
 	userEmail   string

@@ -157,6 +157,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				if !ok {
 					return
 				}
+				slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
 				go func() {
 					if err := b.handler.HandleCallback(ctx, cb); err != nil {
 						slog.Error("bot: HandleCallback failed", "err", err)
