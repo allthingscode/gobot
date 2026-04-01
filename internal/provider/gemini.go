@@ -45,11 +45,25 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		Role: "assistant",
 	}
 
-	// Extract text content
+	// Extract text content and thinking
 	var textParts []string
 	for _, part := range candidate.Content.Parts {
 		if part.Text != "" {
-			textParts = append(textParts, part.Text)
+			if part.Thought {
+				msg.ThinkingBlocks = append(msg.ThinkingBlocks, map[string]any{
+					"text":              part.Text,
+					"thought_signature": part.ThoughtSignature,
+				})
+				// reasoningContent is used for display/logging
+				if msg.ReasoningContent == nil {
+					msg.ReasoningContent = &part.Text
+				} else {
+					combined := *msg.ReasoningContent + "\n" + part.Text
+					msg.ReasoningContent = &combined
+				}
+			} else {
+				textParts = append(textParts, part.Text)
+			}
 		}
 	}
 	if len(textParts) > 0 {
@@ -86,9 +100,9 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 func (p *GeminiProvider) Models() []ModelInfo {
 	// Return a static list or fetch from API. For now, static is fine.
 	return []ModelInfo{
-		{ID: "gemini-2.0-flash", SupportsToolUse: true},
-		{ID: "gemini-2.0-flash-lite-preview-02-05", SupportsToolUse: true},
-		{ID: "gemini-2.0-pro-exp-02-05", SupportsToolUse: true},
+		{ID: "gemini-2.0-flash", SupportsToolUse: true, SupportsThinking: true},
+		{ID: "gemini-2.0-flash-lite-preview-02-05", SupportsToolUse: true, SupportsThinking: true},
+		{ID: "gemini-2.0-pro-exp-02-05", SupportsToolUse: true, SupportsThinking: true},
 		{ID: "gemini-1.5-flash", SupportsToolUse: true},
 		{ID: "gemini-1.5-pro", SupportsToolUse: true},
 	}
@@ -97,8 +111,8 @@ func (p *GeminiProvider) Models() []ModelInfo {
 func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage) []*genai.Content {
 	contents := make([]*genai.Content, 0, len(messages))
 	for i, msg := range messages {
-		// A message is valid if it has content, tool calls, or is a tool response (Name set).
-		if msg.Content == nil && len(msg.ToolCalls) == 0 && msg.Name == nil {
+		// A message is valid if it has content, tool calls, thinking blocks, or is a tool response (Name set).
+		if msg.Content == nil && len(msg.ToolCalls) == 0 && msg.Name == nil && len(msg.ThinkingBlocks) == 0 {
 			slog.Debug("gemini: skipping empty message", "index", i, "role", msg.Role)
 			continue
 		}
@@ -111,6 +125,17 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		}
 		c := &genai.Content{Role: role}
 		
+		// Handle thinking blocks (must come before text/tool calls in the same message)
+		for _, tb := range msg.ThinkingBlocks {
+			text, _ := tb["text"].(string)
+			sig, _ := tb["thought_signature"].([]byte)
+			c.Parts = append(c.Parts, &genai.Part{
+				Text:             text,
+				Thought:          true,
+				ThoughtSignature: sig,
+			})
+		}
+
 		// Handle text content
 		if msg.Content != nil {
 			if msg.Content.Str != nil && *msg.Content.Str != "" {
