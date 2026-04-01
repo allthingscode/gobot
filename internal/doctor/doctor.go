@@ -141,7 +141,12 @@ func checkAPIKey(cfg *config.Config) result {
 	if key == "" {
 		return result{name: "gemini api key", ok: false, detail: "not found in config or GOOGLE_API_KEY env"}
 	}
-	masked := key[:4] + "..." + key[len(key)-4:]
+	var masked string
+	if len(key) < 8 {
+		masked = "***"
+	} else {
+		masked = key[:4] + "..." + key[len(key)-4:]
+	}
 	slog.Debug("api key found", "masked", masked)
 	return result{name: "gemini api key", ok: true, detail: masked}
 }

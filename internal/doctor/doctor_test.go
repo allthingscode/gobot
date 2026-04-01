@@ -154,6 +154,33 @@ func TestCheckAPIKey_FromEnv(t *testing.T) {
 	}
 }
 
+func TestCheckAPIKey_Short(t *testing.T) {
+	cfg := cfgWithRoot(t.TempDir())
+	cfg.Providers.Gemini.APIKey = "short"
+
+	r := checkAPIKey(cfg)
+	if !r.ok {
+		t.Errorf("expected ok=true for short key, got: %s", r.detail)
+	}
+	if r.detail != "***" {
+		t.Errorf("expected detail *** for short key, got: %s", r.detail)
+	}
+}
+
+func TestCheckAPIKey_Exact8(t *testing.T) {
+	cfg := cfgWithRoot(t.TempDir())
+	cfg.Providers.Gemini.APIKey = "12345678"
+
+	r := checkAPIKey(cfg)
+	if !r.ok {
+		t.Errorf("expected ok=true for 8-char key, got: %s", r.detail)
+	}
+	expected := "1234...5678"
+	if r.detail != expected {
+		t.Errorf("expected detail %s for 8-char key, got: %s", expected, r.detail)
+	}
+}
+
 func TestCheckAPIKey_Missing(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 
