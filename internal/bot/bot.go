@@ -134,9 +134,6 @@ func IsTransientError(err error) bool {
 
 // Run starts the polling loop. Blocks until ctx is cancelled.
 //
-// On each update: calls Handler.Handle; if the response is non-empty, calls
-// API.Send with the reply. Handler errors are logged but do not stop the loop.
-//
 // Any error from API.Updates triggers exponential backoff:
 // initial 5s, doubles each retry, capped at 60s, resets to 5s on success.
 // Mirrors strategic_telegram_polling_loop in patches/telegram.py.
@@ -150,21 +147,26 @@ func (b *Bot) Run(ctx context.Context) error {
 		return fmt.Errorf("bot: Callbacks failed: %w", err)
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case cb, ok := <-callbacks:
-			if ok {
+	// Handle callbacks in a dedicated goroutine so they never block on updates.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case cb, ok := <-callbacks:
+				if !ok {
+					return
+				}
 				go func() {
 					if err := b.handler.HandleCallback(ctx, cb); err != nil {
 						slog.Error("bot: HandleCallback failed", "err", err)
 					}
 				}()
 			}
-		default:
 		}
+	}()
 
+	for {
 		updates, err := b.api.Updates(ctx, 30)
 		if err != nil {
 			slog.Error("bot: Updates failed", "err", err, "retry_in", retryDelay)
@@ -187,14 +189,6 @@ func (b *Bot) Run(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case cb, ok := <-callbacks:
-				if ok {
-					go func() {
-						if err := b.handler.HandleCallback(ctx, cb); err != nil {
-							slog.Error("bot: HandleCallback failed", "err", err)
-						}
-					}()
-				}
 			case msg, ok := <-updates:
 				if !ok {
 					break drain // channel closed — reconnect
