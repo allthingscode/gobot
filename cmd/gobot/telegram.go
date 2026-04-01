@@ -15,9 +15,12 @@ import (
 )
 
 type tgAPI struct {
-	client    *telego.Bot
-	seenMsgs  sync.Map
-	allowFrom map[int64]bool
+	client     *telego.Bot
+	seenMsgs   sync.Map
+	allowFrom  map[int64]bool
+	msgChan    chan bot.InboundMessage
+	cbChan     chan bot.InboundCallback
+	pollerOnce sync.Once
 }
 
 func newTgAPI(token string, allowFrom []string) (*tgAPI, error) {
@@ -37,7 +40,12 @@ func newTgAPI(token string, allowFrom []string) (*tgAPI, error) {
 			af[id] = true
 		}
 	}
-	return &tgAPI{client: client, allowFrom: af}, nil
+	return &tgAPI{
+		client:    client,
+		allowFrom: af,
+		msgChan:   make(chan bot.InboundMessage, 100),
+		cbChan:    make(chan bot.InboundCallback, 100),
+	}, nil
 }
 
 const dedupTTL = 5 * time.Minute
@@ -66,89 +74,75 @@ func (t *tgAPI) isDuplicate(key string) bool {
 }
 
 func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMessage, error) {
-	out := make(chan bot.InboundMessage)
-	go func() {
-		defer close(out)
-		offset := 0
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			updates, err := t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
-				Offset:  offset,
-				Timeout: 30,
-			})
-			if err != nil {
-				slog.Error("telegram: GetUpdates failed", "err", err)
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			for _, update := range updates {
-				if update.UpdateID >= offset {
-					offset = update.UpdateID + 1
-				}
-				slog.Debug("telegram: raw update received", "update_id", update.UpdateID)
-				if update.Message == nil || update.Message.Text == "" {
-					continue
-				}
-				msgID := int64(update.Message.MessageID)
-				dedupKey := fmt.Sprintf("%d:%d", update.Message.Chat.ID, msgID)
-				if t.isDuplicate(dedupKey) {
-					continue
-				}
-				if len(t.allowFrom) > 0 && !t.allowFrom[update.Message.Chat.ID] {
-					slog.Warn("telegram: message from unlisted chat ID dropped", "chatID", update.Message.Chat.ID)
-					continue
-				}
-				var senderID int64
-				if update.Message.From != nil {
-					senderID = update.Message.From.ID
-				}
-				out <- bot.InboundMessage{
-					ChatID:    update.Message.Chat.ID,
-					MessageID: msgID,
-					ThreadID:  int64(update.Message.MessageThreadID),
-					SenderID:  senderID,
-					Text:      update.Message.Text,
-				}
-			}
-		}
-	}()
-	return out, nil
+	t.pollerOnce.Do(func() { go t.startPoller(ctx) })
+	return t.msgChan, nil
 }
 
 func (t *tgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, error) {
-	out := make(chan bot.InboundCallback)
-	go func() {
-		defer close(out)
-		offset := 0
-		for {
+	t.pollerOnce.Do(func() { go t.startPoller(ctx) })
+	return t.cbChan, nil
+}
+
+func (t *tgAPI) startPoller(ctx context.Context) {
+	defer close(t.msgChan)
+	defer close(t.cbChan)
+	offset := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		updates, err := t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
+			Offset:  offset,
+			Timeout: 30,
+		})
+		if err != nil {
+			slog.Error("telegram: GetUpdates failed", "err", err)
 			select {
 			case <-ctx.Done():
 				return
-			default:
-			}
-
-			updates, err := t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
-				Offset:  offset,
-				Timeout: 30,
-			})
-			if err != nil {
-				time.Sleep(5 * time.Second)
+			case <-time.After(5 * time.Second):
 				continue
 			}
+		}
 
-			for _, update := range updates {
-				if update.UpdateID >= offset {
-					offset = update.UpdateID + 1
+		for _, update := range updates {
+			if update.UpdateID >= offset {
+				offset = update.UpdateID + 1
+			}
+			slog.Debug("telegram: raw update received", "update_id", update.UpdateID)
+
+			// Handle Messages
+			if update.Message != nil && update.Message.Text != "" {
+				msgID := int64(update.Message.MessageID)
+				dedupKey := fmt.Sprintf("%d:%d", update.Message.Chat.ID, msgID)
+				if !t.isDuplicate(dedupKey) {
+					if len(t.allowFrom) > 0 && !t.allowFrom[update.Message.Chat.ID] {
+						slog.Warn("telegram: message from unlisted chat ID dropped", "chatID", update.Message.Chat.ID)
+					} else {
+						var senderID int64
+						if update.Message.From != nil {
+							senderID = update.Message.From.ID
+						}
+						select {
+						case t.msgChan <- bot.InboundMessage{
+							ChatID:    update.Message.Chat.ID,
+							MessageID: msgID,
+							ThreadID:  int64(update.Message.MessageThreadID),
+							SenderID:  senderID,
+							Text:      update.Message.Text,
+						}:
+						case <-ctx.Done():
+							return
+						}
+					}
 				}
-				if update.CallbackQuery == nil {
-					continue
-				}
+			}
+
+			// Handle Callback Queries
+			if update.CallbackQuery != nil {
 				cb := update.CallbackQuery
 				var chatID int64
 				var msgID int64
@@ -162,17 +156,20 @@ func (t *tgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, erro
 					CallbackQueryID: cb.ID,
 				})
 
-				out <- bot.InboundCallback{
+				select {
+				case t.cbChan <- bot.InboundCallback{
 					ChatID:     chatID,
 					MessageID:  msgID,
 					SenderID:   cb.From.ID,
 					Data:       cb.Data,
 					SessionKey: bot.SessionKey(chatID, 0, cb.From.ID),
+				}:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
-	}()
-	return out, nil
+	}
 }
 
 func (t *tgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {

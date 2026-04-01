@@ -164,7 +164,7 @@ func sanitizeFTSQuery(q string) string {
 	r := strings.NewReplacer(
 		`"`, ` `, `(`, ` `, `)`, ` `, `*`, ` `,
 		`^`, ` `, `-`, ` `, `+`, ` `, `{`, ` `, `}`, ` `,
-		`:`, ` `, `[`, ` `, `]`, ` `,
+		`:`, ` `, `[`, ` `, `]`, ` `, `,`, ` `,
 	)
 	cleaned := strings.Join(strings.Fields(r.Replace(q)), " ")
 	return cleaned

@@ -68,6 +68,22 @@ func (e *winExecutor) Run(ctx context.Context, name string, args []string) (stri
 		return "", fmt.Errorf("sandbox: start: %w", err)
 	}
 
+	// F-102: Start a monitor goroutine to ensure the Job Object is terminated
+	// if the context is cancelled. exec.CommandContext kills the direct child,
+	// but on Windows, cmd.Wait() will hang forever if grandchildren keep pipes
+	// open. Terminating the Job Object kills the whole tree and closes the pipes.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Context cancelled or timed out — kill the whole job tree immediately.
+			_ = windows.TerminateJobObject(job, 1)
+		case <-done:
+			// Run finished naturally.
+		}
+	}()
+
 	// Open a handle to the child process by PID and assign it to the Job Object.
 	ph, err := windows.OpenProcess(windows.PROCESS_ALL_ACCESS, false, uint32(cmd.Process.Pid))
 	if err != nil {

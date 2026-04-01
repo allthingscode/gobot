@@ -219,9 +219,10 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 
 	// Close the updates channel so Run exits the drain loop, then cancel ctx.
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		// Wait long enough for goroutines to potentially complete.
+		time.Sleep(100 * time.Millisecond)
 		close(api.updates)
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 
@@ -231,19 +232,36 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("expected 2 handler calls, got %d: %v", len(calls), calls)
 	}
-	if calls[0] != "telegram:1" {
-		t.Errorf("call[0] = %q, want %q", calls[0], "telegram:1")
+	// Check for presence rather than order.
+	has1, has2 := false, false
+	for _, c := range calls {
+		if c == "telegram:1" {
+			has1 = true
+		}
+		if c == "telegram:2" {
+			has2 = true
+		}
 	}
-	if calls[1] != "telegram:2" {
-		t.Errorf("call[1] = %q, want %q", calls[1], "telegram:2")
+	if !has1 || !has2 {
+		t.Errorf("missing expected calls: has1=%v, has2=%v, calls=%v", has1, has2, calls)
 	}
 
 	sent := api.getSent()
 	if len(sent) != 2 {
 		t.Fatalf("expected 2 sends, got %d", len(sent))
 	}
-	if sent[0].ChatID != 1 || sent[1].ChatID != 2 {
-		t.Errorf("unexpected send chat IDs: %v", sent)
+	// Check for presence rather than order.
+	hasSent1, hasSent2 := false, false
+	for _, s := range sent {
+		if s.ChatID == 1 {
+			hasSent1 = true
+		}
+		if s.ChatID == 2 {
+			hasSent2 = true
+		}
+	}
+	if !hasSent1 || !hasSent2 {
+		t.Errorf("missing expected sends: hasSent1=%v, hasSent2=%v, sent=%v", hasSent1, hasSent2, sent)
 	}
 }
 
@@ -271,7 +289,7 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 		InboundMessage{ChatID: 1, Text: "first"},
 		InboundMessage{ChatID: 2, Text: "second"},
 	)
-	// Override to return error on first, success on second.
+	// Override to return error on one, success on other.
 	customHandler := &callCountHandler{
 		responses: []string{"", "ok"},
 		errs:      []error{errors.New("handler failed"), nil},
@@ -280,9 +298,10 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 	bot := New(api, customHandler)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(30 * time.Millisecond)
+		// Wait for goroutines to potentially complete.
+		time.Sleep(100 * time.Millisecond)
 		close(api.updates)
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 	bot.Run(ctx)
@@ -290,9 +309,10 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 	if customHandler.callCount() != 2 {
 		t.Errorf("expected 2 handler calls, got %d", customHandler.callCount())
 	}
-	// Second message should have been sent successfully.
-	if sent := api.getSent(); len(sent) != 1 || sent[0].ChatID != 2 {
-		t.Errorf("expected one send for chatID=2, got %v", sent)
+	// Exactly one message should have been sent successfully.
+	sent := api.getSent()
+	if len(sent) != 1 {
+		t.Errorf("expected exactly one successful send, got %v", sent)
 	}
 }
 

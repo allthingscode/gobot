@@ -165,9 +165,16 @@ type dispatchHandler struct {
 func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
 	slog.Debug("handler: dispatching to session manager", "session", sessionKey)
 	reply, err := h.mgr.Dispatch(ctx, sessionKey, msg.Text)
-	if err == nil && h.memory != nil && reply != "" {
-		if indexErr := h.memory.Index(sessionKey, reply); indexErr != nil {
-			slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
+	if err == nil && h.memory != nil {
+		// Index user message (if not generic noise)
+		if !memory.ShouldSkipRAG(msg.Text) {
+			_ = h.memory.Index(sessionKey, "USER: "+msg.Text)
+		}
+		// Index assistant reply
+		if reply != "" {
+			if indexErr := h.memory.Index(sessionKey, "ASSISTANT: "+reply); indexErr != nil {
+				slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
+			}
 		}
 	}
 	if err == nil && h.consolidator != nil && reply != "" {
@@ -181,6 +188,47 @@ func (h *dispatchHandler) HandleCallback(ctx context.Context, cb bot.InboundCall
 		return h.hitl.HandleCallback(ctx, cb)
 	}
 	return nil
+}
+
+// registerTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
+func registerTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore) []Tool {
+	specialistModels := make(map[string]string, len(cfg.Agents.Specialists))
+	for agentType, sc := range cfg.Agents.Specialists {
+		if sc.Model != "" {
+			specialistModels[agentType] = sc.Model
+		}
+	}
+
+	// Register tools.
+	secretsRoot := cfg.SecretsRoot()
+	tools := []Tool{
+		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
+	}
+	tools = append(tools, newShellExecTool(cfg.WorkspacePath(), cfg.ExecTimeout()))
+
+	// Initialize MCP tools from config
+	for name, srvCfg := range cfg.Tools.MCPServers {
+		env := cfg.MCPEnvFor(name)
+		tools = append(tools, newMCPTool(name, srvCfg, env))
+		slog.Info("run: registered MCP tool", "server", name)
+	}
+
+	if memStore != nil {
+		tools = append(tools, newSearchMemoryTool(memStore))
+	}
+	tools = append(tools, []Tool{
+		newListCalendarTool(secretsRoot),
+		newListTasksTool(secretsRoot),
+		newCreateTaskTool(secretsRoot),
+		newCompleteTaskTool(secretsRoot),
+		newUpdateTaskTool(secretsRoot),
+	}...)
+	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
+		tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
+	} else {
+		slog.Warn("run: send_email tool disabled -- strategic_edition.user_email not set in config")
+	}
+	return tools
 }
 
 func cmdRun() *cobra.Command {
@@ -256,44 +304,7 @@ func cmdRun() *cobra.Command {
 				defer memStore.Close()
 			}
 
-			// Build specialist model map from config (agent_type -> model override).
-			specialistModels := make(map[string]string, len(cfg.Agents.Specialists))
-			for agentType, sc := range cfg.Agents.Specialists {
-				if sc.Model != "" {
-					specialistModels[agentType] = sc.Model
-				}
-			}
-
-			// Register tools.
-			secretsRoot := cfg.SecretsRoot()
-			tools := []Tool{
-				newSpawnTool(prov, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
-			}
-			tools = append(tools, newShellExecTool(cfg.WorkspacePath(), cfg.ExecTimeout()))
-
-			// Initialize MCP tools from config
-			for name, srvCfg := range cfg.Tools.MCPServers {
-				env := cfg.MCPEnvFor(name)
-				tools = append(tools, newMCPTool(name, srvCfg, env))
-				slog.Info("run: registered MCP tool", "server", name)
-			}
-
-			if memStore != nil {
-				tools = append(tools, newSearchMemoryTool(memStore))
-			}
-			tools = append(tools, []Tool{
-				newListCalendarTool(secretsRoot),
-				newListTasksTool(secretsRoot),
-				newCreateTaskTool(secretsRoot),
-				newCompleteTaskTool(secretsRoot),
-				newUpdateTaskTool(secretsRoot),
-			}...)
-			if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
-				tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
-			} else {
-				slog.Warn("run: send_email tool disabled -- strategic_edition.user_email not set in config")
-			}
-			runner.tools = tools
+			runner.tools = registerTools(cfg, prov, model, memStore)
 
 			store, storeErr := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			if storeErr != nil {
@@ -523,9 +534,19 @@ func cmdSimulate() *cobra.Command {
 			systemPrompt := loadSystemPrompt(cfg)
 			runner := NewGenericRunner(prov, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
 
+			// Init long-term memory store (non-fatal if it fails).
+			memStore, _ := memory.NewMemoryStore(cfg.StorageRoot())
+			if memStore != nil {
+				runner.memStore = memStore
+				defer memStore.Close()
+			}
+
+			runner.tools = registerTools(cfg, prov, model, memStore)
+
 			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetMemoryWindow(cfg.MemoryWindow())
+			mgr.SetStorageRoot(cfg.StorageRoot()) // F-037
 
 			fmt.Printf("--- Simulating Prompt ---\n%s\n\n", prompt)
 			fmt.Println("Waiting for response...")
@@ -665,6 +686,37 @@ func cmdMemory() *cobra.Command {
 	}
 
 	cmd.AddCommand(rebuildCmd)
+
+	searchCmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Search the memory index for a query",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			query := args[0]
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			store, err := memory.NewMemoryStore(cfg.StorageRoot())
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			results, err := store.Search(query, 10)
+			if err != nil {
+				return err
+			}
+			if len(results) == 0 {
+				fmt.Println("No results found.")
+				return nil
+			}
+			for i, r := range results {
+				fmt.Printf("[%d] %s (%s)\n", i+1, r["content"], r["timestamp"])
+			}
+			return nil
+		},
+	}
+	cmd.AddCommand(searchCmd)
 	return cmd
 }
 

@@ -193,7 +193,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				if !ok {
 					break drain // channel closed — reconnect
 				}
-				b.dispatch(ctx, msg)
+				go b.dispatch(ctx, msg)
 			}
 		}
 	}

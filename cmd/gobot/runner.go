@@ -148,7 +148,7 @@ func (r *GenericRunner) Run(ctx context.Context, sessionKey string, messages []a
 			}
 
 			toolSeq = append(toolSeq, name)
-			slog.Info("runner: tool call", "session", sessionKey, "tool", name, "iter", iter)
+			slog.Info("runner: tool call", "session", sessionKey, "tool", name, "args", args, "iter", iter)
 
 			var result string
 			var execErr error
@@ -162,15 +162,19 @@ func (r *GenericRunner) Run(ctx context.Context, sessionKey string, messages []a
 				} else if override != "" {
 					result = override
 					skipExec = true
+					slog.Debug("runner: tool pre-hook override", "tool", name, "result", result)
 				}
 			}
 
 			if execErr == nil && !skipExec {
 				result, execErr = r.executeTool(ctx, sessionKey, name, args)
+				if execErr == nil {
+					slog.Debug("runner: tool result", "tool", name, "result", result)
+				}
 			}
 
 			if execErr != nil {
-				slog.Warn("runner: tool execution failed", "tool", name, "err", execErr)
+				slog.Error("runner: tool execution failed", "tool", name, "err", execErr)
 				result = fmt.Sprintf("Error: %v", execErr)
 			} else {
 				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.
