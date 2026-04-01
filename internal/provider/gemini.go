@@ -96,7 +96,8 @@ func (p *GeminiProvider) Models() []ModelInfo {
 func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage) []*genai.Content {
 	contents := make([]*genai.Content, 0, len(messages))
 	for _, msg := range messages {
-		if msg.Content == nil && len(msg.ToolCalls) == 0 {
+		// A message is valid if it has content, tool calls, or is a tool response (Name set).
+		if msg.Content == nil && len(msg.ToolCalls) == 0 && msg.Name == nil {
 			continue
 		}
 		role := msg.Role
@@ -146,7 +147,10 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 			}
 		}
 
-		contents = append(contents, c)
+		// Final safety check: if we somehow ended up with no parts, don't add the content.
+		if len(c.Parts) > 0 {
+			contents = append(contents, c)
+		}
 	}
 	return contents
 }
