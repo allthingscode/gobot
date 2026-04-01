@@ -46,13 +46,14 @@ type CheckpointStore interface {
 // Concurrent calls with the same sessionKey are queued; concurrent calls
 // with different sessionKeys proceed in parallel.
 type SessionManager struct {
-	runner      Runner
-	store       CheckpointStore // may be nil
-	model       string
-	storageRoot string        // may be ""; used for journal writes on compaction
-	logger      SessionLogger // may be nil; set via SetLogger
-	hooks       *Hooks        // may be nil; set via SetHooks
-	mu          sync.Map      // key: sessionKey (string) → *sync.Mutex
+	runner       Runner
+	store        CheckpointStore // may be nil
+	model        string
+	storageRoot  string        // may be ""; used for journal writes on compaction
+	logger       SessionLogger // may be nil; set via SetLogger
+	hooks        *Hooks        // may be nil; set via SetHooks
+	memoryWindow int
+	mu           sync.Map      // key: sessionKey (string) → *sync.Mutex
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -60,9 +61,17 @@ type SessionManager struct {
 // model is recorded when creating new checkpoint threads (e.g. "gemini-2.5-flash").
 func NewSessionManager(runner Runner, store CheckpointStore, model string) *SessionManager {
 	return &SessionManager{
-		runner: runner,
-		store:  store,
-		model:  model,
+		runner:       runner,
+		store:        store,
+		model:        model,
+		memoryWindow: DefaultMaxContextMessages,
+	}
+}
+
+// SetMemoryWindow configures the maximum context messages kept before compaction.
+func (m *SessionManager) SetMemoryWindow(w int) {
+	if w > 0 {
+		m.memoryWindow = w
 	}
 }
 
@@ -127,7 +136,7 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 	}
 
 	// Compact context if the history has grown too large (F-015).
-	if compacted, dropped := CompactMessages(messages, DefaultMaxContextMessages, DefaultKeepContextMessages); dropped > 0 {
+	if compacted, dropped := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages); dropped > 0 {
 		slog.Info("agent: compacted context", "session", sessionKey, "dropped", dropped, "remaining", len(compacted))
 		if m.storageRoot != "" {
 			entry := fmt.Sprintf("Session %s: compacted %d messages (kept %d)", sessionKey, dropped, len(compacted))

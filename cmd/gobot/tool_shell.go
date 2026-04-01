@@ -24,13 +24,13 @@ type shellExecTool struct {
 }
 
 // newShellExecTool creates a shellExecTool rooted in sandboxRoot.
-// Default limits: 512 MB per-process memory, 30 s CPU, 2 min wall-clock timeout.
-func newShellExecTool(sandboxRoot string) *shellExecTool {
+// Default limits: 512 MB per-process memory, 30 s CPU, wall-clock timeout as configured.
+func newShellExecTool(sandboxRoot string, timeout time.Duration) *shellExecTool {
 	cfg := sandbox.Config{
 		MaxMemoryMB: 512,
 		MaxCPUSec:   30.0,
 		SandboxRoot: sandboxRoot,
-		Timeout:     2 * time.Minute,
+		Timeout:     timeout,
 	}
 	return &shellExecTool{exec: sandbox.New(cfg)}
 }

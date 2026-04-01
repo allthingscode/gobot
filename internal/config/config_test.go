@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type errReader struct{}
@@ -375,34 +376,57 @@ func TestDecode_MCPServers(t *testing.T) {
 
 func TestExecTimeout_Default(t *testing.T) {
 	cfg := &Config{}
-	if got := cfg.ExecTimeout(); got != 120 {
-		t.Errorf("ExecTimeout() = %d, want 120 (default)", got)
+	if got := cfg.ExecTimeout(); got != 2*time.Minute {
+		t.Errorf("ExecTimeout() = %v, want 2m (default)", got)
 	}
 }
 
 func TestExecTimeout_Configured(t *testing.T) {
 	cfg := &Config{Tools: ToolsConfig{Exec: ExecConfig{Timeout: 180}}}
-	if got := cfg.ExecTimeout(); got != 180 {
-		t.Errorf("ExecTimeout() = %d, want 180", got)
+	if got := cfg.ExecTimeout(); got != 180*time.Second {
+		t.Errorf("ExecTimeout() = %v, want 180s", got)
 	}
 }
 
 func TestEffectiveMaxToolIterations(t *testing.T) {
 	tests := []struct {
-		name string
-		val  int
-		want int
+		name     string
+		defaults int
+		strat    int
+		want     int
 	}{
-		{"zero value defaults to 25", 0, 25},
-		{"explicit value", 50, 50},
+		{"all zero defaults to 25", 0, 0, 25},
+		{"strategic override", 0, 50, 50},
+		{"defaults override strategic", 10, 50, 10},
+		{"defaults only", 15, 0, 15},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &Config{Strategic: StrategicConfig{MaxToolIterations: tc.val}}
+			cfg := &Config{
+				Agents:    AgentsConfig{Defaults: AgentDefaults{MaxToolIterations: tc.defaults}},
+				Strategic: StrategicConfig{MaxToolIterations: tc.strat},
+			}
 			if got := cfg.EffectiveMaxToolIterations(); got != tc.want {
 				t.Errorf("EffectiveMaxToolIterations() = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDecode_AgentDefaultsLimits(t *testing.T) {
+	input := `{"agents":{"defaults":{"maxTokens":1024,"maxToolIterations":10,"memoryWindow":30}}}`
+	cfg, err := decode(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTokens() != 1024 {
+		t.Errorf("got MaxTokens %d, want 1024", cfg.MaxTokens())
+	}
+	if cfg.EffectiveMaxToolIterations() != 10 {
+		t.Errorf("got MaxToolIterations %d, want 10", cfg.EffectiveMaxToolIterations())
+	}
+	if cfg.MemoryWindow() != 30 {
+		t.Errorf("got MemoryWindow %d, want 30", cfg.MemoryWindow())
 	}
 }
 

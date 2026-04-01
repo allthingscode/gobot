@@ -31,9 +31,10 @@ type geminiRunner struct {
 	limiter           *rate.Limiter       // token-bucket rate limiter for Gemini API calls
 	hooks             *agent.Hooks        // may be nil; set via SetHooks
 	maxToolIterations int
+	maxTokens         int
 }
 
-func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *geminiRunner {
+func newGeminiRunner(client *genai.Client, model string, systemPrompt string, maxIter int, maxTokens int) *geminiRunner {
 	return &geminiRunner{
 		client:       client,
 		model:        model,
@@ -42,7 +43,8 @@ func newGeminiRunner(client *genai.Client, model string, systemPrompt string) *g
 		breaker: resilience.New("gemini", 5, 60*time.Second, 300*time.Second),
 		// 3 requests/second burst; conservative default for shared Gemini quota.
 		limiter:           rate.NewLimiter(rate.Every(time.Second), 3),
-		maxToolIterations: 25,
+		maxToolIterations: maxIter,
+		maxTokens:         maxTokens,
 	}
 }
 
@@ -253,6 +255,9 @@ func (r *geminiRunner) buildConfig(messages []agentctx.StrategicMessage) *genai.
 	}
 
 	cfg := &genai.GenerateContentConfig{Tools: tools}
+	if r.maxTokens > 0 {
+		cfg.MaxOutputTokens = int32(r.maxTokens)
+	}
 	if systemPrompt != "" {
 		cfg.SystemInstruction = &genai.Content{
 			Parts: []*genai.Part{{Text: systemPrompt}},

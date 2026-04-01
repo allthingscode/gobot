@@ -198,7 +198,7 @@ func cmdRun() *cobra.Command {
 			if systemPrompt != "" {
 				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 			}
-			runner := newGeminiRunner(genaiClient, model, systemPrompt)
+			runner := newGeminiRunner(genaiClient, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
 
 			// Init long-term memory store (non-fatal if it fails).
 			memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
@@ -222,7 +222,7 @@ func cmdRun() *cobra.Command {
 			tools := []Tool{
 				newSpawnTool(genaiClient, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
 			}
-			tools = append(tools, newShellExecTool(cfg.WorkspacePath()))
+			tools = append(tools, newShellExecTool(cfg.WorkspacePath(), cfg.ExecTimeout()))
 
 			// Initialize MCP tools from config
 			for name, srvCfg := range cfg.Tools.MCPServers {
@@ -253,6 +253,7 @@ func cmdRun() *cobra.Command {
 				slog.Warn("run: checkpoint store unavailable, running statelessly", "err", storeErr)
 			}
 			mgr := agent.NewSessionManager(runner, store, model)
+			mgr.SetMemoryWindow(cfg.MemoryWindow())
 			mgr.SetStorageRoot(cfg.StorageRoot())
 			mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
 
@@ -452,10 +453,11 @@ func cmdSimulate() *cobra.Command {
 			model := cfg.DefaultModel()
 
 			systemPrompt := loadSystemPrompt(cfg)
-			runner := newGeminiRunner(genaiClient, model, systemPrompt)
+			runner := newGeminiRunner(genaiClient, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
 
 			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			mgr := agent.NewSessionManager(runner, store, model)
+			mgr.SetMemoryWindow(cfg.MemoryWindow())
 
 			fmt.Printf("--- Simulating Prompt ---\n%s\n\n", prompt)
 			fmt.Println("Waiting for response...")

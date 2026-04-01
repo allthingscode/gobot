@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockExecutor struct {
@@ -21,7 +22,7 @@ func (m *mockExecutor) Run(_ context.Context, name string, args []string) (strin
 }
 
 func TestShellExecTool_Name(t *testing.T) {
-	tool := newShellExecTool(t.TempDir())
+	tool := newShellExecTool(t.TempDir(), 2*time.Minute)
 	if got := tool.Name(); got != "shell_exec" {
 		t.Errorf("Name() = %q, want %q", got, "shell_exec")
 	}

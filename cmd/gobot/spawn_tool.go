@@ -68,8 +68,7 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages [
 func newSpawnTool(client *genai.Client, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore, maxIter int) *SpawnTool {
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
-			r := newGeminiRunner(client, m, systemPrompt)
-			r.maxToolIterations = maxIter
+			r := newGeminiRunner(client, m, systemPrompt, maxIter, 0)
 			r.memStore = memStore
 			return r
 		},

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/secrets"
 )
@@ -30,7 +31,10 @@ type AgentsConfig struct {
 }
 
 type AgentDefaults struct {
-	Model string `json:"model"`
+	Model             string `json:"model"`
+	MaxTokens         int    `json:"maxTokens"`
+	MaxToolIterations int    `json:"maxToolIterations"`
+	MemoryWindow      int    `json:"memoryWindow"`
 }
 
 type SpecialistConfig struct {
@@ -72,9 +76,28 @@ type StrategicConfig struct {
 	MaxToolIterations int    `json:"max_tool_iterations,omitempty"`
 }
 
+// MemoryWindow returns the configured agent memory window (max context messages), defaulting to 50.
+func (c *Config) MemoryWindow() int {
+	if c.Agents.Defaults.MemoryWindow > 0 {
+		return c.Agents.Defaults.MemoryWindow
+	}
+	return 50
+}
+
+// MaxTokens returns the configured maximum output tokens, defaulting to 0 (API default).
+func (c *Config) MaxTokens() int {
+	if c.Agents.Defaults.MaxTokens > 0 {
+		return c.Agents.Defaults.MaxTokens
+	}
+	return 0
+}
+
 // EffectiveMaxToolIterations returns the configured tool iteration cap,
 // defaulting to 25 if unset or zero.
 func (c *Config) EffectiveMaxToolIterations() int {
+	if c.Agents.Defaults.MaxToolIterations > 0 {
+		return c.Agents.Defaults.MaxToolIterations
+	}
 	if c.Strategic.MaxToolIterations > 0 {
 		return c.Strategic.MaxToolIterations
 	}
@@ -188,16 +211,12 @@ func (c *Config) mcpEnvFor(serverName string, store *secrets.SecretsStore) map[s
 	return env
 }
 
-// defaultExecTimeout is the fallback shell exec timeout in seconds (2 minutes).
-const defaultExecTimeout = 120
-
-// ExecTimeout returns the configured shell exec timeout in seconds,
-// defaulting to defaultExecTimeout if not set.
-func (c *Config) ExecTimeout() int {
+// ExecTimeout returns the shell tool execution timeout, defaulting to 2 minutes.
+func (c *Config) ExecTimeout() time.Duration {
 	if c.Tools.Exec.Timeout > 0 {
-		return c.Tools.Exec.Timeout
+		return time.Duration(c.Tools.Exec.Timeout) * time.Second
 	}
-	return defaultExecTimeout
+	return 2 * time.Minute
 }
 
 // DefaultConfigPath returns ~/.gobot/config.json.
