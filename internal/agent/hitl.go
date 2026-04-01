@@ -156,6 +156,5 @@ func (m *HITLManager) createRequestID(sessionKey, toolName string, args map[stri
 	h.Write([]byte(toolName))
 	argBytes, _ := json.Marshal(args)
 	h.Write(argBytes)
-	h.Write([]byte(strconv.FormatInt(time.Now().UnixNano(), 10)))
 	return fmt.Sprintf("%x", h.Sum(nil))[:12]
 }

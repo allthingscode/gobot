@@ -32,6 +32,8 @@ const gmailAPIURL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/sen
 // tokenRefreshURL is the default OAuth2 token endpoint.
 const tokenRefreshURL = "https://oauth2.googleapis.com/token"
 
+var timeoutClient = &http.Client{Timeout: 30 * time.Second}
+
 // storedToken mirrors the JSON structure written by google-auth-library (Python).
 // Fields match the token.json format saved by InstalledAppFlow.
 type storedToken struct {
@@ -82,7 +84,7 @@ func NewService(secretsRoot string) (Sender, error) {
 		if tok.RefreshToken == "" {
 			return nil, ErrNeedsReauth
 		}
-		if err := refreshToken(&tok, http.DefaultClient); err != nil {
+		if err := refreshToken(&tok, timeoutClient); err != nil {
 			if strings.Contains(err.Error(), "invalid_grant") {
 				return nil, ErrNeedsReauth
 			}
@@ -97,7 +99,7 @@ func NewService(secretsRoot string) (Sender, error) {
 	return &gmailSender{
 		accessToken: tok.Token,
 		endpoint:    gmailAPIURL,
-		httpClient:  http.DefaultClient,
+		httpClient:  timeoutClient,
 	}, nil
 }
 
