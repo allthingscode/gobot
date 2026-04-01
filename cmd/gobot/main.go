@@ -223,6 +223,14 @@ func cmdRun() *cobra.Command {
 				newSpawnTool(genaiClient, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
 			}
 			tools = append(tools, newShellExecTool(cfg.WorkspacePath()))
+
+			// Initialize MCP tools from config
+			for name, srvCfg := range cfg.Tools.MCPServers {
+				env := cfg.MCPEnvFor(name)
+				tools = append(tools, newMCPTool(name, srvCfg, env))
+				slog.Info("run: registered MCP tool", "server", name)
+			}
+
 			if memStore != nil {
 				tools = append(tools, newSearchMemoryTool(memStore))
 			}
