@@ -5,9 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"google.golang.org/genai"
-
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 const searchMemoryToolName = "search_memory"
@@ -30,23 +29,23 @@ func newSearchMemoryTool(store *memory.MemoryStore) *SearchMemoryTool {
 
 func (t *SearchMemoryTool) Name() string { return searchMemoryToolName }
 
-func (t *SearchMemoryTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *SearchMemoryTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        searchMemoryToolName,
 		Description: "Search your long-term memory for facts, past decisions, or context from previous sessions. Use this when you need to recall specific information that may not be in the current conversation.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"query": {
-					Type:        genai.TypeString,
-					Description: "Keywords or a natural language query describing what to recall.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Keywords or a natural language query describing what to recall.",
 				},
-				"limit": {
-					Type:        genai.TypeInteger,
-					Description: "Maximum number of results to return. Defaults to 5.",
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Maximum number of results to return. Defaults to 5.",
 				},
 			},
-			Required: []string{"query"},
+			"required": []string{"query"},
 		},
 	}
 }

@@ -48,14 +48,14 @@ func TestUpdateTaskTool_MissingTaskID(t *testing.T) {
 func TestCompleteTaskTool_Declaration(t *testing.T) {
 	tool := newCompleteTaskTool("/tmp/secrets")
 	decl := tool.Declaration()
-	if decl == nil {
-		t.Fatal("Declaration() returned nil")
-	}
-	if _, ok := decl.Parameters.Properties["task_id"]; !ok {
+
+	props, _ := decl.Parameters["properties"].(map[string]any)
+	if _, ok := props["task_id"]; !ok {
 		t.Error("Declaration missing task_id parameter")
 	}
 	found := false
-	for _, r := range decl.Parameters.Required {
+	reqs, _ := decl.Parameters["required"].([]string)
+	for _, r := range reqs {
 		if r == "task_id" {
 			found = true
 		}
@@ -68,15 +68,15 @@ func TestCompleteTaskTool_Declaration(t *testing.T) {
 func TestUpdateTaskTool_Declaration(t *testing.T) {
 	tool := newUpdateTaskTool("/tmp/secrets")
 	decl := tool.Declaration()
-	if decl == nil {
-		t.Fatal("Declaration() returned nil")
-	}
+
+	props, _ := decl.Parameters["properties"].(map[string]any)
 	for _, p := range []string{"task_id", "title", "notes", "due", "tasklist_id"} {
-		if _, ok := decl.Parameters.Properties[p]; !ok {
+		if _, ok := props[p]; !ok {
 			t.Errorf("Declaration missing parameter %q", p)
 		}
 	}
-	if len(decl.Parameters.Required) != 1 || decl.Parameters.Required[0] != "task_id" {
-		t.Errorf("Required should be [task_id], got %v", decl.Parameters.Required)
+	reqs, _ := decl.Parameters["required"].([]string)
+	if len(reqs) != 1 || reqs[0] != "task_id" {
+		t.Errorf("Required should be [task_id], got %v", reqs)
 	}
 }

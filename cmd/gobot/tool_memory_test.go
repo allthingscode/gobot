@@ -34,10 +34,11 @@ func TestSearchMemoryTool_Declaration(t *testing.T) {
 	if decl.Name != searchMemoryToolName {
 		t.Errorf("Declaration.Name = %q, want %q", decl.Name, searchMemoryToolName)
 	}
-	if _, ok := decl.Parameters.Properties["query"]; !ok {
+	props, _ := decl.Parameters["properties"].(map[string]any)
+	if _, ok := props["query"]; !ok {
 		t.Error("Declaration missing 'query' parameter")
 	}
-	if _, ok := decl.Parameters.Properties["limit"]; !ok {
+	if _, ok := props["limit"]; !ok {
 		t.Error("Declaration missing 'limit' parameter")
 	}
 }

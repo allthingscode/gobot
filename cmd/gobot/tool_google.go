@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"google.golang.org/genai"
-
 	"github.com/allthingscode/gobot/internal/google"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 // ── ListCalendarTool ───────────────────────────────────────────────────────────
@@ -28,23 +27,23 @@ func newListCalendarTool(secretsRoot string) *ListCalendarTool {
 
 func (t *ListCalendarTool) Name() string { return listCalendarToolName }
 
-func (t *ListCalendarTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *ListCalendarTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        listCalendarToolName,
 		Description: "List upcoming Google Calendar events. Returns a Markdown-formatted list of events ordered by start time.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"days_ahead": {
-					Type:        genai.TypeInteger,
-					Description: "How many days ahead to look for events. Defaults to 7.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"days_ahead": map[string]any{
+					"type":        "integer",
+					"description": "How many days ahead to look for events. Defaults to 7.",
 				},
-				"max_results": {
-					Type:        genai.TypeInteger,
-					Description: "Maximum number of events to return. Defaults to 10.",
+				"max_results": map[string]any{
+					"type":        "integer",
+					"description": "Maximum number of events to return. Defaults to 10.",
 				},
 			},
-			Required: []string{},
+			"required": []string{},
 		},
 	}
 }
@@ -90,19 +89,19 @@ func newListTasksTool(secretsRoot string) *ListTasksTool {
 
 func (t *ListTasksTool) Name() string { return listTasksToolName }
 
-func (t *ListTasksTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *ListTasksTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        listTasksToolName,
 		Description: "List open (incomplete) Google Tasks. Returns a Markdown-formatted checklist of pending tasks.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"tasklist_id": {
-					Type:        genai.TypeString,
-					Description: "The task list ID to query. Defaults to \"@default\" (the user's default list).",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tasklist_id": map[string]any{
+					"type":        "string",
+					"description": "The task list ID to query. Defaults to \"@default\" (the user's default list).",
 				},
 			},
-			Required: []string{},
+			"required": []string{},
 		},
 	}
 }
@@ -140,27 +139,27 @@ func newCreateTaskTool(secretsRoot string) *CreateTaskTool {
 
 func (t *CreateTaskTool) Name() string { return createTaskToolName }
 
-func (t *CreateTaskTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *CreateTaskTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        createTaskToolName,
 		Description: "Create a new task in Google Tasks. Returns a confirmation with the task title and its assigned ID.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"title": {
-					Type:        genai.TypeString,
-					Description: "The title of the task to create. Required.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"title": map[string]any{
+					"type":        "string",
+					"description": "The title of the task to create. Required.",
 				},
-				"notes": {
-					Type:        genai.TypeString,
-					Description: "Optional notes or description to attach to the task.",
+				"notes": map[string]any{
+					"type":        "string",
+					"description": "Optional notes or description to attach to the task.",
 				},
-				"tasklist_id": {
-					Type:        genai.TypeString,
-					Description: "The task list ID to add the task to. Defaults to \"@default\".",
+				"tasklist_id": map[string]any{
+					"type":        "string",
+					"description": "The task list ID to add the task to. Defaults to \"@default\".",
 				},
 			},
-			Required: []string{"title"},
+			"required": []string{"title"},
 		},
 	}
 }
@@ -199,23 +198,23 @@ func newCompleteTaskTool(secretsRoot string) *CompleteTaskTool {
 
 func (t *CompleteTaskTool) Name() string { return completeTaskToolName }
 
-func (t *CompleteTaskTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *CompleteTaskTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        completeTaskToolName,
 		Description: "Mark a Google Task as completed. Use the task ID returned by list_tasks.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"task_id": {
-					Type:        genai.TypeString,
-					Description: "The ID of the task to complete. Required.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "The ID of the task to complete. Required.",
 				},
-				"tasklist_id": {
-					Type:        genai.TypeString,
-					Description: "The task list ID. Defaults to \"@default\".",
+				"tasklist_id": map[string]any{
+					"type":        "string",
+					"description": "The task list ID. Defaults to \"@default\".",
 				},
 			},
-			Required: []string{"task_id"},
+			"required": []string{"task_id"},
 		},
 	}
 }
@@ -244,35 +243,35 @@ func newUpdateTaskTool(secretsRoot string) *UpdateTaskTool {
 
 func (t *UpdateTaskTool) Name() string { return updateTaskToolName }
 
-func (t *UpdateTaskTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *UpdateTaskTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        updateTaskToolName,
 		Description: "Update an existing Google Task's title, notes, or due date. Use the task ID returned by list_tasks. Only provide the fields you want to change.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"task_id": {
-					Type:        genai.TypeString,
-					Description: "The ID of the task to update. Required.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "The ID of the task to update. Required.",
 				},
-				"title": {
-					Type:        genai.TypeString,
-					Description: "New title for the task. Omit to leave unchanged.",
+				"title": map[string]any{
+					"type":        "string",
+					"description": "New title for the task. Omit to leave unchanged.",
 				},
-				"notes": {
-					Type:        genai.TypeString,
-					Description: "New notes for the task. Omit to leave unchanged.",
+				"notes": map[string]any{
+					"type":        "string",
+					"description": "New notes for the task. Omit to leave unchanged.",
 				},
-				"due": {
-					Type:        genai.TypeString,
-					Description: "New due date in RFC3339 format (e.g. 2026-04-01T00:00:00Z). Omit to leave unchanged.",
+				"due": map[string]any{
+					"type":        "string",
+					"description": "New due date in RFC3339 format (e.g. 2026-04-01T00:00:00Z). Omit to leave unchanged.",
 				},
-				"tasklist_id": {
-					Type:        genai.TypeString,
-					Description: "The task list ID. Defaults to \"@default\".",
+				"tasklist_id": map[string]any{
+					"type":        "string",
+					"description": "The task list ID. Defaults to \"@default\".",
 				},
 			},
-			Required: []string{"task_id"},
+			"required": []string{"task_id"},
 		},
 	}
 }

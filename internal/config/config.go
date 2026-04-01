@@ -32,13 +32,15 @@ type AgentsConfig struct {
 
 type AgentDefaults struct {
 	Model             string `json:"model"`
+	Provider          string `json:"provider"`
 	MaxTokens         int    `json:"maxTokens"`
 	MaxToolIterations int    `json:"maxToolIterations"`
 	MemoryWindow      int    `json:"memoryWindow"`
 }
 
 type SpecialistConfig struct {
-	Model string `json:"model"`
+	Model    string `json:"model"`
+	Provider string `json:"provider"`
 }
 
 type ChannelsConfig struct {
@@ -46,11 +48,22 @@ type ChannelsConfig struct {
 }
 
 type ProvidersConfig struct {
-	Gemini GeminiConfig `json:"gemini"`
+	Gemini    GeminiConfig    `json:"gemini"`
+	Anthropic AnthropicConfig `json:"anthropic"`
+	OpenAI    OpenAIConfig    `json:"openai"`
 }
 
 type GeminiConfig struct {
 	APIKey string `json:"apiKey"`
+}
+
+type AnthropicConfig struct {
+	APIKey string `json:"apiKey"`
+}
+
+type OpenAIConfig struct {
+	APIKey  string `json:"apiKey"`
+	BaseURL string `json:"baseUrl,omitempty"`
 }
 
 type TelegramConfig struct {
@@ -160,6 +173,14 @@ func (c *Config) DefaultModel() string {
 	return "gemini-3-flash-preview"
 }
 
+// DefaultProvider returns the configured default provider, defaulting to "gemini".
+func (c *Config) DefaultProvider() string {
+	if c.Agents.Defaults.Provider != "" {
+		return c.Agents.Defaults.Provider
+	}
+	return "gemini"
+}
+
 // WorkspacePath returns the path to a resource under {StorageRoot}/workspace/.
 // Subpath elements are joined after the workspace directory.
 func (c *Config) WorkspacePath(subpath ...string) string {
@@ -180,6 +201,51 @@ func (c *Config) GeminiAPIKey() string {
 		return val
 	}
 	return os.Getenv("GEMINI_API_KEY")
+}
+
+// AnthropicAPIKey returns the Anthropic API key. Priority order:
+// 1. config.json field
+// 2. DPAPI secrets store (anthropic_api_key)
+// 3. ANTHROPIC_API_KEY environment variable
+func (c *Config) AnthropicAPIKey() string {
+	if c.Providers.Anthropic.APIKey != "" {
+		return c.Providers.Anthropic.APIKey
+	}
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	if val, _ := store.Get("anthropic_api_key"); val != "" {
+		return val
+	}
+	return os.Getenv("ANTHROPIC_API_KEY")
+}
+
+// OpenAIAPIKey returns the OpenAI API key. Priority order:
+// 1. config.json field
+// 2. DPAPI secrets store (openai_api_key)
+// 3. OPENAI_API_KEY environment variable
+func (c *Config) OpenAIAPIKey() string {
+	if c.Providers.OpenAI.APIKey != "" {
+		return c.Providers.OpenAI.APIKey
+	}
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	if val, _ := store.Get("openai_api_key"); val != "" {
+		return val
+	}
+	return os.Getenv("OPENAI_API_KEY")
+}
+
+// OpenAIBaseURL returns the OpenAI base URL. Priority order:
+// 1. config.json field
+// 2. DPAPI secrets store (openai_base_url)
+// 3. OPENAI_BASE_URL environment variable
+func (c *Config) OpenAIBaseURL() string {
+	if c.Providers.OpenAI.BaseURL != "" {
+		return c.Providers.OpenAI.BaseURL
+	}
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	if val, _ := store.Get("openai_base_url"); val != "" {
+		return val
+	}
+	return os.Getenv("OPENAI_BASE_URL")
 }
 
 // TelegramToken returns the Telegram bot token from config,

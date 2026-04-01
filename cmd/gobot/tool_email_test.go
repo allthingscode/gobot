@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"google.golang.org/genai"
-
 	"github.com/allthingscode/gobot/internal/gmail"
 )
 
@@ -20,9 +18,6 @@ func TestSendEmailTool_Declaration_NoToParameter(t *testing.T) {
 	tool := newSendEmailTool("/tmp/secrets", "user@example.com")
 	decl := tool.Declaration()
 
-	if decl == nil {
-		t.Fatal("Declaration() returned nil")
-	}
 	if decl.Name != sendEmailToolName {
 		t.Errorf("Declaration.Name = %q, want %q", decl.Name, sendEmailToolName)
 	}
@@ -32,25 +27,27 @@ func TestSendEmailTool_Declaration_NoToParameter(t *testing.T) {
 	if decl.Parameters == nil {
 		t.Fatal("Declaration.Parameters is nil")
 	}
-	if decl.Parameters.Type != genai.TypeObject {
-		t.Errorf("Parameters.Type = %v, want TypeObject", decl.Parameters.Type)
+	if typ, _ := decl.Parameters["type"].(string); typ != "object" {
+		t.Errorf("Parameters.Type = %v, want object", typ)
 	}
 
 	// Security check: "to" must NOT appear in Properties — the model must never
 	// be able to supply a recipient address.
-	if _, ok := decl.Parameters.Properties["to"]; ok {
+	props, _ := decl.Parameters["properties"].(map[string]any)
+	if _, ok := props["to"]; ok {
 		t.Error("Declaration.Parameters.Properties must NOT contain \"to\" (security constraint)")
 	}
 
 	// Required parameters must be present.
 	for _, field := range []string{"subject", "body"} {
-		if _, ok := decl.Parameters.Properties[field]; !ok {
+		if _, ok := props[field]; !ok {
 			t.Errorf("Declaration.Parameters.Properties missing %q", field)
 		}
 	}
 
-	requiredSet := make(map[string]bool, len(decl.Parameters.Required))
-	for _, r := range decl.Parameters.Required {
+	reqs, _ := decl.Parameters["required"].([]string)
+	requiredSet := make(map[string]bool, len(reqs))
+	for _, r := range reqs {
 		requiredSet[r] = true
 	}
 	for _, req := range []string{"subject", "body"} {

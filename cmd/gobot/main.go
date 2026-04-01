@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/audit"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 var (
@@ -223,12 +223,20 @@ func cmdRun() *cobra.Command {
 				return fmt.Errorf("telegram token not set: add channels.telegram.token to config or set TELEGRAM_BOT_TOKEN env var")
 			}
 			ctx := cmd.Context()
-			genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
-				APIKey:  cfg.GeminiAPIKey(),
-				Backend: genai.BackendGeminiAPI,
-			})
+			factory := &provider.Factory{
+				GeminiAPIKey:    cfg.GeminiAPIKey(),
+				AnthropicAPIKey: cfg.AnthropicAPIKey(),
+				OpenAIAPIKey:    cfg.OpenAIAPIKey(),
+				OpenAIBaseURL:   cfg.OpenAIBaseURL(),
+			}
+			if err := factory.InitAll(ctx); err != nil {
+				return err
+			}
+
+			provName := cfg.DefaultProvider()
+			prov, err := provider.Get(provName)
 			if err != nil {
-				return fmt.Errorf("genai client: %w", err)
+				return fmt.Errorf("provider: %w", err)
 			}
 			model := cfg.DefaultModel()
 
@@ -237,7 +245,7 @@ func cmdRun() *cobra.Command {
 			if systemPrompt != "" {
 				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 			}
-			runner := newGeminiRunner(genaiClient, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
+			runner := NewGenericRunner(prov, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
 
 			// Init long-term memory store (non-fatal if it fails).
 			memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
@@ -259,7 +267,7 @@ func cmdRun() *cobra.Command {
 			// Register tools.
 			secretsRoot := cfg.SecretsRoot()
 			tools := []Tool{
-				newSpawnTool(genaiClient, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
+				newSpawnTool(prov, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
 			}
 			tools = append(tools, newShellExecTool(cfg.WorkspacePath(), cfg.ExecTimeout()))
 
@@ -495,17 +503,25 @@ func cmdSimulate() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-			genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
-				APIKey:  cfg.GeminiAPIKey(),
-				Backend: genai.BackendGeminiAPI,
-			})
+			factory := &provider.Factory{
+				GeminiAPIKey:    cfg.GeminiAPIKey(),
+				AnthropicAPIKey: cfg.AnthropicAPIKey(),
+				OpenAIAPIKey:    cfg.OpenAIAPIKey(),
+				OpenAIBaseURL:   cfg.OpenAIBaseURL(),
+			}
+			if err := factory.InitAll(ctx); err != nil {
+				return err
+			}
+
+			provName := cfg.DefaultProvider()
+			prov, err := provider.Get(provName)
 			if err != nil {
-				return fmt.Errorf("genai client: %w", err)
+				return fmt.Errorf("provider: %w", err)
 			}
 			model := cfg.DefaultModel()
 
 			systemPrompt := loadSystemPrompt(cfg)
-			runner := newGeminiRunner(genaiClient, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
+			runner := NewGenericRunner(prov, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
 
 			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			mgr := agent.NewSessionManager(runner, store, model)

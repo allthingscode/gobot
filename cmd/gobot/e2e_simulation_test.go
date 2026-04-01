@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/genai"
-
 	"github.com/allthingscode/gobot/internal/agent"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 // Scenario defines a complete conversation test case.
@@ -110,8 +109,8 @@ type simTool struct {
 
 func (t *simTool) Name() string { return t.name }
 
-func (t *simTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{Name: t.name, Description: "mock tool for simulation"}
+func (t *simTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: t.name, Description: "mock tool for simulation"}
 }
 
 func (t *simTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {

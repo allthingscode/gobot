@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"google.golang.org/genai"
-
 	"github.com/allthingscode/gobot/internal/gmail"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 const sendEmailToolName = "send_email"
@@ -27,23 +26,23 @@ func newSendEmailTool(secretsRoot, userEmail string) *SendEmailTool {
 
 func (s *SendEmailTool) Name() string { return sendEmailToolName }
 
-func (s *SendEmailTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (s *SendEmailTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        sendEmailToolName,
 		Description: "Send an email via Gmail. The recipient is fixed to the configured user address; only subject and body are required.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"subject": {
-					Type:        genai.TypeString,
-					Description: "Email subject line.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"subject": map[string]any{
+					"type":        "string",
+					"description": "Email subject line.",
 				},
-				"body": {
-					Type:        genai.TypeString,
-					Description: "Email body. Use HTML for best results: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists. Plain text is also accepted.",
+				"body": map[string]any{
+					"type":        "string",
+					"description": "Email body. Use HTML for best results: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists. Plain text is also accepted.",
 				},
 			},
-			Required: []string{"subject", "body"},
+			"required": []string{"subject", "body"},
 		},
 	}
 }

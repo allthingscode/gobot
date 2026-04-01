@@ -7,8 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"google.golang.org/genai"
-
+	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/sandbox"
 )
 
@@ -37,24 +36,26 @@ func newShellExecTool(sandboxRoot string, timeout time.Duration) *shellExecTool 
 
 func (t *shellExecTool) Name() string { return shellExecToolName }
 
-func (t *shellExecTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *shellExecTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        shellExecToolName,
 		Description: "Execute a shell command in a sandboxed Windows environment. Working directory is the bot workspace. Output is capped at 4096 characters.",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"command": {
-					Type:        genai.TypeString,
-					Description: "Executable to run (e.g. 'cmd', 'powershell', 'python').",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{
+					"type":        "string",
+					"description": "Executable to run (e.g. 'cmd', 'powershell', 'python').",
 				},
-				"args": {
-					Type:        genai.TypeArray,
-					Description: "Arguments to pass to the command.",
-					Items:       &genai.Schema{Type: genai.TypeString},
+				"args": map[string]any{
+					"type":        "array",
+					"description": "Arguments to pass to the command.",
+					"items": map[string]any{
+						"type": "string",
+					},
 				},
 			},
-			Required: []string{"command"},
+			"required": []string{"command"},
 		},
 	}
 }

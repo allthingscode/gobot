@@ -53,9 +53,6 @@ func TestSpawnTool_Declaration(t *testing.T) {
 	tool := newTestSpawnTool(&mockRunner{response: "ok"}, nil)
 	decl := tool.Declaration()
 
-	if decl == nil {
-		t.Fatal("Declaration() returned nil")
-	}
 	if decl.Name != spawnToolName {
 		t.Errorf("Declaration.Name = %q, want %q", decl.Name, spawnToolName)
 	}
@@ -65,14 +62,17 @@ func TestSpawnTool_Declaration(t *testing.T) {
 	if decl.Parameters == nil {
 		t.Fatal("Declaration.Parameters is nil")
 	}
+	// Verify properties in the JSON Schema map
+	props, _ := decl.Parameters["properties"].(map[string]any)
 	for _, req := range []string{"agent_type", "objective"} {
-		if _, ok := decl.Parameters.Properties[req]; !ok {
-			t.Errorf("Declaration.Parameters.Properties missing %q", req)
+		if _, ok := props[req]; !ok {
+			t.Errorf("Declaration.Parameters properties missing %q", req)
 		}
 	}
-	// Both params must be in Required.
-	requiredSet := make(map[string]bool, len(decl.Parameters.Required))
-	for _, r := range decl.Parameters.Required {
+	// Verify required fields
+	reqs, _ := decl.Parameters["required"].([]string)
+	requiredSet := make(map[string]bool, len(reqs))
+	for _, r := range reqs {
 		requiredSet[r] = true
 	}
 	for _, req := range []string{"agent_type", "objective"} {

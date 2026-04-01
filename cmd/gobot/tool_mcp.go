@@ -10,9 +10,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"google.golang.org/genai"
-
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 type mcpTool struct {
@@ -33,23 +32,23 @@ func (t *mcpTool) Name() string {
 	return strings.ReplaceAll(t.serverName, "-", "_")
 }
 
-func (t *mcpTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (t *mcpTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        t.Name(),
 		Description: fmt.Sprintf("Execute the %s MCP server with a JSON-RPC request.", t.serverName),
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"method": {
-					Type:        genai.TypeString,
-					Description: "The JSON-RPC method to call (e.g. 'tools/list', 'tools/call').",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"method": map[string]any{
+					"type":        "string",
+					"description": "The JSON-RPC method to call (e.g. 'tools/list', 'tools/call').",
 				},
-				"params": {
-					Type:        genai.TypeObject,
-					Description: "The parameters for the JSON-RPC call.",
+				"params": map[string]any{
+					"type":        "object",
+					"description": "The parameters for the JSON-RPC call.",
 				},
 			},
-			Required: []string{"method"},
+			"required": []string{"method"},
 		},
 	}
 }

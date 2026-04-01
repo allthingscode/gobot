@@ -6,11 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"google.golang.org/genai"
-
 	"github.com/allthingscode/gobot/internal/agent"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 const (
@@ -23,13 +22,13 @@ const (
 // tasks to ephemeral, specialized sub-agents (F-001).
 //
 // A sub-agent is a fresh SessionManager (no checkpoint store) backed by a
-// new geminiRunner with a specialized system prompt. It runs in the same
+// new GenericRunner with a specialized system prompt. It runs in the same
 // goroutine as the tool call and times out after spawnMaxTimeout.
 //
 // Sub-agent session keys: "agent:<agent_type>:<parent_session_key>"
 type SpawnTool struct {
 	// runnerFactory creates a new Runner for the given model and system prompt.
-	// Using a factory keeps SpawnTool testable without a live Gemini client.
+	// Using a factory keeps SpawnTool testable without a live LLM provider.
 	runnerFactory func(model, systemPrompt string) agent.Runner
 
 	// model is the default model used when no specialist override is configured.
@@ -64,11 +63,11 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages [
 	return r.inner.Run(ctx, sessionKey, messages)
 }
 
-// newSpawnTool creates a SpawnTool that builds sub-runners from client/model.
-func newSpawnTool(client *genai.Client, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore, maxIter int) *SpawnTool {
+// newSpawnTool creates a SpawnTool that builds sub-runners from a provider.
+func newSpawnTool(prov provider.Provider, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore, maxIter int) *SpawnTool {
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
-			r := newGeminiRunner(client, m, systemPrompt, maxIter, 0)
+			r := NewGenericRunner(prov, m, systemPrompt, maxIter, 0)
 			r.memStore = memStore
 			return r
 		},
@@ -81,23 +80,23 @@ func newSpawnTool(client *genai.Client, model string, specialistPrompts map[stri
 
 func (s *SpawnTool) Name() string { return spawnToolName }
 
-func (s *SpawnTool) Declaration() *genai.FunctionDeclaration {
-	return &genai.FunctionDeclaration{
+func (s *SpawnTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
 		Name:        spawnToolName,
 		Description: "Delegate a complex or research-heavy task to a specialized sub-agent that works independently and returns a structured summary. Use this when a task would saturate your context window or benefits from a separate focused agent (e.g. deep research, drafting a long document, multi-step analysis).",
-		Parameters: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"agent_type": {
-					Type:        genai.TypeString,
-					Description: "The specialist type to spawn. Options: 'researcher' (fact-finding, web research), 'analyst' (data/situation analysis), 'writer' (drafting content).",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent_type": map[string]any{
+					"type":        "string",
+					"description": "The specialist type to spawn. Options: 'researcher' (fact-finding, web research), 'analyst' (data/situation analysis), 'writer' (drafting content).",
 				},
-				"objective": {
-					Type:        genai.TypeString,
-					Description: "The specific, self-contained task or question for the sub-agent to complete. Be explicit -- the sub-agent has no conversation context.",
+				"objective": map[string]any{
+					"type":        "string",
+					"description": "The specific, self-contained task or question for the sub-agent to complete. Be explicit -- the sub-agent has no conversation context.",
 				},
 			},
-			Required: []string{"agent_type", "objective"},
+			"required": []string{"agent_type", "objective"},
 		},
 	}
 }
