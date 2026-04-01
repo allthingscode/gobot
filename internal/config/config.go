@@ -175,10 +175,20 @@ func (c *Config) DefaultModel() string {
 
 // DefaultProvider returns the configured default provider, defaulting to "gemini".
 func (c *Config) DefaultProvider() string {
-	if c.Agents.Defaults.Provider != "" {
-		return c.Agents.Defaults.Provider
+	p := c.Agents.Defaults.Provider
+	if p == "" || p == "auto" {
+		return "gemini"
 	}
-	return "gemini"
+	return p
+}
+
+// SpecialistProvider returns the provider for a named specialist,
+// falling back to DefaultProvider if unset or "auto".
+func (c *Config) SpecialistProvider(name string) string {
+	if s, ok := c.Agents.Specialists[name]; ok && s.Provider != "" && s.Provider != "auto" {
+		return s.Provider
+	}
+	return c.DefaultProvider()
 }
 
 // WorkspacePath returns the path to a resource under {StorageRoot}/workspace/.
