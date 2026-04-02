@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 type mockDispatcher struct {
+	mu        sync.Mutex
 	payloads  []Payload
 	alerts    []Payload
 	failFirst bool
@@ -18,6 +20,8 @@ type mockDispatcher struct {
 }
 
 func (m *mockDispatcher) Dispatch(ctx context.Context, p Payload) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.payloads = append(m.payloads, p)
 	if m.failFirst && len(m.payloads) == 1 {
 		return m.failErr
@@ -26,6 +30,8 @@ func (m *mockDispatcher) Dispatch(ctx context.Context, p Payload) error {
 }
 
 func (m *mockDispatcher) Alert(ctx context.Context, p Payload) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.alerts = append(m.alerts, p)
 	return nil
 }
@@ -275,4 +281,77 @@ func TestSchedulerPoll_FailureAlert(t *testing.T) {
 	if s.store.Jobs[0].State.FailureCount != 1 {
 		t.Errorf("want FailureCount=1, got %d", s.store.Jobs[0].State.FailureCount)
 	}
+}
+
+func TestSchedulerPoll_JobTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	atTime := int64(1000)
+	initialStore := Store{
+		Jobs: []Job{
+			{
+				ID:       "slow-job",
+				Name:     "Slow Job",
+				Enabled:  true,
+				Schedule: Schedule{Kind: KindAt, AtMS: &atTime},
+				Payload:  Payload{Channel: "telegram", Message: "slow"},
+				State:    JobState{NextRunAtMS: 500},
+			},
+		},
+	}
+	data, _ := initialStore.EncodeJSON()
+	_ = os.WriteFile(storePath, data, 0644)
+
+	// Dispatcher that blocks
+	dispatcher := &blockingDispatcher{delay: 50 * time.Millisecond}
+	s := NewScheduler(storePath, "", dispatcher).WithJobTimeout(1 * time.Millisecond)
+
+	ctx := context.Background()
+	if err := s.poll(ctx); err != nil {
+		t.Fatalf("poll failed: %v", err)
+	}
+
+	if len(dispatcher.payloads) != 1 {
+		t.Fatalf("want 1 dispatch, got %d", len(dispatcher.payloads))
+	}
+
+	err := dispatcher.lastErr
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected context.DeadlineExceeded, got %v", err)
+	}
+
+	if s.store.Jobs[0].State.FailureCount != 1 {
+		t.Errorf("want FailureCount=1, got %d", s.store.Jobs[0].State.FailureCount)
+	}
+}
+
+type blockingDispatcher struct {
+	mu       sync.Mutex
+	delay    time.Duration
+	payloads []Payload
+	alerts   []Payload
+	lastErr  error
+}
+
+func (m *blockingDispatcher) Dispatch(ctx context.Context, p Payload) error {
+	m.mu.Lock()
+	m.payloads = append(m.payloads, p)
+	m.mu.Unlock()
+	select {
+	case <-time.After(m.delay):
+		return nil
+	case <-ctx.Done():
+		m.mu.Lock()
+		m.lastErr = ctx.Err()
+		m.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func (m *blockingDispatcher) Alert(ctx context.Context, p Payload) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.alerts = append(m.alerts, p)
+	return nil
 }

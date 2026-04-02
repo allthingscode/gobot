@@ -29,6 +29,7 @@ type Scheduler struct {
 	itemsDir         string
 	dispatcher       Dispatcher
 	pollInterval     time.Duration
+	jobTimeout       time.Duration
 	store            *Store
 	lastMtime        int64
 	lastSize         int64
@@ -42,7 +43,15 @@ func NewScheduler(storePath, itemsDir string, dispatcher Dispatcher) *Scheduler 
 		itemsDir:     itemsDir,
 		dispatcher:   dispatcher,
 		pollInterval: 30 * time.Second, // default polling interval
+		jobTimeout:   10 * time.Minute,
 	}
+}
+
+// WithJobTimeout sets the per-job execution timeout.
+// If d is 0, jobs have no deadline.
+func (s *Scheduler) WithJobTimeout(d time.Duration) *Scheduler {
+	s.jobTimeout = d
+	return s
 }
 
 // ComputeNextRun calculates the next execution time in milliseconds.
@@ -197,7 +206,15 @@ func (s *Scheduler) poll(ctx context.Context) error {
 			wg.Add(1)
 			go func(dj dueJob) {
 				defer wg.Done()
-				err := s.dispatcher.Dispatch(ctx, dj.payload)
+
+				jobCtx := ctx
+				var cancel context.CancelFunc
+				if s.jobTimeout > 0 {
+					jobCtx, cancel = context.WithTimeout(ctx, s.jobTimeout)
+					defer cancel()
+				}
+
+				err := s.dispatcher.Dispatch(jobCtx, dj.payload)
 				if err != nil {
 					slog.Error("Job dispatch failed", "id", dj.id, "error", err)
 					alert := Payload{
