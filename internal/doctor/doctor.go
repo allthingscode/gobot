@@ -65,7 +65,7 @@ func Run(cfg *config.Config, probes *Probes) error {
 		r(checkWorkspace(cfg), true),
 		r(checkLogs(cfg), false),
 		r(checkAPIKey(cfg), true),
-		r(checkTelegram(cfg.TelegramToken(), p.ProbeTelegram), true),
+		r(checkTelegram(cfg.TelegramToken(), p.ProbeTelegram), false),
 		r(checkGeminiLive(apiKey, p.ProbeGemini), false),
 		r(checkGoogleToken(secretsRoot), false),
 		r(checkGmailToken(secretsRoot), false),
@@ -81,10 +81,10 @@ func Run(cfg *config.Config, probes *Probes) error {
 		switch {
 		case c.ok:
 			icon = "OK "
-		case c.critical:
+		case !c.ok && c.critical:
 			icon = "ERR"
 			anyCriticalFail = true
-		default:
+		case !c.ok && !c.critical:
 			icon = "WRN"
 		}
 		fmt.Printf("  [%s] %-22s", icon, c.name)
@@ -154,8 +154,8 @@ func checkAPIKey(cfg *config.Config) result {
 // checkTelegram validates the Telegram bot token.
 // If probe is nil, only the presence of the token is verified.
 func checkTelegram(token string, probe func(string) (string, error)) result {
-	if token == "" {
-		return result{name: "telegram", ok: false, detail: "token not configured"}
+	if token == "" || token == "REAUTH_REQUIRED" {
+		return result{name: "telegram", ok: false, detail: "token not configured or reauth required"}
 	}
 	if probe == nil {
 		return result{name: "telegram", ok: true, detail: "token present (live check skipped)"}

@@ -15,7 +15,9 @@ import (
 // Ported from resolve_strategic_media_path in infra_logic.py.
 func ResolveMediaPath(storageRoot, channelName string) string {
 	if storageRoot == "" {
-		storageRoot = "D:/Gobot_Storage"
+		// Fallback should be handled by config.StorageRoot() callers,
+		// but as a last resort infra should not assume a specific drive.
+		storageRoot = "."
 	}
 
 	path := filepath.Join(storageRoot, "workspace", "media")

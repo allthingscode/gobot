@@ -1,6 +1,6 @@
 module github.com/allthingscode/gobot
 
-go 1.23.0
+go 1.25.7
 
 require (
 	github.com/mymmrac/telego v1.7.0

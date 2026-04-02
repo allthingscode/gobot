@@ -86,6 +86,11 @@ func (t *tgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, erro
 func (t *tgAPI) startPoller(ctx context.Context) {
 	defer close(t.msgChan)
 	defer close(t.cbChan)
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("PANIC IN STARTPOLLER", "err", r)
+		}
+	}()
 	offset := 0
 	for {
 		select {
@@ -112,9 +117,9 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 			if update.UpdateID >= offset {
 				offset = update.UpdateID + 1
 			}
-			slog.Info("telegram: raw update received", 
-				"updateID", update.UpdateID, 
-				"hasMessage", update.Message != nil, 
+			slog.Info("telegram: raw update received",
+				"updateID", update.UpdateID,
+				"hasMessage", update.Message != nil,
 				"hasCallback", update.CallbackQuery != nil,
 				"hasEditedMessage", update.EditedMessage != nil,
 				"hasChannelPost", update.ChannelPost != nil,

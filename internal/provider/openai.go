@@ -233,11 +233,11 @@ func (p *OpenAIProvider) mapResponse(oaResp openAIResponse) *ChatResponse {
 
 // OpenAI API types
 type openAIRequest struct {
-	Model       string           `json:"model"`
-	Messages    []openAIMessage  `json:"messages"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-	Temperature float32          `json:"temperature,omitempty"`
-	Tools       []openAITool     `json:"tools,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature float32         `json:"temperature,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
 }
 
 type openAIMessage struct {

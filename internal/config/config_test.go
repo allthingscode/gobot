@@ -59,13 +59,18 @@ func TestDecode_MalformedJSON(t *testing.T) {
 
 func TestStorageRoot_Default(t *testing.T) {
 	cfg := &Config{}
-	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, "gobot_data")
-	if home == "" {
-		want = `D:\Gobot_Storage`
-	}
-	if cfg.StorageRoot() != want {
-		t.Errorf("got %q, want %q", cfg.StorageRoot(), want)
+	got := cfg.StorageRoot()
+	// Strategic Edition priority: D:\Gobot_Storage if it exists.
+	if _, err := os.Stat(`D:\Gobot_Storage`); err == nil {
+		if got != `D:\Gobot_Storage` {
+			t.Errorf("got %q, want D:\\Gobot_Storage", got)
+		}
+	} else {
+		home, _ := os.UserHomeDir()
+		want := filepath.Join(home, "gobot_data")
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
 	}
 }
 
@@ -94,11 +99,8 @@ func TestStorageRoot_Override(t *testing.T) {
 }
 
 func TestSecretsRoot(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	defaultRoot := filepath.Join(home, "gobot_data")
-	if home == "" {
-		defaultRoot = `D:\Gobot_Storage`
-	}
+	cfg := &Config{}
+	defaultRoot := cfg.StorageRoot()
 
 	tests := []struct {
 		name        string
@@ -126,8 +128,25 @@ func TestSecretsRoot(t *testing.T) {
 	}
 }
 
+func TestGatewayConfig(t *testing.T) {
+	input := `{"gateway":{"enabled":true,"host":"0.0.0.0","port":1234}}`
+	cfg, err := decode(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Gateway.Enabled {
+		t.Error("expected gateway enabled")
+	}
+	if cfg.Gateway.Host != "0.0.0.0" {
+		t.Errorf("got host %q, want 0.0.0.0", cfg.Gateway.Host)
+	}
+	if cfg.Gateway.Port != 1234 {
+		t.Errorf("got port %d, want 1234", cfg.Gateway.Port)
+	}
+}
+
 func TestLogsRoot(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs` }}
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs`}}
 	want := filepath.Join(`E:\Logs`, "logs")
 	if got := cfg.LogsRoot(); got != want {
 		t.Errorf("LogsRoot() = %q, want %q", got, want)
@@ -135,7 +154,7 @@ func TestLogsRoot(t *testing.T) {
 }
 
 func TestLogPath(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs` }}
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs`}}
 	want := filepath.Join(`E:\Logs`, "logs", "gobot.log")
 	if got := cfg.LogPath("gobot.log"); got != want {
 		t.Errorf("LogPath() = %q, want %q", got, want)

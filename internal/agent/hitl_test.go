@@ -28,7 +28,7 @@ func (m *mockBotAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessag
 func TestHITLManager_PreToolHook_NonHighRisk(t *testing.T) {
 	api := &mockBotAPI{}
 	m := NewHITLManager(api, []string{"high_risk"})
-	
+
 	got, err := m.PreToolHook(context.Background(), "telegram:123", "low_risk", nil)
 	if err != nil {
 		t.Fatalf("PreToolHook failed: %v", err)
@@ -41,7 +41,7 @@ func TestHITLManager_PreToolHook_NonHighRisk(t *testing.T) {
 func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 	api := &mockBotAPI{}
 	m := NewHITLManager(api, []string{"high_risk"})
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -71,7 +71,7 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 		t.Fatal("no buttons sent")
 	}
 	data := api.sentButtons[0][0][0].Data // hitl:approve:reqID
-	
+
 	// Simulate approval callback
 	cb := bot.InboundCallback{
 		ChatID: 123,
@@ -94,7 +94,7 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 	api := &mockBotAPI{}
 	m := NewHITLManager(api, []string{"high_risk"})
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -121,7 +121,7 @@ func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 
 	// Extract reqID from sent buttons
 	data := api.sentButtons[0][0][1].Data // hitl:reject:reqID
-	
+
 	// Simulate rejection callback
 	cb := bot.InboundCallback{
 		ChatID: 123,

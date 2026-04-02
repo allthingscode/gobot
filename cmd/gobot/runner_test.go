@@ -67,12 +67,12 @@ func TestLastUserText(t *testing.T) {
 		{Role: "user", Content: &agentctx.MessageContent{Str: &s1}},
 		{Role: "assistant", Content: &agentctx.MessageContent{Str: &s2}},
 	}
-	
+
 	got := lastUserText(messages)
 	if got != "msg 1" {
 		t.Errorf("lastUserText() = %q, want %q", got, "msg 1")
 	}
-	
+
 	s3 := "msg 3"
 	messages = append(messages, agentctx.StrategicMessage{Role: "user", Content: &agentctx.MessageContent{Str: &s3}})
 	got = lastUserText(messages)

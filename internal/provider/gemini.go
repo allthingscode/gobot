@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"google.golang.org/genai"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"google.golang.org/genai"
 )
 
 // GeminiProvider implements the Provider interface for Google's Gemini models.
@@ -133,7 +133,7 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 			role = "user"
 		}
 		c := &genai.Content{Role: role}
-		
+
 		// Handle thinking blocks (must come before text/tool calls in the same message)
 		for _, tb := range msg.ThinkingBlocks {
 			text, _ := tb["text"].(string)
@@ -162,7 +162,7 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		for _, tc := range msg.ToolCalls {
 			name, _ := tc["name"].(string)
 			args, _ := tc["args"].(map[string]any)
-			
+
 			var sig []byte
 			if rawSig, ok := tc["thought_signature"]; ok {
 				switch v := rawSig.(type) {
@@ -208,7 +208,7 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 
 func (p *GeminiProvider) buildConfig(req ChatRequest) *genai.GenerateContentConfig {
 	cfg := &genai.GenerateContentConfig{}
-	
+
 	if req.SystemInstruction != "" {
 		cfg.SystemInstruction = &genai.Content{
 			Parts: []*genai.Part{{Text: req.SystemInstruction}},
@@ -237,7 +237,7 @@ func (p *GeminiProvider) buildConfig(req ChatRequest) *genai.GenerateContentConf
 				var schema genai.Schema
 				json.Unmarshal(data, &schema)
 				decls[i].Parameters = &schema
-				
+
 				// Fix: genai.Schema.Type is an enum (uppercase), but JSON schema usually lowercase
 				p.fixSchemaTypes(&schema)
 			}

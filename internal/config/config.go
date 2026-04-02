@@ -23,6 +23,7 @@ type Config struct {
 	Providers ProvidersConfig `json:"providers"`
 	Tools     ToolsConfig     `json:"tools"`
 	Strategic StrategicConfig `json:"strategic_edition"`
+	Gateway   GatewayConfig   `json:"gateway"`
 }
 
 type AgentsConfig struct {
@@ -67,8 +68,15 @@ type OpenAIConfig struct {
 }
 
 type TelegramConfig struct {
+	Enabled   bool     `json:"enabled"`
 	Token     string   `json:"token"`
 	AllowFrom []string `json:"allowFrom"`
+}
+
+type GatewayConfig struct {
+	Enabled bool   `json:"enabled"`
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
 }
 
 // ExecConfig holds settings for the shell_exec tool.
@@ -123,10 +131,15 @@ type MCPServerConfig struct {
 	Env     map[string]string `json:"env"`
 }
 
-// StorageRoot returns the configured storage root, defaulting to ~/gobot_data.
+// StorageRoot returns the configured storage root, defaulting to D:\Gobot_Storage if it exists,
+// or ~/gobot_data otherwise.
 func (c *Config) StorageRoot() string {
 	if c.Strategic.StorageRoot != "" {
 		return c.Strategic.StorageRoot
+	}
+	// Strategic Edition Default: Prioritize D: drive on Windows if it exists.
+	if _, err := os.Stat(`D:\Gobot_Storage`); err == nil {
+		return `D:\Gobot_Storage`
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

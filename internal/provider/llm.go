@@ -51,10 +51,10 @@ type TokenUsage struct {
 
 // ModelInfo describes a model's capabilities and limits.
 type ModelInfo struct {
-	ID                 string
-	ContextWindow      int
-	MaxOutputTokens    int
-	SupportsToolUse    bool
-	SupportsImage      bool
-	SupportsThinking   bool
+	ID               string
+	ContextWindow    int
+	MaxOutputTokens  int
+	SupportsToolUse  bool
+	SupportsImage    bool
+	SupportsThinking bool
 }

@@ -21,6 +21,7 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
+	"github.com/allthingscode/gobot/internal/gateway"
 	"github.com/allthingscode/gobot/internal/gmail"
 	"github.com/allthingscode/gobot/internal/google"
 
@@ -61,8 +62,7 @@ func main() {
 	)
 
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		panic(fmt.Errorf("ROOT EXECUTE ERROR: %w", err))
 	}
 }
 
@@ -277,6 +277,12 @@ func cmdRun() *cobra.Command {
 		Use:   "run",
 		Short: "Start the strategic agent polling loop",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer func() {
+				if r := recover(); r != nil {
+					os.Stderr.WriteString("PANIC CAUGHT IN MAIN: " + fmt.Sprint(r) + "\n")
+					os.Exit(1)
+				}
+			}()
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -284,7 +290,7 @@ func cmdRun() *cobra.Command {
 
 			// Pre-flight diagnostics â€" mirrors nanobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
-				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
+				slog.Warn("pre-flight diagnostics found issues", "err", err)
 			}
 
 			// Setup logging to timestamped file and stderr
@@ -308,7 +314,7 @@ func cmdRun() *cobra.Command {
 
 			// Prioritize token from config.json, then environment.
 			token := cfg.TelegramToken()
-			if token == "" {
+			if token == "" && cfg.Channels.Telegram.Enabled {
 				return fmt.Errorf("telegram token not set: add channels.telegram.token to config or set TELEGRAM_BOT_TOKEN env var")
 			}
 			ctx := cmd.Context()
@@ -357,21 +363,33 @@ func cmdRun() *cobra.Command {
 			mgr.SetStorageRoot(cfg.StorageRoot())
 			mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
 
+			slog.Info("run: configuration loaded",
+				"storage_root", cfg.StorageRoot(),
+				"telegram_enabled", cfg.Channels.Telegram.Enabled,
+				"gateway_enabled", cfg.Gateway.Enabled)
+
 			// F-012: create shared Hooks instance and wire into both SessionManager and runner.
 			hooks := &agent.Hooks{}
 
-			api, err := newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
-			if err != nil {
-				return fmt.Errorf("telegram: %w", err)
+			var api *tgAPI
+			var hitl *agent.HITLManager
+			if cfg.Channels.Telegram.Enabled {
+				var tgErr error
+				api, tgErr = newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
+				if tgErr != nil {
+					slog.Error("telegram: connection failed (Gateway will still run)", "err", tgErr)
+				} else {
+					// F-048: HITL Approval Framework
+					hitl = agent.NewHITLManager(api, []string{"shell_exec", "send_email"})
+					hooks.RegisterPreTool(hitl.PreToolHook)
+				}
+			} else {
+				slog.Info("run: telegram disabled by config")
 			}
-
-			// F-048: HITL Approval Framework
-			hitl := agent.NewHITLManager(api, []string{"shell_exec", "send_email"})
-			hooks.RegisterPreTool(hitl.PreToolHook)
 
 			mgr.SetHooks(hooks)
 			runner.SetHooks(hooks)
-			handler := &dispatchHandler{mgr: mgr, memory: memStore}
+			handler := &dispatchHandler{mgr: mgr, memory: memStore, hitl: hitl}
 			if memStore != nil {
 				handler.consolidator = consolidator.New(runner, memStore)
 				slog.Info("run: memory consolidation enabled")
@@ -379,10 +397,6 @@ func cmdRun() *cobra.Command {
 
 			// Wrap handler with HITL and Pairing gates
 			var gateHandler bot.Handler = handler
-
-			// Add HITL callback handling to the handler chain
-			// We can wrap the handler or let dispatchHandler implement HandleCallback
-			handler.hitl = hitl
 
 			if store != nil {
 				if pairingStore, pErr := agentctx.NewPairingStore(store.DB()); pErr != nil {
@@ -393,7 +407,25 @@ func cmdRun() *cobra.Command {
 				}
 			}
 
-			b := bot.New(api, gateHandler)
+			// Start HTTP Gateway if enabled (F-046)
+			if cfg.Gateway.Enabled {
+				gw := gateway.NewServer(cfg.Gateway, gateHandler)
+				go func() {
+					if err := gw.ListenAndServe(ctx); err != nil && err != context.Canceled {
+						slog.Error("gateway: server error", "err", err)
+					}
+				}()
+			}
+
+			// Start Telegram bot if enabled
+			var b *bot.Bot
+			if cfg.Channels.Telegram.Enabled {
+				if api != nil {
+					b = bot.New(api, gateHandler)
+				} else {
+					slog.Warn("run: telegram API is nil, bot will not be started")
+				}
+			}
 
 			// Start cron scheduler in background.
 			storePath := cfg.WorkspacePath("jobs.json")
@@ -404,6 +436,12 @@ func cmdRun() *cobra.Command {
 			cronDisp := &cronDispatcher{mgr: cronMgr, b: b, storageRoot: cfg.StorageRoot()}
 			scheduler := cron.NewScheduler(storePath, itemsDir, cronDisp)
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						os.Stderr.WriteString("PANIC IN CRON: " + fmt.Sprint(r) + "\n")
+						os.Exit(1)
+					}
+				}()
 				if err := scheduler.Run(ctx); err != nil && err != context.Canceled {
 					slog.Error("cron scheduler stopped", "err", err)
 				}
@@ -416,13 +454,31 @@ func cmdRun() *cobra.Command {
 					alertChatID, _ = strconv.ParseInt(cfg.Channels.Telegram.AllowFrom[0], 10, 64)
 				}
 				gmailSecretsPath := filepath.Join(cfg.SecretsRoot(), "gmail")
+				// Heartbeat can run without API (it just won't send alerts)
 				hb := newHeartbeatRunner(liveProbes(), api, alertChatID, cfg.StorageRoot(), cfg.GeminiAPIKey(), token, gmailSecretsPath)
-				go hb.Run(ctx)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							os.Stderr.WriteString("PANIC IN HEARTBEAT: " + fmt.Sprint(r) + "\n")
+							os.Exit(1)
+						}
+					}()
+					hb.Run(ctx)
+				}()
 				slog.Info("gobot: heartbeat started", "interval", "15m")
 			}
 
 			slog.Info("gobot starting", "model", model)
-			return b.Run(ctx)
+			if b != nil {
+				return b.Run(ctx)
+			}
+
+			// If no blocking bot is running (e.g., Telegram disabled),
+			// block on context cancellation to keep the Gateway/Cron/Heartbeat alive.
+			slog.Info("gobot running (headless mode)")
+			<-ctx.Done()
+			return nil
+
 		},
 	}
 }
@@ -552,7 +608,7 @@ func cmdSimulate() *cobra.Command {
 
 			// Pre-flight diagnostics â€" mirrors nanobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
-				return fmt.Errorf("pre-flight diagnostics failed: %w", err)
+				slog.Warn("pre-flight diagnostics found issues", "err", err)
 			}
 
 			ctx := cmd.Context()

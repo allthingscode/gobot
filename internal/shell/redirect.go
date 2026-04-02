@@ -49,7 +49,7 @@ func redirectPath(path, quote, workspaceRoot, projectRoot string) string {
 
 	// B-027: Use custom base extractor that handles backslashes on any OS.
 	name := winBase(inner)
-	
+
 	// Ensure we use backslashes for the redirected path since it's for a Windows sandbox.
 	redirected := strings.TrimRight(workspaceRoot, "\\/") + "\\" + name
 

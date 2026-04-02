@@ -6,7 +6,7 @@ import (
 
 func TestWorkflowStatus_IsTerminal(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		status WorkflowStatus
 		want   bool
 	}{
@@ -29,7 +29,7 @@ func TestWorkflowStatus_IsTerminal(t *testing.T) {
 
 func TestWorkflowStatus_IsActive(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		status WorkflowStatus
 		want   bool
 	}{

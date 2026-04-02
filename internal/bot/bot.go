@@ -142,6 +142,12 @@ func (b *Bot) Run(ctx context.Context) error {
 	const maxDelay = 60 * time.Second
 	retryDelay := initialDelay
 
+	if b.api == nil {
+		slog.Info("bot: no Telegram API configured, skipping polling loop")
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
 	callbacks, err := b.api.Callbacks(ctx)
 	if err != nil {
 		return fmt.Errorf("bot: Callbacks failed: %w", err)

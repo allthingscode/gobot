@@ -71,7 +71,7 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey string, to
 
 	argBytes, _ := json.MarshalIndent(args, "", "  ")
 	reqID := m.createRequestID(sessionKey, toolName, args)
-	
+
 	m.mu.Lock()
 	ch := make(chan bool, 1)
 	m.pending[reqID] = ch

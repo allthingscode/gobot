@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -38,10 +38,10 @@ type Provider struct {
 	meterProvider  *sdkmetric.MeterProvider
 	tracer         trace.Tracer
 	meter          metric.Meter
-	
+
 	// Metrics
-	tokenCounter   metric.Int64Counter
-	toolHistogram  metric.Float64Histogram
+	tokenCounter  metric.Int64Counter
+	toolHistogram metric.Float64Histogram
 }
 
 // NewProvider initializes OpenTelemetry with OTLP exporters.

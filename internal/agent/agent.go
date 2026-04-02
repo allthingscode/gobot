@@ -53,7 +53,7 @@ type SessionManager struct {
 	logger       SessionLogger // may be nil; set via SetLogger
 	hooks        *Hooks        // may be nil; set via SetHooks
 	memoryWindow int
-	mu           sync.Map      // key: sessionKey (string) → *sync.Mutex
+	mu           sync.Map // key: sessionKey (string) → *sync.Mutex
 }
 
 // NewSessionManager creates a SessionManager backed by runner.

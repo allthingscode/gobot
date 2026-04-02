@@ -253,27 +253,27 @@ func (p *AnthropicProvider) mapResponse(antResp anthropicResponse) *ChatResponse
 
 // Anthropic API types
 type anthropicRequest struct {
-	Model       string                 `json:"model"`
-	Messages    []anthropicMessage     `json:"messages"`
-	System      string                 `json:"system,omitempty"`
-	MaxTokens   int                    `json:"max_tokens"`
-	Temperature float32                `json:"temperature,omitempty"`
-	Tools       []anthropicTool        `json:"tools,omitempty"`
+	Model       string             `json:"model"`
+	Messages    []anthropicMessage `json:"messages"`
+	System      string             `json:"system,omitempty"`
+	MaxTokens   int                `json:"max_tokens"`
+	Temperature float32            `json:"temperature,omitempty"`
+	Tools       []anthropicTool    `json:"tools,omitempty"`
 }
 
 type anthropicMessage struct {
-	Role    string                 `json:"role"`
+	Role    string                  `json:"role"`
 	Content []anthropicContentBlock `json:"content"`
 }
 
 type anthropicContentBlock struct {
 	Type      string         `json:"type"`
 	Text      string         `json:"text,omitempty"`
-	ID        string         `json:"id,omitempty"`         // for tool_use
-	Name      string         `json:"name,omitempty"`       // for tool_use
-	Input     map[string]any `json:"input,omitempty"`      // for tool_use
+	ID        string         `json:"id,omitempty"`          // for tool_use
+	Name      string         `json:"name,omitempty"`        // for tool_use
+	Input     map[string]any `json:"input,omitempty"`       // for tool_use
 	ToolUseID string         `json:"tool_use_id,omitempty"` // for tool_result
-	Content   any            `json:"content,omitempty"`    // for tool_result
+	Content   any            `json:"content,omitempty"`     // for tool_result
 }
 
 type anthropicTool struct {

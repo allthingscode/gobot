@@ -1,4 +1,4 @@
-﻿# Gobot Strategic Edition — Startup Script
+# Gobot Strategic Edition — Startup Script
 # Usage: .\start_gobot.ps1
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -6,6 +6,7 @@
 $AppPath    = $PSScriptRoot
 $GobotExe   = Join-Path $AppPath "gobot.exe"
 $LogDir     = "D:\Gobot_Storage\logs"
+$LockFile   = Join-Path $LogDir "gobot.pid"
 $ConfigPath = "C:\Users\HayesChiefOfStaff\.gobot\config.json"
 $PythonExe  = "C:\Users\HayesChiefOfStaff\Documents\nanobot\nanoClaw\Scripts\python.exe"
 
@@ -26,14 +27,33 @@ if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 }
 
-function Stop-GobotProcesses {
-    $procs = Get-Process -Name "gobot" -ErrorAction SilentlyContinue
-    if ($procs) {
-        foreach ($p in $procs) {
-            Write-Host "Stopping existing gobot process (PID: $($p.Id))..." -ForegroundColor Gray
-            $p | Stop-Process -Force -ErrorAction SilentlyContinue
+function Check-GobotLock {
+    if (Test-Path $LockFile) {
+        $oldPid = Get-Content $LockFile -ErrorAction SilentlyContinue
+        if ($oldPid) {
+            $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+            if ($proc -and $proc.Name -eq "gobot") {
+                Write-Host "Gobot is already running (PID: $oldPid). This instance will exit." -ForegroundColor Yellow
+                exit 0
+            }
         }
-        Start-Sleep -Milliseconds 500
+        # Stale lock or not gobot
+        Write-Host "Removing stale lock file: $LockFile" -ForegroundColor Gray
+        Remove-Item $LockFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Stop-GobotProcesses {
+    if (Test-Path $LockFile) {
+        $pidToStop = Get-Content $LockFile -ErrorAction SilentlyContinue
+        if ($pidToStop) {
+            $p = Get-Process -Id $pidToStop -ErrorAction SilentlyContinue
+            if ($p -and $p.Name -eq "gobot") {
+                Write-Host "Stopping managed gobot process (PID: $pidToStop)..." -ForegroundColor Gray
+                $p | Stop-Process -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Remove-Item $LockFile -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -42,12 +62,21 @@ Write-Host "--- Initializing Gobot Strategic Edition ---" -ForegroundColor Cyan
 Write-Host "Log output: $LogDir\gobot.log" -ForegroundColor Gray
 Write-Host ""
 
+# Check for existing instance before starting
+Check-GobotLock
+
 try {
     while ($true) {
         Stop-GobotProcesses
         Write-Host "--- Starting Gobot ---" -ForegroundColor Cyan
-        & $GobotExe run
-        $exitCode = $LASTEXITCODE
+        
+        # Start gobot and capture its PID
+        $process = Start-Process -FilePath $GobotExe -ArgumentList "run" -NoNewWindow -PassThru
+        $process.Id | Out-File $LockFile -Encoding utf8
+        
+        # Wait for the process to exit
+        $process | Wait-Process
+        $exitCode = $process.ExitCode
 
         if ($exitCode -eq 0) {
             Write-Host "Gobot shut down gracefully." -ForegroundColor Green
