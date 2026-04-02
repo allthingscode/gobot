@@ -54,6 +54,9 @@ func TestStripCLIXML(t *testing.T) {
 // ── RedirectCDrive ────────────────────────────────────────────────────────────
 
 func TestRedirectCDrive(t *testing.T) {
+	workspaceRoot := `D:\Gobot_Storage\workspace`
+	projectRoot := `Documents\gobot`
+
 	tests := []struct {
 		name  string
 		input string
@@ -61,44 +64,44 @@ func TestRedirectCDrive(t *testing.T) {
 	}{
 		{
 			name:  "passthrough_no_c_drive",
-			input: `Get-Content D:\Nanobot_Storage\workspace\file.txt`,
-			want:  `Get-Content D:\Nanobot_Storage\workspace\file.txt`,
+			input: `Get-Content D:\Gobot_Storage\workspace\file.txt`,
+			want:  `Get-Content D:\Gobot_Storage\workspace\file.txt`,
 		},
 		{
 			name:  "unquoted_c_drive_redirected",
 			input: `New-Item C:\canary.txt`,
-			want:  `New-Item D:\Nanobot_Storage\workspace\canary.txt`,
+			want:  `New-Item D:\Gobot_Storage\workspace\canary.txt`,
 		},
 		{
 			name:  "double_quoted_c_drive_redirected",
 			input: `New-Item "C:\path with spaces\file.txt"`,
-			want:  `New-Item "D:\Nanobot_Storage\workspace\file.txt"`,
+			want:  `New-Item "D:\Gobot_Storage\workspace\file.txt"`,
 		},
 		{
 			name:  "single_quoted_c_drive_redirected",
 			input: `Set-Content 'C:\temp\out.txt' -Value hello`,
-			want:  `Set-Content 'D:\Nanobot_Storage\workspace\out.txt' -Value hello`,
+			want:  `Set-Content 'D:\Gobot_Storage\workspace\out.txt' -Value hello`,
 		},
 		{
-			name:  "nanobot_project_root_untouched",
-			input: `python C:\Users\HayesChiefOfStaff\Documents\nanobot\run.py`,
-			want:  `python C:\Users\HayesChiefOfStaff\Documents\nanobot\run.py`,
+			name:  "gobot_project_root_untouched",
+			input: `python C:\Users\HayesChiefOfStaff\Documents\gobot\run.py`,
+			want:  `python C:\Users\HayesChiefOfStaff\Documents\gobot\run.py`,
 		},
 		{
 			name:  "case_insensitive_match",
 			input: `echo c:\canary.txt`,
-			want:  `echo D:\Nanobot_Storage\workspace\canary.txt`,
+			want:  `echo D:\Gobot_Storage\workspace\canary.txt`,
 		},
 		{
 			name:  "multiple_c_paths_in_one_command",
 			input: `Copy-Item C:\src\a.txt C:\src\b.txt`,
-			want:  `Copy-Item D:\Nanobot_Storage\workspace\a.txt D:\Nanobot_Storage\workspace\b.txt`,
+			want:  `Copy-Item D:\Gobot_Storage\workspace\a.txt D:\Gobot_Storage\workspace\b.txt`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shell.RedirectCDrive(tt.input)
+			got := shell.RedirectCDrive(tt.input, workspaceRoot, projectRoot)
 			if got != tt.want {
 				t.Errorf("RedirectCDrive(%q)\n  got  %q\n  want %q", tt.input, got, tt.want)
 			}
