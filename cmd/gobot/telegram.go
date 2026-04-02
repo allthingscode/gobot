@@ -100,8 +100,9 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 		}
 
 		updates, err := t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
-			Offset:  offset,
-			Timeout: 30,
+			Offset:         offset,
+			Timeout:        30,
+			AllowedUpdates: []string{"message", "callback_query"},
 		})
 		if err != nil {
 			slog.Error("telegram: GetUpdates failed", "err", err)
