@@ -18,8 +18,8 @@ import (
 	"github.com/allthingscode/gobot/internal/resilience"
 )
 
-// GenericRunner implements the agent.Runner interface using a provider.Provider.
-type GenericRunner struct {
+// geminiRunner implements the agent.Runner interface using a provider.Provider.
+type geminiRunner struct {
 	prov              provider.Provider
 	model             string
 	systemPrompt      string
@@ -32,24 +32,24 @@ type GenericRunner struct {
 	maxTokens         int
 }
 
-// NewGenericRunner creates a new GenericRunner for the given provider and model.
-func NewGenericRunner(prov provider.Provider, model string, systemPrompt string, maxIter int, maxTokens int) *GenericRunner {
-	return &GenericRunner{
-		prov:              prov,
-		model:             model,
-		systemPrompt:      systemPrompt,
+// newGeminiRunner creates a new geminiRunner for the given provider and model.
+func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, maxTokens int) *geminiRunner {
+	return &geminiRunner{
+		prov:         prov,
+		model:        model,
+		systemPrompt: systemPrompt,
 		// Trip after 5 consecutive failures within 60s; attempt recovery after 300s.
 		breaker: resilience.New(prov.Name(), 5, 60*time.Second, 300*time.Second),
 		// 3 requests/second burst; conservative default.
 		limiter:           rate.NewLimiter(rate.Every(time.Second), 3),
-		maxToolIterations: maxIter,
+		maxToolIterations: 25,
 		maxTokens:         maxTokens,
 	}
 }
 
 // RunText makes a single-turn LLM call with the given prompt text and returns
 // the model's text response. Used by the memory consolidator (F-028).
-func (r *GenericRunner) RunText(ctx context.Context, prompt string) (string, error) {
+func (r *geminiRunner) RunText(ctx context.Context, prompt string) (string, error) {
 	req := provider.ChatRequest{
 		Model:    r.model,
 		Messages: []agentctx.StrategicMessage{{Role: "user", Content: &agentctx.MessageContent{Str: &prompt}}},
@@ -63,7 +63,7 @@ func (r *GenericRunner) RunText(ctx context.Context, prompt string) (string, err
 
 // SetHooks configures lifecycle hooks for this runner.
 // PrePrompt hooks are applied before each Chat call.
-func (r *GenericRunner) SetHooks(h *agent.Hooks) {
+func (r *geminiRunner) SetHooks(h *agent.Hooks) {
 	r.hooks = h
 }
 
@@ -76,7 +76,7 @@ func (r *GenericRunner) SetHooks(h *agent.Hooks) {
 //  3. If the response contains no tool calls, extracts the text and returns.
 //
 // Returns an error if maxToolIterations is exceeded or prov.Chat fails.
-func (r *GenericRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	// 1. Build System Prompt with RAG and Hooks
 	sysPrompt := r.systemPrompt
 	if r.memStore != nil {
@@ -203,7 +203,7 @@ func (r *GenericRunner) Run(ctx context.Context, sessionKey string, messages []a
 }
 
 // executeTool dispatches a tool call to the matching registered Tool.
-func (r *GenericRunner) executeTool(ctx context.Context, sessionKey string, name string, args map[string]any) (string, error) {
+func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, name string, args map[string]any) (string, error) {
 	for _, t := range r.tools {
 		if t.Name() == name {
 			return t.Execute(ctx, sessionKey, args)
@@ -213,7 +213,7 @@ func (r *GenericRunner) executeTool(ctx context.Context, sessionKey string, name
 }
 
 // retryChat calls prov.Chat with exponential backoff on transient errors.
-func (r *GenericRunner) retryChat(ctx context.Context, req provider.ChatRequest) (*provider.ChatResponse, error) {
+func (r *geminiRunner) retryChat(ctx context.Context, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	const maxGenRetries = 3
 	const initialDelay = 1 * time.Second
 	const maxDelay = 30 * time.Second

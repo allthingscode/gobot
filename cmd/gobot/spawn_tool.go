@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -22,7 +23,7 @@ const (
 // tasks to ephemeral, specialized sub-agents (F-001).
 //
 // A sub-agent is a fresh SessionManager (no checkpoint store) backed by a
-// new GenericRunner with a specialized system prompt. It runs in the same
+// new geminiRunner with a specialized system prompt. It runs in the same
 // goroutine as the tool call and times out after spawnMaxTimeout.
 //
 // Sub-agent session keys: "agent:<agent_type>:<parent_session_key>"
@@ -64,12 +65,13 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages [
 }
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from a provider.
-func newSpawnTool(prov provider.Provider, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore, maxIter int) *SpawnTool {
+func newSpawnTool(prov provider.Provider, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
-			r := NewGenericRunner(prov, m, systemPrompt, maxIter, 0)
-			r.memStore = memStore
-			return r
+			runner := newGeminiRunner(prov, m, systemPrompt, 0)
+			runner.maxToolIterations = cfg.EffectiveMaxToolIterations()
+			runner.memStore = memStore
+			return runner
 		},
 		model:             model,
 		specialistPrompts: specialistPrompts,

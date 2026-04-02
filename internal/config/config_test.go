@@ -421,20 +421,16 @@ func TestExecTimeout_Configured(t *testing.T) {
 
 func TestEffectiveMaxToolIterations(t *testing.T) {
 	tests := []struct {
-		name     string
-		defaults int
-		strat    int
-		want     int
+		name  string
+		strat int
+		want  int
 	}{
-		{"all zero defaults to 25", 0, 0, 25},
-		{"strategic override", 0, 50, 50},
-		{"defaults override strategic", 10, 50, 10},
-		{"defaults only", 15, 0, 15},
+		{"zero value returns 25", 0, 25},
+		{"explicit value returns that value", 50, 50},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &Config{
-				Agents:    AgentsConfig{Defaults: AgentDefaults{MaxToolIterations: tc.defaults}},
 				Strategic: StrategicConfig{MaxToolIterations: tc.strat},
 			}
 			if got := cfg.EffectiveMaxToolIterations(); got != tc.want {
@@ -444,20 +440,35 @@ func TestEffectiveMaxToolIterations(t *testing.T) {
 	}
 }
 
-func TestDecode_AgentDefaultsLimits(t *testing.T) {
-	input := `{"agents":{"defaults":{"maxTokens":1024,"maxToolIterations":10,"memoryWindow":30}}}`
-	cfg, err := decode(bytes.NewReader([]byte(input)))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestDecode_StrategicLimits(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{
+			name:  "explicit value",
+			input: `{"strategic_edition":{"max_tool_iterations":50}}`,
+			want:  50,
+		},
+		{
+			name:  "zero/missing value defaults to 25",
+			input: `{"strategic_edition":{}}`,
+			want:  25,
+		},
 	}
-	if cfg.MaxTokens() != 1024 {
-		t.Errorf("got MaxTokens %d, want 1024", cfg.MaxTokens())
-	}
-	if cfg.EffectiveMaxToolIterations() != 10 {
-		t.Errorf("got MaxToolIterations %d, want 10", cfg.EffectiveMaxToolIterations())
-	}
-	if cfg.MemoryWindow() != 30 {
-		t.Errorf("got MemoryWindow %d, want 30", cfg.MemoryWindow())
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := decode(bytes.NewReader([]byte(tc.input)))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := cfg.EffectiveMaxToolIterations(); got != tc.want {
+				t.Errorf("EffectiveMaxToolIterations() = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 

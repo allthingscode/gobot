@@ -242,7 +242,7 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
 	// Register tools.
 	secretsRoot := cfg.SecretsRoot()
 	tools := []Tool{
-		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg.EffectiveMaxToolIterations()),
+		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg),
 		&ReadTextFileTool{workspace: cfg.WorkspacePath()},
 	}
 	tools = append(tools, newShellExecTool(cfg.WorkspacePath(), cfg.ExecTimeout()))
@@ -334,7 +334,8 @@ func cmdRun() *cobra.Command {
 			if systemPrompt != "" {
 				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 			}
-			runner := NewGenericRunner(prov, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
+			runner := newGeminiRunner(prov, model, systemPrompt, cfg.MaxTokens())
+			runner.maxToolIterations = cfg.EffectiveMaxToolIterations()
 
 			// Init long-term memory store (non-fatal if it fails).
 			memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
@@ -573,7 +574,8 @@ func cmdSimulate() *cobra.Command {
 			model := cfg.DefaultModel()
 
 			systemPrompt := loadSystemPrompt(cfg)
-			runner := NewGenericRunner(prov, model, systemPrompt, cfg.EffectiveMaxToolIterations(), cfg.MaxTokens())
+			runner := newGeminiRunner(prov, model, systemPrompt, cfg.MaxTokens())
+			runner.maxToolIterations = cfg.EffectiveMaxToolIterations()
 
 			// Init long-term memory store (non-fatal if it fails).
 			memStore, _ := memory.NewMemoryStore(cfg.StorageRoot())

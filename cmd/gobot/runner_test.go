@@ -52,7 +52,7 @@ func TestExtractText(t *testing.T) {
 }
 
 func TestRunner_SetHooks(t *testing.T) {
-	r := &GenericRunner{}
+	r := &geminiRunner{}
 	h := &agent.Hooks{}
 	r.SetHooks(h)
 	if r.hooks != h {

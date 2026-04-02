@@ -108,9 +108,6 @@ func (c *Config) MaxTokens() int {
 // EffectiveMaxToolIterations returns the configured tool iteration cap,
 // defaulting to 25 if unset or zero.
 func (c *Config) EffectiveMaxToolIterations() int {
-	if c.Agents.Defaults.MaxToolIterations > 0 {
-		return c.Agents.Defaults.MaxToolIterations
-	}
 	if c.Strategic.MaxToolIterations > 0 {
 		return c.Strategic.MaxToolIterations
 	}
