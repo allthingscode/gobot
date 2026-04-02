@@ -55,7 +55,7 @@ func TestStripCLIXML(t *testing.T) {
 
 func TestRedirectCDrive(t *testing.T) {
 	workspaceRoot := `D:\Gobot_Storage\workspace`
-	projectRoot := `Documents\gobot`
+	projectRoot := `gobot`
 
 	tests := []struct {
 		name  string
@@ -88,6 +88,11 @@ func TestRedirectCDrive(t *testing.T) {
 			want:  `python C:\Users\HayesChiefOfStaff\Documents\gobot\run.py`,
 		},
 		{
+			name:  "gobot_project_root_trailing_untouched",
+			input: `python C:\Users\HayesChiefOfStaff\Documents\gobot`,
+			want:  `python C:\Users\HayesChiefOfStaff\Documents\gobot`,
+		},
+		{
 			name:  "case_insensitive_match",
 			input: `echo c:\canary.txt`,
 			want:  `echo D:\Gobot_Storage\workspace\canary.txt`,
@@ -96,6 +101,11 @@ func TestRedirectCDrive(t *testing.T) {
 			name:  "multiple_c_paths_in_one_command",
 			input: `Copy-Item C:\src\a.txt C:\src\b.txt`,
 			want:  `Copy-Item D:\Gobot_Storage\workspace\a.txt D:\Gobot_Storage\workspace\b.txt`,
+		},
+		{
+			name:  "mixed_separators_in_inner_path",
+			input: `New-Item C:\temp/slash\file.txt`,
+			want:  `New-Item D:\Gobot_Storage\workspace\file.txt`,
 		},
 	}
 

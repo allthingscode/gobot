@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/provider"
@@ -35,8 +36,9 @@ func newShellExecTool(workspaceRoot string, timeout time.Duration) *shellExecToo
 		SandboxRoot: workspaceRoot,
 		Timeout:     timeout,
 	}
-	// Try to determine project root (e.g. C:\Users\...\Documents\gobot)
-	projectRoot, _ := os.Getwd()
+	// Try to determine project root base name (e.g. "gobot")
+	wd, _ := os.Getwd()
+	projectRoot := filepath.Base(wd)
 	return &shellExecTool{
 		exec:          sandbox.New(cfg),
 		workspaceRoot: workspaceRoot,
