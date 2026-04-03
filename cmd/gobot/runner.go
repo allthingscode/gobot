@@ -12,6 +12,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/bot"
+	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -33,17 +34,18 @@ type geminiRunner struct {
 }
 
 // newGeminiRunner creates a new geminiRunner for the given provider and model.
-func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, maxTokens int) *geminiRunner {
+func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, cfg *config.Config) *geminiRunner {
+	maxFail, window, timeout := cfg.Breaker(prov.Name())
 	return &geminiRunner{
 		prov:         prov,
 		model:        model,
 		systemPrompt: systemPrompt,
-		// Trip after 5 consecutive failures within 60s; attempt recovery after 300s.
-		breaker: resilience.New(prov.Name(), 5, 60*time.Second, 300*time.Second),
+		// Configured circuit breaker for LLM provider.
+		breaker: resilience.New(prov.Name(), maxFail, window, timeout),
 		// 3 requests/second burst; conservative default.
 		limiter:           rate.NewLimiter(rate.Every(time.Second), 3),
 		maxToolIterations: 25,
-		maxTokens:         maxTokens,
+		maxTokens:         cfg.MaxTokens(),
 	}
 }
 

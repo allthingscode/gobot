@@ -29,6 +29,7 @@ import (
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/resilience"
 )
 
 var (
@@ -170,8 +171,20 @@ type dispatchHandler struct {
 }
 
 func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
+	// Handle admin commands first.
+	if strings.TrimSpace(msg.Text) == "/reset_circuits" {
+		resilience.ResetAll()
+		slog.Info("resilience: all circuit breakers reset by user", "session", sessionKey)
+		return "All circuit breakers have been reset.", nil
+	}
+
 	slog.Debug("handler: dispatching to session manager", "session", sessionKey)
 	reply, err := h.mgr.Dispatch(ctx, sessionKey, msg.Text)
+	if err != nil {
+		if errors.Is(err, resilience.ErrCircuitOpen) {
+			return "I'm sorry, I'm currently having trouble connecting to one of my services. Please try again in a few moments.", nil
+		}
+	}
 	if err == nil && h.memory != nil {
 		// Index user message (if not generic noise)
 		if !memory.ShouldSkipRAG(msg.Text) {
@@ -352,8 +365,7 @@ func cmdRun() *cobra.Command {
 			if systemPrompt != "" {
 				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 			}
-			runner := newGeminiRunner(prov, model, systemPrompt, cfg.MaxTokens())
-			runner.maxToolIterations = cfg.EffectiveMaxToolIterations()
+			runner := newGeminiRunner(prov, model, systemPrompt, cfg)
 
 			// Init long-term memory store (non-fatal if it fails).
 			memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
@@ -387,7 +399,7 @@ func cmdRun() *cobra.Command {
 			var hitl *agent.HITLManager
 			if cfg.Channels.Telegram.Enabled {
 				var tgErr error
-				api, tgErr = newTgAPI(token, cfg.Channels.Telegram.AllowFrom)
+				api, tgErr = newTgAPI(token, cfg.Channels.Telegram.AllowFrom, cfg)
 				if tgErr != nil {
 					slog.Error("telegram: connection failed (Gateway will still run)", "err", tgErr)
 				} else {
@@ -642,8 +654,7 @@ func cmdSimulate() *cobra.Command {
 			model := cfg.DefaultModel()
 
 			systemPrompt := loadSystemPrompt(cfg)
-			runner := newGeminiRunner(prov, model, systemPrompt, cfg.MaxTokens())
-			runner.maxToolIterations = cfg.EffectiveMaxToolIterations()
+			runner := newGeminiRunner(prov, model, systemPrompt, cfg)
 
 			// Init long-term memory store (non-fatal if it fails).
 			memStore, _ := memory.NewMemoryStore(cfg.StorageRoot())

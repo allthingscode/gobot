@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/resilience"
 )
 
 // Probes holds optional live connectivity probe functions.
@@ -70,6 +71,20 @@ func Run(cfg *config.Config, probes *Probes) error {
 		r(checkGoogleToken(secretsRoot), false),
 		r(checkGmailToken(secretsRoot), false),
 		r(checkJobsDir(cfg), false),
+	}
+
+	// Add Resilience checks (F-054)
+	// Proactively register configured breakers so they show up in the report
+	for name := range cfg.Resilience.CircuitBreakers {
+		if resilience.Get(name) == nil {
+			maxFail, window, timeout := cfg.Breaker(name)
+			resilience.New(name, maxFail, window, timeout)
+		}
+	}
+
+	resResults := checkResilience()
+	for _, res := range resResults {
+		checks = append(checks, r(res, false))
 	}
 
 	fmt.Println("gobot doctor")
@@ -261,4 +276,31 @@ func checkJobsDir(cfg *config.Config) result {
 		return result{name: "jobs directory", ok: true, detail: fmt.Sprintf("%s (no .md jobs)", dir)}
 	}
 	return result{name: "jobs directory", ok: true, detail: fmt.Sprintf("%d job(s) in %s", count, dir)}
+}
+
+// checkResilience returns results for all registered circuit breakers.
+func checkResilience() []result {
+	breakers := resilience.All()
+	if len(breakers) == 0 {
+		return []result{{name: "resilience", ok: true, detail: "no circuit breakers registered"}}
+	}
+
+	var results []result
+	for name, b := range breakers {
+		state := b.State()
+		stats := resilience.GetStats(name)
+		detail := fmt.Sprintf("state: %s, succ: %d, fail: %d, rej: %d",
+			state, stats.Successes, stats.Failures, stats.Rejections)
+
+		ok := true
+		if state == "open" {
+			ok = false
+		}
+		results = append(results, result{
+			name:   "breaker: " + name,
+			ok:     ok,
+			detail: detail,
+		})
+	}
+	return results
 }

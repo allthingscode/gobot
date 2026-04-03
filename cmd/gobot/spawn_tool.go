@@ -45,6 +45,9 @@ type SpawnTool struct {
 
 	// memStore is optional; if set, sub-agents get RAG context too.
 	memStore *memory.MemoryStore
+
+	// cfg is required to create sub-runners with the correct settings (F-054).
+	cfg *config.Config
 }
 
 // iterLimitRunner wraps a Runner and enforces a maximum number of Run calls.
@@ -68,7 +71,7 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages [
 func newSpawnTool(prov provider.Provider, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
-			runner := newGeminiRunner(prov, m, systemPrompt, 0)
+			runner := newGeminiRunner(prov, m, systemPrompt, cfg)
 			runner.maxToolIterations = cfg.EffectiveMaxToolIterations()
 			runner.memStore = memStore
 			return runner
@@ -77,6 +80,7 @@ func newSpawnTool(prov provider.Provider, model string, specialistPrompts map[st
 		specialistPrompts: specialistPrompts,
 		specialistModels:  specialistModels,
 		memStore:          memStore,
+		cfg:               cfg,
 	}
 }
 

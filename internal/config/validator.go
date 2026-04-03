@@ -277,19 +277,10 @@ func (v *Validator) validatePaths(result *ValidationResult) {
 		}
 	}
 	
-	// Check secrets directory permissions
+	// Check secrets directory permissions (platform-specific)
 	secretsDir := filepath.Join(root, "secrets")
-	if info, err := os.Stat(secretsDir); err == nil {
-		mode := info.Mode().Perm()
-		// Warn if secrets directory is world-readable or group-writable/world-writable
-		if mode&0044 != 0 || mode&0022 != 0 {
-			result.Errors = append(result.Errors, ValidationError{
-				Field:    "secrets.permissions",
-				Message:  fmt.Sprintf("secrets directory has insecure permissions: %s", secretsDir),
-				Remedy:   fmt.Sprintf("run 'chmod 700 %s' to restrict access", secretsDir),
-				Severity: SeverityWarning,
-			})
-		}
+	if err := v.checkPathPermissions(secretsDir, result); err != nil {
+		slog.Debug("path permission check failed", "path", secretsDir, "err", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package resilience
 import (
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/sony/gobreaker"
@@ -14,7 +15,9 @@ var ErrCircuitOpen = errors.New("circuit breaker: open")
 // Breaker wraps a gobreaker.CircuitBreaker with slog state-change logging.
 // Create with New; the zero value is not valid.
 type Breaker struct {
-	cb *gobreaker.CircuitBreaker
+	mu       sync.RWMutex
+	cb       *gobreaker.CircuitBreaker
+	settings gobreaker.Settings
 }
 
 // New creates a Breaker that trips to Open after maxConsecutiveFailures
@@ -39,17 +42,34 @@ func New(name string, maxConsecutiveFailures uint32, countWindow, openTimeout ti
 			)
 		},
 	}
-	return &Breaker{cb: gobreaker.NewCircuitBreaker(settings)}
+	b := &Breaker{
+		cb:       gobreaker.NewCircuitBreaker(settings),
+		settings: settings,
+	}
+	Register(name, b)
+	return b
 }
 
 // Execute calls fn through the circuit breaker.
 // Returns ErrCircuitOpen (without calling fn) when the circuit is open.
 // Any error returned by fn counts as a failure against the circuit.
 func (b *Breaker) Execute(fn func() error) error {
-	_, err := b.cb.Execute(func() (any, error) {
-		return nil, fn()
+	b.mu.RLock()
+	cb := b.cb
+	name := b.settings.Name
+	b.mu.RUnlock()
+
+	_, err := cb.Execute(func() (any, error) {
+		err := fn()
+		if err == nil {
+			RecordSuccess(name)
+		} else {
+			RecordFailure(name)
+		}
+		return nil, err
 	})
 	if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+		RecordRejection(name)
 		return ErrCircuitOpen
 	}
 	return err
@@ -57,5 +77,23 @@ func (b *Breaker) Execute(fn func() error) error {
 
 // State returns the current circuit state as a string ("closed", "half-open", "open").
 func (b *Breaker) State() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.cb.State().String()
+}
+
+// Reset clears the circuit breaker state, returning it to Closed.
+func (b *Breaker) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// Since gobreaker v1.0.0 doesn't have Reset(), we replace the instance.
+	b.cb = gobreaker.NewCircuitBreaker(b.settings)
+}
+
+// Stop removes the breaker from the global registry.
+func (b *Breaker) Stop() {
+	b.mu.RLock()
+	name := b.settings.Name
+	b.mu.RUnlock()
+	Unregister(name)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -10,20 +11,22 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/bot"
+	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/resilience"
 	"github.com/allthingscode/gobot/internal/telegram"
 	telego "github.com/mymmrac/telego"
 )
 
 type tgAPI struct {
-	client     *telego.Bot
-	seenMsgs   sync.Map
-	allowFrom  map[int64]bool
-	msgChan    chan bot.InboundMessage
-	cbChan     chan bot.InboundCallback
-	pollerOnce sync.Once
+	client    *telego.Bot
+	breaker   *resilience.Breaker
+	seenMsgs  sync.Map
+	allowFrom map[int64]bool
+	msgChan   chan bot.InboundMessage
+	cbChan    chan bot.InboundCallback
 }
 
-func newTgAPI(token string, allowFrom []string) (*tgAPI, error) {
+func newTgAPI(token string, allowFrom []string, cfg *config.Config) (*tgAPI, error) {
 	client, err := telego.NewBot(token)
 	if err != nil {
 		return nil, fmt.Errorf("telego: %w", err)
@@ -40,8 +43,13 @@ func newTgAPI(token string, allowFrom []string) (*tgAPI, error) {
 			af[id] = true
 		}
 	}
+
+	maxFail, window, timeout := cfg.Breaker("telegram")
+	breaker := resilience.New("telegram", maxFail, window, timeout)
+
 	return &tgAPI{
 		client:    client,
+		breaker:   breaker,
 		allowFrom: af,
 		msgChan:   make(chan bot.InboundMessage, 100),
 		cbChan:    make(chan bot.InboundCallback, 100),
@@ -74,12 +82,16 @@ func (t *tgAPI) isDuplicate(key string) bool {
 }
 
 func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMessage, error) {
-	t.pollerOnce.Do(func() { go t.startPoller(ctx) })
+	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
+	t.msgChan = make(chan bot.InboundMessage, 100)
+	go t.startPoller(ctx)
 	return t.msgChan, nil
 }
 
 func (t *tgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, error) {
-	t.pollerOnce.Do(func() { go t.startPoller(ctx) })
+	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
+	t.cbChan = make(chan bot.InboundCallback, 100)
+	// Note: startPoller is shared, but usually called via Updates in Bot.Run.
 	return t.cbChan, nil
 }
 
@@ -99,19 +111,23 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 		default:
 		}
 
-		updates, err := t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
-			Offset:         offset,
-			Timeout:        30,
-			AllowedUpdates: []string{"message", "callback_query"},
+		var updates []telego.Update
+		err := t.breaker.Execute(func() error {
+			var pollErr error
+			updates, pollErr = t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
+				Offset:         offset,
+				Timeout:        30,
+				AllowedUpdates: []string{"message", "callback_query"},
+			})
+			return pollErr
 		})
 		if err != nil {
-			slog.Error("telegram: GetUpdates failed", "err", err)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Second):
-				continue
+			if errors.Is(err, resilience.ErrCircuitOpen) {
+				slog.Warn("telegram: circuit breaker is open, stopping poller session")
+				return // Return error to trigger Bot.Run reconnection/backoff
 			}
+			slog.Error("telegram: GetUpdates failed", "err", err)
+			return // Return to allow Bot.Run to handle retry delay
 		}
 
 		for _, update := range updates {
@@ -166,8 +182,10 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 				}
 
 				// Answer callback immediately to stop loading spinner
-				_ = t.client.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
-					CallbackQueryID: cb.ID,
+				_ = t.breaker.Execute(func() error {
+					return t.client.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+						CallbackQueryID: cb.ID,
+					})
 				})
 
 				slog.Debug("telegram: forwarding callback to channel", "id", cb.ID, "reqID", cb.Data)
@@ -199,7 +217,9 @@ func (t *tgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {
 		if threadID > 0 {
 			params.MessageThreadID = int(threadID)
 		}
-		if err := t.client.SendChatAction(ctx, params); err != nil {
+		if err := t.breaker.Execute(func() error {
+			return t.client.SendChatAction(ctx, params)
+		}); err != nil {
 			slog.Debug("telegram: typing action failed", "err", err)
 		}
 	}
@@ -237,11 +257,17 @@ func (t *tgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	if msg.ReplyToID > 0 {
 		params.ReplyParameters = &telego.ReplyParameters{MessageID: int(msg.ReplyToID)}
 	}
-	_, err := t.client.SendMessage(ctx, params)
+	err := t.breaker.Execute(func() error {
+		_, err := t.client.SendMessage(ctx, params)
+		return err
+	})
 	if err != nil && strings.Contains(err.Error(), "can't parse entities") {
 		params.ParseMode = ""
 		params.Text = msg.Text
-		_, err = t.client.SendMessage(ctx, params)
+		err = t.breaker.Execute(func() error {
+			_, err := t.client.SendMessage(ctx, params)
+			return err
+		})
 	}
 	if err != nil {
 		return fmt.Errorf("telego send: %w", err)
@@ -270,7 +296,10 @@ func (t *tgAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, bu
 	if msg.ThreadID > 0 {
 		params.MessageThreadID = int(msg.ThreadID)
 	}
-	_, err := t.client.SendMessage(ctx, params)
+	err := t.breaker.Execute(func() error {
+		_, err := t.client.SendMessage(ctx, params)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("telego SendWithButtons: %w", err)
 	}

@@ -148,34 +148,48 @@ func (b *Bot) Run(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	callbacks, err := b.api.Callbacks(ctx)
-	if err != nil {
-		return fmt.Errorf("bot: Callbacks failed: %w", err)
-	}
-
-	// Handle callbacks in a dedicated goroutine so they never block on updates.
-	go func() {
-		for {
+	for {
+		callbacks, err := b.api.Callbacks(ctx)
+		if err != nil {
+			slog.Error("bot: Callbacks failed", "err", err, "retry_in", retryDelay)
 			select {
 			case <-ctx.Done():
-				return
-			case cb, ok := <-callbacks:
-				if !ok {
-					return
-				}
-				slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
-				go func() {
-					if err := b.handler.HandleCallback(ctx, cb); err != nil {
-						slog.Error("bot: HandleCallback failed", "err", err)
-					}
-				}()
+				return ctx.Err()
+			case <-time.After(retryDelay):
 			}
+			retryDelay *= 2
+			if retryDelay > maxDelay {
+				retryDelay = maxDelay
+			}
+			continue
 		}
-	}()
 
-	for {
+		// Handle callbacks in a dedicated goroutine so they never block on updates.
+		// Use a local context linked to the polling session to prevent leaks.
+		cbCtx, cbCancel := context.WithCancel(ctx)
+		go func() {
+			defer cbCancel()
+			for {
+				select {
+				case <-cbCtx.Done():
+					return
+				case cb, ok := <-callbacks:
+					if !ok {
+						return
+					}
+					slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
+					go func() {
+						if err := b.handler.HandleCallback(cbCtx, cb); err != nil {
+							slog.Error("bot: HandleCallback failed", "err", err)
+						}
+					}()
+				}
+			}
+		}()
+
 		updates, err := b.api.Updates(ctx, 30)
 		if err != nil {
+			cbCancel() // stop callback poller
 			slog.Error("bot: Updates failed", "err", err, "retry_in", retryDelay)
 			select {
 			case <-ctx.Done():
@@ -195,9 +209,11 @@ func (b *Bot) Run(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
+				cbCancel()
 				return ctx.Err()
 			case msg, ok := <-updates:
 				if !ok {
+					cbCancel()
 					break drain // channel closed — reconnect
 				}
 				go b.dispatch(ctx, msg)

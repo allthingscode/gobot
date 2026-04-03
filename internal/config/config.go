@@ -22,8 +22,19 @@ type Config struct {
 	Channels  ChannelsConfig  `json:"channels"`
 	Providers ProvidersConfig `json:"providers"`
 	Tools     ToolsConfig     `json:"tools"`
-	Strategic StrategicConfig `json:"strategic_edition"`
-	Gateway   GatewayConfig   `json:"gateway"`
+	Strategic StrategicConfig   `json:"strategic_edition"`
+	Gateway   GatewayConfig     `json:"gateway"`
+	Resilience ResilienceConfig `json:"resilience"`
+}
+
+type ResilienceConfig struct {
+	CircuitBreakers map[string]BreakerConfig `json:"circuit_breakers"`
+}
+
+type BreakerConfig struct {
+	MaxFailures uint32 `json:"max_failures"`
+	Window      int    `json:"window_seconds"`  // countWindow
+	Timeout     int    `json:"timeout_seconds"` // openTimeout
 }
 
 type AgentsConfig struct {
@@ -146,6 +157,26 @@ func (c *Config) StorageRoot() string {
 		return `D:\Gobot_Storage`
 	}
 	return filepath.Join(home, "gobot_data")
+}
+
+// Breaker returns the configuration for a named circuit breaker, falling back to
+// safe defaults if not configured: 5 failures, 60s window, 30s timeout.
+func (c *Config) Breaker(name string) (maxFail uint32, window, timeout time.Duration) {
+	if bc, ok := c.Resilience.CircuitBreakers[name]; ok {
+		maxFail = bc.MaxFailures
+		if bc.Window > 0 {
+			window = time.Duration(bc.Window) * time.Second
+		} else {
+			window = 60 * time.Second
+		}
+		if bc.Timeout > 0 {
+			timeout = time.Duration(bc.Timeout) * time.Second
+		} else {
+			timeout = 30 * time.Second
+		}
+		return maxFail, window, timeout
+	}
+	return 5, 60 * time.Second, 30 * time.Second
 }
 
 // Save marshals the config to JSON and writes it to the specified path.
