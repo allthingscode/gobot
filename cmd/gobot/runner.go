@@ -177,7 +177,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 			}
 
 			if execErr != nil {
-				slog.Error("runner: tool execution failed", "tool", name, "err", execErr)
+				slog.Error("runner: tool execution failed", "session", sessionKey, "tool", name, "err", execErr)
 				result = fmt.Sprintf("Error: %v", execErr)
 			} else {
 				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.
