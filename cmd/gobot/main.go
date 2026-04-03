@@ -465,7 +465,13 @@ func cmdRun() *cobra.Command {
 			// Cron jobs use an ephemeral session manager (nil store) so they never
 			// share checkpoint history with DM conversations (F-013).
 			cronMgr := agent.NewSessionManager(runner, nil, model)
-			cronDisp := &cronDispatcher{mgr: cronMgr, b: b, storageRoot: cfg.StorageRoot()}
+			cronDisp := &cronDispatcher{
+				mgr:         cronMgr,
+				b:           b,
+				storageRoot: cfg.StorageRoot(),
+				secretsRoot: cfg.SecretsRoot(),
+				userEmail:   cfg.Strategic.UserEmail,
+			}
 			scheduler := cron.NewScheduler(storePath, itemsDir, cronDisp)
 			go func() {
 				defer func() {

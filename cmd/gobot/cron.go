@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/cron"
+	"github.com/allthingscode/gobot/internal/gmail"
 )
 
 // cronDispatcher implements cron.Dispatcher.
@@ -19,6 +21,8 @@ type cronDispatcher struct {
 	mgr         *agent.SessionManager
 	b           *bot.Bot
 	storageRoot string
+	secretsRoot string
+	userEmail   string
 }
 
 // Dispatch routes a cron job payload to the agent and sends the reply.
@@ -26,6 +30,7 @@ type cronDispatcher struct {
 // Steps:
 //  1. Call cron.ResolveRoutableChannel(p, storageRoot).
 //     - If silent == true: prepend "[SILENT] " to message, then dispatch (no reply sent).
+//     - If channel == "email": dispatch and send response via Gmail.
 //     - If channel != "telegram" or to == "": log and return nil (unroutable).
 //  2. Use `to` directly as the sessionKey for mgr.Dispatch.
 //  3. If silent == false and response != "": parse sessionKey into chatID + threadID
@@ -42,6 +47,38 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 		slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", true)
 		_, err := d.mgr.Dispatch(ctx, sessionKey, "[SILENT] [AUTONOMOUS] "+p.Message)
 		return err
+	}
+
+	if channel == "email" {
+		recipient := to
+		if recipient == "" {
+			recipient = d.userEmail
+		}
+		if recipient == "" {
+			slog.Warn("unroutable cron job: email recipient not set", "job", p.Message)
+			return nil
+		}
+
+		sessionKey := "cron:email:" + recipient
+		slog.Info("dispatching cron job", "sessionKey", sessionKey, "channel", "email")
+		response, err := d.mgr.Dispatch(ctx, sessionKey, "[AUTONOMOUS] "+p.Message)
+		if err != nil {
+			return err
+		}
+
+		if response != "" {
+			gmailSecrets := filepath.Join(d.secretsRoot, "gmail")
+			svc, err := gmail.NewService(gmailSecrets)
+			if err != nil {
+				slog.Error("failed to initialize gmail service for cron", "err", err)
+				return nil
+			}
+			subject := "Gobot Strategic Briefing"
+			if err := svc.Send(ctx, recipient, subject, response); err != nil {
+				slog.Error("failed to send cron response via email", "err", err, "to", recipient)
+			}
+		}
+		return nil
 	}
 
 	if channel != "telegram" || to == "" {
