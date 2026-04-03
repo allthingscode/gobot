@@ -18,7 +18,7 @@ jobs:
             -   name: golangci-lint
                 uses: golangci/golangci-lint-action@v6
                 with:
-                    args: --modules-download-mode=vendor
+                    args: --modules-download-mode=readonly
 
     test:
         strategy:
@@ -35,7 +35,7 @@ jobs:
                     cache: true
 
             -   name: Vet
-                run: go vet -mod=vendor ./...
+      run: go vet -mod=readonly ./...
 
-            -   name: Test
-                run: go test -mod=vendor ./...
+    - name: Test
+      run: go test -mod=readonly ./...
