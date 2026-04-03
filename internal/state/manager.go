@@ -82,7 +82,7 @@ func (m *Manager) SaveCheckpoint(state *WorkflowState) error {
 	if err != nil {
 		return fmt.Errorf("acquiring lock: %w", err)
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 
 	// Update timestamp and version.
 	state.UpdatedAt = time.Now()
@@ -174,7 +174,7 @@ func (m *Manager) Archive(id WorkflowID) error {
 	if err != nil {
 		return fmt.Errorf("acquiring lock: %w", err)
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 
 	// Move checkpoint to archive.
 	src := m.checkpointPath(id)

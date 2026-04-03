@@ -18,13 +18,19 @@ func TestCrashRecovery_SimulatesPowerFailure(t *testing.T) {
 	}
 
 	manager := NewManager(config)
-	manager.Init()
+	if err := manager.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
 
 	// Create workflow.
-	_, _ = manager.CreateWorkflow("wf-crash", json.RawMessage(`{"step": 1}`))
+	if _, err := manager.CreateWorkflow("wf-crash", json.RawMessage(`{"step": 1}`)); err != nil {
+		t.Fatalf("CreateWorkflow failed: %v", err)
+	}
 
 	// Simulate crash: journal entry written but checkpoint not updated.
-	manager.UpdateStatus("wf-crash", StatusRunning)
+	if err := manager.UpdateStatus("wf-crash", StatusRunning); err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
 
 	// Simulate recovery (new manager instance).
 	manager2 := NewManager(config)
@@ -48,10 +54,14 @@ func TestConcurrentCheckpoints(t *testing.T) {
 	}
 
 	manager := NewManager(config)
-	manager.Init()
+	if err := manager.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
 
 	// Create workflow.
-	_, _ = manager.CreateWorkflow("wf-concurrent", json.RawMessage(`{"count": 0}`))
+	if _, err := manager.CreateWorkflow("wf-concurrent", json.RawMessage(`{"count": 0}`)); err != nil {
+		t.Fatalf("CreateWorkflow failed: %v", err)
+	}
 
 	// Concurrent updates.
 	var wg sync.WaitGroup
@@ -70,9 +80,17 @@ func TestConcurrentCheckpoints(t *testing.T) {
 			}
 
 			var data map[string]int
-			json.Unmarshal(wf.Data, &data)
+			if err := json.Unmarshal(wf.Data, &data); err != nil {
+				errors <- err
+				return
+			}
 			data["count"] = n
-			wf.Data, _ = json.Marshal(data)
+			var errMarshal error
+			wf.Data, errMarshal = json.Marshal(data)
+			if errMarshal != nil {
+				errors <- errMarshal
+				return
+			}
 
 			if err := manager.SaveCheckpoint(wf); err != nil {
 				errors <- err
@@ -92,7 +110,10 @@ func TestConcurrentCheckpoints(t *testing.T) {
 	}
 
 	// Should have some successful saves.
-	final, _ := manager.LoadWorkflow("wf-concurrent")
+	final, err := manager.LoadWorkflow("wf-concurrent")
+	if err != nil {
+		t.Fatalf("LoadWorkflow failed: %v", err)
+	}
 	if final.Version < 2 {
 		t.Errorf("Version = %d, expected at least 2", final.Version)
 	}
@@ -110,7 +131,10 @@ func TestAtomicWrite_InterruptedWrite(t *testing.T) {
 	}
 
 	// Verify no temp files left.
-	entries, _ := os.ReadDir(tempDir)
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("ReadDir failed: %v", err)
+	}
 	tempCount := 0
 	for _, e := range entries {
 		if len(e.Name()) > 4 && e.Name()[:4] == ".tmp" {
@@ -132,16 +156,24 @@ func TestStaleLockRecovery(t *testing.T) {
 	}
 
 	manager := NewManager(config)
-	manager.Init()
+	if err := manager.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
 
 	// Create a stale lock file.
 	lockPath := filepath.Join(tempDir, "locks", "stale.lock")
-	os.MkdirAll(filepath.Dir(lockPath), 0750)
-	os.WriteFile(lockPath, []byte{}, 0644)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0750); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	// Set modification time to past.
 	oldTime := time.Now().Add(-time.Hour)
-	os.Chtimes(lockPath, oldTime, oldTime)
+	if err := os.Chtimes(lockPath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes failed: %v", err)
+	}
 
 	// Cleanup should remove it.
 	if err := manager.CleanupStaleLocks(); err != nil {
@@ -160,18 +192,29 @@ func TestJournalCorruption_SkipsBadEntries(t *testing.T) {
 
 	// Create journal with valid and invalid entries.
 	journalPath := filepath.Join(tempDir, "corrupt.journal")
-	file, _ := os.Create(journalPath)
+	file, err := os.Create(journalPath)
+	if err != nil {
+		t.Fatalf("Create journal failed: %v", err)
+	}
 
 	// Valid entry.
 	validEntry := `{"timestamp":"2026-03-29T12:00:00Z","operation":"status_change","payload":"{\"status\": \"running\"}"}` + "\n"
-	file.WriteString(validEntry)
+	if _, err := file.WriteString(validEntry); err != nil {
+		t.Fatalf("WriteString failed: %v", err)
+	}
 
 	// Invalid entry.
-	file.WriteString(`{invalid json` + "\n")
+	if _, err := file.WriteString(`{invalid json` + "\n"); err != nil {
+		t.Fatalf("WriteString failed: %v", err)
+	}
 
 	// Another valid entry.
-	file.WriteString(validEntry)
-	file.Close()
+	if _, err := file.WriteString(validEntry); err != nil {
+		t.Fatalf("WriteString failed: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
 
 	// Replay should skip invalid entry.
 	entries, err := Replay(journalPath)
@@ -193,7 +236,9 @@ func TestCheckpointIntegrity_VerifiesAtomicity(t *testing.T) {
 	}
 
 	manager := NewManager(config)
-	manager.Init()
+	if err := manager.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
 
 	// Create and checkpoint workflow.
 	state := &WorkflowState{
@@ -235,7 +280,9 @@ func TestFullWorkflowLifecycle(t *testing.T) {
 	}
 
 	manager := NewManager(config)
-	manager.Init()
+	if err := manager.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
 
 	// 1. Create.
 	state, err := manager.CreateWorkflow("wf-lifecycle", json.RawMessage(`{"step": 0}`))
@@ -272,7 +319,10 @@ func TestFullWorkflowLifecycle(t *testing.T) {
 	}
 
 	// 7. Verify not in list.
-	ids, _ := manager.ListActive()
+	ids, err := manager.ListActive()
+	if err != nil {
+		t.Fatalf("ListActive failed: %v", err)
+	}
 	for _, id := range ids {
 		if id == "wf-lifecycle" {
 			t.Error("Archived workflow in active list")
@@ -289,7 +339,9 @@ func BenchmarkCheckpoint(b *testing.B) {
 	}
 
 	manager := NewManager(config)
-	manager.Init()
+	if err := manager.Init(); err != nil {
+		b.Fatalf("Init failed: %v", err)
+	}
 
 	state := &WorkflowState{
 		ID:      "wf-bench",
@@ -301,6 +353,8 @@ func BenchmarkCheckpoint(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		state.Version = i
-		manager.SaveCheckpoint(state)
+		if err := manager.SaveCheckpoint(state); err != nil {
+			b.Fatalf("SaveCheckpoint failed: %v", err)
+		}
 	}
 }

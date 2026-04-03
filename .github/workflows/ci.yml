@@ -1,28 +1,41 @@
 name: CI
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
-    branches: ["**"]
+    push:
+        branches: ["**"]
+    pull_request:
+        branches: ["**"]
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.mod
+                    cache: true
+            -   name: golangci-lint
+                uses: golangci/golangci-lint-action@v6
+                with:
+                    args: --modules-download-mode=vendor
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
+    test:
+        strategy:
+            matrix:
+                os: [ubuntu-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+        steps:
+            -   uses: actions/checkout@v4
 
-      - name: Vet
-        run: go vet -mod=vendor ./...
+            -   name: Set up Go
+                uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.mod
+                    cache: true
 
-      - name: Test
-        run: go test -mod=vendor ./...
+            -   name: Vet
+                run: go vet -mod=vendor ./...
+
+            -   name: Test
+                run: go test -mod=vendor ./...

@@ -26,17 +26,23 @@ func (f *Factory) InitAll(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("gemini client: %w", err)
 		}
-		Register(NewGeminiProvider(client))
+		if err := Register(NewGeminiProvider(client)); err != nil {
+			return fmt.Errorf("register gemini: %w", err)
+		}
 	}
 
 	// Anthropic
 	if f.AnthropicAPIKey != "" {
-		Register(NewAnthropicProvider(f.AnthropicAPIKey))
+		if err := Register(NewAnthropicProvider(f.AnthropicAPIKey)); err != nil {
+			return fmt.Errorf("register anthropic: %w", err)
+		}
 	}
 
 	// OpenAI / Compatible
 	if f.OpenAIAPIKey != "" || f.OpenAIBaseURL != "" {
-		Register(NewOpenAIProvider(f.OpenAIAPIKey, f.OpenAIBaseURL))
+		if err := Register(NewOpenAIProvider(f.OpenAIAPIKey, f.OpenAIBaseURL)); err != nil {
+			return fmt.Errorf("register openai: %w", err)
+		}
 	}
 
 	return nil

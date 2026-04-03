@@ -248,7 +248,7 @@ func (c *Config) GeminiAPIKey() string {
 		return c.Providers.Gemini.APIKey
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("gemini_api_key"); val != "" {
+	if val, _ := store.Get("gemini_api_key"); val != "" { // Error ignored; fall back to environment variable.
 		return val
 	}
 	return os.Getenv("GEMINI_API_KEY")
@@ -263,7 +263,7 @@ func (c *Config) AnthropicAPIKey() string {
 		return c.Providers.Anthropic.APIKey
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("anthropic_api_key"); val != "" {
+	if val, _ := store.Get("anthropic_api_key"); val != "" { // Error ignored; fall back to environment variable.
 		return val
 	}
 	return os.Getenv("ANTHROPIC_API_KEY")
@@ -278,7 +278,7 @@ func (c *Config) OpenAIAPIKey() string {
 		return c.Providers.OpenAI.APIKey
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("openai_api_key"); val != "" {
+	if val, _ := store.Get("openai_api_key"); val != "" { // Error ignored; fall back to environment variable.
 		return val
 	}
 	return os.Getenv("OPENAI_API_KEY")
@@ -293,7 +293,7 @@ func (c *Config) OpenAIBaseURL() string {
 		return c.Providers.OpenAI.BaseURL
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("openai_base_url"); val != "" {
+	if val, _ := store.Get("openai_base_url"); val != "" { // Error ignored; fall back to environment variable.
 		return val
 	}
 	return os.Getenv("OPENAI_BASE_URL")

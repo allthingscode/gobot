@@ -53,8 +53,8 @@ type storedToken struct {
 func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	// Try reading client credentials from DPAPI first.
 	store := tokenStore(secretsRoot)
-	clientID, _ := store.Get("google_client_id")
-	clientSecret, _ := store.Get("google_client_secret")
+	clientID, _ := store.Get("google_client_id")         // Error ignored; fall back to client_secrets.json if key is missing.
+	clientSecret, _ := store.Get("google_client_secret") // Error ignored; fall back to client_secrets.json if key is missing.
 
 	if clientID == "" || clientSecret == "" {
 		// Fall back to client_secrets.json
@@ -140,7 +140,10 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	}
 
 	// Save to both google_token.json and gmail/token.json for compatibility
-	tokenJSON, _ := json.MarshalIndent(token, "", "  ")
+	tokenJSON, err := json.MarshalIndent(token, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal token: %w", err)
+	}
 
 	googlePath := GoogleTokenPath(secretsRoot)
 	if err := os.WriteFile(googlePath, tokenJSON, 0600); err != nil {
@@ -148,7 +151,9 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	}
 
 	gmailDir := filepath.Join(secretsRoot, "gmail")
-	os.MkdirAll(gmailDir, 0755)
+	if err := os.MkdirAll(gmailDir, 0755); err != nil {
+		return fmt.Errorf("failed to create gmail directory: %w", err)
+	}
 	gmailPath := filepath.Join(gmailDir, "token.json")
 	if err := os.WriteFile(gmailPath, tokenJSON, 0600); err != nil {
 		return fmt.Errorf("failed to save gmail token: %w", err)
@@ -170,7 +175,10 @@ func exchangeCode(code, clientID, clientSecret, redirectURI string) (*storedToke
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
 
 	var result struct {
 		AccessToken  string `json:"access_token"`
@@ -281,7 +289,10 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 		return fmt.Errorf("token refresh request: %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
 	var result struct {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
@@ -313,7 +324,10 @@ func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
 		return fmt.Errorf("GET %s: %w", apiURL, err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		// Try to extract error message
 		var errResp struct {
@@ -349,7 +363,10 @@ func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any
 		return fmt.Errorf("POST %s: %w", apiURL, err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("google API %d: %s", resp.StatusCode, string(respBody))
 	}
@@ -374,7 +391,10 @@ func apiPatch(accessToken, apiURL string, body any, client *http.Client, dest an
 		return fmt.Errorf("PATCH %s: %w", apiURL, err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("google API %d: %s", resp.StatusCode, string(respBody))
 	}

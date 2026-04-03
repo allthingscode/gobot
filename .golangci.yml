@@ -1,0 +1,17 @@
+linters-settings:
+    errorlint:
+        errorf: true # Ensure fmt.Errorf uses %w for wrapping errors
+
+linters:
+    disable-all: true
+    enable:
+        - errcheck
+        - errorlint
+        - nilerr
+        - revive
+        - staticcheck
+
+run:
+    modules-download-mode: vendor
+    allow-parallel-runners: true
+    timeout: 5m

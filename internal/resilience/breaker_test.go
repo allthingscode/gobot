@@ -37,7 +37,7 @@ func TestBreaker_OpenReturnsErrCircuitOpen(t *testing.T) {
 		_ = b.Execute(func() error { return errors.New("fail") })
 	}
 	err := b.Execute(func() error { return nil })
-	if err != ErrCircuitOpen {
+	if !errors.Is(err, ErrCircuitOpen) {
 		t.Fatalf("expected ErrCircuitOpen, got %v", err)
 	}
 }

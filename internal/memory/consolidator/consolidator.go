@@ -78,7 +78,10 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 	}
 
 	facts, err := parseFacts(response)
-	if err != nil || len(facts) == 0 {
+	if err != nil {
+		return 0, fmt.Errorf("consolidator: parseFacts: %w", err)
+	}
+	if len(facts) == 0 {
 		return 0, nil
 	}
 
@@ -89,11 +92,12 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 			continue
 		}
 		// Deduplication: skip if a very similar fact is already in the store.
-		if existing, _ := c.store.Search(fact, 1); len(existing) > 0 {
-			existingContent, _ := existing[0]["content"].(string)
-			if similarity(fact, existingContent) > 0.8 {
-				slog.Debug("consolidator: skipping duplicate fact", "fact", fact)
-				continue
+		if existing, err := c.store.Search(fact, 1); err == nil && len(existing) > 0 {
+			if existingContent, ok := existing[0]["content"].(string); ok {
+				if similarity(fact, existingContent) > 0.8 {
+					slog.Debug("consolidator: skipping duplicate fact", "fact", fact)
+					continue
+				}
 			}
 		}
 		if indexErr := c.store.Index(sessionKey, fact); indexErr != nil {

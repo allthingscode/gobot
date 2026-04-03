@@ -12,15 +12,16 @@ var (
 )
 
 // Register adds a provider to the global registry.
-// Panics if a provider with the same name is already registered.
-func Register(p Provider) {
+// Returns an error if a provider with the same name is already registered.
+func Register(p Provider) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 	name := p.Name()
 	if _, dup := providers[name]; dup {
-		panic(fmt.Sprintf("provider already registered: %s", name))
+		return fmt.Errorf("provider already registered: %s", name)
 	}
 	providers[name] = p
+	return nil
 }
 
 // Get returns a registered provider by name.

@@ -83,7 +83,7 @@ func TestDispatchTracer_TraceBotDispatch_Error(t *testing.T) {
 		return wantErr
 	})
 
-	if err != wantErr {
+	if !errors.Is(err, wantErr) {
 		t.Errorf("TraceBotDispatch() error = %v, want %v", err, wantErr)
 	}
 }
@@ -159,7 +159,7 @@ func TestDispatchTracer_TraceToolExecution_Error(t *testing.T) {
 		return "", wantErr
 	})
 
-	if err != wantErr {
+	if !errors.Is(err, wantErr) {
 		t.Errorf("TraceToolExecution() error = %v, want %v", err, wantErr)
 	}
 }

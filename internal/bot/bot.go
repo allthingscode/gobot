@@ -6,6 +6,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -117,7 +118,7 @@ func IsTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if err == io.EOF || err == context.DeadlineExceeded {
+	if errors.Is(err, io.EOF) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
