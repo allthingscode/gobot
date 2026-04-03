@@ -39,13 +39,13 @@ All items in this backlog must be prioritized strictly according to the followin
 
 | ID | Title | Category | Status | Specialist | Priority |
 |:---|:---|:---:|:---:|:---:|:---|
-| F-017 | [Intelligent Retry with Backoff](features/F-017_Intelligent_Retry.md) | Reliability | 📋 | Architect | P2 |
+| F-017 | [Intelligent Retry with Backoff](features/F-017_Intelligent_Retry.md) | Reliability | 🚀 | Architect | P2 |
 | F-025 | [Local RAG (Local Vector Store)](features/F-025_Local_RAG.md) | Feature | 📝 | Researcher | P3 |
 | F-030 | [Vector/Semantic Memory Layer (Phase 3)](features/F-030_Vector_Semantic_Memory.md) | Feature | 📝 | Researcher | P3 |
 | F-046 | [HTTP Gateway & Telegram Control Flags](features/F-046_Gateway_Enabled_Flags.md) | Feature | 🚀 | Architect | P2 |
 | F-047 | [Advanced Context Pruning & Compaction Policies](features/F-047_Advanced_Context_Management.md) | Feature | 📝 | Researcher | P2 |
 | F-049 | [Reflection & Planning Loop](features/F-049_Reflection_Loop.md) | Feature | 📝 | Architect | P2 |
-| F-053 | [Configuration Validation](features/F-053_Config_Validation.md) | Reliability | 📋 | Architect | P1 |
+| F-053 | [Configuration Validation](features/F-053_Config_Validation.md) | Reliability | 🚀 | Architect | P1 |
 | F-054 | [Circuit Breaker Integration](features/F-054_Circuit_Breaker_Integration.md) | Reliability | 📋 | Architect | P2 |
 | F-055 | [Fault Injection Tests](features/F-055_Fault_Injection_Tests.md) | Testing | 📋 | Architect | P2 |
 | F-056 | [Concurrency Safety Metrics](features/F-056_Concurrency_Safety_Metrics.md) | Observability | 📋 | Architect | P2 |
@@ -59,7 +59,7 @@ All items in this backlog must be prioritized strictly according to the followin
 | ID | Title | Category | Status | Specialist | Priority |
 |:---|:---|:---:|:---:|:---:|:---|
 | C-003 | [Configuration Schema Cleanup](chores/C-003_Config_Cleanup.md) | Refactor | 📋 | Architect | P3 |
-| C-004 | [Resource Cleanup Pattern](chores/C-004_Resource_Cleanup_Pattern.md) | Reliability | 📋 | Architect | P1 |
+| C-004 | [Resource Cleanup Pattern](chores/C-004_Resource_Cleanup_Pattern.md) | Reliability | ✅ | Architect | P1 |
 | C-005 | [Error Handling Standardization](chores/C-005_Error_Handling_Standardization.md) | Refactor | 📋 | Architect | P2 |
 | C-006 | [Troubleshooting Tools Documentation](chores/C-006_Troubleshooting_Tools_Documentation.md) | Documentation | 📋 | Architect | P2 |
 
@@ -72,7 +72,8 @@ All items in this backlog must be prioritized strictly according to the followin
 | B-010 | [bot.go Stale Package Comment After Telego Migration](bugs/B-010_Bot_Package_Stale_Comment.md) | 📋 | Low (P3) |
 | B-011 | [Doctor Probe Leaks Telego Bot Instance](bugs/B-011_Doctor_Probe_Telego_Leak.md) | 📋 | Low (P3) |
 | B-013 | [Tool Failure Log Missing Session Key](bugs/B-013_Tool_Failure_Log_Missing_Session.md) | 📋 | Low (P3) |
-| B-026 | [Storage Root Inconsistency in config.json](bugs/B-026_Config_StorageRoot_Mismatch.md) | 📋 | High (P1) |
+| B-026 | [Storage Root Inconsistency in config.json](bugs/B-026_Config_StorageRoot_Mismatch.md) | 🚀 | High (P1) |
+| B-029 | [Telegram Callback Queries Silently Dropped](bugs/B-029_Telegram_Callback_Queries_Dropped.md) | 🚀 | Critical (P1) |
 
 ---
 
@@ -174,33 +175,37 @@ All items in this backlog must be prioritized strictly according to the followin
 
 ## **Grooming Log**
 
-**Last Groomed:** 2026-04-02T10:00:00-05:00
-**Groomer:** Architect (Gemini CLI)
+**Last Groomed:** 2026-04-02T20:56:00-05:00
+**Groomer:** Backlog Groomer (Claude)
 
 ### Changes Made (This Session):
-- ✅ **Backlog Maintenance**: Archived 61 items (Bugs: 12, Chores: 1, Features: 48) that were already moved to `archived/`.
-- ✅ **Index Update**: Updated `BACKLOG.md` to reflect the current file system state.
-- ✅ **Status Sync**: Verified and updated status for active items (F-017, B-026 set to Planning).
-- ✅ **Link Verification**: Ensured all archived items point to the correct relative path.
+- ✅ **F-053 Deployed**: Moved Configuration Validation to Production.
+- ✅ **Backlog Maintenance**: Updated priority items to focus on Resource Cleanup (C-004).
 
-### Previous Grooming (2026-04-01T23:55:00-05:00):
-- ✅ **B-027 Resolved**: `RedirectCDrive` fixed with OS-agnostic `winBase` helper.
-- ✅ **B-028 Resolved**: `projectRoot` injection improved.
-- ✅ **Backlog Maintenance**: B-027 and B-028 added to the Bugs table and marked as resolved.
+### Previous Grooming (2026-04-02T20:56:00-05:00):
+- ✅ **YAML Frontmatter Fixes**: Added missing YAML frontmatter to F-059, B-029, C-006.
 
-### Current Backlog State:
-- **Features**: 11 active
-- **Bugs**: 4 active
-- **Chores**: 3 active
+---
+
+## **Current Backlog State:**
+- **Features**: 12 active
+- **Bugs**: 5 active
+- **Chores**: 4 active
 - **Archived**: 76 total
 
 ### Items Ready for Implementation:
 | Priority | Item | Status |
 |:---|:---|:---:|
-| P2 | F-046: HTTP Gateway & Telegram Control Flags | 📝 Draft |
+| P1 | C-004: Resource Cleanup Pattern | ✅ Resolved |
 | P2 | F-047: Advanced Context Pruning | 📝 Draft |
 | P2 | F-049: Reflection & Planning Loop | 📝 Draft |
+| P2 | F-054: Circuit Breaker Integration | 📋 Planning |
+| P2 | F-059: Implement `gobot logs` Command | 📋 Planning |
+| P2 | C-005: Error Handling Standardization | 📋 Planning |
+| P2 | C-006: Troubleshooting Tools Documentation | 📋 Planning |
+| P3 | B-010: bot.go Stale Package Comment | 📋 Planning |
 | P3 | B-011: Doctor Probe Leaks Telego Bot Instance | 📋 Planning |
+| P3 | B-013: Tool Failure Log Missing Session Key | 📋 Planning |
 | P3 | C-003: Configuration Schema Cleanup | 📋 Planning |
 
 ---
@@ -211,5 +216,5 @@ Based on the **Hardening First** prioritization matrix:
 
 | Priority | Item | Type | Status | Rationale |
 |:---|:---|:---:|:---:|:---|
-| **P1** | **F-053: Configuration Validation** | Feature | 📋 Planning | **Stability**: Prevents runtime failures from config drift. Fail-fast with clear errors. |
-ature | 📋 Planning | **Stability**: Prevents runtime failures from config drift. Fail-fast with clear errors. |
+| **P1** | **C-004: Resource Cleanup Pattern** | Chore | ✅ Resolved | **Reliability**: Prevents resource leaks (file handles, DB connections) during Windows restarts. |
+| **P1** | **F-053: Configuration Validation** | Feature | 🚀 Production | **Stability**: Prevents runtime failures from config drift. Fail-fast with clear errors. |

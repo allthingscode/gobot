@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -42,11 +43,13 @@ func main() {
 		Short: "Strategic Edition agent runtime",
 		Long:  "gobot - the Go-native runtime for Nanobot Strategic Edition.",
 	}
+	root.SilenceErrors = true
 
 	root.AddCommand(
 		cmdVersion(),
 		cmdInit(),
 		cmdDoctor(),
+		cmdConfig(),
 		cmdRun(),
 		cmdReauth(),
 		cmdCheckpoints(),
@@ -62,6 +65,10 @@ func main() {
 	)
 
 	if err := root.Execute(); err != nil {
+		var exitErr *exitCodeError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.code)
+		}
 		panic(fmt.Errorf("ROOT EXECUTE ERROR: %w", err))
 	}
 }
@@ -288,11 +295,6 @@ func cmdRun() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 
-			// Pre-flight diagnostics â€" mirrors nanobot strategic_launcher.py
-			if err := doctor.Run(cfg, nil); err != nil {
-				slog.Warn("pre-flight diagnostics found issues", "err", err)
-			}
-
 			// Setup logging to timestamped file and stderr
 			now := time.Now().Format("20060102_150405")
 			logName := fmt.Sprintf("gobot_%s.log", now)
@@ -310,6 +312,16 @@ func cmdRun() *cobra.Command {
 			slog.SetDefault(slog.New(audit.NewRedactingHandler(baseHandler)))
 			if logErr != nil {
 				slog.Warn("failed to open log file, logging to stderr only", "err", logErr)
+			}
+
+			// Pre-flight diagnostics — mirrors nanobot strategic_launcher.py
+			if err := doctor.Run(cfg, nil); err != nil {
+				slog.Warn("pre-flight diagnostics found issues", "err", err)
+			}
+
+			// Validate configuration after log setup so warnings are logged
+			if err := reportConfigValidation(cfg, os.Stderr); err != nil {
+				return err
 			}
 
 			// Prioritize token from config.json, then environment.
