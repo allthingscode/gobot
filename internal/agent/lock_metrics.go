@@ -20,81 +20,74 @@ type LockStatus struct {
 	MaxWaitTime     time.Duration `json:"max_wait_time"`
 }
 
-var (
-	metricsMu  sync.RWMutex
-	allMetrics = make(map[string]*LockStatus)
-)
+var allMetrics sync.Map // map[string]*sessionLock
 
 // GetLockMetrics returns a snapshot of all session lock metrics.
 // Used by gobot doctor and debug endpoints.
 func GetLockMetrics() map[string]LockStatus {
-	metricsMu.RLock()
-	defer metricsMu.RUnlock()
-
-	snapshot := make(map[string]LockStatus, len(allMetrics))
-	for k, v := range allMetrics {
-		snapshot[k] = *v
-	}
+	snapshot := make(map[string]LockStatus)
+	allMetrics.Range(func(key, value any) bool {
+		l := value.(*sessionLock)
+		l.metricsMu.RLock()
+		snapshot[key.(string)] = l.metrics
+		l.metricsMu.RUnlock()
+		return true
+	})
 	return snapshot
 }
 
-// updateMetrics safely updates the metrics for a specific session.
-func updateMetrics(sessionKey string, fn func(*LockStatus)) {
-	metricsMu.Lock()
-	defer metricsMu.Unlock()
-
-	s, ok := allMetrics[sessionKey]
-	if !ok {
-		s = &LockStatus{SessionKey: sessionKey}
-		allMetrics[sessionKey] = s
-	}
-	fn(s)
-}
-
-// sessionLock wraps a mutex with metrics and timeout capability.
+// sessionLock wraps a channel-based lock with metrics and timeout capability.
 type sessionLock struct {
-	mu         sync.Mutex
-	sessionKey string
+	sessionKey  string
+	ch          chan struct{}
+	metrics     LockStatus
+	metricsMu   sync.RWMutex
+	deadlockDur time.Duration
 }
 
-// Lock acquires the lock, tracking metrics and panicking on deadlock (30s timeout).
-// It also logs a warning if acquisition takes longer than 5s.
+func newSessionLock(key string) *sessionLock {
+	l := &sessionLock{
+		sessionKey:  key,
+		ch:          make(chan struct{}, 1),
+		metrics:     LockStatus{SessionKey: key},
+		deadlockDur: 30 * time.Second,
+	}
+	l.ch <- struct{}{}
+	actual, _ := allMetrics.LoadOrStore(key, l)
+	return actual.(*sessionLock)
+}
+
+// Lock acquires the lock, tracking metrics and panicking on deadlock.
 func (l *sessionLock) Lock() {
 	start := time.Now()
 
-	// Track that we are waiting
-	updateMetrics(l.sessionKey, func(s *LockStatus) {
-		if s.IsLocked {
-			s.WaitCount++
-			s.ContentionCount++
-		}
-	})
-
-	locked := make(chan struct{})
-	go func() {
-		l.mu.Lock()
-		close(locked)
-	}()
+	l.metricsMu.Lock()
+	if l.metrics.IsLocked {
+		l.metrics.WaitCount++
+		l.metrics.ContentionCount++
+	}
+	l.metricsMu.Unlock()
 
 	select {
-	case <-locked:
+	case <-l.ch:
 		elapsed := time.Since(start)
-		updateMetrics(l.sessionKey, func(s *LockStatus) {
-			s.IsLocked = true
-			s.AcquiredAt = time.Now()
-			s.TotalWaitTime += elapsed
-			if elapsed > s.MaxWaitTime {
-				s.MaxWaitTime = elapsed
-			}
-			// Capture stack trace of holder (first 1KB is usually enough for the top of the stack)
+		l.metricsMu.Lock()
+		l.metrics.IsLocked = true
+		l.metrics.AcquiredAt = time.Now()
+		l.metrics.TotalWaitTime += elapsed
+		if elapsed > l.metrics.MaxWaitTime {
+			l.metrics.MaxWaitTime = elapsed
+		}
+		if elapsed > 5*time.Second {
 			buf := make([]byte, 1024)
 			n := runtime.Stack(buf, false)
-			s.HolderStack = string(buf[:n])
-		})
-		if elapsed > 5*time.Second {
+			l.metrics.HolderStack = string(buf[:n])
 			slog.Warn("LOCK CONTENTION", "session", l.sessionKey, "wait_time", elapsed)
+		} else {
+			l.metrics.HolderStack = ""
 		}
-	case <-time.After(30 * time.Second):
+		l.metricsMu.Unlock()
+	case <-time.After(l.deadlockDur):
 		buf := make([]byte, 64*1024)
 		n := runtime.Stack(buf, true)
 		panic("DEADLOCK DETECTED for session " + l.sessionKey + "\n\n" + string(buf[:n]))
@@ -103,12 +96,13 @@ func (l *sessionLock) Lock() {
 
 // Unlock releases the lock and records the hold duration.
 func (l *sessionLock) Unlock() {
-	updateMetrics(l.sessionKey, func(s *LockStatus) {
-		if s.IsLocked {
-			s.TotalHoldTime += time.Since(s.AcquiredAt)
-			s.IsLocked = false
-			s.HolderStack = ""
-		}
-	})
-	l.mu.Unlock()
+	l.metricsMu.Lock()
+	if l.metrics.IsLocked {
+		l.metrics.TotalHoldTime += time.Since(l.metrics.AcquiredAt)
+		l.metrics.IsLocked = false
+		l.metrics.HolderStack = ""
+	}
+	l.metricsMu.Unlock()
+	
+	l.ch <- struct{}{}
 }

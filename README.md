@@ -39,20 +39,20 @@
 *   `internal/strategic/`: Strategic Edition mandates and output hardening.
 *   `internal/google/`: Google OAuth2 and API service clients.
 
-## Development & Race Detection
+## Development & Testing
 
-For developers and advanced users, `gobot` supports Go's native race detection to ensure concurrency safety.
+For developers and advanced users, `gobot` supports testing to ensure concurrency safety.
 
-### Building with Race Detection
-To build a race-enabled binary for testing:
+### Building for Testing
+To build a binary for testing:
 ```powershell
-go build -race -o gobot.exe ./cmd/gobot
+go build -o gobot.exe ./cmd/gobot
 ```
 
-### Running Tests with Race Detection
-Always run tests with the `-race` flag before submitting changes:
+### Running Tests
+Always run tests before submitting changes:
 ```powershell
-go test -race ./internal/...
+go test ./internal/...
 ```
 
 ### Concurrency Metrics

@@ -1,13 +1,14 @@
 package agent
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestSessionLock_Metrics(t *testing.T) {
-	l := &sessionLock{sessionKey: "test-session"}
+	l := newSessionLock("test-session")
 
 	// First lock
 	l.Lock()
@@ -27,18 +28,41 @@ func TestSessionLock_Metrics(t *testing.T) {
 	// Test contention
 	var wg sync.WaitGroup
 	wg.Add(1)
+	
+	started := make(chan struct{})
+	unlocked := make(chan struct{})
+	
 	l.Lock()
 	
 	go func() {
-		defer wg.Done()
+		close(started)
 		l.Lock() // Should wait
 		_ = 1 + 1
 		l.Unlock()
+		close(unlocked)
+		wg.Done()
 	}()
 
-	// Give the goroutine time to start and wait
-	time.Sleep(100 * time.Millisecond)
+	// Wait for goroutine to start
+	<-started
+	
+	// Deterministically wait for contention count to increase
+	for {
+		l.metricsMu.RLock()
+		wc := l.metrics.WaitCount
+		l.metricsMu.RUnlock()
+		if wc > 0 {
+			break
+		}
+		runtime.Gosched()
+	}
+
+	// Wait past the Windows timer resolution (~15.6ms) to ensure MaxWaitTime > 0.
+	// Note: This is NOT for goroutine coordination, only for time measurement.
+	time.Sleep(20 * time.Millisecond)
+
 	l.Unlock()
+	<-unlocked
 	wg.Wait()
 
 	metrics = GetLockMetrics()
@@ -55,11 +79,23 @@ func TestSessionLock_Metrics(t *testing.T) {
 }
 
 func TestSessionLock_DeadlockPanic(t *testing.T) {
-	// We want to verify it panics after 30s, but we don't want the test to take 30s.
-	// For testing purposes, we could make the timeout configurable, 
-	// but the mandate says "30s default".
+	l := newSessionLock("deadlock-test")
+	// Make the timeout extremely short for the test
+	l.deadlockDur = 10 * time.Millisecond
 	
-	// I'll skip the actual 30s wait in regular tests but I've verified the logic.
-	// If I really wanted to test it, I'd need to mock time or use a smaller timeout for tests.
-	t.Skip("Skipping 30s deadlock test to save CI time")
+	l.Lock() // First acquisition succeeds
+	
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		l.Lock() // Second acquisition should timeout and panic
+	}()
+	
+	if !panicked {
+		t.Error("expected deadlock panic, but didn't happen")
+	}
 }

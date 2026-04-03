@@ -182,7 +182,10 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 // lockFor returns the existing session lock for sessionKey, creating one if needed.
 // Uses LoadOrStore for goroutine-safe lazy initialisation.
 func (m *SessionManager) lockFor(sessionKey string) *sessionLock {
-	val, _ := m.mu.LoadOrStore(sessionKey, &sessionLock{sessionKey: sessionKey})
+	if val, ok := m.mu.Load(sessionKey); ok {
+		return val.(*sessionLock)
+	}
+	val, _ := m.mu.LoadOrStore(sessionKey, newSessionLock(sessionKey))
 	return val.(*sessionLock)
 }
 
