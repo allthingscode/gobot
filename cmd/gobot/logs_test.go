@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -129,7 +130,7 @@ func TestLogsCommand_NoLogs(t *testing.T) {
 
 	cfgDir := filepath.Join(homeDir, ".gobot")
 	os.MkdirAll(cfgDir, 0755)
-	
+
 	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
 	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
 	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)
@@ -140,5 +141,111 @@ func TestLogsCommand_NoLogs(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Errorf("Expected error for no logs, got nil")
+	}
+}
+
+func TestLogsCommand_LinesBoundsValidation(t *testing.T) {
+	homeDir := t.TempDir()
+	os.Setenv("USERPROFILE", homeDir)
+	os.Setenv("HOME", homeDir)
+	defer func() {
+		os.Unsetenv("USERPROFILE")
+		os.Unsetenv("HOME")
+	}()
+
+	// Setup config and logs
+	cfgDir := filepath.Join(homeDir, ".gobot")
+	os.MkdirAll(cfgDir, 0755)
+
+	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
+	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
+	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)
+
+	logsDir := filepath.Join(storageRoot, "logs")
+	os.MkdirAll(logsDir, 0755)
+
+	logFile := filepath.Join(logsDir, "gobot_test.log")
+	os.WriteFile(logFile, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"test\"\n"), 0644)
+
+	runTest := func(linesVal string, expectErr bool) {
+		cmd := cmdLogs()
+		cmd.SetArgs([]string{"--lines", linesVal})
+		b := bytes.NewBufferString("")
+		cmd.SetOut(b)
+		err := cmd.Execute()
+
+		if expectErr && err == nil {
+			t.Errorf("Expected error for --lines=%s, got nil", linesVal)
+		}
+		if !expectErr && err != nil {
+			t.Errorf("Expected no error for --lines=%s, got: %v", linesVal, err)
+		}
+	}
+
+	// Test invalid values
+	runTest("0", true)
+	runTest("-1", true)
+	runTest("-100", true)
+
+	// Test valid values
+	runTest("1", false)
+	runTest("100", false)
+}
+
+func TestLogsCommand_FollowContextCancellation(t *testing.T) {
+	homeDir := t.TempDir()
+	os.Setenv("USERPROFILE", homeDir)
+	os.Setenv("HOME", homeDir)
+	defer func() {
+		os.Unsetenv("USERPROFILE")
+		os.Unsetenv("HOME")
+	}()
+
+	// Setup config and logs
+	cfgDir := filepath.Join(homeDir, ".gobot")
+	os.MkdirAll(cfgDir, 0755)
+
+	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
+	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
+	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)
+
+	logsDir := filepath.Join(storageRoot, "logs")
+	os.MkdirAll(logsDir, 0755)
+
+	logFile := filepath.Join(logsDir, "gobot_test.log")
+	os.WriteFile(logFile, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"test\"\n"), 0644)
+
+	cmd := cmdLogs()
+	cmd.SetArgs([]string{"--follow"})
+	b := bytes.NewBufferString("")
+	cmd.SetOut(b)
+
+	// Create a context that will be cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd.SetContext(ctx)
+
+	// Start command in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	// Give the command time to enter follow loop
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel context
+	cancel()
+
+	// Wait for completion with timeout
+	select {
+	case err := <-done:
+		if err != nil {
+			// Context cancellation error is expected
+			if !strings.Contains(err.Error(), "context") {
+				t.Errorf("Expected context-related error, got: %v", err)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("Command did not exit after context cancellation")
 	}
 }

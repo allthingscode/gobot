@@ -23,6 +23,12 @@ func cmdLogs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs",
 		Short: "View the most recent gobot logs",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if lines <= 0 {
+				return fmt.Errorf("--lines must be greater than 0, got %d", lines)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -136,11 +142,21 @@ func cmdLogs() *cobra.Command {
 
 			if follow {
 				for {
+					select {
+					case <-cmd.Context().Done():
+						return cmd.Context().Err()
+					default:
+					}
+
 					line, err := reader.ReadString('\n')
 					if err != nil {
 						if err == io.EOF {
 							pending += line
-							time.Sleep(500 * time.Millisecond)
+							select {
+							case <-cmd.Context().Done():
+								return cmd.Context().Err()
+							case <-time.After(500 * time.Millisecond):
+							}
 							continue
 						}
 						return fmt.Errorf("error reading log file: %w", err)
