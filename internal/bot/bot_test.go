@@ -108,6 +108,38 @@ func (m *mockAPIWithError) Typing(ctx context.Context, chatID, threadID int64) f
 }
 func (m *mockAPIWithError) Stop() { m.fallback.Stop() }
 
+// mockAPIWithCircuit returns ErrCircuitOpen on Updates/Callbacks.
+type mockAPIWithCircuit struct {
+	lastCall time.Time
+	delays   []time.Duration
+	mu       sync.Mutex
+}
+
+func (m *mockAPIWithCircuit) Updates(ctx context.Context, timeout int) (<-chan InboundMessage, error) {
+	m.recordCall()
+	return nil, errors.New("circuit breaker: open")
+}
+func (m *mockAPIWithCircuit) Callbacks(ctx context.Context) (<-chan InboundCallback, error) {
+	m.recordCall()
+	return nil, errors.New("circuit breaker: open")
+}
+
+func (m *mockAPIWithCircuit) recordCall() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	if !m.lastCall.IsZero() {
+		m.delays = append(m.delays, now.Sub(m.lastCall))
+	}
+	m.lastCall = now
+}
+func (m *mockAPIWithCircuit) Send(ctx context.Context, msg OutboundMessage) error           { return nil }
+func (m *mockAPIWithCircuit) SendWithButtons(ctx context.Context, msg OutboundMessage, _ [][]Button) error {
+	return nil
+}
+func (m *mockAPIWithCircuit) Typing(ctx context.Context, chatID, threadID int64) func() { return func() {} }
+func (m *mockAPIWithCircuit) Stop()                                                   {}
+
 // ── Mock Handler ──────────────────────────────────────────────────────────────
 
 type mockHandler struct {
@@ -426,4 +458,36 @@ func (h *callCountHandler) callCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.n
+}
+
+func TestBot_Run_BackoffOnCircuitOpen(t *testing.T) {
+	api := &mockAPIWithCircuit{}
+	bot := New(api, &mockHandler{})
+
+	// Context that cancels quickly after a couple of retries would take.
+	// Since initial delay is 5s, we'll wait 6s to see at least one retry gap.
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	bot.Run(ctx)
+	elapsed := time.Since(start)
+
+	if elapsed < 5*time.Second {
+		t.Errorf("Bot.Run exited too early: %v, expected it to wait for backoff (at least 5s)", elapsed)
+	}
+
+	api.mu.Lock()
+	delays := api.delays
+	api.mu.Unlock()
+
+	// We expect at least one delay recorded (between 1st and 2nd attempt).
+	if len(delays) == 0 {
+		t.Error("expected at least one retry attempt with delay")
+	}
+	for i, d := range delays {
+		if d < 4*time.Second { // Allow some slack from 5s
+			t.Errorf("delay %d was too short: %v, want ~5s", i, d)
+		}
+	}
 }

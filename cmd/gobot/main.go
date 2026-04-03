@@ -395,6 +395,9 @@ func cmdRun() *cobra.Command {
 			// F-012: create shared Hooks instance and wire into both SessionManager and runner.
 			hooks := &agent.Hooks{}
 
+			// F-063: Automated Handoffs
+			hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
+
 			var api *tgAPI
 			var hitl *agent.HITLManager
 			if cfg.Channels.Telegram.Enabled {
@@ -665,8 +668,14 @@ func cmdSimulate() *cobra.Command {
 
 			runner.tools = registerTools(cfg, prov, model, memStore)
 
+			// F-012: create shared Hooks instance
+			hooks := &agent.Hooks{}
+			// F-063: Automated Handoffs
+			hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
+
 			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			mgr := agent.NewSessionManager(runner, store, model)
+			mgr.SetHooks(hooks)
 			mgr.SetMemoryWindow(cfg.MemoryWindow())
 			mgr.SetStorageRoot(cfg.StorageRoot()) // F-037
 

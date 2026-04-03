@@ -171,6 +171,11 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 		}
 	}
 
+	// Run PostDispatch hooks (F-063: Automated Handoffs).
+	if m.hooks != nil {
+		response = m.hooks.RunPostDispatch(ctx, sessionKey, response)
+	}
+
 	return response, nil
 }
 

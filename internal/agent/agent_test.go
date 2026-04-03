@@ -275,3 +275,23 @@ func TestDispatch_CheckpointSaveFailureIsNonFatal(t *testing.T) {
 		t.Errorf("response = %q, want %q", resp, "ok")
 	}
 }
+
+func TestDispatch_PostDispatchHook(t *testing.T) {
+	runner := &mockRunner{response: "original"}
+	mgr := NewSessionManager(runner, nil, "model")
+
+	hooks := &Hooks{}
+	hooks.RegisterPostDispatch(func(ctx context.Context, sessionKey, response string) string {
+		return response + " (hooked)"
+	})
+	mgr.SetHooks(hooks)
+
+	resp, err := mgr.Dispatch(context.Background(), "s1", "hi")
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+	want := "original (hooked)"
+	if resp != want {
+		t.Errorf("response = %q, want %q", resp, want)
+	}
+}

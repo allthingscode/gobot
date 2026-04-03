@@ -16,6 +16,10 @@ type PostToolFn func(ctx context.Context, toolName string, result string) string
 // If it returns an error, the entire tool loop is aborted.
 type PreToolFn func(ctx context.Context, sessionKey string, toolName string, args map[string]any) (string, error)
 
+// PostDispatchFn transforms the agent's final response string after a successful
+// Dispatch, but before it is returned to the caller.
+type PostDispatchFn func(ctx context.Context, sessionKey string, response string) string
+
 // PreHistoryFn transforms the conversation history before it is passed to the
 // runner. Hooks run in registration order; each receives the output of the previous.
 type PreHistoryFn func(ctx context.Context, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage
@@ -29,10 +33,16 @@ type PrePromptFn func(ctx context.Context, systemPrompt string) string
 // Hooks is not safe for concurrent Register calls; register all hooks at
 // startup before the first Dispatch call.
 type Hooks struct {
-	preHistory []PreHistoryFn
-	prePrompt  []PrePromptFn
-	postTool   []PostToolFn
-	preTool    []PreToolFn
+	preHistory   []PreHistoryFn
+	prePrompt    []PrePromptFn
+	postTool     []PostToolFn
+	preTool      []PreToolFn
+	postDispatch []PostDispatchFn
+}
+
+// RegisterPostDispatch appends fn to the PostDispatch chain.
+func (h *Hooks) RegisterPostDispatch(fn PostDispatchFn) {
+	h.postDispatch = append(h.postDispatch, fn)
 }
 
 // RegisterPreHistory appends fn to the PreHistory chain.
@@ -48,6 +58,15 @@ func (h *Hooks) RegisterPrePrompt(fn PrePromptFn) {
 // RegisterPreTool appends fn to the PreTool chain.
 func (h *Hooks) RegisterPreTool(fn PreToolFn) {
 	h.preTool = append(h.preTool, fn)
+}
+
+// RunPostDispatch runs all registered PostDispatch hooks in order.
+// Returns response unchanged if no hooks are registered.
+func (h *Hooks) RunPostDispatch(ctx context.Context, sessionKey, response string) string {
+	for _, fn := range h.postDispatch {
+		response = fn(ctx, sessionKey, response)
+	}
+	return response
 }
 
 // RunPreHistory runs all registered PreHistory hooks in order.

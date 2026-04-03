@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/resilience"
 )
 
 func TestIsDuplicate(t *testing.T) {
@@ -49,5 +53,20 @@ func TestIsDuplicate_CrossChatNoFalsePositive(t *testing.T) {
 	// Same composite key — must deduplicate.
 	if !api.isDuplicate("100:42") {
 		t.Error("same key second call should return true")
+	}
+}
+
+func TestUpdates_CircuitOpen(t *testing.T) {
+	// Initialize a breaker that is already open.
+	breaker := resilience.New("test_telegram_circuit", 1, time.Minute, time.Hour)
+	_ = breaker.Execute(func() error { return errors.New("fail") })
+
+	api := &tgAPI{
+		breaker: breaker,
+	}
+
+	_, err := api.Updates(context.Background(), 30)
+	if err == nil {
+		t.Error("expected error when circuit is open, got nil")
 	}
 }

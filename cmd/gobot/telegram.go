@@ -82,16 +82,25 @@ func (t *tgAPI) isDuplicate(key string) bool {
 }
 
 func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMessage, error) {
+	if t.breaker.State() == "open" {
+		return nil, resilience.ErrCircuitOpen
+	}
+
 	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
+	// Always initialize both to avoid nil-channel panics in startPoller.
 	t.msgChan = make(chan bot.InboundMessage, 100)
+	if t.cbChan == nil {
+		t.cbChan = make(chan bot.InboundCallback, 100)
+	}
 	go t.startPoller(ctx)
 	return t.msgChan, nil
 }
 
 func (t *tgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, error) {
 	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
-	t.cbChan = make(chan bot.InboundCallback, 100)
-	// Note: startPoller is shared, but usually called via Updates in Bot.Run.
+	if t.cbChan == nil {
+		t.cbChan = make(chan bot.InboundCallback, 100)
+	}
 	return t.cbChan, nil
 }
 
