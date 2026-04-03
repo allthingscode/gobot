@@ -407,8 +407,13 @@ func cmdRun() *cobra.Command {
 					slog.Error("telegram: connection failed (Gateway will still run)", "err", tgErr)
 				} else {
 					// F-048: HITL Approval Framework
-					hitl = agent.NewHITLManager(api, []string{"shell_exec", "send_email"})
-					hooks.RegisterPreTool(hitl.PreToolHook)
+					if cfg.HumanInTheLoop() {
+						hitl = agent.NewHITLManager(api, []string{"shell_exec", "send_email"})
+						hooks.RegisterPreTool(hitl.PreToolHook)
+						slog.Info("run: human-in-the-loop (HITL) enabled")
+					} else {
+						slog.Info("run: human-in-the-loop (HITL) disabled by config")
+					}
 				}
 			} else {
 				slog.Info("run: telegram disabled by config")

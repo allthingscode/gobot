@@ -491,4 +491,23 @@ func TestDecode_StrategicLimits(t *testing.T) {
 	}
 }
 
+func TestHumanInTheLoop(t *testing.T) {
+	tests := []struct {
+		name string
+		hitl bool
+		want bool
+	}{
+		{"hitl enabled", true, true},
+		{"hitl disabled", false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Channels: ChannelsConfig{Telegram: TelegramConfig{HITL: tc.hitl}}}
+			if got := cfg.HumanInTheLoop(); got != tc.want {
+				t.Errorf("HumanInTheLoop() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 var _ io.Reader = errReader{}

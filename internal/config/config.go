@@ -80,6 +80,7 @@ type OpenAIConfig struct {
 
 type TelegramConfig struct {
 	Enabled   bool     `json:"enabled"`
+	HITL      bool     `json:"hitl"`
 	Token     string   `json:"token"`
 	AllowFrom []string `json:"allowFrom"`
 }
@@ -350,6 +351,11 @@ func (c *Config) ExecTimeout() time.Duration {
 		return time.Duration(c.Tools.Exec.Timeout) * time.Second
 	}
 	return 2 * time.Minute
+}
+
+// HumanInTheLoop returns true if the human-in-the-loop approval framework is enabled.
+func (c *Config) HumanInTheLoop() bool {
+	return c.Channels.Telegram.HITL
 }
 
 // DefaultConfigPath returns ~/.gobot/config.json.
