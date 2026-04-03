@@ -23,14 +23,10 @@ func liveProbes() *doctor.Probes {
 				return "", err
 			}
 
-			// Register for cleanup using defer pattern
-			res := infra.NewClosableResource("doctor:telegram", func() error {
-				// Telego doesn't have an explicit Close, but we ensure reference is cleared
-				return nil
-			})
-			defer res.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 
-			self, err := client.GetMe(context.Background())
+			self, err := client.GetMe(ctx)
 			if err != nil {
 				return "", err
 			}
