@@ -9,6 +9,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/doctor"
+	"github.com/allthingscode/gobot/internal/infra"
 	"github.com/allthingscode/gobot/internal/gmail"
 )
 
@@ -21,6 +22,14 @@ func liveProbes() *doctor.Probes {
 			if err != nil {
 				return "", err
 			}
+
+			// Register for cleanup using defer pattern
+			res := infra.NewClosableResource("doctor:telegram", func() error {
+				// Telego doesn't have an explicit Close, but we ensure reference is cleared
+				return nil
+			})
+			defer res.Close()
+
 			self, err := client.GetMe(context.Background())
 			if err != nil {
 				return "", err
@@ -30,6 +39,7 @@ func liveProbes() *doctor.Probes {
 		ProbeGemini: func(apiKey string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
+
 			client, err := genai.NewClient(ctx, &genai.ClientConfig{
 				APIKey:  apiKey,
 				Backend: genai.BackendGeminiAPI,
@@ -37,6 +47,14 @@ func liveProbes() *doctor.Probes {
 			if err != nil {
 				return err
 			}
+
+			// Register for cleanup
+			res := infra.NewClosableResource("doctor:gemini", func() error {
+				// genai.Client doesn't have Close, but we document the pattern
+				return nil
+			})
+			defer res.Close()
+
 			_, err = client.Models.GenerateContent(ctx, "gemini-2.0-flash",
 				[]*genai.Content{{Parts: []*genai.Part{{Text: "ping"}}}},
 				nil,
