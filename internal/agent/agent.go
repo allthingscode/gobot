@@ -53,7 +53,7 @@ type SessionManager struct {
 	logger       SessionLogger // may be nil; set via SetLogger
 	hooks        *Hooks        // may be nil; set via SetHooks
 	memoryWindow int
-	mu           sync.Map // key: sessionKey (string) → *sync.Mutex
+	mu           sync.Map // key: sessionKey (string) → *sessionLock
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -179,11 +179,11 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 	return response, nil
 }
 
-// lockFor returns the existing mutex for sessionKey, creating one if needed.
+// lockFor returns the existing session lock for sessionKey, creating one if needed.
 // Uses LoadOrStore for goroutine-safe lazy initialisation.
-func (m *SessionManager) lockFor(sessionKey string) *sync.Mutex {
-	val, _ := m.mu.LoadOrStore(sessionKey, &sync.Mutex{})
-	return val.(*sync.Mutex)
+func (m *SessionManager) lockFor(sessionKey string) *sessionLock {
+	val, _ := m.mu.LoadOrStore(sessionKey, &sessionLock{sessionKey: sessionKey})
+	return val.(*sessionLock)
 }
 
 // StripSilent removes the "[SILENT]" prefix from message (trimming surrounding

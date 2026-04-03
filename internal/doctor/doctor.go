@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
@@ -84,6 +85,12 @@ func Run(cfg *config.Config, probes *Probes) error {
 
 	resResults := checkResilience()
 	for _, res := range resResults {
+		checks = append(checks, r(res, false))
+	}
+
+	// Add Concurrency checks (F-056)
+	conResults := checkConcurrency()
+	for _, res := range conResults {
 		checks = append(checks, r(res, false))
 	}
 
@@ -299,6 +306,29 @@ func checkResilience() []result {
 		results = append(results, result{
 			name:   "breaker: " + name,
 			ok:     ok,
+			detail: detail,
+		})
+	}
+	return results
+}
+
+// checkConcurrency returns results for all session locks that have recorded metrics.
+func checkConcurrency() []result {
+	metrics := agent.GetLockMetrics()
+	if len(metrics) == 0 {
+		return []result{{name: "concurrency", ok: true, detail: "no active session locks"}}
+	}
+
+	var results []result
+	for name, m := range metrics {
+		detail := fmt.Sprintf("contention: %d, max_wait: %s, total_hold: %s",
+			m.ContentionCount,
+			m.MaxWaitTime.Round(time.Millisecond),
+			m.TotalHoldTime.Round(time.Millisecond))
+
+		results = append(results, result{
+			name:   "lock: " + name,
+			ok:     true, // advisory
 			detail: detail,
 		})
 	}
