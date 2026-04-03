@@ -63,6 +63,7 @@ func main() {
 		cmdAuthorize(),
 		cmdSecrets(),
 		cmdState(),
+		cmdLogs(),
 	)
 
 	if err := root.Execute(); err != nil {
