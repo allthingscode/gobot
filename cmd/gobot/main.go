@@ -31,6 +31,7 @@ import (
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/resilience"
+	"sync"
 )
 
 var (
@@ -359,6 +360,10 @@ func cmdRun() *cobra.Command {
 				return fmt.Errorf("telegram token not set: add channels.telegram.token to config or set TELEGRAM_BOT_TOKEN env var")
 			}
 			ctx := cmd.Context()
+
+			// F-074: Graceful shutdown with goroutine drain
+			var wg sync.WaitGroup
+
 			factory := &provider.Factory{
 				GeminiAPIKey:    cfg.GeminiAPIKey(),
 				AnthropicAPIKey: cfg.AnthropicAPIKey(),
@@ -393,7 +398,14 @@ func cmdRun() *cobra.Command {
 			if otelErr != nil {
 				slog.Warn("run: observability provider failed to initialize", "err", otelErr)
 			} else if otelProvider != nil {
-				defer otelProvider.Shutdown(ctx)
+				// F-074: Use fresh context for shutdown since ctx may be cancelled
+				defer func() {
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := otelProvider.Shutdown(shutdownCtx); err != nil {
+						slog.Warn("gobot: telemetry shutdown failed", "err", err)
+					}
+				}()
 			}
 			tracer := observability.NewDispatchTracer(otelProvider)
 
@@ -488,7 +500,9 @@ func cmdRun() *cobra.Command {
 			// Start HTTP Gateway if enabled (F-046)
 			if cfg.Gateway.Enabled {
 				gw := gateway.NewServer(cfg.Gateway, gateHandler)
+				wg.Add(1)
 				go func() {
+					defer wg.Done()
 					if err := gw.ListenAndServe(ctx); err != nil && err != context.Canceled {
 						slog.Error("gateway: server error", "err", err)
 					}
@@ -521,7 +535,9 @@ func cmdRun() *cobra.Command {
 				userEmail:   cfg.Strategic.UserEmail,
 			}
 			scheduler := cron.NewScheduler(storePath, itemsDir, cronDisp)
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
 				defer func() {
 					if r := recover(); r != nil {
 						os.Stderr.WriteString("PANIC IN CRON: " + fmt.Sprint(r) + "\n")
@@ -542,7 +558,9 @@ func cmdRun() *cobra.Command {
 				gmailSecretsPath := filepath.Join(cfg.SecretsRoot(), "gmail")
 				// Heartbeat can run without API (it just won't send alerts)
 				hb := newHeartbeatRunner(liveProbes(), api, alertChatID, cfg.StorageRoot(), cfg.GeminiAPIKey(), token, gmailSecretsPath)
+				wg.Add(1)
 				go func() {
+					defer wg.Done()
 					defer func() {
 						if r := recover(); r != nil {
 							os.Stderr.WriteString("PANIC IN HEARTBEAT: " + fmt.Sprint(r) + "\n")
@@ -563,6 +581,18 @@ func cmdRun() *cobra.Command {
 			// block on context cancellation to keep the Gateway/Cron/Heartbeat alive.
 			slog.Info("gobot running (headless mode)")
 			<-ctx.Done()
+			slog.Info("gobot: signal received, draining goroutines...")
+
+			// F-074: Drain goroutines with 30-second timeout
+			done := make(chan struct{})
+			go func() { wg.Wait(); close(done) }()
+			select {
+			case <-done:
+				slog.Info("gobot: drain complete, proceeding to shutdown")
+			case <-time.After(30 * time.Second):
+				slog.Warn("gobot: drain timed out after 30s — forcing exit")
+			}
+
 			return nil
 
 		},
