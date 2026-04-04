@@ -16,21 +16,24 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/reflection"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
 
 // geminiRunner implements the agent.Runner interface using a provider.Provider.
 type geminiRunner struct {
-	prov              provider.Provider
-	model             string
-	systemPrompt      string
-	memStore          *memory.MemoryStore // may be nil; used for RAG context injection
-	tools             []Tool              // registered tools exposed to the provider
-	breaker           *resilience.Breaker // circuit breaker for API calls
-	limiter           *rate.Limiter       // token-bucket rate limiter
-	hooks             *agent.Hooks        // may be nil; set via SetHooks
-	maxToolIterations int
-	maxTokens         int
+	prov                provider.Provider
+	model               string
+	systemPrompt        string
+	memStore            *memory.MemoryStore // may be nil; used for RAG context injection
+	tools               []Tool              // registered tools exposed to the provider
+	breaker             *resilience.Breaker // circuit breaker for API calls
+	limiter             *rate.Limiter       // token-bucket rate limiter
+	hooks               *agent.Hooks        // may be nil; set via SetHooks
+	maxToolIterations   int
+	maxTokens           int
+	enableReflection    bool // opt-in; off by default for cost control
+	maxReflectionRounds int  // default 1 → ≤2x token overhead
 }
 
 // newGeminiRunner creates a new geminiRunner for the given provider and model.
@@ -43,9 +46,11 @@ func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, 
 		// Configured circuit breaker for LLM provider.
 		breaker: resilience.New(prov.Name(), maxFail, window, timeout),
 		// 3 requests/second burst; conservative default.
-		limiter:           rate.NewLimiter(rate.Every(time.Second), 3),
-		maxToolIterations: 25,
-		maxTokens:         cfg.MaxTokens(),
+		limiter:             rate.NewLimiter(rate.Every(time.Second), 3),
+		maxToolIterations:   25,
+		maxTokens:           cfg.MaxTokens(),
+		enableReflection:    false,
+		maxReflectionRounds: 1,
 	}
 }
 
@@ -101,6 +106,19 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		sysPrompt = r.hooks.RunPrePrompt(ctx, sysPrompt)
 	}
 
+	// Planning phase (F-049): generate a validation rubric before executing.
+	var rubric map[string]any
+	userText := lastUserText(messages)
+	if r.enableReflection && userText != "" {
+		planPrompt := reflection.GenerateRubricPrompt(userText)
+		if planStr, planErr := r.RunText(ctx, planPrompt); planErr == nil {
+			if parsed, ok := reflection.ParseJSONResponse(planStr); ok {
+				rubric = parsed
+				slog.Debug("runner: planning rubric generated", "session", sessionKey)
+			}
+		}
+	}
+
 	// 2. Prepare Tool Declarations
 	var toolDecls []provider.ToolDeclaration
 	for _, t := range r.tools {
@@ -109,6 +127,8 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 
 	// toolSeq records the tool names called across all iterations for diagnostics.
 	toolSeq := make([]string, 0, r.maxToolIterations*2)
+
+	reflectionRounds := 0
 
 	// 3. Loop
 	for iter := 0; iter < r.maxToolIterations; iter++ {
@@ -135,6 +155,37 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		if len(resp.Message.ToolCalls) == 0 {
 			// Terminal text response
 			text := extractText(resp.Message)
+
+			// Reflection phase (F-049): audit the terminal response against the rubric.
+			if r.enableReflection && rubric != nil && reflectionRounds < r.maxReflectionRounds {
+				criticPrompt := reflection.GenerateCriticPrompt(userText, rubric, text)
+				if criticStr, criticErr := r.RunText(ctx, criticPrompt); criticErr == nil {
+					if report, ok := reflection.ParseJSONResponse(criticStr); ok {
+						score := reflection.CalculateTotalScore(report, rubric)
+						threshold := 0.7
+						if t, ok := rubric["success_threshold"].(float64); ok {
+							threshold = t
+						}
+						if score < threshold {
+							reflectionRounds++
+							correction := buildCorrectionMessage(report)
+							messages = append(messages, agentctx.StrategicMessage{
+								Role:    "user",
+								Content: &agentctx.MessageContent{Str: &correction},
+							})
+							slog.Info("runner: reflection backtrack triggered",
+								"session", sessionKey,
+								"score", score,
+								"threshold", threshold,
+								"round", reflectionRounds,
+							)
+							continue
+						}
+						slog.Debug("runner: reflection passed", "session", sessionKey, "score", score)
+					}
+				}
+			}
+
 			return text, messages, nil
 		}
 
@@ -289,4 +340,29 @@ func lastUserText(messages []agentctx.StrategicMessage) string {
 		}
 	}
 	return ""
+}
+
+// buildCorrectionMessage formats a critic report's required corrections into a
+// user-facing correction instruction that the agent can act on.
+func buildCorrectionMessage(report map[string]any) string {
+	feedback, _ := report["feedback"].(string)
+	corrections, _ := report["required_corrections"].([]any)
+
+	var sb strings.Builder
+	sb.WriteString("The previous response did not fully satisfy the task requirements.\n")
+	if feedback != "" {
+		sb.WriteString("Critic feedback: ")
+		sb.WriteString(feedback)
+		sb.WriteString("\n")
+	}
+	if len(corrections) > 0 {
+		sb.WriteString("Required corrections:\n")
+		for i, c := range corrections {
+			if s, ok := c.(string); ok {
+				sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, s))
+			}
+		}
+	}
+	sb.WriteString("Please revise your response to address the above.")
+	return sb.String()
 }
