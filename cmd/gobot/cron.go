@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/bot"
@@ -71,9 +72,9 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 			svc, err := gmail.NewService(gmailSecrets)
 			if err != nil {
 				slog.Error("failed to initialize gmail service for cron", "err", err)
-				return nil
+				return fmt.Errorf("init gmail service: %w", err)
 			}
-			subject := "Gobot Strategic Briefing"
+			subject := resolveEmailSubject(p)
 			if err := svc.Send(ctx, recipient, subject, response); err != nil {
 				slog.Error("failed to send cron response via email", "err", err, "to", recipient)
 			}
@@ -159,4 +160,17 @@ func parseSessionKey(sessionKey string) (chatID, threadID int64, err error) {
 	}
 
 	return chatID, threadID, nil
+}
+
+// resolveEmailSubject builds the email subject line from the payload.
+// If a subject template was provided in the job's front-matter, it is used
+// with {{DATE}} replaced by the current date (e.g. "April 4, 2026").
+// If no subject template was set, the historic default is used.
+func resolveEmailSubject(p cron.Payload) string {
+	if p.Subject != "" {
+		now := time.Now()
+		dateStr := fmt.Sprintf("%s %d, %d", now.Format("January"), now.Day(), now.Year())
+		return strings.ReplaceAll(p.Subject, "{{DATE}}", dateStr)
+	}
+	return "Gobot Strategic Briefing"
 }

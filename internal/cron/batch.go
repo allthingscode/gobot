@@ -88,6 +88,8 @@ func ParseModularJobFile(path string) (*Job, error) {
 			job.Payload.Channel = val
 		case "to":
 			job.Payload.To = val
+		case "subject":
+			job.Payload.Subject = val
 		case "enabled":
 			job.Enabled = (strings.ToLower(val) == "true")
 		}

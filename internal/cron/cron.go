@@ -29,6 +29,7 @@ type Schedule struct {
 type Payload struct {
 	Channel string `json:"channel"`
 	To      string `json:"to,omitempty"`
+	Subject string `json:"subject,omitempty"`
 	Message string `json:"message"`
 }
 
