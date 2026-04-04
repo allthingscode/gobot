@@ -98,7 +98,9 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 		}
 	}
 
-	if ttl <= 0 && cfg.KeepLastAssistants <= 0 {
+	// If TTL is not configured (or parses to zero), TTL-based pruning is disabled.
+	// KeepLastAssistants is a safety net during TTL pruning only, not a standalone pruning policy.
+	if ttl <= 0 {
 		return messages, 0
 	}
 
@@ -107,7 +109,7 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 
 	// Identify messages to keep.
 	// 1. Messages newer than cutoff.
-	// 2. The last N assistant messages (and their preceding user message to avoid stripping).
+	// 2. The last N assistant messages (and their preceding user message) as a safety net.
 
 	keep := make([]bool, len(messages))
 	assistantsFound := 0
@@ -130,36 +132,20 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 		}
 	}
 
-	// Scan forwards for TTL and combine with assistants.
-	if ttl > 0 {
-		for i, msg := range messages {
-			if msg.CreatedAt == "" {
-				// If no timestamp, keep it to be safe, or treat as "new"?
-				// Given it's a new feature, legacy messages won't have it.
-				keep[i] = true
-				continue
-			}
-			t, err := time.Parse(time.RFC3339, msg.CreatedAt)
-			if err != nil {
-				keep[i] = true // keep if timestamp is unparseable
-				continue
-			}
-			if t.After(cutoff) {
-				keep[i] = true
-			}
+	// Scan forwards for TTL.
+	for i, msg := range messages {
+		if msg.CreatedAt == "" {
+			// Legacy messages without a timestamp are kept to avoid silent data loss.
+			keep[i] = true
+			continue
 		}
-	} else {
-		// If no TTL, we only kept assistants above.
-		// But we should probably keep EVERYTHING else if no TTL is set?
-		// Wait, if no TTL is set, why are we here?
-		// The check `if ttl <= 0 && cfg.KeepLastAssistants <= 0` at the top handles this.
-		// If TTL is not set but KeepLastAssistants is, it means we ONLY keep last N assistants?
-		// No, that doesn't make sense. Pruning usually means "remove what is OLD".
-		// If TTL is NOT set, TTL-based pruning is disabled.
-		// If KeepLastAssistants IS set, it's a safety net for OTHER pruning (like count-based).
-		// But PruneMessages's primary job is TTL.
-		if ttl <= 0 {
-			return messages, 0
+		t, err := time.Parse(time.RFC3339, msg.CreatedAt)
+		if err != nil {
+			keep[i] = true // keep if timestamp is unparseable
+			continue
+		}
+		if t.After(cutoff) {
+			keep[i] = true
 		}
 	}
 

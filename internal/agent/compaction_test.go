@@ -378,6 +378,65 @@ func TestCompactMessages_DroppedMessageIdentification(t *testing.T) {
 	}
 }
 
+// TestPruneMessages_NoTTLKeepLastAssistants verifies B-032: when TTL is empty but
+// KeepLastAssistants > 0, PruneMessages must return all messages unchanged.
+// Previously the keep[] array was populated with only assistants before an early return;
+// removing that guard would have silently dropped all non-assistant messages.
+func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name               string
+		msgs               []agentctx.StrategicMessage
+		keepLastAssistants int
+	}{
+		{
+			name: "mixed conversation preserved when no TTL",
+			msgs: []agentctx.StrategicMessage{
+				{Role: "user", CreatedAt: now.Add(-5 * time.Hour).Format(time.RFC3339)},
+				{Role: "assistant", CreatedAt: now.Add(-4 * time.Hour).Format(time.RFC3339)},
+				{Role: "user", CreatedAt: now.Add(-3 * time.Hour).Format(time.RFC3339)},
+				{Role: "assistant", CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339)},
+				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+			},
+			keepLastAssistants: 1,
+		},
+		{
+			name: "all non-assistant messages preserved when no TTL",
+			msgs: []agentctx.StrategicMessage{
+				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
+				{Role: "user", CreatedAt: now.Add(-8 * time.Hour).Format(time.RFC3339)},
+				{Role: "assistant", CreatedAt: now.Add(-6 * time.Hour).Format(time.RFC3339)},
+				{Role: "user", CreatedAt: now.Add(-4 * time.Hour).Format(time.RFC3339)},
+				{Role: "user", CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339)},
+			},
+			keepLastAssistants: 2,
+		},
+		{
+			name:               "KeepLastAssistants=0 also no-ops without TTL",
+			msgs: []agentctx.StrategicMessage{
+				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+				{Role: "assistant", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
+			},
+			keepLastAssistants: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.ContextPruningConfig{KeepLastAssistants: tt.keepLastAssistants}
+			got, dropped := PruneMessages(tt.msgs, cfg)
+
+			if dropped != 0 {
+				t.Errorf("dropped = %d, want 0: PruneMessages must be a no-op when TTL is empty", dropped)
+			}
+			if len(got) != len(tt.msgs) {
+				t.Errorf("len(got) = %d, want %d: all messages must be preserved when TTL is empty", len(got), len(tt.msgs))
+			}
+		})
+	}
+}
+
 func TestDefaultConstants(t *testing.T) {
 	if DefaultMaxContextMessages <= 0 {
 		t.Error("DefaultMaxContextMessages must be positive")
