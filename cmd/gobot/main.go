@@ -385,6 +385,8 @@ func cmdRun() *cobra.Command {
 			}
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetMemoryWindow(cfg.MemoryWindow())
+			mgr.SetPruningPolicy(cfg.ContextPruning())
+			mgr.SetCompactionPolicy(cfg.Compaction())
 			mgr.SetStorageRoot(cfg.StorageRoot())
 			mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
 
@@ -424,7 +426,11 @@ func cmdRun() *cobra.Command {
 			runner.SetHooks(hooks)
 			handler := &dispatchHandler{mgr: mgr, memory: memStore, hitl: hitl}
 			if memStore != nil {
-				handler.consolidator = consolidator.New(runner, memStore)
+				h := consolidator.New(runner, memStore)
+				if cfg.Agents.Defaults.Compaction.Strategy == "memoryFlush" {
+					h.SetPrompt(cfg.Agents.Defaults.Compaction.MemoryFlush.Prompt)
+				}
+				handler.consolidator = h
 				slog.Info("run: memory consolidation enabled")
 			}
 
@@ -689,6 +695,8 @@ func cmdSimulate() *cobra.Command {
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetHooks(hooks)
 			mgr.SetMemoryWindow(cfg.MemoryWindow())
+			mgr.SetPruningPolicy(cfg.ContextPruning())
+			mgr.SetCompactionPolicy(cfg.Compaction())
 			mgr.SetStorageRoot(cfg.StorageRoot()) // F-037
 
 			fmt.Printf("--- Simulating Prompt ---\n%s\n\n", prompt)

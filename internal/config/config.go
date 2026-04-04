@@ -43,11 +43,27 @@ type AgentsConfig struct {
 }
 
 type AgentDefaults struct {
-	Model             string `json:"model"`
-	Provider          string `json:"provider"`
-	MaxTokens         int    `json:"maxTokens"`
-	MaxToolIterations int    `json:"maxToolIterations"`
-	MemoryWindow      int    `json:"memoryWindow"`
+	Model             string                 `json:"model"`
+	Provider          string                 `json:"provider"`
+	MaxTokens         int                    `json:"maxTokens"`
+	MaxToolIterations int                    `json:"maxToolIterations"`
+	MemoryWindow      int                    `json:"memoryWindow"`
+	ContextPruning    ContextPruningConfig   `json:"contextPruning"`
+	Compaction        CompactionPolicyConfig `json:"compaction"`
+}
+
+type ContextPruningConfig struct {
+	TTL                string `json:"ttl"`
+	KeepLastAssistants int    `json:"keepLastAssistants"`
+}
+
+type CompactionPolicyConfig struct {
+	Strategy    string            `json:"strategy"`
+	MemoryFlush MemoryFlushConfig `json:"memoryFlush"`
+}
+
+type MemoryFlushConfig struct {
+	Prompt string `json:"prompt"`
 }
 
 type SpecialistConfig struct {
@@ -115,6 +131,16 @@ func (c *Config) MemoryWindow() int {
 		return c.Agents.Defaults.MemoryWindow
 	}
 	return 50
+}
+
+// ContextPruning returns the configured context pruning policy.
+func (c *Config) ContextPruning() ContextPruningConfig {
+	return c.Agents.Defaults.ContextPruning
+}
+
+// Compaction returns the configured compaction policy.
+func (c *Config) Compaction() CompactionPolicyConfig {
+	return c.Agents.Defaults.Compaction
 }
 
 // MaxTokens returns the configured maximum output tokens, defaulting to 0 (API default).

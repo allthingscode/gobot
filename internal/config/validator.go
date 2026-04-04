@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Severity represents the criticality of a validation error.
@@ -87,8 +88,24 @@ func (v *Validator) Validate() *ValidationResult {
 	v.validateTelegram(result)
 	v.validatePaths(result)
 	v.validateDiskSpace(result)
+	v.validateAgentDefaults(result)
 	
 	return result
+}
+
+func (v *Validator) validateAgentDefaults(result *ValidationResult) {
+	// Validate Context Pruning TTL
+	ttl := v.cfg.Agents.Defaults.ContextPruning.TTL
+	if ttl != "" {
+		if _, err := time.ParseDuration(ttl); err != nil {
+			result.Errors = append(result.Errors, ValidationError{
+				Field:    "agents.defaults.contextPruning.ttl",
+				Message:  fmt.Sprintf("invalid duration: %v", err),
+				Remedy:   "use a valid Go duration string like '6h', '30m', or '1d'",
+				Severity: SeverityCritical,
+			})
+		}
+	}
 }
 
 func (v *Validator) validateStorageRoot(result *ValidationResult) {

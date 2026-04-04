@@ -1,6 +1,12 @@
 package agent
 
-import agentctx "github.com/allthingscode/gobot/internal/context"
+import (
+	"log/slog"
+	"time"
+
+	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
+)
 
 // DefaultMaxContextMessages is the message count above which compaction triggers.
 const DefaultMaxContextMessages = 50
@@ -9,17 +15,8 @@ const DefaultMaxContextMessages = 50
 const DefaultKeepContextMessages = 20
 
 // CompactMessages trims messages to at most keepN entries when len(messages) exceeds maxN.
-//
-// Algorithm:
-//  1. If len(messages) <= maxN: return messages unchanged, dropped=0.
-//  2. Take the last keepN messages.
-//  3. If the first retained message has role "assistant" or "model", drop it
-//     (Gemini requires conversations to start with a user turn).
-//  4. Return (compacted, dropped) where dropped = len(messages) - len(compacted).
-//
-// The returned slice shares the underlying array with messages — callers must
-// not mutate the original slice after calling CompactMessages.
-func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int) ([]agentctx.StrategicMessage, int) {
+// It respects the CompactionPolicyConfig strategy if provided.
+func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, policy config.CompactionPolicyConfig) ([]agentctx.StrategicMessage, int) {
 	// Defensive: invalid parameters — return unchanged.
 	if maxN <= 0 || keepN <= 0 {
 		return messages, 0
@@ -35,6 +32,12 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int) ([]a
 		keepN = maxN - 1
 	}
 
+	// For now, only simple trimming is implemented.
+	// Future: handle "memoryFlush" strategy with memory.Consolidate.
+	if policy.Strategy == "memoryFlush" {
+		slog.Debug("agent: memoryFlush strategy requested (not yet fully implemented, falling back to trim)", "prompt_len", len(policy.MemoryFlush.Prompt))
+	}
+
 	// Take the last keepN messages.
 	start := len(messages) - keepN
 	if start < 0 {
@@ -43,14 +46,113 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int) ([]a
 	compacted := messages[start:]
 
 	// Gemini requires conversations to start with a user turn.
-	// Drop the first retained message if it is an assistant or model turn.
-	if len(compacted) > 0 {
+	// Drop all leading assistant or model turns.
+	for len(compacted) > 0 {
 		role := compacted[0].Role
 		if role == "assistant" || role == "model" {
 			compacted = compacted[1:]
+		} else {
+			break
 		}
 	}
 
 	dropped := len(messages) - len(compacted)
 	return compacted, dropped
+}
+
+// PruneMessages removes messages based on TTL and KeepLastAssistants settings.
+func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruningConfig) ([]agentctx.StrategicMessage, int) {
+	if cfg.TTL == "" && cfg.KeepLastAssistants <= 0 {
+		return messages, 0
+	}
+
+	var ttl time.Duration
+	if cfg.TTL != "" {
+		var err error
+		ttl, err = time.ParseDuration(cfg.TTL)
+		if err != nil {
+			slog.Warn("agent: invalid context pruning TTL", "ttl", cfg.TTL, "err", err)
+			return messages, 0
+		}
+	}
+
+	if ttl <= 0 && cfg.KeepLastAssistants <= 0 {
+		return messages, 0
+	}
+
+	now := time.Now()
+	cutoff := now.Add(-ttl)
+
+	// Identify messages to keep.
+	// 1. Messages newer than cutoff.
+	// 2. The last N assistant messages.
+
+	keep := make([]bool, len(messages))
+	assistantsFound := 0
+
+	// Scan backwards to find the last N assistants.
+	if cfg.KeepLastAssistants > 0 {
+		for i := len(messages) - 1; i >= 0; i-- {
+			role := messages[i].Role
+			if role == "assistant" || role == "model" {
+				if assistantsFound < cfg.KeepLastAssistants {
+					keep[i] = true
+					assistantsFound++
+				}
+			}
+		}
+	}
+
+	// Scan forwards for TTL and combine with assistants.
+	if ttl > 0 {
+		for i, msg := range messages {
+			if msg.CreatedAt == "" {
+				// If no timestamp, keep it to be safe, or treat as "new"?
+				// Given it's a new feature, legacy messages won't have it.
+				keep[i] = true
+				continue
+			}
+			t, err := time.Parse(time.RFC3339, msg.CreatedAt)
+			if err != nil {
+				keep[i] = true // keep if timestamp is unparseable
+				continue
+			}
+			if t.After(cutoff) {
+				keep[i] = true
+			}
+		}
+	} else {
+		// If no TTL, we only kept assistants above.
+		// But we should probably keep EVERYTHING else if no TTL is set?
+		// Wait, if no TTL is set, why are we here?
+		// The check `if ttl <= 0 && cfg.KeepLastAssistants <= 0` at the top handles this.
+		// If TTL is not set but KeepLastAssistants is, it means we ONLY keep last N assistants?
+		// No, that doesn't make sense. Pruning usually means "remove what is OLD".
+		// If TTL is NOT set, TTL-based pruning is disabled.
+		// If KeepLastAssistants IS set, it's a safety net for OTHER pruning (like count-based).
+		// But PruneMessages's primary job is TTL.
+		if ttl <= 0 {
+			return messages, 0
+		}
+	}
+
+	var pruned []agentctx.StrategicMessage
+	for i, k := range keep {
+		if k {
+			pruned = append(pruned, messages[i])
+		}
+	}
+
+	// Gemini requires conversations to start with a user turn.
+	for len(pruned) > 0 {
+		role := pruned[0].Role
+		if role == "assistant" || role == "model" {
+			pruned = pruned[1:]
+		} else {
+			break
+		}
+	}
+
+	dropped := len(messages) - len(pruned)
+	return pruned, dropped
 }

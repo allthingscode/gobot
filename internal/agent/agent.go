@@ -17,7 +17,9 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 )
@@ -46,14 +48,16 @@ type CheckpointStore interface {
 // Concurrent calls with the same sessionKey are queued; concurrent calls
 // with different sessionKeys proceed in parallel.
 type SessionManager struct {
-	runner       Runner
-	store        CheckpointStore // may be nil
-	model        string
-	storageRoot  string        // may be ""; used for journal writes on compaction
-	logger       SessionLogger // may be nil; set via SetLogger
-	hooks        *Hooks        // may be nil; set via SetHooks
-	memoryWindow int
-	mu           sync.Map // key: sessionKey (string) → *sessionLock
+	runner           Runner
+	store            CheckpointStore // may be nil
+	model            string
+	storageRoot      string        // may be ""; used for journal writes on compaction
+	logger           SessionLogger // may be nil; set via SetLogger
+	hooks            *Hooks        // may be nil; set via SetHooks
+	memoryWindow     int
+	pruningPolicy    config.ContextPruningConfig
+	compactionPolicy config.CompactionPolicyConfig
+	mu               sync.Map // key: sessionKey (string) → *sessionLock
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -73,6 +77,16 @@ func (m *SessionManager) SetMemoryWindow(w int) {
 	if w > 0 {
 		m.memoryWindow = w
 	}
+}
+
+// SetPruningPolicy configures the context pruning policy.
+func (m *SessionManager) SetPruningPolicy(p config.ContextPruningConfig) {
+	m.pruningPolicy = p
+}
+
+// SetCompactionPolicy configures the context compaction policy.
+func (m *SessionManager) SetCompactionPolicy(p config.CompactionPolicyConfig) {
+	m.compactionPolicy = p
 }
 
 // SetStorageRoot configures the storage root used for journal writes on
@@ -135,8 +149,14 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 		messages = m.hooks.RunPreHistory(ctx, messages)
 	}
 
-	// Compact context if the history has grown too large (F-015).
-	if compacted, dropped := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages); dropped > 0 {
+	// Prune context based on TTL and KeepLastAssistants (F-047).
+	if pruned, dropped := PruneMessages(messages, m.pruningPolicy); dropped > 0 {
+		slog.Info("agent: pruned context", "session", sessionKey, "dropped", dropped, "remaining", len(pruned))
+		messages = pruned
+	}
+
+	// Compact context if the history has grown too large (F-015, F-047).
+	if compacted, dropped := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages, m.compactionPolicy); dropped > 0 {
 		slog.Info("agent: compacted context", "session", sessionKey, "dropped", dropped, "remaining", len(compacted))
 		if m.storageRoot != "" {
 			entry := fmt.Sprintf("Session %s: compacted %d messages (kept %d)", sessionKey, dropped, len(compacted))
@@ -147,14 +167,26 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 
 	// Append the incoming user message.
 	messages = append(messages, agentctx.StrategicMessage{
-		Role:    "user",
-		Content: &agentctx.MessageContent{Str: &cleaned},
+		Role:      "user",
+		Content:   &agentctx.MessageContent{Str: &cleaned},
+		CreatedAt: time.Now().Format(time.RFC3339),
 	})
 
 	// Execute the turn.
 	response, updated, err := m.runner.Run(ctx, sessionKey, messages)
 	if err != nil {
 		return "", fmt.Errorf("runner.Run: %w", err)
+	}
+
+	// Ensure the model's response also has a timestamp if it doesn't already.
+	// We scan the 'updated' history (which should have the last assistant turn).
+	for i := len(updated) - 1; i >= 0; i-- {
+		if updated[i].CreatedAt == "" {
+			updated[i].CreatedAt = time.Now().Format(time.RFC3339)
+		} else {
+			// Once we find one with a timestamp, we assume older ones are fine.
+			break
+		}
 	}
 
 	// Persist the updated history.

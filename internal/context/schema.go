@@ -160,4 +160,5 @@ type StrategicMessage struct {
 	ToolCalls        []map[string]any `json:"tool_calls,omitempty"`
 	ReasoningContent *string          `json:"reasoning_content,omitempty"`
 	ThinkingBlocks   []map[string]any `json:"thinking_blocks,omitempty"`
+	CreatedAt        string           `json:"created_at,omitempty"`
 }

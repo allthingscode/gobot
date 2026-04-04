@@ -39,11 +39,23 @@ type TextRunner interface {
 type Consolidator struct {
 	runner TextRunner
 	store  *memory.MemoryStore
+	prompt string
 }
 
 // New creates a Consolidator. Both runner and store must be non-nil.
 func New(runner TextRunner, store *memory.MemoryStore) *Consolidator {
-	return &Consolidator{runner: runner, store: store}
+	return &Consolidator{
+		runner: runner,
+		store:  store,
+		prompt: consolidationPrompt,
+	}
+}
+
+// SetPrompt overrides the default consolidation system prompt.
+func (c *Consolidator) SetPrompt(p string) {
+	if p != "" {
+		c.prompt = p
+	}
 }
 
 // ConsolidateAsync spawns a goroutine to consolidate reply for sessionKey.
@@ -71,7 +83,10 @@ func (c *Consolidator) ConsolidateAsync(sessionKey, reply string) {
 // consolidate runs the LLM extraction and indexes facts. Returns the number
 // of facts indexed. Exported for testing via a direct call.
 func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string) (int, error) {
-	prompt := consolidationPrompt + reply
+	prompt := c.prompt + reply
+	if !strings.Contains(c.prompt, "reply") && !strings.HasSuffix(c.prompt, "\n") {
+		prompt = c.prompt + "\n\nAgent reply to consolidate:\n" + reply
+	}
 	response, err := c.runner.RunText(ctx, prompt)
 	if err != nil {
 		return 0, fmt.Errorf("consolidator: RunText: %w", err)
