@@ -22,6 +22,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/observability"
 )
 
 // Runner executes one agentic turn.
@@ -60,6 +61,7 @@ type SessionManager struct {
 	logger           SessionLogger // may be nil; set via SetLogger
 	consolidator     Consolidator  // may be nil; set via SetConsolidator
 	hooks            *Hooks        // may be nil; set via SetHooks
+	tracer           *observability.DispatchTracer
 	memoryWindow     int
 	pruningPolicy    config.ContextPruningConfig
 	compactionPolicy config.CompactionPolicyConfig
@@ -76,6 +78,11 @@ func NewSessionManager(runner Runner, store CheckpointStore, model string) *Sess
 		model:        model,
 		memoryWindow: DefaultMaxContextMessages,
 	}
+}
+
+// SetTracer configures the observability tracer for the session manager.
+func (m *SessionManager) SetTracer(t *observability.DispatchTracer) {
+	m.tracer = t
 }
 
 // SetMemoryWindow configures the maximum context messages kept before compaction.
@@ -133,14 +140,26 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 	lock.Lock()
 	defer lock.Unlock()
 
-	// Strip [SILENT] prefix — the cron layer uses it to suppress routing
-	// but the model should never see it (mirrors _patched_dispatch in loop.py).
-	cleaned, silent := StripSilent(userMessage)
-	if silent {
-		slog.Debug("agent: [SILENT] message received, stripping prefix", "session", sessionKey)
+	if m.tracer != nil {
+		// Load history first so we can report message count to tracer.
+		messages, iteration, err := m.loadHistory(sessionKey)
+		if err != nil {
+			return "", err
+		}
+		return m.tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
+			return m.dispatch(ctx, sessionKey, userMessage, messages, iteration)
+		})
 	}
 
-	// Load conversation history from checkpoint.
+	messages, iteration, err := m.loadHistory(sessionKey)
+	if err != nil {
+		return "", err
+	}
+	return m.dispatch(ctx, sessionKey, userMessage, messages, iteration)
+}
+
+// loadHistory loads conversation history from checkpoint.
+func (m *SessionManager) loadHistory(sessionKey string) ([]agentctx.StrategicMessage, int, error) {
 	var messages []agentctx.StrategicMessage
 	var iteration int
 	if m.store != nil {
@@ -154,6 +173,17 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 				slog.Warn("agent: CreateThread failed (continuing statelessly)", "session", sessionKey, "err", createErr)
 			}
 		}
+	}
+	return messages, iteration, nil
+}
+
+// dispatch is the implementation of Dispatch, potentially wrapped by tracing.
+func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage string, messages []agentctx.StrategicMessage, iteration int) (string, error) {
+	// Strip [SILENT] prefix — the cron layer uses it to suppress routing
+	// but the model should never see it (mirrors _patched_dispatch in loop.py).
+	cleaned, silent := StripSilent(userMessage)
+	if silent {
+		slog.Debug("agent: [SILENT] message received, stripping prefix", "session", sessionKey)
 	}
 
 	// Run PreHistory hooks (F-012) — filter/transform history before compaction and dispatch.

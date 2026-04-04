@@ -108,3 +108,11 @@ func (d *DispatchTracer) TraceToolExecution(ctx context.Context, sessionKey, too
 	}
 	return result, err
 }
+
+// RecordTokens records token consumption via the underlying provider.
+func (d *DispatchTracer) RecordTokens(ctx context.Context, count int64) {
+	if d.provider == nil {
+		return
+	}
+	d.provider.RecordTokens(ctx, count)
+}

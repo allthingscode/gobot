@@ -510,4 +510,22 @@ func TestHumanInTheLoop(t *testing.T) {
 	}
 }
 
+func TestObservabilityConfig(t *testing.T) {
+	input := `{"strategic_edition":{"observability":{"service_name":"test-bot","otlp_endpoint":"localhost:4317","sampling_rate":0.5}}}`
+	cfg, err := decode(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	obs := cfg.Strategic.Observability
+	if obs.ServiceName != "test-bot" {
+		t.Errorf("got service_name %q, want test-bot", obs.ServiceName)
+	}
+	if obs.OTLPEndpoint != "localhost:4317" {
+		t.Errorf("got otlp_endpoint %q, want localhost:4317", obs.OTLPEndpoint)
+	}
+	if obs.SamplingRate != 0.5 {
+		t.Errorf("got sampling_rate %v, want 0.5", obs.SamplingRate)
+	}
+}
+
 var _ io.Reader = errReader{}

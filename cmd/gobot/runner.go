@@ -15,6 +15,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/reflection"
 	"github.com/allthingscode/gobot/internal/resilience"
@@ -30,6 +31,7 @@ type geminiRunner struct {
 	breaker             *resilience.Breaker // circuit breaker for API calls
 	limiter             *rate.Limiter       // token-bucket rate limiter
 	hooks               *agent.Hooks        // may be nil; set via SetHooks
+	tracer              *observability.DispatchTracer
 	maxToolIterations   int
 	maxTokens           int
 	enableReflection    bool // opt-in; off by default for cost control
@@ -61,7 +63,7 @@ func (r *geminiRunner) RunText(ctx context.Context, prompt string) (string, erro
 		Model:    r.model,
 		Messages: []agentctx.StrategicMessage{{Role: "user", Content: &agentctx.MessageContent{Str: &prompt}}},
 	}
-	resp, err := r.retryChat(ctx, req)
+	resp, err := r.retryChat(ctx, "", req)
 	if err != nil {
 		return "", fmt.Errorf("RunText: %w", err)
 	}
@@ -72,6 +74,11 @@ func (r *geminiRunner) RunText(ctx context.Context, prompt string) (string, erro
 // PrePrompt hooks are applied before each Chat call.
 func (r *geminiRunner) SetHooks(h *agent.Hooks) {
 	r.hooks = h
+}
+
+// SetTracer configures the observability tracer for this runner.
+func (r *geminiRunner) SetTracer(t *observability.DispatchTracer) {
+	r.tracer = t
 }
 
 // Run executes the tool-call/response loop until the provider returns a terminal text response.
@@ -143,7 +150,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 		slog.Debug("runner: calling provider.Chat", "session", sessionKey, "provider", r.prov.Name(), "model", r.model, "messages", len(messages), "iter", iter)
 
 		// 4. Retry + Resilience Call
-		resp, err := r.retryChat(ctx, req)
+		resp, err := r.retryChat(ctx, sessionKey, req)
 		if err != nil {
 			return "", nil, fmt.Errorf("chat: %w", err)
 		}
@@ -259,6 +266,11 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, name string, args map[string]any) (string, error) {
 	for _, t := range r.tools {
 		if t.Name() == name {
+			if r.tracer != nil {
+				return r.tracer.TraceToolExecution(ctx, sessionKey, name, func(ctx context.Context) (string, error) {
+					return t.Execute(ctx, sessionKey, args)
+				})
+			}
 			return t.Execute(ctx, sessionKey, args)
 		}
 	}
@@ -266,7 +278,7 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, name 
 }
 
 // retryChat calls prov.Chat with exponential backoff on transient errors.
-func (r *geminiRunner) retryChat(ctx context.Context, req provider.ChatRequest) (*provider.ChatResponse, error) {
+func (r *geminiRunner) retryChat(ctx context.Context, sessionKey string, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	const maxGenRetries = 3
 	const initialDelay = 1 * time.Second
 	const maxDelay = 30 * time.Second
@@ -293,13 +305,26 @@ func (r *geminiRunner) retryChat(ctx context.Context, req provider.ChatRequest) 
 		}
 
 		var resp *provider.ChatResponse
-		err := r.breaker.Execute(func() error {
-			var callErr error
-			resp, callErr = r.prov.Chat(ctx, req)
-			return callErr
-		})
+		fn := func(ctx context.Context) error {
+			return r.breaker.Execute(func() error {
+				var callErr error
+				resp, callErr = r.prov.Chat(ctx, req)
+				return callErr
+			})
+		}
+
+		var err error
+		if r.tracer != nil {
+			err = r.tracer.TraceGeminiCall(ctx, sessionKey, attempt, fn)
+		} else {
+			err = fn(ctx)
+		}
 
 		if err == nil {
+			// Record token consumption if tracer is present.
+			if r.tracer != nil && resp != nil && resp.Usage.TotalTokens > 0 {
+				r.tracer.RecordTokens(ctx, int64(resp.Usage.TotalTokens))
+			}
 			return resp, nil
 		}
 

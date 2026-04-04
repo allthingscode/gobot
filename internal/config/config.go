@@ -119,10 +119,18 @@ type ToolsConfig struct {
 }
 
 type StrategicConfig struct {
-	UserEmail         string `json:"user_email"`
-	StorageRoot       string `json:"storage_root"`
-	Mandate           string `json:"mandate"`
-	MaxToolIterations int    `json:"max_tool_iterations,omitempty"`
+	UserEmail         string              `json:"user_email"`
+	StorageRoot       string              `json:"storage_root"`
+	Mandate           string              `json:"mandate"`
+	MaxToolIterations int                 `json:"max_tool_iterations,omitempty"`
+	Observability     ObservabilityConfig `json:"observability"`
+}
+
+type ObservabilityConfig struct {
+	ServiceName    string  `json:"service_name"`
+	ServiceVersion string  `json:"service_version"`
+	OTLPEndpoint   string  `json:"otlp_endpoint"`
+	SamplingRate   float64 `json:"sampling_rate"`
 }
 
 // MemoryWindow returns the configured agent memory window (max context messages), defaulting to 50.

@@ -28,6 +28,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
@@ -366,7 +367,24 @@ func cmdRun() *cobra.Command {
 			if systemPrompt != "" {
 				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 			}
+
+			// Init OpenTelemetry observability (F-022)
+			otelConfig := observability.Config{
+				ServiceName:    cfg.Strategic.Observability.ServiceName,
+				ServiceVersion: version, // build version
+				OTLPEndpoint:   cfg.Strategic.Observability.OTLPEndpoint,
+				SamplingRate:   cfg.Strategic.Observability.SamplingRate,
+			}
+			otelProvider, otelErr := observability.NewProvider(otelConfig)
+			if otelErr != nil {
+				slog.Warn("run: observability provider failed to initialize", "err", otelErr)
+			} else if otelProvider != nil {
+				defer otelProvider.Shutdown(ctx)
+			}
+			tracer := observability.NewDispatchTracer(otelProvider)
+
 			runner := newGeminiRunner(prov, model, systemPrompt, cfg)
+			runner.SetTracer(tracer)
 
 			// Init long-term memory store (non-fatal if it fails).
 			memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
@@ -384,6 +402,7 @@ func cmdRun() *cobra.Command {
 				slog.Warn("run: checkpoint store unavailable, running statelessly", "err", storeErr)
 			}
 			mgr := agent.NewSessionManager(runner, store, model)
+			mgr.SetTracer(tracer)
 			mgr.SetMemoryWindow(cfg.MemoryWindow())
 			mgr.SetPruningPolicy(cfg.ContextPruning())
 			mgr.SetCompactionPolicy(cfg.Compaction())
@@ -462,6 +481,7 @@ func cmdRun() *cobra.Command {
 			if cfg.Channels.Telegram.Enabled {
 				if api != nil {
 					b = bot.New(api, gateHandler)
+					b.SetTracer(tracer)
 				} else {
 					slog.Warn("run: telegram API is nil, bot will not be started")
 				}
@@ -473,6 +493,7 @@ func cmdRun() *cobra.Command {
 			// Cron jobs use an ephemeral session manager (nil store) so they never
 			// share checkpoint history with DM conversations (F-013).
 			cronMgr := agent.NewSessionManager(runner, nil, model)
+			cronMgr.SetTracer(tracer)
 			cronDisp := &cronDispatcher{
 				mgr:         cronMgr,
 				b:           b,

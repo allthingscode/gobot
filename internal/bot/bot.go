@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/observability"
 )
 
 // InboundMessage is a normalized message received from Telegram.
@@ -77,11 +79,17 @@ type Handler interface {
 type Bot struct {
 	api     API
 	handler Handler
+	tracer  *observability.DispatchTracer
 }
 
 // New creates a Bot backed by the given API and Handler.
 func New(api API, handler Handler) *Bot {
 	return &Bot{api: api, handler: handler}
+}
+
+// SetTracer configures the observability tracer for the bot.
+func (b *Bot) SetTracer(t *observability.DispatchTracer) {
+	b.tracer = t
 }
 
 // SessionKey returns the routing key for a message.
@@ -232,13 +240,26 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 	stopTyping := b.api.Typing(ctx, msg.ChatID, msg.ThreadID)
 	defer stopTyping()
 
-	reply, err := b.handler.Handle(ctx, sessionKey, msg)
-	if err != nil {
-		slog.Error("bot: handler error", "session", sessionKey, "err", err)
+	if b.tracer != nil {
+		_ = b.tracer.TraceBotDispatch(ctx, sessionKey, func(ctx context.Context) error {
+			return b.handleAndSend(ctx, sessionKey, msg)
+		})
 		return
 	}
+
+	if err := b.handleAndSend(ctx, sessionKey, msg); err != nil {
+		slog.Error("bot: handleAndSend failed", "session", sessionKey, "err", err)
+	}
+}
+
+// handleAndSend is the untraced implementation of dispatch.
+func (b *Bot) handleAndSend(ctx context.Context, sessionKey string, msg InboundMessage) error {
+	reply, err := b.handler.Handle(ctx, sessionKey, msg)
+	if err != nil {
+		return err
+	}
 	if reply == "" {
-		return
+		return nil
 	}
 	out := OutboundMessage{
 		ChatID:   msg.ChatID,
@@ -246,10 +267,10 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 		Text:     reply,
 	}
 	if err := b.api.Send(ctx, out); err != nil {
-		slog.Error("bot: send error", "session", sessionKey, "err", err)
-	} else {
-		slog.Info("bot: message sent", "session", sessionKey)
+		return fmt.Errorf("send error: %w", err)
 	}
+	slog.Info("bot: message sent", "session", sessionKey)
+	return nil
 }
 
 // Send delivers a message via the underlying API.
