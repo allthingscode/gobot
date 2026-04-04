@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- **Advanced Context Pruning & Compaction Policies** (F-047): Sophisticated context management for long-running sessions.
+  - Implements TTL-based pruning (e.g., "6h" window) for history retention.
+  - Adds `KeepLastAssistants` safety net to preserve critical assistant turns.
+  - Integrates `memoryFlush` strategy with asynchronous fact extraction into long-term memory.
+  - Adds `created_at` message timestamps to conversation history.
 - **Rubric-Driven Reflection Loop** (F-049): Implement a multi-phase agent loop with explicit planning and reflection.
   - Generates a measurable validation rubric before task execution.
   - Performs a "Critic" turn to audit model output against the rubric.

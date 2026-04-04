@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
@@ -85,6 +86,24 @@ func (s *mockStore) CreateThread(threadID, model string, _ map[string]any) error
 	return nil
 }
 
+// ── Mock consolidator ──────────────────────────────────────────────────────────
+
+type mockConsolidator struct {
+	calls []consolidateCall
+	mu    sync.Mutex
+}
+
+type consolidateCall struct {
+	sessionKey string
+	text       string
+}
+
+func (c *mockConsolidator) ConsolidateAsync(sessionKey, text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, consolidateCall{sessionKey: sessionKey, text: text})
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 func TestStripSilent(t *testing.T) {
@@ -107,14 +126,65 @@ func TestStripSilent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gotCleaned, gotSilent := StripSilent(tt.input)
 			if gotCleaned != tt.wantCleaned {
-				t.Errorf("cleaned = %q, want %q", gotCleaned, tt.wantCleaned)
+				t.Errorf("%s: got cleaned %q, want %q", tt.name, gotCleaned, tt.wantCleaned)
 			}
 			if gotSilent != tt.wantSilent {
-				t.Errorf("silent = %v, want %v", gotSilent, tt.wantSilent)
+				t.Errorf("%s: got silent %v, want %v", tt.name, gotSilent, tt.wantSilent)
 			}
 		})
 	}
 }
+
+func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
+	ctx := context.Background()
+	runner := &mockRunner{response: "ok"}
+	store := newMockStore()
+	mgr := NewSessionManager(runner, store, "mock")
+
+	// Pre-fill history with 10 messages.
+	history := make([]agentctx.StrategicMessage, 10)
+	for i := range history {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		content := "msg"
+		history[i] = agentctx.StrategicMessage{
+			Role:    role,
+			Content: &agentctx.MessageContent{Str: &content},
+		}
+	}
+	store.SaveSnapshot("sess1", 1, history)
+
+	// Set compaction policy.
+	mgr.SetMemoryWindow(5)
+	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
+		Strategy: "memoryFlush",
+	})
+	cons := &mockConsolidator{}
+	mgr.SetConsolidator(cons)
+
+	// Dispatch a new message.
+	_, err := mgr.Dispatch(ctx, "sess1", "new message")
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+
+	// Verify consolidator was called.
+	cons.mu.Lock()
+	defer cons.mu.Unlock()
+	if len(cons.calls) != 1 {
+		t.Errorf("expected 1 consolidator call, got %d", len(cons.calls))
+	} else {
+		if cons.calls[0].sessionKey != "sess1" {
+			t.Errorf("wrong session key: %s", cons.calls[0].sessionKey)
+		}
+		if cons.calls[0].text == "" {
+			t.Error("expected non-empty consolidated text")
+		}
+	}
+}
+
 
 func TestDispatch_BasicRoundtrip(t *testing.T) {
 	runner := &mockRunner{response: "pong"}

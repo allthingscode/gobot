@@ -42,6 +42,11 @@ type CheckpointStore interface {
 	CreateThread(threadID, model string, metadata map[string]any) error
 }
 
+// Consolidator abstracts the memory consolidation/fact extraction layer (F-028, F-047).
+type Consolidator interface {
+	ConsolidateAsync(sessionKey, text string)
+}
+
 // SessionManager serializes Runner calls per session key and optionally
 // persists conversation history via a CheckpointStore.
 //
@@ -53,6 +58,7 @@ type SessionManager struct {
 	model            string
 	storageRoot      string        // may be ""; used for journal writes on compaction
 	logger           SessionLogger // may be nil; set via SetLogger
+	consolidator     Consolidator  // may be nil; set via SetConsolidator
 	hooks            *Hooks        // may be nil; set via SetHooks
 	memoryWindow     int
 	pruningPolicy    config.ContextPruningConfig
@@ -100,6 +106,12 @@ func (m *SessionManager) SetStorageRoot(root string) {
 // after every successful SaveSnapshot. If nil, no logging is performed.
 func (m *SessionManager) SetLogger(l SessionLogger) {
 	m.logger = l
+}
+
+// SetConsolidator configures a Consolidator that extracts facts from dropped
+// history during memoryFlush compaction. If nil, no consolidation is performed.
+func (m *SessionManager) SetConsolidator(c Consolidator) {
+	m.consolidator = c
 }
 
 // SetHooks configures the lifecycle hooks for this SessionManager.
@@ -156,8 +168,17 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 	}
 
 	// Compact context if the history has grown too large (F-015, F-047).
-	if compacted, dropped := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages, m.compactionPolicy); dropped > 0 {
+	if compacted, dropped := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages, m.compactionPolicy, m.pruningPolicy); dropped > 0 {
 		slog.Info("agent: compacted context", "session", sessionKey, "dropped", dropped, "remaining", len(compacted))
+		if m.consolidator != nil && m.compactionPolicy.Strategy == "memoryFlush" {
+			// Extract facts from dropped history (F-047).
+			var sb strings.Builder
+			for i := 0; i < dropped; i++ {
+				msg := messages[i]
+				fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
+			}
+			m.consolidator.ConsolidateAsync(sessionKey, sb.String())
+		}
 		if m.storageRoot != "" {
 			entry := fmt.Sprintf("Session %s: compacted %d messages (kept %d)", sessionKey, dropped, len(compacted))
 			memory.WriteJournalEntry(m.storageRoot, entry)

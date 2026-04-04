@@ -15,8 +15,8 @@ const DefaultMaxContextMessages = 50
 const DefaultKeepContextMessages = 20
 
 // CompactMessages trims messages to at most keepN entries when len(messages) exceeds maxN.
-// It respects the CompactionPolicyConfig strategy if provided.
-func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, policy config.CompactionPolicyConfig) ([]agentctx.StrategicMessage, int) {
+// It respects the CompactionPolicyConfig strategy and ContextPruningConfig safety nets.
+func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, policy config.CompactionPolicyConfig, pruning config.ContextPruningConfig) ([]agentctx.StrategicMessage, int) {
 	// Defensive: invalid parameters — return unchanged.
 	if maxN <= 0 || keepN <= 0 {
 		return messages, 0
@@ -32,18 +32,39 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 		keepN = maxN - 1
 	}
 
-	// For now, only simple trimming is implemented.
-	// Future: handle "memoryFlush" strategy with memory.Consolidate.
-	if policy.Strategy == "memoryFlush" {
-		slog.Debug("agent: memoryFlush strategy requested (not yet fully implemented, falling back to trim)", "prompt_len", len(policy.MemoryFlush.Prompt))
+	// Identify messages to keep.
+	keep := make([]bool, len(messages))
+
+	// 1. Always keep the last keepN messages.
+	start := len(messages) - keepN
+	for i := start; i < len(messages); i++ {
+		keep[i] = true
 	}
 
-	// Take the last keepN messages.
-	start := len(messages) - keepN
-	if start < 0 {
-		start = 0
+	// 2. Safety net: keep the last N assistants (and their preceding user turn).
+	if pruning.KeepLastAssistants > 0 {
+		assistantsFound := 0
+		for i := len(messages) - 1; i >= 0; i-- {
+			role := messages[i].Role
+			if role == "assistant" || role == "model" {
+				if assistantsFound < pruning.KeepLastAssistants {
+					keep[i] = true
+					if i > 0 && messages[i-1].Role == "user" {
+						keep[i-1] = true
+					}
+					assistantsFound++
+				}
+			}
+		}
 	}
-	compacted := messages[start:]
+
+	// Construct the compacted list.
+	var compacted []agentctx.StrategicMessage
+	for i, k := range keep {
+		if k {
+			compacted = append(compacted, messages[i])
+		}
+	}
 
 	// Gemini requires conversations to start with a user turn.
 	// Drop all leading assistant or model turns.
@@ -85,7 +106,7 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 
 	// Identify messages to keep.
 	// 1. Messages newer than cutoff.
-	// 2. The last N assistant messages.
+	// 2. The last N assistant messages (and their preceding user message to avoid stripping).
 
 	keep := make([]bool, len(messages))
 	assistantsFound := 0
@@ -97,6 +118,11 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 			if role == "assistant" || role == "model" {
 				if assistantsFound < cfg.KeepLastAssistants {
 					keep[i] = true
+					// Keep the preceding message if it's a user turn, to satisfy the
+					// "must start with user" requirement and avoid stripping.
+					if i > 0 && messages[i-1].Role == "user" {
+						keep[i-1] = true
+					}
 					assistantsFound++
 				}
 			}

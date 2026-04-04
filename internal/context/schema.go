@@ -6,6 +6,7 @@ package context
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ── Content types ─────────────────────────────────────────────────────────────
@@ -148,6 +149,23 @@ func (m MessageContent) MarshalJSON() ([]byte, error) {
 		return json.Marshal(*m.Str)
 	}
 	return json.Marshal(m.Items)
+}
+
+// String returns the text representation of the content.
+func (m *MessageContent) String() string {
+	if m == nil {
+		return ""
+	}
+	if m.Str != nil {
+		return *m.Str
+	}
+	var sb strings.Builder
+	for _, item := range m.Items {
+		if item.Text != nil {
+			sb.WriteString(item.Text.Text)
+		}
+	}
+	return sb.String()
 }
 
 // StrategicMessage is a single entry in the agent conversation history.

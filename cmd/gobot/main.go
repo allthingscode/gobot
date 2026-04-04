@@ -431,6 +431,7 @@ func cmdRun() *cobra.Command {
 					h.SetPrompt(cfg.Agents.Defaults.Compaction.MemoryFlush.Prompt)
 				}
 				handler.consolidator = h
+				mgr.SetConsolidator(h)
 				slog.Info("run: memory consolidation enabled")
 			}
 

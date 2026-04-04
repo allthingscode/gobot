@@ -118,7 +118,7 @@ func TestCompactMessages(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msgs := makeMessages(tt.msgCount, tt.startRole)
-			got, dropped := CompactMessages(msgs, tt.maxN, tt.keepN, config.CompactionPolicyConfig{})
+			got, dropped := CompactMessages(msgs, tt.maxN, tt.keepN, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
 			if tt.wantDropped == -1 {
 				// Sentinel: just verify compaction occurred.
@@ -153,7 +153,7 @@ func TestCompactMessages_FirstRetainedAssistant(t *testing.T) {
 	// With keepN=10, slice starts at index 50 → index 50 is even → "assistant".
 	msgs := makeMessages(60, "assistant")
 
-	got, dropped := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{})
+	got, dropped := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
 	// First retained (index 50) is "assistant" → dropped.
 	// 60 - 10 = 50 dropped for compaction, then 1 more for assistant stripping = 51.
@@ -176,7 +176,7 @@ func TestCompactMessages_StartsWithUser(t *testing.T) {
 	// Index 50 (even, user-start) → role "user". No assistant-drop needed.
 	msgs := makeMessages(60, "user")
 
-	got, _ := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{})
+	got, _ := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
 	if len(got) == 0 {
 		t.Fatal("expected non-empty result")
@@ -248,11 +248,12 @@ func TestPruneMessages(t *testing.T) {
 			},
 			// TTL 6h cutoff: message 0, 1, 2 are OLD.
 			// KeepLastAssistants: 2 -> keeps index 1 and 2.
-			// Keep set: {1, 2, 3}. Pruned before strip: [A(-9h), A(-8h), U(-1h)].
-			// Strip all leading assistants -> [U(-1h)].
+			// My improved logic also keeps index 0 because it's the user message before index 1.
+			// Result before strip: [U(-10h), A(-9h), A(-8h), U(-1h)].
+			// After leading assistant strip: [U(-10h), A(-9h), A(-8h), U(-1h)].
 			cfg:         config.ContextPruningConfig{TTL: "6h", KeepLastAssistants: 2},
-			wantLen:     1,
-			wantDropped: 3,
+			wantLen:     4,
+			wantDropped: 0,
 		},
 		{
 			name: "Legacy messages (no timestamp)",
