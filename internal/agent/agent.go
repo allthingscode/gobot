@@ -198,14 +198,17 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	}
 
 	// Compact context if the history has grown too large (F-015, F-047).
-	if compacted, dropped := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages, m.compactionPolicy, m.pruningPolicy); dropped > 0 {
+	if compacted, dropped, keep := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages, m.compactionPolicy, m.pruningPolicy); dropped > 0 {
 		slog.Info("agent: compacted context", "session", sessionKey, "dropped", dropped, "remaining", len(compacted))
 		if m.consolidator != nil && m.compactionPolicy.Strategy == "memoryFlush" {
 			// Extract facts from dropped history (F-047).
+			// Use the keep[] array to identify which messages were actually dropped.
 			var sb strings.Builder
-			for i := 0; i < dropped; i++ {
-				msg := messages[i]
-				fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
+			for i, k := range keep {
+				if !k && i < len(messages) {
+					msg := messages[i]
+					fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
+				}
 			}
 			m.consolidator.ConsolidateAsync(sessionKey, sb.String())
 		}
@@ -278,8 +281,8 @@ func (m *SessionManager) lockFor(sessionKey string) *sessionLock {
 // Mirrors the [SILENT] handling in _patched_dispatch (loop.py) and
 // resolve_routable_channel (cron_logic.py).
 func StripSilent(message string) (cleaned string, silent bool) {
-	if strings.HasPrefix(message, "[SILENT]") {
-		return strings.TrimSpace(strings.TrimPrefix(message, "[SILENT]")), true
+	if trimmed, ok := strings.CutPrefix(message, "[SILENT]"); ok {
+		return strings.TrimSpace(trimmed), true
 	}
 	return message, false
 }

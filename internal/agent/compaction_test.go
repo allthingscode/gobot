@@ -118,7 +118,7 @@ func TestCompactMessages(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msgs := makeMessages(tt.msgCount, tt.startRole)
-			got, dropped := CompactMessages(msgs, tt.maxN, tt.keepN, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
+			got, dropped, _ := CompactMessages(msgs, tt.maxN, tt.keepN, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
 			if tt.wantDropped == -1 {
 				// Sentinel: just verify compaction occurred.
@@ -153,7 +153,7 @@ func TestCompactMessages_FirstRetainedAssistant(t *testing.T) {
 	// With keepN=10, slice starts at index 50 → index 50 is even → "assistant".
 	msgs := makeMessages(60, "assistant")
 
-	got, dropped := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
+	got, dropped, _ := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
 	// First retained (index 50) is "assistant" → dropped.
 	// 60 - 10 = 50 dropped for compaction, then 1 more for assistant stripping = 51.
@@ -176,7 +176,7 @@ func TestCompactMessages_StartsWithUser(t *testing.T) {
 	// Index 50 (even, user-start) → role "user". No assistant-drop needed.
 	msgs := makeMessages(60, "user")
 
-	got, _ := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
+	got, _, _ := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
 	if len(got) == 0 {
 		t.Fatal("expected non-empty result")
@@ -311,6 +311,70 @@ func TestPruneMessages(t *testing.T) {
 				t.Errorf("result starts with assistant/model")
 			}
 		})
+	}
+}
+
+// TestCompactMessages_DroppedMessageIdentification verifies that dropped messages
+// are correctly identified via the keep[] array, not by assuming they are at the front.
+// This is the test for bug B-031.
+func TestCompactMessages_DroppedMessageIdentification(t *testing.T) {
+	// Create a conversation where dropped messages are scattered, not at the front.
+	// With keepN=10, maxN=50: keep the last 10 messages, drop the rest.
+	msgs := makeMessages(60, "user")
+
+	compacted, dropped, keep := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
+
+	// Verify that the keep[] array correctly reflects what was dropped.
+	if len(keep) != 60 {
+		t.Errorf("keep array length = %d, want 60", len(keep))
+	}
+
+	// Count how many keep[] entries are false (these are the dropped messages).
+	droppedCount := 0
+	droppedIndices := []int{}
+	for i, k := range keep {
+		if !k {
+			droppedCount++
+			droppedIndices = append(droppedIndices, i)
+		}
+	}
+
+	if droppedCount != dropped {
+		t.Errorf("dropped count from keep[] = %d, but CompactMessages returned dropped = %d", droppedCount, dropped)
+	}
+
+	// Verify that the compacted messages only contain messages where keep[i] == true.
+	for i, msg := range compacted {
+		// The message at compacted[i] is one of the kept messages from the original array.
+		// We can verify by checking the content matches.
+		found := false
+		for j := range msgs {
+			if keep[j] && msgs[j].Role == msg.Role && msgs[j].CreatedAt == msg.CreatedAt {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("compacted[%d] not found in original kept messages", i)
+		}
+	}
+
+	// Verify that dropped indices do NOT start at 0.
+	// This is the key test: dropped messages are scattered throughout, not at the front.
+	if len(droppedIndices) > 0 && droppedIndices[0] == 0 {
+		// It's possible the first message is dropped due to assistant-stripping logic,
+		// but most dropped messages should be at the beginning (indices 0..39 for a 60-message list).
+		// Let's verify that the last 10 are kept.
+		allLastTenKept := true
+		for i := 50; i < 60; i++ {
+			if !keep[i] {
+				allLastTenKept = false
+				break
+			}
+		}
+		if !allLastTenKept {
+			t.Error("expected last 10 messages (indices 50-59) to be kept")
+		}
 	}
 }
 

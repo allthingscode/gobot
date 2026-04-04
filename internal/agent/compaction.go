@@ -16,15 +16,16 @@ const DefaultKeepContextMessages = 20
 
 // CompactMessages trims messages to at most keepN entries when len(messages) exceeds maxN.
 // It respects the CompactionPolicyConfig strategy and ContextPruningConfig safety nets.
-func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, policy config.CompactionPolicyConfig, pruning config.ContextPruningConfig) ([]agentctx.StrategicMessage, int) {
+// Returns (compacted messages, count of dropped, keep array from original messages).
+func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, policy config.CompactionPolicyConfig, pruning config.ContextPruningConfig) ([]agentctx.StrategicMessage, int, []bool) {
 	// Defensive: invalid parameters — return unchanged.
 	if maxN <= 0 || keepN <= 0 {
-		return messages, 0
+		return messages, 0, nil
 	}
 
 	// If not over the threshold, nothing to do.
 	if len(messages) <= maxN {
-		return messages, 0
+		return messages, 0, nil
 	}
 
 	// Clamp keepN so compaction always drops at least 1 message when triggered.
@@ -78,7 +79,7 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 	}
 
 	dropped := len(messages) - len(compacted)
-	return compacted, dropped
+	return compacted, dropped, keep
 }
 
 // PruneMessages removes messages based on TTL and KeepLastAssistants settings.
