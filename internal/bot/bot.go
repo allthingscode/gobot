@@ -1,7 +1,7 @@
 // Package bot provides a Telegram polling bot runtime with resilience features.
 // It is the Go equivalent of TelegramPatch in strategery/patches/telegram.py.
 // This package contains pure logic and interfaces only — no Telegram SDK dependency.
-// The concrete go-telegram-bot-api adapter lives in cmd/gobot/.
+// The concrete telego adapter lives in cmd/gobot/.
 package bot
 
 import (
@@ -47,7 +47,7 @@ type OutboundMessage struct {
 }
 
 // API abstracts the Telegram bot client for testability.
-// Production implementation (using go-telegram-bot-api) lives in cmd/gobot/.
+// Production implementation (using telego) lives in cmd/gobot/.
 // Implementations must be safe for concurrent use.
 type API interface {
 	// Updates returns a channel of inbound messages. The channel is closed
