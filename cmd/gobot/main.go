@@ -281,6 +281,7 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
 	}
 	tools = append(tools, []Tool{
 		newListCalendarTool(secretsRoot),
+		newCreateCalendarEventTool(secretsRoot),
 		newListTasksTool(secretsRoot),
 		newCreateTaskTool(secretsRoot),
 		newCompleteTaskTool(secretsRoot),

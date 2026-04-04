@@ -330,6 +330,117 @@ func TestListUpcomingEventsWithClient_PartialFailure(t *testing.T) {
 	}
 }
 
+func TestCreateEventWithClient_Success(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]string{"id": "evt-abc-123"})
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
+	client := redirectClient(calendarBaseURL, srv.URL)
+
+	id, err := createEventWithClient(dir, "primary", "Team Standup", "Daily sync", "2026-04-05T09:00:00Z", "2026-04-05T09:30:00Z", "Room 1", client)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "evt-abc-123" {
+		t.Errorf("want id evt-abc-123, got %q", id)
+	}
+	if gotBody["summary"] != "Team Standup" {
+		t.Errorf("want summary 'Team Standup' in body, got %v", gotBody["summary"])
+	}
+	if gotBody["description"] != "Daily sync" {
+		t.Errorf("want description 'Daily sync' in body, got %v", gotBody["description"])
+	}
+	if gotBody["location"] != "Room 1" {
+		t.Errorf("want location 'Room 1' in body, got %v", gotBody["location"])
+	}
+}
+
+func TestCreateEventWithClient_MinimalFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if _, ok := body["description"]; ok {
+			t.Error("description should be absent when empty")
+		}
+		if _, ok := body["location"]; ok {
+			t.Error("location should be absent when empty")
+		}
+		json.NewEncoder(w).Encode(map[string]string{"id": "evt-min"})
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
+	client := redirectClient(calendarBaseURL, srv.URL)
+
+	id, err := createEventWithClient(dir, "", "Meeting", "", "2026-04-05T10:00:00Z", "2026-04-05T11:00:00Z", "", client)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "evt-min" {
+		t.Errorf("want id evt-min, got %q", id)
+	}
+}
+
+func TestCreateEventWithClient_InvalidStartTime(t *testing.T) {
+	dir := t.TempDir()
+	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
+
+	_, err := createEventWithClient(dir, "primary", "Bad", "", "not-a-date", "2026-04-05T11:00:00Z", "", http.DefaultClient)
+	if err == nil {
+		t.Fatal("expected error for invalid start_time")
+	}
+	if !strings.Contains(err.Error(), "start time") {
+		t.Errorf("error should mention 'start time', got: %v", err)
+	}
+}
+
+func TestCreateEventWithClient_InvalidEndTime(t *testing.T) {
+	dir := t.TempDir()
+	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
+
+	_, err := createEventWithClient(dir, "primary", "Bad", "", "2026-04-05T10:00:00Z", "not-a-date", "", http.DefaultClient)
+	if err == nil {
+		t.Fatal("expected error for invalid end_time")
+	}
+	if !strings.Contains(err.Error(), "end time") {
+		t.Errorf("error should mention 'end time', got: %v", err)
+	}
+}
+
+func TestCreateEventWithClient_AuthError(t *testing.T) {
+	_, err := createEventWithClient(t.TempDir(), "primary", "Test", "", "2026-04-05T10:00:00Z", "2026-04-05T11:00:00Z", "", http.DefaultClient)
+	if err == nil {
+		t.Fatal("expected error for missing token")
+	}
+}
+
+func TestCreateEventWithClient_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"forbidden"}}`, http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
+	client := redirectClient(calendarBaseURL, srv.URL)
+
+	_, err := createEventWithClient(dir, "primary", "Test", "", "2026-04-05T10:00:00Z", "2026-04-05T11:00:00Z", "", client)
+	if err == nil {
+		t.Fatal("expected error for 403 API response")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should mention 403, got: %v", err)
+	}
+}
+
 func TestFormatEventsMarkdown_ShowsCalendarName(t *testing.T) {
 	events := []CalendarEvent{
 		{Summary: "Sprint Review", Start: "2026-03-28T14:00:00-05:00", CalendarName: "Work"},

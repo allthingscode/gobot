@@ -132,6 +132,55 @@ func listUpcomingEventsWithClient(secretsRoot string, maxResults int, client *ht
 	return all, nil
 }
 
+// CreateEvent creates a new event in the specified Google Calendar and returns
+// the created event's ID. calendarID defaults to "primary" when empty.
+// start and end must be valid RFC3339 (ISO 8601) strings.
+func CreateEvent(secretsRoot, calendarID, summary, description, start, end, location string) (string, error) {
+	return createEventWithClient(secretsRoot, calendarID, summary, description, start, end, location, http.DefaultClient)
+}
+
+func createEventWithClient(secretsRoot, calendarID, summary, description, start, end, location string, client *http.Client) (string, error) {
+	if _, err := time.Parse(time.RFC3339, start); err != nil {
+		return "", fmt.Errorf("invalid start time (want RFC3339): %w", err)
+	}
+	if _, err := time.Parse(time.RFC3339, end); err != nil {
+		return "", fmt.Errorf("invalid end time (want RFC3339): %w", err)
+	}
+
+	token, err := bearerTokenWithClient(secretsRoot, client)
+	if err != nil {
+		return "", fmt.Errorf("calendar auth: %w", err)
+	}
+
+	if calendarID == "" {
+		calendarID = "primary"
+	}
+
+	type eventTime struct {
+		DateTime string `json:"dateTime"`
+	}
+	body := map[string]any{
+		"summary": summary,
+		"start":   eventTime{DateTime: start},
+		"end":     eventTime{DateTime: end},
+	}
+	if description != "" {
+		body["description"] = description
+	}
+	if location != "" {
+		body["location"] = location
+	}
+
+	apiURL := fmt.Sprintf("%s/calendars/%s/events", calendarBaseURL, url.PathEscape(calendarID))
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := apiPost(token, apiURL, body, client, &created); err != nil {
+		return "", fmt.Errorf("calendar create event: %w", err)
+	}
+	return created.ID, nil
+}
+
 // FormatEventsMarkdown returns a Markdown bullet list of events for use in
 // the system prompt. Returns empty string when events is empty.
 func FormatEventsMarkdown(events []CalendarEvent) string {

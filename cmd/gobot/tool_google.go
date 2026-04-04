@@ -292,6 +292,83 @@ func (t *UpdateTaskTool) Execute(_ context.Context, _ string, args map[string]an
 	return fmt.Sprintf("Task %s updated.", taskID), nil
 }
 
+// ── CreateCalendarEventTool ────────────────────────────────────────────────────
+
+const createCalendarEventToolName = "create_calendar_event"
+
+// CreateCalendarEventTool creates a new event in a Google Calendar.
+type CreateCalendarEventTool struct {
+	secretsRoot string
+}
+
+func newCreateCalendarEventTool(secretsRoot string) *CreateCalendarEventTool {
+	return &CreateCalendarEventTool{secretsRoot: secretsRoot}
+}
+
+func (t *CreateCalendarEventTool) Name() string { return createCalendarEventToolName }
+
+func (t *CreateCalendarEventTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
+		Name:        createCalendarEventToolName,
+		Description: "Create a new event in a Google Calendar.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"calendar_id": map[string]any{
+					"type":        "string",
+					"description": "The calendar ID to create the event in. Defaults to \"primary\".",
+				},
+				"summary": map[string]any{
+					"type":        "string",
+					"description": "The title/summary of the event. Required.",
+				},
+				"description": map[string]any{
+					"type":        "string",
+					"description": "Optional description or notes for the event.",
+				},
+				"start_time": map[string]any{
+					"type":        "string",
+					"description": "Start time in ISO 8601 / RFC3339 format (e.g. 2026-04-05T10:00:00-05:00). Required.",
+				},
+				"end_time": map[string]any{
+					"type":        "string",
+					"description": "End time in ISO 8601 / RFC3339 format (e.g. 2026-04-05T11:00:00-05:00). Required.",
+				},
+				"location": map[string]any{
+					"type":        "string",
+					"description": "Optional location for the event.",
+				},
+			},
+			"required": []string{"summary", "start_time", "end_time"},
+		},
+	}
+}
+
+func (t *CreateCalendarEventTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+	summary, _ := args["summary"].(string)
+	if strings.TrimSpace(summary) == "" {
+		return "", fmt.Errorf("create_calendar_event: summary is required")
+	}
+	startTime, _ := args["start_time"].(string)
+	if strings.TrimSpace(startTime) == "" {
+		return "", fmt.Errorf("create_calendar_event: start_time is required")
+	}
+	endTime, _ := args["end_time"].(string)
+	if strings.TrimSpace(endTime) == "" {
+		return "", fmt.Errorf("create_calendar_event: end_time is required")
+	}
+
+	calendarID, _ := args["calendar_id"].(string)
+	description, _ := args["description"].(string)
+	location, _ := args["location"].(string)
+
+	id, err := google.CreateEvent(t.secretsRoot, calendarID, summary, description, startTime, endTime, location)
+	if err != nil {
+		return "", fmt.Errorf("create_calendar_event: %w", err)
+	}
+	return fmt.Sprintf("Event created: %s (id: %s)", summary, id), nil
+}
+
 // ── WebSearchTool ─────────────────────────────────────────────────────────────
 
 const webSearchToolName = "google_search"
