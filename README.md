@@ -62,6 +62,12 @@ go test ./internal/...
 
 ### Installation
 
+**Option 1: Download Pre-compiled Binary (Recommended)**
+
+You can download the latest pre-compiled binary for your operating system from the [GitHub Releases page](https://github.com/allthingscode/gobot/releases).
+
+**Option 2: Build from Source**
+
 Clone the repository and build the binary using the provided scripts:
 
 ```powershell
