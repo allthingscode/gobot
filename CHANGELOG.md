@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Enhanced error reporting with structured logging
 
 ### Fixed
+- **Bot Package Stale Comment** (B-010): Updated `internal/bot/bot.go` package comment to reference `telego` instead of deprecated `go-telegram-bot-api`.
 - Pending issues to be documented as they are resolved
 
 ---
