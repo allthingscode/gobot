@@ -133,12 +133,14 @@ func (m *mockAPIWithCircuit) recordCall() {
 	}
 	m.lastCall = now
 }
-func (m *mockAPIWithCircuit) Send(ctx context.Context, msg OutboundMessage) error           { return nil }
+func (m *mockAPIWithCircuit) Send(ctx context.Context, msg OutboundMessage) error { return nil }
 func (m *mockAPIWithCircuit) SendWithButtons(ctx context.Context, msg OutboundMessage, _ [][]Button) error {
 	return nil
 }
-func (m *mockAPIWithCircuit) Typing(ctx context.Context, chatID, threadID int64) func() { return func() {} }
-func (m *mockAPIWithCircuit) Stop()                                                   {}
+func (m *mockAPIWithCircuit) Typing(ctx context.Context, chatID, threadID int64) func() {
+	return func() {}
+}
+func (m *mockAPIWithCircuit) Stop() {}
 
 // ── Mock Handler ──────────────────────────────────────────────────────────────
 

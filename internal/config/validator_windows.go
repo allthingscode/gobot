@@ -17,10 +17,10 @@ func (v *Validator) checkDiskSpace(root string, result *ValidationResult) error 
 	if err != nil {
 		return err
 	}
-	
+
 	available := freeBytes
 	const minFree = 1 << 30 // 1GB in bytes
-	
+
 	if available < minFree {
 		result.Errors = append(result.Errors, ValidationError{
 			Field:    "disk_space",

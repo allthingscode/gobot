@@ -81,7 +81,7 @@ func NewValidator(cfg *Config) *Validator {
 // Validate performs all validation checks and returns the result.
 func (v *Validator) Validate() *ValidationResult {
 	result := &ValidationResult{}
-	
+
 	v.validateStorageRoot(result)
 	v.validateWorkspace(result)
 	v.validateAPIKeys(result)
@@ -89,7 +89,7 @@ func (v *Validator) Validate() *ValidationResult {
 	v.validatePaths(result)
 	v.validateDiskSpace(result)
 	v.validateAgentDefaults(result)
-	
+
 	return result
 }
 
@@ -119,7 +119,7 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 		})
 		return
 	}
-	
+
 	info, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -139,7 +139,7 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 		}
 		return
 	}
-	
+
 	if !info.IsDir() {
 		result.Errors = append(result.Errors, ValidationError{
 			Field:    "strategic_edition.storage_root",
@@ -149,7 +149,7 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 		})
 		return
 	}
-	
+
 	// Check writability by attempting to create a temporary file
 	tmpFile, err := os.CreateTemp(root, ".gobot-write-test-*")
 	if err != nil {
@@ -170,7 +170,7 @@ func (v *Validator) validateWorkspace(result *ValidationResult) {
 	if root == "" {
 		return // Already reported in storage_root validation
 	}
-	
+
 	workspace := filepath.Join(root, "workspace")
 	if _, err := os.Stat(workspace); err != nil {
 		if os.IsNotExist(err) {
@@ -189,7 +189,7 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 	hasGemini := v.cfg.GeminiAPIKey() != ""
 	hasAnthropic := v.cfg.AnthropicAPIKey() != ""
 	hasOpenAI := v.cfg.OpenAIAPIKey() != ""
-	
+
 	if !hasGemini && !hasAnthropic && !hasOpenAI {
 		result.Errors = append(result.Errors, ValidationError{
 			Field:    "providers.api_key",
@@ -199,7 +199,7 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 		})
 		return
 	}
-	
+
 	// Validate key format (basic length check)
 	if hasGemini {
 		key := v.cfg.GeminiAPIKey()
@@ -212,7 +212,7 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 			})
 		}
 	}
-	
+
 	if hasAnthropic {
 		key := v.cfg.AnthropicAPIKey()
 		if !strings.HasPrefix(key, "sk-") {
@@ -224,7 +224,7 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 			})
 		}
 	}
-	
+
 	if hasOpenAI {
 		key := v.cfg.OpenAIAPIKey()
 		if !strings.HasPrefix(key, "sk-") {
@@ -242,7 +242,7 @@ func (v *Validator) validateTelegram(result *ValidationResult) {
 	if !v.cfg.Channels.Telegram.Enabled {
 		return // Telegram disabled, skip validation
 	}
-	
+
 	token := v.cfg.TelegramToken()
 	if token == "" {
 		result.Errors = append(result.Errors, ValidationError{
@@ -253,7 +253,7 @@ func (v *Validator) validateTelegram(result *ValidationResult) {
 		})
 		return
 	}
-	
+
 	// Basic bot token format validation: should contain a colon
 	if !strings.Contains(token, ":") {
 		result.Errors = append(result.Errors, ValidationError{
@@ -263,7 +263,7 @@ func (v *Validator) validateTelegram(result *ValidationResult) {
 			Severity: SeverityCritical,
 		})
 	}
-	
+
 	// Validate allowFrom entries
 	if len(v.cfg.Channels.Telegram.AllowFrom) == 0 {
 		result.Errors = append(result.Errors, ValidationError{
@@ -280,7 +280,7 @@ func (v *Validator) validatePaths(result *ValidationResult) {
 	if root == "" {
 		return
 	}
-	
+
 	// Check for AWARENESS.md in workspace
 	awarenessPath := filepath.Join(root, "workspace", "AWARENESS.md")
 	if _, err := os.Stat(awarenessPath); err != nil {
@@ -293,7 +293,7 @@ func (v *Validator) validatePaths(result *ValidationResult) {
 			})
 		}
 	}
-	
+
 	// Check secrets directory permissions (platform-specific)
 	secretsDir := filepath.Join(root, "secrets")
 	if err := v.checkPathPermissions(secretsDir, result); err != nil {
@@ -306,7 +306,7 @@ func (v *Validator) validateDiskSpace(result *ValidationResult) {
 	if root == "" {
 		return
 	}
-	
+
 	// Get available disk space (platform-specific)
 	if err := v.checkDiskSpace(root, result); err != nil {
 		slog.Debug("disk space check failed", "path", root, "err", err)
@@ -318,11 +318,11 @@ func (v *Validator) validateDiskSpace(result *ValidationResult) {
 func ReportValidation(cfg *Config) error {
 	validator := NewValidator(cfg)
 	result := validator.Validate()
-	
+
 	if !result.HasErrors() {
 		return nil
 	}
-	
+
 	for _, e := range result.Errors {
 		if e.Severity == SeverityCritical {
 			slog.Error("configuration error", "field", e.Field, "msg", e.Message, "remedy", e.Remedy)
@@ -330,10 +330,10 @@ func ReportValidation(cfg *Config) error {
 			slog.Warn("configuration warning", "field", e.Field, "msg", e.Message, "remedy", e.Remedy)
 		}
 	}
-	
+
 	if result.HasCritical() {
 		return errors.New("configuration validation failed with critical errors")
 	}
-	
+
 	return nil
 }

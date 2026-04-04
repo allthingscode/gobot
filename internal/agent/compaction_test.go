@@ -241,7 +241,7 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "TTL + KeepLastAssistants",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},      // index 0
+				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},     // index 0
 				{Role: "assistant", CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)}, // index 1
 				{Role: "assistant", CreatedAt: now.Add(-8 * time.Hour).Format(time.RFC3339)}, // index 2
 				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},      // index 3

@@ -7,8 +7,8 @@ import (
 
 // BreakerStats holds counters for circuit breaker events.
 type BreakerStats struct {
-	Successes uint64
-	Failures  uint64
+	Successes  uint64
+	Failures   uint64
 	Rejections uint64 // rejected due to open circuit
 }
 

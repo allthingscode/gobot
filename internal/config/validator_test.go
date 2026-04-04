@@ -13,7 +13,7 @@ func baseValidConfig(t *testing.T) *Config {
 	wsDir := filepath.Join(tmpDir, "workspace")
 	os.MkdirAll(wsDir, 0755)
 	os.WriteFile(filepath.Join(wsDir, "AWARENESS.md"), []byte("test"), 0644)
-	
+
 	return &Config{
 		Strategic: StrategicConfig{
 			StorageRoot: tmpDir,
@@ -27,40 +27,40 @@ func baseValidConfig(t *testing.T) *Config {
 func TestValidator_Validate_StorageRoot(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
+		name        string
 		storageRoot string
-		wantError bool
-		errorField string
+		wantError   bool
+		errorField  string
 	}{
 		{
-			name:      "valid storage root",
+			name:        "valid storage root",
 			storageRoot: t.TempDir(),
-			wantError: false,
+			wantError:   false,
 		},
 		{
-			name:      "empty storage root",
+			name:        "empty storage root",
 			storageRoot: "",
-			wantError: true,
-			errorField: "strategic_edition.storage_root",
+			wantError:   true,
+			errorField:  "strategic_edition.storage_root",
 		},
 		{
-			name:      "non-existent storage root",
+			name:        "non-existent storage root",
 			storageRoot: "/nonexistent/path/that/does/not/exist",
-			wantError: true,
-			errorField: "strategic_edition.storage_root",
+			wantError:   true,
+			errorField:  "strategic_edition.storage_root",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := baseValidConfig(t)
 			cfg.Strategic.StorageRoot = tt.storageRoot
-			
+
 			validator := NewValidator(cfg)
 			result := validator.Validate()
-			
+
 			hasError := false
 			for _, e := range result.Errors {
 				if e.Field == tt.errorField {
@@ -68,7 +68,7 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if tt.wantError && !hasError {
 				// Special case: if StorageRoot() fallback kicked in, root is not empty.
 				if tt.storageRoot == "" && cfg.StorageRoot() != "" {
@@ -84,16 +84,16 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 func TestValidator_Validate_APIKeys(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		geminiKey  string
+		name         string
+		geminiKey    string
 		anthropicKey string
-		openAIKey  string
-		wantError  bool
-		errorField string
+		openAIKey    string
+		wantError    bool
+		errorField   string
 	}{
 		{
-			name:      "no API keys configured",
-			wantError: true,
+			name:       "no API keys configured",
+			wantError:  true,
 			errorField: "providers.api_key",
 		},
 		{
@@ -124,13 +124,13 @@ func TestValidator_Validate_APIKeys(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name:      "invalid OpenAI key format",
-			openAIKey: "not-starting-with-sk-",
-			wantError: true,
+			name:       "invalid OpenAI key format",
+			openAIKey:  "not-starting-with-sk-",
+			wantError:  true,
 			errorField: "providers.openai.apiKey",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
@@ -141,10 +141,10 @@ func TestValidator_Validate_APIKeys(t *testing.T) {
 				Anthropic: AnthropicConfig{APIKey: tt.anthropicKey},
 				OpenAI:    OpenAIConfig{APIKey: tt.openAIKey},
 			}
-			
+
 			validator := NewValidator(cfg)
 			result := validator.Validate()
-			
+
 			hasError := false
 			for _, e := range result.Errors {
 				if e.Field == tt.errorField {
@@ -152,7 +152,7 @@ func TestValidator_Validate_APIKeys(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if tt.wantError && !hasError {
 				t.Errorf("expected error for field %s, got none. Errors: %v", tt.errorField, result.Errors)
 			}
@@ -207,7 +207,7 @@ func TestValidator_Validate_Telegram(t *testing.T) {
 			wantError: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
@@ -220,10 +220,10 @@ func TestValidator_Validate_Telegram(t *testing.T) {
 					AllowFrom: tt.allowFrom,
 				},
 			}
-			
+
 			validator := NewValidator(cfg)
 			result := validator.Validate()
-			
+
 			hasError := false
 			for _, e := range result.Errors {
 				if e.Field == tt.errorField {
@@ -231,7 +231,7 @@ func TestValidator_Validate_Telegram(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if tt.wantError && !hasError {
 				t.Errorf("expected error for field %s, got none. Errors: %v", tt.errorField, result.Errors)
 			}
@@ -251,12 +251,12 @@ func TestValidationResult_CriticalErrors(t *testing.T) {
 			{Field: "disk_space", Message: "low", Severity: SeverityWarning},
 		},
 	}
-	
+
 	critical := result.CriticalErrors()
 	if len(critical) != 2 {
 		t.Errorf("expected 2 critical errors, got %d. Errors: %v", len(critical), critical)
 	}
-	
+
 	for _, e := range critical {
 		if e.Severity != SeverityCritical {
 			t.Errorf("expected SeverityCritical, got %s", e.Severity)
@@ -270,7 +270,7 @@ func TestValidationResult_HasErrors(t *testing.T) {
 	if empty.HasErrors() {
 		t.Error("expected no errors for empty result")
 	}
-	
+
 	withErrors := &ValidationResult{
 		Errors: []ValidationError{{Field: "test", Message: "error", Severity: SeverityWarning}},
 	}
@@ -287,12 +287,12 @@ func TestValidationError_Error(t *testing.T) {
 		Remedy:   "fix it",
 		Severity: SeverityCritical,
 	}
-	
+
 	want := "test.field: something wrong (fix: fix it)"
 	if got := e.Error(); got != want {
 		t.Errorf("Error() = %q, want %q", got, want)
 	}
-	
+
 	// Without remedy
 	e2 := ValidationError{
 		Field:    "test.field",
@@ -309,21 +309,21 @@ func TestReportValidation(t *testing.T) {
 	t.Parallel()
 	// Valid config should return nil
 	validCfg := baseValidConfig(t)
-	
+
 	if err := ReportValidation(validCfg); err != nil {
 		t.Errorf("expected nil for valid config, got: %v", err)
 	}
-	
+
 	// Invalid config with critical error should return error
 	invalidCfg := baseValidConfig(t)
 	invalidCfg.Strategic.StorageRoot = ""
-	
+
 	// Special case for Windows fallback again
 	if invalidCfg.StorageRoot() != "" {
 		t.Log("Skipping empty storage root test in ReportValidation due to fallback")
 		return
 	}
-	
+
 	if err := ReportValidation(invalidCfg); err == nil {
 		t.Error("expected error for invalid config, got nil")
 	}

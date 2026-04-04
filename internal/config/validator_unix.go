@@ -13,11 +13,11 @@ func (v *Validator) checkDiskSpace(root string, result *ValidationResult) error 
 	if err := syscall.Statfs(root, &stat); err != nil {
 		return err
 	}
-	
+
 	// Calculate available space in bytes
 	available := stat.Bavail * uint64(stat.Bsize)
 	const minFree = 1 << 30 // 1GB in bytes
-	
+
 	if available < minFree {
 		result.Errors = append(result.Errors, ValidationError{
 			Field:    "disk_space",

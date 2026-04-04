@@ -28,12 +28,12 @@ func TestSessionLock_Metrics(t *testing.T) {
 	// Test contention
 	var wg sync.WaitGroup
 	wg.Add(1)
-	
+
 	started := make(chan struct{})
 	unlocked := make(chan struct{})
-	
+
 	l.Lock()
-	
+
 	go func() {
 		close(started)
 		l.Lock() // Should wait
@@ -45,7 +45,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 
 	// Wait for goroutine to start
 	<-started
-	
+
 	// Deterministically wait for contention count to increase
 	for {
 		l.metricsMu.RLock()
@@ -82,9 +82,9 @@ func TestSessionLock_DeadlockPanic(t *testing.T) {
 	l := newSessionLock("deadlock-test")
 	// Make the timeout extremely short for the test
 	l.deadlockDur = 10 * time.Millisecond
-	
+
 	l.Lock() // First acquisition succeeds
-	
+
 	panicked := false
 	func() {
 		defer func() {
@@ -94,7 +94,7 @@ func TestSessionLock_DeadlockPanic(t *testing.T) {
 		}()
 		l.Lock() // Second acquisition should timeout and panic
 	}()
-	
+
 	if !panicked {
 		t.Error("expected deadlock panic, but didn't happen")
 	}

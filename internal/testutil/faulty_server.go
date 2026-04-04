@@ -57,7 +57,7 @@ func NewFaultyServer() *FaultyServer {
 func (fs *FaultyServer) handle(w http.ResponseWriter, r *http.Request) {
 	fs.mu.Lock()
 	fs.RequestCount++
-	
+
 	var action ResponseAction
 	if len(fs.Sequence) > 0 {
 		if fs.current < len(fs.Sequence) {

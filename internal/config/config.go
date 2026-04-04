@@ -18,12 +18,12 @@ var bomPrefix = []byte{0xEF, 0xBB, 0xBF}
 
 // Config mirrors the relevant fields of ~/.gobot/config.json.
 type Config struct {
-	Agents    AgentsConfig    `json:"agents"`
-	Channels  ChannelsConfig  `json:"channels"`
-	Providers ProvidersConfig `json:"providers"`
-	Tools     ToolsConfig     `json:"tools"`
-	Strategic StrategicConfig   `json:"strategic_edition"`
-	Gateway   GatewayConfig     `json:"gateway"`
+	Agents     AgentsConfig     `json:"agents"`
+	Channels   ChannelsConfig   `json:"channels"`
+	Providers  ProvidersConfig  `json:"providers"`
+	Tools      ToolsConfig      `json:"tools"`
+	Strategic  StrategicConfig  `json:"strategic_edition"`
+	Gateway    GatewayConfig    `json:"gateway"`
 	Resilience ResilienceConfig `json:"resilience"`
 }
 

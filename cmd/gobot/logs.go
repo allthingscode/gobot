@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/spf13/cobra"
 )
 
 func cmdLogs() *cobra.Command {

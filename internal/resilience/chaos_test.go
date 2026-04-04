@@ -38,10 +38,10 @@ func TestChaos_RandomFailures(t *testing.T) {
 	// Run for 10 seconds
 	duration := 10 * time.Second
 	start := time.Now()
-	
+
 	var wg sync.WaitGroup
 	concurrency := 5
-	
+
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func(id int) {
@@ -61,10 +61,10 @@ func TestChaos_RandomFailures(t *testing.T) {
 					})
 				})
 
-				// We don't care if it fails (it will, due to chaos), 
+				// We don't care if it fails (it will, due to chaos),
 				// we just want to ensure it doesn't panic or leak goroutines.
 				_ = err
-				
+
 				// Small sleep to prevent tight loop
 				time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
 			}
@@ -72,6 +72,6 @@ func TestChaos_RandomFailures(t *testing.T) {
 	}
 
 	wg.Wait()
-	
+
 	t.Logf("Chaos test completed: %d total requests", fs.RequestCount)
 }

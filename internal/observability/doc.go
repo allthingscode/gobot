@@ -40,5 +40,4 @@
 //   - agent.dispatch: Agent session dispatch
 //   - gemini.generate: Gemini API generation call
 //   - tool.execute: Tool execution
-//
 package observability

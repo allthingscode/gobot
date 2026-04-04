@@ -103,6 +103,6 @@ func (l *sessionLock) Unlock() {
 		l.metrics.HolderStack = ""
 	}
 	l.metricsMu.Unlock()
-	
+
 	l.ch <- struct{}{}
 }

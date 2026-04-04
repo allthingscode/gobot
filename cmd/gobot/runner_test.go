@@ -156,8 +156,8 @@ type mockProvider struct {
 	idx       int
 }
 
-func (m *mockProvider) Name() string                    { return "mock" }
-func (m *mockProvider) Models() []provider.ModelInfo    { return nil }
+func (m *mockProvider) Name() string                 { return "mock" }
+func (m *mockProvider) Models() []provider.ModelInfo { return nil }
 func (m *mockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.ChatResponse, error) {
 	if m.idx >= len(m.responses) {
 		return nil, fmt.Errorf("mockProvider: no more responses (call %d)", m.idx)
@@ -216,4 +216,3 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 		t.Errorf("Run() = %q, want %q (reflection should have triggered backtrack)", got, "corrected attempt")
 	}
 }
-

@@ -24,7 +24,7 @@ func TestCmdLogs(t *testing.T) {
 	// Setup config
 	cfgDir := filepath.Join(homeDir, ".gobot")
 	os.MkdirAll(cfgDir, 0755)
-	
+
 	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
 	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
 	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)

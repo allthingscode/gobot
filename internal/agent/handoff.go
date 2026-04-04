@@ -12,15 +12,15 @@ import (
 
 // HandoffTicket mirrors the schema in .private/HANDOFF_PROTOCOL.md.
 type HandoffTicket struct {
-	TaskID             string `json:"task_id"`
-	SourceSpecialist   string `json:"source_specialist"`
-	TargetSpecialist   string `json:"target_specialist"`
-	StateFilePath      string `json:"state_file_path"`
-	Priority           string `json:"priority"`
-	LastOutputSummary  string `json:"last_output_summary"`
-	AgentPrompt        string `json:"agent_prompt"`
-	ResumeCommand      string `json:"resume_command"`
-	Timestamp          string `json:"timestamp"`
+	TaskID            string `json:"task_id"`
+	SourceSpecialist  string `json:"source_specialist"`
+	TargetSpecialist  string `json:"target_specialist"`
+	StateFilePath     string `json:"state_file_path"`
+	Priority          string `json:"priority"`
+	LastOutputSummary string `json:"last_output_summary"`
+	AgentPrompt       string `json:"agent_prompt"`
+	ResumeCommand     string `json:"resume_command"`
+	Timestamp         string `json:"timestamp"`
 }
 
 // NewHandoffHook returns a PostDispatchFn that detects handoff.json in the
@@ -31,7 +31,7 @@ type HandoffTicket struct {
 func NewHandoffHook(storageRoot string) PostDispatchFn {
 	return func(ctx context.Context, sessionKey string, response string) string {
 		handoffPath := filepath.Join(storageRoot, ".private", "session", "handoff.json")
-		
+
 		data, err := os.ReadFile(handoffPath)
 		if err != nil {
 			if !os.IsNotExist(err) {
@@ -52,8 +52,8 @@ func NewHandoffHook(storageRoot string) PostDispatchFn {
 			slog.Warn("handoff: failed to delete handoff.json", "err", err)
 		}
 
-		slog.Info("handoff: detected handoff.json, appending resume command", 
-			"session", sessionKey, 
+		slog.Info("handoff: detected handoff.json, appending resume command",
+			"session", sessionKey,
 			"target", ticket.TargetSpecialist)
 
 		// Format the handoff message

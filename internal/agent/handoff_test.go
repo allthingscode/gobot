@@ -26,7 +26,7 @@ func TestHandoffHook(t *testing.T) {
 	ticket := HandoffTicket{
 		TargetSpecialist: "reviewer",
 		ResumeCommand:    "gemini \"resume review\"",
-		AgentPrompt:     "Please review F-123.",
+		AgentPrompt:      "Please review F-123.",
 	}
 	data, _ := json.Marshal(ticket)
 	if err := os.WriteFile(handoffPath, data, 0644); err != nil {

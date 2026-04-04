@@ -123,7 +123,7 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 		t.Fatalf("expected success, got %v", err)
 	}
 
-	// Expected delay: 
+	// Expected delay:
 	// 1st retry: ~100ms
 	// 2nd retry: ~200ms
 	// Total wait time: ~300ms
