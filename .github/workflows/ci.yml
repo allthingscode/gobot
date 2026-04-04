@@ -35,7 +35,29 @@ jobs:
                     cache: true
 
             -   name: Vet
-      run: go vet -mod=readonly ./...
+                run: go vet -mod=readonly ./...
 
-    - name: Test
-      run: go test -mod=readonly ./...
+            -   name: Test
+                run: go test -mod=readonly ./...
+
+    doc-lint:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.mod
+                    cache: true
+            -   name: Documentation Lint
+                run: go run scripts/doc_lint.go
+
+    parity-check:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.mod
+                    cache: true
+            -   name: Upstream Reference Parity
+                run: go run scripts/parity_check.go
