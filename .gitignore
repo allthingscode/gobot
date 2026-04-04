@@ -36,6 +36,7 @@ GEMINI.md
 
 # Claude local settings
 .claude/
+.claudeignore.txt
 
 # Temporary/Generated Files
 coverage/
