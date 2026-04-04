@@ -461,6 +461,11 @@ func cmdRun() *cobra.Command {
 				h := consolidator.New(runner, memStore)
 				if cfg.Agents.Defaults.Compaction.Strategy == "memoryFlush" {
 					h.SetPrompt(cfg.Agents.Defaults.Compaction.MemoryFlush.Prompt)
+					h.SetTTL(cfg.Agents.Defaults.Compaction.MemoryFlush.TTL)
+				}
+				// Wire observability provider for metrics (F-068)
+				if otelProvider != nil {
+					h.SetObservability(otelProvider)
 				}
 				handler.consolidator = h
 				mgr.SetConsolidator(h)

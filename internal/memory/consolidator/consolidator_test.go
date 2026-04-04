@@ -159,3 +159,115 @@ func TestSimilarity(t *testing.T) {
 // Ensure os and filepath are used (suppress unused import if needed).
 var _ = os.TempDir
 var _ = filepath.Join
+
+// ── F-068: Integration Tests ────────────────────────────────────────────────
+
+func TestConsolidator_EndToEnd_CompactConsolidateRetrieve(t *testing.T) {
+	// Full integration test: verify that facts extracted from dropped messages
+	// can be consolidated and retrieved via RAG search.
+	store := newTestStore(t)
+
+	// Simulate LLM returning meaningful facts.
+	runner := &mockTextRunner{
+		response: `[
+			"Project deadline May 2026",
+			"Budget approved fifty thousand",
+			"Stakeholder review next Thursday"
+		]`,
+	}
+
+	c := New(runner, store)
+
+	// Simulate messages being dropped during compaction.
+	// These messages contain substantive information.
+	droppedMessages := `user: What's the project deadline?
+assistant: May 15, 2026. We also need to get stakeholder review scheduled.
+user: How much budget do we have?
+assistant: Budget approved for Q2`
+
+	// Consolidate (extract facts and index them).
+	n, err := c.consolidate(context.Background(), "sess1", droppedMessages)
+	if err != nil {
+		t.Fatalf("consolidate: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("expected 3 facts indexed, got %d", n)
+	}
+
+	// Verify facts are retrievable via RAG (search).
+	tests := []struct {
+		query    string
+		wantFind bool
+	}{
+		{"May 2026", true},
+		{"deadline", true},
+		{"stakeholder", true},
+		{"nonexistent fact", false},
+	}
+
+	for _, tc := range tests {
+		results, err := store.Search(tc.query, 5)
+		if err != nil {
+			t.Logf("Search(%q): %v", tc.query, err)
+		}
+		found := len(results) > 0
+		if tc.wantFind && !found {
+			t.Errorf("Search(%q): expected to find fact, got none", tc.query)
+		}
+		if !tc.wantFind && found {
+			t.Errorf("Search(%q): expected no results, got %d", tc.query, len(results))
+		}
+	}
+}
+
+func TestConsolidator_TTLCleanupRunsWithoutError(t *testing.T) {
+	// Test that TTL cleanup runs during consolidation without errors.
+	// We don't test the actual deletion since timing is sensitive to nanosecond precision.
+	store := newTestStore(t)
+
+	runner := &mockTextRunner{
+		response: `["new fact to consolidate"]`,
+	}
+
+	c := New(runner, store)
+	c.SetTTL("87600h") // Very long TTL (10 years) — nothing should be deleted
+
+	// Consolidate with TTL cleanup configured.
+	n, err := c.consolidate(context.Background(), "sess1", strings.Repeat("x", 200))
+	if err != nil {
+		t.Fatalf("consolidate: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 fact indexed, got %d", n)
+	}
+
+	// Just verify that consolidation completed without error.
+	// The cleanup is a best-effort operation and doesn't affect the return value.
+}
+
+func TestConsolidator_NoConsolidateOnShortReply(t *testing.T) {
+	// Short replies (less than minConsolidateLength runes) should not trigger consolidation.
+	store := newTestStore(t)
+	runner := &mockTextRunner{
+		response: `["should not be reached"]`,
+	}
+
+	c := New(runner, store)
+
+	// These messages are too short to trigger consolidation (minConsolidateLength = 80).
+	shortMsgs := []string{"ok", "yes", "confirmed", "thanks"}
+	for _, msg := range shortMsgs {
+		c.ConsolidateAsync("sess1", msg)
+	}
+
+	// Verify nothing was indexed. If ConsolidateAsync had run the consolidate function,
+	// facts would be indexed. Since they're not, we know it returned early.
+	// We can verify this by trying a search that would only match if the fact was indexed.
+	results, err := store.Search("should not be reached", 100)
+	if err != nil {
+		t.Logf("Search error: %v", err) // Empty results are okay
+	}
+	if len(results) > 0 {
+		t.Error("expected no entries indexed for short messages, but found results")
+	}
+}

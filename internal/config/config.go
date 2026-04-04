@@ -64,6 +64,7 @@ type CompactionPolicyConfig struct {
 
 type MemoryFlushConfig struct {
 	Prompt string `json:"prompt"`
+	TTL    string `json:"ttl"` // e.g., "2160h" for 90 days; empty means no cleanup
 }
 
 type SpecialistConfig struct {

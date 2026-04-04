@@ -40,8 +40,12 @@ type Provider struct {
 	meter          metric.Meter
 
 	// Metrics
-	tokenCounter  metric.Int64Counter
-	toolHistogram metric.Float64Histogram
+	tokenCounter           metric.Int64Counter
+	toolHistogram          metric.Float64Histogram
+	consolidationsTriggered metric.Int64Counter
+	factsExtracted         metric.Int64Counter
+	factsIndexed           metric.Int64Counter
+	factsSkipped           metric.Int64Counter
 }
 
 // NewProvider initializes OpenTelemetry with OTLP exporters.
@@ -135,13 +139,53 @@ func NewProvider(cfg Config) (*Provider, error) {
 		return nil, fmt.Errorf("failed to create tool duration histogram: %w", err)
 	}
 
+	consolidationsTriggered, err := meter.Int64Counter(
+		"consolidations_triggered_total",
+		metric.WithDescription("Total number of memory consolidation operations triggered"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create consolidations counter: %w", err)
+	}
+
+	factsExtracted, err := meter.Int64Counter(
+		"facts_extracted_total",
+		metric.WithDescription("Total number of facts extracted by consolidator"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create facts extracted counter: %w", err)
+	}
+
+	factsIndexed, err := meter.Int64Counter(
+		"facts_indexed_total",
+		metric.WithDescription("Total number of facts indexed to long-term memory"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create facts indexed counter: %w", err)
+	}
+
+	factsSkipped, err := meter.Int64Counter(
+		"facts_skipped_total",
+		metric.WithDescription("Total number of facts skipped during consolidation (duplicates, etc.)"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create facts skipped counter: %w", err)
+	}
+
 	return &Provider{
-		tracerProvider: tp,
-		meterProvider:  mp,
-		tracer:         tracer,
-		meter:          meter,
-		tokenCounter:   tokenCounter,
-		toolHistogram:  toolHistogram,
+		tracerProvider:          tp,
+		meterProvider:           mp,
+		tracer:                  tracer,
+		meter:                   meter,
+		tokenCounter:            tokenCounter,
+		toolHistogram:           toolHistogram,
+		consolidationsTriggered: consolidationsTriggered,
+		factsExtracted:          factsExtracted,
+		factsIndexed:            factsIndexed,
+		factsSkipped:            factsSkipped,
 	}, nil
 }
 
@@ -170,6 +214,38 @@ func (p *Provider) RecordToolDuration(ctx context.Context, duration time.Duratio
 		return
 	}
 	p.toolHistogram.Record(ctx, duration.Seconds())
+}
+
+// RecordConsolidationTriggered records a memory consolidation trigger event.
+func (p *Provider) RecordConsolidationTriggered(ctx context.Context) {
+	if p.consolidationsTriggered == nil {
+		return
+	}
+	p.consolidationsTriggered.Add(ctx, 1)
+}
+
+// RecordFactsExtracted records the number of facts extracted during consolidation.
+func (p *Provider) RecordFactsExtracted(ctx context.Context, count int64) {
+	if p.factsExtracted == nil {
+		return
+	}
+	p.factsExtracted.Add(ctx, count)
+}
+
+// RecordFactsIndexed records the number of facts successfully indexed to memory.
+func (p *Provider) RecordFactsIndexed(ctx context.Context, count int64) {
+	if p.factsIndexed == nil {
+		return
+	}
+	p.factsIndexed.Add(ctx, count)
+}
+
+// RecordFactsSkipped records the number of facts skipped during consolidation.
+func (p *Provider) RecordFactsSkipped(ctx context.Context, count int64) {
+	if p.factsSkipped == nil {
+		return
+	}
+	p.factsSkipped.Add(ctx, count)
 }
 
 // Shutdown gracefully shuts down the providers.

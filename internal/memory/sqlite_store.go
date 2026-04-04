@@ -153,6 +153,40 @@ func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
 	return count, err
 }
 
+// CleanupExpired removes entries older than the specified duration.
+// ttl should be a duration string like "2160h" (90 days) or "720h" (30 days).
+// If ttl is empty or invalid, this is a no-op (returns nil).
+// Returns the number of rows deleted.
+func (m *MemoryStore) CleanupExpired(ttl string) (int64, error) {
+	if ttl == "" {
+		return 0, nil
+	}
+	duration, err := time.ParseDuration(ttl)
+	if err != nil {
+		slog.Warn("memory: invalid TTL duration", "ttl", ttl, "err", err)
+		return 0, nil
+	}
+	if duration <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().UTC().Add(-duration)
+	result, err := m.db.Exec(
+		`DELETE FROM memory_fts WHERE timestamp < ?`,
+		cutoff.Format(time.RFC3339),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("memory: cleanup: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("memory: rows affected: %w", err)
+	}
+	if deleted > 0 {
+		slog.Info("memory: cleanup removed expired entries", "count", deleted, "ttl", ttl)
+	}
+	return deleted, nil
+}
+
 // Close releases the database connection.
 func (m *MemoryStore) Close() error {
 	return m.db.Close()

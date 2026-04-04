@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/observability"
 )
 
 // minConsolidateLength is the minimum reply length (runes) worth consolidating.
@@ -40,6 +41,8 @@ type Consolidator struct {
 	runner TextRunner
 	store  *memory.MemoryStore
 	prompt string
+	ttl    string // e.g., "2160h" for 90 days; empty means no cleanup
+	obs    *observability.Provider // optional observability provider
 }
 
 // New creates a Consolidator. Both runner and store must be non-nil.
@@ -48,6 +51,8 @@ func New(runner TextRunner, store *memory.MemoryStore) *Consolidator {
 		runner: runner,
 		store:  store,
 		prompt: consolidationPrompt,
+		ttl:    "",
+		obs:    nil,
 	}
 }
 
@@ -58,6 +63,16 @@ func (c *Consolidator) SetPrompt(p string) {
 	}
 }
 
+// SetTTL sets the TTL for memory cleanup (e.g., "2160h" for 90 days).
+func (c *Consolidator) SetTTL(ttl string) {
+	c.ttl = ttl
+}
+
+// SetObservability sets the observability provider for metrics recording.
+func (c *Consolidator) SetObservability(obs *observability.Provider) {
+	c.obs = obs
+}
+
 // ConsolidateAsync spawns a goroutine to consolidate reply for sessionKey.
 // Returns immediately; errors are logged. ctx is used only to derive a
 // background context with a fixed timeout — the goroutine is not cancelled
@@ -65,6 +80,9 @@ func (c *Consolidator) SetPrompt(p string) {
 func (c *Consolidator) ConsolidateAsync(sessionKey, reply string) {
 	if utf8.RuneCountInString(strings.TrimSpace(reply)) < minConsolidateLength {
 		return
+	}
+	if c.obs != nil {
+		c.obs.RecordConsolidationTriggered(context.Background())
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -100,7 +118,13 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 		return 0, nil
 	}
 
+	// Record facts extracted (F-068)
+	if c.obs != nil {
+		c.obs.RecordFactsExtracted(ctx, int64(len(facts)))
+	}
+
 	indexed := 0
+	skipped := 0
 	for _, fact := range facts {
 		fact = strings.TrimSpace(fact)
 		if fact == "" {
@@ -111,16 +135,36 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 			if existingContent, ok := existing[0]["content"].(string); ok {
 				if similarity(fact, existingContent) > 0.8 {
 					slog.Debug("consolidator: skipping duplicate fact", "fact", fact)
+					skipped++
 					continue
 				}
 			}
 		}
 		if indexErr := c.store.Index(sessionKey, fact); indexErr != nil {
 			slog.Warn("consolidator: index failed", "fact", fact, "err", indexErr)
+			skipped++
 			continue
 		}
 		indexed++
 	}
+
+	// Record metrics (F-068)
+	if c.obs != nil {
+		c.obs.RecordFactsIndexed(ctx, int64(indexed))
+		if skipped > 0 {
+			c.obs.RecordFactsSkipped(ctx, int64(skipped))
+		}
+	}
+
+	// Perform TTL-based cleanup if configured (F-068).
+	if c.ttl != "" {
+		if deleted, err := c.store.CleanupExpired(c.ttl); err != nil {
+			slog.Warn("consolidator: cleanup failed", "err", err)
+		} else if deleted > 0 {
+			slog.Debug("consolidator: cleanup completed", "deleted", deleted)
+		}
+	}
+
 	return indexed, nil
 }
 

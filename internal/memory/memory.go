@@ -255,6 +255,15 @@ func ShouldSkipRAG(content string) bool {
 	return len(content) <= 10 || genericSkipPatterns[clean] || content == "[empty message]"
 }
 
+// IsTrivialMessageForConsolidation returns true if the message is too trivial
+// to warrant fact extraction during memory consolidation (F-068).
+// Unlike ShouldSkipRAG, this only filters truly trivial acknowledgements,
+// not all short messages.
+func IsTrivialMessageForConsolidation(content string) bool {
+	clean := strings.ToLower(strings.TrimSpace(content))
+	return genericSkipPatterns[clean] || content == "[empty message]"
+}
+
 // FormatRAGBlock formats valid RAG results into a prompt block.
 // Returns (block, count); block is empty string and count is 0 when no results.
 func FormatRAGBlock(results []map[string]any) (string, int) {

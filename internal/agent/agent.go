@@ -201,16 +201,26 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	if compacted, dropped, keep := CompactMessages(messages, m.memoryWindow, DefaultKeepContextMessages, m.compactionPolicy, m.pruningPolicy); dropped > 0 {
 		slog.Info("agent: compacted context", "session", sessionKey, "dropped", dropped, "remaining", len(compacted))
 		if m.consolidator != nil && m.compactionPolicy.Strategy == "memoryFlush" {
-			// Extract facts from dropped history (F-047).
+			// Extract facts from dropped history (F-047, F-068).
 			// Use the keep[] array to identify which messages were actually dropped.
+			// Filter out trivial messages (ok, yes, etc.) before consolidation.
 			var sb strings.Builder
 			for i, k := range keep {
 				if !k && i < len(messages) {
 					msg := messages[i]
-					fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
+					content := msg.Content.String()
+					// Skip trivial messages that don't warrant fact extraction (F-068)
+					if memory.IsTrivialMessageForConsolidation(content) {
+						continue
+					}
+					fmt.Fprintf(&sb, "%s: %s\n", msg.Role, content)
 				}
 			}
-			m.consolidator.ConsolidateAsync(sessionKey, sb.String())
+			// Only call consolidator if there are meaningful messages
+			droppedContent := strings.TrimSpace(sb.String())
+			if droppedContent != "" {
+				m.consolidator.ConsolidateAsync(sessionKey, droppedContent)
+			}
 		}
 		if m.storageRoot != "" {
 			entry := fmt.Sprintf("Session %s: compacted %d messages (kept %d)", sessionKey, dropped, len(compacted))
