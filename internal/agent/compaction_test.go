@@ -437,6 +437,230 @@ func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
 	}
 }
 
+// ptr returns a pointer to the given string.
+func ptr(s string) *string { return &s }
+
+// TestCompactMessages_ToolChainConsistency verifies B-033: tool-call/response
+// pairs are not split across the compaction boundary. The compaction pass must
+// either keep both halves of a tool-call pair or drop them together so the
+// resulting message list never contains an orphaned tool result with no
+// originating call, and vice versa.
+func TestCompactMessages_ToolChainConsistency(t *testing.T) {
+
+	tests := []struct {
+		name                string
+		msgs                []agentctx.StrategicMessage
+		maxN                int
+		keepN               int
+		wantNoOrphans       bool
+		wantNoUnresolvedIDs bool
+		wantLen             int
+		checkFn             func(t *testing.T, got []agentctx.StrategicMessage, keep []bool)
+	}{
+		{
+			name: "Mode 1 - boundary split drops call, keeps response",
+			// Build 32 messages alternating user/model starting with user (index 0).
+			// With maxN=31, keepN=1: keep only last 1 message (index 31).
+			// Index 30 (dropped) is even → role "user" by default, but we override to "model" with tool call.
+			// Index 31 (kept) is odd → role "model" by default, but we override to "tool" with response.
+			// The fix must detect that kept tool response needs its originating call and keep both.
+			msgs: buildMessages(32, []toolScenario{
+				{idx: 30, role: "model", toolCallIDs: []string{"call_abc"}},
+				{idx: 31, role: "tool", toolCallID: "call_abc"},
+			}),
+			maxN:          31,
+			keepN:         1,
+			wantNoOrphans: true,
+			wantLen:       2, // Both message 30 and 31 should be kept (call + response)
+		},
+		{
+			name: "Mode 2 - keepLastAssistants keeps call but drops response",
+			// 60 messages alternating user/model starting with user.
+			// With maxN=50, keepN=10, KeepLastAssistants=1:
+			//   - Tail-slice keeps indices 50-59 (10 messages)
+			//   - KeepLastAssistants=1 finds last assistant (index 59, odd=model) and preceding user (58)
+			//   - But we place tool call at index 58 (user, overridden to model with call)
+			//   - And tool response at index 49 (dropped by tail-slice)
+			// Without 3a pass: call at 58 kept, response at 49 dropped → orphaned call
+			// With 3a pass: response 49 is found when scanning from call 58, marked as kept
+			msgs: buildMessages(60, []toolScenario{
+				{idx: 58, role: "model", toolCallIDs: []string{"call_mode2"}},  // kept by keepLastAssistants
+				{idx: 49, role: "tool", toolCallID: "call_mode2"},  // dropped by tail-slice, should be recovered
+			}),
+			maxN:          50,
+			keepN:         10,
+			wantNoOrphans: true,
+			wantNoUnresolvedIDs: true,
+			wantLen:       11, // tail-slice(10) + tool response(1) + tool call(already in 10) = 11 total
+		},
+		{
+			name:                "clean compaction - no tool calls",
+			msgs:                makeMessages(51, "user"),
+			maxN:                50,
+			keepN:               20,
+			wantNoOrphans:       true,
+			wantNoUnresolvedIDs: true,
+			wantLen:             19, // Index 31 is assistant (odd index), gets stripped as leading assistant
+		},
+		{
+			name: "multi-tool call boundary - both calls dropped",
+			// 33 messages, maxN=32, keepN=1.
+			// Keeps only index 32.
+			// Indices 30,31,32: 30 has call for 31 and 32, but 30 is dropped.
+			msgs: buildMessages(33, []toolScenario{
+				{idx: 30, role: "model", toolCallIDs: []string{"call_1", "call_2"}},
+				{idx: 31, role: "tool", toolCallID: "call_1"},
+				{idx: 32, role: "tool", toolCallID: "call_2"},
+			}),
+			maxN:          32,
+			keepN:         1,
+			wantNoOrphans: true,
+			wantLen:       3, // All 3 must be kept: call at 30, responses at 31,32
+		},
+		{
+			name: "partial tool responses - call kept, one response missing",
+			// 51 messages, maxN=50, keepN=1.
+			// Keeps only index 50.
+			// Index 49 has tool calls for 50, but index 50 only responds to call_a.
+			// After tail-slice: keeps index 50 (response to call_a), drops index 49 (calls).
+			msgs: buildMessages(51, []toolScenario{
+				{idx: 49, role: "model", toolCallIDs: []string{"call_a", "call_b"}},
+				{idx: 50, role: "tool", toolCallID: "call_a"},
+			}),
+			maxN:          50,
+			keepN:         1,
+			wantNoOrphans: false, // We allow orphans temporarily to complete the chain
+			wantLen:       2,     // Both 49 and 50 must be kept
+		},
+		{
+			name: "Mode 2 with KeepLastAssistants",
+			// 60 messages alternating user/model starting with user.
+			// With maxN=50, keepN=10: keeps indices 50-59 (last 10).
+			// KeepLastAssistants=1: keeps last assistant and preceding user.
+			// Let's place tool call at index 49 (dropped by tail-slice) and response at 50 (kept by tail-slice + KeepLastAssistants).
+			msgs: buildMessages(60, []toolScenario{
+				{idx: 49, role: "model", toolCallIDs: []string{"call_keep"}},
+				{idx: 50, role: "tool", toolCallID: "call_keep"},
+			}),
+			maxN:          50,
+			keepN:         10,
+			wantNoOrphans: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _, keep := CompactMessages(tt.msgs, tt.maxN, tt.keepN,
+				config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
+
+			if tt.wantNoOrphans {
+				assertNoOrphanedTools(t, got)
+			}
+			if tt.wantNoUnresolvedIDs {
+				assertNoUnresolvedToolCalls(t, got)
+			}
+			if tt.wantLen > 0 && len(got) != tt.wantLen {
+				t.Errorf("len(got) = %d, want %d", len(got), tt.wantLen)
+			}
+			if tt.checkFn != nil {
+				tt.checkFn(t, got, keep)
+			}
+		})
+	}
+}
+
+// assertNoOrphanedTools ensures every tool message in the result has its
+// originating model/assistant turn (with the matching ToolCall id) also present.
+func assertNoOrphanedTools(t *testing.T, msgs []agentctx.StrategicMessage) {
+	t.Helper()
+	// Collect all tool call IDs present in model/assistant turns in the result.
+	calledIDs := make(map[string]bool)
+	for _, m := range msgs {
+		if m.Role == "model" || m.Role == "assistant" {
+			for _, tc := range m.ToolCalls {
+				if id, ok := tc["id"].(string); ok && id != "" {
+					calledIDs[id] = true
+				}
+			}
+		}
+	}
+	// Check every tool message references an ID that exists in calledIDs.
+	for i, m := range msgs {
+		if m.Role == "tool" && m.ToolCallID != nil {
+			if !calledIDs[*m.ToolCallID] {
+				t.Errorf("msg[%d]: orphaned tool response for ToolCallID=%q (no matching tool call in result)",
+					i, *m.ToolCallID)
+			}
+		}
+	}
+}
+
+// assertNoUnresolvedToolCalls ensures every tool call in the result has a
+// corresponding tool response also in the result.
+func assertNoUnresolvedToolCalls(t *testing.T, msgs []agentctx.StrategicMessage) {
+	t.Helper()
+	respondedIDs := make(map[string]bool)
+	for _, m := range msgs {
+		if m.Role == "tool" && m.ToolCallID != nil {
+			respondedIDs[*m.ToolCallID] = true
+		}
+	}
+	for i, m := range msgs {
+		if m.Role == "model" || m.Role == "assistant" {
+			for _, tc := range m.ToolCalls {
+				if id, ok := tc["id"].(string); ok && id != "" {
+					if !respondedIDs[id] {
+						t.Errorf("msg[%d]: unresolved tool call id=%q (no matching tool response in result)",
+							i, id)
+					}
+				}
+			}
+		}
+	}
+}
+
+// toolScenario describes a single message's tool-related fields for buildMessages.
+type toolScenario struct {
+	idx         int
+	role        string
+	toolCallIDs []string // if set, message is model/assistant with these tool calls
+	toolCallID  string   // if set (non-empty), message is a tool response
+}
+
+// buildMessages creates n messages alternating user/model (starting with "user")
+// and applies tool scenarios to specific indices.
+func buildMessages(n int, scenarios []toolScenario) []agentctx.StrategicMessage {
+	roles := []string{"user", "model"}
+	msgs := make([]agentctx.StrategicMessage, n)
+	scenarioMap := make(map[int]toolScenario)
+	for _, s := range scenarios {
+		scenarioMap[s.idx] = s
+	}
+
+	now := time.Now()
+	for i := 0; i < n; i++ {
+		role := roles[i%2]
+		msg := agentctx.StrategicMessage{
+			Role:      role,
+			CreatedAt: now.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+		}
+		if s, ok := scenarioMap[i]; ok {
+			msg.Role = s.role
+			if len(s.toolCallIDs) > 0 {
+				msg.ToolCalls = make([]map[string]any, len(s.toolCallIDs))
+				for j, id := range s.toolCallIDs {
+					msg.ToolCalls[j] = map[string]any{"id": id}
+				}
+			}
+			if s.toolCallID != "" {
+				msg.ToolCallID = ptr(s.toolCallID)
+			}
+		}
+		msgs[i] = msg
+	}
+	return msgs
+}
+
 func TestDefaultConstants(t *testing.T) {
 	if DefaultMaxContextMessages <= 0 {
 		t.Error("DefaultMaxContextMessages must be positive")

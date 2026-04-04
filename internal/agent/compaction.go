@@ -59,6 +59,65 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 		}
 	}
 
+	// 3. Tool chain consistency pass: ensure tool-call/response pairs are not split.
+	// Build a map of all tool call IDs in the entire message list.
+	// Then, after tail-slice/keepLastAssistants have set initial keep[] values, fix splits:
+	// 3a: For each kept tool response, if its originating call was dropped, keep the call.
+	// 3b: For each kept model/assistant turn with tool calls, ensure all responses are kept.
+
+	// Build a map: callID -> message index of originating call
+	allToolCallIDs := make(map[string]int)
+	for i := range messages {
+		role := messages[i].Role
+		if role == "model" || role == "assistant" {
+			for _, tc := range messages[i].ToolCalls {
+				if id, ok := tc["id"].(string); ok && id != "" {
+					allToolCallIDs[id] = i
+				}
+			}
+		}
+	}
+
+	// 3a: For each kept tool response, if its originating call was dropped, keep the call.
+	for i := range messages {
+		if !keep[i] {
+			continue
+		}
+		role := messages[i].Role
+		if role == "tool" && messages[i].ToolCallID != nil {
+			respID := *messages[i].ToolCallID
+			if callIdx, exists := allToolCallIDs[respID]; exists {
+				// Originating call exists - if it was dropped, keep it now
+				if !keep[callIdx] {
+					keep[callIdx] = true // complete the chain backward
+				}
+			}
+			// else: no originating call found - leave orphan for now, will be stripped later
+		}
+	}
+
+	// 3b: For each kept model/assistant turn with tool calls, ensure all responses are kept.
+	for i := range messages {
+		if !keep[i] {
+			continue
+		}
+		role := messages[i].Role
+		if role == "model" || role == "assistant" {
+			for _, tc := range messages[i].ToolCalls {
+				if id, ok := tc["id"].(string); ok && id != "" {
+					// Find all tool responses for this call ID and keep them
+					for j := range messages {
+						if messages[j].Role == "tool" && messages[j].ToolCallID != nil {
+							if *messages[j].ToolCallID == id {
+								keep[j] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Construct the compacted list.
 	var compacted []agentctx.StrategicMessage
 	for i, k := range keep {
@@ -68,13 +127,34 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 	}
 
 	// Gemini requires conversations to start with a user turn.
-	// Drop all leading assistant or model turns.
-	for len(compacted) > 0 {
+	// Drop all leading assistant or model turns, but only if doing so won't break tool chains.
+	// Check if the first message starts a tool chain - if so, don't strip it.
+	if len(compacted) > 0 {
 		role := compacted[0].Role
 		if role == "assistant" || role == "model" {
-			compacted = compacted[1:]
-		} else {
-			break
+			// Only strip if this assistant/model turn doesn't have tool calls
+			// that are present in the compacted result.
+			hasKeptToolCalls := false
+			for _, tc := range compacted[0].ToolCalls {
+				if id, ok := tc["id"].(string); ok && id != "" {
+					// Check if any tool response in compacted matches this call ID
+					for _, msg := range compacted[1:] {
+						if msg.Role == "tool" && msg.ToolCallID != nil {
+							if *msg.ToolCallID == id {
+								hasKeptToolCalls = true
+								break
+							}
+						}
+					}
+				}
+				if hasKeptToolCalls {
+					break
+				}
+			}
+			// Only strip if this turn doesn't have tool calls that are kept
+			if !hasKeptToolCalls {
+				compacted = compacted[1:]
+			}
 		}
 	}
 
