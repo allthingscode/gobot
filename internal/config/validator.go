@@ -236,6 +236,19 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 			})
 		}
 	}
+
+	// Validate Google Custom Search (Optional but check if partially configured)
+	googleKey := v.cfg.GoogleAPIKey()
+	googleCX := v.cfg.GoogleCX()
+
+	if (googleKey != "" && googleCX == "") || (googleKey == "" && googleCX != "") {
+		result.Errors = append(result.Errors, ValidationError{
+			Field:    "providers.google",
+			Message:  "both apiKey and customCx must be provided for Google Search",
+			Remedy:   "ensure both providers.google.apiKey and providers.google.customCx are set",
+			Severity: SeverityWarning,
+		})
+	}
 }
 
 func (v *Validator) validateTelegram(result *ValidationResult) {

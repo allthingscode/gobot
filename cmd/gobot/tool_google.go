@@ -291,3 +291,59 @@ func (t *UpdateTaskTool) Execute(_ context.Context, _ string, args map[string]an
 	}
 	return fmt.Sprintf("Task %s updated.", taskID), nil
 }
+
+// ── WebSearchTool ─────────────────────────────────────────────────────────────
+
+const webSearchToolName = "google_search"
+
+// WebSearchTool performs a web search using Google Custom Search API.
+type WebSearchTool struct {
+	apiKey  string
+	cx      string
+	baseURL string
+}
+
+func newWebSearchTool(apiKey, cx string) *WebSearchTool {
+	return &WebSearchTool{
+		apiKey:  apiKey,
+		cx:      cx,
+		baseURL: google.DefaultBaseURL,
+	}
+}
+
+func (t *WebSearchTool) Name() string { return webSearchToolName }
+
+func (t *WebSearchTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
+		Name:        webSearchToolName,
+		Description: "Perform a live web search using Google Custom Search. Returns a list of titles, links, and snippets from the top results.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "The search query. Required.",
+				},
+			},
+			"required": []string{"query"},
+		},
+	}
+}
+
+func (t *WebSearchTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("google_search: query is required")
+	}
+
+	svc := &google.SearchService{
+		BaseURL:    t.baseURL,
+		HTTPClient: google.DefaultSearchClient,
+	}
+	results, err := svc.Execute(ctx, t.apiKey, t.cx, query)
+	if err != nil {
+		return "", fmt.Errorf("google_search: %w", err)
+	}
+
+	return google.FormatSearchMarkdown(results), nil
+}

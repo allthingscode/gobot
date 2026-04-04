@@ -79,6 +79,7 @@ type ProvidersConfig struct {
 	Gemini    GeminiConfig    `json:"gemini"`
 	Anthropic AnthropicConfig `json:"anthropic"`
 	OpenAI    OpenAIConfig    `json:"openai"`
+	Google    GoogleConfig    `json:"google"`
 }
 
 type GeminiConfig struct {
@@ -92,6 +93,11 @@ type AnthropicConfig struct {
 type OpenAIConfig struct {
 	APIKey  string `json:"apiKey"`
 	BaseURL string `json:"baseUrl,omitempty"`
+}
+
+type GoogleConfig struct {
+	APIKey   string `json:"apiKey"`
+	CustomCX string `json:"customCx"`
 }
 
 type TelegramConfig struct {
@@ -332,6 +338,36 @@ func (c *Config) OpenAIBaseURL() string {
 		return val
 	}
 	return os.Getenv("OPENAI_BASE_URL")
+}
+
+// GoogleAPIKey returns the Google Custom Search API key. Priority order:
+// 1. config.json field
+// 2. DPAPI secrets store (google_api_key)
+// 3. GOOGLE_API_KEY environment variable
+func (c *Config) GoogleAPIKey() string {
+	if c.Providers.Google.APIKey != "" {
+		return c.Providers.Google.APIKey
+	}
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	if val, _ := store.Get("google_api_key"); val != "" {
+		return val
+	}
+	return os.Getenv("GOOGLE_API_KEY")
+}
+
+// GoogleCX returns the Google Custom Search Engine ID (CX). Priority order:
+// 1. config.json field
+// 2. DPAPI secrets store (google_cx)
+// 3. GOOGLE_CX environment variable
+func (c *Config) GoogleCX() string {
+	if c.Providers.Google.CustomCX != "" {
+		return c.Providers.Google.CustomCX
+	}
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	if val, _ := store.Get("google_cx"); val != "" {
+		return val
+	}
+	return os.Getenv("GOOGLE_CX")
 }
 
 // TelegramToken returns the Telegram bot token from config,

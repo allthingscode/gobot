@@ -286,8 +286,21 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
 		newCompleteTaskTool(secretsRoot),
 		newUpdateTaskTool(secretsRoot),
 	}...)
+
+	googleKey := cfg.GoogleAPIKey()
+	googleCX := cfg.GoogleCX()
+	if googleKey != "" && googleCX != "" {
+		tools = append(tools, newWebSearchTool(googleKey, googleCX))
+		slog.Info("run: registered google_search tool")
+	} else {
+		slog.Warn("run: google_search tool disabled -- providers.google.apiKey or customCx not set")
+	}
+
 	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
 		tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
+		tools = append(tools, newSearchGmailTool(secretsRoot))
+		tools = append(tools, newReadGmailTool(secretsRoot))
+		slog.Info("run: registered gmail tools (send, search, read)")
 	} else {
 		slog.Warn("run: send_email tool disabled -- strategic_edition.user_email not set in config")
 	}

@@ -316,7 +316,3 @@ func TestIterLimitRunner_CountTracked(t *testing.T) {
 		t.Errorf("count = %d, want 3", limited.count)
 	}
 }
-
-func contains(s, sub string) bool {
-	return strings.Contains(s, sub)
-}

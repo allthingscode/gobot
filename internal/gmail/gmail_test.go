@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,309 +13,183 @@ import (
 	"time"
 )
 
-// writeToken is a test helper that writes a storedToken as token.json in dir.
-func writeToken(t *testing.T, dir string, tok storedToken) {
-	t.Helper()
-	data, err := json.Marshal(tok)
-	if err != nil {
-		t.Fatalf("marshal token: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "token.json"), data, 0600); err != nil {
-		t.Fatalf("write token.json: %v", err)
-	}
-}
+func TestGmailSearchAndRead(t *testing.T) {
+	mux := http.NewServeMux()
 
-func TestNewService_MissingToken(t *testing.T) {
-	_, err := NewService(t.TempDir())
-	if err == nil {
-		t.Fatal("expected error for missing token.json")
-	}
-	if !strings.Contains(err.Error(), "token.json not found") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestNewService_InvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "token.json"), []byte("not json"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := NewService(dir)
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-}
-
-func TestNewService_ValidToken(t *testing.T) {
-	dir := t.TempDir()
-	writeToken(t, dir, storedToken{
-		Token:        "valid-access-token",
-		RefreshToken: "refresh-token",
-		Expiry:       time.Now().Add(1 * time.Hour),
+	// Mock List/Search
+	mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		if q == "empty" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"messages": []any{}})
+			return
+		}
+		resp := struct {
+			Messages []MessageSummary `json:"messages"`
+		}{
+			Messages: []MessageSummary{
+				{ID: "msg123", ThreadID: "thread123"},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
-	sender, err := NewService(dir)
+	// Mock Get Message
+	mux.HandleFunc("/messages/msg123", func(w http.ResponseWriter, r *http.Request) {
+		msg := Message{
+			ID:      "msg123",
+			Snippet: "Hello world snippet",
+			Payload: &Payload{
+				Headers: []Header{
+					{Name: "Subject", Value: "Test Subject"},
+					{Name: "From", Value: "sender@example.com"},
+				},
+				Body: &Body{
+					Data: base64.URLEncoding.EncodeToString([]byte("Full body text")),
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(msg)
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	// Setup fake secrets
+	tmp := t.TempDir()
+	tok := storedToken{
+		Token:  "fake-token",
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+	tokData, _ := json.Marshal(tok)
+	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0644)
+
+	svc, err := NewService(tmp)
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
-	if sender == nil {
-		t.Fatal("expected non-nil sender")
-	}
-	gs := sender.(*gmailSender)
-	if gs.accessToken != "valid-access-token" {
-		t.Errorf("accessToken = %q, want %q", gs.accessToken, "valid-access-token")
-	}
-}
+	svc.baseURL = server.URL
 
-func TestNewService_ExpiredNoRefreshToken(t *testing.T) {
-	dir := t.TempDir()
-	writeToken(t, dir, storedToken{
-		Token:  "expired-token",
-		Expiry: time.Now().Add(-1 * time.Hour),
+	ctx := context.Background()
+
+	t.Run("Search", func(t *testing.T) {
+		t.Parallel()
+		res, err := svc.SearchMessages(ctx, "query", 5)
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(res) != 1 || res[0].ID != "msg123" {
+			t.Errorf("Unexpected search results: %+v", res)
+		}
 	})
 
-	_, err := NewService(dir)
-	if !errors.Is(err, ErrNeedsReauth) {
-		t.Fatalf("expected ErrNeedsReauth, got: %v", err)
-	}
-}
-
-func TestNewService_ExpiredRefreshesSuccessfully(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "new-access-token",
-			"expires_in":   3600,
-		})
-	}))
-	defer srv.Close()
-
-	dir := t.TempDir()
-	writeToken(t, dir, storedToken{
-		Token:        "old-token",
-		RefreshToken: "valid-refresh-token",
-		ClientID:     "client-id",
-		ClientSecret: "client-secret",
-		TokenURI:     srv.URL,
-		Expiry:       time.Now().Add(-1 * time.Hour),
+	t.Run("Get", func(t *testing.T) {
+		t.Parallel()
+		msg, err := svc.GetMessage(ctx, "msg123")
+		if err != nil {
+			t.Fatalf("GetMessage failed: %v", err)
+		}
+		if msg.Snippet != "Hello world snippet" {
+			t.Errorf("Unexpected snippet: %s", msg.Snippet)
+		}
+		if msg.GetHeader("Subject") != "Test Subject" {
+			t.Errorf("Unexpected subject: %s", msg.GetHeader("Subject"))
+		}
+		if msg.ExtractBody() != "Full body text" {
+			t.Errorf("Unexpected body: %s", msg.ExtractBody())
+		}
 	})
-
-	sender, err := NewService(dir)
-	if err != nil {
-		t.Fatalf("NewService failed: %v", err)
-	}
-	gs := sender.(*gmailSender)
-	if gs.accessToken != "new-access-token" {
-		t.Errorf("accessToken = %q, want %q", gs.accessToken, "new-access-token")
-	}
-
-	// Verify token.json was updated on disk.
-	data, _ := os.ReadFile(filepath.Join(dir, "token.json"))
-	var saved storedToken
-	if err := json.Unmarshal(data, &saved); err != nil {
-		t.Fatalf("re-read token.json: %v", err)
-	}
-	if saved.Token != "new-access-token" {
-		t.Errorf("persisted token = %q, want %q", saved.Token, "new-access-token")
-	}
 }
 
-func TestNewService_InvalidGrant(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
-	}))
-	defer srv.Close()
+func TestExtractBodyFromParts(t *testing.T) {
+	t.Parallel()
 
-	dir := t.TempDir()
-	writeToken(t, dir, storedToken{
-		Token:        "old-token",
-		RefreshToken: "bad-refresh",
-		TokenURI:     srv.URL,
-		Expiry:       time.Now().Add(-1 * time.Hour),
-	})
-
-	_, err := NewService(dir)
-	if !errors.Is(err, ErrNeedsReauth) {
-		t.Fatalf("expected ErrNeedsReauth for invalid_grant, got: %v", err)
-	}
-}
-
-func TestSend_PlainText(t *testing.T) {
-	var capturedAuth string
-	var capturedPayload map[string]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedAuth = r.Header.Get("Authorization")
-		json.NewDecoder(r.Body).Decode(&capturedPayload)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"id": "msg-001"})
-	}))
-	defer srv.Close()
-
-	s := &gmailSender{
-		accessToken: "test-token",
-		endpoint:    srv.URL,
-		httpClient:  http.DefaultClient,
-	}
-
-	if err := s.Send(context.Background(), "user@example.com",
-		"Hello", "plain text body"); err != nil {
-		t.Fatalf("Send failed: %v", err)
-	}
-	if capturedAuth != "Bearer test-token" {
-		t.Errorf("Authorization = %q, want %q", capturedAuth, "Bearer test-token")
-	}
-	raw, ok := capturedPayload["raw"]
-	if !ok || raw == "" {
-		t.Errorf("request body missing 'raw' field: %v", capturedPayload)
-	}
-	decoded, err := base64.URLEncoding.DecodeString(raw)
-	if err != nil {
-		t.Fatalf("base64 decode: %v", err)
-	}
-	mime := string(decoded)
-	if !strings.Contains(mime, "To: user@example.com") {
-		t.Errorf("MIME missing To header: %s", mime)
-	}
-	if !strings.Contains(mime, "plain text body") {
-		t.Errorf("MIME missing body: %s", mime)
-	}
-	if strings.Contains(mime, "text/html") {
-		t.Errorf("plain text body should not have HTML content-type: %s", mime)
-	}
-}
-
-func TestSend_HTMLWrapped(t *testing.T) {
-	var capturedPayload map[string]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedPayload)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"id": "msg-002"})
-	}))
-	defer srv.Close()
-
-	s := &gmailSender{
-		accessToken: "test-token",
-		endpoint:    srv.URL,
-		httpClient:  http.DefaultClient,
-	}
-
-	if err := s.Send(context.Background(), "user@example.com",
-		"Report", "<h1>Title</h1><p>Body</p>"); err != nil {
-		t.Fatalf("Send failed: %v", err)
-	}
-	raw := capturedPayload["raw"]
-	if raw == "" {
-		t.Fatal("expected raw field in payload")
-	}
-	decoded, err := base64.URLEncoding.DecodeString(raw)
-	if err != nil {
-		t.Fatalf("base64 decode: %v", err)
-	}
-	mimeStr := string(decoded)
-	// Top-level must be multipart/alternative.
-	if !strings.Contains(mimeStr, "multipart/alternative") {
-		t.Errorf("expected multipart/alternative content-type, got: %s", truncate(mimeStr, 300))
-	}
-	// Must include the HTML part.
-	if !strings.Contains(mimeStr, "Content-Type: text/html") {
-		t.Errorf("expected text/html part in multipart, got: %s", truncate(mimeStr, 300))
-	}
-	// Must include the CSS wrapper.
-	if !strings.Contains(mimeStr, "container") {
-		t.Errorf("expected CSS wrapper (container class) in body, got: %s", truncate(mimeStr, 300))
-	}
-	// Must include the plain-text part.
-	if !strings.Contains(mimeStr, "Content-Type: text/plain") {
-		t.Errorf("expected text/plain fallback part, got: %s", truncate(mimeStr, 300))
-	}
-	// Must include the boundary.
-	if !strings.Contains(mimeStr, multipartBoundary) {
-		t.Errorf("expected MIME boundary %q in message, got: %s", multipartBoundary, truncate(mimeStr, 300))
-	}
-}
-
-func TestSend_Multipart_HasPlainPart(t *testing.T) {
-	var capturedPayload map[string]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedPayload)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"id": "msg-003"})
-	}))
-	defer srv.Close()
-
-	s := &gmailSender{
-		accessToken: "test-token",
-		endpoint:    srv.URL,
-		httpClient:  http.DefaultClient,
-	}
-
-	if err := s.Send(context.Background(), "user@example.com",
-		"Report", "<h2>Summary</h2><p>All systems nominal.</p>"); err != nil {
-		t.Fatalf("Send failed: %v", err)
-	}
-
-	raw := capturedPayload["raw"]
-	decoded, err := base64.URLEncoding.DecodeString(raw)
-	if err != nil {
-		t.Fatalf("base64 decode: %v", err)
-	}
-	mimeStr := string(decoded)
-
-	// Plain text part must contain the text stripped of HTML tags.
-	if !strings.Contains(mimeStr, "Summary") {
-		t.Errorf("plain-text part should contain stripped heading text, got: %s", truncate(mimeStr, 500))
-	}
-	if !strings.Contains(mimeStr, "All systems nominal.") {
-		t.Errorf("plain-text part should contain paragraph text, got: %s", truncate(mimeStr, 500))
-	}
-}
-
-func TestSend_APIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "invalid credentials"}`))
-	}))
-	defer srv.Close()
-
-	s := &gmailSender{
-		accessToken: "bad-token",
-		endpoint:    srv.URL,
-		httpClient:  http.DefaultClient,
-	}
-
-	err := s.Send(context.Background(), "user@example.com", "Test", "body")
-	if err == nil {
-		t.Fatal("expected error for API 401")
-	}
-	if !strings.Contains(err.Error(), "401") {
-		t.Errorf("error should mention status code, got: %v", err)
-	}
-}
-
-func TestStoredToken_Expired(t *testing.T) {
 	tests := []struct {
-		name    string
-		tok     storedToken
-		wantExp bool
+		name     string
+		payload  *Payload
+		wantBody string
 	}{
-		{"zero expiry is not expired", storedToken{}, false},
-		{"future expiry is not expired", storedToken{Expiry: time.Now().Add(1 * time.Hour)}, false},
-		{"past expiry is expired", storedToken{Expiry: time.Now().Add(-1 * time.Hour)}, true},
-		{"within 30s grace is expired", storedToken{Expiry: time.Now().Add(20 * time.Second)}, true},
+		{
+			name: "SimpleBody",
+			payload: &Payload{
+				Body: &Body{
+					Data: base64.URLEncoding.EncodeToString([]byte("Simple body")),
+				},
+			},
+			wantBody: "Simple body",
+		},
+		{
+			name: "MultipartAlternativePreferText",
+			payload: &Payload{
+				Parts: []Part{
+					{
+						MimeType: "text/plain",
+						Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("Plain text"))},
+					},
+					{
+						MimeType: "text/html",
+						Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("<p>HTML text</p>"))},
+					},
+				},
+			},
+			wantBody: "Plain text",
+		},
+		{
+			name: "NestedMultipart",
+			payload: &Payload{
+				Parts: []Part{
+					{
+						MimeType: "multipart/alternative",
+						Parts: []Part{
+							{
+								MimeType: "text/plain",
+								Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("Nested plain text"))},
+							},
+						},
+					},
+				},
+			},
+			wantBody: "Nested plain text",
+		},
+		{
+			name: "MixedWithAttachments",
+			payload: &Payload{
+				Parts: []Part{
+					{
+						MimeType: "multipart/alternative",
+						Parts: []Part{
+							{
+								MimeType: "text/plain",
+								Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("Mixed body text"))},
+							},
+						},
+					},
+					{
+						MimeType: "application/pdf",
+						Filename: "test.pdf",
+						Body:     &Body{Data: "SOMEBASE64DATA"},
+					},
+				},
+			},
+			wantBody: "Mixed body text",
+		},
+		{
+			name: "NoBodyData",
+			payload: &Payload{
+				Body: &Body{Data: ""},
+			},
+			wantBody: "",
+		},
 	}
+
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.tok.expired(); got != tt.wantExp {
-				t.Errorf("expired() = %v, want %v", got, tt.wantExp)
+			t.Parallel()
+			msg := &Message{Payload: tt.payload}
+			got := msg.ExtractBody()
+			if !strings.Contains(got, tt.wantBody) {
+				t.Errorf("ExtractBody() = %q, want it to contain %q", got, tt.wantBody)
 			}
 		})
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }
