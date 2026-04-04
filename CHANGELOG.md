@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- **Rubric-Driven Reflection Loop** (F-049): Implement a multi-phase agent loop with explicit planning and reflection.
+  - Generates a measurable validation rubric before task execution.
+  - Performs a "Critic" turn to audit model output against the rubric.
+  - Triggers a backtrack and correction if the reflection score is below threshold.
 - Support for additional MCP server integrations
 - Enhanced telemetry for distributed tracing
 - Support for per-specialist model routing in sub-agents
