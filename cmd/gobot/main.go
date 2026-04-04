@@ -427,6 +427,20 @@ func cmdRun() *cobra.Command {
 			if storeErr != nil {
 				slog.Warn("run: checkpoint store unavailable, running statelessly", "err", storeErr)
 			}
+
+			// Initialize idempotency store for side-effecting tools (F-069).
+			if storeErr == nil {
+				// Get the underlying db from checkpoint manager.
+				db := store.DB()
+				idempStore := agentctx.NewIdempotencyStore(db, cfg.EffectiveIdempotencyTTL())
+				runner.SetIdempotencyStore(idempStore)
+
+				// Periodic cleanup of expired keys (run at startup).
+				if cleaned, cleanErr := idempStore.CleanupExpired(); cleanErr == nil && cleaned > 0 {
+					slog.Info("run: cleaned up expired idempotency keys", "count", cleaned)
+				}
+			}
+
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetTracer(tracer)
 			mgr.SetMemoryWindow(cfg.MemoryWindow())

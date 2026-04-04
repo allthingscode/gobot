@@ -130,6 +130,7 @@ type StrategicConfig struct {
 	StorageRoot       string              `json:"storage_root"`
 	Mandate           string              `json:"mandate"`
 	MaxToolIterations int                 `json:"max_tool_iterations,omitempty"`
+	IdempotencyTTL    string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
 	Observability     ObservabilityConfig `json:"observability"`
 }
 
@@ -156,6 +157,17 @@ func (c *Config) ContextPruning() ContextPruningConfig {
 // Compaction returns the configured compaction policy.
 func (c *Config) Compaction() CompactionPolicyConfig {
 	return c.Agents.Defaults.Compaction
+}
+
+// EffectiveIdempotencyTTL returns the configured idempotency key TTL,
+// defaulting to 24 hours if unset or invalid.
+func (c *Config) EffectiveIdempotencyTTL() time.Duration {
+	if c.Strategic.IdempotencyTTL != "" {
+		if ttl, err := time.ParseDuration(c.Strategic.IdempotencyTTL); err == nil && ttl > 0 {
+			return ttl
+		}
+	}
+	return 24 * time.Hour
 }
 
 // MaxTokens returns the configured maximum output tokens, defaulting to 0 (API default).

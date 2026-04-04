@@ -19,6 +19,22 @@ const (
 	shellMaxOutput    = 4096
 )
 
+// isSideEffectingTool returns true for tools that modify external state
+// and should be protected by idempotency keys.
+func isSideEffectingTool(name string) bool {
+	switch name {
+	case "send_email",
+		"create_calendar_event",
+		"create_task",
+		"complete_task",
+		"update_task",
+		shellExecToolName:
+		return true
+	default:
+		return false
+	}
+}
+
 // shellExecTool exposes sandboxed shell command execution to the agent.
 // Commands run inside a Windows Job Object with memory and CPU limits.
 type shellExecTool struct {

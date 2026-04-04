@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -26,12 +28,13 @@ type geminiRunner struct {
 	prov                provider.Provider
 	model               string
 	systemPrompt        string
-	memStore            *memory.MemoryStore // may be nil; used for RAG context injection
-	tools               []Tool              // registered tools exposed to the provider
-	breaker             *resilience.Breaker // circuit breaker for API calls
-	limiter             *rate.Limiter       // token-bucket rate limiter
-	hooks               *agent.Hooks        // may be nil; set via SetHooks
+	memStore            *memory.MemoryStore             // may be nil; used for RAG context injection
+	tools               []Tool                          // registered tools exposed to the provider
+	breaker             *resilience.Breaker             // circuit breaker for API calls
+	limiter             *rate.Limiter                   // token-bucket rate limiter
+	hooks               *agent.Hooks                    // may be nil; set via SetHooks
 	tracer              *observability.DispatchTracer
+	idempStore          *agentctx.IdempotencyStore      // may be nil; idempotency for side-effecting tools
 	maxToolIterations   int
 	maxTokens           int
 	enableReflection    bool // opt-in; off by default for cost control
@@ -79,6 +82,11 @@ func (r *geminiRunner) SetHooks(h *agent.Hooks) {
 // SetTracer configures the observability tracer for this runner.
 func (r *geminiRunner) SetTracer(t *observability.DispatchTracer) {
 	r.tracer = t
+}
+
+// SetIdempotencyStore configures the idempotency store for side-effecting tools.
+func (r *geminiRunner) SetIdempotencyStore(store *agentctx.IdempotencyStore) {
+	r.idempStore = store
 }
 
 // Run executes the tool-call/response loop until the provider returns a terminal text response.
@@ -227,7 +235,13 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 			}
 
 			if execErr == nil && !skipExec {
-				result, execErr = r.executeTool(ctx, sessionKey, name, args)
+				// Generate a deterministic idempotency key based on the tool's position in the sequence and parameters.
+				// This ensures that if the agent loop crashes and resumes, the exact same tool call gets the same key,
+				// preventing duplicate real-world side effects.
+				paramsHash, _ := agentctx.HashParams(args)
+				idemKey := fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, len(toolSeq), name, paramsHash)
+
+				result, execErr = r.executeTool(ctx, sessionKey, idemKey, name, args)
 				if execErr == nil {
 					slog.Info("runner: tool result", "tool", name, "result_len", len(result))
 					slog.Debug("runner: tool result detail", "tool", name, "result", result)
@@ -263,7 +277,47 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 }
 
 // executeTool dispatches a tool call to the matching registered Tool.
-func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, name string, args map[string]any) (string, error) {
+// For side-effecting tools, it checks the idempotency store before execution
+// and caches the result to prevent duplicates on retry.
+func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, idemKey string, name string, args map[string]any) (string, error) {
+	// Check if this is a side-effecting tool that needs idempotency protection.
+	if isSideEffectingTool(name) && r.idempStore != nil {
+		// Compute params hash to detect key reuse with different params.
+		paramsHash, err := agentctx.HashParams(args)
+		if err != nil {
+			return "", fmt.Errorf("executeTool: hash params: %w", err)
+		}
+
+		// Check idempotency store.
+		checkResult, err := r.idempStore.Check(idemKey, name, paramsHash)
+		if err != nil {
+			// Hash mismatch — same key with different params.
+			return "", fmt.Errorf("executeTool: %w", err)
+		}
+
+		if checkResult.Found {
+			// Cache hit — return cached result without executing.
+			slog.Debug("executeTool: idempotency cache hit", "tool", name, "key", idemKey)
+			return checkResult.CachedResult, nil
+		}
+
+		// Cache miss — execute the tool and store result.
+		result, execErr := r.executeToolInner(ctx, sessionKey, name, args)
+		if execErr == nil {
+			// Store result in idempotency cache.
+			if storeErr := r.idempStore.Store(idemKey, name, paramsHash, result, sessionKey); storeErr != nil {
+				slog.Warn("executeTool: failed to store idempotency key", "err", storeErr)
+			}
+		}
+		return result, execErr
+	}
+
+	// Non-side-effecting tool or no idempotency store — execute normally.
+	return r.executeToolInner(ctx, sessionKey, name, args)
+}
+
+// executeToolInner is the inner implementation of executeTool without idempotency checks.
+func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey string, name string, args map[string]any) (string, error) {
 	for _, t := range r.tools {
 		if t.Name() == name {
 			if r.tracer != nil {
@@ -275,6 +329,24 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, name 
 		}
 	}
 	return "", fmt.Errorf("unknown tool: %s", name)
+}
+
+// generateIdempotencyKey generates a random UUID v4 for use as an idempotency key.
+func generateIdempotencyKey() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to timestamp-based key if random fails.
+		return fmt.Sprintf("idem-%d", time.Now().UnixNano())
+	}
+	// Set version (4) and variant bits.
+	bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+	bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%s-%s-%s-%s-%s",
+		hex.EncodeToString(bytes[0:4]),
+		hex.EncodeToString(bytes[4:6]),
+		hex.EncodeToString(bytes[6:8]),
+		hex.EncodeToString(bytes[8:10]),
+		hex.EncodeToString(bytes[10:16]))
 }
 
 // retryChat calls prov.Chat with exponential backoff on transient errors.

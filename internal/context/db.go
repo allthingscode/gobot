@@ -69,7 +69,7 @@ func addChecksumColumnIfMissing(db *sql.DB) error {
 	return err
 }
 
-// initSchema creates the threads and checkpoints tables if they do not exist.
+// initSchema creates the threads, checkpoints, and idempotency_keys tables if they do not exist.
 func initSchema(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS threads (
@@ -100,6 +100,36 @@ func initSchema(db *sql.DB) error {
 
 	if err := addChecksumColumnIfMissing(db); err != nil {
 		return fmt.Errorf("initSchema: add checksum column: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS idempotency_keys (
+			key         TEXT PRIMARY KEY,
+			tool_name   TEXT NOT NULL,
+			params_hash TEXT NOT NULL,
+			result      TEXT,
+			session_key TEXT,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("initSchema: create idempotency_keys: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_idempotency_session
+		ON idempotency_keys(session_key)
+	`)
+	if err != nil {
+		return fmt.Errorf("initSchema: create idx_idempotency_session: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_idempotency_created
+		ON idempotency_keys(created_at)
+	`)
+	if err != nil {
+		return fmt.Errorf("initSchema: create idx_idempotency_created: %w", err)
 	}
 
 	return nil
