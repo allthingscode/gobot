@@ -6,16 +6,18 @@
 //
 // Checks performed:
 //  1. Exported standalone functions in internal/ and cmd/ must have a doc
-//     comment whose first line names the function.  Methods are excluded
-//     because they often implement interfaces and rarely need separate docs.
+//     comment.  Methods are excluded because they often implement interfaces
+//     and rarely need separate docs.
 //  2. Non-archived markdown files under .private/backlog/ may reference file
 //     paths; every referenced path that looks like a project file must exist.
 //  3. Every .md file in .private/backlog/features/ and .private/backlog/bugs/
 //     must be mentioned (by filename) in BACKLOG.md.
 //  4. Backlog item YAML frontmatter must contain a valid status field.
+//  5. Specialist protocol enforcement (handoff schema, stale locks, state JSON).
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -24,6 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -46,6 +49,9 @@ func main() {
 
 	// --- Check 4: backlog YAML frontmatter status ---
 	failures = append(failures, lintBacklogStatus(root)...)
+
+	// --- Check 5: specialist protocol enforcement ---
+	failures = append(failures, lintSpecialistProtocols(root)...)
 
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "\n--- doc_lint: %d issue(s) found ---\n", len(failures))
@@ -90,6 +96,10 @@ func lintGoDocs(root string) []string {
 				if fn.Recv != nil {
 					continue
 				}
+				// Skip main — it's always the entry point and never needs a doc comment.
+				if fn.Name.Name == "main" {
+					continue
+				}
 				if !fn.Name.IsExported() {
 					continue
 				}
@@ -123,7 +133,7 @@ func lintStaleReferences(root string) []string {
 		}
 		// Skip archived items — they are historical and may reference paths
 		// that no longer exist.
-		if strings.Contains(path, string(filepath.Separator)+"archived"+string(filepath.Separator)) {
+		if strings.Contains(path, "archived") {
 			return nil
 		}
 		data, readErr := os.ReadFile(path)
@@ -175,7 +185,7 @@ func lintBacklogIndex(root string) []string {
 // frontmatterStatusRe matches the YAML status field in frontmatter.
 var frontmatterStatusRe = regexp.MustCompile(`(?m)^status:\s*"?(.+?)"?\s*$`)
 
-// validStatuses lists the allowed status values per the BACKLOG.md key.
+// validStatuses lists the allowed status values per the BACKLOG.md status key.
 var validStatuses = map[string]bool{
 	"Production":  true,
 	"In Progress": true,
@@ -183,8 +193,6 @@ var validStatuses = map[string]bool{
 	"Draft":       true,
 	"Archived":    true,
 	"Resolved":    true,
-	"Ready for Review": true,
-	"Ready for Deploy": true,
 }
 
 // lintBacklogStatus checks that each backlog item has a valid YAML status.
@@ -210,9 +218,85 @@ func lintBacklogStatus(root string) []string {
 			status := string(m[1])
 			if !validStatuses[status] {
 				out = append(out,
-					fmt.Sprintf("%s/%s: invalid status %q (valid: Production, In Progress, Planning, Draft, Archived, Resolved, Ready for Review, Ready for Deploy)",
+					fmt.Sprintf("%s/%s: invalid status %q (valid: Production, In Progress, Planning, Draft, Archived, Resolved)",
 						subDir, e.Name(), status))
 			}
+		}
+	}
+	return out
+}
+
+// handoffRequiredFields lists mandatory keys in handoff.json.
+var handoffRequiredFields = []string{
+	"task_id", "source_specialist", "target_specialist",
+	"state_file_path", "timestamp",
+}
+
+// staleLockAge is the threshold after which a lock file is considered stale.
+const staleLockAge = 24 * time.Hour
+
+// lintSpecialistProtocols validates handoff.json schema, checks for stale lock
+// files, and ensures session state JSON is well-formed.
+func lintSpecialistProtocols(root string) []string {
+	var out []string
+	sessionDir := filepath.Join(root, ".private", "session")
+	locksDir := filepath.Join(root, ".private", "locks")
+
+	// handoff.json schema validation.
+	handoffPath := filepath.Join(sessionDir, "handoff.json")
+	if data, err := os.ReadFile(handoffPath); err == nil {
+		var obj map[string]json.RawMessage
+		if jsonErr := json.Unmarshal(data, &obj); jsonErr != nil {
+			out = append(out, fmt.Sprintf(".private/session/handoff.json: invalid JSON: %v", jsonErr))
+		} else {
+			for _, field := range handoffRequiredFields {
+				if _, ok := obj[field]; !ok {
+					out = append(out,
+						fmt.Sprintf(".private/session/handoff.json: missing required field %q", field))
+				}
+			}
+			// Verify state_file_path points to an existing file.
+			if raw, ok := obj["state_file_path"]; ok {
+				var p string
+				if json.Unmarshal(raw, &p) == nil {
+					abs := filepath.Join(root, filepath.FromSlash(p))
+					if _, statErr := os.Stat(abs); os.IsNotExist(statErr) {
+						out = append(out,
+							fmt.Sprintf(".private/session/handoff.json: state_file_path %q does not exist", p))
+					}
+				}
+			}
+		}
+	}
+
+	// session_state.json validity.
+	statePath := filepath.Join(sessionDir, "session_state.json")
+	if data, err := os.ReadFile(statePath); err == nil {
+		var obj map[string]interface{}
+		if jsonErr := json.Unmarshal(data, &obj); jsonErr != nil {
+			out = append(out,
+				fmt.Sprintf(".private/session/session_state.json: invalid JSON: %v", jsonErr))
+		}
+	}
+
+	// Stale lock files.
+	entries, err := os.ReadDir(locksDir)
+	if err != nil {
+		return out // no locks dir — not an error
+	}
+	now := time.Now()
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > staleLockAge {
+			out = append(out,
+				fmt.Sprintf(".private/locks/%s: lock file is stale (older than %s)",
+					e.Name(), staleLockAge))
 		}
 	}
 	return out

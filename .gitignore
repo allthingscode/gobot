@@ -40,3 +40,7 @@ GEMINI.md
 # Temporary/Generated Files
 coverage/
 package-lock.json
+
+# GitHub API research artifacts
+oc_go.json
+oc_main.json

@@ -78,7 +78,9 @@ func main() {
 	srcText := src.String()
 	var missing []string
 	for _, tag := range tags {
-		if !strings.Contains(srcText, tag) {
+		// Use word-boundary regex to avoid substring matches (e.g. "FOO" inside "FOOBAR").
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(tag) + `\b`)
+		if !re.MatchString(srcText) {
 			missing = append(missing, tag)
 		}
 	}
