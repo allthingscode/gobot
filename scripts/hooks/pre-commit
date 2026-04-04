@@ -9,13 +9,31 @@ set -e
 
 cd "$(git rev-parse --show-toplevel)"
 
-echo "--- go vet ./..."
-go vet ./...
+TEMP_LOG=$(mktemp)
 
-echo "--- staticcheck ./..."
-staticcheck ./...
+cleanup() {
+    rm -f "$TEMP_LOG"
+}
+trap cleanup EXIT
 
-echo "--- go test -mod=vendor ./..."
-go test -mod=vendor ./...
+echo "--- Pre-commit verification started"
 
-echo "--- pre-commit: all checks passed"
+if ! go vet ./... > "$TEMP_LOG" 2>&1; then
+    echo "ERROR: go vet failed"
+    cat "$TEMP_LOG"
+    exit 1
+fi
+
+if ! staticcheck ./... > "$TEMP_LOG" 2>&1; then
+    echo "ERROR: staticcheck failed"
+    cat "$TEMP_LOG"
+    exit 1
+fi
+
+if ! go test -mod=vendor ./... > "$TEMP_LOG" 2>&1; then
+    echo "ERROR: go test failed"
+    cat "$TEMP_LOG"
+    exit 1
+fi
+
+echo "--- Pre-commit: all checks passed (vet, staticcheck, test)"
