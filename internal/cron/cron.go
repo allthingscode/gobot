@@ -27,6 +27,7 @@ type Schedule struct {
 
 // Payload defines the message to be sent when a job triggers.
 type Payload struct {
+	ID      string `json:"id,omitempty"`
 	Channel string `json:"channel"`
 	To      string `json:"to,omitempty"`
 	Subject string `json:"subject,omitempty"`

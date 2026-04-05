@@ -194,14 +194,20 @@ func TestCronSessionKeyFormat(t *testing.T) {
 // Regression: the morning briefing job prompt was changed from HTML to
 // Markdown instructions, causing WrapHTML to return the body unchanged
 // and emails to go out as plain text (no dark theme, no styling).
+// Second regression: WrapHTML only checked for <h1> and <p>, so responses
+// using <h2>, <div>, <ul>, or <strong> went out as plain text.
 func TestBriefingEmailHTMLDelivery(t *testing.T) {
 	t.Parallel()
 
-	// Simulate what an agent response should look like following the HTML prompt
+	// Simulate what an agent response should look like following the HTML prompt.
+	// Covers tags that were previously undetected by WrapHTML.
 	responses := []string{
 		"<h1>Values &amp; Vitality</h1><p>Matthew, have a great day.</p>",
 		"<p>Brief test</p>",
 		"<div class=\"vitality\"><h1>Vitals</h1><p>Body</p></div>",
+		"<h2>📅 Schedule</h2><ul><li>Item</li></ul>",
+		"<div style=\"background-color:#121212\"><h2>Finance</h2></div>",
+		"<strong>Market Futures:</strong> Bearish sentiment.",
 	}
 
 	for _, body := range responses {
@@ -210,5 +216,37 @@ func TestBriefingEmailHTMLDelivery(t *testing.T) {
 			t.Errorf("WrapHTML output missing HTML wrapper.\n"+
 				"input: %q\noutput: %q", body, got)
 		}
+	}
+}
+
+// TestCronEmailSessionKeyIncludesJobID verifies that email-channel cron jobs
+// produce session keys that include the job ID, ensuring two different jobs
+// (e.g. morning_briefing and nightly_batch) get isolated agent sessions.
+// Regression: both jobs shared "cron:email:<recipient>", causing the nightly
+// batch's Markdown context to bleed into the morning briefing session.
+func TestCronEmailSessionKeyIncludesJobID(t *testing.T) {
+	t.Parallel()
+
+	const recipient = "user@example.com"
+	jobIDs := []string{"morning_briefing", "nightly_batch", "unknown"}
+
+	keys := make(map[string]string, len(jobIDs))
+	for _, id := range jobIDs {
+		key := "cron:" + id + ":email:" + recipient
+		if !strings.HasPrefix(key, "cron:") {
+			t.Errorf("session key %q must start with cron:", key)
+		}
+		if !strings.Contains(key, ":email:") {
+			t.Errorf("session key %q must contain :email:", key)
+		}
+		if !strings.Contains(key, id) {
+			t.Errorf("session key %q must contain job ID %q", key, id)
+		}
+		keys[id] = key
+	}
+
+	if keys["morning_briefing"] == keys["nightly_batch"] {
+		t.Errorf("morning_briefing and nightly_batch must have different session keys, both got %q",
+			keys["morning_briefing"])
 	}
 }

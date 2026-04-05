@@ -56,11 +56,18 @@ func FallbackNotify(storageRoot, subject, body, recipient, reason string) string
 
 // WrapHTML detects whether body is HTML and, if so, injects a CSS stylesheet and
 // wraps the content in a container div. Plain text bodies are returned unchanged.
-// HTML is detected if the lowercased body contains any of: \"<html\", \"<body>\", \"<h1\", \"<p>\".
+// HTML is detected if the lowercased body contains any common HTML tag.
 func WrapHTML(body string) string {
 	lowerBody := strings.ToLower(body)
-	if !strings.Contains(lowerBody, "<html") && !strings.Contains(lowerBody, "<body>") &&
-		!strings.Contains(lowerBody, "<h1") && !strings.Contains(lowerBody, "<p>") {
+	htmlTags := []string{"<html", "<body>", "<h1", "<h2", "<h3", "<p>", "<div", "<ul>", "<ol>", "<li>", "<strong>", "<em>", "<span"}
+	isHTML := false
+	for _, tag := range htmlTags {
+		if strings.Contains(lowerBody, tag) {
+			isHTML = true
+			break
+		}
+	}
+	if !isHTML {
 		return body
 	}
 

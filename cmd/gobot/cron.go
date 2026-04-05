@@ -60,7 +60,11 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 			return nil
 		}
 
-		sessionKey := "cron:email:" + recipient
+		jobID := p.ID
+		if jobID == "" {
+			jobID = "unknown"
+		}
+		sessionKey := "cron:" + jobID + ":email:" + recipient
 		slog.Info("dispatching cron job", "sessionKey", sessionKey, "channel", "email")
 		response, err := d.mgr.Dispatch(ctx, sessionKey, "[AUTONOMOUS] "+p.Message)
 		if err != nil {

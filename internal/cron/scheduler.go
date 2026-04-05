@@ -214,7 +214,9 @@ func (s *Scheduler) poll(ctx context.Context) error {
 					defer cancel()
 				}
 
-				err := s.dispatcher.Dispatch(jobCtx, dj.payload)
+				p := dj.payload
+				p.ID = dj.id
+				err := s.dispatcher.Dispatch(jobCtx, p)
 				if err != nil {
 					slog.Error("Job dispatch failed", "id", dj.id, "error", err)
 					alert := Payload{
