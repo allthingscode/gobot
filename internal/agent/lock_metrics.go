@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"log/slog"
 	"runtime"
 	"sync"
@@ -62,7 +63,7 @@ func acquireLock(key string) *sessionLock {
 			sessionKey:  key,
 			ch:          make(chan struct{}, 1),
 			metrics:     LockStatus{SessionKey: key},
-			deadlockDur: 30 * time.Second,
+			deadlockDur: 120 * time.Second,
 		}
 		l.ch <- struct{}{}
 		allLocks[key] = l
@@ -82,8 +83,8 @@ func (l *sessionLock) release() {
 	}
 }
 
-// Lock acquires the lock, tracking metrics and panicking on deadlock.
-func (l *sessionLock) Lock() {
+// Lock acquires the lock, tracking metrics and returning an error on deadlock.
+func (l *sessionLock) Lock() error {
 	start := time.Now()
 
 	l.metricsMu.Lock()
@@ -112,10 +113,12 @@ func (l *sessionLock) Lock() {
 			l.metrics.HolderStack = ""
 		}
 		l.metricsMu.Unlock()
+		return nil
 	case <-time.After(l.deadlockDur):
 		buf := make([]byte, 64*1024)
 		n := runtime.Stack(buf, true)
-		panic("DEADLOCK DETECTED for session " + l.sessionKey + "\n\n" + string(buf[:n]))
+		slog.Error("agent: session lock held too long — possible deadlock", "session", l.sessionKey, "stack", string(buf[:n]))
+		return fmt.Errorf("session lock timeout: possible deadlock in session %s", l.sessionKey)
 	}
 }
 

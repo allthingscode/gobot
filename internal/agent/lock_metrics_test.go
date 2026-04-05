@@ -10,7 +10,10 @@ func TestSessionLock_Metrics(t *testing.T) {
 	defer l.release()
 
 	// First lock
-	l.Lock()
+	err := l.Lock()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	_ = 1 + 1 // Non-empty section to satisfy staticcheck
 	l.Unlock()
 
@@ -28,13 +31,19 @@ func TestSessionLock_Metrics(t *testing.T) {
 	l2 := acquireLock("test-session")
 	defer l2.release()
 
-	l.Lock()
+	err = l.Lock()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		l.Unlock()
 	}()
 
-	l2.Lock()
+	err = l2.Lock()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	_ = 1 + 1 // Dummy operation to satisfy SA2001 (empty critical section)
 	l2.Unlock()
 
@@ -51,26 +60,21 @@ func TestSessionLock_Metrics(t *testing.T) {
 	}
 }
 
-func TestSessionLock_DeadlockPanic(t *testing.T) {
+func TestSessionLock_DeadlockError(t *testing.T) {
 	l := acquireLock("deadlock-test")
 	defer l.release()
 	// Make the timeout extremely short for the test
 	l.deadlockDur = 10 * time.Millisecond
 
-	l.Lock() // First acquisition succeeds
+	err := l.Lock() // First acquisition succeeds
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	panicked := false
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				panicked = true
-			}
-		}()
-		l.Lock() // Second acquisition should timeout and panic
-	}()
-
-	if !panicked {
-		t.Error("expected panic on deadlock, but didn't")
+	// Second acquisition should timeout and return error
+	err = l.Lock()
+	if err == nil {
+		t.Error("expected error on deadlock, but got nil")
 	}
 }
 

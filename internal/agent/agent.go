@@ -137,7 +137,10 @@ func (m *SessionManager) SetHooks(h *Hooks) {
 // Returns the runner's response, or an error if the runner or store fails.
 func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage string) (string, error) {
 	lock := acquireLock(sessionKey)
-	lock.Lock()
+	if err := lock.Lock(); err != nil {
+		lock.release()
+		return "", err
+	}
 	defer func() {
 		lock.Unlock()
 		lock.release()
