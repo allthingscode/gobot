@@ -231,7 +231,10 @@ func TestParseConsolidationResponse_ToolCallMap(t *testing.T) {
 		"history_entry": "summary here",
 		"memory_update": "new facts",
 	}
-	result := memory.ParseConsolidationResponse(nil, true, args, "old")
+	result, err := memory.ParseConsolidationResponse(nil, true, args, "old")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -242,7 +245,10 @@ func TestParseConsolidationResponse_ToolCallMap(t *testing.T) {
 
 func TestParseConsolidationResponse_ToolCallJSONString(t *testing.T) {
 	jsonStr := `{"history_entry":"from json","memory_update":"facts"}`
-	result := memory.ParseConsolidationResponse(nil, true, jsonStr, "old")
+	result, err := memory.ParseConsolidationResponse(nil, true, jsonStr, "old")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -253,7 +259,10 @@ func TestParseConsolidationResponse_ToolCallJSONString(t *testing.T) {
 
 func TestParseConsolidationResponse_RegexRecovery(t *testing.T) {
 	content := `Some preamble {"history_entry": "recovered", "memory_update": "data"} trailing`
-	result := memory.ParseConsolidationResponse(content, false, nil, "old memory")
+	result, err := memory.ParseConsolidationResponse(content, false, nil, "old memory")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result == nil {
 		t.Fatal("expected regex recovery to succeed")
 	}
@@ -264,7 +273,10 @@ func TestParseConsolidationResponse_RegexRecovery(t *testing.T) {
 
 func TestParseConsolidationResponse_SummaryFallback(t *testing.T) {
 	content := `{"summary": "alt key", "facts": "alt memory"}`
-	result := memory.ParseConsolidationResponse(content, false, nil, "default mem")
+	result, err := memory.ParseConsolidationResponse(content, false, nil, "default mem")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -274,25 +286,25 @@ func TestParseConsolidationResponse_SummaryFallback(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_NilOnNoKeys(t *testing.T) {
-	result := memory.ParseConsolidationResponse("no json here", false, nil, "old")
-	if result != nil {
-		t.Errorf("expected nil for unparseable input, got %v", result)
+	result, err := memory.ParseConsolidationResponse("no json here", false, nil, "old")
+	if err == nil {
+		t.Errorf("expected error for unparseable input, got result=%v", result)
 	}
 }
 
 func TestParseConsolidationResponse_NonStringContent(t *testing.T) {
 	// Non-string content (e.g. a number) — exercises the default json.Marshal branch.
-	result := memory.ParseConsolidationResponse(42, false, nil, "old")
-	if result != nil {
-		t.Errorf("expected nil for non-string numeric content, got %v", result)
+	result, err := memory.ParseConsolidationResponse(42, false, nil, "old")
+	if err == nil {
+		t.Errorf("expected error for non-string numeric content, got result=%v", result)
 	}
 }
 
 func TestParseConsolidationResponse_InvalidJSONInContent(t *testing.T) {
 	// Regex finds braces but content is not valid JSON — exercises extractJSON failure.
-	result := memory.ParseConsolidationResponse("{not valid json}", false, nil, "old")
-	if result != nil {
-		t.Errorf("expected nil for invalid JSON content, got %v", result)
+	result, err := memory.ParseConsolidationResponse("{not valid json}", false, nil, "old")
+	if err == nil {
+		t.Errorf("expected error for invalid JSON content, got result=%v", result)
 	}
 }
 
@@ -300,7 +312,10 @@ func TestParseConsolidationResponse_AllMemoryKeysMissing(t *testing.T) {
 	// Neither memory_update nor facts present, and currentMemory is "".
 	// Exercises firstNonEmpty reaching its final return "".
 	content := `{"history_entry": "got this", "unrelated": "data"}`
-	result := memory.ParseConsolidationResponse(content, false, nil, "")
+	result, err := memory.ParseConsolidationResponse(content, false, nil, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -313,7 +328,10 @@ func TestParseConsolidationResponse_AllMemoryKeysMissing(t *testing.T) {
 func TestParseConsolidationResponse_NoSummaryFallback(t *testing.T) {
 	// Neither history_entry nor summary present — firstNonEmpty falls through to default.
 	content := `{"memory_update": "some facts"}`
-	result := memory.ParseConsolidationResponse(content, false, nil, "old memory")
+	result, err := memory.ParseConsolidationResponse(content, false, nil, "old memory")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -325,9 +343,78 @@ func TestParseConsolidationResponse_NoSummaryFallback(t *testing.T) {
 
 func TestParseConsolidationResponse_NilOnEmptyArgsNoKeys(t *testing.T) {
 	args := map[string]any{"irrelevant": "value"}
-	result := memory.ParseConsolidationResponse(nil, true, args, "old")
-	if result != nil {
-		t.Errorf("expected nil when args have no history/memory keys, got %v", result)
+	result, err := memory.ParseConsolidationResponse(nil, true, args, "old")
+	if err == nil {
+		t.Errorf("expected error when args have no history/memory keys, got result=%v", result)
+	}
+}
+
+// TestParseConsolidationResponse_ErrorHandling tests all three parse outcomes
+// as required by B-040 implementation steps.
+func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       any
+		hasToolCalls  bool
+		toolArguments any
+		currentMemory string
+		wantError     bool
+		checkResult   func(t *testing.T, result map[string]any)
+	}{
+		{
+			name:          "valid JSON",
+			content:       `{"history_entry": "valid", "memory_update": "facts"}`,
+			hasToolCalls:  false,
+			toolArguments: nil,
+			currentMemory: "old",
+			wantError:     false,
+			checkResult: func(t *testing.T, result map[string]any) {
+				if result["history_entry"] != "valid" {
+					t.Errorf("expected history_entry='valid', got %v", result["history_entry"])
+				}
+			},
+		},
+		{
+			name:          "invalid JSON with regex match",
+			content:       `Some text {"history_entry": "recovered", "memory_update": "data"} more text`,
+			hasToolCalls:  false,
+			toolArguments: nil,
+			currentMemory: "old",
+			wantError:     false,
+			checkResult: func(t *testing.T, result map[string]any) {
+				if result["history_entry"] != "recovered" {
+					t.Errorf("expected history_entry='recovered', got %v", result["history_entry"])
+				}
+			},
+		},
+		{
+			name:          "invalid JSON with no regex match - expect error",
+			content:       "no json here at all",
+			hasToolCalls:  false,
+			toolArguments: nil,
+			currentMemory: "old",
+			wantError:     true,
+			checkResult: func(t *testing.T, result map[string]any) {
+				if result != nil {
+					t.Errorf("expected nil result on error, got %v", result)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := memory.ParseConsolidationResponse(tt.content, tt.hasToolCalls, tt.toolArguments, tt.currentMemory)
+			if tt.wantError && err == nil {
+				t.Errorf("expected error but got none")
+			}
+			if !tt.wantError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if tt.checkResult != nil {
+				tt.checkResult(t, result)
+			}
+		})
 	}
 }
 

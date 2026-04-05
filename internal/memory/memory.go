@@ -4,6 +4,8 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -148,17 +150,23 @@ func FormatConsolidationMessages(messages []map[string]any) string {
 // ParseConsolidationResponse parses the LLM response from a consolidation turn
 // (from tool calls or raw text) and applies regex recovery if needed.
 //
-// Returns a map with "history_entry" and/or "memory_update" keys, or nil if
+// Returns a map with "history_entry" and/or "memory_update" keys, or an error if
 // the response cannot be parsed into a valid consolidation result.
-func ParseConsolidationResponse(content any, hasToolCalls bool, toolArguments any, currentMemory string) map[string]any {
+func ParseConsolidationResponse(content any, hasToolCalls bool, toolArguments any, currentMemory string) (map[string]any, error) {
 	var args map[string]any
+	var jsonErr error
 
 	if hasToolCalls {
 		switch v := toolArguments.(type) {
 		case map[string]any:
 			args = v
 		case string:
-			_ = json.Unmarshal([]byte(v), &args)
+			jsonErr = json.Unmarshal([]byte(v), &args)
+			if jsonErr != nil {
+				slog.Error("consolidation: failed to unmarshal tool arguments",
+					"error", jsonErr,
+					"raw_content", truncateString(v, 500))
+			}
 		}
 	}
 
@@ -173,45 +181,58 @@ func ParseConsolidationResponse(content any, hasToolCalls bool, toolArguments an
 				contentStr = string(b)
 			}
 		}
-		if candidate, ok := extractJSON(contentStr); ok {
-			args = map[string]any{
-				"history_entry": firstNonEmpty(
-					stringVal(candidate, "history_entry"),
-					stringVal(candidate, "summary"),
-					"No summary available.",
-				),
-				"memory_update": firstNonEmpty(
-					stringVal(candidate, "memory_update"),
-					stringVal(candidate, "facts"),
-					currentMemory,
-				),
-			}
+		candidate, extractErr := extractJSON(contentStr)
+		if extractErr != nil {
+			slog.Error("consolidation: failed to parse LLM response as JSON",
+				"error", extractErr,
+				"json_error", jsonErr,
+				"regex_error", "no match",
+				"raw_response", truncateString(contentStr, 500))
+			return nil, fmt.Errorf("consolidation: failed to parse LLM response as JSON (json: %w; regex: no match)", jsonErr)
+		}
+		args = map[string]any{
+			"history_entry": firstNonEmpty(
+				stringVal(candidate, "history_entry"),
+				stringVal(candidate, "summary"),
+				"No summary available.",
+			),
+			"memory_update": firstNonEmpty(
+				stringVal(candidate, "memory_update"),
+				stringVal(candidate, "facts"),
+				currentMemory,
+			),
 		}
 	}
 
 	if len(args) == 0 {
-		return nil
+		slog.Error("consolidation: no valid consolidation data found",
+			"raw_content", truncateString(fmt.Sprintf("%v", content), 500))
+		return nil, fmt.Errorf("consolidation: no valid consolidation data found in response")
 	}
 	_, hasHistory := args["history_entry"]
 	_, hasMemory := args["memory_update"]
 	if !hasHistory && !hasMemory {
-		return nil
+		slog.Error("consolidation: response missing required keys",
+			"has_history", hasHistory,
+			"has_memory", hasMemory,
+			"raw_content", truncateString(fmt.Sprintf("%v", content), 500))
+		return nil, fmt.Errorf("consolidation: response missing required keys (history_entry/memory_update)")
 	}
-	return args
+	return args, nil
 }
 
 var reJSONObj = regexp.MustCompile(`(?s)(\{.*\})`)
 
-func extractJSON(s string) (map[string]any, bool) {
+func extractJSON(s string) (map[string]any, error) {
 	m := reJSONObj.FindString(s)
 	if m == "" {
-		return nil, false
+		return nil, fmt.Errorf("extractJSON: no JSON object found in string")
 	}
 	var out map[string]any
 	if err := json.Unmarshal([]byte(m), &out); err != nil {
-		return nil, false
+		return nil, fmt.Errorf("extractJSON: failed to unmarshal JSON: %w", err)
 	}
-	return out, true
+	return out, nil
 }
 
 // ── RAG helpers ───────────────────────────────────────────────────────────────
@@ -293,4 +314,11 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
