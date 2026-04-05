@@ -19,6 +19,10 @@ type delayedRunner struct {
 	calls    int
 }
 
+func (r *delayedRunner) RunText(_ context.Context, sessionKey, prompt string, _ string) (string, error) {
+	return r.response, nil
+}
+
 func (r *delayedRunner) Run(_ context.Context, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	if r.delay > 0 {
 		time.Sleep(r.delay)

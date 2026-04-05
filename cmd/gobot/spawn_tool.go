@@ -59,6 +59,10 @@ type iterLimitRunner struct {
 	count int
 }
 
+func (r *iterLimitRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) {
+	return r.inner.RunText(ctx, sessionKey, prompt, modelOverride)
+}
+
 func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	r.count++
 	if r.count > r.max {

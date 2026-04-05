@@ -123,6 +123,10 @@ func TestSessionManager_PreHistoryHook_TrimsBeforeRunner(t *testing.T) {
 // noopRunner returns an empty response and the input messages unchanged.
 type noopRunner struct{}
 
+func (r *noopRunner) RunText(_ context.Context, sessionKey, prompt string, _ string) (string, error) {
+	return "", nil
+}
+
 func (r *noopRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	return "ok", messages, nil
 }
@@ -130,6 +134,10 @@ func (r *noopRunner) Run(ctx context.Context, sessionKey string, messages []agen
 // recordingRunner records each call's message slice.
 type recordingRunner struct {
 	calls [][]agentctx.StrategicMessage
+}
+
+func (r *recordingRunner) RunText(_ context.Context, sessionKey, prompt string, _ string) (string, error) {
+	return "", nil
 }
 
 func (r *recordingRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {

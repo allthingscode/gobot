@@ -316,3 +316,7 @@ func TestIterLimitRunner_CountTracked(t *testing.T) {
 		t.Errorf("count = %d, want 3", limited.count)
 	}
 }
+
+func (r *mockRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) { return "", nil }
+
+func (c *captureKeyRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) { return "", nil }

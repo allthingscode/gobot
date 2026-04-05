@@ -58,8 +58,18 @@ type ContextPruningConfig struct {
 }
 
 type CompactionPolicyConfig struct {
-	Strategy    string            `json:"strategy"`
-	MemoryFlush MemoryFlushConfig `json:"memoryFlush"`
+	Strategy      string              `json:"strategy"`
+	MemoryFlush   MemoryFlushConfig   `json:"memoryFlush"`
+	Summarization SummarizationConfig `json:"summarization"`
+}
+
+// DefaultSummarizationThreshold is the default threshold for context summarization (70%).
+const DefaultSummarizationThreshold = 0.7
+
+type SummarizationConfig struct {
+	Enabled          bool    `json:"enabled"`
+	Model            string  `json:"model"`
+	ThresholdPercent float64 `json:"thresholdPercent"` // 0.0 to 1.0; e.g. 0.7 for 70%
 }
 
 type MemoryFlushConfig struct {

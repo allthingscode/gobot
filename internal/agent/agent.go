@@ -33,6 +33,8 @@ import (
 // SessionManager ensures calls with the same key are serialized.
 type Runner interface {
 	Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (response string, updated []agentctx.StrategicMessage, err error)
+	// RunText executes a single-turn completion (text-only) with no tool use.
+	RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error)
 }
 
 // CheckpointStore abstracts the checkpoint persistence layer.
@@ -177,6 +179,20 @@ func (m *SessionManager) loadHistory(sessionKey string) ([]agentctx.StrategicMes
 	return messages, iteration, nil
 }
 
+// summarizationPrompt is the system prompt for context summarization.
+const summarizationPrompt = `You are a context summarization assistant. Your task is to condense the provided conversation history into a concise <context_summary> block.
+
+Preserve the following:
+1. Key decisions made and agreed upon.
+2. Active action items and their status.
+3. User preferences and stylistic mandates.
+4. Current task state and progress.
+
+Format the summary as a clear, bulleted list within <context_summary> tags. If an existing summary is provided, integrate it into the new one (hierarchical summarization).
+
+Conversation history to summarize:
+`
+
 // dispatch is the implementation of Dispatch, potentially wrapped by tracing.
 func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage string, messages []agentctx.StrategicMessage, iteration int) (string, error) {
 	// Strip [SILENT] prefix — the cron layer uses it to suppress routing
@@ -195,6 +211,56 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	if pruned, dropped := PruneMessages(messages, m.pruningPolicy); dropped > 0 {
 		slog.Info("agent: pruned context", "session", sessionKey, "dropped", dropped, "remaining", len(pruned))
 		messages = pruned
+	}
+
+	// Compact context if the history has grown too large (F-015, F-047, F-070).
+	// F-070: Summarize-then-Prune step.
+	threshold := m.compactionPolicy.Summarization.ThresholdPercent
+	if threshold <= 0 {
+		threshold = config.DefaultSummarizationThreshold
+	}
+
+	if m.compactionPolicy.Summarization.Enabled && len(messages) > int(float64(m.memoryWindow)*threshold) {
+		// Trigger summarization when window exceeds threshold.
+		// Identify messages to drop (all but the last keepN messages).
+		keepN := DefaultKeepContextMessages
+		if m.memoryWindow < keepN*2 {
+			keepN = m.memoryWindow / 2
+		}
+
+		if len(messages) > keepN {
+			toSummarize := messages[:len(messages)-keepN]
+			
+			// Build prompt for summarization
+			var sb strings.Builder
+			sb.WriteString(summarizationPrompt)
+			for _, msg := range toSummarize {
+				fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
+			}
+			
+			model := m.compactionPolicy.Summarization.Model
+			if model == "" {
+				model = m.model
+			}
+
+			summary, err := m.runner.RunText(ctx, sessionKey, sb.String(), model)
+			if err == nil {
+				slog.Info("agent: context summarized", "session", sessionKey, "summary_len", len(summary))
+				
+				// Prepend summary as a system message.
+				summaryMsg := agentctx.StrategicMessage{
+					Role:      "system",
+					Content:   &agentctx.MessageContent{Str: &summary},
+					CreatedAt: time.Now().Format(time.RFC3339),
+				}
+				
+				newMessages := []agentctx.StrategicMessage{summaryMsg}
+				newMessages = append(newMessages, messages[len(messages)-keepN:]...)
+				messages = newMessages
+			} else {
+				slog.Warn("agent: summarization failed (falling back to plain compaction)", "session", sessionKey, "err", err)
+			}
+		}
 	}
 
 	// Compact context if the history has grown too large (F-015, F-047).

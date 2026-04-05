@@ -37,6 +37,13 @@ func (r *mockRunner) Run(_ context.Context, sessionKey string, messages []agentc
 	return r.response, updated, nil
 }
 
+func (r *mockRunner) RunText(_ context.Context, sessionKey, prompt string, _ string) (string, error) {
+	if r.err != nil {
+		return "", r.err
+	}
+	return r.response, nil
+}
+
 // ── Mock checkpoint store ─────────────────────────────────────────────────────
 
 type mockStore struct {

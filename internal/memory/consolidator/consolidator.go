@@ -31,7 +31,7 @@ Agent reply to consolidate:
 // TextRunner is the interface used by Consolidator to make a single LLM call.
 // geminiRunner in cmd/gobot/runner.go implements this via RunText.
 type TextRunner interface {
-	RunText(ctx context.Context, prompt string) (string, error)
+	RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error)
 }
 
 // Consolidator extracts facts from agent replies and indexes them into the
@@ -105,7 +105,7 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 	if !strings.Contains(c.prompt, "reply") && !strings.HasSuffix(c.prompt, "\n") {
 		prompt = c.prompt + "\n\nAgent reply to consolidate:\n" + reply
 	}
-	response, err := c.runner.RunText(ctx, prompt)
+	response, err := c.runner.RunText(ctx, sessionKey, prompt, "")
 	if err != nil {
 		return 0, fmt.Errorf("consolidator: RunText: %w", err)
 	}

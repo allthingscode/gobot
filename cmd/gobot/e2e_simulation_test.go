@@ -60,6 +60,10 @@ type simRunner struct {
 	stepIdx  int
 }
 
+func (r *simRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) {
+	return "", nil
+}
+
 func (r *simRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	for r.stepIdx < len(r.steps) {
 		step := r.steps[r.stepIdx]

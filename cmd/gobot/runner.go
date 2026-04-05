@@ -59,14 +59,17 @@ func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, 
 	}
 }
 
-// RunText makes a single-turn LLM call with the given prompt text and returns
-// the model's text response. Used by the memory consolidator (F-028).
-func (r *geminiRunner) RunText(ctx context.Context, prompt string) (string, error) {
+// RunText performs a single-turn, text-only LLM call without tool use.
+func (r *geminiRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) {
+	model := r.model
+	if modelOverride != "" {
+		model = modelOverride
+	}
 	req := provider.ChatRequest{
-		Model:    r.model,
+		Model:    model,
 		Messages: []agentctx.StrategicMessage{{Role: "user", Content: &agentctx.MessageContent{Str: &prompt}}},
 	}
-	resp, err := r.retryChat(ctx, "", req)
+	resp, err := r.retryChat(ctx, sessionKey, req)
 	if err != nil {
 		return "", fmt.Errorf("RunText: %w", err)
 	}
@@ -126,7 +129,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 	userText := lastUserText(messages)
 	if r.enableReflection && userText != "" {
 		planPrompt := reflection.GenerateRubricPrompt(userText)
-		if planStr, planErr := r.RunText(ctx, planPrompt); planErr == nil {
+		if planStr, planErr := r.RunText(ctx, sessionKey, planPrompt, ""); planErr == nil {
 			if parsed, ok := reflection.ParseJSONResponse(planStr); ok {
 				rubric = parsed
 				slog.Debug("runner: planning rubric generated", "session", sessionKey)
@@ -174,7 +177,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 			// Reflection phase (F-049): audit the terminal response against the rubric.
 			if r.enableReflection && rubric != nil && reflectionRounds < r.maxReflectionRounds {
 				criticPrompt := reflection.GenerateCriticPrompt(userText, rubric, text)
-				if criticStr, criticErr := r.RunText(ctx, criticPrompt); criticErr == nil {
+				if criticStr, criticErr := r.RunText(ctx, sessionKey, criticPrompt, ""); criticErr == nil {
 					if report, ok := reflection.ParseJSONResponse(criticStr); ok {
 						score := reflection.CalculateTotalScore(report, rubric)
 						threshold := 0.7

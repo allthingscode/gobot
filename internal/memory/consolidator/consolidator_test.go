@@ -17,7 +17,7 @@ type mockTextRunner struct {
 	err      error
 }
 
-func (m *mockTextRunner) RunText(_ context.Context, _ string) (string, error) {
+func (m *mockTextRunner) RunText(_ context.Context, _, _ string, _ string) (string, error) {
 	return m.response, m.err
 }
 

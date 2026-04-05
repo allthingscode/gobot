@@ -153,7 +153,8 @@ func cmdInit() *cobra.Command {
 }
 
 func cmdDoctor() *cobra.Command {
-	return &cobra.Command{
+	var noInteractive bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run strategic health checks",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -161,9 +162,15 @@ func cmdDoctor() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config load failed: %w", err)
 			}
-			return doctor.Run(cfg, liveProbes())
+			var probes *doctor.Probes
+			if !noInteractive {
+				probes = liveProbes()
+			}
+			return doctor.Run(cfg, probes)
 		},
 	}
+	cmd.Flags().BoolVar(&noInteractive, "no-interactive", false, "Skip live connectivity checks (OAuth, API calls)")
+	return cmd
 }
 
 type dispatchHandler struct {
