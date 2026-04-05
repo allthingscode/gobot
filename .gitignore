@@ -39,6 +39,7 @@ GEMINI.md
 .claudeignore.txt
 
 # Temporary/Generated Files
+coverage
 coverage/
 package-lock.json
 
