@@ -32,6 +32,9 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 	if keepN >= maxN {
 		keepN = maxN - 1
 	}
+	if keepN < 1 {
+		keepN = 1
+	}
 
 	// Identify messages to keep.
 	keep := make([]bool, len(messages))

@@ -497,3 +497,52 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 func ptrStr(s string) *string {
 	return &s
 }
+func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
+	ctx := context.Background()
+	// Mock runner that returns a summary.
+	runner := &mockRunner{response: "<context_summary>\n* summarized\n</context_summary>"}
+	store := newMockStore()
+	mgr := NewSessionManager(runner, store, "mock")
+
+	// Set memoryWindow to 1 to trigger the bug (keepN = 1 / 2 = 0).
+	mgr.SetMemoryWindow(1)
+	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
+		Summarization: config.SummarizationConfig{
+			Enabled:          true,
+			ThresholdPercent: 0.1, // Trigger easily
+		},
+	})
+
+	// Pre-fill history ending with a user message.
+	history := []agentctx.StrategicMessage{
+		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("message 1")}},
+		{Role: "assistant", Content: &agentctx.MessageContent{Str: ptrStr("response 1")}},
+		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("message 2")}},
+	}
+	store.SaveSnapshot("sess1", 1, history)
+
+	// Dispatch a new message.
+	_, err := mgr.Dispatch(ctx, "sess1", "new message")
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+
+	// Verify the history in the store after dispatch.
+	snap, _ := store.LoadLatest("sess1")
+	if snap == nil {
+		t.Fatal("expected snapshot to exist")
+	}
+
+	foundMsg2 := false
+	for _, msg := range snap.Messages {
+		if msg.Content.String() == "message 2" {
+			foundMsg2 = true
+			break
+		}
+	}
+
+	// This test demonstrates that without the fix, we lose "message 2" entirely.
+	if !foundMsg2 {
+		t.Errorf("expected 'message 2' to be kept in history, but it was dropped (keepN likely 0)")
+	}
+}

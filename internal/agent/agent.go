@@ -226,6 +226,10 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 		keepN := DefaultKeepContextMessages
 		if m.memoryWindow < keepN*2 {
 			keepN = m.memoryWindow / 2
+			if keepN < 1 {
+				keepN = 1
+				slog.Warn("agent: memoryWindow too small, clamping keepN to 1", "memoryWindow", m.memoryWindow, "keepN", keepN)
+			}
 		}
 
 		if len(messages) > keepN {
