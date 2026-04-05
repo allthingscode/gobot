@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -82,11 +83,23 @@ func (m *CheckpointManager) CreateThread(threadID, model string, metadata map[st
 func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, messages []StrategicMessage) (bool, error) {
 	stateJSON, err := json.Marshal(messages)
 	if err != nil {
+		var preview string
+		if len(messages) > 0 && messages[0].Content != nil {
+			preview = truncate(messages[0].Content.String(), 200)
+		}
+		slog.Warn("context: SaveSnapshot skipped — message failed validation (marshal)",
+			"session", threadID,
+			"reason", err,
+			"preview", preview)
 		return false, nil //nolint:nilerr // mirrors Python: log and return false
 	}
 	// Validate round-trip.
 	var check []StrategicMessage
 	if err := json.Unmarshal(stateJSON, &check); err != nil {
+		slog.Warn("context: SaveSnapshot skipped — message failed validation (unmarshal)",
+			"session", threadID,
+			"reason", err,
+			"preview", truncate(string(stateJSON), 200))
 		return false, nil
 	}
 
@@ -217,4 +230,12 @@ func (m *CheckpointManager) ListResumable() ([]ResumableThread, error) {
 		result = append(result, r)
 	}
 	return result, rows.Err()
+}
+
+func truncate(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "..."
 }

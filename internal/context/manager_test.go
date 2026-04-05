@@ -1,6 +1,8 @@
 package context
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"sync"
 	"testing"
@@ -416,6 +418,13 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
+	// Set up a custom slog handler to capture output.
+	var buf bytes.Buffer
+	handler := slog.NewTextHandler(&buf, nil)
+	oldDefault := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(oldDefault) })
+
 	// ContentItem with all-nil fields: MarshalJSON returns an error.
 	badItem := ContentItem{} // all nil
 	msgs := []StrategicMessage{
@@ -427,6 +436,18 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) {
 	}
 	if ok {
 		t.Error("expected ok=false for un-marshalable messages, got true")
+	}
+
+	// Verify log contains the warning and our session ID.
+	output := buf.String()
+	if !bytes.Contains(buf.Bytes(), []byte("level=WARN")) {
+		t.Errorf("expected level=WARN log, got: %q", output)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("session=t1")) {
+		t.Errorf("expected session=t1 in log, got: %q", output)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("ContentItem: all fields are nil")) {
+		t.Errorf("expected reason in log, got: %q", output)
 	}
 }
 
