@@ -333,7 +333,14 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, idemK
 }
 
 // executeToolInner is the inner implementation of executeTool without idempotency checks.
-func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey string, name string, args map[string]any) (string, error) {
+func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey string, name string, args map[string]any) (result string, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("runner: tool panic recovered", "session", sessionKey, "tool", name, "panic", rec)
+			err = fmt.Errorf("tool %s panicked: %v", name, rec)
+		}
+	}()
+
 	for _, t := range r.tools {
 		if t.Name() == name {
 			if r.tracer != nil {

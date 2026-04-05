@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"context"
@@ -320,3 +320,30 @@ func (m *mockTool) Declaration() provider.ToolDeclaration { return provider.Tool
 func (m *mockTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return "result", nil
 }
+type panicTool struct {}
+func (p *panicTool) Name() string                     { return "panic_tool" }
+func (p *panicTool) Description() string              { return "panics" }
+func (p *panicTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: "panic_tool"} }
+func (p *panicTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+	panic("simulated panic")
+}
+
+func TestRunner_ToolPanicRecovery(t *testing.T) {
+	r := &geminiRunner{
+		tools: []Tool{&panicTool{}},
+	}
+	ctx := context.Background()
+	result, err := r.executeToolInner(ctx, "session-123", "panic_tool", nil)
+	
+	if err == nil {
+		t.Fatal("Expected error due to panic, got nil")
+	}
+	expectedMsg := "tool panic_tool panicked: simulated panic"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error %q, got %q", expectedMsg, err.Error())
+	}
+	if result != "" {
+		t.Errorf("Expected empty result, got %q", result)
+	}
+}
+
