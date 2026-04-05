@@ -73,7 +73,8 @@ func main() {
 		if errors.As(err, &exitErr) {
 			os.Exit(exitErr.code)
 		}
-		panic(fmt.Errorf("ROOT EXECUTE ERROR: %w", err))
+		slog.Error("fatal command error", "err", err)
+		os.Exit(1)
 	}
 }
 
