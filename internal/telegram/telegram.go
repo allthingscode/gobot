@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // Regex for .nanobot/media or .nanobot\media (case-insensitive)
@@ -36,7 +37,10 @@ func GetMediaPath(baseWorkspace, originalPath string) string {
 		}
 	}
 
-	filename := filepath.Base(originalPath)
+	// Always normalize backslashes to forward slashes before calling Base
+	// to ensure cross-platform behavior even on non-Windows host OS.
+	normalized := strings.ReplaceAll(originalPath, "\\", "/")
+	filename := filepath.Base(normalized)
 	return filepath.Join(workspace, "media", filename)
 }
 

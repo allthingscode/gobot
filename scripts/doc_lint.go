@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -42,16 +43,18 @@ func main() {
 	failures = append(failures, lintGoDocs(root)...)
 
 	// --- Check 2: stale file references in backlog markdown ---
-	failures = append(failures, lintStaleReferences(root)...)
+	if _, err := os.Stat(filepath.Join(root, ".private")); err == nil {
+		failures = append(failures, lintStaleReferences(root)...)
 
-	// --- Check 3: every backlog item file is indexed ---
-	failures = append(failures, lintBacklogIndex(root)...)
+		// --- Check 3: every backlog item file is indexed ---
+		failures = append(failures, lintBacklogIndex(root)...)
 
-	// --- Check 4: backlog YAML frontmatter status ---
-	failures = append(failures, lintBacklogStatus(root)...)
+		// --- Check 4: backlog YAML frontmatter status ---
+		failures = append(failures, lintBacklogStatus(root)...)
 
-	// --- Check 5: specialist protocol enforcement ---
-	failures = append(failures, lintSpecialistProtocols(root)...)
+		// --- Check 5: specialist protocol enforcement ---
+		failures = append(failures, lintSpecialistProtocols(root)...)
+	}
 
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "\n--- doc_lint: %d issue(s) found ---\n", len(failures))
@@ -129,7 +132,7 @@ func lintStaleReferences(root string) []string {
 	backlogDir := filepath.Join(root, ".private", "backlog")
 
 	// In CI, .private/ is gitignored - skip this check gracefully
-	if _, err := os.Stat(backlogDir); os.IsNotExist(err) {
+	if _, err := os.Stat(backlogDir); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 
@@ -150,7 +153,7 @@ func lintStaleReferences(root string) []string {
 		for _, m := range matches {
 			ref := m[1]
 			absPath := filepath.Join(root, filepath.FromSlash(ref))
-			if _, statErr := os.Stat(absPath); os.IsNotExist(statErr) {
+			if _, statErr := os.Stat(absPath); errors.Is(statErr, os.ErrNotExist) {
 				rel, _ := filepath.Rel(root, path)
 				out = append(out, fmt.Sprintf("%s references non-existent path %q", rel, ref))
 			}
@@ -169,7 +172,7 @@ func lintBacklogIndex(root string) []string {
 	data, err := os.ReadFile(backlogMd)
 	if err != nil {
 		// In CI, .private/ is gitignored - skip this check gracefully
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		out = append(out, fmt.Sprintf("cannot read BACKLOG.md: %v", err))
@@ -212,7 +215,7 @@ func lintBacklogStatus(root string) []string {
 	var out []string
 	for _, subDir := range []string{"features", "bugs"} {
 		dir := filepath.Join(root, ".private", "backlog", subDir)
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 			return nil // In CI, .private/ is gitignored - skip gracefully
 		}
 		entries, _ := os.ReadDir(dir)
@@ -275,7 +278,7 @@ func lintSpecialistProtocols(root string) []string {
 				var p string
 				if json.Unmarshal(raw, &p) == nil {
 					abs := filepath.Join(root, filepath.FromSlash(p))
-					if _, statErr := os.Stat(abs); os.IsNotExist(statErr) {
+					if _, statErr := os.Stat(abs); errors.Is(statErr, os.ErrNotExist) {
 						out = append(out,
 							fmt.Sprintf(".private/session/handoff.json: state_file_path %q does not exist", p))
 					}
