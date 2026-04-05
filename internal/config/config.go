@@ -47,6 +47,7 @@ type AgentDefaults struct {
 	Provider          string                 `json:"provider"`
 	MaxTokens         int                    `json:"maxTokens"`
 	MaxToolIterations int                    `json:"maxToolIterations"`
+	MaxToolResultBytes int                   `json:"maxToolResultBytes"`
 	MemoryWindow      int                    `json:"memoryWindow"`
 	ContextPruning    ContextPruningConfig   `json:"contextPruning"`
 	Compaction        CompactionPolicyConfig `json:"compaction"`
@@ -186,6 +187,15 @@ func (c *Config) MaxTokens() int {
 		return c.Agents.Defaults.MaxTokens
 	}
 	return 0
+}
+
+// MaxToolResultBytes returns the configured maximum tool result size in bytes,
+// defaulting to 32768 (32KB). Zero or negative means no limit.
+func (c *Config) MaxToolResultBytes() int {
+	if c.Agents.Defaults.MaxToolResultBytes != 0 {
+		return c.Agents.Defaults.MaxToolResultBytes
+	}
+	return 32768
 }
 
 // EffectiveMaxToolIterations returns the configured tool iteration cap,

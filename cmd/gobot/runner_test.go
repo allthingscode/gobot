@@ -59,6 +59,73 @@ func TestExtractText(t *testing.T) {
 	}
 }
 
+func TestTruncateToolResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   string
+		maxBytes int
+		want     string
+	}{
+		{
+			name:     "empty string",
+			result:   "",
+			maxBytes: 10,
+			want:     "",
+		},
+		{
+			name:     "under limit",
+			result:   "hello",
+			maxBytes: 10,
+			want:     "hello",
+		},
+		{
+			name:     "exactly at limit",
+			result:   "1234567890",
+			maxBytes: 10,
+			want:     "1234567890",
+		},
+		{
+			name:     "over limit",
+			result:   "1234567890-excess",
+			maxBytes: 10,
+			want:     "1234567890\n\n[... truncated: result exceeded 10 bytes ...]",
+		},
+		{
+			name:     "disabled (zero)",
+			result:   "long string",
+			maxBytes: 0,
+			want:     "long string",
+		},
+		{
+			name:     "disabled (negative)",
+			result:   "long string",
+			maxBytes: -1,
+			want:     "long string",
+		},
+		{
+			name:     "utf-8 multi-byte boundary (keep)",
+			result:   "Hello 世界", // "世界" is 6 bytes. Total 12 bytes.
+			maxBytes: 9,        // Should keep "Hello 世" (9 bytes)
+			want:     "Hello 世\n\n[... truncated: result exceeded 9 bytes ...]",
+		},
+		{
+			name:     "utf-8 multi-byte boundary (cut middle)",
+			result:   "Hello 世界",
+			maxBytes: 8,        // Cuts in middle of "世". Should fallback to "Hello " (6 bytes).
+			want:     "Hello \n\n[... truncated: result exceeded 8 bytes ...]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateToolResult(tt.result, tt.maxBytes)
+			if got != tt.want {
+				t.Errorf("truncateToolResult() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunner_SetHooks(t *testing.T) {
 	r := &geminiRunner{}
 	h := &agent.Hooks{}
@@ -347,3 +414,76 @@ func TestRunner_ToolPanicRecovery(t *testing.T) {
 	}
 }
 
+
+type largeTool struct {
+	size int
+}
+
+func (l *largeTool) Name() string                     { return "large_tool" }
+func (l *largeTool) Description() string              { return "returns large string" }
+func (l *largeTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: "large_tool"} }
+func (l *largeTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+	return strings.Repeat("A", l.size), nil
+}
+
+func TestRunner_ToolResultSizeLimiting(t *testing.T) {
+	mock := &mockProvider{
+		responses: []*provider.ChatResponse{
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []map[string]any{
+						{"name": "large_tool", "args": map[string]any{}},
+					},
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role:    agentctx.RoleAssistant,
+					Content: &agentctx.MessageContent{Str: strPtr("done")},
+				},
+			},
+		},
+	}
+
+	r := &geminiRunner{
+		prov:               mock,
+		model:              "mock-model",
+		maxToolIterations:  10,
+		maxToolResultBytes: 100,
+		limiter:            rate.NewLimiter(rate.Inf, 1),
+		breaker:            resilience.New("mock", 5, time.Minute, time.Second),
+		tools: []Tool{
+			&largeTool{size: 200},
+		},
+	}
+
+	_, messages, err := r.Run(context.Background(), "test-session", nil)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Find the tool message
+	var toolMsg *agentctx.StrategicMessage
+	for _, m := range messages {
+		if m.Role == agentctx.RoleTool {
+			toolMsg = &m
+			break
+		}
+	}
+
+	if toolMsg == nil {
+		t.Fatal("Tool message not found in history")
+	}
+
+	content := *toolMsg.Content.Str
+	if len(content) > 200 { // Should be 100 + notice
+		t.Errorf("Tool result not truncated, length: %d", len(content))
+	}
+	if !strings.Contains(content, "truncated") {
+		t.Errorf("Tool result missing truncation notice: %q", content)
+	}
+	if len(content) != 100 + len(fmt.Sprintf("\n\n[... truncated: result exceeded %d bytes ...]", 100)) {
+		t.Errorf("Unexpected truncated length: %d", len(content))
+	}
+}

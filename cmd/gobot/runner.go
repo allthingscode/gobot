@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/time/rate"
 
@@ -37,6 +38,7 @@ type geminiRunner struct {
 	idempStore          *agentctx.IdempotencyStore      // may be nil; idempotency for side-effecting tools
 	maxToolIterations   int
 	maxTokens           int
+	maxToolResultBytes  int
 	enableReflection    bool // opt-in; off by default for cost control
 	maxReflectionRounds int  // default 1 → ≤2x token overhead
 }
@@ -54,6 +56,7 @@ func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, 
 		limiter:             rate.NewLimiter(rate.Every(time.Second), 3),
 		maxToolIterations:   25,
 		maxTokens:           cfg.MaxTokens(),
+		maxToolResultBytes:  cfg.MaxToolResultBytes(),
 		enableReflection:    false,
 		maxReflectionRounds: 1,
 	}
@@ -271,6 +274,9 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 				}
 			}
 
+			// F-076: Truncate oversized tool results at dispatch to prevent context overflow.
+			result = truncateToolResult(result, r.maxToolResultBytes)
+
 			// Append result as a new message
 			messages = append(messages, agentctx.StrategicMessage{
 				Role:       agentctx.RoleTool,
@@ -485,4 +491,25 @@ func buildCorrectionMessage(report map[string]any) string {
 	}
 	sb.WriteString("Please revise your response to address the above.")
 	return sb.String()
+}
+
+// truncateToolResult cuts off oversized tool outputs at maxBytes.
+// Zero or negative maxBytes means no truncation (disabled).
+func truncateToolResult(result string, maxBytes int) string {
+	if maxBytes <= 0 || len(result) <= maxBytes {
+		return result
+	}
+
+	// F-076 Review: slog truncation event.
+	slog.Info("runner: tool result truncated", "max_bytes", maxBytes, "original_size", len(result))
+
+	// F-076: Truncate at maxBytes while ensuring we don't break multi-byte UTF-8 sequences.
+	// We walk backwards from maxBytes to find the start of the last rune.
+	idx := maxBytes
+	for idx > 0 && !utf8.RuneStart(result[idx]) {
+		idx--
+	}
+
+	const truncationNotice = "\n\n[... truncated: result exceeded %d bytes ...]"
+	return result[:idx] + fmt.Sprintf(truncationNotice, maxBytes)
 }
