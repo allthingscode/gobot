@@ -15,18 +15,22 @@ type HandoffTicket struct {
 	TaskID            string `json:"task_id"`
 	SourceSpecialist  string `json:"source_specialist"`
 	TargetSpecialist  string `json:"target_specialist"`
-	StateFilePath     string `json:"state_file_path"`
-	Priority          string `json:"priority"`
-	LastOutputSummary string `json:"last_output_summary"`
-	AgentPrompt       string `json:"agent_prompt"`
-	ResumeCommand     string `json:"resume_command"`
-	Timestamp         string `json:"timestamp"`
+	HandoffRetryCount int    `json:"handoff_retry_count"`
+	Prompt            string `json:"prompt"`
+
+	// Deprecated: Fields below are for backwards compatibility with older versions
+	StateFilePath     string `json:"state_file_path,omitempty"`
+	Priority          string `json:"priority,omitempty"`
+	LastOutputSummary string `json:"last_output_summary,omitempty"`
+	AgentPrompt       string `json:"agent_prompt,omitempty"`
+	ResumeCommand     string `json:"resume_command,omitempty"`
+	Timestamp         string `json:"timestamp,omitempty"`
 }
 
 // NewHandoffHook returns a PostDispatchFn that detects handoff.json in the
 // storage root and appends the resume command to the agent's response.
 //
-// If a handoff.json is found, it is read, its resume_command is appended to
+// If a handoff.json is found, it is read, its prompt is appended to
 // the response, and the file is deleted to prevent duplicate handoffs.
 func NewHandoffHook(storageRoot string) PostDispatchFn {
 	return func(ctx context.Context, sessionKey string, response string) string {
@@ -52,7 +56,7 @@ func NewHandoffHook(storageRoot string) PostDispatchFn {
 			slog.Warn("handoff: failed to delete handoff.json", "err", err)
 		}
 
-		slog.Info("handoff: detected handoff.json, appending resume command",
+		slog.Info("handoff: detected handoff.json, appending prompt",
 			"session", sessionKey,
 			"target", ticket.TargetSpecialist)
 
@@ -61,10 +65,20 @@ func NewHandoffHook(storageRoot string) PostDispatchFn {
 		if len(title) > 0 {
 			title = strings.ToUpper(title[:1]) + title[1:]
 		}
-		handoffMsg := fmt.Sprintf("\n\n---\n🚀 **HANDOFF DETECTED**\nTarget: %s\nPrompt: %s\n\nCommand:\n`%s`",
-			title,
-			ticket.AgentPrompt,
-			ticket.ResumeCommand)
+
+		// Support both new schema (prompt) and old schema (AgentPrompt + ResumeCommand)
+		var handoffMsg string
+		if ticket.Prompt != "" {
+			handoffMsg = fmt.Sprintf("\n\n---\n🚀 **HANDOFF DETECTED**\nTarget: %s\nPrompt: %s\n\nCommand:\n`%s`\n",
+				title,
+				ticket.Prompt,
+				ticket.Prompt)
+		} else {
+			handoffMsg = fmt.Sprintf("\n\n---\n🚀 **HANDOFF DETECTED**\nTarget: %s\nPrompt: %s\n\nCommand:\n`%s`\n",
+				title,
+				ticket.AgentPrompt,
+				ticket.ResumeCommand)
+		}
 
 		return response + handoffMsg
 	}
