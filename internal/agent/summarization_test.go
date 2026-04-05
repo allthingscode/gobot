@@ -40,7 +40,7 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 
 	// Dispatch with this history.
 	ctx := context.Background()
-	_, err := sm.dispatch(ctx, "test-session", "new message", messages, 1)
+	_, err := sm.dispatch(ctx, "test-session", "new message", messages, 1, false)
 	if err != nil {
 		t.Fatalf("dispatch failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 
 	// Dispatch.
 	ctx := context.Background()
-	_, err := sm.dispatch(ctx, "test-session", "new message", messages, 1)
+	_, err := sm.dispatch(ctx, "test-session", "new message", messages, 1, false)
 	if err != nil {
 		t.Fatalf("dispatch failed: %v", err)
 	}
