@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -105,5 +106,48 @@ func TestSessionManagerStress_WithStore(t *testing.T) {
 
 	if saveCalls != n {
 		t.Errorf("expected %d store.saveCalls, got %d", n, saveCalls)
+	}
+}
+
+func TestSessionLock_MemoryLeakVerification(t *testing.T) {
+	runner := &mockRunner{response: "ok"}
+	mgr := NewSessionManager(runner, nil, "model")
+
+	const numSessions = 1000
+	var wg sync.WaitGroup
+
+	// Run 1000 unique sessions in parallel
+	for i := 0; i < numSessions; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			key := fmt.Sprintf("stress-session-%d", idx)
+			_, _ = mgr.Dispatch(context.Background(), key, "msg")
+		}(i)
+	}
+	wg.Wait()
+
+	// After all sessions complete, allLocks should be empty
+	metrics := GetLockMetrics()
+	count := 0
+	for key := range metrics {
+		if strings.HasPrefix(key, "stress-session-") {
+			count++
+		}
+	}
+
+	if count != 0 {
+		t.Errorf("expected 0 stress-test locks remaining in map, found %d", count)
+		// Print a few for debugging if it fails
+		i := 0
+		for key := range metrics {
+			if strings.HasPrefix(key, "stress-session-") {
+				t.Logf("leaked key: %s", key)
+				i++
+				if i > 5 {
+					break
+				}
+			}
+		}
 	}
 }

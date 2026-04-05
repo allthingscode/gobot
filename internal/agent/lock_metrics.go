@@ -20,41 +20,66 @@ type LockStatus struct {
 	MaxWaitTime     time.Duration `json:"max_wait_time"`
 }
 
-var allMetrics sync.Map // map[string]*sessionLock
+var (
+	allLocks   = make(map[string]*sessionLock)
+	allLocksMu sync.Mutex
+)
 
 // GetLockMetrics returns a snapshot of all session lock metrics.
 // Used by gobot doctor and debug endpoints.
 func GetLockMetrics() map[string]LockStatus {
 	snapshot := make(map[string]LockStatus)
-	allMetrics.Range(func(key, value any) bool {
-		l := value.(*sessionLock)
+	allLocksMu.Lock()
+	defer allLocksMu.Unlock()
+
+	for key, l := range allLocks {
 		l.metricsMu.RLock()
-		snapshot[key.(string)] = l.metrics
+		snapshot[key] = l.metrics
 		l.metricsMu.RUnlock()
-		return true
-	})
+	}
 	return snapshot
 }
 
-// sessionLock wraps a channel-based lock with metrics and timeout capability.
+// sessionLock wraps a channel-based lock with metrics, timeout, and reference counting.
 type sessionLock struct {
 	sessionKey  string
 	ch          chan struct{}
 	metrics     LockStatus
 	metricsMu   sync.RWMutex
 	deadlockDur time.Duration
+	refCount    int
 }
 
-func newSessionLock(key string) *sessionLock {
-	l := &sessionLock{
-		sessionKey:  key,
-		ch:          make(chan struct{}, 1),
-		metrics:     LockStatus{SessionKey: key},
-		deadlockDur: 30 * time.Second,
+// acquireLock gets or creates a sessionLock for the given key and increments its reference count.
+// Must be called via SessionManager to ensure proper cleanup.
+func acquireLock(key string) *sessionLock {
+	allLocksMu.Lock()
+	defer allLocksMu.Unlock()
+
+	l, ok := allLocks[key]
+	if !ok {
+		l = &sessionLock{
+			sessionKey:  key,
+			ch:          make(chan struct{}, 1),
+			metrics:     LockStatus{SessionKey: key},
+			deadlockDur: 30 * time.Second,
+		}
+		l.ch <- struct{}{}
+		allLocks[key] = l
 	}
-	l.ch <- struct{}{}
-	actual, _ := allMetrics.LoadOrStore(key, l)
-	return actual.(*sessionLock)
+	l.refCount++
+	return l
+}
+
+// release decrements the reference count and removes the lock from the global map if it hits zero.
+func (l *sessionLock) release() {
+	allLocksMu.Lock()
+	defer allLocksMu.Unlock()
+
+	l.refCount--
+	if l.refCount <= 0 {
+		delete(allLocks, l.sessionKey)
+	}
 }
 
 // Lock acquires the lock, tracking metrics and panicking on deadlock.

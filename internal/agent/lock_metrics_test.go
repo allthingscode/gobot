@@ -1,14 +1,13 @@
 package agent
 
 import (
-	"runtime"
-	"sync"
 	"testing"
 	"time"
 )
 
 func TestSessionLock_Metrics(t *testing.T) {
-	l := newSessionLock("test-session")
+	l := acquireLock("test-session")
+	defer l.release()
 
 	// First lock
 	l.Lock()
@@ -25,45 +24,19 @@ func TestSessionLock_Metrics(t *testing.T) {
 		t.Errorf("expected 0 wait count, got %d", m.WaitCount)
 	}
 
-	// Test contention
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	started := make(chan struct{})
-	unlocked := make(chan struct{})
+	// Wait, we need to test contention
+	l2 := acquireLock("test-session")
+	defer l2.release()
 
 	l.Lock()
-
 	go func() {
-		close(started)
-		l.Lock() // Should wait
-		_ = 1 + 1
+		time.Sleep(50 * time.Millisecond)
 		l.Unlock()
-		close(unlocked)
-		wg.Done()
 	}()
 
-	// Wait for goroutine to start
-	<-started
-
-	// Deterministically wait for contention count to increase
-	for {
-		l.metricsMu.RLock()
-		wc := l.metrics.WaitCount
-		l.metricsMu.RUnlock()
-		if wc > 0 {
-			break
-		}
-		runtime.Gosched()
-	}
-
-	// Wait past the Windows timer resolution (~15.6ms) to ensure MaxWaitTime > 0.
-	// Note: This is NOT for goroutine coordination, only for time measurement.
-	time.Sleep(20 * time.Millisecond)
-
-	l.Unlock()
-	<-unlocked
-	wg.Wait()
+	l2.Lock()
+	_ = 1 + 1 // Dummy operation to satisfy SA2001 (empty critical section)
+	l2.Unlock()
 
 	metrics = GetLockMetrics()
 	m = metrics["test-session"]
@@ -79,7 +52,8 @@ func TestSessionLock_Metrics(t *testing.T) {
 }
 
 func TestSessionLock_DeadlockPanic(t *testing.T) {
-	l := newSessionLock("deadlock-test")
+	l := acquireLock("deadlock-test")
+	defer l.release()
 	// Make the timeout extremely short for the test
 	l.deadlockDur = 10 * time.Millisecond
 
@@ -96,6 +70,45 @@ func TestSessionLock_DeadlockPanic(t *testing.T) {
 	}()
 
 	if !panicked {
-		t.Error("expected deadlock panic, but didn't happen")
+		t.Error("expected panic on deadlock, but didn't")
+	}
+}
+
+func TestSessionLock_Lifecycle(t *testing.T) {
+	key := "lifecycle-test"
+
+	// Initially no metrics
+	if _, ok := GetLockMetrics()[key]; ok {
+		t.Fatal("expected no metrics initially")
+	}
+
+	l1 := acquireLock(key)
+	if l1.refCount != 1 {
+		t.Errorf("expected refCount 1, got %d", l1.refCount)
+	}
+
+	if _, ok := GetLockMetrics()[key]; !ok {
+		t.Fatal("expected metrics after acquireLock")
+	}
+
+	l2 := acquireLock(key)
+	if l1 != l2 {
+		t.Fatal("expected same lock object for same key")
+	}
+	if l1.refCount != 2 {
+		t.Errorf("expected refCount 2, got %d", l1.refCount)
+	}
+
+	l1.release()
+	if l1.refCount != 1 {
+		t.Errorf("expected refCount 1 after first release, got %d", l1.refCount)
+	}
+	if _, ok := GetLockMetrics()[key]; !ok {
+		t.Fatal("expected metrics still present after first release")
+	}
+
+	l2.release()
+	if _, ok := GetLockMetrics()[key]; ok {
+		t.Fatal("expected metrics to be removed after last release")
 	}
 }

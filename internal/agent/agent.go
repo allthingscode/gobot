@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -67,7 +66,6 @@ type SessionManager struct {
 	memoryWindow     int
 	pruningPolicy    config.ContextPruningConfig
 	compactionPolicy config.CompactionPolicyConfig
-	mu               sync.Map // key: sessionKey (string) → *sessionLock
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -138,9 +136,12 @@ func (m *SessionManager) SetHooks(h *Hooks) {
 // The [SILENT] prefix is stripped from userMessage before it reaches the runner.
 // Returns the runner's response, or an error if the runner or store fails.
 func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage string) (string, error) {
-	lock := m.lockFor(sessionKey)
+	lock := acquireLock(sessionKey)
 	lock.Lock()
-	defer lock.Unlock()
+	defer func() {
+		lock.Unlock()
+		lock.release()
+	}()
 
 	if m.tracer != nil {
 		// Load history first so we can report message count to tracer.
@@ -343,16 +344,6 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	}
 
 	return response, nil
-}
-
-// lockFor returns the existing session lock for sessionKey, creating one if needed.
-// Uses LoadOrStore for goroutine-safe lazy initialisation.
-func (m *SessionManager) lockFor(sessionKey string) *sessionLock {
-	if val, ok := m.mu.Load(sessionKey); ok {
-		return val.(*sessionLock)
-	}
-	val, _ := m.mu.LoadOrStore(sessionKey, newSessionLock(sessionKey))
-	return val.(*sessionLock)
 }
 
 // StripSilent removes the "[SILENT]" prefix from message (trimming surrounding
