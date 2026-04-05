@@ -216,3 +216,107 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 		t.Errorf("Run() = %q, want %q (reflection should have triggered backtrack)", got, "corrected attempt")
 	}
 }
+
+func TestRunner_ToolCallValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		toolCalls []map[string]any
+		wantErr   string
+	}{
+		{
+			name: "valid call",
+			toolCalls: []map[string]any{
+				{"name": "test_tool", "args": map[string]any{"arg1": "val1"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "missing name",
+			toolCalls: []map[string]any{
+				{"args": map[string]any{}},
+			},
+			wantErr: "missing or non-string 'name' field",
+		},
+		{
+			name: "wrong name type",
+			toolCalls: []map[string]any{
+				{"name": 123, "args": map[string]any{}},
+			},
+			wantErr: "missing or non-string 'name' field",
+		},
+		{
+			name: "missing args",
+			toolCalls: []map[string]any{
+				{"name": "test_tool"},
+			},
+			wantErr: "missing or non-map 'args' field",
+		},
+		{
+			name: "wrong args type",
+			toolCalls: []map[string]any{
+				{"name": "test_tool", "args": "invalid"},
+			},
+			wantErr: "missing or non-map 'args' field",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockProvider{
+				responses: []*provider.ChatResponse{
+					{
+						Message: agentctx.StrategicMessage{
+							Role:      "assistant",
+							ToolCalls: tt.toolCalls,
+						},
+					},
+					{
+						Message: agentctx.StrategicMessage{
+							Role:    "assistant",
+							Content: &agentctx.MessageContent{Str: strPtr("done")},
+						},
+					},
+				},
+			}
+
+			r := &geminiRunner{
+				prov:              mock,
+				model:             "mock-model",
+				maxToolIterations: 10,
+				limiter:           rate.NewLimiter(rate.Inf, 1),
+				breaker:           resilience.New("mock", 5, time.Minute, time.Second),
+				tools: []Tool{
+					&mockTool{name: "test_tool"},
+				},
+			}
+
+			got, _, err := r.Run(context.Background(), "test-session", nil)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("Run() expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Run() error = %q, want error containing %q", err, tt.wantErr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Run() error = %v, want nil", err)
+				}
+				if got != "done" {
+					t.Errorf("Run() got %q, want %q", got, "done")
+				}
+			}
+		})
+	}
+}
+
+type mockTool struct {
+	name string
+}
+
+func (m *mockTool) Name() string                     { return m.name }
+func (m *mockTool) Description() string              { return "mock" }
+func (m *mockTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: m.name} }
+func (m *mockTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+	return "result", nil
+}

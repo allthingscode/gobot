@@ -209,8 +209,14 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 
 		// 7. Execute Tools
 		for _, tc := range resp.Message.ToolCalls {
-			name, _ := tc["name"].(string)
-			args, _ := tc["args"].(map[string]any)
+			name, ok := tc["name"].(string)
+			if !ok {
+				return "", nil, fmt.Errorf("malformed tool call: missing or non-string 'name' field: %v", tc)
+			}
+			args, ok := tc["args"].(map[string]any)
+			if !ok {
+				return "", nil, fmt.Errorf("malformed tool call: missing or non-map 'args' field for tool %s: %v", name, tc)
+			}
 
 			// Some providers might not provide an ID, but internal/context expects it if available.
 			var toolCallID *string
