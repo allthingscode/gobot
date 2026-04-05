@@ -205,7 +205,12 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 
 	// Run PreHistory hooks (F-012) — filter/transform history before compaction and dispatch.
 	if m.hooks != nil {
+		original := messages
 		messages = m.hooks.RunPreHistory(ctx, messages)
+		if len(messages) == 0 && len(original) > 0 {
+			slog.Warn("agent: RunPreHistory returned nil or empty slice, falling back to original history to prevent context loss", "session", sessionKey)
+			messages = original
+		}
 	}
 
 	// Prune context based on TTL and KeepLastAssistants (F-047).

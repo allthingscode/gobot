@@ -71,6 +71,10 @@ func (h *Hooks) RunPostDispatch(ctx context.Context, sessionKey, response string
 
 // RunPreHistory runs all registered PreHistory hooks in order.
 // Returns messages unchanged if no hooks are registered.
+//
+// NOTE: If a hook returns nil or empty when messages was not empty,
+// SessionManager logs a warning and falls back to the original messages
+// to prevent silent context loss.
 func (h *Hooks) RunPreHistory(ctx context.Context, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage {
 	for _, fn := range h.preHistory {
 		messages = fn(ctx, messages)

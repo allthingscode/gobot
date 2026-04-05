@@ -374,6 +374,75 @@ func TestDispatch_PostDispatchHook(t *testing.T) {
 	}
 }
 
+func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
+	tests := []struct {
+		name    string
+		hook    PreHistoryFn
+		wantLen int // expected messages passed to runner (including the new one)
+	}{
+		{
+			name: "hook returns nil - fallback to original",
+			hook: func(ctx context.Context, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage {
+				return nil
+			},
+			wantLen: 2, // "prior message" + "new message"
+		},
+		{
+			name: "hook returns empty - fallback to original",
+			hook: func(ctx context.Context, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage {
+				return []agentctx.StrategicMessage{}
+			},
+			wantLen: 2,
+		},
+		{
+			name: "hook returns modified - use modified",
+			hook: func(ctx context.Context, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage {
+				return append(messages, agentctx.StrategicMessage{Role: "system", Content: &agentctx.MessageContent{Str: ptrStr("injected")}})
+			},
+			wantLen: 3, // "prior message" + "injected" + "new message"
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &mockRunner{response: "ok"}
+			mgr := NewSessionManager(runner, nil, "model")
+
+			// Pre-fill history.
+			history := []agentctx.StrategicMessage{
+				{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("prior message")}},
+			}
+			store := newMockStore()
+			store.SaveSnapshot("s1", 1, history)
+			mgr.store = store
+
+			hooks := &Hooks{}
+			hooks.RegisterPreHistory(tt.hook)
+			mgr.SetHooks(hooks)
+
+			_, err := mgr.Dispatch(context.Background(), "s1", "new message")
+			if err != nil {
+				t.Fatalf("Dispatch failed: %v", err)
+			}
+
+			runner.mu.Lock()
+			numCalls := len(runner.calls)
+			var gotLen int
+			if numCalls > 0 {
+				gotLen = len(runner.calls[0].messages)
+			}
+			runner.mu.Unlock()
+
+			if numCalls != 1 {
+				t.Fatalf("expected 1 runner call, got %d", numCalls)
+			}
+			if gotLen != tt.wantLen {
+				t.Errorf("got %d messages, want %d", gotLen, tt.wantLen)
+			}
+		})
+	}
+}
+
 // ── F-068: Memory Flush Compaction Tests ───────────────────────────────────
 
 func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
