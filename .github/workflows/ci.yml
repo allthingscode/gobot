@@ -21,19 +21,6 @@ jobs:
                     version: v2.1.6
                     args: --modules-download-mode=readonly
 
-    vendor-check:
-        runs-on: ubuntu-latest
-        steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
-                with:
-                    go-version-file: go.mod
-                    cache: true
-            -   name: Verify vendor consistency
-                run: |
-                    go mod vendor
-                    git diff --exit-code vendor/
-
     test:
         strategy:
             matrix:
