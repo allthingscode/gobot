@@ -233,7 +233,7 @@ func (c *captureKeyRunner) Run(_ context.Context, sessionKey string, messages []
 	*c.capture = sessionKey
 	text := "captured"
 	return text, append(messages, agentctx.StrategicMessage{
-		Role:    "assistant",
+		Role:    agentctx.RoleAssistant,
 		Content: &agentctx.MessageContent{Str: &text},
 	}), nil
 }
