@@ -18,8 +18,21 @@ jobs:
             -   name: golangci-lint
                 uses: golangci/golangci-lint-action@v6
                 with:
-                    version: v1.66.0
+                    version: latest
                     args: --modules-download-mode=readonly
+
+    vendor-check:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.mod
+                    cache: true
+            -   name: Verify vendor consistency
+                run: |
+                    go mod vendor
+                    git diff --exit-code vendor/
 
     test:
         strategy:

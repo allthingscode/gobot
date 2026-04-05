@@ -14,7 +14,7 @@ func TestPanicFix(t *testing.T) {
 	// without knowing the absolute path or building it.
 	// However, we can use 'go run .' if we are in the right directory.
 	
-	cmd := exec.Command("go", "run", "-mod=vendor", ".", "--invalid-flag")
+	cmd := exec.Command("go", "run", "-mod=readonly", ".", "--invalid-flag")
 	// Set the working directory to the current directory (cmd/gobot)
 	// so 'go run .' works.
 	cmd.Dir = "."
