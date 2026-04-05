@@ -43,9 +43,16 @@ jobs:
           LDFLAGS="-X main.version=${VERSION} -X main.commitHash=${COMMIT} -X main.buildTime=${BUILD_TIME}"
           GOOS=linux GOARCH=amd64 go build -mod=vendor -ldflags "${LDFLAGS}" -o gobot-${VERSION}-linux-amd64 ./cmd/gobot
 
+      - name: Pre-flight validation
+        run: |
+          go run scripts/validate_release.go
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           generate_release_notes: true
           files: |
             gobot-*-windows-amd64.exe

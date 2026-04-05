@@ -123,9 +123,15 @@ var pathRefRe = regexp.MustCompile("`((?:[a-zA-Z0-9_.-]+/)+[a-zA-Z0-9_.-]+\\.(?:
 
 // lintStaleReferences scans non-archived .md files under .private/backlog/
 // for backtick-quoted file paths and verifies each exists relative to root.
+// This check is skipped in CI where .private/ is gitignored.
 func lintStaleReferences(root string) []string {
 	var out []string
 	backlogDir := filepath.Join(root, ".private", "backlog")
+
+	// In CI, .private/ is gitignored - skip this check gracefully
+	if _, err := os.Stat(backlogDir); os.IsNotExist(err) {
+		return nil
+	}
 
 	filepath.WalkDir(backlogDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
@@ -156,11 +162,16 @@ func lintStaleReferences(root string) []string {
 
 // lintBacklogIndex ensures every .md in features/ and bugs/ is referenced
 // (by filename) somewhere in BACKLOG.md.
+// This check is skipped in CI where .private/ is gitignored.
 func lintBacklogIndex(root string) []string {
 	var out []string
 	backlogMd := filepath.Join(root, ".private", "backlog", "BACKLOG.md")
 	data, err := os.ReadFile(backlogMd)
 	if err != nil {
+		// In CI, .private/ is gitignored - skip this check gracefully
+		if os.IsNotExist(err) {
+			return nil
+		}
 		out = append(out, fmt.Sprintf("cannot read BACKLOG.md: %v", err))
 		return out
 	}
@@ -196,10 +207,14 @@ var validStatuses = map[string]bool{
 }
 
 // lintBacklogStatus checks that each backlog item has a valid YAML status.
+// This check is skipped in CI where .private/ is gitignored.
 func lintBacklogStatus(root string) []string {
 	var out []string
 	for _, subDir := range []string{"features", "bugs"} {
 		dir := filepath.Join(root, ".private", "backlog", subDir)
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return nil // In CI, .private/ is gitignored - skip gracefully
+		}
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
