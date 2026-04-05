@@ -145,26 +145,27 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 
 	if m.tracer != nil {
 		// Load history first so we can report message count to tracer.
-		messages, iteration, err := m.loadHistory(sessionKey)
+		messages, iteration, stateless, err := m.loadHistory(sessionKey)
 		if err != nil {
 			return "", err
 		}
 		return m.tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
-			return m.dispatch(ctx, sessionKey, userMessage, messages, iteration)
+			return m.dispatch(ctx, sessionKey, userMessage, messages, iteration, stateless)
 		})
 	}
 
-	messages, iteration, err := m.loadHistory(sessionKey)
+	messages, iteration, stateless, err := m.loadHistory(sessionKey)
 	if err != nil {
 		return "", err
 	}
-	return m.dispatch(ctx, sessionKey, userMessage, messages, iteration)
+	return m.dispatch(ctx, sessionKey, userMessage, messages, iteration, stateless)
 }
 
 // loadHistory loads conversation history from checkpoint.
-func (m *SessionManager) loadHistory(sessionKey string) ([]agentctx.StrategicMessage, int, error) {
+func (m *SessionManager) loadHistory(sessionKey string) ([]agentctx.StrategicMessage, int, bool, error) {
 	var messages []agentctx.StrategicMessage
 	var iteration int
+	var stateless bool
 	if m.store != nil {
 		snap, err := m.store.LoadLatest(sessionKey)
 		if err == nil && snap != nil {
@@ -173,15 +174,17 @@ func (m *SessionManager) loadHistory(sessionKey string) ([]agentctx.StrategicMes
 		} else {
 			// First turn for this session — create the thread record.
 			if createErr := m.store.CreateThread(sessionKey, m.model, nil); createErr != nil {
-				slog.Warn("agent: CreateThread failed (continuing statelessly)", "session", sessionKey, "err", createErr)
+				slog.Error("agent: CreateThread failed (continuing statelessly)", "session_id", sessionKey, "err", createErr)
+				stateless = true
 			}
 		}
 	}
-	return messages, iteration, nil
+	return messages, iteration, stateless, nil
 }
 
 // summarizationPrompt is the system prompt for context summarization.
-const summarizationPrompt = `You are a context summarization assistant. Your task is to condense the provided conversation history into a concise <context_summary> block.
+const (
+	summarizationPrompt = `You are a context summarization assistant. Your task is to condense the provided conversation history into a concise <context_summary> block.
 
 Preserve the following:
 1. Key decisions made and agreed upon.
@@ -193,9 +196,11 @@ Format the summary as a clear, bulleted list within <context_summary> tags. If a
 
 Conversation history to summarize:
 `
+	statelessWarning = "⚠️ Warning: session history could not be initialized. This conversation will not be persisted.\n\n"
+)
 
 // dispatch is the implementation of Dispatch, potentially wrapped by tracing.
-func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage string, messages []agentctx.StrategicMessage, iteration int) (string, error) {
+func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage string, messages []agentctx.StrategicMessage, iteration int, stateless bool) (string, error) {
 	// Strip [SILENT] prefix — the cron layer uses it to suppress routing
 	// but the model should never see it (mirrors _patched_dispatch in loop.py).
 	cleaned, silent := StripSilent(userMessage)
@@ -330,7 +335,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	}
 
 	// Persist the updated history.
-	if m.store != nil && len(updated) > 0 {
+	if !stateless && m.store != nil && len(updated) > 0 {
 		iteration++
 		if _, saveErr := m.store.SaveSnapshot(sessionKey, iteration, updated); saveErr != nil {
 			slog.Warn("agent: SaveSnapshot failed", "session", sessionKey, "err", saveErr)
@@ -346,6 +351,10 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	// Run PostDispatch hooks (F-063: Automated Handoffs).
 	if m.hooks != nil {
 		response = m.hooks.RunPostDispatch(ctx, sessionKey, response)
+	}
+
+	if stateless {
+		response = statelessWarning + response
 	}
 
 	return response, nil

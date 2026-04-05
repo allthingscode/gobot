@@ -50,6 +50,7 @@ type mockStore struct {
 	snapshots   map[string]*agentctx.ThreadSnapshot
 	saveErr     error
 	loadErr     error
+	createErr   error
 	createCalls []string
 	saveCalls   int
 	mu          sync.Mutex
@@ -91,6 +92,9 @@ func (s *mockStore) CreateThread(threadID, model string, _ map[string]any) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createCalls = append(s.createCalls, threadID)
+	if s.createErr != nil {
+		return s.createErr
+	}
 	return nil
 }
 
@@ -613,5 +617,38 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 	// This test demonstrates that without the fix, we lose "message 2" entirely.
 	if !foundMsg2 {
 		t.Errorf("expected 'message 2' to be kept in history, but it was dropped (keepN likely 0)")
+	}
+}
+
+func TestSessionManager_Dispatch_StatelessDegradation(t *testing.T) {
+	ctx := context.Background()
+	runner := &mockRunner{response: "pong"}
+	store := newMockStore()
+	// Mock CreateThread to return an error.
+	store.createErr = errors.New("database locked")
+	mgr := NewSessionManager(runner, store, "test-model")
+
+	// First turn — CreateThread fails.
+	resp, err := mgr.Dispatch(ctx, "sess-fail", "ping")
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	// Verify the response contains the warning.
+	if !strings.HasPrefix(resp, statelessWarning) {
+		t.Errorf("response does not contain stateless warning: %q", resp)
+	}
+	if !strings.Contains(resp, "pong") {
+		t.Errorf("response does not contain runner response: %q", resp)
+	}
+
+	// Verify CreateThread was called.
+	if len(store.createCalls) != 1 || store.createCalls[0] != "sess-fail" {
+		t.Errorf("CreateThread not called correctly: %v", store.createCalls)
+	}
+
+	// Verify SaveSnapshot was NOT called (stateless mode).
+	if store.saveCalls != 0 {
+		t.Errorf("expected 0 SaveSnapshot calls in stateless mode, got %d", store.saveCalls)
 	}
 }
