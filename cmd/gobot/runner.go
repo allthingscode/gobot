@@ -247,10 +247,14 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 				// Generate a deterministic idempotency key based on the tool's position in the sequence and parameters.
 				// This ensures that if the agent loop crashes and resumes, the exact same tool call gets the same key,
 				// preventing duplicate real-world side effects.
-				paramsHash, _ := agentctx.HashParams(args)
-				idemKey := fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, len(toolSeq), name, paramsHash)
-
-				result, execErr = r.executeTool(ctx, sessionKey, idemKey, name, args)
+				paramsHash, hashErr := agentctx.HashParams(args)
+				if hashErr != nil {
+					slog.Warn("runner: failed to hash tool params, skipping idempotency check", "tool", name, "err", hashErr)
+					result, execErr = r.executeTool(ctx, sessionKey, "", name, args, "")
+				} else {
+					idemKey := fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, len(toolSeq), name, paramsHash)
+					result, execErr = r.executeTool(ctx, sessionKey, idemKey, name, args, paramsHash)
+				}
 				if execErr == nil {
 					slog.Info("runner: tool result", "tool", name, "result_len", len(result))
 					slog.Debug("runner: tool result detail", "tool", name, "result", result)
@@ -288,13 +292,16 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 // executeTool dispatches a tool call to the matching registered Tool.
 // For side-effecting tools, it checks the idempotency store before execution
 // and caches the result to prevent duplicates on retry.
-func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, idemKey string, name string, args map[string]any) (string, error) {
+func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, idemKey string, name string, args map[string]any, paramsHash string) (string, error) {
 	// Check if this is a side-effecting tool that needs idempotency protection.
 	if isSideEffectingTool(name) && r.idempStore != nil {
-		// Compute params hash to detect key reuse with different params.
-		paramsHash, err := agentctx.HashParams(args)
-		if err != nil {
-			return "", fmt.Errorf("executeTool: hash params: %w", err)
+		// If paramsHash not already computed by caller, compute it now.
+		if paramsHash == "" {
+			var err error
+			paramsHash, err = agentctx.HashParams(args)
+			if err != nil {
+				return "", fmt.Errorf("executeTool: hash params: %w", err)
+			}
 		}
 
 		// Check idempotency store.

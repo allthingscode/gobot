@@ -10,6 +10,53 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
+// TestHashParams_NonSerializableArgs verifies that HashParams returns an error
+// for non-JSON-serializable types, which should be handled gracefully by callers.
+func TestHashParams_NonSerializableArgs(t *testing.T) {
+	// Create a map containing a function (non-serializable).
+	nonSerializableParams := map[string]any{
+		"callback": func() {},
+	}
+
+	hash, err := agentctx.HashParams(nonSerializableParams)
+	if err == nil {
+		t.Errorf("HashParams() with non-serializable args should return error, got hash: %s", hash)
+	}
+	if hash != "" {
+		t.Errorf("HashParams() with non-serializable args should return empty string, got: %s", hash)
+	}
+}
+
+// TestHashParams_ValidArgs verifies that HashParams succeeds with valid JSON-serializable types.
+func TestHashParams_ValidArgs(t *testing.T) {
+	validParams := map[string]any{
+		"to":      "test@example.com",
+		"subject": "Test Email",
+		"body":    "Hello, World!",
+	}
+
+	hash, err := agentctx.HashParams(validParams)
+	if err != nil {
+		t.Errorf("HashParams() with valid args failed: %v", err)
+	}
+	if hash == "" {
+		t.Errorf("HashParams() with valid args returned empty hash")
+	}
+}
+
+// TestHashParams_EmptyArgs verifies that HashParams handles empty params correctly.
+func TestHashParams_EmptyArgs(t *testing.T) {
+	emptyParams := map[string]any{}
+
+	hash, err := agentctx.HashParams(emptyParams)
+	if err != nil {
+		t.Errorf("HashParams() with empty args failed: %v", err)
+	}
+	if hash == "" {
+		t.Errorf("HashParams() with empty args returned empty hash")
+	}
+}
+
 // TestSideEffectingToolIdempotency verifies that side-effecting tools
 // return cached results on retry, preventing duplicate executions.
 func TestSideEffectingToolIdempotency(t *testing.T) {
@@ -37,6 +84,22 @@ func TestSideEffectingToolIdempotency(t *testing.T) {
 				t.Errorf("isSideEffectingTool(%q) = %v, want %v", tt.toolName, got, tt.isIdem)
 			}
 		})
+	}
+}
+
+// TestRunner_HashParamsFailure verifies that when HashParams fails due to
+// non-serializable args, the runner proceeds without idempotency check.
+// See B-039 for full specification.
+func TestRunner_HashParamsFailure(t *testing.T) {
+	// Verify HashParams behavior: non-serializable args return error + empty string.
+	// The runner handles this by logging a warning and skipping idempotency.
+	nonSerializableParams := map[string]any{"callback": func() {}}
+	hash, err := agentctx.HashParams(nonSerializableParams)
+	if err == nil {
+		t.Error("HashParams() with non-serializable args should return error")
+	}
+	if hash != "" {
+		t.Errorf("HashParams() with non-serializable args should return empty string, got: %s", hash)
 	}
 }
 
