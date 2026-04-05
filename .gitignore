@@ -41,6 +41,7 @@ GEMINI.md
 # Temporary/Generated Files
 coverage
 coverage/
+coverage.out
 package-lock.json
 
 # GitHub API research artifacts
