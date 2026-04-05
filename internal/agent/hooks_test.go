@@ -43,7 +43,7 @@ func TestHooks_PrePrompt_ChainOrder(t *testing.T) {
 func TestHooks_PreHistory_NoHooks(t *testing.T) {
 	h := &Hooks{}
 	msgs := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: strPtrH("hi")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtrH("hi")}},
 	}
 	got := h.RunPreHistory(context.Background(), msgs)
 	if len(got) != 1 {
@@ -61,11 +61,11 @@ func TestHooks_PreHistory_FiltersMessages(t *testing.T) {
 		return msgs
 	})
 	msgs := []agentctx.StrategicMessage{
-		{Role: "user"},
-		{Role: "assistant"},
-		{Role: "user"},
-		{Role: "assistant"},
-		{Role: "user"},
+		{Role: agentctx.RoleUser},
+		{Role: agentctx.RoleAssistant},
+		{Role: agentctx.RoleUser},
+		{Role: agentctx.RoleAssistant},
+		{Role: agentctx.RoleUser},
 	}
 	got := h.RunPreHistory(context.Background(), msgs)
 	if len(got) != 2 {

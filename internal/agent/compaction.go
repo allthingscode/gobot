@@ -50,10 +50,10 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 		assistantsFound := 0
 		for i := len(messages) - 1; i >= 0; i-- {
 			role := messages[i].Role
-			if role == "assistant" || role == "model" {
+			if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
 				if assistantsFound < pruning.KeepLastAssistants {
 					keep[i] = true
-					if i > 0 && messages[i-1].Role == "user" {
+					if i > 0 && messages[i-1].Role == agentctx.RoleUser {
 						keep[i-1] = true
 					}
 					assistantsFound++
@@ -72,7 +72,7 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 	allToolCallIDs := make(map[string]int)
 	for i := range messages {
 		role := messages[i].Role
-		if role == "model" || role == "assistant" {
+		if role == agentctx.RoleModel || role == agentctx.RoleAssistant {
 			for _, tc := range messages[i].ToolCalls {
 				if id, ok := tc["id"].(string); ok && id != "" {
 					allToolCallIDs[id] = i
@@ -87,7 +87,7 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 			continue
 		}
 		role := messages[i].Role
-		if role == "tool" && messages[i].ToolCallID != nil {
+		if role == agentctx.RoleTool && messages[i].ToolCallID != nil {
 			respID := *messages[i].ToolCallID
 			if callIdx, exists := allToolCallIDs[respID]; exists {
 				// Originating call exists - if it was dropped, keep it now
@@ -105,12 +105,12 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 			continue
 		}
 		role := messages[i].Role
-		if role == "model" || role == "assistant" {
+		if role == agentctx.RoleModel || role == agentctx.RoleAssistant {
 			for _, tc := range messages[i].ToolCalls {
 				if id, ok := tc["id"].(string); ok && id != "" {
 					// Find all tool responses for this call ID and keep them
 					for j := range messages {
-						if messages[j].Role == "tool" && messages[j].ToolCallID != nil {
+						if messages[j].Role == agentctx.RoleTool && messages[j].ToolCallID != nil {
 							if *messages[j].ToolCallID == id {
 								keep[j] = true
 							}
@@ -134,7 +134,7 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 	// Check if the first message starts a tool chain - if so, don't strip it.
 	if len(compacted) > 0 {
 		role := compacted[0].Role
-		if role == "assistant" || role == "model" {
+		if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
 			// Only strip if this assistant/model turn doesn't have tool calls
 			// that are present in the compacted result.
 			hasKeptToolCalls := false
@@ -142,7 +142,7 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, poli
 				if id, ok := tc["id"].(string); ok && id != "" {
 					// Check if any tool response in compacted matches this call ID
 					for _, msg := range compacted[1:] {
-						if msg.Role == "tool" && msg.ToolCallID != nil {
+						if msg.Role == agentctx.RoleTool && msg.ToolCallID != nil {
 							if *msg.ToolCallID == id {
 								hasKeptToolCalls = true
 								break
@@ -201,12 +201,12 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 	if cfg.KeepLastAssistants > 0 {
 		for i := len(messages) - 1; i >= 0; i-- {
 			role := messages[i].Role
-			if role == "assistant" || role == "model" {
+			if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
 				if assistantsFound < cfg.KeepLastAssistants {
 					keep[i] = true
 					// Keep the preceding message if it's a user turn, to satisfy the
 					// "must start with user" requirement and avoid stripping.
-					if i > 0 && messages[i-1].Role == "user" {
+					if i > 0 && messages[i-1].Role == agentctx.RoleUser {
 						keep[i-1] = true
 					}
 					assistantsFound++
@@ -242,7 +242,7 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 	// Gemini requires conversations to start with a user turn.
 	for len(pruned) > 0 {
 		role := pruned[0].Role
-		if role == "assistant" || role == "model" {
+		if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
 			pruned = pruned[1:]
 		} else {
 			break

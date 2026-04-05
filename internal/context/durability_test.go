@@ -27,8 +27,8 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 		t.Fatalf("phase1 CreateThread: %v", err)
 	}
 	msgs := []StrategicMessage{
-		{Role: "user", Content: &MessageContent{Str: strPtr("hello")}},
-		{Role: "assistant", Content: &MessageContent{Str: strPtr("world")}},
+		{Role: RoleUser, Content: &MessageContent{Str: strPtr("hello")}},
+		{Role: RoleAssistant, Content: &MessageContent{Str: strPtr("world")}},
 	}
 	ok, err := m1.SaveSnapshot("t1", 1, msgs)
 	if err != nil || !ok {
@@ -98,7 +98,7 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		msgs := make([]StrategicMessage, i)
 		for j := 0; j < i; j++ {
-			msgs[j] = StrategicMessage{Role: "user", Content: &MessageContent{Str: strPtr("msg")}}
+			msgs[j] = StrategicMessage{Role: RoleUser, Content: &MessageContent{Str: strPtr("msg")}}
 		}
 		if _, err := m1.SaveSnapshot("t1", i, msgs); err != nil {
 			t.Fatalf("SaveSnapshot iter %d: %v", i, err)
@@ -150,7 +150,7 @@ func TestCheckpointManager_ConcurrentSaveSnapshot(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			msgs := []StrategicMessage{
-				{Role: "user", Content: &MessageContent{Str: strPtr("msg")}},
+				{Role: RoleUser, Content: &MessageContent{Str: strPtr("msg")}},
 			}
 			_, errs[idx] = m.SaveSnapshot("t1", idx+1, msgs)
 		}(i)
@@ -182,7 +182,7 @@ func TestCheckpointManager_ChecksumProtectsAgainstBitrot(t *testing.T) {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	msgs := []StrategicMessage{
-		{Role: "user", Content: &MessageContent{Str: strPtr("sensitive data")}},
+		{Role: RoleUser, Content: &MessageContent{Str: strPtr("sensitive data")}},
 	}
 	if _, err := m.SaveSnapshot("t1", 1, msgs); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)

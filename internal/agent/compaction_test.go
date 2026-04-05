@@ -9,11 +9,11 @@ import (
 )
 
 // makeMessages creates n alternating user/assistant messages starting with startRole.
-func makeMessages(n int, startRole string) []agentctx.StrategicMessage {
+func makeMessages(n int, startRole agentctx.MessageRole) []agentctx.StrategicMessage {
 	msgs := make([]agentctx.StrategicMessage, n)
-	roles := []string{"user", "assistant"}
+	roles := []agentctx.MessageRole{agentctx.RoleUser, agentctx.RoleAssistant}
 	startIdx := 0
-	if startRole == "assistant" {
+	if startRole == agentctx.RoleAssistant {
 		startIdx = 1
 	}
 	now := time.Now()
@@ -30,7 +30,7 @@ func TestCompactMessages(t *testing.T) {
 	tests := []struct {
 		name        string
 		msgCount    int
-		startRole   string
+		startRole   agentctx.MessageRole
 		maxN        int
 		keepN       int
 		wantDropped int
@@ -39,7 +39,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:        "below threshold",
 			msgCount:    10,
-			startRole:   "user",
+			startRole:   agentctx.RoleUser,
 			maxN:        50,
 			keepN:       20,
 			wantDropped: 0,
@@ -48,7 +48,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:        "at threshold",
 			msgCount:    50,
-			startRole:   "user",
+			startRole:   agentctx.RoleUser,
 			maxN:        50,
 			keepN:       20,
 			wantDropped: 0,
@@ -57,7 +57,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:      "one over threshold",
 			msgCount:  51,
-			startRole: "assistant",
+			startRole: agentctx.RoleAssistant,
 			// assistant-start: index 31 = "user" → no assistant-strip after keepN slice.
 			maxN:        50,
 			keepN:       20,
@@ -67,7 +67,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:        "large session",
 			msgCount:    100,
-			startRole:   "user",
+			startRole:   agentctx.RoleUser,
 			maxN:        50,
 			keepN:       20,
 			wantDropped: 80,
@@ -76,7 +76,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:        "keepN zero",
 			msgCount:    10,
-			startRole:   "user",
+			startRole:   agentctx.RoleUser,
 			maxN:        50,
 			keepN:       0,
 			wantDropped: 0,
@@ -85,7 +85,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:        "maxN zero",
 			msgCount:    10,
-			startRole:   "user",
+			startRole:   agentctx.RoleUser,
 			maxN:        0,
 			keepN:       20,
 			wantDropped: 0,
@@ -94,7 +94,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:        "empty messages",
 			msgCount:    0,
-			startRole:   "user",
+			startRole:   agentctx.RoleUser,
 			maxN:        50,
 			keepN:       20,
 			wantDropped: 0,
@@ -103,7 +103,7 @@ func TestCompactMessages(t *testing.T) {
 		{
 			name:      "keepN >= maxN",
 			msgCount:  60,
-			startRole: "user",
+			startRole: agentctx.RoleUser,
 			maxN:      50,
 			keepN:     50,
 			// keepN clamped to 49; 60 > 50 triggers; last 49 taken from 60-msg slice.
@@ -114,6 +114,7 @@ func TestCompactMessages(t *testing.T) {
 			wantLen:     -1, // sentinel: just verify < 60
 		},
 	}
+
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -151,7 +152,7 @@ func TestCompactMessages_FirstRetainedAssistant(t *testing.T) {
 	//
 	// Start with "assistant": index 0=assistant, 1=user, 2=assistant, ...
 	// With keepN=10, slice starts at index 50 → index 50 is even → "assistant".
-	msgs := makeMessages(60, "assistant")
+	msgs := makeMessages(60, agentctx.RoleAssistant)
 
 	got, dropped, _ := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
@@ -163,8 +164,8 @@ func TestCompactMessages_FirstRetainedAssistant(t *testing.T) {
 	if dropped != 51 {
 		t.Errorf("dropped = %d, want 51", dropped)
 	}
-	if got[0].Role != "user" {
-		t.Errorf("got[0].Role = %q, want %q", got[0].Role, "user")
+	if got[0].Role != agentctx.RoleUser {
+		t.Errorf("got[0].Role = %q, want %q", got[0].Role, agentctx.RoleUser)
 	}
 }
 
@@ -174,15 +175,15 @@ func TestCompactMessages_StartsWithUser(t *testing.T) {
 	// 60-message conversation alternating user/assistant starting with user.
 	// keepN=10, maxN=50 → slice starts at index 50.
 	// Index 50 (even, user-start) → role "user". No assistant-drop needed.
-	msgs := makeMessages(60, "user")
+	msgs := makeMessages(60, agentctx.RoleUser)
 
 	got, _, _ := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
 	if len(got) == 0 {
 		t.Fatal("expected non-empty result")
 	}
-	if got[0].Role != "user" {
-		t.Errorf("result[0].Role = %q, want %q", got[0].Role, "user")
+	if got[0].Role != agentctx.RoleUser {
+		t.Errorf("result[0].Role = %q, want %q", got[0].Role, agentctx.RoleUser)
 	}
 }
 
@@ -199,8 +200,8 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "no pruning policy",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{},
 			wantLen:     2,
@@ -209,8 +210,8 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "TTL pruning - all within TTL",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{TTL: "6h"},
 			wantLen:     2,
@@ -219,10 +220,10 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "TTL pruning - some outside TTL",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)},
-				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{TTL: "6h"},
 			wantLen:     2,
@@ -231,8 +232,8 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "KeepLastAssistants only - does nothing for PruneMessages without TTL",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{KeepLastAssistants: 1},
 			wantLen:     2,
@@ -241,10 +242,10 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "TTL + KeepLastAssistants",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},     // index 0
-				{Role: "assistant", CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)}, // index 1
-				{Role: "assistant", CreatedAt: now.Add(-8 * time.Hour).Format(time.RFC3339)}, // index 2
-				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},      // index 3
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},     // index 0
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)}, // index 1
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-8 * time.Hour).Format(time.RFC3339)}, // index 2
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},      // index 3
 			},
 			// TTL 6h cutoff: message 0, 1, 2 are OLD.
 			// KeepLastAssistants: 2 -> keeps index 1 and 2.
@@ -258,8 +259,8 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "Legacy messages (no timestamp)",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user"}, // CreatedAt is empty
-				{Role: "assistant", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser}, // CreatedAt is empty
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{TTL: "6h"},
 			wantLen:     2,
@@ -268,7 +269,7 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "Invalid TTL string",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{TTL: "invalid"},
 			wantLen:     1,
@@ -277,10 +278,10 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "Strip multiple leading assistants",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "assistant", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-50 * time.Minute).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-40 * time.Minute).Format(time.RFC3339)},
-				{Role: "user", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-50 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-40 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{TTL: "6h"},
 			wantLen:     1,
@@ -289,8 +290,8 @@ func TestPruneMessages(t *testing.T) {
 		{
 			name: "Empty resulting context",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-9 * time.Hour).Format(time.RFC3339)},
 			},
 			cfg:         config.ContextPruningConfig{TTL: "6h"},
 			wantLen:     0,
@@ -307,7 +308,7 @@ func TestPruneMessages(t *testing.T) {
 			if dropped != tt.wantDropped {
 				t.Errorf("dropped = %d, want %d", dropped, tt.wantDropped)
 			}
-			if len(got) > 0 && (got[0].Role == "assistant" || got[0].Role == "model") {
+			if len(got) > 0 && (got[0].Role == agentctx.RoleAssistant || got[0].Role == agentctx.RoleModel) {
 				t.Errorf("result starts with assistant/model")
 			}
 		})
@@ -320,9 +321,10 @@ func TestPruneMessages(t *testing.T) {
 func TestCompactMessages_DroppedMessageIdentification(t *testing.T) {
 	// Create a conversation where dropped messages are scattered, not at the front.
 	// With keepN=10, maxN=50: keep the last 10 messages, drop the rest.
-	msgs := makeMessages(60, "user")
+	msgs := makeMessages(60, agentctx.RoleUser)
 
 	compacted, dropped, keep := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
+
 
 	// Verify that the keep[] array correctly reflects what was dropped.
 	if len(keep) != 60 {
@@ -393,30 +395,30 @@ func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
 		{
 			name: "mixed conversation preserved when no TTL",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-5 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-4 * time.Hour).Format(time.RFC3339)},
-				{Role: "user", CreatedAt: now.Add(-3 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339)},
-				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-5 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-4 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-3 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
 			},
 			keepLastAssistants: 1,
 		},
 		{
 			name: "all non-assistant messages preserved when no TTL",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
-				{Role: "user", CreatedAt: now.Add(-8 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-6 * time.Hour).Format(time.RFC3339)},
-				{Role: "user", CreatedAt: now.Add(-4 * time.Hour).Format(time.RFC3339)},
-				{Role: "user", CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-10 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-8 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-6 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-4 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339)},
 			},
 			keepLastAssistants: 2,
 		},
 		{
 			name:               "KeepLastAssistants=0 also no-ops without TTL",
 			msgs: []agentctx.StrategicMessage{
-				{Role: "user", CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
-				{Role: "assistant", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
+				{Role: agentctx.RoleUser, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
 			},
 			keepLastAssistants: 0,
 		},
@@ -465,8 +467,8 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 			// Index 31 (kept) is odd → role "model" by default, but we override to "tool" with response.
 			// The fix must detect that kept tool response needs its originating call and keep both.
 			msgs: buildMessages(32, []toolScenario{
-				{idx: 30, role: "model", toolCallIDs: []string{"call_abc"}},
-				{idx: 31, role: "tool", toolCallID: "call_abc"},
+				{idx: 30, role: agentctx.RoleModel, toolCallIDs: []string{"call_abc"}},
+				{idx: 31, role: agentctx.RoleTool, toolCallID: "call_abc"},
 			}),
 			maxN:          31,
 			keepN:         1,
@@ -484,8 +486,8 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 			// Without 3a pass: call at 58 kept, response at 49 dropped → orphaned call
 			// With 3a pass: response 49 is found when scanning from call 58, marked as kept
 			msgs: buildMessages(60, []toolScenario{
-				{idx: 58, role: "model", toolCallIDs: []string{"call_mode2"}},  // kept by keepLastAssistants
-				{idx: 49, role: "tool", toolCallID: "call_mode2"},  // dropped by tail-slice, should be recovered
+				{idx: 58, role: agentctx.RoleModel, toolCallIDs: []string{"call_mode2"}},  // kept by keepLastAssistants
+				{idx: 49, role: agentctx.RoleTool, toolCallID: "call_mode2"},  // dropped by tail-slice, should be recovered
 			}),
 			maxN:          50,
 			keepN:         10,
@@ -495,7 +497,7 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 		},
 		{
 			name:                "clean compaction - no tool calls",
-			msgs:                makeMessages(51, "user"),
+			msgs:                makeMessages(51, agentctx.RoleUser),
 			maxN:                50,
 			keepN:               20,
 			wantNoOrphans:       true,
@@ -508,9 +510,9 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 			// Keeps only index 32.
 			// Indices 30,31,32: 30 has call for 31 and 32, but 30 is dropped.
 			msgs: buildMessages(33, []toolScenario{
-				{idx: 30, role: "model", toolCallIDs: []string{"call_1", "call_2"}},
-				{idx: 31, role: "tool", toolCallID: "call_1"},
-				{idx: 32, role: "tool", toolCallID: "call_2"},
+				{idx: 30, role: agentctx.RoleModel, toolCallIDs: []string{"call_1", "call_2"}},
+				{idx: 31, role: agentctx.RoleTool, toolCallID: "call_1"},
+				{idx: 32, role: agentctx.RoleTool, toolCallID: "call_2"},
 			}),
 			maxN:          32,
 			keepN:         1,
@@ -524,8 +526,8 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 			// Index 49 has tool calls for 50, but index 50 only responds to call_a.
 			// After tail-slice: keeps index 50 (response to call_a), drops index 49 (calls).
 			msgs: buildMessages(51, []toolScenario{
-				{idx: 49, role: "model", toolCallIDs: []string{"call_a", "call_b"}},
-				{idx: 50, role: "tool", toolCallID: "call_a"},
+				{idx: 49, role: agentctx.RoleModel, toolCallIDs: []string{"call_a", "call_b"}},
+				{idx: 50, role: agentctx.RoleTool, toolCallID: "call_a"},
 			}),
 			maxN:          50,
 			keepN:         1,
@@ -539,8 +541,8 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 			// KeepLastAssistants=1: keeps last assistant and preceding user.
 			// Let's place tool call at index 49 (dropped by tail-slice) and response at 50 (kept by tail-slice + KeepLastAssistants).
 			msgs: buildMessages(60, []toolScenario{
-				{idx: 49, role: "model", toolCallIDs: []string{"call_keep"}},
-				{idx: 50, role: "tool", toolCallID: "call_keep"},
+				{idx: 49, role: agentctx.RoleModel, toolCallIDs: []string{"call_keep"}},
+				{idx: 50, role: agentctx.RoleTool, toolCallID: "call_keep"},
 			}),
 			maxN:          50,
 			keepN:         10,
@@ -576,7 +578,7 @@ func assertNoOrphanedTools(t *testing.T, msgs []agentctx.StrategicMessage) {
 	// Collect all tool call IDs present in model/assistant turns in the result.
 	calledIDs := make(map[string]bool)
 	for _, m := range msgs {
-		if m.Role == "model" || m.Role == "assistant" {
+		if m.Role == agentctx.RoleModel || m.Role == agentctx.RoleAssistant {
 			for _, tc := range m.ToolCalls {
 				if id, ok := tc["id"].(string); ok && id != "" {
 					calledIDs[id] = true
@@ -586,7 +588,7 @@ func assertNoOrphanedTools(t *testing.T, msgs []agentctx.StrategicMessage) {
 	}
 	// Check every tool message references an ID that exists in calledIDs.
 	for i, m := range msgs {
-		if m.Role == "tool" && m.ToolCallID != nil {
+		if m.Role == agentctx.RoleTool && m.ToolCallID != nil {
 			if !calledIDs[*m.ToolCallID] {
 				t.Errorf("msg[%d]: orphaned tool response for ToolCallID=%q (no matching tool call in result)",
 					i, *m.ToolCallID)
@@ -601,12 +603,12 @@ func assertNoUnresolvedToolCalls(t *testing.T, msgs []agentctx.StrategicMessage)
 	t.Helper()
 	respondedIDs := make(map[string]bool)
 	for _, m := range msgs {
-		if m.Role == "tool" && m.ToolCallID != nil {
+		if m.Role == agentctx.RoleTool && m.ToolCallID != nil {
 			respondedIDs[*m.ToolCallID] = true
 		}
 	}
 	for i, m := range msgs {
-		if m.Role == "model" || m.Role == "assistant" {
+		if m.Role == agentctx.RoleModel || m.Role == agentctx.RoleAssistant {
 			for _, tc := range m.ToolCalls {
 				if id, ok := tc["id"].(string); ok && id != "" {
 					if !respondedIDs[id] {
@@ -622,7 +624,7 @@ func assertNoUnresolvedToolCalls(t *testing.T, msgs []agentctx.StrategicMessage)
 // toolScenario describes a single message's tool-related fields for buildMessages.
 type toolScenario struct {
 	idx         int
-	role        string
+	role        agentctx.MessageRole
 	toolCallIDs []string // if set, message is model/assistant with these tool calls
 	toolCallID  string   // if set (non-empty), message is a tool response
 }
@@ -630,7 +632,7 @@ type toolScenario struct {
 // buildMessages creates n messages alternating user/model (starting with "user")
 // and applies tool scenarios to specific indices.
 func buildMessages(n int, scenarios []toolScenario) []agentctx.StrategicMessage {
-	roles := []string{"user", "model"}
+	roles := []agentctx.MessageRole{agentctx.RoleUser, agentctx.RoleModel}
 	msgs := make([]agentctx.StrategicMessage, n)
 	scenarioMap := make(map[int]toolScenario)
 	for _, s := range scenarios {

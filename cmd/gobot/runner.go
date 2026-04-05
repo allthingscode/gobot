@@ -67,7 +67,7 @@ func (r *geminiRunner) RunText(ctx context.Context, sessionKey, prompt string, m
 	}
 	req := provider.ChatRequest{
 		Model:    model,
-		Messages: []agentctx.StrategicMessage{{Role: "user", Content: &agentctx.MessageContent{Str: &prompt}}},
+		Messages: []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &prompt}}},
 	}
 	resp, err := r.retryChat(ctx, sessionKey, req)
 	if err != nil {
@@ -188,7 +188,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 							reflectionRounds++
 							correction := buildCorrectionMessage(report)
 							messages = append(messages, agentctx.StrategicMessage{
-								Role:    "user",
+								Role:    agentctx.RoleUser,
 								Content: &agentctx.MessageContent{Str: &correction},
 							})
 							slog.Info("runner: reflection backtrack triggered",
@@ -273,7 +273,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 
 			// Append result as a new message
 			messages = append(messages, agentctx.StrategicMessage{
-				Role:       "tool",
+				Role:       agentctx.RoleTool,
 				Name:       &name,
 				Content:    &agentctx.MessageContent{Str: &result},
 				ToolCallID: toolCallID,
@@ -448,7 +448,7 @@ func extractText(msg agentctx.StrategicMessage) string {
 // lastUserText returns the text of the last user message in messages, or "".
 func lastUserText(messages []agentctx.StrategicMessage) string {
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" && messages[i].Content != nil && messages[i].Content.Str != nil {
+		if messages[i].Role == agentctx.RoleUser && messages[i].Content != nil && messages[i].Content.Str != nil {
 			return *messages[i].Content.Str
 		}
 	}

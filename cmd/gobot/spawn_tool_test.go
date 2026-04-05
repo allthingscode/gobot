@@ -25,7 +25,7 @@ func (m *mockRunner) Run(_ context.Context, _ string, messages []agentctx.Strate
 	}
 	text := m.response
 	updated := append(messages, agentctx.StrategicMessage{
-		Role:    "assistant",
+		Role:    agentctx.RoleAssistant,
 		Content: &agentctx.MessageContent{Str: &text},
 	})
 	return m.response, updated, nil

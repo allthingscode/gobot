@@ -43,7 +43,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	candidate := resp.Candidates[0]
 	msg := agentctx.StrategicMessage{
-		Role: "assistant",
+		Role: agentctx.RoleAssistant,
 	}
 
 	// Extract text content, thinking, and tool calls in order
@@ -122,15 +122,15 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 	for i, msg := range messages {
 		// A message is valid if it has content, tool calls, thinking blocks, or is a tool response (Name set).
 		if msg.Content == nil && len(msg.ToolCalls) == 0 && msg.Name == nil && len(msg.ThinkingBlocks) == 0 {
-			slog.Debug("gemini: skipping empty message", "index", i, "role", msg.Role)
+			slog.Debug("gemini: skipping empty message", "index", i, "role", string(msg.Role))
 			continue
 		}
-		role := msg.Role
-		switch role {
-		case "assistant":
-			role = "model"
-		case "tool":
-			role = "user"
+		role := string(msg.Role)
+		switch msg.Role {
+		case agentctx.RoleAssistant:
+			role = string(agentctx.RoleModel)
+		case agentctx.RoleTool:
+			role = string(agentctx.RoleUser)
 		}
 		c := &genai.Content{Role: role}
 
@@ -186,7 +186,7 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		}
 
 		// Handle tool results (user turn)
-		if msg.Role == "tool" || (msg.Role == "user" && msg.ToolCallID != nil) {
+		if msg.Role == agentctx.RoleTool || (msg.Role == agentctx.RoleUser && msg.ToolCallID != nil) {
 			if msg.Name != nil && msg.Content != nil && msg.Content.Str != nil {
 				var res map[string]any
 				if err := json.Unmarshal([]byte(*msg.Content.Str), &res); err != nil {
@@ -200,7 +200,7 @@ func (p *GeminiProvider) messagesToContents(messages []agentctx.StrategicMessage
 		if len(c.Parts) > 0 {
 			contents = append(contents, c)
 		} else {
-			slog.Debug("gemini: message yielded no parts, omitting", "index", i, "role", msg.Role)
+			slog.Debug("gemini: message yielded no parts, omitting", "index", i, "role", string(msg.Role))
 		}
 	}
 	return contents

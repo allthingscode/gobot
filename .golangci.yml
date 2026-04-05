@@ -12,6 +12,6 @@ linters:
         - staticcheck
 
 run:
-    modules-download-mode: vendor
+    modules-download-mode: readonly
     allow-parallel-runners: true
     timeout: 5m

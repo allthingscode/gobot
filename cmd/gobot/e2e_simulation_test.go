@@ -73,7 +73,7 @@ func (r *simRunner) Run(ctx context.Context, sessionKey string, messages []agent
 			// Final text step — return the scripted response.
 			text := step.FinalText
 			updated := append(messages, agentctx.StrategicMessage{
-				Role:    "assistant",
+				Role:    agentctx.RoleAssistant,
 				Content: &agentctx.MessageContent{Str: &text},
 			})
 			return text, updated, nil

@@ -72,7 +72,7 @@ func TestCreateThread(t *testing.T) {
 // ── SaveSnapshot ─────────────────────────────────────────────────────────────
 
 func TestSaveSnapshot(t *testing.T) {
-	msg := func(role, text string) StrategicMessage {
+	msg := func(role MessageRole, text string) StrategicMessage {
 		content := MessageContent{Str: strPtr(text)}
 		return StrategicMessage{Role: role, Content: &content}
 	}
@@ -88,7 +88,7 @@ func TestSaveSnapshot(t *testing.T) {
 			name:      "saves valid snapshot",
 			threadID:  "t1",
 			iteration: 1,
-			messages:  []StrategicMessage{msg("user", "hello"), msg("assistant", "hi")},
+			messages:  []StrategicMessage{msg(RoleUser, "hello"), msg(RoleAssistant, "hi")},
 			wantOK:    true,
 		},
 		{
@@ -127,7 +127,7 @@ func TestSaveSnapshot(t *testing.T) {
 // ── LoadLatest ────────────────────────────────────────────────────────────────
 
 func TestLoadLatest(t *testing.T) {
-	msg := func(role, text string) StrategicMessage {
+	msg := func(role MessageRole, text string) StrategicMessage {
 		content := MessageContent{Str: strPtr(text)}
 		return StrategicMessage{Role: role, Content: &content}
 	}
@@ -148,8 +148,8 @@ func TestLoadLatest(t *testing.T) {
 		if err := m.CreateThread("t1", "gemini-3-flash", map[string]any{"k": "v"}); err != nil {
 			t.Fatalf("CreateThread: %v", err)
 		}
-		msgs1 := []StrategicMessage{msg("user", "first")}
-		msgs2 := []StrategicMessage{msg("user", "first"), msg("assistant", "second")}
+		msgs1 := []StrategicMessage{msg(RoleUser, "first")}
+		msgs2 := []StrategicMessage{msg(RoleUser, "first"), msg(RoleAssistant, "second")}
 		if _, err := m.SaveSnapshot("t1", 1, msgs1); err != nil {
 			t.Fatalf("SaveSnapshot iter1: %v", err)
 		}
@@ -184,8 +184,8 @@ func TestLoadLatest(t *testing.T) {
 			t.Fatalf("CreateThread: %v", err)
 		}
 		original := []StrategicMessage{
-			msg("user", "hello"),
-			msg("assistant", "world"),
+			msg(RoleUser, "hello"),
+			msg(RoleAssistant, "world"),
 		}
 		if _, err := m.SaveSnapshot("t1", 1, original); err != nil {
 			t.Fatalf("SaveSnapshot: %v", err)
@@ -232,7 +232,7 @@ func TestCompleteThread(t *testing.T) {
 			t.Fatalf("CreateThread: %v", err)
 		}
 		content := MessageContent{Str: strPtr("hi")}
-		if _, err := m.SaveSnapshot("t1", 1, []StrategicMessage{{Role: "user", Content: &content}}); err != nil {
+		if _, err := m.SaveSnapshot("t1", 1, []StrategicMessage{{Role: RoleUser, Content: &content}}); err != nil {
 			t.Fatalf("SaveSnapshot: %v", err)
 		}
 		if err := m.CompleteThread("t1"); err != nil {
@@ -265,7 +265,7 @@ func TestListResumable(t *testing.T) {
 	t.Run("returns active threads with snapshots ordered by updated_at desc", func(t *testing.T) {
 		m := newTestManager(t)
 		content := MessageContent{Str: strPtr("msg")}
-		snap := []StrategicMessage{{Role: "user", Content: &content}}
+		snap := []StrategicMessage{{Role: RoleUser, Content: &content}}
 
 		for _, id := range []string{"tA", "tB"} {
 			if err := m.CreateThread(id, "model", nil); err != nil {
@@ -315,7 +315,7 @@ func TestSaveSnapshot_TxBeginError(t *testing.T) {
 	m.db.Close() // force all subsequent DB operations to fail
 
 	content := MessageContent{Str: strPtr("hi")}
-	msgs := []StrategicMessage{{Role: "user", Content: &content}}
+	msgs := []StrategicMessage{{Role: RoleUser, Content: &content}}
 	_, err := m.SaveSnapshot("t1", 1, msgs)
 	if err == nil {
 		t.Error("expected error after DB close, got nil")
@@ -419,7 +419,7 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) {
 	// ContentItem with all-nil fields: MarshalJSON returns an error.
 	badItem := ContentItem{} // all nil
 	msgs := []StrategicMessage{
-		{Role: "user", Content: &MessageContent{Items: []ContentItem{badItem}}},
+		{Role: RoleUser, Content: &MessageContent{Items: []ContentItem{badItem}}},
 	}
 	ok, err := m.SaveSnapshot("t1", 1, msgs)
 	if err != nil {
@@ -497,7 +497,7 @@ func TestSaveSnapshot_StoresChecksum(t *testing.T) {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	content := MessageContent{Str: strPtr("hello")}
-	msgs := []StrategicMessage{{Role: "user", Content: &content}}
+	msgs := []StrategicMessage{{Role: RoleUser, Content: &content}}
 	ok, err := m.SaveSnapshot("t1", 1, msgs)
 	if err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
@@ -524,7 +524,7 @@ func TestLoadLatest_ChecksumMismatch(t *testing.T) {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	content := MessageContent{Str: strPtr("hello")}
-	msgs := []StrategicMessage{{Role: "user", Content: &content}}
+	msgs := []StrategicMessage{{Role: RoleUser, Content: &content}}
 	if _, err := m.SaveSnapshot("t1", 1, msgs); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}

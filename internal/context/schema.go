@@ -119,6 +119,17 @@ func (c ContentItem) MarshalJSON() ([]byte, error) {
 
 // ── StrategicMessage ──────────────────────────────────────────────────────────
 
+// MessageRole defines the role of a StrategicMessage (e.g., "user", "assistant").
+type MessageRole string
+
+const (
+	RoleSystem    MessageRole = "system"
+	RoleUser      MessageRole = "user"
+	RoleAssistant MessageRole = "assistant"
+	RoleModel     MessageRole = "model" // Used by Gemini
+	RoleTool      MessageRole = "tool"
+)
+
 // MessageContent is the union type for the content field of StrategicMessage:
 // either a plain string or a list of ContentItems.
 type MessageContent struct {
@@ -171,7 +182,7 @@ func (m *MessageContent) String() string {
 // StrategicMessage is a single entry in the agent conversation history.
 // It mirrors the Pydantic StrategicMessage in checkpoint_logic.py.
 type StrategicMessage struct {
-	Role             string           `json:"role"`
+	Role             MessageRole      `json:"role"`
 	Content          *MessageContent  `json:"content,omitempty"`
 	Name             *string          `json:"name,omitempty"`
 	ToolCallID       *string          `json:"tool_call_id,omitempty"`

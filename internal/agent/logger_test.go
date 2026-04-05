@@ -16,8 +16,8 @@ func TestMarkdownLogger_WritesFile(t *testing.T) {
 	root := t.TempDir()
 	l := NewMarkdownLogger(root)
 	msgs := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: strPtr("hello")}},
-		{Role: "assistant", Content: &agentctx.MessageContent{Str: strPtr("hi there")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("hello")}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: strPtr("hi there")}},
 	}
 	if err := l.Log("session123", 1, msgs); err != nil {
 		t.Fatalf("Log: %v", err)
@@ -47,7 +47,7 @@ func TestMarkdownLogger_SanitizesKey(t *testing.T) {
 	root := t.TempDir()
 	l := NewMarkdownLogger(root)
 	msgs := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: strPtr("test")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("test")}},
 	}
 	if err := l.Log("123:456/789", 1, msgs); err != nil {
 		t.Fatalf("Log: %v", err)
@@ -67,7 +67,7 @@ func TestMarkdownLogger_SanitizesKey(t *testing.T) {
 func TestMarkdownLogger_CreatesDateDir(t *testing.T) {
 	root := t.TempDir()
 	l := NewMarkdownLogger(root)
-	msgs := []agentctx.StrategicMessage{{Role: "user", Content: &agentctx.MessageContent{Str: strPtr("a")}}}
+	msgs := []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("a")}}}
 	if err := l.Log("s1", 1, msgs); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestMarkdownLogger_CreatesDateDir(t *testing.T) {
 
 func TestRenderMarkdown_ContentItems(t *testing.T) {
 	msgs := []agentctx.StrategicMessage{
-		{Role: "assistant", Content: &agentctx.MessageContent{Items: []agentctx.ContentItem{
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Items: []agentctx.ContentItem{
 			{Tool: &agentctx.ToolCallContent{Type: "tool_call", ID: "id1", Function: agentctx.ToolCallFunction{Name: "search", Arguments: `{"q":"foo"}`}}},
 			{Thinking: &agentctx.ThinkingContent{Type: "thinking", Text: "reasoning..."}},
 		}}},

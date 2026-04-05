@@ -18,7 +18,18 @@ trap cleanup EXIT
 
 echo "--- Pre-commit verification started"
 
-if ! go vet ./... > "$TEMP_LOG" 2>&1; then
+# Check vendor consistency whenever go.mod or go.sum are staged.
+if git diff --cached --name-only | grep -qE '^(go\.mod|go\.sum)$'; then
+    echo "--- go mod vendor (consistency check)"
+    go mod vendor
+    if ! git diff --exit-code vendor/ > "$TEMP_LOG" 2>&1; then
+        echo "ERROR: vendor/ is out of sync with go.mod. Stage the updated vendor/ directory."
+        cat "$TEMP_LOG"
+        exit 1
+    fi
+fi
+
+if ! go vet -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
     echo "ERROR: go vet failed"
     cat "$TEMP_LOG"
     exit 1
@@ -30,10 +41,10 @@ if ! staticcheck ./... > "$TEMP_LOG" 2>&1; then
     exit 1
 fi
 
-if ! go test -mod=vendor ./... > "$TEMP_LOG" 2>&1; then
+if ! go test -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
     echo "ERROR: go test failed"
     cat "$TEMP_LOG"
     exit 1
 fi
 
-echo "--- Pre-commit: all checks passed (vet, staticcheck, test)"
+echo "--- Pre-commit: all checks passed (vendor, vet, staticcheck, test)"

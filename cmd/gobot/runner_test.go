@@ -72,8 +72,8 @@ func TestLastUserText(t *testing.T) {
 	s1 := "msg 1"
 	s2 := "msg 2"
 	messages := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: &s1}},
-		{Role: "assistant", Content: &agentctx.MessageContent{Str: &s2}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &s1}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: &s2}},
 	}
 
 	got := lastUserText(messages)
@@ -82,7 +82,7 @@ func TestLastUserText(t *testing.T) {
 	}
 
 	s3 := "msg 3"
-	messages = append(messages, agentctx.StrategicMessage{Role: "user", Content: &agentctx.MessageContent{Str: &s3}})
+	messages = append(messages, agentctx.StrategicMessage{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &s3}})
 	got = lastUserText(messages)
 	if got != "msg 3" {
 		t.Errorf("lastUserText() = %q, want %q", got, "msg 3")
@@ -177,7 +177,7 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 	makeTextResp := func(text string) *provider.ChatResponse {
 		return &provider.ChatResponse{
 			Message: agentctx.StrategicMessage{
-				Role:    "assistant",
+				Role:    agentctx.RoleAssistant,
 				Content: &agentctx.MessageContent{Str: strPtr(text)},
 			},
 		}
@@ -205,7 +205,7 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 
 	userMsg := "test task"
 	messages := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: &userMsg}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &userMsg}},
 	}
 
 	got, _, err := r.Run(context.Background(), "test-session", messages)
@@ -266,13 +266,13 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 				responses: []*provider.ChatResponse{
 					{
 						Message: agentctx.StrategicMessage{
-							Role:      "assistant",
+							Role:      agentctx.RoleAssistant,
 							ToolCalls: tt.toolCalls,
 						},
 					},
 					{
 						Message: agentctx.StrategicMessage{
-							Role:    "assistant",
+							Role:    agentctx.RoleAssistant,
 							Content: &agentctx.MessageContent{Str: strPtr("done")},
 						},
 					},

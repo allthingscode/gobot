@@ -122,7 +122,7 @@ func (p *OpenAIProvider) mapMessages(messages []agentctx.StrategicMessage, syste
 
 	if system != "" {
 		result = append(result, openAIMessage{
-			Role:    "system",
+			Role:    string(agentctx.RoleSystem),
 			Content: system,
 		})
 	}
@@ -146,7 +146,7 @@ func (p *OpenAIProvider) mapMessages(messages []agentctx.StrategicMessage, syste
 			}
 		}
 
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+		if msg.Role == agentctx.RoleAssistant && len(msg.ToolCalls) > 0 {
 			for _, tc := range msg.ToolCalls {
 				id, _ := tc["id"].(string)
 				name, _ := tc["name"].(string)
@@ -166,7 +166,7 @@ func (p *OpenAIProvider) mapMessages(messages []agentctx.StrategicMessage, syste
 			}
 		}
 
-		if msg.Role == "tool" && msg.ToolCallID != nil {
+		if msg.Role == agentctx.RoleTool && msg.ToolCallID != nil {
 			oaMsg.ToolCallID = *msg.ToolCallID
 		}
 
@@ -201,7 +201,7 @@ func (p *OpenAIProvider) mapTools(tools []ToolDeclaration) []openAITool {
 func (p *OpenAIProvider) mapResponse(oaResp openAIResponse) *ChatResponse {
 	choice := oaResp.Choices[0]
 	msg := agentctx.StrategicMessage{
-		Role: "assistant",
+		Role: agentctx.RoleAssistant,
 	}
 
 	if choice.Message.Content != "" {

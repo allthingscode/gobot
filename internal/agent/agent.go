@@ -267,7 +267,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 				
 				// Prepend summary as a system message.
 				summaryMsg := agentctx.StrategicMessage{
-					Role:      "system",
+					Role:      agentctx.RoleSystem,
 					Content:   &agentctx.MessageContent{Str: &summary},
 					CreatedAt: time.Now().Format(time.RFC3339),
 				}
@@ -315,7 +315,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 
 	// Append the incoming user message.
 	messages = append(messages, agentctx.StrategicMessage{
-		Role:      "user",
+		Role:      agentctx.RoleUser,
 		Content:   &agentctx.MessageContent{Str: &cleaned},
 		CreatedAt: time.Now().Format(time.RFC3339),
 	})

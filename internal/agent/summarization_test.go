@@ -28,9 +28,9 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 	messages := make([]agentctx.StrategicMessage, 8)
 	for i := 0; i < 8; i++ {
 		content := fmt.Sprintf("message %d", i)
-		role := "user"
+		role := agentctx.RoleUser
 		if i%2 == 1 {
-			role = "assistant"
+			role = agentctx.RoleAssistant
 		}
 		messages[i] = agentctx.StrategicMessage{
 			Role:    role,
@@ -58,7 +58,7 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 	}
 	
 	firstMsg := lastCall.messages[0]
-	if firstMsg.Role != "system" {
+	if firstMsg.Role != agentctx.RoleSystem {
 		t.Errorf("expected first message role 'system', got %q", firstMsg.Role)
 	}
 	if firstMsg.Content.String() != expectedSummary {
@@ -91,7 +91,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 	// Create a history starting with an existing summary.
 	messages := []agentctx.StrategicMessage{
 		{
-			Role:    "system",
+			Role:    agentctx.RoleSystem,
 			Content: &agentctx.MessageContent{Str: &initialSummary},
 		},
 	}
@@ -99,7 +99,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		content := fmt.Sprintf("message %d", i)
 		messages = append(messages, agentctx.StrategicMessage{
-			Role:    "user",
+			Role:    agentctx.RoleUser,
 			Content: &agentctx.MessageContent{Str: &content},
 		})
 	}
@@ -114,7 +114,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 	lastCall := mock.calls[len(mock.calls)-1]
 	firstMsg := lastCall.messages[0]
 	
-	if firstMsg.Role != "system" {
+	if firstMsg.Role != agentctx.RoleSystem {
 		t.Errorf("expected first message role 'system', got %q", firstMsg.Role)
 	}
 	if firstMsg.Content.String() != newSummary {

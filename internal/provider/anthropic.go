@@ -116,9 +116,9 @@ func (p *AnthropicProvider) mapMessages(messages []agentctx.StrategicMessage) []
 	var currentMsg *anthropicMessage
 
 	for _, msg := range messages {
-		role := msg.Role
-		if role == "tool" {
-			role = "user"
+		role := string(msg.Role)
+		if msg.Role == agentctx.RoleTool {
+			role = string(agentctx.RoleUser)
 		}
 
 		blocks := p.mapContentBlocks(msg)
@@ -183,7 +183,7 @@ func (p *AnthropicProvider) mapContentBlocks(msg agentctx.StrategicMessage) []an
 	}
 
 	// Tool result (user role)
-	if msg.Role == "tool" || (msg.Role == "user" && msg.ToolCallID != nil) {
+	if msg.Role == agentctx.RoleTool || (msg.Role == agentctx.RoleUser && msg.ToolCallID != nil) {
 		if msg.ToolCallID != nil {
 			content := ""
 			if msg.Content != nil && msg.Content.Str != nil {
@@ -217,7 +217,7 @@ func (p *AnthropicProvider) mapTools(tools []ToolDeclaration) []anthropicTool {
 
 func (p *AnthropicProvider) mapResponse(antResp anthropicResponse) *ChatResponse {
 	msg := agentctx.StrategicMessage{
-		Role: "assistant",
+		Role: agentctx.RoleAssistant,
 	}
 
 	var textParts []string

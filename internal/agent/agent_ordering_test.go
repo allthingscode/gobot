@@ -30,7 +30,7 @@ func (r *delayedRunner) Run(_ context.Context, _ string, messages []agentctx.Str
 	r.mu.Lock()
 	r.calls++
 	r.mu.Unlock()
-	updated := append(messages, agentctx.StrategicMessage{Role: "assistant"})
+	updated := append(messages, agentctx.StrategicMessage{Role: agentctx.RoleAssistant})
 	return r.response, updated, nil
 }
 

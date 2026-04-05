@@ -33,7 +33,7 @@ func (r *mockRunner) Run(_ context.Context, sessionKey string, messages []agentc
 	if r.err != nil {
 		return "", nil, r.err
 	}
-	updated := append(messages, agentctx.StrategicMessage{Role: "assistant"})
+	updated := append(messages, agentctx.StrategicMessage{Role: agentctx.RoleAssistant})
 	return r.response, updated, nil
 }
 
@@ -156,9 +156,9 @@ func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
 	// Pre-fill history with 10 messages.
 	history := make([]agentctx.StrategicMessage, 10)
 	for i := range history {
-		role := "user"
+		role := agentctx.RoleUser
 		if i%2 == 1 {
-			role = "assistant"
+			role = agentctx.RoleAssistant
 		}
 		content := "msg"
 		history[i] = agentctx.StrategicMessage{
@@ -216,7 +216,7 @@ func TestDispatch_BasicRoundtrip(t *testing.T) {
 	if call.sessionKey != "session-1" {
 		t.Errorf("sessionKey = %q, want %q", call.sessionKey, "session-1")
 	}
-	if len(call.messages) != 1 || call.messages[0].Role != "user" {
+	if len(call.messages) != 1 || call.messages[0].Role != agentctx.RoleUser {
 		t.Errorf("expected one user message, got: %v", call.messages)
 	}
 }
@@ -401,7 +401,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 		{
 			name: "hook returns modified - use modified",
 			hook: func(ctx context.Context, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage {
-				return append(messages, agentctx.StrategicMessage{Role: "system", Content: &agentctx.MessageContent{Str: ptrStr("injected")}})
+				return append(messages, agentctx.StrategicMessage{Role: agentctx.RoleSystem, Content: &agentctx.MessageContent{Str: ptrStr("injected")}})
 			},
 			wantLen: 3, // "prior message" + "injected" + "new message"
 		},
@@ -414,7 +414,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 
 			// Pre-fill history.
 			history := []agentctx.StrategicMessage{
-				{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("prior message")}},
+				{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("prior message")}},
 			}
 			store := newMockStore()
 			store.SaveSnapshot("s1", 1, history)
@@ -457,11 +457,11 @@ func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
 
 	// Pre-fill history with trivial messages ("ok", "yes", "confirmed").
 	history := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("ok")}},
-		{Role: "assistant", Content: &agentctx.MessageContent{Str: ptrStr("yes")}},
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("confirmed")}},
-		{Role: "assistant", Content: &agentctx.MessageContent{Str: ptrStr("ok.")}},
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("hello")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("ok")}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("yes")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("confirmed")}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("ok.")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("hello")}},
 	}
 	store.SaveSnapshot("sess1", 1, history)
 
@@ -499,9 +499,9 @@ func TestSessionManager_CompactionWithNilConsolidator(t *testing.T) {
 	// Pre-fill history to trigger compaction.
 	history := make([]agentctx.StrategicMessage, 10)
 	for i := range history {
-		role := "user"
+		role := agentctx.RoleUser
 		if i%2 == 1 {
-			role = "assistant"
+			role = agentctx.RoleAssistant
 		}
 		content := "msg"
 		history[i] = agentctx.StrategicMessage{
@@ -532,11 +532,11 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 
 	// Pre-fill history with mixed user/assistant turns.
 	history := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("What's the deadline?")}},
-		{Role: "assistant", Content: &agentctx.MessageContent{Str: ptrStr("May 15, 2026")}},
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("ok")}},
-		{Role: "assistant", Content: &agentctx.MessageContent{Str: ptrStr("Budget approved: $50k")}},
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("confirmed")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("What's the deadline?")}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("May 15, 2026")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("ok")}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("Budget approved: $50k")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("confirmed")}},
 	}
 	store.SaveSnapshot("sess1", 1, history)
 
@@ -588,9 +588,9 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 
 	// Pre-fill history ending with a user message.
 	history := []agentctx.StrategicMessage{
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("message 1")}},
-		{Role: "assistant", Content: &agentctx.MessageContent{Str: ptrStr("response 1")}},
-		{Role: "user", Content: &agentctx.MessageContent{Str: ptrStr("message 2")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("message 1")}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("response 1")}},
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("message 2")}},
 	}
 	store.SaveSnapshot("sess1", 1, history)
 

@@ -336,7 +336,7 @@ func TestMessageContent_MarshalNilStr_NilItems(t *testing.T) {
 func TestStrategicMessage_StringContent_RoundTrip(t *testing.T) {
 	s := "User message text"
 	msg := ctx.StrategicMessage{
-		Role:    "user",
+		Role:    ctx.RoleUser,
 		Content: &ctx.MessageContent{Str: &s},
 	}
 	data, err := json.Marshal(msg)
@@ -347,7 +347,7 @@ func TestStrategicMessage_StringContent_RoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Role != "user" {
+	if got.Role != ctx.RoleUser {
 		t.Errorf("role mismatch: %q", got.Role)
 	}
 	if got.Content == nil || got.Content.Str == nil || *got.Content.Str != s {
@@ -357,7 +357,7 @@ func TestStrategicMessage_StringContent_RoundTrip(t *testing.T) {
 
 func TestStrategicMessage_ItemContent_RoundTrip(t *testing.T) {
 	msg := ctx.StrategicMessage{
-		Role: "assistant",
+		Role: ctx.RoleAssistant,
 		Content: &ctx.MessageContent{
 			Items: []ctx.ContentItem{
 				{Text: &ctx.TextContent{Type: "text", Text: "answer"}},
@@ -383,7 +383,7 @@ func TestStrategicMessage_OptionalFields(t *testing.T) {
 	tcid := "tc_001"
 	rc := "some reasoning"
 	msg := ctx.StrategicMessage{
-		Role:             "tool",
+		Role:             ctx.RoleTool,
 		Name:             &name,
 		ToolCallID:       &tcid,
 		ReasoningContent: &rc,
@@ -408,7 +408,7 @@ func TestStrategicMessage_OptionalFields(t *testing.T) {
 }
 
 func TestStrategicMessage_NilContent_OmitEmpty(t *testing.T) {
-	msg := ctx.StrategicMessage{Role: "system"}
+	msg := ctx.StrategicMessage{Role: ctx.RoleSystem}
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
@@ -420,7 +420,7 @@ func TestStrategicMessage_NilContent_OmitEmpty(t *testing.T) {
 
 func TestStrategicMessage_ToolCalls_RoundTrip(t *testing.T) {
 	msg := ctx.StrategicMessage{
-		Role: "assistant",
+		Role: ctx.RoleAssistant,
 		ToolCalls: []map[string]any{
 			{"id": "c1", "type": "function", "function": map[string]any{"name": "spawn", "arguments": "{}"}},
 		},
@@ -440,7 +440,7 @@ func TestStrategicMessage_ToolCalls_RoundTrip(t *testing.T) {
 
 func TestStrategicMessage_ThinkingBlocks_RoundTrip(t *testing.T) {
 	msg := ctx.StrategicMessage{
-		Role: "assistant",
+		Role: ctx.RoleAssistant,
 		ThinkingBlocks: []map[string]any{
 			{"type": "thinking", "thinking": "consider X"},
 		},
@@ -459,7 +459,7 @@ func TestStrategicMessage_ThinkingBlocks_RoundTrip(t *testing.T) {
 }
 
 func TestStrategicMessage_Roles(t *testing.T) {
-	for _, role := range []string{"system", "user", "assistant", "tool"} {
+	for _, role := range []ctx.MessageRole{ctx.RoleSystem, ctx.RoleUser, ctx.RoleAssistant, ctx.RoleTool} {
 		msg := ctx.StrategicMessage{Role: role}
 		data, _ := json.Marshal(msg)
 		var got ctx.StrategicMessage
