@@ -246,11 +246,14 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 				}
 			}
 
+			var paramsHash string
 			if execErr == nil && !skipExec {
+				start := time.Now()
 				// Generate a deterministic idempotency key based on the tool's position in the sequence and parameters.
 				// This ensures that if the agent loop crashes and resumes, the exact same tool call gets the same key,
 				// preventing duplicate real-world side effects.
-				paramsHash, hashErr := agentctx.HashParams(args)
+				var hashErr error
+				paramsHash, hashErr = agentctx.HashParams(args)
 				if hashErr != nil {
 					slog.Warn("runner: failed to hash tool params, skipping idempotency check", "tool", name, "err", hashErr)
 					result, execErr = r.executeTool(ctx, sessionKey, "", name, args, "")
@@ -259,13 +262,24 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 					result, execErr = r.executeTool(ctx, sessionKey, idemKey, name, args, paramsHash)
 				}
 				if execErr == nil {
-					slog.Info("runner: tool result", "tool", name, "result_len", len(result))
+					slog.Info("runner: tool execution completed",
+						slog.String("session", sessionKey),
+						slog.String("tool", name),
+						slog.String("params_hash", paramsHash),
+						slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+						slog.Int("result_len", len(result)),
+					)
 					slog.Debug("runner: tool result detail", "tool", name, "result", result)
 				}
 			}
 
 			if execErr != nil {
-				slog.Error("runner: tool execution failed", "session", sessionKey, "tool", name, "err", execErr)
+				slog.Error("runner: tool execution failed",
+					slog.String("session", sessionKey),
+					slog.String("tool", name),
+					slog.String("params_hash", paramsHash),
+					slog.Any("err", execErr),
+				)
 				result = fmt.Sprintf("Error: %v", execErr)
 			} else {
 				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.

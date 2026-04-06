@@ -1,8 +1,10 @@
 ﻿package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -486,4 +488,72 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 	if len(content) != 100 + len(fmt.Sprintf("\n\n[... truncated: result exceeded %d bytes ...]", 100)) {
 		t.Errorf("Unexpected truncated length: %d", len(content))
 	}
+}
+
+func TestRunner_StructuredLogging(t *testing.T) {
+	var buf bytes.Buffer
+	handler := slog.NewTextHandler(&buf, nil)
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	defer func() {
+		// Reset logger
+		slog.SetDefault(slog.Default())
+	}()
+
+	mock := &mockProvider{
+		responses: []*provider.ChatResponse{
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []map[string]any{
+						{"name": "fail_tool", "args": map[string]any{"force": "fail"}},
+					},
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role:    agentctx.RoleAssistant,
+					Content: &agentctx.MessageContent{Str: strPtr("done")},
+				},
+			},
+		},
+	}
+
+	r := &geminiRunner{
+		prov:              mock,
+		model:             "mock-model",
+		maxToolIterations: 10,
+		limiter:           rate.NewLimiter(rate.Inf, 1),
+		breaker:           resilience.New("mock", 5, time.Minute, time.Second),
+		tools: []Tool{
+			&failTool{name: "fail_tool"},
+		},
+	}
+
+	_, _, _ = r.Run(context.Background(), "test-session", nil)
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "runner: tool execution failed") {
+		t.Errorf("Expected failure log, got:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "tool=fail_tool") {
+		t.Errorf("Expected structured 'tool' field, got:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "session=test-session") {
+		t.Errorf("Expected structured 'session' field, got:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "params_hash=") {
+		t.Errorf("Expected structured 'params_hash' field, got:\n%s", logOutput)
+	}
+}
+
+type failTool struct {
+	name string
+}
+
+func (m *failTool) Name() string                     { return m.name }
+func (m *failTool) Description() string              { return "fails" }
+func (m *failTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: m.name} }
+func (m *failTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+	return "", fmt.Errorf("simulated failure")
 }
