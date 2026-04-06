@@ -39,7 +39,7 @@ type Scheduler struct {
 
 // NewScheduler creates a new background scheduler.
 func NewScheduler(storePath, itemsDir string, dispatcher Dispatcher) *Scheduler {
-	return &Scheduler{
+	s := &Scheduler{
 		storePath:    storePath,
 		itemsDir:     itemsDir,
 		dispatcher:   dispatcher,
@@ -47,6 +47,20 @@ func NewScheduler(storePath, itemsDir string, dispatcher Dispatcher) *Scheduler 
 		jobTimeout:   10 * time.Minute,
 		clock:        RealClock(),
 	}
+
+	// Initialize file tracking state and load initial store
+	if info, err := os.Stat(storePath); err == nil {
+		s.lastMtime = info.ModTime().UnixNano()
+		s.lastSize = info.Size()
+		if data, err := os.ReadFile(storePath); err == nil {
+			var store Store
+			if err := store.DecodeJSON(data); err == nil {
+				s.store = &store
+			}
+		}
+	}
+
+	return s
 }
 
 // WithJobTimeout sets the per-job execution timeout.
