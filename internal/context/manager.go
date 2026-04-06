@@ -196,10 +196,13 @@ func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error)
 func (m *CheckpointManager) CompleteThread(threadID string) error {
 	_, err := m.db.Exec(
 		`UPDATE threads SET status = 'completed', updated_at = CURRENT_TIMESTAMP
-		 WHERE thread_id = ?`,
+                 WHERE thread_id = ?`,
 		threadID,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("CompleteThread: exec: %w", err)
+	}
+	return nil
 }
 
 // DB returns the underlying *sql.DB so callers can share the connection for
@@ -232,7 +235,10 @@ func (m *CheckpointManager) ListResumable() ([]ResumableThread, error) {
 		}
 		result = append(result, r)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListResumable: final iteration: %w", err)
+	}
+	return result, nil
 }
 
 func truncate(s string, n int) string {

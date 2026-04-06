@@ -353,8 +353,13 @@ func TestCompleteThread_ExecError(t *testing.T) {
 	m := newTestManager(t)
 	m.db.Close()
 
-	if err := m.CompleteThread("t1"); err == nil {
+	err := m.CompleteThread("t1")
+	if err == nil {
 		t.Error("expected error after DB close, got nil")
+	}
+	expected := "CompleteThread: exec:"
+	if !strings.Contains(err.Error(), expected) {
+		t.Errorf("expected error to contain %q, got %q", expected, err.Error())
 	}
 }
 
