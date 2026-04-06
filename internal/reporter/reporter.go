@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const emailCSS = `body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;line-height:1.6;color:#d1d1d1;background-color:#0a0b10;margin:0;padding:20px}.container{max-width:800px;margin:0 auto;background:#161b22;padding:40px;border:1px solid #30363d;border-radius:4px}h1,h2,h3{color:#58a6ff;border-bottom:2px solid #30363d;padding-bottom:10px}a{color:#58a6ff}code{background:#0d1117;padding:2px 5px;color:#79c0ff}`
+const emailCSS = `body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;line-height:1.6;color:#f0f6fc;background-color:#0a0b10;margin:0;padding:20px}.container{max-width:800px;margin:0 auto;background:#161b22;padding:40px;border:1px solid #30363d;border-radius:4px;color:#f0f6fc !important}h1,h2,h3{color:#58a6ff;border-bottom:2px solid #30363d;padding-bottom:10px}a{color:#58a6ff;text-decoration:none}code{background:#0d1117;padding:2px 5px;color:#79c0ff}.vitality{font-family:'Georgia',serif;font-style:italic;color:#a5d6ff !important;font-size:1.25em;line-height:1.5;margin:20px 0}.audit{font-family:'Cascadia Code','Consolas',monospace;font-size:12px;color:#8b949e;background-color:#0d1117;border:1px solid #30363d;padding:15px;border-radius:4px;margin-top:30px}`
 
 // FallbackNotify writes a notification entry to {storageRoot}/workspace/NOTIFICATIONS.md
 // when email delivery is unavailable. Creates the file if it does not exist.
