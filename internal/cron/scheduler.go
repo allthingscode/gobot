@@ -131,7 +131,7 @@ func (s *Scheduler) poll(ctx context.Context) error {
 	info, err := os.Stat(s.storePath)
 	if err == nil {
 		if ShouldReload(info.ModTime().UnixNano(), s.lastMtime, info.Size(), s.lastSize) {
-			slog.Info("Cron: jobs.json modified externally, reloading")
+			slog.Debug("Cron: jobs.json modified externally, reloading")
 			data, err := os.ReadFile(s.storePath)
 			if err == nil {
 				var newStore Store
