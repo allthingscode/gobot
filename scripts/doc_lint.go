@@ -263,6 +263,8 @@ func lintSpecialistProtocols(root string) []string {
 	// handoff.json schema validation.
 	handoffPath := filepath.Join(sessionDir, "handoff.json")
 	if data, err := os.ReadFile(handoffPath); err == nil {
+		// Handle UTF-8 BOM
+		data = []byte(strings.TrimPrefix(string(data), "\ufeff"))
 		var obj map[string]json.RawMessage
 		if jsonErr := json.Unmarshal(data, &obj); jsonErr != nil {
 			out = append(out, fmt.Sprintf(".private/session/handoff.json: invalid JSON: %v", jsonErr))
@@ -273,6 +275,31 @@ func lintSpecialistProtocols(root string) []string {
 						fmt.Sprintf(".private/session/handoff.json: missing required field %q", field))
 				}
 			}
+			// Verify task_id is NOT in archived (Production/Resolved).
+			if raw, ok := obj["task_id"]; ok {
+				var id string
+				if json.Unmarshal(raw, &id) == nil {
+					archivedDir := filepath.Join(root, ".private", "backlog", "archived")
+					filepath.WalkDir(archivedDir, func(path string, d os.DirEntry, err error) error {
+						if err != nil || d.IsDir() || !strings.Contains(d.Name(), id) {
+							return nil
+						}
+						data, readErr := os.ReadFile(path)
+						if readErr != nil {
+							return nil
+						}
+						m := frontmatterStatusRe.FindSubmatch(data)
+						if m != nil {
+							status := string(m[1])
+							if status == "Production" || status == "Resolved" {
+								out = append(out, fmt.Sprintf(".private/session/handoff.json: task_id %q is already %s (archived)", id, status))
+							}
+						}
+						return nil
+					})
+				}
+			}
+
 			// Verify state_file_path points to an existing file.
 			if raw, ok := obj["state_file_path"]; ok {
 				var p string
@@ -290,6 +317,8 @@ func lintSpecialistProtocols(root string) []string {
 	// session_state.json validity.
 	statePath := filepath.Join(sessionDir, "session_state.json")
 	if data, err := os.ReadFile(statePath); err == nil {
+		// Handle UTF-8 BOM
+		data = []byte(strings.TrimPrefix(string(data), "\ufeff"))
 		var obj map[string]interface{}
 		if jsonErr := json.Unmarshal(data, &obj); jsonErr != nil {
 			out = append(out,
