@@ -66,30 +66,30 @@ This document provides a deep dive into gobot's architecture, covering data flow
 
 | Package | Path | Primary Responsibility | Key Files |
 |---------|------|----------------------|-----------|
-| `agent` | `internal/agent` | Core agent loop: LLM turns, tool dispatch, compaction, session management | `agent.go`, `agent_test.go` |
-| `audit` | `internal/audit` | Markdown audit report generation (immutable audit trail) | `audit.go`, `audit_test.go` |
-| `bot` | `internal/bot` | Telegram bot client, message routing, pairing gate | `bot.go`, `bot_test.go` |
-| `config` | `internal/config` | Configuration loading from YAML/JSON, validation, typed accessors | `config.go`, `config_test.go` |
-| `context` | `internal/context` | Durable checkpointing and session state persistence (SQLite) | `manager.go`, `manager_test.go` |
-| `cron` | `internal/cron` | Autonomous background job scheduler | `scheduler.go`, `scheduler_test.go` |
-| `doctor` | `internal/doctor` | Pre-flight diagnostics and health checks | `doctor.go`, `doctor_test.go` |
-| `gateway` | `internal/gateway` | HTTP gateway for Telegram webhook and future web dashboard | `gateway.go`, `gateway_test.go` |
+| `agent` | `internal/agent` | Core agent loop: LLM turns, tool dispatch, compaction, session management | `agent.go`, `compaction.go`, `handoff.go`, `hooks.go` |
+| `audit` | `internal/audit` | Markdown audit report generation (immutable audit trail) | `audit.go`, `ledger.go`, `redact.go` |
+| `bot` | `internal/bot` | Telegram bot client, message routing, pairing gate | `bot.go`, `pairing_handler.go` |
+| `config` | `internal/config` | Configuration loading from YAML/JSON, validation, typed accessors | `config.go`, `validator.go` |
+| `context` | `internal/context` | Durable checkpointing and session state persistence (SQLite) | `manager.go`, `db.go`, `pairing.go` |
+| `cron` | `internal/cron` | Autonomous background job scheduler | `scheduler.go`, `cron.go`, `batch.go` |
+| `doctor` | `internal/doctor` | Pre-flight diagnostics and health checks | `doctor.go` |
+| `gateway` | `internal/gateway` | HTTP gateway for Telegram webhook and future web dashboard | `gateway.go` |
 | `google` | `internal/integrations/google` | Google Workspace integrations (Auth, Gmail, Calendar, Tasks) | `auth.go`, `gmail.go`, `calendar.go`, `tasks.go` |
-| `infra` | `internal/infra` | Infrastructure wiring (DB init, lifecycle management) | `infra.go`, `infra_test.go` |
-| `memory` | `internal/memory` | SQLite-backed long-term memory with FTS5 search | `memory.go`, `memory_test.go` |
-| `observability` | `internal/observability` | OpenTelemetry traces and metrics export | `otel.go`, `otel_test.go` |
-| `provider` | `internal/provider` | LLM provider abstraction (Gemini, Anthropic, OpenAI) | `factory.go`, `provider_test.go` |
-| `reflection` | `internal/reflection` | Pure-function reflection/planning loop utilities | `reflection.go`, `reflection_test.go` |
-| `reporter` | `internal/reporter` | HTML report generation | `reporter.go`, `reporter_test.go` |
-| `resilience` | `internal/resilience` | Circuit breakers, intelligent retry logic | `retry.go`, `retry_test.go` |
-| `sandbox` | `internal/sandbox` | Tool sandboxing and execution isolation | `executor_windows.go`, `executor_test.go` |
-| `secrets` | `internal/secrets` | DPAPI-encrypted secrets storage (Windows) | `secrets.go`, `secrets_test.go` |
-| `shell` | `internal/shell` | Shell command execution tool | `redirect.go`, `shell_test.go` |
-| `state` | `internal/state` | Durable agent state with atomic writes and file locking | `manager.go`, `manager_test.go` |
-| `strategic` | `internal/strategic` | Strategic hooks (F-012) for custom logic injection | `mandate.go`, `strategic_test.go` |
-| `telegram` | `internal/telegram` | Telegram API client and formatting utilities | `telegram.go`, `telegram_test.go` |
+| `infra` | `internal/infra` | Infrastructure wiring (DB init, lifecycle management) | `infra.go`, `resource_registry.go` |
+| `memory` | `internal/memory` | SQLite-backed long-term memory with FTS5 search | `memory.go`, `sqlite_store.go`, `consolidator/` |
+| `observability` | `internal/observability` | OpenTelemetry traces and metrics export | `otel.go`, `middleware.go` |
+| `provider` | `internal/provider` | LLM provider abstraction (Gemini, Anthropic, OpenAI) | `factory.go` |
+| `reflection` | `internal/reflection` | Pure-function reflection/planning loop utilities | `reflection.go` |
+| `reporter` | `internal/reporter` | HTML report generation | `reporter.go` |
+| `resilience` | `internal/resilience` | Circuit breakers, intelligent retry logic | `retry.go` |
+| `sandbox` | `internal/sandbox` | Tool sandboxing and execution isolation | `executor_windows.go` |
+| `secrets` | `internal/secrets` | DPAPI-encrypted secrets storage (Windows) | `secrets.go` |
+| `shell` | `internal/shell` | Shell command execution tool | `redirect.go`, `clixml.go` |
+| `state` | `internal/state` | Durable agent state with atomic writes and file locking | `manager.go` |
+| `strategic` | `internal/strategic` | Strategic hooks (F-012) for custom logic injection | `mandate.go` |
+| `telegram` | `internal/telegram` | Telegram API client and formatting utilities | `telegram.go` |
 | `testutil` | `internal/testutil` | Shared test helpers (table-driven test utilities) | `faulty_server.go` |
-| `cmd/gobot` | `cmd/gobot` | Main binary entrypoint and CLI commands | `main.go`, `runner_test.go` |
+| `cmd/gobot` | `cmd/gobot` | Main binary entrypoint and CLI commands | `main.go`, `runner.go`, `tool_*.go` |
 
 ## Key Design Decisions
 
