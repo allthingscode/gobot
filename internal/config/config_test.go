@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -525,6 +526,96 @@ func TestObservabilityConfig(t *testing.T) {
 	}
 	if obs.SamplingRate != 0.5 {
 		t.Errorf("got sampling_rate %v, want 0.5", obs.SamplingRate)
+	}
+}
+
+// TestConfig_SecretsErrorLogging verifies that when the secrets store fails,
+// warnings are logged via slog but environment variable fallback still works.
+func TestConfig_SecretsErrorLogging(t *testing.T) {
+	// Set up a custom slog handler to capture log output.
+	var logBuf bytes.Buffer
+	handler := slog.NewTextHandler(&logBuf, nil)
+	oldDefault := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(oldDefault) })
+
+	// Create a temporary storage root with a corrupted secrets file to force errors.
+	tmpDir := t.TempDir()
+	workspaceDir := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write corrupted JSON to trigger parse errors.
+	secretsFile := filepath.Join(workspaceDir, "dpapi_secrets.json")
+	if err := os.WriteFile(secretsFile, []byte("{invalid json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: tmpDir}}
+
+	// Set environment variables as fallback.
+	t.Setenv("GEMINI_API_KEY", "env-gemini-key")
+	t.Setenv("ANTHROPIC_API_KEY", "env-anthropic-key")
+	t.Setenv("OPENAI_API_KEY", "env-openai-key")
+	t.Setenv("OPENAI_BASE_URL", "env-openai-url")
+	t.Setenv("GOOGLE_API_KEY", "env-google-key")
+	t.Setenv("GOOGLE_CX", "env-google-cx")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "env-telegram-token")
+
+	tests := []struct {
+		name      string
+		getKey    func(*Config) string
+		wantValue string
+	}{
+		{
+			name:      "GeminiAPIKey falls back to env",
+			getKey:    func(c *Config) string { return c.GeminiAPIKey() },
+			wantValue: "env-gemini-key",
+		},
+		{
+			name:      "AnthropicAPIKey falls back to env",
+			getKey:    func(c *Config) string { return c.AnthropicAPIKey() },
+			wantValue: "env-anthropic-key",
+		},
+		{
+			name:      "OpenAIAPIKey falls back to env",
+			getKey:    func(c *Config) string { return c.OpenAIAPIKey() },
+			wantValue: "env-openai-key",
+		},
+		{
+			name:      "OpenAIBaseURL falls back to env",
+			getKey:    func(c *Config) string { return c.OpenAIBaseURL() },
+			wantValue: "env-openai-url",
+		},
+		{
+			name:      "GoogleAPIKey falls back to env",
+			getKey:    func(c *Config) string { return c.GoogleAPIKey() },
+			wantValue: "env-google-key",
+		},
+		{
+			name:      "GoogleCX falls back to env",
+			getKey:    func(c *Config) string { return c.GoogleCX() },
+			wantValue: "env-google-cx",
+		},
+		{
+			name:      "TelegramToken falls back to env",
+			getKey:    func(c *Config) string { return c.TelegramToken() },
+			wantValue: "env-telegram-token",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logBuf.Reset()
+			got := tc.getKey(cfg)
+			if got != tc.wantValue {
+				t.Errorf("got %q, want %q", got, tc.wantValue)
+			}
+			// Verify that a warning was logged (secrets store lookup failed).
+			logOutput := logBuf.String()
+			if !strings.Contains(logOutput, "secrets store lookup failed") {
+				t.Errorf("expected warning log, got: %s", logOutput)
+			}
+		})
 	}
 }
 

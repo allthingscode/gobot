@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -322,7 +323,11 @@ func (c *Config) GeminiAPIKey() string {
 		return c.Providers.Gemini.APIKey
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("gemini_api_key"); val != "" { // Error ignored; fall back to environment variable.
+	val, err := store.Get("gemini_api_key")
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", "gemini_api_key", "err", err)
+	}
+	if val != "" {
 		return val
 	}
 	return os.Getenv("GEMINI_API_KEY")
@@ -337,7 +342,11 @@ func (c *Config) AnthropicAPIKey() string {
 		return c.Providers.Anthropic.APIKey
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("anthropic_api_key"); val != "" { // Error ignored; fall back to environment variable.
+	val, err := store.Get("anthropic_api_key")
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", "anthropic_api_key", "err", err)
+	}
+	if val != "" {
 		return val
 	}
 	return os.Getenv("ANTHROPIC_API_KEY")
@@ -352,7 +361,11 @@ func (c *Config) OpenAIAPIKey() string {
 		return c.Providers.OpenAI.APIKey
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("openai_api_key"); val != "" { // Error ignored; fall back to environment variable.
+	val, err := store.Get("openai_api_key")
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", "openai_api_key", "err", err)
+	}
+	if val != "" {
 		return val
 	}
 	return os.Getenv("OPENAI_API_KEY")
@@ -367,7 +380,11 @@ func (c *Config) OpenAIBaseURL() string {
 		return c.Providers.OpenAI.BaseURL
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("openai_base_url"); val != "" { // Error ignored; fall back to environment variable.
+	val, err := store.Get("openai_base_url")
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", "openai_base_url", "err", err)
+	}
+	if val != "" {
 		return val
 	}
 	return os.Getenv("OPENAI_BASE_URL")
@@ -382,7 +399,11 @@ func (c *Config) GoogleAPIKey() string {
 		return c.Providers.Google.APIKey
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("google_api_key"); val != "" {
+	val, err := store.Get("google_api_key")
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", "google_api_key", "err", err)
+	}
+	if val != "" {
 		return val
 	}
 	return os.Getenv("GOOGLE_API_KEY")
@@ -397,7 +418,11 @@ func (c *Config) GoogleCX() string {
 		return c.Providers.Google.CustomCX
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("google_cx"); val != "" {
+	val, err := store.Get("google_cx")
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", "google_cx", "err", err)
+	}
+	if val != "" {
 		return val
 	}
 	return os.Getenv("GOOGLE_CX")
@@ -410,7 +435,11 @@ func (c *Config) TelegramToken() string {
 		return t
 	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	if val, _ := store.Get("telegram_token"); val != "" {
+	val, err := store.Get("telegram_token")
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", "telegram_token", "err", err)
+	}
+	if val != "" {
 		return val
 	}
 	return os.Getenv("TELEGRAM_BOT_TOKEN")
@@ -441,7 +470,11 @@ func (c *Config) mcpEnvFor(serverName string, store *secrets.SecretsStore) map[s
 		key := fmt.Sprintf("mcp_env_%s_%s",
 			strings.ToLower(serverName),
 			strings.ToLower(varName))
-		if v, _ := store.Get(key); v != "" {
+		v, err := store.Get(key)
+		if err != nil {
+			slog.Warn("secrets store lookup failed, falling back to env", "key", key, "err", err)
+		}
+		if v != "" {
 			env[varName] = v
 		}
 	}
