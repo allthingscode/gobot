@@ -64,7 +64,7 @@ This creates the following directory structure under the configured storage root
 
 ```
 Gobot_Storage/
-├── config.yaml          # Main configuration file
+├── config.json          # Main configuration file
 ├── gobot.db             # SQLite checkpoint database
 ├── memory.db            # Long-term memory FTS5 index
 ├── logs/                # Timestamped structured logs
@@ -75,7 +75,7 @@ Gobot_Storage/
 
 ### 3. Configuration
 
-Fill in your API keys in the generated `config.yaml` (usually located in `~/.gobot/config.yaml` or the storage root):
+Fill in your API keys in the generated `config.json` (usually located in `~/.gobot/config.json` or the storage root):
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -136,7 +136,7 @@ This runs pre-flight diagnostics including:
 ### View Logs
 
 ```powershell
-./gobot logs --tail 50 --filter ERROR
+./gobot logs --lines 50 --filter ERROR
 ```
 
 This displays the last 50 log lines filtered by severity. Logs are stored as structured JSON under `Gobot_Storage/logs/`.
