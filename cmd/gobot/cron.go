@@ -12,7 +12,7 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/cron"
-	"github.com/allthingscode/gobot/internal/gmail"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 )
 
 // cronDispatcher implements cron.Dispatcher.
@@ -31,7 +31,7 @@ type cronDispatcher struct {
 // Steps:
 //  1. Call cron.ResolveRoutableChannel(p, storageRoot).
 //     - If silent == true: prepend "[SILENT] " to message, then dispatch (no reply sent).
-//     - If channel == "email": dispatch and send response via Gmail.
+//     - If channel == "email": dispatch and send response via google.
 //     - If channel != "telegram" or to == "": log and return nil (unroutable).
 //  2. Use `to` directly as the sessionKey for mgr.Dispatch.
 //  3. If silent == false and response != "": parse sessionKey into chatID + threadID
@@ -73,7 +73,7 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 
 		if response != "" {
 			gmailSecrets := filepath.Join(d.secretsRoot, "gmail")
-			svc, err := gmail.NewService(gmailSecrets)
+			svc, err := google.NewService(gmailSecrets)
 			if err != nil {
 				slog.Error("failed to initialize gmail service for cron", "err", err)
 				return fmt.Errorf("init gmail service: %w", err)

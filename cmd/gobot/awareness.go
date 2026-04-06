@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/allthingscode/gobot/internal/config"
-	"github.com/allthingscode/gobot/internal/google"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/memory"
 )
 

@@ -73,7 +73,10 @@ func (m *CheckpointManager) CreateThread(threadID, model string, metadata map[st
 		 VALUES (?, ?, 'active', ?, CURRENT_TIMESTAMP)`,
 		threadID, model, string(metaJSON),
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("CreateThread: exec: %w", err)
+	}
+	return nil
 }
 
 // SaveSnapshot atomically persists the agent state for a given iteration.

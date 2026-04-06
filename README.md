@@ -239,7 +239,7 @@ For a deeper dive into package responsibilities and design decisions, see [`docs
 - **`internal/memory/`** — Long-term memory indexing and RAG search components. Uses SQLite FTS5 for full-text search across session history.
 - **`internal/provider/`** — LLM provider abstraction layer. Supports Gemini, Anthropic, and OpenAI-compatible APIs with unified `Provider` interface.
 - **`internal/strategic/`** — Strategic Edition mandates and output hardening. Contains PII redaction, circuit breakers, and security gates.
-- **`internal/google/`** — Google OAuth2 and API service clients for Calendar, Tasks, and Gmail.
+- **`internal/integrations/google/`** — Google OAuth2 and API service clients for Calendar, Tasks, and Gmail.
 - **`internal/gateway/`** — HTTP gateway for Telegram webhook mode and future web UI.
 - **`internal/cron/`** — Autonomous background job scheduler. Reads job definitions from `jobs/` directory and spawns ephemeral agent sessions.
 - **`internal/observability/`** — OpenTelemetry traces and metrics export. Integrates with `otel` SDK for distributed tracing.

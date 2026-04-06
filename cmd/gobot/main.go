@@ -23,8 +23,7 @@ import (
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/gateway"
-	"github.com/allthingscode/gobot/internal/gmail"
-	"github.com/allthingscode/gobot/internal/google"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
@@ -636,8 +635,8 @@ func cmdReauth() *cobra.Command {
 			scopes := []string{
 				"https://www.googleapis.com/auth/tasks",
 				"https://www.googleapis.com/auth/calendar.readonly",
-				"https://www.googleapis.com/auth/gmail.send",
-				"https://www.googleapis.com/auth/gmail.readonly",
+				"https://www.googleapis.com/auth/google.send",
+				"https://www.googleapis.com/auth/google.readonly",
 			}
 
 			fmt.Println("Starting Go-native interactive authorization...")
@@ -984,7 +983,7 @@ func cmdEmail() *cobra.Command {
 
 			// Gmail service uses secretsRoot/gmail/token.json
 			gmailSecrets := filepath.Join(secretsRoot, "gmail")
-			svc, err := gmail.NewService(gmailSecrets)
+			svc, err := google.NewService(gmailSecrets)
 			if err != nil {
 				return fmt.Errorf("auth: %w", err)
 			}

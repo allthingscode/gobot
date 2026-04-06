@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allthingscode/gobot/internal/gmail"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 )
 
 func TestSendEmailTool_Basic(t *testing.T) {
@@ -86,7 +86,7 @@ func TestSendEmailTool_Execute_Validation(t *testing.T) {
 func TestSendEmailTool_Execute_AuthFailure(t *testing.T) {
 	t.Parallel()
 
-	// An empty secretsRoot has no token.json, so gmail.NewService will fail.
+	// An empty secretsRoot has no token.json, so google.NewService will fail.
 	tool := newSendEmailTool(t.TempDir(), "user@example.com")
 	_, err := tool.Execute(context.Background(), "test-session", map[string]any{
 		"subject": "Test subject",
@@ -98,7 +98,7 @@ func TestSendEmailTool_Execute_AuthFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "auth") && !strings.Contains(err.Error(), "token.json") {
 		t.Errorf("error %q should mention auth or token.json failure", err.Error())
 	}
-	_ = gmail.ErrNeedsReauth // ensure the import is used
+	_ = google.ErrNeedsReauth // ensure the import is used
 }
 
 func TestGmailTools_Declarations(t *testing.T) {

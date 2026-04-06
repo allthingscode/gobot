@@ -9,7 +9,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/doctor"
-	"github.com/allthingscode/gobot/internal/gmail"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/infra"
 )
 
@@ -59,9 +59,9 @@ func liveProbes() *doctor.Probes {
 		},
 		ProbeGmail: func(gmailSecretsPath string) error {
 			// gmailSecretsPath is the directory containing token.json.
-			// gmail.NewService expects the directory path directly.
+			// google.NewService expects the directory path directly.
 			tokenDir := filepath.Dir(filepath.Join(gmailSecretsPath, "token.json"))
-			_, err := gmail.NewService(tokenDir)
+			_, err := google.NewService(tokenDir)
 			return err
 		},
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -338,8 +339,13 @@ func TestCreateThread_ExecError(t *testing.T) {
 	m := newTestManager(t)
 	m.db.Close()
 
-	if err := m.CreateThread("t1", "model", nil); err == nil {
+	err := m.CreateThread("t1", "model", nil)
+	if err == nil {
 		t.Error("expected error after DB close, got nil")
+	}
+	expected := "CreateThread: exec:"
+	if !strings.Contains(err.Error(), expected) {
+		t.Errorf("expected error to contain %q, got %q", expected, err.Error())
 	}
 }
 

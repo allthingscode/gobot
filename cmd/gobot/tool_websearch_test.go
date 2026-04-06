@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/allthingscode/gobot/internal/google"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 )
 
 func TestWebSearchTool(t *testing.T) {

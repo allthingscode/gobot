@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/allthingscode/gobot/internal/google"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/provider"
 )
 

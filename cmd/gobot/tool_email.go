@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/allthingscode/gobot/internal/gmail"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
@@ -25,7 +25,7 @@ func (s *SendEmailTool) Name() string { return sendEmailToolName }
 func (s *SendEmailTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        sendEmailToolName,
-		Description: "Send an email via Gmail. The recipient is fixed to the configured user address; only subject and body are required.",
+		Description: "Send an email via google. The recipient is fixed to the configured user address; only subject and body are required.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -57,7 +57,7 @@ func (s *SendEmailTool) Execute(ctx context.Context, _ string, args map[string]a
 		return "", fmt.Errorf("send_email: body is required")
 	}
 
-	svc, err := gmail.NewService(s.secretsRoot)
+	svc, err := google.NewService(s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("send_email: auth: %w", err)
 	}
@@ -117,7 +117,7 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _ string, args map[string
 		}
 	}
 
-	svc, err := gmail.NewService(s.secretsRoot)
+	svc, err := google.NewService(s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("search_gmail: auth: %w", err)
 	}
@@ -187,7 +187,7 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _ string, args map[string]a
 		return "", fmt.Errorf("read_gmail: message_id is required")
 	}
 
-	svc, err := gmail.NewService(s.secretsRoot)
+	svc, err := google.NewService(s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("read_gmail: auth: %w", err)
 	}

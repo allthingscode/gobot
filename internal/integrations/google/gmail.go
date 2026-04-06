@@ -1,6 +1,6 @@
-// Package gmail provides OAuth2 token management and email delivery via the Gmail API.
+// package google provides OAuth2 token management and email delivery via the Gmail API.
 // It uses only the standard library and the internal reporter package — no Google SDK required.
-package gmail
+package google
 
 import (
 	"context"
@@ -28,27 +28,12 @@ var ErrNeedsReauth = errors.New("AUTH_EXPIRED: run gobot reauth")
 
 const (
 	gmailBaseURL    = "https://gmail.googleapis.com/gmail/v1/users/me"
-	tokenRefreshURL = "https://oauth2.googleapis.com/token"
 )
 
 var timeoutClient = &http.Client{Timeout: 30 * time.Second}
 
 // storedToken mirrors the JSON structure written by google-auth-library (Python).
-type storedToken struct {
-	Token        string    `json:"token"`
-	RefreshToken string    `json:"refresh_token"`
-	TokenURI     string    `json:"token_uri"`
-	ClientID     string    `json:"client_id"`
-	ClientSecret string    `json:"client_secret"`
-	Expiry       time.Time `json:"expiry"`
-}
 
-func (t *storedToken) expired() bool {
-	if t.Expiry.IsZero() {
-		return false
-	}
-	return time.Now().After(t.Expiry.Add(-30 * time.Second))
-}
 
 // MessageSummary represents a minimal message object from a list/search result.
 type MessageSummary struct {
@@ -131,43 +116,6 @@ func NewService(secretsRoot string) (*Service, error) {
 	}, nil
 }
 
-func refreshToken(tok *storedToken, client *http.Client) error {
-	tokenURI := tok.TokenURI
-	if tokenURI == "" {
-		tokenURI = tokenRefreshURL
-	}
-
-	resp, err := client.PostForm(tokenURI, url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {tok.RefreshToken},
-		"client_id":     {tok.ClientID},
-		"client_secret": {tok.ClientSecret},
-	})
-	if err != nil {
-		return fmt.Errorf("token refresh request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	var result struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-		Error       string `json:"error"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("invalid token refresh response: %w", err)
-	}
-	if result.Error != "" {
-		return fmt.Errorf("%s", result.Error)
-	}
-
-	tok.Token = result.AccessToken
-	if result.ExpiresIn > 0 {
-		tok.Expiry = time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
-	}
-	return nil
-}
 
 // Send delivers an email via the Gmail API.
 func (s *Service) Send(ctx context.Context, to, subject, body string) error {
