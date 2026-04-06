@@ -53,17 +53,20 @@ type sessionLock struct {
 
 // acquireLock gets or creates a sessionLock for the given key and increments its reference count.
 // Must be called via SessionManager to ensure proper cleanup.
-func acquireLock(key string) *sessionLock {
+func acquireLock(key string, timeout time.Duration) *sessionLock {
 	allLocksMu.Lock()
 	defer allLocksMu.Unlock()
 
 	l, ok := allLocks[key]
 	if !ok {
+		if timeout <= 0 {
+			timeout = 120 * time.Second
+		}
 		l = &sessionLock{
 			sessionKey:  key,
 			ch:          make(chan struct{}, 1),
 			metrics:     LockStatus{SessionKey: key},
-			deadlockDur: 120 * time.Second,
+			deadlockDur: timeout,
 		}
 		l.ch <- struct{}{}
 		allLocks[key] = l

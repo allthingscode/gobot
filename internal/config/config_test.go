@@ -619,4 +619,42 @@ func TestConfig_SecretsErrorLogging(t *testing.T) {
 	}
 }
 
+func TestLockTimeoutDuration(t *testing.T) {
+	tests := []struct {
+		name    string
+		seconds int
+		want    time.Duration
+	}{
+		{
+			name:    "configured value used",
+			seconds: 60,
+			want:    60 * time.Second,
+		},
+		{
+			name:    "zero value defaults to 120s",
+			seconds: 0,
+			want:    120 * time.Second,
+		},
+		{
+			name:    "negative value defaults to 120s",
+			seconds: -1,
+			want:    120 * time.Second,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Agents: AgentsConfig{
+					Defaults: AgentDefaults{
+						LockTimeoutSeconds: tc.seconds,
+					},
+				},
+			}
+			if got := cfg.LockTimeoutDuration(); got != tc.want {
+				t.Errorf("LockTimeoutDuration() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 var _ io.Reader = errReader{}

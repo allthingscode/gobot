@@ -106,6 +106,17 @@ func (v *Validator) validateAgentDefaults(result *ValidationResult) {
 			})
 		}
 	}
+
+	// Validate Lock Timeout (10s - 3600s)
+	lockTimeout := v.cfg.Agents.Defaults.LockTimeoutSeconds
+	if lockTimeout != 0 && (lockTimeout < 10 || lockTimeout > 3600) {
+		result.Errors = append(result.Errors, ValidationError{
+			Field:    "agents.defaults.lockTimeoutSeconds",
+			Message:  fmt.Sprintf("invalid lock timeout: %ds (must be between 10 and 3600)", lockTimeout),
+			Remedy:   "set a value between 10 and 3600, or 0 for default (120s)",
+			Severity: SeverityCritical,
+		})
+	}
 }
 
 func (v *Validator) validateStorageRoot(result *ValidationResult) {

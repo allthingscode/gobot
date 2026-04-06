@@ -242,6 +242,79 @@ func TestValidator_Validate_Telegram(t *testing.T) {
 	}
 }
 
+func TestValidator_Validate_AgentDefaults(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		lockTimeout int
+		ttl         string
+		wantError   bool
+		errorField  string
+	}{
+		{
+			name:        "valid lock timeout (60s)",
+			lockTimeout: 60,
+			wantError:   false,
+		},
+		{
+			name:        "valid lock timeout (zero/default)",
+			lockTimeout: 0,
+			wantError:   false,
+		},
+		{
+			name:        "invalid lock timeout (too short)",
+			lockTimeout: 5,
+			wantError:   true,
+			errorField:  "agents.defaults.lockTimeoutSeconds",
+		},
+		{
+			name:        "invalid lock timeout (too long)",
+			lockTimeout: 5000,
+			wantError:   true,
+			errorField:  "agents.defaults.lockTimeoutSeconds",
+		},
+		{
+			name:       "invalid context pruning ttl",
+			ttl:        "invalid",
+			wantError:  true,
+			errorField: "agents.defaults.contextPruning.ttl",
+		},
+		{
+			name:      "valid context pruning ttl",
+			ttl:       "6h",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := baseValidConfig(t)
+			cfg.Agents.Defaults.LockTimeoutSeconds = tt.lockTimeout
+			cfg.Agents.Defaults.ContextPruning.TTL = tt.ttl
+
+			validator := NewValidator(cfg)
+			result := validator.Validate()
+
+			hasError := false
+			for _, e := range result.Errors {
+				if e.Field == tt.errorField {
+					hasError = true
+					break
+				}
+			}
+
+			if tt.wantError && !hasError {
+				t.Errorf("expected error for field %s, got none. Errors: %v", tt.errorField, result.Errors)
+			}
+			if !tt.wantError && hasError {
+				t.Errorf("expected no errors, got error for field %s", tt.errorField)
+			}
+		})
+	}
+}
+
 func TestValidationResult_CriticalErrors(t *testing.T) {
 	t.Parallel()
 	result := &ValidationResult{

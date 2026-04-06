@@ -44,14 +44,15 @@ type AgentsConfig struct {
 }
 
 type AgentDefaults struct {
-	Model             string                 `json:"model"`
-	Provider          string                 `json:"provider"`
-	MaxTokens         int                    `json:"maxTokens"`
-	MaxToolIterations int                    `json:"maxToolIterations"`
-	MaxToolResultBytes int                   `json:"maxToolResultBytes"`
-	MemoryWindow      int                    `json:"memoryWindow"`
-	ContextPruning    ContextPruningConfig   `json:"contextPruning"`
-	Compaction        CompactionPolicyConfig `json:"compaction"`
+	Model              string                 `json:"model"`
+	Provider           string                 `json:"provider"`
+	MaxTokens          int                    `json:"maxTokens"`
+	MaxToolIterations  int                    `json:"maxToolIterations"`
+	MaxToolResultBytes int                    `json:"maxToolResultBytes"`
+	LockTimeoutSeconds int                    `json:"lockTimeoutSeconds"`
+	MemoryWindow       int                    `json:"memoryWindow"`
+	ContextPruning     ContextPruningConfig   `json:"contextPruning"`
+	Compaction         CompactionPolicyConfig `json:"compaction"`
 }
 
 type ContextPruningConfig struct {
@@ -197,6 +198,15 @@ func (c *Config) MaxToolResultBytes() int {
 		return c.Agents.Defaults.MaxToolResultBytes
 	}
 	return 32768
+}
+
+// LockTimeoutDuration returns the configured session lock timeout,
+// defaulting to 120 seconds if zero or unset.
+func (c *Config) LockTimeoutDuration() time.Duration {
+	if c.Agents.Defaults.LockTimeoutSeconds > 0 {
+		return time.Duration(c.Agents.Defaults.LockTimeoutSeconds) * time.Second
+	}
+	return 120 * time.Second
 }
 
 // EffectiveMaxToolIterations returns the configured tool iteration cap,

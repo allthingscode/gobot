@@ -450,6 +450,7 @@ func cmdRun() *cobra.Command {
 
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetTracer(tracer)
+			mgr.SetLockTimeout(cfg.LockTimeoutDuration())
 			mgr.SetMemoryWindow(cfg.MemoryWindow())
 			mgr.SetPruningPolicy(cfg.ContextPruning())
 			mgr.SetCompactionPolicy(cfg.Compaction())
@@ -545,9 +546,10 @@ func cmdRun() *cobra.Command {
 			storePath := cfg.WorkspacePath("jobs.json")
 			itemsDir := cfg.WorkspacePath("jobs")
 			// Cron jobs use an ephemeral session manager (nil store) so they never
-			// share checkpoint history with DM conversations (F-013).
+						// share checkpoint history with DM conversations (F-013).
 			cronMgr := agent.NewSessionManager(runner, nil, model)
 			cronMgr.SetTracer(tracer)
+			cronMgr.SetLockTimeout(cfg.LockTimeoutDuration())
 			cronDisp := &cronDispatcher{
 				mgr:         cronMgr,
 				b:           b,
@@ -786,6 +788,7 @@ func cmdSimulate() *cobra.Command {
 			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			mgr := agent.NewSessionManager(runner, store, model)
 			mgr.SetHooks(hooks)
+			mgr.SetLockTimeout(cfg.LockTimeoutDuration())
 			mgr.SetMemoryWindow(cfg.MemoryWindow())
 			mgr.SetPruningPolicy(cfg.ContextPruning())
 			mgr.SetCompactionPolicy(cfg.Compaction())

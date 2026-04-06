@@ -6,7 +6,7 @@ import (
 )
 
 func TestSessionLock_Metrics(t *testing.T) {
-	l := acquireLock("test-session")
+	l := acquireLock("test-session", 0)
 	defer l.release()
 
 	// First lock
@@ -28,7 +28,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 	}
 
 	// Wait, we need to test contention
-	l2 := acquireLock("test-session")
+	l2 := acquireLock("test-session", 0)
 	defer l2.release()
 
 	err = l.Lock()
@@ -61,10 +61,8 @@ func TestSessionLock_Metrics(t *testing.T) {
 }
 
 func TestSessionLock_DeadlockError(t *testing.T) {
-	l := acquireLock("deadlock-test")
+	l := acquireLock("deadlock-test", 10*time.Millisecond)
 	defer l.release()
-	// Make the timeout extremely short for the test
-	l.deadlockDur = 10 * time.Millisecond
 
 	err := l.Lock() // First acquisition succeeds
 	if err != nil {
@@ -86,7 +84,7 @@ func TestSessionLock_Lifecycle(t *testing.T) {
 		t.Fatal("expected no metrics initially")
 	}
 
-	l1 := acquireLock(key)
+	l1 := acquireLock(key, 0)
 	if l1.refCount != 1 {
 		t.Errorf("expected refCount 1, got %d", l1.refCount)
 	}
@@ -95,7 +93,7 @@ func TestSessionLock_Lifecycle(t *testing.T) {
 		t.Fatal("expected metrics after acquireLock")
 	}
 
-	l2 := acquireLock(key)
+	l2 := acquireLock(key, 0)
 	if l1 != l2 {
 		t.Fatal("expected same lock object for same key")
 	}

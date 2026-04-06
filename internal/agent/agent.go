@@ -64,6 +64,7 @@ type SessionManager struct {
 	hooks            *Hooks        // may be nil; set via SetHooks
 	tracer           *observability.DispatchTracer
 	memoryWindow     int
+	lockTimeout      time.Duration
 	pruningPolicy    config.ContextPruningConfig
 	compactionPolicy config.CompactionPolicyConfig
 }
@@ -77,12 +78,20 @@ func NewSessionManager(runner Runner, store CheckpointStore, model string) *Sess
 		store:        store,
 		model:        model,
 		memoryWindow: DefaultMaxContextMessages,
+		lockTimeout:  120 * time.Second,
 	}
 }
 
 // SetTracer configures the observability tracer for the session manager.
 func (m *SessionManager) SetTracer(t *observability.DispatchTracer) {
 	m.tracer = t
+}
+
+// SetLockTimeout configures the maximum time to wait for a session lock.
+func (m *SessionManager) SetLockTimeout(d time.Duration) {
+	if d > 0 {
+		m.lockTimeout = d
+	}
 }
 
 // SetMemoryWindow configures the maximum context messages kept before compaction.
@@ -136,7 +145,7 @@ func (m *SessionManager) SetHooks(h *Hooks) {
 // The [SILENT] prefix is stripped from userMessage before it reaches the runner.
 // Returns the runner's response, or an error if the runner or store fails.
 func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage string) (string, error) {
-	lock := acquireLock(sessionKey)
+	lock := acquireLock(sessionKey, m.lockTimeout)
 	if err := lock.Lock(); err != nil {
 		lock.release()
 		return "", err
