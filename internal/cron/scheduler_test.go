@@ -159,7 +159,9 @@ func TestSchedulerPoll(t *testing.T) {
 	_ = os.WriteFile(storePath, data, 0644)
 
 	dispatcher := &mockDispatcher{}
-	s := NewScheduler(storePath, "", dispatcher)
+	start := time.UnixMilli(1000)
+	fc := NewFakeClock(start)
+	s := NewScheduler(storePath, "", dispatcher).WithClock(fc)
 
 	// 2. Poll
 	ctx := context.Background()
@@ -179,9 +181,6 @@ func TestSchedulerPoll(t *testing.T) {
 	if s.store.Jobs[0].State.RunCount != 1 {
 		t.Errorf("expected RunCount to be 1, got %d", s.store.Jobs[0].State.RunCount)
 	}
-
-	// 5. Verify next run was calculated (atTime is 1000, so it's not in future if now > 1000)
-	// Our test runs now, which is > 1000, so ComputeNextRun(KindAt, 1000) should be 0.
 }
 
 func TestSchedulerPoll_InitializesNewJob(t *testing.T) {
@@ -205,7 +204,9 @@ func TestSchedulerPoll_InitializesNewJob(t *testing.T) {
 	_ = os.WriteFile(storePath, data, 0644)
 
 	dispatcher := &mockDispatcher{}
-	s := NewScheduler(storePath, "", dispatcher)
+	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC) // Midnight
+	fc := NewFakeClock(start)
+	s := NewScheduler(storePath, "", dispatcher).WithClock(fc)
 
 	ctx := context.Background()
 	if err := s.poll(ctx); err != nil {
@@ -217,12 +218,10 @@ func TestSchedulerPoll_InitializesNewJob(t *testing.T) {
 		t.Errorf("new job must not fire on initialization poll, got %d dispatches", len(dispatcher.payloads))
 	}
 
-	// NextRunAtMS must now be set to a future time.
-	if s.store.Jobs[0].State.NextRunAtMS == 0 {
-		t.Errorf("NextRunAtMS should be initialized after first poll, got 0")
-	}
-	if s.store.Jobs[0].State.NextRunAtMS <= time.Now().UnixMilli() {
-		t.Errorf("NextRunAtMS should be in the future, got %d", s.store.Jobs[0].State.NextRunAtMS)
+	// NextRunAtMS must now be set to a future time (08:45).
+	wantMS := time.Date(2026, 1, 5, 8, 45, 0, 0, time.UTC).UnixMilli()
+	if s.store.Jobs[0].State.NextRunAtMS != wantMS {
+		t.Errorf("NextRunAtMS: want %d, got %d", wantMS, s.store.Jobs[0].State.NextRunAtMS)
 	}
 }
 
@@ -250,7 +249,9 @@ func TestSchedulerPoll_FailureAlert(t *testing.T) {
 		failFirst: true,
 		failErr:   errors.New("gemini: rate limit"),
 	}
-	s := NewScheduler(storePath, "", dispatcher)
+	start := time.UnixMilli(1000)
+	fc := NewFakeClock(start)
+	s := NewScheduler(storePath, "", dispatcher).WithClock(fc)
 
 	ctx := context.Background()
 	if err := s.poll(ctx); err != nil {
@@ -305,7 +306,9 @@ func TestSchedulerPoll_JobTimeout(t *testing.T) {
 
 	// Dispatcher that blocks
 	dispatcher := &blockingDispatcher{delay: 50 * time.Millisecond}
-	s := NewScheduler(storePath, "", dispatcher).WithJobTimeout(1 * time.Millisecond)
+	start := time.UnixMilli(1000)
+	fc := NewFakeClock(start)
+	s := NewScheduler(storePath, "", dispatcher).WithClock(fc).WithJobTimeout(1 * time.Millisecond)
 
 	ctx := context.Background()
 	if err := s.poll(ctx); err != nil {
@@ -324,6 +327,95 @@ func TestSchedulerPoll_JobTimeout(t *testing.T) {
 	if s.store.Jobs[0].State.FailureCount != 1 {
 		t.Errorf("want FailureCount=1, got %d", s.store.Jobs[0].State.FailureCount)
 	}
+}
+
+func TestScheduler_FakeClock(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	// Job triggers every 1 hour
+	every1h := int64(3600000)
+	initialStore := Store{
+		Jobs: []Job{
+			{
+				ID:       "job1",
+				Name:     "Hourly Job",
+				Enabled:  true,
+				Schedule: Schedule{Kind: KindEvery, EveryMS: &every1h},
+				Payload:  Payload{Channel: "telegram", Message: "tick"},
+				State:    JobState{NextRunAtMS: 1000},
+			},
+		},
+	}
+	data, _ := initialStore.EncodeJSON()
+	_ = os.WriteFile(storePath, data, 0644)
+
+	dispatcher := &mockDispatcher{}
+	start := time.UnixMilli(0)
+	fc := NewFakeClock(start)
+	s := NewScheduler(storePath, "", dispatcher).WithClock(fc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Run scheduler in background
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.Run(ctx)
+	}()
+
+	// Wait for scheduler to reach After()
+	for i := 0; i < 50; i++ {
+		if fc.HasWaiter() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// 1. Advance to 1000ms. Poll should trigger.
+	fc.Advance(1000 * time.Millisecond)
+	
+	// Wait for poll to complete and Scheduler to wait on After() again
+	for i := 0; i < 100; i++ {
+		dispatcher.mu.Lock()
+		count := len(dispatcher.payloads)
+		dispatcher.mu.Unlock()
+		if count == 1 && fc.HasWaiter() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	
+	dispatcher.mu.Lock()
+	if len(dispatcher.payloads) != 1 {
+		dispatcher.mu.Unlock()
+		t.Errorf("Step 1: want 1 dispatch, got %d", len(dispatcher.payloads))
+	} else {
+		dispatcher.mu.Unlock()
+	}
+
+	// 2. Advance another 1h. Poll should trigger again.
+	fc.Advance(1 * time.Hour)
+	for i := 0; i < 100; i++ {
+		dispatcher.mu.Lock()
+		count := len(dispatcher.payloads)
+		dispatcher.mu.Unlock()
+		if count == 2 && fc.HasWaiter() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	dispatcher.mu.Lock()
+	if len(dispatcher.payloads) != 2 {
+		dispatcher.mu.Unlock()
+		t.Errorf("Step 2: want 2 dispatches, got %d", len(dispatcher.payloads))
+	} else {
+		dispatcher.mu.Unlock()
+	}
+
+	cancel()
+	<-errCh
 }
 
 type blockingDispatcher struct {
@@ -355,3 +447,4 @@ func (m *blockingDispatcher) Alert(ctx context.Context, p Payload) error {
 	m.alerts = append(m.alerts, p)
 	return nil
 }
+

@@ -34,6 +34,7 @@ type Scheduler struct {
 	lastMtime        int64
 	lastSize         int64
 	lastModularMtime float64
+	clock            Clock
 }
 
 // NewScheduler creates a new background scheduler.
@@ -44,6 +45,7 @@ func NewScheduler(storePath, itemsDir string, dispatcher Dispatcher) *Scheduler 
 		dispatcher:   dispatcher,
 		pollInterval: 30 * time.Second, // default polling interval
 		jobTimeout:   10 * time.Minute,
+		clock:        RealClock(),
 	}
 }
 
@@ -51,6 +53,12 @@ func NewScheduler(storePath, itemsDir string, dispatcher Dispatcher) *Scheduler 
 // If d is 0, jobs have no deadline.
 func (s *Scheduler) WithJobTimeout(d time.Duration) *Scheduler {
 	s.jobTimeout = d
+	return s
+}
+
+// WithClock sets a custom clock for testing or specialized timing.
+func (s *Scheduler) WithClock(c Clock) *Scheduler {
+	s.clock = c
 	return s
 }
 
@@ -90,16 +98,13 @@ func ComputeNextRun(s Schedule, nowMS int64) int64 {
 
 // Run starts the polling loop.
 func (s *Scheduler) Run(ctx context.Context) error {
-	ticker := time.NewTicker(s.pollInterval)
-	defer ticker.Stop()
-
 	slog.Info("Starting cron scheduler", "poll_interval", s.pollInterval)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case <-s.clock.After(s.pollInterval):
 			if err := s.poll(ctx); err != nil {
 				slog.Error("Cron poll error", "error", err)
 			}
@@ -149,7 +154,7 @@ func (s *Scheduler) poll(ctx context.Context) error {
 	}
 
 	// 3. Trigger due jobs
-	nowMS := time.Now().UnixNano() / 1e6
+	nowMS := s.clock.Now().UnixMilli()
 	if s.store == nil {
 		return nil
 	}
@@ -222,7 +227,7 @@ func (s *Scheduler) poll(ctx context.Context) error {
 					alert := Payload{
 						Channel: dj.payload.Channel,
 						To:      dj.payload.To,
-						Message: fmt.Sprintf("⚠️ Job %q failed: %v", dj.name, err),
+						Message: fmt.Sprintf("Job %q failed: %v", dj.name, err),
 					}
 					if a, ok := s.dispatcher.(Alerter); ok {
 						if alertErr := a.Alert(ctx, alert); alertErr != nil {
@@ -270,3 +275,4 @@ func (s *Scheduler) poll(ctx context.Context) error {
 
 	return nil
 }
+
