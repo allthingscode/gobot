@@ -14,7 +14,7 @@ Unlike traditional chatbot frameworks that rely on Python and CGO-heavy dependen
 
 ## Key Features
 
-- **Zero-Dependency Runtime:** Compiles to a single static binary for trivial deployment (no Python venvs, no CGO, no `modernc.org/sqlite` CGO fallback).
+- **Zero-Dependency Runtime:** Compiles to a single static binary for trivial deployment (no Python venvs, no CGO, pure-Go SQLite via `modernc.org/sqlite`).
 - **Durable Session State:** Every interaction is checkpointed via a pure-Go SQLite implementation (`modernc.org/sqlite`) under `D:\Gobot_Storage`.
 - **Long-Term Memory (RAG):** Automatically indexes session history using SQLite FTS5 for semantic search, enabling agents to recall context across sessions.
 - **Autonomous Cron:** Built-in background job scheduler for recurring agent tasks (e.g., morning briefings, calendar checks).
@@ -85,6 +85,8 @@ Fill in your API keys in the generated `config.yaml` (usually located in `~/.gob
 | `channels.telegram.token` | Your Telegram bot token (from @BotFather) | Yes (for Telegram) |
 | `channels.telegram.allowFrom` | Whitelisted Telegram user IDs (numeric) | Yes (security) |
 | `strategic_edition.user_email` | Your Gmail address (for Google Workspace tools) | No (for Gmail/calendar/tools) |
+
+For a complete list of configuration options, see the [full configuration reference](docs/configuration.md).
 
 ### 4. Authorization
 

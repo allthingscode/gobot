@@ -106,7 +106,7 @@ This document provides a deep dive into gobot's architecture, covering data flow
 
 **Trade-offs:**
 - `modernc.org/sqlite` is slower than `mattn/go-sqlite3` (pure-Go vs. native C)
-- Larger binary size (~10-15MB vs. ~5MB with CGO)
+- Slightly larger binary size compared to CGO-based builds
 
 **Impact:** gobot compiles to a single binary that runs on any platform without external C dependencies.
 
