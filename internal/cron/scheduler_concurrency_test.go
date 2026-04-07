@@ -81,6 +81,7 @@ func loadStore(t *testing.T, path string) *Store {
 // TestScheduler_NoStore_NoPanic verifies that polling against a missing
 // jobs.json file does not panic or return an error.
 func TestScheduler_NoStore_NoPanic(t *testing.T) {
+	t.Parallel()
 	s := NewScheduler(filepath.Join(t.TempDir(), "jobs.json"), "", nil)
 	s.pollInterval = 1 * time.Millisecond
 	if err := s.poll(context.Background()); err != nil {
@@ -91,6 +92,7 @@ func TestScheduler_NoStore_NoPanic(t *testing.T) {
 // TestScheduler_DispatchesDueJob asserts that a single enabled job whose
 // NextRunAtMS is in the past is dispatched exactly once.
 func TestScheduler_DispatchesDueJob(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	nowMS := time.Now().UnixNano() / 1e6
 	jobs := []Job{
@@ -132,6 +134,7 @@ func TestScheduler_DispatchesDueJob(t *testing.T) {
 // NOTE: This is a forward-looking acceptance test for F-027.  It will fail
 // until scheduler.go is updated to fan-out due jobs with sync.WaitGroup.
 func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	nowMS := time.Now().UnixNano() / 1e6
 	const n = 5
@@ -175,6 +178,7 @@ func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 // TestScheduler_StateUpdated_AfterDispatch checks that RunCount and
 // SuccessCount are both incremented to 1 after a successful poll.
 func TestScheduler_StateUpdated_AfterDispatch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	nowMS := time.Now().UnixNano() / 1e6
 	jobs := []Job{
@@ -206,6 +210,7 @@ func TestScheduler_StateUpdated_AfterDispatch(t *testing.T) {
 // TestScheduler_DisabledJobNotDispatched confirms that a job with
 // Enabled=false is never dispatched even when its NextRunAtMS is overdue.
 func TestScheduler_DisabledJobNotDispatched(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	nowMS := time.Now().UnixNano() / 1e6
 	jobs := []Job{
@@ -237,6 +242,7 @@ func TestScheduler_DisabledJobNotDispatched(t *testing.T) {
 // final dispatch count using sync/atomic to confirm no data races in the
 // counting path.
 func TestScheduler_AtomicDispatchCounter(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	nowMS := time.Now().UnixNano() / 1e6
 	const n = 10

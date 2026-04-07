@@ -8,6 +8,7 @@ import (
 
 // TestSecretsStore_SetAndGet verifies that a stored value round-trips through DPAPI.
 func TestSecretsStore_SetAndGet(t *testing.T) {
+	t.Parallel()
 	store := NewSecretsStore(t.TempDir())
 
 	if err := store.Set("gemini_api_key", "my-secret-key-123"); err != nil {
@@ -24,6 +25,7 @@ func TestSecretsStore_SetAndGet(t *testing.T) {
 
 // TestSecretsStore_GetMissingKey verifies that Get returns "" with no error for unknown keys.
 func TestSecretsStore_GetMissingKey(t *testing.T) {
+	t.Parallel()
 	store := NewSecretsStore(t.TempDir())
 	got, err := store.Get("nonexistent")
 	if err != nil {
@@ -36,6 +38,7 @@ func TestSecretsStore_GetMissingKey(t *testing.T) {
 
 // TestSecretsStore_List verifies that List returns keys in sorted order.
 func TestSecretsStore_List(t *testing.T) {
+	t.Parallel()
 	store := NewSecretsStore(t.TempDir())
 
 	for _, kv := range []struct{ k, v string }{
@@ -65,6 +68,7 @@ func TestSecretsStore_List(t *testing.T) {
 
 // TestSecretsStore_Delete verifies that a deleted key is gone from the store.
 func TestSecretsStore_Delete(t *testing.T) {
+	t.Parallel()
 	store := NewSecretsStore(t.TempDir())
 
 	if err := store.Set("key1", "value1"); err != nil {
@@ -85,6 +89,7 @@ func TestSecretsStore_Delete(t *testing.T) {
 // TestSecretsStore_PersistAcrossInstances verifies the store is durable — a new
 // SecretsStore pointed at the same dir reads back what a prior instance wrote.
 func TestSecretsStore_PersistAcrossInstances(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s1 := NewSecretsStore(root)
 	if err := s1.Set("key", "persisted-value"); err != nil {

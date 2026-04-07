@@ -26,6 +26,7 @@ func (m *mockBotAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessag
 }
 
 func TestHITLManager_PreToolHook_NonHighRisk(t *testing.T) {
+	t.Parallel()
 	api := &mockBotAPI{}
 	m := NewHITLManager(api, []string{"high_risk"})
 
@@ -39,6 +40,7 @@ func TestHITLManager_PreToolHook_NonHighRisk(t *testing.T) {
 }
 
 func TestHITLManager_PreToolHook_Approve(t *testing.T) {
+	t.Parallel()
 	api := &mockBotAPI{}
 	m := NewHITLManager(api, []string{"high_risk"})
 
@@ -92,6 +94,7 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 }
 
 func TestHITLManager_PreToolHook_Reject(t *testing.T) {
+	t.Parallel()
 	api := &mockBotAPI{}
 	m := NewHITLManager(api, []string{"high_risk"})
 

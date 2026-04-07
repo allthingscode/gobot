@@ -40,6 +40,7 @@ func writeTokenJSON(t *testing.T, dir, filename string, expiry time.Time, refres
 // ── checkStorageRoot ──────────────────────────────────────────────────────────
 
 func TestCheckStorageRoot_Exists(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	r := checkStorageRoot(cfgWithRoot(dir))
 	if !r.ok {
@@ -48,6 +49,7 @@ func TestCheckStorageRoot_Exists(t *testing.T) {
 }
 
 func TestCheckStorageRoot_Missing(t *testing.T) {
+	t.Parallel()
 	r := checkStorageRoot(cfgWithRoot(filepath.Join(t.TempDir(), "nonexistent")))
 	if r.ok {
 		t.Error("expected ok=false for missing directory")
@@ -55,6 +57,7 @@ func TestCheckStorageRoot_Missing(t *testing.T) {
 }
 
 func TestCheckStorageRoot_IsFile(t *testing.T) {
+	t.Parallel()
 	f, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +73,7 @@ func TestCheckStorageRoot_IsFile(t *testing.T) {
 // ── checkWorkspace ────────────────────────────────────────────────────────────
 
 func TestCheckWorkspace_Writable(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws := filepath.Join(root, "workspace")
 	if err := os.MkdirAll(ws, 0o755); err != nil {
@@ -83,6 +87,7 @@ func TestCheckWorkspace_Writable(t *testing.T) {
 }
 
 func TestCheckWorkspace_Missing(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	r := checkWorkspace(cfgWithRoot(root))
 	if r.ok {
@@ -93,6 +98,7 @@ func TestCheckWorkspace_Missing(t *testing.T) {
 // ── checkLogs ─────────────────────────────────────────────────────────────────
 
 func TestCheckLogs_CreatesDir(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	r := checkLogs(cfgWithRoot(root))
 	if !r.ok {
@@ -108,6 +114,7 @@ func TestCheckLogs_CreatesDir(t *testing.T) {
 }
 
 func TestCheckLogs_AlreadyExists(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
 		t.Fatal(err)
@@ -119,6 +126,7 @@ func TestCheckLogs_AlreadyExists(t *testing.T) {
 }
 
 func TestCheckLogs_BlockedByFile(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	blocker := filepath.Join(root, "logs")
 	f, err := os.Create(blocker)
@@ -136,6 +144,7 @@ func TestCheckLogs_BlockedByFile(t *testing.T) {
 // ── checkAPIKey ───────────────────────────────────────────────────────────────
 
 func TestCheckAPIKey_FromConfig(t *testing.T) {
+	t.Parallel()
 	cfg := cfgWithRoot(t.TempDir())
 	cfg.Providers.Gemini.APIKey = "test-api-key-1234"
 
@@ -155,6 +164,7 @@ func TestCheckAPIKey_FromEnv(t *testing.T) {
 }
 
 func TestCheckAPIKey_Short(t *testing.T) {
+	t.Parallel()
 	cfg := cfgWithRoot(t.TempDir())
 	cfg.Providers.Gemini.APIKey = "short"
 
@@ -168,6 +178,7 @@ func TestCheckAPIKey_Short(t *testing.T) {
 }
 
 func TestCheckAPIKey_Exact8(t *testing.T) {
+	t.Parallel()
 	cfg := cfgWithRoot(t.TempDir())
 	cfg.Providers.Gemini.APIKey = "12345678"
 
@@ -193,6 +204,7 @@ func TestCheckAPIKey_Missing(t *testing.T) {
 // ── checkTelegram ─────────────────────────────────────────────────────────────
 
 func TestCheckTelegram_TokenMissing(t *testing.T) {
+	t.Parallel()
 	r := checkTelegram("", nil)
 	if r.ok {
 		t.Error("expected ok=false for empty token")
@@ -200,6 +212,7 @@ func TestCheckTelegram_TokenMissing(t *testing.T) {
 }
 
 func TestCheckTelegram_NoProbe(t *testing.T) {
+	t.Parallel()
 	r := checkTelegram("bot:token", nil)
 	if !r.ok {
 		t.Errorf("expected ok=true (skipped) for present token with no probe, got: %s", r.detail)
@@ -207,6 +220,7 @@ func TestCheckTelegram_NoProbe(t *testing.T) {
 }
 
 func TestCheckTelegram_ProbeSuccess(t *testing.T) {
+	t.Parallel()
 	probe := func(_ string) (string, error) { return "@gobotprod", nil }
 	r := checkTelegram("bot:token", probe)
 	if !r.ok {
@@ -218,6 +232,7 @@ func TestCheckTelegram_ProbeSuccess(t *testing.T) {
 }
 
 func TestCheckTelegram_ProbeError(t *testing.T) {
+	t.Parallel()
 	probe := func(_ string) (string, error) { return "", errors.New("401 Unauthorized") }
 	r := checkTelegram("bot:token", probe)
 	if r.ok {
@@ -228,6 +243,7 @@ func TestCheckTelegram_ProbeError(t *testing.T) {
 // ── checkGeminiLive ───────────────────────────────────────────────────────────
 
 func TestCheckGeminiLive_NoKey(t *testing.T) {
+	t.Parallel()
 	r := checkGeminiLive("", nil)
 	if r.ok {
 		t.Error("expected ok=false for empty api key")
@@ -235,6 +251,7 @@ func TestCheckGeminiLive_NoKey(t *testing.T) {
 }
 
 func TestCheckGeminiLive_NoProbe(t *testing.T) {
+	t.Parallel()
 	r := checkGeminiLive("AIzaSy-test", nil)
 	if !r.ok {
 		t.Errorf("expected ok=true (skipped) for present key with no probe, got: %s", r.detail)
@@ -242,6 +259,7 @@ func TestCheckGeminiLive_NoProbe(t *testing.T) {
 }
 
 func TestCheckGeminiLive_ProbeSuccess(t *testing.T) {
+	t.Parallel()
 	probe := func(_ string) error { return nil }
 	r := checkGeminiLive("AIzaSy-test", probe)
 	if !r.ok {
@@ -250,6 +268,7 @@ func TestCheckGeminiLive_ProbeSuccess(t *testing.T) {
 }
 
 func TestCheckGeminiLive_ProbeError(t *testing.T) {
+	t.Parallel()
 	probe := func(_ string) error { return errors.New("quota exceeded") }
 	r := checkGeminiLive("AIzaSy-test", probe)
 	if r.ok {
@@ -260,6 +279,7 @@ func TestCheckGeminiLive_ProbeError(t *testing.T) {
 // ── checkTokenFile ────────────────────────────────────────────────────────────
 
 func TestCheckTokenFile_Missing(t *testing.T) {
+	t.Parallel()
 	r := checkTokenFile("test token", filepath.Join(t.TempDir(), "nonexistent.json"))
 	if r.ok {
 		t.Error("expected ok=false for missing token file")
@@ -267,6 +287,7 @@ func TestCheckTokenFile_Missing(t *testing.T) {
 }
 
 func TestCheckTokenFile_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
 	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
@@ -280,6 +301,7 @@ func TestCheckTokenFile_InvalidJSON(t *testing.T) {
 }
 
 func TestCheckTokenFile_NoExpiry(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tok.json")
 	if err := os.WriteFile(path, []byte(`{"token":"abc"}`), 0o600); err != nil {
@@ -293,6 +315,7 @@ func TestCheckTokenFile_NoExpiry(t *testing.T) {
 }
 
 func TestCheckTokenFile_Valid(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTokenJSON(t, dir, "tok.json", time.Now().Add(30*24*time.Hour), "")
 
@@ -303,6 +326,7 @@ func TestCheckTokenFile_Valid(t *testing.T) {
 }
 
 func TestCheckTokenFile_ExpiredNoRefresh(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTokenJSON(t, dir, "tok.json", time.Now().Add(-48*time.Hour), "")
 
@@ -313,6 +337,7 @@ func TestCheckTokenFile_ExpiredNoRefresh(t *testing.T) {
 }
 
 func TestCheckTokenFile_ExpiredWithRefresh(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTokenJSON(t, dir, "tok.json", time.Now().Add(-48*time.Hour), "some_refresh_token")
 
@@ -325,6 +350,7 @@ func TestCheckTokenFile_ExpiredWithRefresh(t *testing.T) {
 // ── checkJobsDir ──────────────────────────────────────────────────────────────
 
 func TestCheckJobsDir_Missing(t *testing.T) {
+	t.Parallel()
 	r := checkJobsDir(cfgWithRoot(t.TempDir()))
 	if r.ok {
 		t.Error("expected ok=false for missing jobs directory")
@@ -332,6 +358,7 @@ func TestCheckJobsDir_Missing(t *testing.T) {
 }
 
 func TestCheckJobsDir_EmptyDir(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755)
 
@@ -342,6 +369,7 @@ func TestCheckJobsDir_EmptyDir(t *testing.T) {
 }
 
 func TestCheckJobsDir_WithJobs(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	jobsDir := filepath.Join(root, "workspace", "jobs")
 	_ = os.MkdirAll(jobsDir, 0o755)

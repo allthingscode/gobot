@@ -27,6 +27,7 @@ func makeMessages(n int, startRole agentctx.MessageRole) []agentctx.StrategicMes
 }
 
 func TestCompactMessages(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		msgCount    int
@@ -118,6 +119,7 @@ func TestCompactMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			msgs := makeMessages(tt.msgCount, tt.startRole)
 			got, dropped, _ := CompactMessages(msgs, tt.maxN, tt.keepN, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
@@ -144,6 +146,7 @@ func TestCompactMessages(t *testing.T) {
 // TestCompactMessages_FirstRetainedAssistant verifies that when the first retained
 // message after slicing is an assistant turn, it is dropped.
 func TestCompactMessages_FirstRetainedAssistant(t *testing.T) {
+	t.Parallel()
 	// Build 60 messages alternating user/assistant starting with user.
 	// With keepN=10, maxN=50: slice starts at index 50.
 	// Index 50 in a user-start alternation: even indices are user, odd are assistant.
@@ -172,6 +175,7 @@ func TestCompactMessages_FirstRetainedAssistant(t *testing.T) {
 // TestCompactMessages_StartsWithUser verifies after compaction the result
 // always starts with a user turn in a realistic alternating conversation.
 func TestCompactMessages_StartsWithUser(t *testing.T) {
+	t.Parallel()
 	// 60-message conversation alternating user/assistant starting with user.
 	// keepN=10, maxN=50 → slice starts at index 50.
 	// Index 50 (even, user-start) → role "user". No assistant-drop needed.
@@ -188,6 +192,7 @@ func TestCompactMessages_StartsWithUser(t *testing.T) {
 }
 
 func TestPruneMessages(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	tests := []struct {
@@ -301,6 +306,7 @@ func TestPruneMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got, dropped := PruneMessages(tt.msgs, tt.cfg)
 			if len(got) != tt.wantLen {
 				t.Errorf("len(got) = %d, want %d", len(got), tt.wantLen)
@@ -319,6 +325,7 @@ func TestPruneMessages(t *testing.T) {
 // are correctly identified via the keep[] array, not by assuming they are at the front.
 // This is the test for bug B-031.
 func TestCompactMessages_DroppedMessageIdentification(t *testing.T) {
+	t.Parallel()
 	// Create a conversation where dropped messages are scattered, not at the front.
 	// With keepN=10, maxN=50: keep the last 10 messages, drop the rest.
 	msgs := makeMessages(60, agentctx.RoleUser)
@@ -385,6 +392,7 @@ func TestCompactMessages_DroppedMessageIdentification(t *testing.T) {
 // Previously the keep[] array was populated with only assistants before an early return;
 // removing that guard would have silently dropped all non-assistant messages.
 func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	tests := []struct {
@@ -426,6 +434,7 @@ func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			cfg := config.ContextPruningConfig{KeepLastAssistants: tt.keepLastAssistants}
 			got, dropped := PruneMessages(tt.msgs, cfg)
 
@@ -448,6 +457,7 @@ func ptr(s string) *string { return &s }
 // resulting message list never contains an orphaned tool result with no
 // originating call, and vice versa.
 func TestCompactMessages_ToolChainConsistency(t *testing.T) {
+	t.Parallel()
 
 	tests := []struct {
 		name                string
@@ -552,6 +562,7 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got, _, keep := CompactMessages(tt.msgs, tt.maxN, tt.keepN,
 				config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
@@ -664,6 +675,7 @@ func buildMessages(n int, scenarios []toolScenario) []agentctx.StrategicMessage 
 }
 
 func TestDefaultConstants(t *testing.T) {
+	t.Parallel()
 	if DefaultMaxContextMessages <= 0 {
 		t.Error("DefaultMaxContextMessages must be positive")
 	}

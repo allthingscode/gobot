@@ -8,6 +8,7 @@ import (
 )
 
 func TestSessionLock_Metrics(t *testing.T) {
+	t.Parallel()
 	l := acquireLock("test-session", 0)
 	defer l.release()
 
@@ -63,6 +64,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 }
 
 func TestSessionLock_DeadlockError(t *testing.T) {
+	t.Parallel()
 	l := acquireLock("deadlock-test", 10*time.Millisecond)
 	defer l.release()
 
@@ -79,6 +81,7 @@ func TestSessionLock_DeadlockError(t *testing.T) {
 }
 
 func TestSessionLock_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	l := acquireLock("cancel-test", 120*time.Second)
 	defer l.release()
 
@@ -119,6 +122,7 @@ func TestSessionLock_ContextCancellation(t *testing.T) {
 }
 
 func TestSessionLock_Lifecycle(t *testing.T) {
+	t.Parallel()
 	key := "lifecycle-test"
 
 	// Initially no metrics

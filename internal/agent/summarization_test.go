@@ -10,6 +10,7 @@ import (
 )
 
 func TestSessionManager_Dispatch_Summarization(t *testing.T) {
+	t.Parallel()
 	// Setup SessionManager with summarization enabled.
 	expectedSummary := "<context_summary>\n* Key decision: Use Go\n</context_summary>"
 	mock := &mockRunner{response: expectedSummary}
@@ -74,6 +75,7 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 }
 
 func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
+	t.Parallel()
 	// Setup SessionManager with summarization enabled.
 	initialSummary := "<context_summary>\n* Old decision: Use Go\n</context_summary>"
 	newSummary := "<context_summary>\n* Old decision: Use Go\n* New decision: Use SQLite\n</context_summary>"

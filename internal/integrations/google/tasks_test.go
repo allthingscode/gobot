@@ -10,6 +10,7 @@ import (
 
 // TestFormatTasksMarkdown_IncludesID verifies task ID appears in output.
 func TestFormatTasksMarkdown_IncludesID(t *testing.T) {
+	t.Parallel()
 	tasks := []Task{
 		{ID: "abc123", Title: "Buy milk"},
 		{ID: "def456", Title: "Call dentist", Due: "2026-04-01T00:00:00Z"},
@@ -24,6 +25,7 @@ func TestFormatTasksMarkdown_IncludesID(t *testing.T) {
 
 // TestFormatTasksMarkdown_Empty returns empty string for no tasks.
 func TestFormatTasksMarkdown_Empty(t *testing.T) {
+	t.Parallel()
 	if got := FormatTasksMarkdown(nil); got != "" {
 		t.Errorf("want empty string, got %q", got)
 	}
@@ -31,6 +33,7 @@ func TestFormatTasksMarkdown_Empty(t *testing.T) {
 
 // TestCompleteTask_Success mocks a PATCH endpoint and asserts no error.
 func TestCompleteTask_Success(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
@@ -57,6 +60,7 @@ func TestCompleteTask_Success(t *testing.T) {
 
 // TestUpdateTask_NoFields returns error when no fields provided.
 func TestUpdateTask_NoFields(t *testing.T) {
+	t.Parallel()
 	// Use the simple version from the plan: assert non-nil error from UpdateTask with a tempdir.
 	err := UpdateTask(t.TempDir(), "@default", "task-1", "", "", "")
 	if err == nil {
@@ -66,6 +70,7 @@ func TestUpdateTask_NoFields(t *testing.T) {
 
 // TestUpdateTask_TitleOnly mocks PATCH and checks only "title" is in body.
 func TestUpdateTask_TitleOnly(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {

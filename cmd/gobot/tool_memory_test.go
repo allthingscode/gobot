@@ -22,6 +22,7 @@ func (m *mockMemorySearcher) Search(query string, limit int) ([]map[string]any, 
 }
 
 func TestSearchMemoryTool_Name(t *testing.T) {
+	t.Parallel()
 	tool := &SearchMemoryTool{store: &mockMemorySearcher{}}
 	if tool.Name() != searchMemoryToolName {
 		t.Errorf("Name() = %q, want %q", tool.Name(), searchMemoryToolName)
@@ -29,6 +30,7 @@ func TestSearchMemoryTool_Name(t *testing.T) {
 }
 
 func TestSearchMemoryTool_Declaration(t *testing.T) {
+	t.Parallel()
 	tool := &SearchMemoryTool{store: &mockMemorySearcher{}}
 	decl := tool.Declaration()
 	if decl.Name != searchMemoryToolName {
@@ -44,6 +46,7 @@ func TestSearchMemoryTool_Declaration(t *testing.T) {
 }
 
 func TestSearchMemoryTool_Execute_ReturnsJSON(t *testing.T) {
+	t.Parallel()
 	mock := &mockMemorySearcher{
 		results: []map[string]any{
 			{"content": "Project Alpha deadline is May 1", "session_key": "s1", "timestamp": "2026-01-01T00:00:00Z"},
@@ -69,6 +72,7 @@ func TestSearchMemoryTool_Execute_ReturnsJSON(t *testing.T) {
 }
 
 func TestSearchMemoryTool_Execute_NoResults(t *testing.T) {
+	t.Parallel()
 	tool := &SearchMemoryTool{store: &mockMemorySearcher{results: nil}}
 	got, err := tool.Execute(context.Background(), "sess", map[string]any{"query": "unknown topic"})
 	if err != nil {
@@ -80,6 +84,7 @@ func TestSearchMemoryTool_Execute_NoResults(t *testing.T) {
 }
 
 func TestSearchMemoryTool_Execute_EmptyQuery(t *testing.T) {
+	t.Parallel()
 	tool := &SearchMemoryTool{store: &mockMemorySearcher{}}
 	_, err := tool.Execute(context.Background(), "sess", map[string]any{"query": ""})
 	if err == nil {
@@ -88,6 +93,7 @@ func TestSearchMemoryTool_Execute_EmptyQuery(t *testing.T) {
 }
 
 func TestSearchMemoryTool_Execute_DefaultLimit(t *testing.T) {
+	t.Parallel()
 	mock := &mockMemorySearcher{results: nil}
 	tool := &SearchMemoryTool{store: mock}
 	_, _ = tool.Execute(context.Background(), "sess", map[string]any{"query": "test"})
@@ -97,6 +103,7 @@ func TestSearchMemoryTool_Execute_DefaultLimit(t *testing.T) {
 }
 
 func TestSearchMemoryTool_Execute_CustomLimit(t *testing.T) {
+	t.Parallel()
 	mock := &mockMemorySearcher{results: nil}
 	tool := &SearchMemoryTool{store: mock}
 	_, _ = tool.Execute(context.Background(), "sess", map[string]any{"query": "test", "limit": float64(3)})

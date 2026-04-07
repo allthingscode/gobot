@@ -9,6 +9,7 @@ import (
 )
 
 func TestDo_SuccessOnFirstAttempt(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: 0}
 	err := Do(context.Background(), cfg, IsRetryable, func() error {
@@ -24,6 +25,7 @@ func TestDo_SuccessOnFirstAttempt(t *testing.T) {
 }
 
 func TestDo_RetryThenSucceed(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: 0}
 	err := Do(context.Background(), cfg, IsRetryable, func() error {
@@ -42,6 +44,7 @@ func TestDo_RetryThenSucceed(t *testing.T) {
 }
 
 func TestDo_AllAttemptsFail(t *testing.T) {
+	t.Parallel()
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: 0}
 	want := &HTTPStatusError{StatusCode: http.StatusInternalServerError, Body: "oops"}
 	err := Do(context.Background(), cfg, IsRetryable, func() error {
@@ -58,6 +61,7 @@ func TestDo_AllAttemptsFail(t *testing.T) {
 }
 
 func TestDo_NonRetryableError(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: 0}
 	err := Do(context.Background(), cfg, IsRetryable, func() error {
@@ -73,6 +77,7 @@ func TestDo_NonRetryableError(t *testing.T) {
 }
 
 func TestDo_ContextCancelled(t *testing.T) {
+	t.Parallel()
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: 100 * time.Millisecond}
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
@@ -93,6 +98,7 @@ func TestDo_ContextCancelled(t *testing.T) {
 }
 
 func TestDo_DefaultsAppliedWhenZero(t *testing.T) {
+	t.Parallel()
 	// MaxAttempts=0 should default to 3 attempts.
 	calls := 0
 	cfg := RetryConfig{MaxAttempts: 0, InitialDelay: 0}
@@ -106,6 +112,7 @@ func TestDo_DefaultsAppliedWhenZero(t *testing.T) {
 }
 
 func TestIsRetryable(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		err  error
@@ -126,6 +133,7 @@ func TestIsRetryable(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			if got := IsRetryable(tc.err); got != tc.want {
 				t.Errorf("IsRetryable(%v) = %v, want %v", tc.err, got, tc.want)
 			}
@@ -134,6 +142,7 @@ func TestIsRetryable(t *testing.T) {
 }
 
 func TestHTTPStatusError_Error(t *testing.T) {
+	t.Parallel()
 	e := &HTTPStatusError{StatusCode: 503, Body: "service unavailable"}
 	want := "HTTP 503: service unavailable"
 	if got := e.Error(); got != want {
@@ -142,6 +151,7 @@ func TestHTTPStatusError_Error(t *testing.T) {
 }
 
 func TestHTTPStatusError_Error_EmptyBody(t *testing.T) {
+	t.Parallel()
 	e := &HTTPStatusError{StatusCode: 429}
 	want := "HTTP 429: "
 	if got := e.Error(); got != want {

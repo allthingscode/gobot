@@ -7,6 +7,7 @@ import (
 )
 
 func TestWriteFileAtomic_Success(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "subdir", "test.txt")
 	content := []byte("hello, world")
@@ -37,6 +38,7 @@ func TestWriteFileAtomic_Success(t *testing.T) {
 }
 
 func TestWriteFileAtomic_CreatesParentDir(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "a", "b", "c", "test.txt")
 	content := []byte("nested content")
@@ -53,6 +55,7 @@ func TestWriteFileAtomic_CreatesParentDir(t *testing.T) {
 }
 
 func TestWriteFileAtomic_OverwritesExisting(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "existing.txt")
 
@@ -78,6 +81,7 @@ func TestWriteFileAtomic_OverwritesExisting(t *testing.T) {
 }
 
 func TestReadFileJSON_Success(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	jsonPath := filepath.Join(tempDir, "test.json")
 
@@ -105,6 +109,7 @@ func TestReadFileJSON_Success(t *testing.T) {
 }
 
 func TestReadFileJSON_FileNotFound(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	nonExistent := filepath.Join(tempDir, "nonexistent.json")
 
@@ -116,6 +121,7 @@ func TestReadFileJSON_FileNotFound(t *testing.T) {
 }
 
 func TestReadFileJSON_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	jsonPath := filepath.Join(tempDir, "invalid.json")
 
@@ -132,6 +138,7 @@ func TestReadFileJSON_InvalidJSON(t *testing.T) {
 }
 
 func TestWriteFileJSON_Success(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	jsonPath := filepath.Join(tempDir, "output.json")
 

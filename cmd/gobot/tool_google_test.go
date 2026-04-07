@@ -7,6 +7,7 @@ import (
 )
 
 func TestCompleteTaskTool_Name(t *testing.T) {
+	t.Parallel()
 	tool := newCompleteTaskTool("/tmp/secrets")
 	if tool.Name() != completeTaskToolName {
 		t.Errorf("Name() = %q, want %q", tool.Name(), completeTaskToolName)
@@ -14,6 +15,7 @@ func TestCompleteTaskTool_Name(t *testing.T) {
 }
 
 func TestCompleteTaskTool_MissingTaskID(t *testing.T) {
+	t.Parallel()
 	tool := newCompleteTaskTool("/tmp/secrets")
 	_, err := tool.Execute(context.Background(), "session:1", map[string]any{"task_id": ""})
 	if err == nil {
@@ -25,6 +27,7 @@ func TestCompleteTaskTool_MissingTaskID(t *testing.T) {
 }
 
 func TestUpdateTaskTool_Name(t *testing.T) {
+	t.Parallel()
 	tool := newUpdateTaskTool("/tmp/secrets")
 	if tool.Name() != updateTaskToolName {
 		t.Errorf("Name() = %q, want %q", tool.Name(), updateTaskToolName)
@@ -32,6 +35,7 @@ func TestUpdateTaskTool_Name(t *testing.T) {
 }
 
 func TestUpdateTaskTool_MissingTaskID(t *testing.T) {
+	t.Parallel()
 	tool := newUpdateTaskTool("/tmp/secrets")
 	_, err := tool.Execute(context.Background(), "session:1", map[string]any{
 		"task_id": "",
@@ -46,6 +50,7 @@ func TestUpdateTaskTool_MissingTaskID(t *testing.T) {
 }
 
 func TestCompleteTaskTool_Declaration(t *testing.T) {
+	t.Parallel()
 	tool := newCompleteTaskTool("/tmp/secrets")
 	decl := tool.Declaration()
 
@@ -66,6 +71,7 @@ func TestCompleteTaskTool_Declaration(t *testing.T) {
 }
 
 func TestUpdateTaskTool_Declaration(t *testing.T) {
+	t.Parallel()
 	tool := newUpdateTaskTool("/tmp/secrets")
 	decl := tool.Declaration()
 

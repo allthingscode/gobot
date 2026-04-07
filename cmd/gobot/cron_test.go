@@ -9,6 +9,7 @@ import (
 )
 
 func TestResolveEmailSubject(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		payload    cron.Payload
@@ -44,6 +45,7 @@ func TestResolveEmailSubject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := resolveEmailSubject(tt.payload)
 			if !strings.Contains(got, tt.wantFormat) {
 				t.Errorf("resolveEmailSubject() = %q, want to contain %q", got, tt.wantFormat)
@@ -53,6 +55,7 @@ func TestResolveEmailSubject(t *testing.T) {
 }
 
 func TestResolveEmailSubjectDateIsCurrent(t *testing.T) {
+	t.Parallel()
 	p := cron.Payload{Subject: "{{DATE}}"}
 	got := resolveEmailSubject(p)
 	// The date portion should look like a real calendar date: "MonthName Day, Year"
@@ -68,6 +71,7 @@ func TestResolveEmailSubjectDateIsCurrent(t *testing.T) {
 }
 
 func TestParseSessionKey(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		input        string
@@ -130,6 +134,7 @@ func TestParseSessionKey(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			gotChatID, gotThreadID, err := parseSessionKey(tc.input)
 			if tc.wantErr {
 				if err == nil {
@@ -153,6 +158,7 @@ func TestParseSessionKey(t *testing.T) {
 }
 
 func TestCronSessionKeyIsolation(t *testing.T) {
+	t.Parallel()
 	to := "telegram:12345"
 	cronKey := "cron:" + to
 	dmKey := to
@@ -166,6 +172,7 @@ func TestCronSessionKeyIsolation(t *testing.T) {
 }
 
 func TestCronSessionKeyFormat(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		to   string
@@ -178,6 +185,7 @@ func TestCronSessionKeyFormat(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			cronKey := "cron:" + tc.to
 			if cronKey == tc.to {
 				t.Errorf("cron session key %q must not equal to value %q", cronKey, tc.to)

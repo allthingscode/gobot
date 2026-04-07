@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-func TestLogsCommand(t *testing.T) {
+func TestLogsCommand(t *testing.T) { //nolint:paralleltest // modifies global env
+
 	// Setup a temporary home for config and logs
 	homeDir, err := os.MkdirTemp("", "gobot-test-logs-*")
 	if err != nil {
@@ -112,7 +113,8 @@ func TestLogsCommand(t *testing.T) {
 	}
 }
 
-func TestLogsCommand_StorageRootOverride(t *testing.T) {
+func TestLogsCommand_StorageRootOverride(t *testing.T) { //nolint:paralleltest // modifies global env
+
 	homeDir, err := os.MkdirTemp("", "gobot-test-logs-override-*")
 	if err != nil {
 		t.Fatal(err)

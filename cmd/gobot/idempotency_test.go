@@ -12,6 +12,7 @@ import (
 )
 
 func TestGenerateIdempotencyKey(t *testing.T) {
+	t.Parallel()
 	// Should produce unique keys
 	k1 := generateIdempotencyKey()
 	k2 := generateIdempotencyKey()
@@ -73,6 +74,7 @@ func setupTestStore(t *testing.T) (store *agentctx.IdempotencyStore, db *sql.DB,
 }
 
 func TestIdempotency_Success(t *testing.T) {
+	t.Parallel()
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -102,6 +104,7 @@ func TestIdempotency_Success(t *testing.T) {
 }
 
 func TestIdempotency_HashMismatch(t *testing.T) {
+	t.Parallel()
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -124,6 +127,7 @@ func TestIdempotency_HashMismatch(t *testing.T) {
 }
 
 func TestIdempotency_Expired(t *testing.T) {
+	t.Parallel()
 	store, db, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -151,6 +155,7 @@ func TestIdempotency_Expired(t *testing.T) {
 }
 
 func TestIdempotency_BackgroundCleanup(t *testing.T) {
+	t.Parallel()
 	store, db, cleanup := setupTestStore(t)
 	defer cleanup()
 

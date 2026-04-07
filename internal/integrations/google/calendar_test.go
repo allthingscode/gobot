@@ -11,12 +11,14 @@ import (
 )
 
 func TestFormatEventsMarkdown_Empty(t *testing.T) {
+	t.Parallel()
 	if got := FormatEventsMarkdown(nil); got != "" {
 		t.Errorf("expected empty string for nil events, got %q", got)
 	}
 }
 
 func TestFormatEventsMarkdown_TimedEvent(t *testing.T) {
+	t.Parallel()
 	events := []CalendarEvent{
 		{Summary: "Team Standup", Start: "2026-03-28T09:00:00-05:00"},
 	}
@@ -30,6 +32,7 @@ func TestFormatEventsMarkdown_TimedEvent(t *testing.T) {
 }
 
 func TestFormatEventsMarkdown_AllDayEvent(t *testing.T) {
+	t.Parallel()
 	events := []CalendarEvent{
 		{Summary: "Company Holiday", Start: "2026-03-28", AllDay: true},
 	}
@@ -43,6 +46,7 @@ func TestFormatEventsMarkdown_AllDayEvent(t *testing.T) {
 }
 
 func TestFormatEventsMarkdown_WithLocation(t *testing.T) {
+	t.Parallel()
 	events := []CalendarEvent{
 		{Summary: "Doctor", Start: "2026-03-28T14:00:00-05:00", Location: "123 Main St"},
 	}
@@ -53,6 +57,7 @@ func TestFormatEventsMarkdown_WithLocation(t *testing.T) {
 }
 
 func TestFormatEventsMarkdown_NoTitle(t *testing.T) {
+	t.Parallel()
 	events := []CalendarEvent{
 		{Start: "2026-03-28T10:00:00-05:00"},
 	}
@@ -63,6 +68,7 @@ func TestFormatEventsMarkdown_NoTitle(t *testing.T) {
 }
 
 func TestFormatEventTime_AllDay(t *testing.T) {
+	t.Parallel()
 	got := formatEventTime("2026-03-28", true)
 	if !strings.Contains(got, "all day") {
 		t.Errorf("expected 'all day' in %q", got)
@@ -73,6 +79,7 @@ func TestFormatEventTime_AllDay(t *testing.T) {
 }
 
 func TestFormatEventTime_Timed(t *testing.T) {
+	t.Parallel()
 	got := formatEventTime("2026-03-28T09:00:00Z", false)
 	// Should contain AM/PM
 	if !strings.Contains(got, "AM") && !strings.Contains(got, "PM") {
@@ -81,6 +88,7 @@ func TestFormatEventTime_Timed(t *testing.T) {
 }
 
 func TestFormatEventTime_InvalidFallsBack(t *testing.T) {
+	t.Parallel()
 	raw := "not-a-date"
 	got := formatEventTime(raw, false)
 	if got != raw {
@@ -89,6 +97,7 @@ func TestFormatEventTime_InvalidFallsBack(t *testing.T) {
 }
 
 func TestListUpcomingEventsWithClient(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		items       []map[string]any
@@ -131,6 +140,7 @@ func TestListUpcomingEventsWithClient(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(r.URL.Path, "calendarList") {
 					if err := json.NewEncoder(w).Encode(map[string]any{
@@ -176,6 +186,7 @@ func TestListUpcomingEventsWithClient(t *testing.T) {
 }
 
 func TestListUpcomingEventsWithClient_AuthError(t *testing.T) {
+	t.Parallel()
 	_, err := listUpcomingEventsWithClient(t.TempDir(), 10, http.DefaultClient)
 	if err == nil {
 		t.Fatal("expected error for missing token file")
@@ -183,6 +194,7 @@ func TestListUpcomingEventsWithClient_AuthError(t *testing.T) {
 }
 
 func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
 			if err := json.NewEncoder(w).Encode(map[string]any{
@@ -253,6 +265,7 @@ func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 }
 
 func TestListUpcomingEventsWithClient_UnselectedCalendarIncluded(t *testing.T) {
+	t.Parallel()
 	var calledA, calledB bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
@@ -300,6 +313,7 @@ func TestListUpcomingEventsWithClient_UnselectedCalendarIncluded(t *testing.T) {
 }
 
 func TestListUpcomingEventsWithClient_PartialFailure(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
 			if err := json.NewEncoder(w).Encode(map[string]any{
@@ -351,6 +365,7 @@ func TestListUpcomingEventsWithClient_PartialFailure(t *testing.T) {
 }
 
 func TestCreateEventWithClient_Success(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -385,6 +400,7 @@ func TestCreateEventWithClient_Success(t *testing.T) {
 }
 
 func TestCreateEventWithClient_MinimalFields(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -414,6 +430,7 @@ func TestCreateEventWithClient_MinimalFields(t *testing.T) {
 }
 
 func TestCreateEventWithClient_InvalidStartTime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
 
@@ -427,6 +444,7 @@ func TestCreateEventWithClient_InvalidStartTime(t *testing.T) {
 }
 
 func TestCreateEventWithClient_InvalidEndTime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
 
@@ -440,6 +458,7 @@ func TestCreateEventWithClient_InvalidEndTime(t *testing.T) {
 }
 
 func TestCreateEventWithClient_AuthError(t *testing.T) {
+	t.Parallel()
 	_, err := createEventWithClient(t.TempDir(), "primary", "Test", "", "2026-04-05T10:00:00Z", "2026-04-05T11:00:00Z", "", http.DefaultClient)
 	if err == nil {
 		t.Fatal("expected error for missing token")
@@ -447,6 +466,7 @@ func TestCreateEventWithClient_AuthError(t *testing.T) {
 }
 
 func TestCreateEventWithClient_APIError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":{"message":"forbidden"}}`, http.StatusForbidden)
 	}))
@@ -466,6 +486,7 @@ func TestCreateEventWithClient_APIError(t *testing.T) {
 }
 
 func TestFormatEventsMarkdown_ShowsCalendarName(t *testing.T) {
+	t.Parallel()
 	events := []CalendarEvent{
 		{Summary: "Sprint Review", Start: "2026-03-28T14:00:00-05:00", CalendarName: "Work"},
 	}

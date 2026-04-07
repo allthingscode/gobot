@@ -21,6 +21,7 @@ type specialistState struct {
 // TestBacklogItemStatusVerification ensures the last_item in session_state.json
 // has a status field that matches reality (code existence).
 func TestBacklogItemStatusVerification(t *testing.T) {
+	t.Parallel()
 	// 1. Locate session_state.json
 	statePath := filepath.Join("..", "..", ".private", "session", "session_state.json")
 	stateBytes, err := os.ReadFile(statePath)
@@ -56,6 +57,7 @@ func TestBacklogItemStatusVerification(t *testing.T) {
 	// 4. Verify each item
 	for itemID := range itemsToCheck {
 		t.Run(itemID, func(t *testing.T) {
+		t.Parallel()
 			verifyItemStatus(t, itemID)
 		})
 	}

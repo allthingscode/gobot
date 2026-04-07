@@ -10,6 +10,7 @@ import (
 )
 
 func TestIsDuplicate(t *testing.T) {
+	t.Parallel()
 	api := &tgAPI{}
 
 	// First call: not a duplicate.
@@ -40,6 +41,7 @@ func TestIsDuplicate(t *testing.T) {
 }
 
 func TestIsDuplicate_CrossChatNoFalsePositive(t *testing.T) {
+	t.Parallel()
 	api := &tgAPI{}
 
 	// Same messageID, different chats — must NOT deduplicate.
@@ -57,6 +59,7 @@ func TestIsDuplicate_CrossChatNoFalsePositive(t *testing.T) {
 }
 
 func TestUpdates_CircuitOpen(t *testing.T) {
+	t.Parallel()
 	// Initialize a breaker that is already open.
 	breaker := resilience.New("test_telegram_circuit", 1, time.Minute, time.Hour)
 	_ = breaker.Execute(func() error { return errors.New("fail") })

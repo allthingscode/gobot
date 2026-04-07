@@ -22,6 +22,7 @@ func msgWithTS(role, content, ts string) map[string]any {
 // ── PruneContext ──────────────────────────────────────────────────────────────
 
 func TestPruneContext_UserMessagesAlwaysKept(t *testing.T) {
+	t.Parallel()
 	old := time.Now().Add(-48 * time.Hour).Format(time.RFC3339)
 	msgs := []map[string]any{
 		msgWithTS("user", "hello", old),
@@ -38,6 +39,7 @@ func TestPruneContext_UserMessagesAlwaysKept(t *testing.T) {
 }
 
 func TestPruneContext_KeepLastAssistants(t *testing.T) {
+	t.Parallel()
 	old := time.Now().Add(-48 * time.Hour).Format(time.RFC3339)
 	msgs := []map[string]any{
 		msgWithTS("assistant", "old1", old),
@@ -56,6 +58,7 @@ func TestPruneContext_KeepLastAssistants(t *testing.T) {
 }
 
 func TestPruneContext_ToolResponseRetainedWithAssistant(t *testing.T) {
+	t.Parallel()
 	recent := time.Now().Format(time.RFC3339)
 	msgs := []map[string]any{
 		{
@@ -79,6 +82,7 @@ func TestPruneContext_ToolResponseRetainedWithAssistant(t *testing.T) {
 }
 
 func TestPruneContext_ToolResponseDroppedWithAssistant(t *testing.T) {
+	t.Parallel()
 	old := time.Now().Add(-48 * time.Hour).Format(time.RFC3339)
 	msgs := []map[string]any{
 		{
@@ -103,6 +107,7 @@ func TestPruneContext_ToolResponseDroppedWithAssistant(t *testing.T) {
 }
 
 func TestPruneContext_OrderPreserved(t *testing.T) {
+	t.Parallel()
 	recent := time.Now().Format(time.RFC3339)
 	msgs := []map[string]any{
 		msgWithTS("user", "first", recent),
@@ -118,6 +123,7 @@ func TestPruneContext_OrderPreserved(t *testing.T) {
 }
 
 func TestPruneContext_EmptyInput(t *testing.T) {
+	t.Parallel()
 	result := memory.PruneContext(nil, 24, 5)
 	if len(result) != 0 {
 		t.Errorf("expected empty result for nil input, got %d", len(result))
@@ -125,6 +131,7 @@ func TestPruneContext_EmptyInput(t *testing.T) {
 }
 
 func TestPruneContext_NoTimestamp(t *testing.T) {
+	t.Parallel()
 	// Messages without a timestamp are treated as not-old (zero time is not before cutoff).
 	msgs := []map[string]any{
 		msg("assistant", "no ts"),
@@ -137,6 +144,7 @@ func TestPruneContext_NoTimestamp(t *testing.T) {
 }
 
 func TestPruneContext_SpaceFormatTimestamp(t *testing.T) {
+	t.Parallel()
 	// Exercises the "2006-01-02 15:04:05" timestamp format parser branch.
 	old := time.Now().Add(-48 * time.Hour).Format("2006-01-02 15:04:05")
 	msgs := []map[string]any{
@@ -151,6 +159,7 @@ func TestPruneContext_SpaceFormatTimestamp(t *testing.T) {
 }
 
 func TestPruneContext_UnparseableTimestamp(t *testing.T) {
+	t.Parallel()
 	// Exercises the final return of parseTimestamp (all formats fail → zero time).
 	msgs := []map[string]any{
 		msgWithTS("assistant", "bad ts", "not-a-date"),
@@ -163,6 +172,7 @@ func TestPruneContext_UnparseableTimestamp(t *testing.T) {
 }
 
 func TestPruneContext_PlainDateTimeTimestamp(t *testing.T) {
+	t.Parallel()
 	// Exercises the "2006-01-02T15:04:05" (no timezone) format parser branch.
 	old := time.Now().Add(-48 * time.Hour).Format("2006-01-02T15:04:05")
 	msgs := []map[string]any{
@@ -178,6 +188,7 @@ func TestPruneContext_PlainDateTimeTimestamp(t *testing.T) {
 // ── FormatConsolidationMessages ───────────────────────────────────────────────
 
 func TestFormatConsolidationMessages_Basic(t *testing.T) {
+	t.Parallel()
 	msgs := []map[string]any{
 		{"role": "user", "content": "hello", "timestamp": "2026-03-27T10:00:00"},
 		{"role": "assistant", "content": "world", "timestamp": "2026-03-27T10:01:00"},
@@ -192,6 +203,7 @@ func TestFormatConsolidationMessages_Basic(t *testing.T) {
 }
 
 func TestFormatConsolidationMessages_SkipsEmptyContent(t *testing.T) {
+	t.Parallel()
 	msgs := []map[string]any{
 		{"role": "user", "content": ""},
 		{"role": "assistant", "content": "response"},
@@ -204,6 +216,7 @@ func TestFormatConsolidationMessages_SkipsEmptyContent(t *testing.T) {
 }
 
 func TestFormatConsolidationMessages_TimestampTruncated(t *testing.T) {
+	t.Parallel()
 	msgs := []map[string]any{
 		{"role": "user", "content": "hi", "timestamp": "2026-03-27T10:00:00.000Z"},
 	}
@@ -215,6 +228,7 @@ func TestFormatConsolidationMessages_TimestampTruncated(t *testing.T) {
 }
 
 func TestFormatConsolidationMessages_MissingTimestamp(t *testing.T) {
+	t.Parallel()
 	msgs := []map[string]any{
 		{"role": "user", "content": "hi"},
 	}
@@ -227,6 +241,7 @@ func TestFormatConsolidationMessages_MissingTimestamp(t *testing.T) {
 // ── ParseConsolidationResponse ────────────────────────────────────────────────
 
 func TestParseConsolidationResponse_ToolCallMap(t *testing.T) {
+	t.Parallel()
 	args := map[string]any{
 		"history_entry": "summary here",
 		"memory_update": "new facts",
@@ -244,6 +259,7 @@ func TestParseConsolidationResponse_ToolCallMap(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_ToolCallJSONString(t *testing.T) {
+	t.Parallel()
 	jsonStr := `{"history_entry":"from json","memory_update":"facts"}`
 	result, err := memory.ParseConsolidationResponse(nil, true, jsonStr, "old")
 	if err != nil {
@@ -258,6 +274,7 @@ func TestParseConsolidationResponse_ToolCallJSONString(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_RegexRecovery(t *testing.T) {
+	t.Parallel()
 	content := `Some preamble {"history_entry": "recovered", "memory_update": "data"} trailing`
 	result, err := memory.ParseConsolidationResponse(content, false, nil, "old memory")
 	if err != nil {
@@ -272,6 +289,7 @@ func TestParseConsolidationResponse_RegexRecovery(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_SummaryFallback(t *testing.T) {
+	t.Parallel()
 	content := `{"summary": "alt key", "facts": "alt memory"}`
 	result, err := memory.ParseConsolidationResponse(content, false, nil, "default mem")
 	if err != nil {
@@ -286,6 +304,7 @@ func TestParseConsolidationResponse_SummaryFallback(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_NilOnNoKeys(t *testing.T) {
+	t.Parallel()
 	result, err := memory.ParseConsolidationResponse("no json here", false, nil, "old")
 	if err == nil {
 		t.Errorf("expected error for unparseable input, got result=%v", result)
@@ -293,6 +312,7 @@ func TestParseConsolidationResponse_NilOnNoKeys(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_NonStringContent(t *testing.T) {
+	t.Parallel()
 	// Non-string content (e.g. a number) — exercises the default json.Marshal branch.
 	result, err := memory.ParseConsolidationResponse(42, false, nil, "old")
 	if err == nil {
@@ -301,6 +321,7 @@ func TestParseConsolidationResponse_NonStringContent(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_InvalidJSONInContent(t *testing.T) {
+	t.Parallel()
 	// Regex finds braces but content is not valid JSON — exercises extractJSON failure.
 	result, err := memory.ParseConsolidationResponse("{not valid json}", false, nil, "old")
 	if err == nil {
@@ -309,6 +330,7 @@ func TestParseConsolidationResponse_InvalidJSONInContent(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_AllMemoryKeysMissing(t *testing.T) {
+	t.Parallel()
 	// Neither memory_update nor facts present, and currentMemory is "".
 	// Exercises firstNonEmpty reaching its final return "".
 	content := `{"history_entry": "got this", "unrelated": "data"}`
@@ -326,6 +348,7 @@ func TestParseConsolidationResponse_AllMemoryKeysMissing(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_NoSummaryFallback(t *testing.T) {
+	t.Parallel()
 	// Neither history_entry nor summary present — firstNonEmpty falls through to default.
 	content := `{"memory_update": "some facts"}`
 	result, err := memory.ParseConsolidationResponse(content, false, nil, "old memory")
@@ -342,6 +365,7 @@ func TestParseConsolidationResponse_NoSummaryFallback(t *testing.T) {
 }
 
 func TestParseConsolidationResponse_NilOnEmptyArgsNoKeys(t *testing.T) {
+	t.Parallel()
 	args := map[string]any{"irrelevant": "value"}
 	result, err := memory.ParseConsolidationResponse(nil, true, args, "old")
 	if err == nil {
@@ -352,6 +376,7 @@ func TestParseConsolidationResponse_NilOnEmptyArgsNoKeys(t *testing.T) {
 // TestParseConsolidationResponse_ErrorHandling tests all three parse outcomes
 // as required by B-040 implementation steps.
 func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		content       any
@@ -404,6 +429,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			result, err := memory.ParseConsolidationResponse(tt.content, tt.hasToolCalls, tt.toolArguments, tt.currentMemory)
 			if tt.wantError && err == nil {
 				t.Errorf("expected error but got none")
@@ -421,6 +447,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 // ── FilterRAGResults ──────────────────────────────────────────────────────────
 
 func TestFilterRAGResults_FiltersLowScore(t *testing.T) {
+	t.Parallel()
 	results := []map[string]any{
 		{"content": "good content", "score": 0.9},
 		{"content": "bad content", "score": 0.5},
@@ -432,6 +459,7 @@ func TestFilterRAGResults_FiltersLowScore(t *testing.T) {
 }
 
 func TestFilterRAGResults_FiltersNoSummary(t *testing.T) {
+	t.Parallel()
 	results := []map[string]any{
 		{"content": "No summary available", "score": 1.0},
 		{"content": "real content", "score": 1.0},
@@ -443,6 +471,7 @@ func TestFilterRAGResults_FiltersNoSummary(t *testing.T) {
 }
 
 func TestFilterRAGResults_FiltersNoisePatterns(t *testing.T) {
+	t.Parallel()
 	results := []map[string]any{
 		{"content": "spawned subagent for task X", "score": 1.0},
 		{"content": "Meeting summary: budget approved", "score": 1.0},
@@ -454,6 +483,7 @@ func TestFilterRAGResults_FiltersNoisePatterns(t *testing.T) {
 }
 
 func TestFilterRAGResults_FiltersEmptyContent(t *testing.T) {
+	t.Parallel()
 	results := []map[string]any{
 		{"content": "", "score": 1.0},
 		{"content": "valid", "score": 1.0},
@@ -465,6 +495,7 @@ func TestFilterRAGResults_FiltersEmptyContent(t *testing.T) {
 }
 
 func TestFilterRAGResults_DefaultScoreIsOne(t *testing.T) {
+	t.Parallel()
 	// Result with no "score" key should default to 1.0 and pass a 0.7 threshold.
 	results := []map[string]any{
 		{"content": "no score key"},
@@ -478,6 +509,7 @@ func TestFilterRAGResults_DefaultScoreIsOne(t *testing.T) {
 // ── ShouldSkipRAG ─────────────────────────────────────────────────────────────
 
 func TestShouldSkipRAG(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  bool
@@ -493,6 +525,7 @@ func TestShouldSkipRAG(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%q", tt.input), func(t *testing.T) {
+		t.Parallel()
 			got := memory.ShouldSkipRAG(tt.input)
 			if got != tt.want {
 				t.Errorf("ShouldSkipRAG(%q) = %v, want %v", tt.input, got, tt.want)
@@ -504,6 +537,7 @@ func TestShouldSkipRAG(t *testing.T) {
 // ── FormatRAGBlock ────────────────────────────────────────────────────────────
 
 func TestFormatRAGBlock_Basic(t *testing.T) {
+	t.Parallel()
 	results := []map[string]any{
 		{"content": "fact one"},
 		{"content": "fact two"},
@@ -524,6 +558,7 @@ func TestFormatRAGBlock_Basic(t *testing.T) {
 }
 
 func TestFormatRAGBlock_Empty(t *testing.T) {
+	t.Parallel()
 	block, count := memory.FormatRAGBlock(nil)
 	if count != 0 || block != "" {
 		t.Errorf("expected empty block and 0 count, got %q / %d", block, count)

@@ -21,6 +21,7 @@ func newTestPairingDB(t *testing.T) *sql.DB {
 }
 
 func TestPairingStore_IsAuthorized_False(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {
@@ -37,6 +38,7 @@ func TestPairingStore_IsAuthorized_False(t *testing.T) {
 }
 
 func TestPairingStore_IsAuthorized_True(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {
@@ -58,6 +60,7 @@ func TestPairingStore_IsAuthorized_True(t *testing.T) {
 }
 
 func TestPairingStore_GetOrCreateCode_CreatesCode(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {
@@ -80,6 +83,7 @@ func TestPairingStore_GetOrCreateCode_CreatesCode(t *testing.T) {
 }
 
 func TestPairingStore_GetOrCreateCode_ReturnsExistingCode(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {
@@ -100,6 +104,7 @@ func TestPairingStore_GetOrCreateCode_ReturnsExistingCode(t *testing.T) {
 }
 
 func TestPairingStore_AuthorizeByCode_Success(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {
@@ -130,6 +135,7 @@ func TestPairingStore_AuthorizeByCode_Success(t *testing.T) {
 }
 
 func TestPairingStore_AuthorizeByCode_NotFound(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {
@@ -143,6 +149,7 @@ func TestPairingStore_AuthorizeByCode_NotFound(t *testing.T) {
 }
 
 func TestPairingStore_AuthorizeByChatID(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {
@@ -164,6 +171,7 @@ func TestPairingStore_AuthorizeByChatID(t *testing.T) {
 }
 
 func TestPairingStore_AuthorizeByCode_DeletesCode(t *testing.T) {
+	t.Parallel()
 	db := newTestPairingDB(t)
 	store, err := NewPairingStore(db)
 	if err != nil {

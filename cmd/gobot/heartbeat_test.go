@@ -21,6 +21,7 @@ func (m *mockAlertSender) Send(_ context.Context, msg bot.OutboundMessage) error
 }
 
 func TestHeartbeatCheck(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name             string
 		telegramErr      error
@@ -82,6 +83,7 @@ func TestHeartbeatCheck(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			dir := t.TempDir()
 			sender := &mockAlertSender{}
 

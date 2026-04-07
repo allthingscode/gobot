@@ -13,6 +13,7 @@ import (
 // ── DailyJournalPath ──────────────────────────────────────────────────────────
 
 func TestDailyJournalPath_Format(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ts := time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC)
 	got := memory.DailyJournalPath(root, ts)
@@ -25,6 +26,7 @@ func TestDailyJournalPath_Format(t *testing.T) {
 // ── GetJournalContinuity ──────────────────────────────────────────────────────
 
 func TestGetJournalContinuity_ReturnsEmptyWhenMissing(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	got := memory.GetJournalContinuity(root, 1000)
 	if got != "" {
@@ -38,6 +40,7 @@ func TestGetJournalContinuity_ReturnsEmptyWhenMissing(t *testing.T) {
 }
 
 func TestGetJournalContinuity_ReturnsContent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	journalPath := memory.DailyJournalPath(root, time.Now())
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
@@ -58,6 +61,7 @@ func TestGetJournalContinuity_ReturnsContent(t *testing.T) {
 }
 
 func TestGetJournalContinuity_TruncatesToMaxChars(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	journalPath := memory.DailyJournalPath(root, time.Now())
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
@@ -77,6 +81,7 @@ func TestGetJournalContinuity_TruncatesToMaxChars(t *testing.T) {
 }
 
 func TestGetJournalContinuity_NoNewlineInTruncatedPortion(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	journalPath := memory.DailyJournalPath(root, time.Now())
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
@@ -97,6 +102,7 @@ func TestGetJournalContinuity_NoNewlineInTruncatedPortion(t *testing.T) {
 }
 
 func TestGetJournalContinuity_EmptyFileReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	journalPath := memory.DailyJournalPath(root, time.Now())
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
@@ -116,6 +122,7 @@ func TestGetJournalContinuity_EmptyFileReturnsEmpty(t *testing.T) {
 // ── WriteJournalEntry ─────────────────────────────────────────────────────────
 
 func TestWriteJournalEntry_CreatesAndAppends(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	ok := memory.WriteJournalEntry(root, "first consolidation")
@@ -134,6 +141,7 @@ func TestWriteJournalEntry_CreatesAndAppends(t *testing.T) {
 }
 
 func TestWriteJournalEntry_AppendsTwice(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	memory.WriteJournalEntry(root, "entry one")
 	memory.WriteJournalEntry(root, "entry two")
@@ -146,6 +154,7 @@ func TestWriteJournalEntry_AppendsTwice(t *testing.T) {
 }
 
 func TestWriteJournalEntry_ContainsCONSOLIDATIONHeader(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	memory.WriteJournalEntry(root, "test entry")
 

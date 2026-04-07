@@ -10,6 +10,7 @@ import (
 // TestPanicFix verifies that passing an invalid flag does not panic
 // but instead logs an error and exits with code 1.
 func TestPanicFix(t *testing.T) {
+	t.Parallel()
 	// We run the command itself as a subprocess.
 	// Since we are in the 'main' package, we can't easily run 'go run main.go' 
 	// without knowing the absolute path or building it.

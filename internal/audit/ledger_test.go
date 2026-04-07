@@ -17,6 +17,7 @@ func newTestLedger(t *testing.T) *AuditLedger {
 
 // TestAuditLedger_AppendAndGetAll verifies basic append and retrieval.
 func TestAuditLedger_AppendAndGetAll(t *testing.T) {
+	t.Parallel()
 	l := newTestLedger(t)
 
 	entries := []AuditEntry{
@@ -47,6 +48,7 @@ func TestAuditLedger_AppendAndGetAll(t *testing.T) {
 
 // TestAuditLedger_HashChainValid verifies that Verify passes on an untampered ledger.
 func TestAuditLedger_HashChainValid(t *testing.T) {
+	t.Parallel()
 	l := newTestLedger(t)
 
 	for i := 0; i < 5; i++ {
@@ -67,6 +69,7 @@ func TestAuditLedger_HashChainValid(t *testing.T) {
 
 // TestAuditLedger_EmptyLedger_Verify verifies that an empty ledger passes Verify.
 func TestAuditLedger_EmptyLedger_Verify(t *testing.T) {
+	t.Parallel()
 	l := newTestLedger(t)
 	if err := l.Verify(); err != nil {
 		t.Errorf("Verify on empty ledger: %v", err)
@@ -76,6 +79,7 @@ func TestAuditLedger_EmptyLedger_Verify(t *testing.T) {
 // TestAuditLedger_PrevHashChained verifies that each record's PrevHash equals
 // the previous record's Hash, forming a proper chain.
 func TestAuditLedger_PrevHashChained(t *testing.T) {
+	t.Parallel()
 	l := newTestLedger(t)
 
 	for i := 0; i < 4; i++ {
@@ -110,6 +114,7 @@ func TestAuditLedger_PrevHashChained(t *testing.T) {
 // TestAuditLedger_Verify_DetectsTampering verifies that modifying a stored
 // result field without updating the hash causes Verify to return an error.
 func TestAuditLedger_Verify_DetectsTampering(t *testing.T) {
+	t.Parallel()
 	l := newTestLedger(t)
 
 	if err := l.Append(AuditEntry{

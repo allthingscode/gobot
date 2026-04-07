@@ -8,6 +8,7 @@ import (
 )
 
 func TestFallbackNotify(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		subject   string
@@ -118,6 +119,7 @@ func TestFallbackNotify(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			storageRoot := t.TempDir()
 			if tt.setup != nil {
 				tt.setup(storageRoot)
@@ -136,6 +138,7 @@ func TestFallbackNotify(t *testing.T) {
 }
 
 func TestWrapHTML(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		body  string
@@ -197,6 +200,7 @@ func TestWrapHTML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := WrapHTML(tt.body)
 			if tt.want != "" {
 				if got != tt.want {
@@ -214,6 +218,7 @@ func TestWrapHTML(t *testing.T) {
 }
 
 func TestStripHTML(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -247,6 +252,7 @@ func TestStripHTML(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			got := StripHTML(tc.input)
 			if got != tc.want {
 				t.Errorf("StripHTML(%q)\n got: %q\nwant: %q", tc.input, got, tc.want)

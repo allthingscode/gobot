@@ -27,11 +27,13 @@ func (m *mockHandler) HandleCallback(_ context.Context, _ bot.InboundCallback) e
 }
 
 func TestGateway(t *testing.T) {
+	t.Parallel()
 	cfg := config.GatewayConfig{Enabled: true, Host: "localhost", Port: 18790}
 	h := &mockHandler{}
 	srv := NewServer(cfg, h)
 
 	t.Run("Health", func(t *testing.T) {
+	t.Parallel()
 		req := httptest.NewRequest("GET", "/health", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleHealth(w, req)
@@ -45,6 +47,7 @@ func TestGateway(t *testing.T) {
 	})
 
 	t.Run("Chat", func(t *testing.T) {
+	t.Parallel()
 		in := InboundRequest{
 			SessionKey: "test-session",
 			Text:       "hello gateway",
@@ -72,6 +75,7 @@ func TestGateway(t *testing.T) {
 	})
 
 	t.Run("InvalidMethod", func(t *testing.T) {
+	t.Parallel()
 		req := httptest.NewRequest("GET", "/chat", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleChat(w, req)

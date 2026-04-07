@@ -30,7 +30,8 @@ func strPtr(s string) *string { return &s }
 
 // ── CreateThread ──────────────────────────────────────────────────────────────
 
-func TestCreateThread(t *testing.T) {
+func TestCreateThread(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	tests := []struct {
 		name     string
 		threadID string
@@ -60,6 +61,8 @@ func TestCreateThread(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
+
 			m := newTestManager(t)
 			if err := m.CreateThread(tt.threadID, tt.model, tt.metadata); (err != nil) != tt.wantErr {
 				t.Errorf("CreateThread() error = %v, wantErr %v", err, tt.wantErr)
@@ -74,7 +77,8 @@ func TestCreateThread(t *testing.T) {
 
 // ── SaveSnapshot ─────────────────────────────────────────────────────────────
 
-func TestSaveSnapshot(t *testing.T) {
+func TestSaveSnapshot(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	msg := func(role MessageRole, text string) StrategicMessage {
 		content := MessageContent{Str: strPtr(text)}
 		return StrategicMessage{Role: role, Content: &content}
@@ -112,6 +116,8 @@ func TestSaveSnapshot(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
+
 			m := newTestManager(t)
 			if err := m.CreateThread(tt.threadID, "model", nil); err != nil {
 				t.Fatalf("CreateThread: %v", err)
@@ -129,13 +135,16 @@ func TestSaveSnapshot(t *testing.T) {
 
 // ── LoadLatest ────────────────────────────────────────────────────────────────
 
-func TestLoadLatest(t *testing.T) {
+func TestLoadLatest(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	msg := func(role MessageRole, text string) StrategicMessage {
 		content := MessageContent{Str: strPtr(text)}
 		return StrategicMessage{Role: role, Content: &content}
 	}
 
 	t.Run("returns nil for unknown thread", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		snap, err := m.LoadLatest("no-such-thread")
 		if err != nil {
@@ -147,6 +156,8 @@ func TestLoadLatest(t *testing.T) {
 	})
 
 	t.Run("returns latest iteration when multiple snapshots exist", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		if err := m.CreateThread("t1", "gemini-3-flash", map[string]any{"k": "v"}); err != nil {
 			t.Fatalf("CreateThread: %v", err)
@@ -182,6 +193,8 @@ func TestLoadLatest(t *testing.T) {
 	})
 
 	t.Run("messages round-trip correctly", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		if err := m.CreateThread("t1", "m", nil); err != nil {
 			t.Fatalf("CreateThread: %v", err)
@@ -211,8 +224,11 @@ func TestLoadLatest(t *testing.T) {
 
 // ── CompleteThread ────────────────────────────────────────────────────────────
 
-func TestCompleteThread(t *testing.T) {
+func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	t.Run("marks thread as completed", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		if err := m.CreateThread("t1", "model", nil); err != nil {
 			t.Fatalf("CreateThread: %v", err)
@@ -230,6 +246,8 @@ func TestCompleteThread(t *testing.T) {
 	})
 
 	t.Run("completed thread excluded from ListResumable", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		if err := m.CreateThread("t1", "m", nil); err != nil {
 			t.Fatalf("CreateThread: %v", err)
@@ -253,8 +271,11 @@ func TestCompleteThread(t *testing.T) {
 
 // ── ListResumable ─────────────────────────────────────────────────────────────
 
-func TestListResumable(t *testing.T) {
+func TestListResumable(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	t.Run("returns empty list when no threads", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		result, err := m.ListResumable()
 		if err != nil {
@@ -266,6 +287,8 @@ func TestListResumable(t *testing.T) {
 	})
 
 	t.Run("returns active threads with snapshots ordered by updated_at desc", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		content := MessageContent{Str: strPtr("msg")}
 		snap := []StrategicMessage{{Role: RoleUser, Content: &content}}
@@ -294,6 +317,8 @@ func TestListResumable(t *testing.T) {
 	})
 
 	t.Run("thread without snapshot not included", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestManager(t)
 		if err := m.CreateThread("no-snap", "model", nil); err != nil {
 			t.Fatalf("CreateThread: %v", err)
@@ -310,7 +335,8 @@ func TestListResumable(t *testing.T) {
 
 // ── Closed-DB error paths ─────────────────────────────────────────────────────
 
-func TestSaveSnapshot_TxBeginError(t *testing.T) {
+func TestSaveSnapshot_TxBeginError(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	m := newTestManager(t)
 	if err := m.CreateThread("t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -325,7 +351,8 @@ func TestSaveSnapshot_TxBeginError(t *testing.T) {
 	}
 }
 
-func TestListResumable_QueryError(t *testing.T) {
+func TestListResumable_QueryError(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	m := newTestManager(t)
 	m.db.Close() // force query to fail
 
@@ -335,7 +362,8 @@ func TestListResumable_QueryError(t *testing.T) {
 	}
 }
 
-func TestCreateThread_ExecError(t *testing.T) {
+func TestCreateThread_ExecError(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	m := newTestManager(t)
 	m.db.Close()
 
@@ -349,7 +377,8 @@ func TestCreateThread_ExecError(t *testing.T) {
 	}
 }
 
-func TestCompleteThread_ExecError(t *testing.T) {
+func TestCompleteThread_ExecError(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	m := newTestManager(t)
 	m.db.Close()
 
@@ -365,8 +394,10 @@ func TestCompleteThread_ExecError(t *testing.T) {
 
 // ── LoadLatest error paths ────────────────────────────────────────────────────
 
-func TestLoadLatest_CorruptState(t *testing.T) {
+func TestLoadLatest_CorruptState(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	t.Run("returns error when state JSON is corrupt", func(t *testing.T) {
+		t.Parallel()
 		m := newTestManager(t)
 		if err := m.CreateThread("t1", "model", nil); err != nil {
 			t.Fatalf("CreateThread: %v", err)
@@ -385,8 +416,10 @@ func TestLoadLatest_CorruptState(t *testing.T) {
 	})
 }
 
-func TestLoadLatest_CorruptMetadata(t *testing.T) {
+func TestLoadLatest_CorruptMetadata(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	t.Run("falls back to empty map when metadata JSON is corrupt", func(t *testing.T) {
+		t.Parallel()
 		m := newTestManager(t)
 		// Insert a thread with invalid metadata JSON directly.
 		if _, err := m.db.Exec(
@@ -419,7 +452,8 @@ func TestLoadLatest_CorruptMetadata(t *testing.T) {
 
 // ── SaveSnapshot validation path ──────────────────────────────────────────────
 
-func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) {
+func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	// StrategicMessage with a channel (or func) in ToolCalls cannot marshal.
 	// The simplest way to exercise the marshal-returns-false path is to pass
 	// a message whose Content is set to an item whose MarshalJSON returns an error.
@@ -470,8 +504,10 @@ func resetSingleton() {
 	cmInitErr = nil
 }
 
-func TestGetCheckpointManager_Error(t *testing.T) {
+func TestGetCheckpointManager_Error(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	t.Run("returns error when storage root is not creatable", func(t *testing.T) {
+		t.Parallel()
 		resetSingleton()
 		root := t.TempDir()
 		t.Cleanup(resetSingleton)
@@ -491,7 +527,8 @@ func TestGetCheckpointManager_Error(t *testing.T) {
 	})
 }
 
-func TestGetCheckpointManager_Singleton(t *testing.T) {
+func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	// Reset the singleton state for this test.
 	cmOnce = sync.Once{}
 	cmInstance = nil
@@ -523,7 +560,8 @@ func TestGetCheckpointManager_Singleton(t *testing.T) {
 
 // ── Checksum tests ────────────────────────────────────────────────────────────
 
-func TestSaveSnapshot_StoresChecksum(t *testing.T) {
+func TestSaveSnapshot_StoresChecksum(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	m := newTestManager(t)
 	if err := m.CreateThread("t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -550,7 +588,8 @@ func TestSaveSnapshot_StoresChecksum(t *testing.T) {
 	}
 }
 
-func TestLoadLatest_ChecksumMismatch(t *testing.T) {
+func TestLoadLatest_ChecksumMismatch(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	m := newTestManager(t)
 	if err := m.CreateThread("t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -572,7 +611,8 @@ func TestLoadLatest_ChecksumMismatch(t *testing.T) {
 	}
 }
 
-func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) {
+func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) { //nolint:paralleltest // modifies global environment
+
 	m := newTestManager(t)
 	if err := m.CreateThread("t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)

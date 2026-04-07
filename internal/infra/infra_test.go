@@ -9,6 +9,7 @@ import (
 )
 
 func TestResolveMediaPath(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	tests := []struct {
@@ -39,6 +40,7 @@ func TestResolveMediaPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := ResolveMediaPath(tt.storageRoot, tt.channel)
 			if tt.storageRoot != "" {
 				if !strings.Contains(got, tt.storageRoot) {
@@ -58,6 +60,7 @@ func TestResolveMediaPath(t *testing.T) {
 }
 
 func TestListDirectory(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create a dummy structure
@@ -92,6 +95,7 @@ func TestListDirectory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := ListDirectory(tt.pathStr, tt.workspacePath)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
@@ -103,6 +107,7 @@ func TestListDirectory(t *testing.T) {
 }
 
 func TestReadLogFile(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("Skipping Windows-specific ReadLogFile test")
 	}
@@ -164,6 +169,7 @@ func TestReadLogFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got, ok := ReadLogFile(tt.pathStr, tt.workspacePath, tt.maxChars)
 			if ok != tt.wantOk {
 				t.Errorf("ReadLogFile() ok = %v, want %v", ok, tt.wantOk)

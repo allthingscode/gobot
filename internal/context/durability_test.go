@@ -10,6 +10,7 @@ import (
 // 2. Reopening the same DB path and verifying the state is fully intact.
 // This is the core F-018 durability guarantee.
 func TestCheckpointManager_CrashAndRecover(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	// ── Phase 1: save state, then close the DB ────────────────────────────────
@@ -80,6 +81,7 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 // TestCheckpointManager_CrashAndRecover_MultipleIterations verifies that
 // after a restart, LoadLatest returns the HIGHEST iteration saved before crash.
 func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	db1, err := openDB(root)
@@ -136,6 +138,7 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 // and all complete without error.
 // This tests the WAL + MaxOpenConns(1) combination that serializes writes.
 func TestCheckpointManager_ConcurrentSaveSnapshot(t *testing.T) {
+	t.Parallel()
 	m := newTestManager(t)
 	if err := m.CreateThread("t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -177,6 +180,7 @@ func TestCheckpointManager_ConcurrentSaveSnapshot(t *testing.T) {
 // stored state JSON is modified on disk (bit-rot / tampering), LoadLatest
 // returns an error rather than silently returning corrupt data.
 func TestCheckpointManager_ChecksumProtectsAgainstBitrot(t *testing.T) {
+	t.Parallel()
 	m := newTestManager(t)
 	if err := m.CreateThread("t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)

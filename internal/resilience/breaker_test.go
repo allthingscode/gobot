@@ -7,6 +7,7 @@ import (
 )
 
 func TestBreaker_ClosedByDefault(t *testing.T) {
+	t.Parallel()
 	b := New("test", 3, 10*time.Second, 1*time.Second)
 	if got := b.State(); got != "closed" {
 		t.Fatalf("expected state %q, got %q", "closed", got)
@@ -14,6 +15,7 @@ func TestBreaker_ClosedByDefault(t *testing.T) {
 }
 
 func TestBreaker_Execute_Success(t *testing.T) {
+	t.Parallel()
 	b := New("test", 3, 10*time.Second, 1*time.Second)
 	err := b.Execute(func() error { return nil })
 	if err != nil {
@@ -22,6 +24,7 @@ func TestBreaker_Execute_Success(t *testing.T) {
 }
 
 func TestBreaker_TripsAfterConsecutiveFailures(t *testing.T) {
+	t.Parallel()
 	b := New("test", 3, 60*time.Second, 1*time.Second)
 	for i := 0; i < 3; i++ {
 		_ = b.Execute(func() error { return errors.New("fail") })
@@ -32,6 +35,7 @@ func TestBreaker_TripsAfterConsecutiveFailures(t *testing.T) {
 }
 
 func TestBreaker_OpenReturnsErrCircuitOpen(t *testing.T) {
+	t.Parallel()
 	b := New("test", 3, 60*time.Second, 1*time.Second)
 	for i := 0; i < 3; i++ {
 		_ = b.Execute(func() error { return errors.New("fail") })
@@ -43,6 +47,7 @@ func TestBreaker_OpenReturnsErrCircuitOpen(t *testing.T) {
 }
 
 func TestBreaker_Execute_NonFatalError(t *testing.T) {
+	t.Parallel()
 	b := New("test", 5, 60*time.Second, 1*time.Second)
 	err := b.Execute(func() error { return errors.New("transient") })
 	if errors.Is(err, ErrCircuitOpen) {

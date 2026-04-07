@@ -24,6 +24,7 @@ func newTestHook(t *testing.T) *StateHook {
 }
 
 func TestStateHook_WorkflowLifecycle(t *testing.T) {
+	t.Parallel()
 	hook := newTestHook(t)
 	ctx := context.Background()
 	id := state.WorkflowID("wf-lifecycle")
@@ -51,6 +52,7 @@ func TestStateHook_WorkflowLifecycle(t *testing.T) {
 }
 
 func TestStateHook_WorkflowLifecycle_Failure(t *testing.T) {
+	t.Parallel()
 	hook := newTestHook(t)
 	ctx := context.Background()
 	id := state.WorkflowID("wf-failure")
@@ -66,6 +68,7 @@ func TestStateHook_WorkflowLifecycle_Failure(t *testing.T) {
 }
 
 func TestStateHook_RecoverWorkflow(t *testing.T) {
+	t.Parallel()
 	hook := newTestHook(t)
 	ctx := context.Background()
 	id := state.WorkflowID("wf-recover")
@@ -89,6 +92,7 @@ func TestStateHook_RecoverWorkflow(t *testing.T) {
 }
 
 func TestStateHook_RecoverWorkflow_Completed(t *testing.T) {
+	t.Parallel()
 	hook := newTestHook(t)
 	ctx := context.Background()
 	id := state.WorkflowID("wf-recover-completed")
@@ -115,6 +119,7 @@ func TestStateHook_RecoverWorkflow_Completed(t *testing.T) {
 }
 
 func TestStateHook_ListActiveWorkflows(t *testing.T) {
+	t.Parallel()
 	hook := newTestHook(t)
 	ctx := context.Background()
 

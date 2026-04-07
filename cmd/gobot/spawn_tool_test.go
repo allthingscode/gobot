@@ -47,6 +47,7 @@ func newTestSpawnTool(runner agent.Runner, prompts map[string]string) *SpawnTool
 // ── Name / Declaration ─────────────────────────────────────────────────────────
 
 func TestSpawnTool_Name(t *testing.T) {
+	t.Parallel()
 	tool := newTestSpawnTool(&mockRunner{response: "ok"}, nil)
 	if tool.Name() != spawnToolName {
 		t.Errorf("Name() = %q, want %q", tool.Name(), spawnToolName)
@@ -54,6 +55,7 @@ func TestSpawnTool_Name(t *testing.T) {
 }
 
 func TestSpawnTool_Declaration(t *testing.T) {
+	t.Parallel()
 	tool := newTestSpawnTool(&mockRunner{response: "ok"}, nil)
 	decl := tool.Declaration()
 
@@ -89,6 +91,7 @@ func TestSpawnTool_Declaration(t *testing.T) {
 // ── Execute ────────────────────────────────────────────────────────────────────
 
 func TestSpawnTool_Execute(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		args          map[string]any
@@ -133,6 +136,7 @@ func TestSpawnTool_Execute(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			mock := &mockRunner{response: tc.runnerResp, err: tc.runnerErr}
 			tool := newTestSpawnTool(mock, map[string]string{
 				"custom": "You are a custom specialist.",
@@ -163,6 +167,7 @@ func TestSpawnTool_Execute(t *testing.T) {
 }
 
 func TestSpawnTool_SubAgentSessionKey(t *testing.T) {
+	t.Parallel()
 	var capturedKey string
 	tool := &SpawnTool{
 		runnerFactory: func(_, _ string) agent.Runner {
@@ -181,6 +186,7 @@ func TestSpawnTool_SubAgentSessionKey(t *testing.T) {
 }
 
 func TestSpawnTool_SpecialistModelOverride(t *testing.T) {
+	t.Parallel()
 	var capturedModel string
 	tool := &SpawnTool{
 		runnerFactory: func(model, _ string) agent.Runner {
@@ -205,6 +211,7 @@ func TestSpawnTool_SpecialistModelOverride(t *testing.T) {
 }
 
 func TestSpawnTool_UnknownTypeUsesDefaultModel(t *testing.T) {
+	t.Parallel()
 	var capturedModel string
 	tool := &SpawnTool{
 		runnerFactory: func(model, _ string) agent.Runner {
@@ -247,6 +254,7 @@ func (c *captureKeyRunner) Run(_ context.Context, sessionKey string, messages []
 // ── defaultSpecialistPrompt ────────────────────────────────────────────────────
 
 func TestDefaultSpecialistPrompt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		agentType    string
 		wantNonEmpty bool
@@ -257,6 +265,7 @@ func TestDefaultSpecialistPrompt(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.agentType, func(t *testing.T) {
+		t.Parallel()
 			p := defaultSpecialistPrompt(tc.agentType)
 			if tc.wantNonEmpty && p == "" {
 				t.Errorf("defaultSpecialistPrompt(%q) = %q, want non-empty", tc.agentType, p)
@@ -266,6 +275,7 @@ func TestDefaultSpecialistPrompt(t *testing.T) {
 }
 
 func TestIterLimitRunner_StopsAtLimit(t *testing.T) {
+	t.Parallel()
 	inner := &mockRunner{response: "ok"}
 	limited := &iterLimitRunner{inner: inner, max: spawnMaxIterations}
 	ctx := context.Background()
@@ -291,6 +301,7 @@ func TestIterLimitRunner_StopsAtLimit(t *testing.T) {
 }
 
 func TestIterLimitRunner_CountTracked(t *testing.T) {
+	t.Parallel()
 	inner := &mockRunner{response: "ok"}
 	limited := &iterLimitRunner{inner: inner, max: 10}
 	ctx := context.Background()

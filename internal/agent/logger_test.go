@@ -13,6 +13,7 @@ import (
 func strPtr(s string) *string { return &s }
 
 func TestMarkdownLogger_WritesFile(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	l := NewMarkdownLogger(root)
 	msgs := []agentctx.StrategicMessage{
@@ -44,6 +45,7 @@ func TestMarkdownLogger_WritesFile(t *testing.T) {
 }
 
 func TestMarkdownLogger_SanitizesKey(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	l := NewMarkdownLogger(root)
 	msgs := []agentctx.StrategicMessage{
@@ -65,6 +67,7 @@ func TestMarkdownLogger_SanitizesKey(t *testing.T) {
 }
 
 func TestMarkdownLogger_CreatesDateDir(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	l := NewMarkdownLogger(root)
 	msgs := []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("a")}}}
@@ -82,6 +85,7 @@ func TestMarkdownLogger_CreatesDateDir(t *testing.T) {
 }
 
 func TestRenderMarkdown_ContentItems(t *testing.T) {
+	t.Parallel()
 	msgs := []agentctx.StrategicMessage{
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Items: []agentctx.ContentItem{
 			{Tool: &agentctx.ToolCallContent{Type: "tool_call", ID: "id1", Function: agentctx.ToolCallFunction{Name: "search", Arguments: `{"q":"foo"}`}}},
@@ -98,6 +102,7 @@ func TestRenderMarkdown_ContentItems(t *testing.T) {
 }
 
 func TestSanitizeKey(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ in, want string }{
 		{"abc123", "abc123"},
 		{"123:456", "123_456"},

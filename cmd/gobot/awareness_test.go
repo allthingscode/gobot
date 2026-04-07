@@ -10,6 +10,7 @@ import (
 )
 
 func TestBuildAwarenessContent(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: "/storage/root"}}
 	content := buildAwarenessContent(cfg)
 	checks := []string{
@@ -28,6 +29,7 @@ func TestBuildAwarenessContent(t *testing.T) {
 }
 
 func TestEnsureAwarenessFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
 

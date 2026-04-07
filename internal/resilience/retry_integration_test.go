@@ -11,6 +11,7 @@ import (
 )
 
 func TestRetryIntegration_5xxFailures(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewFaultyServer()
 	defer fs.Close()
 
@@ -50,6 +51,7 @@ func TestRetryIntegration_5xxFailures(t *testing.T) {
 }
 
 func TestRetryIntegration_NoRetryOn4xx(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewFaultyServer()
 	defer fs.Close()
 
@@ -91,6 +93,7 @@ func TestRetryIntegration_NoRetryOn4xx(t *testing.T) {
 }
 
 func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewFaultyServer()
 	defer fs.Close()
 
@@ -140,6 +143,7 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 }
 
 func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewFaultyServer()
 	defer fs.Close()
 
@@ -207,6 +211,7 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 }
 
 func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewFaultyServer()
 	defer fs.Close()
 

@@ -144,6 +144,7 @@ func (c *mockConsolidator) ConsolidateAsync(sessionKey, text string) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 func TestStripSilent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       string
@@ -161,6 +162,7 @@ func TestStripSilent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			gotCleaned, gotSilent := StripSilent(tt.input)
 			if gotCleaned != tt.wantCleaned {
 				t.Errorf("%s: got cleaned %q, want %q", tt.name, gotCleaned, tt.wantCleaned)
@@ -173,6 +175,7 @@ func TestStripSilent(t *testing.T) {
 }
 
 func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &mockRunner{response: "ok"}
 	store := newMockStore()
@@ -224,6 +227,7 @@ func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
 
 
 func TestDispatch_BasicRoundtrip(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "pong"}
 	mgr := NewSessionManager(runner, nil, "test-model")
 
@@ -247,6 +251,7 @@ func TestDispatch_BasicRoundtrip(t *testing.T) {
 }
 
 func TestDispatch_SilentPrefixStripped(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "ok"}
 	mgr := NewSessionManager(runner, nil, "test-model")
 
@@ -269,6 +274,7 @@ func TestDispatch_SilentPrefixStripped(t *testing.T) {
 }
 
 func TestDispatch_RunnerError(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{err: errors.New("model overloaded")}
 	mgr := NewSessionManager(runner, nil, "test-model")
 
@@ -282,6 +288,7 @@ func TestDispatch_RunnerError(t *testing.T) {
 }
 
 func TestDispatch_WithCheckpointStore(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "reply"}
 	store := newMockStore()
 	mgr := NewSessionManager(runner, store, "test-model")
@@ -314,6 +321,7 @@ func TestDispatch_WithCheckpointStore(t *testing.T) {
 }
 
 func TestDispatch_SerializesConcurrentCallsSameSession(t *testing.T) {
+	t.Parallel()
 	// Verify that two concurrent calls on the same session are serialized.
 	// We detect ordering by using a channel-based runner that records call order.
 	runner := &mockRunner{response: "ok"}
@@ -347,6 +355,7 @@ func TestDispatch_SerializesConcurrentCallsSameSession(t *testing.T) {
 }
 
 func TestDispatch_ParallelDifferentSessions(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "ok"}
 	mgr := NewSessionManager(runner, nil, "model")
 
@@ -368,6 +377,7 @@ func TestDispatch_ParallelDifferentSessions(t *testing.T) {
 }
 
 func TestDispatch_CheckpointSaveFailureIsNonFatal(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "ok"}
 	store := newMockStore()
 	store.saveErr = errors.New("disk full")
@@ -384,6 +394,7 @@ func TestDispatch_CheckpointSaveFailureIsNonFatal(t *testing.T) {
 }
 
 func TestDispatch_PostDispatchHook(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "original"}
 	mgr := NewSessionManager(runner, nil, "model")
 
@@ -404,6 +415,7 @@ func TestDispatch_PostDispatchHook(t *testing.T) {
 }
 
 func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		hook    PreHistoryFn
@@ -434,6 +446,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			runner := &mockRunner{response: "ok"}
 			mgr := NewSessionManager(runner, nil, "model")
 
@@ -475,6 +488,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 // ── F-068: Memory Flush Compaction Tests ───────────────────────────────────
 
 func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &mockRunner{response: "ok"}
 	store := newMockStore()
@@ -516,6 +530,7 @@ func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
 }
 
 func TestSessionManager_CompactionWithNilConsolidator(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &mockRunner{response: "ok"}
 	store := newMockStore()
@@ -550,6 +565,7 @@ func TestSessionManager_CompactionWithNilConsolidator(t *testing.T) {
 }
 
 func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &mockRunner{response: "decision made"}
 	store := newMockStore()
@@ -600,6 +616,7 @@ func ptrStr(s string) *string {
 	return &s
 }
 func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// Mock runner that returns a summary.
 	runner := &mockRunner{response: "<context_summary>\n* summarized\n</context_summary>"}
@@ -650,6 +667,7 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 }
 
 func TestSessionManager_Dispatch_StatelessDegradation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &mockRunner{response: "pong"}
 	store := newMockStore()

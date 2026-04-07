@@ -10,6 +10,7 @@ import (
 // ── GenerateRubricPrompt ──────────────────────────────────────────────────────
 
 func TestGenerateRubricPrompt_ContainsTask(t *testing.T) {
+	t.Parallel()
 	task := "Write a summary of the quarterly report"
 	prompt := reflection.GenerateRubricPrompt(task)
 	if !strings.Contains(prompt, task) {
@@ -18,6 +19,7 @@ func TestGenerateRubricPrompt_ContainsTask(t *testing.T) {
 }
 
 func TestGenerateRubricPrompt_ContainsSchema(t *testing.T) {
+	t.Parallel()
 	prompt := reflection.GenerateRubricPrompt("any task")
 	if !strings.Contains(prompt, "task_goal") {
 		t.Error("rubric prompt should contain 'task_goal' schema field")
@@ -30,6 +32,7 @@ func TestGenerateRubricPrompt_ContainsSchema(t *testing.T) {
 // ── GenerateCriticPrompt ──────────────────────────────────────────────────────
 
 func TestGenerateCriticPrompt_ContainsAllParts(t *testing.T) {
+	t.Parallel()
 	task := "Analyze the data"
 	rubric := map[string]any{"task_goal": "done", "criteria": []any{}}
 	answer := "I analyzed the data and found X."
@@ -53,6 +56,7 @@ func TestGenerateCriticPrompt_ContainsAllParts(t *testing.T) {
 // ── ParseJSONResponse ─────────────────────────────────────────────────────────
 
 func TestParseJSONResponse_DirectParse(t *testing.T) {
+	t.Parallel()
 	m, ok := reflection.ParseJSONResponse(`{"key": "value"}`)
 	if !ok {
 		t.Fatal("expected success for valid JSON")
@@ -63,6 +67,7 @@ func TestParseJSONResponse_DirectParse(t *testing.T) {
 }
 
 func TestParseJSONResponse_MarkdownCodeBlock(t *testing.T) {
+	t.Parallel()
 	input := "Here is the result:\n```json\n{\"score\": 0.9}\n```\nThat's it."
 	m, ok := reflection.ParseJSONResponse(input)
 	if !ok {
@@ -74,6 +79,7 @@ func TestParseJSONResponse_MarkdownCodeBlock(t *testing.T) {
 }
 
 func TestParseJSONResponse_LastResortBraces(t *testing.T) {
+	t.Parallel()
 	input := `The model says: {"passed": true} end of response.`
 	m, ok := reflection.ParseJSONResponse(input)
 	if !ok {
@@ -85,6 +91,7 @@ func TestParseJSONResponse_LastResortBraces(t *testing.T) {
 }
 
 func TestParseJSONResponse_Empty(t *testing.T) {
+	t.Parallel()
 	_, ok := reflection.ParseJSONResponse("")
 	if ok {
 		t.Error("expected failure for empty string")
@@ -92,6 +99,7 @@ func TestParseJSONResponse_Empty(t *testing.T) {
 }
 
 func TestParseJSONResponse_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	_, ok := reflection.ParseJSONResponse("not json at all")
 	if ok {
 		t.Error("expected failure for non-JSON text")
@@ -99,6 +107,7 @@ func TestParseJSONResponse_InvalidJSON(t *testing.T) {
 }
 
 func TestParseJSONResponse_Whitespace(t *testing.T) {
+	t.Parallel()
 	_, ok := reflection.ParseJSONResponse("   \n\t  ")
 	if ok {
 		t.Error("expected failure for whitespace-only input")
@@ -108,6 +117,7 @@ func TestParseJSONResponse_Whitespace(t *testing.T) {
 // ── CalculateTotalScore ───────────────────────────────────────────────────────
 
 func TestCalculateTotalScore_WeightedAverage(t *testing.T) {
+	t.Parallel()
 	rubric := map[string]any{
 		"criteria": []any{
 			map[string]any{"name": "A", "weight": 2.0},
@@ -128,6 +138,7 @@ func TestCalculateTotalScore_WeightedAverage(t *testing.T) {
 }
 
 func TestCalculateTotalScore_EqualWeights(t *testing.T) {
+	t.Parallel()
 	rubric := map[string]any{
 		"criteria": []any{
 			map[string]any{"name": "A", "weight": 1.0},
@@ -147,6 +158,7 @@ func TestCalculateTotalScore_EqualWeights(t *testing.T) {
 }
 
 func TestCalculateTotalScore_ZeroTotalWeight(t *testing.T) {
+	t.Parallel()
 	// Empty criteria — denominator is 0, should return 0.0 not panic
 	rubric := map[string]any{"criteria": []any{}}
 	report := map[string]any{"scores": []any{}}
@@ -157,6 +169,7 @@ func TestCalculateTotalScore_ZeroTotalWeight(t *testing.T) {
 }
 
 func TestCalculateTotalScore_MissingCriteriaKey(t *testing.T) {
+	t.Parallel()
 	rubric := map[string]any{}
 	report := map[string]any{"scores": []any{}}
 	got := reflection.CalculateTotalScore(report, rubric)
@@ -166,6 +179,7 @@ func TestCalculateTotalScore_MissingCriteriaKey(t *testing.T) {
 }
 
 func TestCalculateTotalScore_MalformedCriterionSkipped(t *testing.T) {
+	t.Parallel()
 	// A non-map item in criteria should be skipped without panic.
 	rubric := map[string]any{
 		"criteria": []any{
@@ -185,6 +199,7 @@ func TestCalculateTotalScore_MalformedCriterionSkipped(t *testing.T) {
 }
 
 func TestCalculateTotalScore_MalformedScoreSkipped(t *testing.T) {
+	t.Parallel()
 	// A non-map item in scores should be skipped without panic.
 	rubric := map[string]any{
 		"criteria": []any{
@@ -204,6 +219,7 @@ func TestCalculateTotalScore_MalformedScoreSkipped(t *testing.T) {
 }
 
 func TestCalculateTotalScore_UnknownCriterionDefaultsTo1(t *testing.T) {
+	t.Parallel()
 	// Score references a criterion not in the rubric — weight defaults to 1.0
 	rubric := map[string]any{
 		"criteria": []any{

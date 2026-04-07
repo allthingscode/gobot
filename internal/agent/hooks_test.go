@@ -12,6 +12,7 @@ import (
 func strPtrH(s string) *string { return &s }
 
 func TestHooks_PrePrompt_NoHooks(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	got := h.RunPrePrompt(context.Background(), "original")
 	if got != "original" {
@@ -20,6 +21,7 @@ func TestHooks_PrePrompt_NoHooks(t *testing.T) {
 }
 
 func TestHooks_PrePrompt_SingleHook(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPrePrompt(func(ctx context.Context, p string) string {
 		return p + " [APPENDED]"
@@ -31,6 +33,7 @@ func TestHooks_PrePrompt_SingleHook(t *testing.T) {
 }
 
 func TestHooks_PrePrompt_ChainOrder(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPrePrompt(func(ctx context.Context, p string) string { return p + "_A" })
 	h.RegisterPrePrompt(func(ctx context.Context, p string) string { return p + "_B" })
@@ -41,6 +44,7 @@ func TestHooks_PrePrompt_ChainOrder(t *testing.T) {
 }
 
 func TestHooks_PreHistory_NoHooks(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	msgs := []agentctx.StrategicMessage{
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtrH("hi")}},
@@ -52,6 +56,7 @@ func TestHooks_PreHistory_NoHooks(t *testing.T) {
 }
 
 func TestHooks_PreHistory_FiltersMessages(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	// Hook: keep only last 2 messages
 	h.RegisterPreHistory(func(ctx context.Context, msgs []agentctx.StrategicMessage) []agentctx.StrategicMessage {
@@ -74,6 +79,7 @@ func TestHooks_PreHistory_FiltersMessages(t *testing.T) {
 }
 
 func TestSessionManager_PreHistoryHook_Applied(t *testing.T) {
+	t.Parallel()
 	// Verify that a registered PreHistory hook trims history before runner.Run.
 	called := false
 	hooks := &Hooks{}
@@ -92,6 +98,7 @@ func TestSessionManager_PreHistoryHook_Applied(t *testing.T) {
 }
 
 func TestSessionManager_PreHistoryHook_TrimsBeforeRunner(t *testing.T) {
+	t.Parallel()
 	// Hook keeps only last 1 message. Runner should receive exactly 2:
 	// the 1 kept by hook + the new user message appended after the hook.
 	hooks := &Hooks{}
@@ -151,6 +158,7 @@ func (r *recordingRunner) Run(ctx context.Context, sessionKey string, messages [
 // ── PostTool hooks ──────────────────────────────────────────────────────────
 
 func TestHooks_PostTool_NoHooks(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	got := h.RunPostTool(context.Background(), "my_tool", "original result")
 	if got != "original result" {
@@ -159,6 +167,7 @@ func TestHooks_PostTool_NoHooks(t *testing.T) {
 }
 
 func TestHooks_PostTool_SingleHook(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
 		return result + " [SANITIZED]"
@@ -170,6 +179,7 @@ func TestHooks_PostTool_SingleHook(t *testing.T) {
 }
 
 func TestHooks_PostTool_ChainOrder(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string { return result + "_A" })
 	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string { return result + "_B" })
@@ -180,6 +190,7 @@ func TestHooks_PostTool_ChainOrder(t *testing.T) {
 }
 
 func TestHooks_PostTool_ToolNamePassed(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	var capturedName string
 	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
@@ -193,6 +204,7 @@ func TestHooks_PostTool_ToolNamePassed(t *testing.T) {
 }
 
 func TestHooks_PostTool_ChainTransforms(t *testing.T) {
+	t.Parallel()
 	// Each hook receives the output of the previous, not the original.
 	h := &Hooks{}
 	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
@@ -210,6 +222,7 @@ func TestHooks_PostTool_ChainTransforms(t *testing.T) {
 // ── PreTool hooks ───────────────────────────────────────────────────────────
 
 func TestHooks_PreTool_NoHooks(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	got, err := h.RunPreTool(context.Background(), "sess", "tool", nil)
 	if err != nil {
@@ -221,6 +234,7 @@ func TestHooks_PreTool_NoHooks(t *testing.T) {
 }
 
 func TestHooks_PreTool_SingleHook_Pass(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
 		return "", nil // continue
@@ -235,6 +249,7 @@ func TestHooks_PreTool_SingleHook_Pass(t *testing.T) {
 }
 
 func TestHooks_PreTool_SingleHook_Override(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
 		return "INTERCEPTED", nil
@@ -249,6 +264,7 @@ func TestHooks_PreTool_SingleHook_Override(t *testing.T) {
 }
 
 func TestHooks_PreTool_ChainOrder(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
 		return "", nil // Pass
@@ -269,6 +285,7 @@ func TestHooks_PreTool_ChainOrder(t *testing.T) {
 }
 
 func TestHooks_PreTool_ErrorAborts(t *testing.T) {
+	t.Parallel()
 	h := &Hooks{}
 	h.RegisterPreTool(func(ctx context.Context, sess, tool string, args map[string]any) (string, error) {
 		return "", fmt.Errorf("some error") // Abort

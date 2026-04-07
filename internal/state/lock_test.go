@@ -8,6 +8,7 @@ import (
 )
 
 func TestAcquireLock_Success(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	lock, err := AcquireLock(tempDir, "wf-123", 5*time.Second)
 	if err != nil {
@@ -23,6 +24,7 @@ func TestAcquireLock_Success(t *testing.T) {
 }
 
 func TestAcquireLock_Timeout(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	// First acquire the lock.
 	lock1, err := AcquireLock(tempDir, "wf-456", 5*time.Second)
@@ -39,6 +41,7 @@ func TestAcquireLock_Timeout(t *testing.T) {
 }
 
 func TestAcquireLock_StaleLock(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	lockPath := filepath.Join(tempDir, "wf-789.lock")
 
@@ -62,6 +65,7 @@ func TestAcquireLock_StaleLock(t *testing.T) {
 }
 
 func TestFileLock_Release(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	lock, err := AcquireLock(tempDir, "wf-abc", 5*time.Second)
 	if err != nil {
@@ -82,6 +86,7 @@ func TestFileLock_Release(t *testing.T) {
 }
 
 func TestCleanupStaleLocks(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	// Create a fresh lock.

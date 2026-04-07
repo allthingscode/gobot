@@ -12,6 +12,7 @@ import (
 )
 
 func TestExecutor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -56,6 +57,7 @@ func TestExecutor(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			exec := sandbox.New(tc.cfg)
 			output, err := exec.Run(ctx, tc.cmd, tc.args)
 			if tc.wantErr && err == nil {
@@ -72,6 +74,7 @@ func TestExecutor(t *testing.T) {
 }
 
 func TestExecutor_WorkingDirectory(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := sandbox.Config{SandboxRoot: dir}
 	exec := sandbox.New(cfg)

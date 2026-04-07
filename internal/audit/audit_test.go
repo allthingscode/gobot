@@ -10,6 +10,7 @@ import (
 // ── ClassifyModel ─────────────────────────────────────────────────────────────
 
 func TestClassifyModel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -35,6 +36,7 @@ func TestClassifyModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+		t.Parallel()
 			got := audit.ClassifyModel(tt.input)
 			if got != tt.want {
 				t.Errorf("ClassifyModel(%q) = %q, want %q", tt.input, got, tt.want)
@@ -44,6 +46,7 @@ func TestClassifyModel(t *testing.T) {
 }
 
 func TestClassifyModel_ResearcherBeforeDefault(t *testing.T) {
+	t.Parallel()
 	// "flash-lite" must be classified as researcher, not default (order test)
 	got := audit.ClassifyModel("gemini-flash-lite")
 	if got != "researcher" {
@@ -64,6 +67,7 @@ var current = map[string]string{
 }
 
 func TestBuildReport_ContainsCurrentTag(t *testing.T) {
+	t.Parallel()
 	models := []audit.ModelInfo{
 		makeModel("models/gemini-3-flash-preview", "", ""), // empty DisplayName — exercises fallback
 		makeModel("models/gemini-2.5-flash-lite", "Gemini Flash Lite", ""),
@@ -76,6 +80,7 @@ func TestBuildReport_ContainsCurrentTag(t *testing.T) {
 }
 
 func TestBuildReport_SuggestsReplacementForMissingModel(t *testing.T) {
+	t.Parallel()
 	// default model is NOT in the model list — should produce a suggestion
 	models := []audit.ModelInfo{
 		makeModel("models/gemini-2.5-flash-lite", "Flash Lite", ""),
@@ -92,6 +97,7 @@ func TestBuildReport_SuggestsReplacementForMissingModel(t *testing.T) {
 }
 
 func TestBuildReport_NoSuggestionWhenCurrentPresent(t *testing.T) {
+	t.Parallel()
 	models := []audit.ModelInfo{
 		makeModel("models/gemini-3-flash-preview", "Flash", ""),
 		makeModel("models/gemini-2.5-flash-lite", "Flash Lite", ""),
@@ -104,6 +110,7 @@ func TestBuildReport_NoSuggestionWhenCurrentPresent(t *testing.T) {
 }
 
 func TestBuildReport_EmptyTierFallback(t *testing.T) {
+	t.Parallel()
 	// Only provide a researcher model — default and architect tiers will be empty
 	models := []audit.ModelInfo{
 		makeModel("models/gemini-2.5-flash-lite", "Flash Lite", ""),
@@ -115,6 +122,7 @@ func TestBuildReport_EmptyTierFallback(t *testing.T) {
 }
 
 func TestBuildReport_SpecialModelsSection(t *testing.T) {
+	t.Parallel()
 	models := []audit.ModelInfo{
 		makeModel("models/text-embedding-004", "", ""), // empty DisplayName exercises special-section fallback
 		makeModel("models/gemini-3-flash-preview", "Flash", ""),
@@ -131,6 +139,7 @@ func TestBuildReport_SpecialModelsSection(t *testing.T) {
 }
 
 func TestBuildReport_DescriptionTruncated(t *testing.T) {
+	t.Parallel()
 	longDesc := strings.Repeat("x", 200)
 	models := []audit.ModelInfo{
 		makeModel("models/gemini-3-flash-preview", "Flash", longDesc),
@@ -145,6 +154,7 @@ func TestBuildReport_DescriptionTruncated(t *testing.T) {
 }
 
 func TestBuildReport_NoModels(t *testing.T) {
+	t.Parallel()
 	report := audit.BuildReport(nil, current)
 	if !strings.Contains(report, "Available models:** 0") {
 		t.Error("expected 0 available models count")
@@ -152,6 +162,7 @@ func TestBuildReport_NoModels(t *testing.T) {
 }
 
 func TestBuildReport_NoSpecialModels(t *testing.T) {
+	t.Parallel()
 	// All models are tier-classified — special section should show "*None found.*"
 	models := []audit.ModelInfo{
 		makeModel("models/gemini-3-flash-preview", "Flash", ""),

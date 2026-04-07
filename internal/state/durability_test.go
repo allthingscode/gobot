@@ -11,6 +11,7 @@ import (
 
 // TestCrashRecovery_SimulatesPowerFailure verifies recovery after simulated crash.
 func TestCrashRecovery_SimulatesPowerFailure(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -47,6 +48,7 @@ func TestCrashRecovery_SimulatesPowerFailure(t *testing.T) {
 
 // TestConcurrentCheckpoints verifies multiple goroutines can checkpoint safely.
 func TestConcurrentCheckpoints(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -121,6 +123,7 @@ func TestConcurrentCheckpoints(t *testing.T) {
 
 // TestAtomicWrite_InterruptedWrite verifies temp file cleanup on failure.
 func TestAtomicWrite_InterruptedWrite(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "test.json")
 
@@ -149,6 +152,7 @@ func TestAtomicWrite_InterruptedWrite(t *testing.T) {
 
 // TestStaleLockRecovery verifies stale locks are cleaned up on startup.
 func TestStaleLockRecovery(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -188,6 +192,7 @@ func TestStaleLockRecovery(t *testing.T) {
 
 // TestJournalCorruption_SkipsBadEntries verifies corrupted entries are skipped.
 func TestJournalCorruption_SkipsBadEntries(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	// Create journal with valid and invalid entries.
@@ -229,6 +234,7 @@ func TestJournalCorruption_SkipsBadEntries(t *testing.T) {
 
 // TestCheckpointIntegrity_VerifiesAtomicity verifies checkpoint is atomic.
 func TestCheckpointIntegrity_VerifiesAtomicity(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -273,6 +279,7 @@ func TestCheckpointIntegrity_VerifiesAtomicity(t *testing.T) {
 
 // TestFullWorkflowLifecycle exercises complete create-update-archive cycle.
 func TestFullWorkflowLifecycle(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,

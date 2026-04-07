@@ -10,6 +10,7 @@ import (
 // This catches syntax errors, missing imports, and initialization logic errors
 // in main.go and its sub-commands.
 func TestBuildIntegrity(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("Root command initialization panicked: %v", r)

@@ -39,6 +39,7 @@ func (r *delayedRunner) Run(_ context.Context, _ string, messages []agentctx.Str
 // the same session produce monotonically increasing iteration numbers with no
 // gaps or duplicates — proof that per-session serialization is correct.
 func TestSessionManager_OrderedIterations(t *testing.T) {
+	t.Parallel()
 	const n = 20
 	store := newMockStore()
 	runner := &delayedRunner{delay: 2 * time.Millisecond, response: "ok"}
@@ -78,6 +79,7 @@ func TestSessionManager_OrderedIterations(t *testing.T) {
 // to different sessions proceed independently and each session accumulates its
 // own iteration counter without cross-session contamination.
 func TestSessionManager_ParallelSessionsNoInterference(t *testing.T) {
+	t.Parallel()
 	const sessions = 10
 	const msgsPerSession = 5
 	store := newMockStore()

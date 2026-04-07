@@ -8,6 +8,7 @@ import (
 )
 
 func TestShouldReload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		currentMtime int64
@@ -24,6 +25,7 @@ func TestShouldReload(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			if got := ShouldReload(tt.currentMtime, tt.lastMtime, tt.currentSize, tt.lastSize); got != tt.want {
 				t.Errorf("ShouldReload() = %v, want %v", got, tt.want)
 			}
@@ -32,6 +34,7 @@ func TestShouldReload(t *testing.T) {
 }
 
 func TestResolveRoutableChannel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		payload     Payload
@@ -84,6 +87,7 @@ func TestResolveRoutableChannel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			gotChannel, gotTo, gotSilent := ResolveRoutableChannel(tt.payload, "/tmp/test-storage")
 			if gotChannel != tt.wantChannel || gotTo != tt.wantTo || gotSilent != tt.wantSilent {
 				t.Errorf("ResolveRoutableChannel() = (%v, %v, %v), want (%v, %v, %v)",
@@ -94,6 +98,7 @@ func TestResolveRoutableChannel(t *testing.T) {
 }
 
 func TestDetectModularChange(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// 1. Initial detection (empty dir)
@@ -140,6 +145,7 @@ func TestDetectModularChange(t *testing.T) {
 }
 
 func TestMergeModularJobs(t *testing.T) {
+	t.Parallel()
 	stateCache := map[string]JobState{
 		"job1": {RunCount: 5},
 	}

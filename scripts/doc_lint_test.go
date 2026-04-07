@@ -59,6 +59,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestDocLint_CleanProject(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	out, err := runDocLint(t, dir)
 	if err != nil {
@@ -67,6 +68,7 @@ func TestDocLint_CleanProject(t *testing.T) {
 }
 
 func TestDocLint_MissingDocComment(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, "internal", "foo.go"),
 		"package internal\n\nfunc ExportedFunc() {}\n")
@@ -80,6 +82,7 @@ func TestDocLint_MissingDocComment(t *testing.T) {
 }
 
 func TestDocLint_MainSkipped(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, "cmd", "gobot", "main.go"),
 		"package main\n\nfunc main() {}\n")
@@ -90,6 +93,7 @@ func TestDocLint_MainSkipped(t *testing.T) {
 }
 
 func TestDocLint_UnexportedSkipped(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, "internal", "foo.go"),
 		"package internal\n\nfunc helper() {}\n")
@@ -100,6 +104,7 @@ func TestDocLint_UnexportedSkipped(t *testing.T) {
 }
 
 func TestDocLint_MethodSkipped(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, "internal", "foo.go"),
 		"package internal\n\ntype T struct{}\n\nfunc (T) ExportedMethod() {}\n")
@@ -110,6 +115,7 @@ func TestDocLint_MethodSkipped(t *testing.T) {
 }
 
 func TestDocLint_StaleReference(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-999.md"),
 		"---\nstatus: \"Planning\"\n---\n\nSee `internal/nonexistent.go` for details.\n")
@@ -123,6 +129,7 @@ func TestDocLint_StaleReference(t *testing.T) {
 }
 
 func TestDocLint_UnindexedItem(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-999_Orphan.md"),
 		"---\nstatus: \"Planning\"\n---\n\nAn orphaned feature.\n")
@@ -136,6 +143,7 @@ func TestDocLint_UnindexedItem(t *testing.T) {
 }
 
 func TestDocLint_InvalidStatus(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-999_Bad.md"),
 		"---\nstatus: \"Ready for Review\"\n---\n\nBad status.\n")
@@ -151,8 +159,10 @@ func TestDocLint_InvalidStatus(t *testing.T) {
 }
 
 func TestDocLint_ValidStatuses(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{"Production", "In Progress", "Planning", "Draft", "Archived", "Resolved"} {
 		t.Run(s, func(t *testing.T) {
+		t.Parallel()
 			dir := setupTempProject(t)
 			writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-001.md"),
 				"---\nstatus: \""+s+"\"\n---\n\nItem.\n")
@@ -167,6 +177,7 @@ func TestDocLint_ValidStatuses(t *testing.T) {
 }
 
 func TestDocLint_InvalidHandoffJSON(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, ".private", "session", "handoff.json"),
 		`{invalid json}`)
@@ -180,6 +191,7 @@ func TestDocLint_InvalidHandoffJSON(t *testing.T) {
 }
 
 func TestDocLint_MissingHandoffField(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	writeFile(t, filepath.Join(dir, ".private", "session", "handoff.json"),
 		`{"task_id": "F-001"}`)
@@ -193,6 +205,7 @@ func TestDocLint_MissingHandoffField(t *testing.T) {
 }
 
 func TestDocLint_ValidHandoff(t *testing.T) {
+	t.Parallel()
 	dir := setupTempProject(t)
 	taskFile := filepath.Join(dir, ".private", "session", "task.md")
 	writeFile(t, taskFile, "Task details.\n")

@@ -12,6 +12,7 @@ import (
 )
 
 func TestBearerToken_ValidNotExpired(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tok := storedToken{
 		Token:        "valid-access-token",
@@ -32,6 +33,7 @@ func TestBearerToken_ValidNotExpired(t *testing.T) {
 }
 
 func TestBearerToken_ExpiredRefreshes(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "new-token",
@@ -63,6 +65,7 @@ func TestBearerToken_ExpiredRefreshes(t *testing.T) {
 }
 
 func TestBearerToken_MissingFile(t *testing.T) {
+	t.Parallel()
 	_, err := BearerToken(t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for missing token file")
@@ -70,6 +73,7 @@ func TestBearerToken_MissingFile(t *testing.T) {
 }
 
 func TestBearerToken_NoRefreshToken(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tok := storedToken{
 		Token:  "old",
@@ -83,6 +87,7 @@ func TestBearerToken_NoRefreshToken(t *testing.T) {
 }
 
 func TestAPIGet_Success(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
 			t.Errorf("want Authorization: Bearer tok, got %q", r.Header.Get("Authorization"))
@@ -105,6 +110,7 @@ func TestAPIGet_Success(t *testing.T) {
 }
 
 func TestAPIGet_HTTPError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":{"message":"not found"}}`, http.StatusNotFound)
 	}))
@@ -117,6 +123,7 @@ func TestAPIGet_HTTPError(t *testing.T) {
 }
 
 func TestAPIPost_Success(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("want POST, got %s", r.Method)
@@ -138,6 +145,7 @@ func TestAPIPost_Success(t *testing.T) {
 }
 
 func TestAPIPost_HTTPError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 	}))

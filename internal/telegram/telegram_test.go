@@ -9,6 +9,7 @@ import (
 )
 
 func TestGetMediaPath(t *testing.T) {
+	t.Parallel()
 	home, _ := os.UserHomeDir()
 	defaultWorkspace := filepath.Join(home, ".gobot", "workspace")
 
@@ -58,6 +59,7 @@ func TestGetMediaPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := GetMediaPath(tt.baseWorkspace, tt.originalPath)
 			if got != tt.want {
 				t.Errorf("GetMediaPath() = %v, want %v", got, tt.want)
@@ -67,6 +69,7 @@ func TestGetMediaPath(t *testing.T) {
 }
 
 func TestDetectThreadMetadata(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		messageThreadID int64
@@ -92,6 +95,7 @@ func TestDetectThreadMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := DetectThreadMetadata(tt.messageThreadID, tt.chatID)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("DetectThreadMetadata() = %v, want %v", got, tt.want)

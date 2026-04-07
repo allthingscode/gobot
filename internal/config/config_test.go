@@ -17,6 +17,7 @@ type errReader struct{}
 func (errReader) Read(_ []byte) (int, error) { return 0, errors.New("read error") }
 
 func TestDecode_NoBOM(t *testing.T) {
+	t.Parallel()
 	input := `{"agents":{"defaults":{"model":"gemini-3-flash-preview"}}}`
 	cfg, err := decode(bytes.NewReader([]byte(input)))
 	if err != nil {
@@ -28,6 +29,7 @@ func TestDecode_NoBOM(t *testing.T) {
 }
 
 func TestDecode_WithBOM(t *testing.T) {
+	t.Parallel()
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	json := []byte(`{"providers":{"gemini":{"apiKey":"test-key"}}}`)
 	input := append(bom, json...) //nolint:gocritic // intentional: prepend BOM to original json bytes
@@ -42,6 +44,7 @@ func TestDecode_WithBOM(t *testing.T) {
 }
 
 func TestDecode_MissingField_DoesNotError(t *testing.T) {
+	t.Parallel()
 	cfg, err := decode(bytes.NewReader([]byte(`{}`)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -52,6 +55,7 @@ func TestDecode_MissingField_DoesNotError(t *testing.T) {
 }
 
 func TestDecode_MalformedJSON(t *testing.T) {
+	t.Parallel()
 	_, err := decode(bytes.NewReader([]byte(`{not valid json`)))
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
@@ -90,6 +94,7 @@ func TestStorageRoot_Default(t *testing.T) {
 }
 
 func TestSave(t *testing.T) {
+	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "config.json")
 	cfg := &Config{
 		Strategic: StrategicConfig{UserEmail: "test@example.com"},
@@ -107,6 +112,7 @@ func TestSave(t *testing.T) {
 }
 
 func TestStorageRoot_Override(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "custom_storage"}}
 	if cfg.StorageRoot() != "custom_storage" {
 		t.Errorf("got %q, want custom_storage", cfg.StorageRoot())
@@ -114,6 +120,7 @@ func TestStorageRoot_Override(t *testing.T) {
 }
 
 func TestSecretsRoot(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{}
 	defaultRoot := cfg.StorageRoot()
 
@@ -135,6 +142,7 @@ func TestSecretsRoot(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.storageRoot}}
 			if got := cfg.SecretsRoot(); got != tc.want {
 				t.Errorf("SecretsRoot() = %q, want %q", got, tc.want)
@@ -144,6 +152,7 @@ func TestSecretsRoot(t *testing.T) {
 }
 
 func TestGatewayConfig(t *testing.T) {
+	t.Parallel()
 	input := `{"gateway":{"enabled":true,"host":"0.0.0.0","port":1234}}`
 	cfg, err := decode(bytes.NewReader([]byte(input)))
 	if err != nil {
@@ -161,6 +170,7 @@ func TestGatewayConfig(t *testing.T) {
 }
 
 func TestLogsRoot(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "logs_root"}}
 	want := filepath.Join("logs_root", "logs")
 	if got := cfg.LogsRoot(); got != want {
@@ -169,6 +179,7 @@ func TestLogsRoot(t *testing.T) {
 }
 
 func TestLogPath(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "logs_root"}}
 	want := filepath.Join("logs_root", "logs", "gobot.log")
 	if got := cfg.LogPath("gobot.log"); got != want {
@@ -177,6 +188,7 @@ func TestLogPath(t *testing.T) {
 }
 
 func TestDefaultModel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		model string
@@ -195,6 +207,7 @@ func TestDefaultModel(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			cfg := &Config{Agents: AgentsConfig{Defaults: AgentDefaults{Model: tc.model}}}
 			if got := cfg.DefaultModel(); got != tc.want {
 				t.Errorf("DefaultModel() = %q, want %q", got, tc.want)
@@ -204,6 +217,7 @@ func TestDefaultModel(t *testing.T) {
 }
 
 func TestWorkspacePath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		root    string
@@ -231,6 +245,7 @@ func TestWorkspacePath(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.root}}
 			got := cfg.WorkspacePath(tc.subpath...)
 			if got != tc.want {
@@ -241,6 +256,7 @@ func TestWorkspacePath(t *testing.T) {
 }
 
 func TestGeminiAPIKey(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Providers: ProvidersConfig{Gemini: GeminiConfig{APIKey: "my-key"}}}
 	if cfg.GeminiAPIKey() != "my-key" {
 		t.Errorf("got %q, want %q", cfg.GeminiAPIKey(), "my-key")
@@ -256,6 +272,7 @@ func TestGeminiAPIKey_Empty(t *testing.T) {
 }
 
 func TestDefaultConfigPath(t *testing.T) {
+	t.Parallel()
 	got := DefaultConfigPath()
 	if !strings.HasSuffix(got, filepath.Join(".gobot", "config.json")) {
 		t.Errorf("DefaultConfigPath() = %q, want suffix .gobot/config.json", got)
@@ -263,6 +280,7 @@ func TestDefaultConfigPath(t *testing.T) {
 }
 
 func TestLoadFrom_ValidFile(t *testing.T) {
+	t.Parallel()
 	content := `{"providers":{"gemini":{"apiKey":"file-key"}}}`
 	f, err := os.CreateTemp(t.TempDir(), "config-*.json")
 	if err != nil {
@@ -283,6 +301,7 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
+	t.Parallel()
 	cfg, err := LoadFrom(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
@@ -293,6 +312,7 @@ func TestLoadFrom_MissingFile(t *testing.T) {
 }
 
 func TestDecode_ReadError(t *testing.T) {
+	t.Parallel()
 	_, err := decode(errReader{})
 	if err == nil {
 		t.Fatal("expected error from failing reader, got nil")
@@ -300,6 +320,7 @@ func TestDecode_ReadError(t *testing.T) {
 }
 
 func TestDecode_OnlyBOM(t *testing.T) {
+	t.Parallel()
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	_, err := decode(bytes.NewReader(bom))
 	if err == nil {
@@ -307,11 +328,13 @@ func TestDecode_OnlyBOM(t *testing.T) {
 	}
 }
 
-func TestLoad_DoesNotPanic(_ *testing.T) {
+func TestLoad_DoesNotPanic(t *testing.T) {
+	t.Parallel()
 	_, _ = Load()
 }
 
 func TestTelegramConfig_AllowFrom(t *testing.T) {
+	t.Parallel()
 	json := `{"channels":{"telegram":{"token":"tok","allowFrom":["111","222"]}}}`
 	cfg, err := decode(bytes.NewReader([]byte(json)))
 	if err != nil {
@@ -329,6 +352,7 @@ func TestTelegramConfig_AllowFrom(t *testing.T) {
 }
 
 func TestTelegramToken_FromConfig(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Channels: ChannelsConfig{Telegram: TelegramConfig{Token: "cfg-token"}}}
 	if cfg.TelegramToken() != "cfg-token" {
 		t.Errorf("got %q, want cfg-token", cfg.TelegramToken())
@@ -352,6 +376,7 @@ func TestTelegramToken_Empty(t *testing.T) {
 }
 
 func TestMCPEnvFor_StaticValues(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{
 		Tools: ToolsConfig{
 			MCPServers: map[string]MCPServerConfig{
@@ -370,6 +395,7 @@ func TestMCPEnvFor_StaticValues(t *testing.T) {
 }
 
 func TestMCPEnvFor_UnknownServer(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{}
 	env := cfg.MCPEnvFor("nonexistent-server")
 	if len(env) != 0 {
@@ -378,6 +404,7 @@ func TestMCPEnvFor_UnknownServer(t *testing.T) {
 }
 
 func TestMCPEnvFor_NoServers(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Strategic: StrategicConfig{}}
 	env := cfg.MCPEnvFor("any-server")
 	if len(env) != 0 {
@@ -386,6 +413,7 @@ func TestMCPEnvFor_NoServers(t *testing.T) {
 }
 
 func TestMCPEnvFor_EmptyValue_NoFallback(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{
 		Strategic: StrategicConfig{StorageRoot: t.TempDir()},
 		Tools: ToolsConfig{
@@ -403,6 +431,7 @@ func TestMCPEnvFor_EmptyValue_NoFallback(t *testing.T) {
 }
 
 func TestDecode_MCPServers(t *testing.T) {
+	t.Parallel()
 	// Mirrors the actual tools.mcpServers layout in ~/.gobot/config.json.
 	input := `{
 		"tools": {
@@ -442,6 +471,7 @@ func TestDecode_MCPServers(t *testing.T) {
 }
 
 func TestExecTimeout_Default(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{}
 	if got := cfg.ExecTimeout(); got != 2*time.Minute {
 		t.Errorf("ExecTimeout() = %v, want 2m (default)", got)
@@ -449,6 +479,7 @@ func TestExecTimeout_Default(t *testing.T) {
 }
 
 func TestExecTimeout_Configured(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{Tools: ToolsConfig{Exec: ExecConfig{Timeout: 180}}}
 	if got := cfg.ExecTimeout(); got != 180*time.Second {
 		t.Errorf("ExecTimeout() = %v, want 180s", got)
@@ -456,6 +487,7 @@ func TestExecTimeout_Configured(t *testing.T) {
 }
 
 func TestEffectiveMaxToolIterations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		limit int
@@ -466,6 +498,7 @@ func TestEffectiveMaxToolIterations(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			cfg := &Config{
 				Strategic: StrategicConfig{MaxToolIterations: tc.limit},
 			}
@@ -509,6 +542,7 @@ func TestDecode_StrategicLimits(t *testing.T) {
 }
 
 func TestHumanInTheLoop(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		hitl bool
@@ -519,6 +553,7 @@ func TestHumanInTheLoop(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			cfg := &Config{Channels: ChannelsConfig{Telegram: TelegramConfig{HITL: tc.hitl}}}
 			if got := cfg.HumanInTheLoop(); got != tc.want {
 				t.Errorf("HumanInTheLoop() = %v, want %v", got, tc.want)
@@ -528,6 +563,7 @@ func TestHumanInTheLoop(t *testing.T) {
 }
 
 func TestObservabilityConfig(t *testing.T) {
+	t.Parallel()
 	input := `{"strategic_edition":{"observability":{"service_name":"test-bot","otlp_endpoint":"localhost:4317","sampling_rate":0.5}}}`
 	cfg, err := decode(bytes.NewReader([]byte(input)))
 	if err != nil {
@@ -621,6 +657,7 @@ func TestConfig_SecretsErrorLogging(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			logBuf.Reset()
 			got := tc.getKey(cfg)
 			if got != tc.wantValue {
@@ -636,6 +673,7 @@ func TestConfig_SecretsErrorLogging(t *testing.T) {
 }
 
 func TestLockTimeoutDuration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		seconds int
@@ -659,6 +697,7 @@ func TestLockTimeoutDuration(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			cfg := &Config{
 				Agents: AgentsConfig{
 					Defaults: AgentDefaults{

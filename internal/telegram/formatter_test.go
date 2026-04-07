@@ -3,6 +3,7 @@ package telegram
 import "testing"
 
 func TestToHTML(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -92,6 +93,7 @@ func TestToHTML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := ToHTML(tt.input)
 			if got != tt.want {
 				t.Errorf("ToHTML(%q)\n got  %q\n want %q", tt.input, got, tt.want)

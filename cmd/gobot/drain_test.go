@@ -7,6 +7,7 @@ import (
 )
 
 func TestDrainGoroutines(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		wgCount       int
@@ -43,6 +44,7 @@ func TestDrainGoroutines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			var wg sync.WaitGroup
 			if tt.wgCount > 0 {
 				wg.Add(tt.wgCount)

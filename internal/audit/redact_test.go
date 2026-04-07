@@ -38,6 +38,7 @@ func (h *captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 func (h *captureHandler) WithGroup(_ string) slog.Handler { return h }
 
 func TestRedactString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -53,6 +54,7 @@ func TestRedactString(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := redactString(tt.input)
 			if got != tt.want {
 				t.Errorf("redactString(%q) = %q, want %q", tt.input, got, tt.want)
@@ -62,6 +64,7 @@ func TestRedactString(t *testing.T) {
 }
 
 func TestRedactingHandler_RedactsMessage(t *testing.T) {
+	t.Parallel()
 	capture := &captureHandler{buf: &bytes.Buffer{}}
 	h := NewRedactingHandler(capture)
 	logger := slog.New(h)
@@ -75,6 +78,7 @@ func TestRedactingHandler_RedactsMessage(t *testing.T) {
 }
 
 func TestRedactingHandler_RedactsAttrValue(t *testing.T) {
+	t.Parallel()
 	capture := &captureHandler{buf: &bytes.Buffer{}}
 	h := NewRedactingHandler(capture)
 	logger := slog.New(h)
@@ -85,6 +89,7 @@ func TestRedactingHandler_RedactsAttrValue(t *testing.T) {
 }
 
 func TestRedactingHandler_PassesThroughCleanLog(t *testing.T) {
+	t.Parallel()
 	capture := &captureHandler{buf: &bytes.Buffer{}}
 	h := NewRedactingHandler(capture)
 	logger := slog.New(h)
@@ -107,6 +112,7 @@ func TestRedactingHandler_PIIDebugMode(t *testing.T) {
 }
 
 func TestNeedsRedaction(t *testing.T) {
+	t.Parallel()
 	if needsRedaction("clean log line") {
 		t.Error("clean string incorrectly flagged")
 	}
@@ -116,6 +122,7 @@ func TestNeedsRedaction(t *testing.T) {
 }
 
 func TestRedactingHandler_WithAttrs_RedactsSecret(t *testing.T) {
+	t.Parallel()
 	capture := &captureHandler{buf: &bytes.Buffer{}}
 	h := NewRedactingHandler(capture)
 	// Secret is passed via With(), not via Info() args.
@@ -130,6 +137,7 @@ func TestRedactingHandler_WithAttrs_RedactsSecret(t *testing.T) {
 }
 
 func TestRedactAttr_GroupKind(t *testing.T) {
+	t.Parallel()
 	// Build a group attr containing a secret and a clean value.
 	inner := slog.Group("auth",
 		slog.String("token", "ya29.supersecrettoken123456"),

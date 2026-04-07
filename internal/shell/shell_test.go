@@ -8,6 +8,7 @@ import (
 )
 
 func TestRedirectCDrive(t *testing.T) {
+	t.Parallel()
 	// We use neutral mock paths for testing the logic.
 	workspaceRoot := filepath.FromSlash("/mock/workspace")
 	projectRoot := filepath.FromSlash("/mock/project")
@@ -61,6 +62,7 @@ func TestRedirectCDrive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := shell.RedirectCDrive(tt.input, workspaceRoot, projectRoot)
 			if got != tt.want {
 				t.Errorf("RedirectCDrive(%q)\n  got  %q\n  want %q", tt.input, got, tt.want)

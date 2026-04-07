@@ -32,6 +32,7 @@ func newTestStore(t *testing.T) *memory.MemoryStore {
 }
 
 func TestParseFacts_ValidArray(t *testing.T) {
+	t.Parallel()
 	facts, err := parseFacts(`["Fact one", "Fact two", "Fact three"]`)
 	if err != nil {
 		t.Fatalf("parseFacts: %v", err)
@@ -42,6 +43,7 @@ func TestParseFacts_ValidArray(t *testing.T) {
 }
 
 func TestParseFacts_EmptyArray(t *testing.T) {
+	t.Parallel()
 	facts, err := parseFacts(`[]`)
 	if err != nil {
 		t.Fatalf("parseFacts: %v", err)
@@ -52,6 +54,7 @@ func TestParseFacts_EmptyArray(t *testing.T) {
 }
 
 func TestParseFacts_MarkdownFences(t *testing.T) {
+	t.Parallel()
 	input := "```json\n[\"Fact A\", \"Fact B\"]\n```"
 	facts, err := parseFacts(input)
 	if err != nil {
@@ -63,6 +66,7 @@ func TestParseFacts_MarkdownFences(t *testing.T) {
 }
 
 func TestParseFacts_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	_, err := parseFacts("not json at all")
 	if err == nil {
 		t.Error("expected error for invalid JSON, got nil")
@@ -70,6 +74,7 @@ func TestParseFacts_InvalidJSON(t *testing.T) {
 }
 
 func TestConsolidator_IndexesFacts(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	runner := &mockTextRunner{
 		response: `["Project Alpha deadline is May 1 2026", "User prefers Friday updates"]`,
@@ -94,6 +99,7 @@ func TestConsolidator_IndexesFacts(t *testing.T) {
 }
 
 func TestConsolidator_EmptyLLMResponse_IndexesNothing(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	runner := &mockTextRunner{response: `[]`}
 	c := New(runner, store)
@@ -107,6 +113,7 @@ func TestConsolidator_EmptyLLMResponse_IndexesNothing(t *testing.T) {
 }
 
 func TestConsolidator_ShortReply_SkippedByConsolidateAsync(t *testing.T) {
+	t.Parallel()
 	// ConsolidateAsync should not spawn a goroutine for short replies.
 	// We verify by using a runner that would panic if called.
 	store := newTestStore(t)
@@ -118,6 +125,7 @@ func TestConsolidator_ShortReply_SkippedByConsolidateAsync(t *testing.T) {
 }
 
 func TestConsolidator_DeduplicatesFacts(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	// Pre-seed a fact.
 	_ = store.Index("sess1", "Project Alpha deadline is May 1 2026")
@@ -137,6 +145,7 @@ func TestConsolidator_DeduplicatesFacts(t *testing.T) {
 }
 
 func TestSimilarity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		a, b string
 		high bool
@@ -163,6 +172,7 @@ var _ = filepath.Join
 // ── F-068: Integration Tests ────────────────────────────────────────────────
 
 func TestConsolidator_EndToEnd_CompactConsolidateRetrieve(t *testing.T) {
+	t.Parallel()
 	// Full integration test: verify that facts extracted from dropped messages
 	// can be consolidated and retrieved via RAG search.
 	store := newTestStore(t)
@@ -221,6 +231,7 @@ assistant: Budget approved for Q2`
 }
 
 func TestConsolidator_TTLCleanupRunsWithoutError(t *testing.T) {
+	t.Parallel()
 	// Test that TTL cleanup runs during consolidation without errors.
 	// We don't test the actual deletion since timing is sensitive to nanosecond precision.
 	store := newTestStore(t)
@@ -246,6 +257,7 @@ func TestConsolidator_TTLCleanupRunsWithoutError(t *testing.T) {
 }
 
 func TestConsolidator_NoConsolidateOnShortReply(t *testing.T) {
+	t.Parallel()
 	// Short replies (less than minConsolidateLength runes) should not trigger consolidation.
 	store := newTestStore(t)
 	runner := &mockTextRunner{

@@ -12,6 +12,7 @@ import (
 )
 
 func TestChaos_RandomFailures(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping chaos test in short mode")
 	}

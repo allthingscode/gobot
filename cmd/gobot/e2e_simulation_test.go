@@ -172,6 +172,7 @@ func RunScenario(t *testing.T, s Scenario, tools []Tool) {
 }
 
 func TestE2ESimulation_DirectResponse(t *testing.T) {
+	t.Parallel()
 	RunScenario(t, Scenario{
 		Name:       "direct_response",
 		UserPrompt: "What is 2 + 2?",
@@ -183,6 +184,7 @@ func TestE2ESimulation_DirectResponse(t *testing.T) {
 }
 
 func TestE2ESimulation_SingleToolCall(t *testing.T) {
+	t.Parallel()
 	calendarTool := &simTool{
 		name:     "list_calendar_events",
 		response: "Monday 9am: Team standup\nWednesday 2pm: Design review",
@@ -207,6 +209,7 @@ func TestE2ESimulation_SingleToolCall(t *testing.T) {
 }
 
 func TestE2ESimulation_MultiStep(t *testing.T) {
+	t.Parallel()
 	calendarTool := &simTool{
 		name:     "list_calendar_events",
 		response: "Friday 3pm: Sprint review",
@@ -244,6 +247,7 @@ func TestE2ESimulation_MultiStep(t *testing.T) {
 }
 
 func TestE2ESimulation_ToolError(t *testing.T) {
+	t.Parallel()
 	failingTool := &simTool{
 		name: "list_calendar_events",
 		err:  fmt.Errorf("calendar service unavailable"),
@@ -268,6 +272,7 @@ func TestE2ESimulation_ToolError(t *testing.T) {
 }
 
 func TestE2ESimulation_NoSteps(t *testing.T) {
+	t.Parallel()
 	runner := &simRunner{steps: nil, tools: nil}
 	mgr := agent.NewSessionManager(runner, nil, "sim-model")
 

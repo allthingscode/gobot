@@ -5,6 +5,7 @@ import (
 )
 
 func TestWorkflowStatus_IsTerminal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status WorkflowStatus
@@ -19,6 +20,7 @@ func TestWorkflowStatus_IsTerminal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := tt.status.IsTerminal()
 			if got != tt.want {
 				t.Errorf("IsTerminal() = %v, want %v", got, tt.want)
@@ -28,6 +30,7 @@ func TestWorkflowStatus_IsTerminal(t *testing.T) {
 }
 
 func TestWorkflowStatus_IsActive(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status WorkflowStatus
@@ -42,6 +45,7 @@ func TestWorkflowStatus_IsActive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := tt.status.IsActive()
 			if got != tt.want {
 				t.Errorf("IsActive() = %v, want %v", got, tt.want)

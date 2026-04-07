@@ -9,6 +9,7 @@ import (
 )
 
 func TestOpenJournal_CreatesFile(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	journal, err := OpenJournal(tempDir, "wf-123")
@@ -24,6 +25,7 @@ func TestOpenJournal_CreatesFile(t *testing.T) {
 }
 
 func TestJournal_AppendAndReplay(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	journal, err := OpenJournal(tempDir, "wf-456")
@@ -69,6 +71,7 @@ func TestJournal_AppendAndReplay(t *testing.T) {
 }
 
 func TestReplay_NonExistent(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	nonExistent := filepath.Join(tempDir, "nonexistent.journal")
 
@@ -82,6 +85,7 @@ func TestReplay_NonExistent(t *testing.T) {
 }
 
 func TestTruncate_RemovesFile(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	journalPath := filepath.Join(tempDir, "to-truncate.journal")
 
@@ -99,6 +103,7 @@ func TestTruncate_RemovesFile(t *testing.T) {
 }
 
 func TestRecoverWorkflow(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	journal, _ := OpenJournal(tempDir, "wf-recover")

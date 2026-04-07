@@ -18,6 +18,7 @@ import (
 )
 
 func TestExtractText(t *testing.T) {
+	t.Parallel()
 	s1 := "hello"
 	tests := []struct {
 		name string
@@ -53,6 +54,7 @@ func TestExtractText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := extractText(tt.msg)
 			if got != tt.want {
 				t.Errorf("extractText() = %q, want %q", got, tt.want)
@@ -62,6 +64,7 @@ func TestExtractText(t *testing.T) {
 }
 
 func TestTruncateToolResult(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		result   string
@@ -120,6 +123,7 @@ func TestTruncateToolResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := truncateToolResult(tt.result, tt.maxBytes)
 			if got != tt.want {
 				t.Errorf("truncateToolResult() = %q, want %q", got, tt.want)
@@ -129,6 +133,7 @@ func TestTruncateToolResult(t *testing.T) {
 }
 
 func TestRunner_SetHooks(t *testing.T) {
+	t.Parallel()
 	r := &geminiRunner{}
 	h := &agent.Hooks{}
 	r.SetHooks(h)
@@ -138,6 +143,7 @@ func TestRunner_SetHooks(t *testing.T) {
 }
 
 func TestLastUserText(t *testing.T) {
+	t.Parallel()
 	s1 := "msg 1"
 	s2 := "msg 2"
 	messages := []agentctx.StrategicMessage{
@@ -159,6 +165,7 @@ func TestLastUserText(t *testing.T) {
 }
 
 func TestBuildCorrectionMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		report map[string]any
@@ -197,6 +204,7 @@ func TestBuildCorrectionMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := buildCorrectionMessage(tt.report)
 			for _, check := range tt.checks {
 				if !strings.Contains(got, check) {
@@ -208,6 +216,7 @@ func TestBuildCorrectionMessage(t *testing.T) {
 }
 
 func TestRunner_ReflectionDefaults(t *testing.T) {
+	t.Parallel()
 	r := &geminiRunner{
 		maxReflectionRounds: 1,
 		enableReflection:    false,
@@ -239,6 +248,7 @@ func (m *mockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provide
 func strPtr(s string) *string { return &s }
 
 func TestRunner_ReflectionLoop(t *testing.T) {
+	t.Parallel()
 	rubricJSON := `{"task_goal":"test","criteria":[{"name":"Quality","description":"good","weight":1.0}],"success_threshold":0.9}`
 	criticFail := `{"overall_score":0.3,"scores":[{"criterion_name":"Quality","score":0.3,"reasoning":"poor"}],"passed":false,"feedback":"needs work","required_corrections":["improve X"]}`
 	criticPass := `{"overall_score":0.95,"scores":[{"criterion_name":"Quality","score":0.95,"reasoning":"excellent"}],"passed":true,"feedback":"great","required_corrections":[]}`
@@ -287,6 +297,7 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 }
 
 func TestRunner_ToolCallValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		toolCalls []map[string]any
@@ -331,6 +342,7 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mock := &mockProvider{
 				responses: []*provider.ChatResponse{
 					{
@@ -398,6 +410,7 @@ func (p *panicTool) Execute(_ context.Context, _ string, _ map[string]any) (stri
 }
 
 func TestRunner_ToolPanicRecovery(t *testing.T) {
+	t.Parallel()
 	r := &geminiRunner{
 		tools: []Tool{&panicTool{}},
 	}
@@ -429,6 +442,7 @@ func (l *largeTool) Execute(_ context.Context, _ string, _ map[string]any) (stri
 }
 
 func TestRunner_ToolResultSizeLimiting(t *testing.T) {
+	t.Parallel()
 	mock := &mockProvider{
 		responses: []*provider.ChatResponse{
 			{
@@ -491,6 +505,7 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 }
 
 func TestRunner_StructuredLogging(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	handler := slog.NewTextHandler(&buf, nil)
 	logger := slog.New(handler)
@@ -570,6 +585,7 @@ func (f *failWithOutputTool) Execute(_ context.Context, _ string, _ map[string]a
 }
 
 func TestRunner_PreservesOutputOnError(t *testing.T) {
+	t.Parallel()
 	mock := &mockProvider{
 		responses: []*provider.ChatResponse{
 			{

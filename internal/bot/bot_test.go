@@ -177,6 +177,7 @@ func (h *mockHandler) getCalls() []string {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 func TestSessionKey(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		chatID   int64
@@ -193,6 +194,7 @@ func TestSessionKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := SessionKey(tt.chatID, tt.threadID, tt.senderID)
 			assert.Equal(t, tt.want, got, "SessionKey(%d, %d, %d)", tt.chatID, tt.threadID, tt.senderID)
 		})
@@ -200,6 +202,7 @@ func TestSessionKey(t *testing.T) {
 }
 
 func TestSessionKey_GroupIsolation(t *testing.T) {
+	t.Parallel()
 	// Two different senders in the same group must get different session keys.
 	key1 := SessionKey(-1001234567890, 0, 100)
 	key2 := SessionKey(-1001234567890, 0, 200)
@@ -209,6 +212,7 @@ func TestSessionKey_GroupIsolation(t *testing.T) {
 }
 
 func TestSessionKey_DMNotDoubled(t *testing.T) {
+	t.Parallel()
 	// DM: chatID == senderID — must not produce "telegram:12345:12345".
 	key := SessionKey(12345, 0, 12345)
 	if key != "telegram:12345" {
@@ -217,6 +221,7 @@ func TestSessionKey_DMNotDoubled(t *testing.T) {
 }
 
 func TestIsTransientError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		err  error
@@ -237,6 +242,7 @@ func TestIsTransientError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := IsTransientError(tt.err)
 			assert.Equal(t, tt.want, got, "IsTransientError(%v)", tt.err)
 		})
@@ -244,6 +250,7 @@ func TestIsTransientError(t *testing.T) {
 }
 
 func TestBot_Run_DispatchesMessages(t *testing.T) {
+	t.Parallel()
 	api := newMockAPI(
 		InboundMessage{ChatID: 1, MessageID: 10, Text: "hello"},
 		InboundMessage{ChatID: 2, MessageID: 20, Text: "world"},
@@ -281,6 +288,7 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 }
 
 func TestBot_Run_NoReplyForEmptyResponse(t *testing.T) {
+	t.Parallel()
 	api := newMockAPI(InboundMessage{ChatID: 1, Text: "hi"})
 	handler := &mockHandler{response: ""} // empty = no reply
 	bot := New(api, handler)
@@ -300,6 +308,7 @@ func TestBot_Run_NoReplyForEmptyResponse(t *testing.T) {
 }
 
 func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
+	t.Parallel()
 	api := newMockAPI(
 		InboundMessage{ChatID: 1, Text: "first"},
 		InboundMessage{ChatID: 2, Text: "second"},
@@ -332,6 +341,7 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 }
 
 func TestBot_Run_RetriesOnTransientError(t *testing.T) {
+	t.Parallel()
 	fallback := newMockAPI(InboundMessage{ChatID: 99, Text: "retry-msg"})
 	api := &mockAPIWithError{fallback: fallback}
 	handler := &mockHandler{response: "ok"}
@@ -363,6 +373,7 @@ func TestBot_Run_RetriesOnTransientError(t *testing.T) {
 }
 
 func TestBot_Run_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	api := newMockAPI() // no messages
 	handler := &mockHandler{}
 	bot := New(api, handler)
@@ -377,6 +388,7 @@ func TestBot_Run_ContextCancellation(t *testing.T) {
 }
 
 func TestBot_Send(t *testing.T) {
+	t.Parallel()
 	api := newMockAPI()
 	bot := New(api, &mockHandler{})
 
@@ -392,6 +404,7 @@ func TestBot_Send(t *testing.T) {
 }
 
 func TestBot_Run_ThreadAwareSessionKey(t *testing.T) {
+	t.Parallel()
 	api := newMockAPI(InboundMessage{ChatID: 500, ThreadID: 12, Text: "topic msg"})
 	handler := &mockHandler{response: ""}
 	bot := New(api, handler)
@@ -442,6 +455,7 @@ func (h *callCountHandler) callCount() int {
 }
 
 func TestBot_Run_BackoffOnCircuitOpen(t *testing.T) {
+	t.Parallel()
 	api := &mockAPIWithCircuit{}
 	bot := New(api, &mockHandler{})
 
@@ -489,6 +503,7 @@ func (h *blockingHandler) Handle(ctx context.Context, sessionKey string, msg Inb
 }
 
 func TestBot_CallbackLeakPrevention(t *testing.T) {
+	t.Parallel()
 	// Custom API to feed exactly one callback and then block indefinitely
 	api := &mockAPI{
 		updates:   make(chan InboundMessage),

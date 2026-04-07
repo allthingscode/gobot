@@ -37,6 +37,7 @@ func (m *mockDispatcher) Alert(_ context.Context, p Payload) error {
 }
 
 func TestComputeNextRun(t *testing.T) {
+	t.Parallel()
 	atTime := int64(2000)
 	everyInterval := int64(1000)
 
@@ -68,6 +69,7 @@ func TestComputeNextRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			if got := ComputeNextRun(tt.schedule, tt.nowMS); got != tt.want {
 				t.Errorf("ComputeNextRun() = %v, want %v", got, tt.want)
 			}
@@ -76,6 +78,7 @@ func TestComputeNextRun(t *testing.T) {
 }
 
 func TestComputeNextRunKindCron(t *testing.T) {
+	t.Parallel()
 	// Monday 2026-01-05 00:00:00 UTC
 	monday := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
 	mondayMS := monday.UnixMilli()
@@ -127,6 +130,7 @@ func TestComputeNextRunKindCron(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := ComputeNextRun(tt.schedule, tt.nowMS)
 			if got != tt.wantMS {
 				t.Errorf("ComputeNextRun() = %v (%s), want %v (%s)",
@@ -138,6 +142,7 @@ func TestComputeNextRunKindCron(t *testing.T) {
 }
 
 func TestSchedulerPoll(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "jobs.json")
 
@@ -184,6 +189,7 @@ func TestSchedulerPoll(t *testing.T) {
 }
 
 func TestSchedulerPoll_InitializesNewJob(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "jobs.json")
 
@@ -226,6 +232,7 @@ func TestSchedulerPoll_InitializesNewJob(t *testing.T) {
 }
 
 func TestSchedulerPoll_FailureAlert(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "jobs.json")
 
@@ -285,6 +292,7 @@ func TestSchedulerPoll_FailureAlert(t *testing.T) {
 }
 
 func TestSchedulerPoll_JobTimeout(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "jobs.json")
 
@@ -330,6 +338,7 @@ func TestSchedulerPoll_JobTimeout(t *testing.T) {
 }
 
 func TestScheduler_FakeClock(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "jobs.json")
 

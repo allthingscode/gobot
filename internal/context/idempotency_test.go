@@ -66,6 +66,7 @@ func setupTestStore(t *testing.T) (*context.IdempotencyStore, *sql.DB, func()) {
 }
 
 func TestIdempotencyStore_Check_Miss(t *testing.T) {
+	t.Parallel()
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -79,6 +80,7 @@ func TestIdempotencyStore_Check_Miss(t *testing.T) {
 }
 
 func TestIdempotencyStore_Store_And_Check_Hit(t *testing.T) {
+	t.Parallel()
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -110,6 +112,7 @@ func TestIdempotencyStore_Store_And_Check_Hit(t *testing.T) {
 }
 
 func TestIdempotencyStore_Check_Hash_Mismatch(t *testing.T) {
+	t.Parallel()
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -132,6 +135,7 @@ func TestIdempotencyStore_Check_Hash_Mismatch(t *testing.T) {
 }
 
 func TestIdempotencyStore_Cleanup_Expired(t *testing.T) {
+	t.Parallel()
 	store, db, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -184,6 +188,7 @@ func TestIdempotencyStore_Cleanup_Expired(t *testing.T) {
 }
 
 func TestIdempotencyStore_TTL_Expiry_On_Check(t *testing.T) {
+	t.Parallel()
 	store, db, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -209,6 +214,7 @@ func TestIdempotencyStore_TTL_Expiry_On_Check(t *testing.T) {
 }
 
 func TestIdempotencyStore_Concurrent_Access(t *testing.T) {
+	t.Parallel()
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -236,6 +242,7 @@ func TestIdempotencyStore_Concurrent_Access(t *testing.T) {
 }
 
 func TestHashParams_Deterministic(t *testing.T) {
+	t.Parallel()
 	params := map[string]any{
 		"to":      "test@example.com",
 		"subject": "Test Subject",
@@ -258,6 +265,7 @@ func TestHashParams_Deterministic(t *testing.T) {
 }
 
 func TestHashParams_Order_Independent(t *testing.T) {
+	t.Parallel()
 	params1 := map[string]any{"a": 1, "b": 2, "c": 3}
 	params2 := map[string]any{"c": 3, "a": 1, "b": 2}
 
@@ -277,6 +285,7 @@ func TestHashParams_Order_Independent(t *testing.T) {
 }
 
 func TestHashParams_Different_Values(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		params map[string]any
@@ -301,6 +310,7 @@ func TestHashParams_Different_Values(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			hash, err := context.HashParams(tt.params)
 			if err != nil {
 				t.Fatalf("HashParams() error: %v", err)

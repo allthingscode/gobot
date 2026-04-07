@@ -25,6 +25,7 @@ func (m *mockResource) Shutdown(_ context.Context) error {
 }
 
 func TestResourceRegistry_Register(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
@@ -41,6 +42,7 @@ func TestResourceRegistry_Register(t *testing.T) {
 }
 
 func TestResourceRegistry_Unregister(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
@@ -65,6 +67,7 @@ func TestResourceRegistry_Unregister(t *testing.T) {
 }
 
 func TestResourceRegistry_Get(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
@@ -84,6 +87,7 @@ func TestResourceRegistry_Get(t *testing.T) {
 }
 
 func TestResourceRegistry_Shutdown(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
@@ -113,6 +117,7 @@ func TestResourceRegistry_Shutdown(t *testing.T) {
 }
 
 func TestResourceRegistry_Shutdown_Order(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	var order []string
@@ -159,6 +164,7 @@ func TestResourceRegistry_Shutdown_Order(t *testing.T) {
 }
 
 func TestResourceRegistry_Shutdown_Error(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
@@ -186,6 +192,7 @@ func TestResourceRegistry_Shutdown_Error(t *testing.T) {
 }
 
 func TestResourceRegistry_Shutdown_Timeout(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{
@@ -208,6 +215,7 @@ func TestResourceRegistry_Shutdown_Timeout(t *testing.T) {
 }
 
 func TestResourceRegistry_Metrics(t *testing.T) {
+	t.Parallel()
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
@@ -224,6 +232,7 @@ func TestResourceRegistry_Metrics(t *testing.T) {
 }
 
 func TestDefaultRegistry(t *testing.T) {
+	t.Parallel()
 	// Reset default registry for testing
 	DefaultRegistry = NewResourceRegistry()
 
@@ -243,6 +252,7 @@ func TestDefaultRegistry(t *testing.T) {
 }
 
 func TestClosableResource(t *testing.T) {
+	t.Parallel()
 	var closed bool
 	res := NewClosableResource("closable", func() error {
 		closed = true
@@ -269,6 +279,7 @@ func TestClosableResource(t *testing.T) {
 }
 
 func TestClosableResource_Close(t *testing.T) {
+	t.Parallel()
 	var closed bool
 	res := NewClosableResource("closable", func() error {
 		closed = true
@@ -286,6 +297,7 @@ func TestClosableResource_Close(t *testing.T) {
 }
 
 func TestClosableResource_Timeout(t *testing.T) {
+	t.Parallel()
 	res := NewClosableResource("slow", func() error {
 		time.Sleep(5 * time.Second)
 		return nil

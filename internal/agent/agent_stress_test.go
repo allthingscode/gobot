@@ -12,6 +12,7 @@ import (
 // TestDispatch_Concurrent_SameSession verifies that 10 concurrent calls
 // with the same session key are correctly serialized (no overlaps).
 func TestDispatch_Concurrent_SameSession(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{
 		response: "ok",
 		delay:    50 * time.Millisecond, // Increase chance of seeing overlaps if locking failed
@@ -54,6 +55,7 @@ func TestDispatch_Concurrent_SameSession(t *testing.T) {
 // TestDispatch_Concurrent_DifferentSessions verifies that 10 concurrent calls
 // with unique session keys proceed in parallel.
 func TestDispatch_Concurrent_DifferentSessions(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{
 		response: "ok",
 		delay:    100 * time.Millisecond,
@@ -101,6 +103,7 @@ func TestDispatch_Concurrent_DifferentSessions(t *testing.T) {
 // TestDispatch_LockMap_Stability verifies that after 1000 sequential unique sessions,
 // the internal lock map is correctly cleaned up (no leaks).
 func TestDispatch_LockMap_Stability(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "ok"}
 	mgr := NewSessionManager(runner, nil, "model")
 
@@ -129,6 +132,7 @@ func TestDispatch_LockMap_Stability(t *testing.T) {
 }
 
 func TestSessionManagerStress_WithStore(t *testing.T) {
+	t.Parallel()
 	runner := &mockRunner{response: "ok"}
 	store := newMockStore()
 	mgr := NewSessionManager(runner, store, "model")

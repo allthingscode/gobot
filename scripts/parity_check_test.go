@@ -32,6 +32,7 @@ func setupParityProject(t *testing.T) string {
 }
 
 func TestParityCheck_NoReferences(t *testing.T) {
+	t.Parallel()
 	dir := setupParityProject(t)
 	// No UPSTREAM_REFERENCES.md — should skip gracefully.
 	out, err := runParityCheck(t, dir)
@@ -44,6 +45,7 @@ func TestParityCheck_NoReferences(t *testing.T) {
 }
 
 func TestParityCheck_TagFound(t *testing.T) {
+	t.Parallel()
 	dir := setupParityProject(t)
 	writeFile(t, filepath.Join(dir, "UPSTREAM_REFERENCES.md"),
 		"<!-- tag: FOO_BAR -->\nSome reference.\n")
@@ -57,6 +59,7 @@ func TestParityCheck_TagFound(t *testing.T) {
 }
 
 func TestParityCheck_TagMissing(t *testing.T) {
+	t.Parallel()
 	dir := setupParityProject(t)
 	writeFile(t, filepath.Join(dir, "UPSTREAM_REFERENCES.md"),
 		"<!-- tag: MISSING_TAG -->\nSome reference.\n")
@@ -70,6 +73,7 @@ func TestParityCheck_TagMissing(t *testing.T) {
 }
 
 func TestParityCheck_NoSubstringMatch(t *testing.T) {
+	t.Parallel()
 	dir := setupParityProject(t)
 	// Tag FOO should NOT match FOOBAR.
 	writeFile(t, filepath.Join(dir, "UPSTREAM_REFERENCES.md"),
@@ -86,6 +90,7 @@ func TestParityCheck_NoSubstringMatch(t *testing.T) {
 }
 
 func TestParityCheck_WordBoundaryMatch(t *testing.T) {
+	t.Parallel()
 	dir := setupParityProject(t)
 	// Tag FOO should match as a standalone word.
 	writeFile(t, filepath.Join(dir, "UPSTREAM_REFERENCES.md"),
@@ -99,6 +104,7 @@ func TestParityCheck_WordBoundaryMatch(t *testing.T) {
 }
 
 func TestParityCheck_MultipleTags(t *testing.T) {
+	t.Parallel()
 	dir := setupParityProject(t)
 	writeFile(t, filepath.Join(dir, "UPSTREAM_REFERENCES.md"),
 		"<!-- tag: ALPHA -->\n<!-- tag: BETA -->\n<!-- tag: GAMMA -->\n")

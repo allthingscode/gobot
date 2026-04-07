@@ -45,6 +45,7 @@ func (m *mockInnerHandler) HandleCallback(_ context.Context, _ InboundCallback) 
 }
 
 func TestPairingHandler_AuthorizedUser_DelegatesToInner(t *testing.T) {
+	t.Parallel()
 	store := &mockPairingStore{
 		authorizedIDs: map[int64]bool{1: true},
 	}
@@ -62,6 +63,7 @@ func TestPairingHandler_AuthorizedUser_DelegatesToInner(t *testing.T) {
 }
 
 func TestPairingHandler_UnauthorizedUser_ReturnsPairingCode(t *testing.T) {
+	t.Parallel()
 	store := &mockPairingStore{
 		authorizedIDs: map[int64]bool{},
 	}
@@ -79,6 +81,7 @@ func TestPairingHandler_UnauthorizedUser_ReturnsPairingCode(t *testing.T) {
 }
 
 func TestPairingHandler_IsAuthorized_Error_ReturnsError(t *testing.T) {
+	t.Parallel()
 	authErr := errors.New("db unavailable")
 	store := &mockPairingStore{
 		authErr: authErr,
@@ -97,6 +100,7 @@ func TestPairingHandler_IsAuthorized_Error_ReturnsError(t *testing.T) {
 }
 
 func TestPairingHandler_GetOrCreateCode_Error_ReturnsError(t *testing.T) {
+	t.Parallel()
 	codeErr := errors.New("code generation failed")
 	store := &mockPairingStore{
 		authorizedIDs: map[int64]bool{},

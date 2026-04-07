@@ -11,6 +11,7 @@ import (
 // ── TextContent ───────────────────────────────────────────────────────────────
 
 func TestTextContent_RoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := ctx.TextContent{Type: "text", Text: "hello world"}
 	data, err := json.Marshal(orig)
 	if err != nil {
@@ -28,6 +29,7 @@ func TestTextContent_RoundTrip(t *testing.T) {
 // ── ThinkingContent ───────────────────────────────────────────────────────────
 
 func TestThinkingContent_RoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := ctx.ThinkingContent{Type: "thinking", Text: "internal reasoning"}
 	data, _ := json.Marshal(orig)
 	var got ctx.ThinkingContent
@@ -42,6 +44,7 @@ func TestThinkingContent_RoundTrip(t *testing.T) {
 // ── ImageContent ──────────────────────────────────────────────────────────────
 
 func TestImageContent_RoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := ctx.ImageContent{
 		Type:     "image_url",
 		ImageURL: ctx.ImageURL{URL: "https://example.com/img.png"},
@@ -59,6 +62,7 @@ func TestImageContent_RoundTrip(t *testing.T) {
 // ── ToolCallContent ───────────────────────────────────────────────────────────
 
 func TestToolCallContent_RoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := ctx.ToolCallContent{
 		Type: "tool_call",
 		ID:   "call_abc123",
@@ -80,6 +84,7 @@ func TestToolCallContent_RoundTrip(t *testing.T) {
 // ── ContentItem (discriminated union) ─────────────────────────────────────────
 
 func TestContentItem_UnmarshalText(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"text","text":"hi"}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err != nil {
@@ -94,6 +99,7 @@ func TestContentItem_UnmarshalText(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalThinking(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"thinking","text":"reasoning here"}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err != nil {
@@ -105,6 +111,7 @@ func TestContentItem_UnmarshalThinking(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalImage(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"image_url","image_url":{"url":"https://x.com/a.jpg"}}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err != nil {
@@ -116,6 +123,7 @@ func TestContentItem_UnmarshalImage(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalToolCall(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"tool_call","id":"c1","function":{"name":"spawn","arguments":"{}"}}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err != nil {
@@ -127,6 +135,7 @@ func TestContentItem_UnmarshalToolCall(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalUnknownType(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"video","src":"x.mp4"}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err == nil {
@@ -135,6 +144,7 @@ func TestContentItem_UnmarshalUnknownType(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalInvalidJSON(t *testing.T) {
+	t.Parallel()
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(`not-json`), &item); err == nil {
 		t.Error("expected error for invalid JSON")
@@ -143,6 +153,7 @@ func TestContentItem_UnmarshalInvalidJSON(t *testing.T) {
 
 // Each known type but with malformed body (triggers the inner json.Unmarshal error).
 func TestContentItem_UnmarshalMalformedText(t *testing.T) {
+	t.Parallel()
 	// "text" field is an int, not a string — should fail struct unmarshal.
 	raw := `{"type":"text","text":123}`
 	var item ctx.ContentItem
@@ -152,6 +163,7 @@ func TestContentItem_UnmarshalMalformedText(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalMalformedThinking(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"thinking","text":false}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err == nil {
@@ -160,6 +172,7 @@ func TestContentItem_UnmarshalMalformedThinking(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalMalformedImage(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"image_url","image_url":"not-an-object"}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err == nil {
@@ -168,6 +181,7 @@ func TestContentItem_UnmarshalMalformedImage(t *testing.T) {
 }
 
 func TestContentItem_UnmarshalMalformedToolCall(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"tool_call","id":999}`
 	var item ctx.ContentItem
 	if err := json.Unmarshal([]byte(raw), &item); err == nil {
@@ -176,6 +190,7 @@ func TestContentItem_UnmarshalMalformedToolCall(t *testing.T) {
 }
 
 func TestContentItem_MarshalText(t *testing.T) {
+	t.Parallel()
 	item := ctx.ContentItem{Text: &ctx.TextContent{Type: "text", Text: "hello"}}
 	data, err := json.Marshal(item)
 	if err != nil {
@@ -187,6 +202,7 @@ func TestContentItem_MarshalText(t *testing.T) {
 }
 
 func TestContentItem_MarshalThinking(t *testing.T) {
+	t.Parallel()
 	item := ctx.ContentItem{Thinking: &ctx.ThinkingContent{Type: "thinking", Text: "r"}}
 	data, err := json.Marshal(item)
 	if err != nil {
@@ -198,6 +214,7 @@ func TestContentItem_MarshalThinking(t *testing.T) {
 }
 
 func TestContentItem_MarshalImage(t *testing.T) {
+	t.Parallel()
 	item := ctx.ContentItem{Image: &ctx.ImageContent{Type: "image_url", ImageURL: ctx.ImageURL{URL: "u"}}}
 	data, err := json.Marshal(item)
 	if err != nil {
@@ -209,6 +226,7 @@ func TestContentItem_MarshalImage(t *testing.T) {
 }
 
 func TestContentItem_MarshalTool(t *testing.T) {
+	t.Parallel()
 	item := ctx.ContentItem{Tool: &ctx.ToolCallContent{Type: "tool_call", ID: "x", Function: ctx.ToolCallFunction{Name: "f", Arguments: "{}"}}}
 	data, err := json.Marshal(item)
 	if err != nil {
@@ -220,6 +238,7 @@ func TestContentItem_MarshalTool(t *testing.T) {
 }
 
 func TestContentItem_MarshalNilAll(t *testing.T) {
+	t.Parallel()
 	item := ctx.ContentItem{}
 	if _, err := json.Marshal(item); err == nil {
 		t.Error("expected error marshaling empty ContentItem")
@@ -227,6 +246,7 @@ func TestContentItem_MarshalNilAll(t *testing.T) {
 }
 
 func TestContentItem_RoundTrip(t *testing.T) {
+	t.Parallel()
 	items := []ctx.ContentItem{
 		{Text: &ctx.TextContent{Type: "text", Text: "msg"}},
 		{Thinking: &ctx.ThinkingContent{Type: "thinking", Text: "reason"}},
@@ -257,6 +277,7 @@ func TestContentItem_RoundTrip(t *testing.T) {
 // ── MessageContent (string | []ContentItem) ───────────────────────────────────
 
 func TestMessageContent_UnmarshalString(t *testing.T) {
+	t.Parallel()
 	raw := `"plain text content"`
 	var mc ctx.MessageContent
 	if err := json.Unmarshal([]byte(raw), &mc); err != nil {
@@ -271,6 +292,7 @@ func TestMessageContent_UnmarshalString(t *testing.T) {
 }
 
 func TestMessageContent_UnmarshalItems(t *testing.T) {
+	t.Parallel()
 	raw := `[{"type":"text","text":"part1"},{"type":"thinking","text":"reason"}]`
 	var mc ctx.MessageContent
 	if err := json.Unmarshal([]byte(raw), &mc); err != nil {
@@ -285,6 +307,7 @@ func TestMessageContent_UnmarshalItems(t *testing.T) {
 }
 
 func TestMessageContent_UnmarshalInvalid(t *testing.T) {
+	t.Parallel()
 	raw := `123`
 	var mc ctx.MessageContent
 	if err := json.Unmarshal([]byte(raw), &mc); err == nil {
@@ -293,6 +316,7 @@ func TestMessageContent_UnmarshalInvalid(t *testing.T) {
 }
 
 func TestMessageContent_MarshalString(t *testing.T) {
+	t.Parallel()
 	s := "hello"
 	mc := ctx.MessageContent{Str: &s}
 	data, err := json.Marshal(mc)
@@ -305,6 +329,7 @@ func TestMessageContent_MarshalString(t *testing.T) {
 }
 
 func TestMessageContent_MarshalItems(t *testing.T) {
+	t.Parallel()
 	mc := ctx.MessageContent{
 		Items: []ctx.ContentItem{
 			{Text: &ctx.TextContent{Type: "text", Text: "x"}},
@@ -320,6 +345,7 @@ func TestMessageContent_MarshalItems(t *testing.T) {
 }
 
 func TestMessageContent_MarshalNilStr_NilItems(t *testing.T) {
+	t.Parallel()
 	// Str=nil, Items=nil → marshals as null array
 	mc := ctx.MessageContent{}
 	data, err := json.Marshal(mc)
@@ -334,6 +360,7 @@ func TestMessageContent_MarshalNilStr_NilItems(t *testing.T) {
 // ── StrategicMessage ──────────────────────────────────────────────────────────
 
 func TestStrategicMessage_StringContent_RoundTrip(t *testing.T) {
+	t.Parallel()
 	s := "User message text"
 	msg := ctx.StrategicMessage{
 		Role:    ctx.RoleUser,
@@ -356,6 +383,7 @@ func TestStrategicMessage_StringContent_RoundTrip(t *testing.T) {
 }
 
 func TestStrategicMessage_ItemContent_RoundTrip(t *testing.T) {
+	t.Parallel()
 	msg := ctx.StrategicMessage{
 		Role: ctx.RoleAssistant,
 		Content: &ctx.MessageContent{
@@ -379,6 +407,7 @@ func TestStrategicMessage_ItemContent_RoundTrip(t *testing.T) {
 }
 
 func TestStrategicMessage_OptionalFields(t *testing.T) {
+	t.Parallel()
 	name := "researcher"
 	tcid := "tc_001"
 	rc := "some reasoning"
@@ -408,6 +437,7 @@ func TestStrategicMessage_OptionalFields(t *testing.T) {
 }
 
 func TestStrategicMessage_NilContent_OmitEmpty(t *testing.T) {
+	t.Parallel()
 	msg := ctx.StrategicMessage{Role: ctx.RoleSystem}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -419,6 +449,7 @@ func TestStrategicMessage_NilContent_OmitEmpty(t *testing.T) {
 }
 
 func TestStrategicMessage_ToolCalls_RoundTrip(t *testing.T) {
+	t.Parallel()
 	msg := ctx.StrategicMessage{
 		Role: ctx.RoleAssistant,
 		ToolCalls: []map[string]any{
@@ -439,6 +470,7 @@ func TestStrategicMessage_ToolCalls_RoundTrip(t *testing.T) {
 }
 
 func TestStrategicMessage_ThinkingBlocks_RoundTrip(t *testing.T) {
+	t.Parallel()
 	msg := ctx.StrategicMessage{
 		Role: ctx.RoleAssistant,
 		ThinkingBlocks: []map[string]any{
@@ -459,6 +491,7 @@ func TestStrategicMessage_ThinkingBlocks_RoundTrip(t *testing.T) {
 }
 
 func TestStrategicMessage_Roles(t *testing.T) {
+	t.Parallel()
 	for _, role := range []ctx.MessageRole{ctx.RoleSystem, ctx.RoleUser, ctx.RoleAssistant, ctx.RoleTool} {
 		msg := ctx.StrategicMessage{Role: role}
 		data, _ := json.Marshal(msg)

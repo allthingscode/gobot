@@ -22,6 +22,7 @@ func (m *mockExecutor) Run(_ context.Context, name string, args []string) (strin
 }
 
 func TestShellExecTool_Name(t *testing.T) {
+	t.Parallel()
 	tool := newShellExecTool(t.TempDir(), 2*time.Minute)
 	if got := tool.Name(); got != "shell_exec" {
 		t.Errorf("Name() = %q, want %q", got, "shell_exec")
@@ -29,6 +30,7 @@ func TestShellExecTool_Name(t *testing.T) {
 }
 
 func TestShellExecTool_Execute(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -76,6 +78,7 @@ func TestShellExecTool_Execute(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			mock := &mockExecutor{output: tc.mockOutput, err: tc.mockErr}
 			tool := &shellExecTool{exec: mock}
 

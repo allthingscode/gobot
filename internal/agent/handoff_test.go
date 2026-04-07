@@ -10,6 +10,7 @@ import (
 )
 
 func TestHandoffHook(t *testing.T) {
+	t.Parallel()
 	// Setup a temporary workspace.
 	tmpDir, err := os.MkdirTemp("", "gobot-handoff-test")
 	if err != nil {

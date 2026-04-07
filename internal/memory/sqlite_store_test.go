@@ -20,6 +20,7 @@ func newTestStore(t *testing.T) *MemoryStore {
 // ── NewMemoryStore ─────────────────────────────────────────────────────────────
 
 func TestNewMemoryStore_CreatesDB(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	store, err := NewMemoryStore(root)
 	if err != nil {
@@ -38,6 +39,7 @@ func TestNewMemoryStore_CreatesDB(t *testing.T) {
 }
 
 func TestNewMemoryStore_IdempotentSchema(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	// Opening the same root twice must not error (idempotent CREATE IF NOT EXISTS).
 	s1, err := NewMemoryStore(root)
@@ -56,6 +58,7 @@ func TestNewMemoryStore_IdempotentSchema(t *testing.T) {
 // ── Index ──────────────────────────────────────────────────────────────────────
 
 func TestIndex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sessionKey string
@@ -85,6 +88,7 @@ func TestIndex(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			store := newTestStore(t)
 			err := store.Index(tc.sessionKey, tc.content)
 			if (err != nil) != tc.wantErr {
@@ -108,6 +112,7 @@ func TestIndex(t *testing.T) {
 // ── Search ─────────────────────────────────────────────────────────────────────
 
 func TestSearch(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 
 	_ = store.Index("session-a", "The Q1 budget review is on Thursday with the finance team.")
@@ -167,6 +172,7 @@ func TestSearch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			results, err := store.Search(tc.query, tc.limit)
 			if err != nil {
 				t.Fatalf("Search() unexpected error: %v", err)
@@ -202,6 +208,7 @@ func TestSearch(t *testing.T) {
 // ── Rebuild ────────────────────────────────────────────────────────────────────
 
 func TestRebuild(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 
 	// Create a temp session directory with some .md files.
@@ -245,6 +252,7 @@ func TestRebuild(t *testing.T) {
 }
 
 func TestRebuild_NonexistentDir(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	_, err := store.Rebuild(filepath.Join(t.TempDir(), "does-not-exist"))
 	if err == nil {
@@ -255,6 +263,7 @@ func TestRebuild_NonexistentDir(t *testing.T) {
 // ── sanitizeFTSQuery ───────────────────────────────────────────────────────────
 
 func TestSanitizeFTSQuery(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -272,6 +281,7 @@ func TestSanitizeFTSQuery(t *testing.T) {
 	special := []string{`"`, `(`, `)`, `*`, `^`, `-`, `+`, `{`, `}`, `:`, `[`, `]`}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			got := sanitizeFTSQuery(tc.input)
 			for _, ch := range special {
 				if strings.Contains(got, ch) {
@@ -291,6 +301,7 @@ func writeFile(path, content string) error {
 // ── CleanupExpired (F-068) ─────────────────────────────────────────────────
 
 func TestCleanupExpired(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 
 	// Add some entries to the store.
@@ -323,6 +334,7 @@ func TestCleanupExpired(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			deleted, err := store.CleanupExpired(tc.ttl)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("CleanupExpired() error = %v, wantErr %v", err, tc.wantErr)

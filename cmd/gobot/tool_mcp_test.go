@@ -9,6 +9,7 @@ import (
 )
 
 func TestMCPTool_Name(t *testing.T) {
+	t.Parallel()
 	cfg := config.MCPServerConfig{}
 	tool := newMCPTool("my-server", cfg, nil)
 	if tool.Name() != "my_server" {
@@ -17,6 +18,7 @@ func TestMCPTool_Name(t *testing.T) {
 }
 
 func TestMCPTool_Execute_MissingMethod(t *testing.T) {
+	t.Parallel()
 	cfg := config.MCPServerConfig{}
 	tool := newMCPTool("test-srv", cfg, nil)
 	_, err := tool.Execute(context.Background(), "session1", map[string]any{})

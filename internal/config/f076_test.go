@@ -6,6 +6,7 @@ import (
 )
 
 func TestMaxToolResultBytes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -30,6 +31,7 @@ func TestMaxToolResultBytes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			cfg, err := decode(bytes.NewReader([]byte(tt.input)))
 			if err != nil {
 				t.Fatalf("decode failed: %v", err)
@@ -43,6 +45,7 @@ func TestMaxToolResultBytes(t *testing.T) {
 }
 
 func TestMaxToolResultBytes_Disabled(t *testing.T) {
+	t.Parallel()
 	// The specification says "Zero or negative value disables truncation."
 	// However, the current implementation of MaxToolResultBytes() in config.go is:
 	// if c.Agents.Defaults.MaxToolResultBytes != 0 {

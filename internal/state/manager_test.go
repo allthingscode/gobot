@@ -9,6 +9,7 @@ import (
 )
 
 func TestManager_Init(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{StateDir: tempDir}
 
@@ -26,6 +27,7 @@ func TestManager_Init(t *testing.T) {
 }
 
 func TestManager_CreateAndLoad(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -58,6 +60,7 @@ func TestManager_CreateAndLoad(t *testing.T) {
 }
 
 func TestManager_SaveCheckpoint(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -92,6 +95,7 @@ func TestManager_SaveCheckpoint(t *testing.T) {
 }
 
 func TestManager_UpdateStatus(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -113,6 +117,7 @@ func TestManager_UpdateStatus(t *testing.T) {
 }
 
 func TestManager_LoadWithRecovery(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -140,6 +145,7 @@ func TestManager_LoadWithRecovery(t *testing.T) {
 }
 
 func TestManager_Archive(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
@@ -169,6 +175,7 @@ func TestManager_Archive(t *testing.T) {
 }
 
 func TestManager_ListActive(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	config := ManagerConfig{
 		StateDir:    tempDir,
