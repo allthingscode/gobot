@@ -12,6 +12,7 @@ import (
 )
 
 func TestWebSearchTool(t *testing.T) {
+	t.Parallel()
 	// Mock Google Search API
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

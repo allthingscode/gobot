@@ -30,6 +30,7 @@ linters:
         - unused
         - gocritic
         - misspell
+        - tparallel
 
 run:
     modules-download-mode: readonly

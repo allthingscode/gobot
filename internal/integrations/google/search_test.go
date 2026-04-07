@@ -10,6 +10,7 @@ import (
 )
 
 func TestExecuteSearch(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")

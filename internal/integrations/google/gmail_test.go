@@ -14,6 +14,7 @@ import (
 )
 
 func TestGmailSearchAndRead(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 
 	// Mock List/Search
