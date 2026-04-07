@@ -76,7 +76,7 @@ func TestDocLint_MissingDocComment(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for missing doc comment")
 	}
-	if want := "ExportedFunc"; !contains(out, want) {
+	if want := "ExportedFunc"; !strings.Contains(out, want) {
 		t.Errorf("output should mention %q, got:\n%s", want, out)
 	}
 }
@@ -123,7 +123,7 @@ func TestDocLint_StaleReference(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for stale reference")
 	}
-	if want := "nonexistent.go"; !contains(out, want) {
+	if want := "nonexistent.go"; !strings.Contains(out, want) {
 		t.Errorf("output should mention %q, got:\n%s", want, out)
 	}
 }
@@ -137,7 +137,7 @@ func TestDocLint_UnindexedItem(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for unindexed backlog item")
 	}
-	if want := "not referenced in BACKLOG.md"; !contains(out, want) {
+	if want := "not referenced in BACKLOG.md"; !strings.Contains(out, want) {
 		t.Errorf("output should mention unindexed item, got:\n%s", out)
 	}
 }
@@ -153,7 +153,7 @@ func TestDocLint_InvalidStatus(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for invalid status")
 	}
-	if want := "invalid status"; !contains(out, want) {
+	if want := "invalid status"; !strings.Contains(out, want) {
 		t.Errorf("output should mention invalid status, got:\n%s", out)
 	}
 }
@@ -185,7 +185,7 @@ func TestDocLint_InvalidHandoffJSON(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for invalid handoff.json")
 	}
-	if want := "invalid JSON"; !contains(out, want) {
+	if want := "invalid JSON"; !strings.Contains(out, want) {
 		t.Errorf("output should mention invalid JSON, got:\n%s", out)
 	}
 }
@@ -199,7 +199,7 @@ func TestDocLint_MissingHandoffField(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for missing required fields")
 	}
-	if want := "missing required field"; !contains(out, want) {
+	if want := "missing required field"; !strings.Contains(out, want) {
 		t.Errorf("output should mention missing field, got:\n%s", out)
 	}
 }
@@ -222,5 +222,3 @@ func TestDocLint_ValidHandoff(t *testing.T) {
 		t.Errorf("valid handoff should pass, got error: %v\noutput:\n%s", err, out)
 	}
 }
-
-func contains(s, sub string) bool { return strings.Contains(s, sub) }

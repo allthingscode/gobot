@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,7 +40,7 @@ func TestParityCheck_NoReferences(t *testing.T) {
 	if err != nil {
 		t.Errorf("should pass when file is missing, got: %v\noutput:\n%s", err, out)
 	}
-	if want := "not found"; !contains(out, want) {
+	if want := "not found"; !strings.Contains(out, want) {
 		t.Errorf("expected skip message, got:\n%s", out)
 	}
 }
@@ -67,7 +68,7 @@ func TestParityCheck_TagMissing(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for missing tag")
 	}
-	if want := "MISSING_TAG"; !contains(out, want) {
+	if want := "MISSING_TAG"; !strings.Contains(out, want) {
 		t.Errorf("output should mention MISSING_TAG, got:\n%s", out)
 	}
 }
@@ -84,7 +85,7 @@ func TestParityCheck_NoSubstringMatch(t *testing.T) {
 	if err == nil {
 		t.Error("FOO should not match FOOBAR (substring)")
 	}
-	if want := "FOO"; !contains(out, want) {
+	if want := "FOO"; !strings.Contains(out, want) {
 		t.Errorf("output should list FOO as missing, got:\n%s", out)
 	}
 }
@@ -117,10 +118,10 @@ func TestParityCheck_MultipleTags(t *testing.T) {
 	if err == nil {
 		t.Error("expected failure for missing GAMMA")
 	}
-	if want := "GAMMA"; !contains(out, want) {
+	if want := "GAMMA"; !strings.Contains(out, want) {
 		t.Errorf("output should mention GAMMA, got:\n%s", out)
 	}
-	if contains(out, "ALPHA") || contains(out, "BETA") {
+	if strings.Contains(out, "ALPHA") || strings.Contains(out, "BETA") {
 		t.Errorf("output should not list found tags ALPHA/BETA, got:\n%s", out)
 	}
 }
