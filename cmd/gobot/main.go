@@ -606,18 +606,27 @@ func cmdRun() *cobra.Command {
 			slog.Info("gobot: signal received, draining goroutines...")
 
 			// F-074: Drain goroutines with 30-second timeout
-			done := make(chan struct{})
-			go func() { wg.Wait(); close(done) }()
-			select {
-			case <-done:
-				slog.Info("gobot: drain complete, proceeding to shutdown")
-			case <-time.After(30 * time.Second):
-				slog.Warn("gobot: drain timed out after 30s — forcing exit")
-			}
+			drainGoroutines(&wg, 30*time.Second)
 
 			return nil
 
 		},
+	}
+}
+
+// drainGoroutines waits for the WaitGroup to complete or times out.
+// F-074: Drain goroutines with configurable timeout.
+func drainGoroutines(wg *sync.WaitGroup, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		slog.Info("gobot: drain complete, proceeding to shutdown")
+	case <-time.After(timeout):
+		slog.Warn("gobot: drain timed out forcing exit", "timeout", timeout)
 	}
 }
 
