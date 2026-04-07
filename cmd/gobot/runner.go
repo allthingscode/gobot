@@ -303,7 +303,11 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 					slog.String("params_hash", paramsHash),
 					slog.Any("err", execErr),
 				)
-				result = fmt.Sprintf("Error: %v", execErr)
+				if result != "" {
+					result = fmt.Sprintf("%s\nError: %v", result, execErr)
+				} else {
+					result = fmt.Sprintf("Error: %v", execErr)
+				}
 			} else if r.hooks != nil && !skipExec {
 				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.
 				result = r.hooks.RunPostTool(ctx, name, result)

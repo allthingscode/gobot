@@ -557,3 +557,72 @@ func (m *failTool) Declaration() provider.ToolDeclaration { return provider.Tool
 func (m *failTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return "", fmt.Errorf("simulated failure")
 }
+
+type failWithOutputTool struct{}
+
+func (f *failWithOutputTool) Name() string { return "fail_with_output" }
+func (f *failWithOutputTool) Description() string { return "fails but returns output" }
+func (f *failWithOutputTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: "fail_with_output"}
+}
+func (f *failWithOutputTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+	return "important diagnostic output", fmt.Errorf("exit status 1")
+}
+
+func TestRunner_PreservesOutputOnError(t *testing.T) {
+	mock := &mockProvider{
+		responses: []*provider.ChatResponse{
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []map[string]any{
+						{"name": "fail_with_output", "args": map[string]any{}},
+					},
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role:    agentctx.RoleAssistant,
+					Content: &agentctx.MessageContent{Str: strPtr("done")},
+				},
+			},
+		},
+	}
+
+	r := &geminiRunner{
+		prov:              mock,
+		model:             "mock-model",
+		maxToolIterations: 10,
+		limiter:           rate.NewLimiter(rate.Inf, 1),
+		breaker:           resilience.New("mock", 5, time.Minute, time.Second),
+		tools: []Tool{
+			&failWithOutputTool{},
+		},
+	}
+
+	_, messages, err := r.Run(context.Background(), "test-session", nil)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Find the tool message
+	var toolMsg *agentctx.StrategicMessage
+	for _, m := range messages {
+		if m.Role == agentctx.RoleTool {
+			toolMsg = &m
+			break
+		}
+	}
+
+	if toolMsg == nil {
+		t.Fatal("Tool message not found in history")
+	}
+
+	content := *toolMsg.Content.Str
+	if !strings.Contains(content, "important diagnostic output") {
+		t.Errorf("Tool result lost diagnostic output, got: %q", content)
+	}
+	if !strings.Contains(content, "Error: exit status 1") {
+		t.Errorf("Tool result missing error message, got: %q", content)
+	}
+}
