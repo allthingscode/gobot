@@ -17,6 +17,8 @@ const memoryDBFileName = "memory.db"
 
 // MemoryStore is a SQLite FTS5-backed long-term memory index.
 // It indexes agent responses by session key and supports full-text search.
+//
+// revive:disable:exported
 type MemoryStore struct {
 	db *sql.DB
 }

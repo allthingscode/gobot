@@ -41,6 +41,7 @@ func (s *MCPServer) start(ctx context.Context) error {
 		return nil // already running
 	}
 
+	// #nosec G204
 	cmd := exec.Command(s.cfg.Command, s.cfg.Args...)
 	cmd.Env = os.Environ()
 	for k, v := range s.env {

@@ -20,7 +20,7 @@ func NewStateHook(manager *state.Manager) *StateHook {
 }
 
 // OnWorkflowStart creates initial checkpoint when workflow starts.
-func (h *StateHook) OnWorkflowStart(ctx context.Context, id state.WorkflowID, data json.RawMessage) (*state.WorkflowState, error) {
+func (h *StateHook) OnWorkflowStart(_ context.Context, id state.WorkflowID, data json.RawMessage) (*state.WorkflowState, error) {
 	wfState, err := h.manager.CreateWorkflow(id, data)
 	if err != nil {
 		return nil, fmt.Errorf("creating workflow state: %w", err)
@@ -35,7 +35,7 @@ func (h *StateHook) OnWorkflowStart(ctx context.Context, id state.WorkflowID, da
 }
 
 // OnStepComplete checkpoints after each subagent step completes.
-func (h *StateHook) OnStepComplete(ctx context.Context, id state.WorkflowID, stepData json.RawMessage) error {
+func (h *StateHook) OnStepComplete(_ context.Context, id state.WorkflowID, stepData json.RawMessage) error {
 	// Load current state.
 	wfState, err := h.manager.LoadWorkflow(id)
 	if err != nil {

@@ -62,7 +62,7 @@ func TestListDirectory(t *testing.T) {
 
 	// Create a dummy structure
 	_ = os.Mkdir(filepath.Join(tmpDir, "subdir"), 0755)
-	_ = os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("test"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("test"), 0600)
 
 	tests := []struct {
 		name          string
@@ -113,12 +113,12 @@ func TestReadLogFile(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "test.log")
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	content := "log content"
-	_ = os.WriteFile(logPath, append(bom, []byte(content)...), 0644)
+	_ = os.WriteFile(logPath, append(bom, []byte(content)...), 0600)
 
 	// Create a large log file
 	largeLogPath := filepath.Join(tmpDir, "large.log")
 	largeContent := strings.Repeat("A", 1000)
-	_ = os.WriteFile(largeLogPath, []byte(largeContent), 0644)
+	_ = os.WriteFile(largeLogPath, []byte(largeContent), 0600)
 
 	tests := []struct {
 		name          string

@@ -24,10 +24,14 @@ if ! go vet -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
     exit 1
 fi
 
-if ! golangci-lint run --modules-download-mode=readonly > "$TEMP_LOG" 2>&1; then
-    echo "ERROR: golangci-lint failed"
-    cat "$TEMP_LOG"
-    exit 1
+if command -v golangci-lint > /dev/null 2>&1; then
+    if ! golangci-lint run --modules-download-mode=readonly > "$TEMP_LOG" 2>&1; then
+        echo "ERROR: golangci-lint failed"
+        cat "$TEMP_LOG"
+        exit 1
+    fi
+else
+    echo "WARN: golangci-lint not found locally; CI will enforce lint"
 fi
 
 if ! go test -mod=readonly ./... > "$TEMP_LOG" 2>&1; then

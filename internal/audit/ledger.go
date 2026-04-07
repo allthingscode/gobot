@@ -14,6 +14,8 @@ import (
 const auditDBFileName = "audit.db"
 
 // AuditEntry is one side-effect event to record.
+//
+// revive:disable:exported
 type AuditEntry struct {
 	SessionID string
 	Actor     string // "agent" or "user"
@@ -22,6 +24,8 @@ type AuditEntry struct {
 }
 
 // AuditRecord is a persisted entry including hash chain fields.
+//
+// revive:disable:exported
 type AuditRecord struct {
 	ID        int64
 	Timestamp string
@@ -35,6 +39,8 @@ type AuditRecord struct {
 
 // AuditLedger is an append-only SQLite-backed audit log with a SHA-256 hash chain.
 // Create via NewAuditLedger; close via Close when done.
+//
+// revive:disable:exported
 type AuditLedger struct {
 	db *sql.DB
 }

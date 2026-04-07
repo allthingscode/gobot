@@ -478,7 +478,7 @@ func TestGetCheckpointManager_Error(t *testing.T) {
 
 		// Block workspace dir creation by placing a file at that path.
 		blocker := root + "/workspace"
-		if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 			t.Fatalf("setup: %v", err)
 		}
 		m, err := GetCheckpointManager(root)
@@ -562,7 +562,9 @@ func TestLoadLatest_ChecksumMismatch(t *testing.T) {
 	}
 
 	// Corrupt the stored checksum.
-	m.db.Exec(`UPDATE checkpoints SET checksum = ? WHERE thread_id = ?`, "deadbeef", "t1")
+	if _, err := m.db.Exec(`UPDATE checkpoints SET checksum = ? WHERE thread_id = ?`, "deadbeef", "t1"); err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
 
 	_, err := m.LoadLatest("t1")
 	if err == nil {
@@ -576,8 +578,10 @@ func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	// Insert a legacy checkpoint row without the checksum column (defaults to NULL).
-	m.db.Exec(`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
-		"t1", 1, `[{"role":"user","content":"hi"}]`)
+	if _, err := m.db.Exec(`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
+		"t1", 1, `[{"role":"user","content":"hi"}]`); err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
 
 	snap, err := m.LoadLatest("t1")
 	if err != nil {

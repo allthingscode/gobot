@@ -43,7 +43,7 @@ func TestOpenDB(t *testing.T) {
 		root := t.TempDir()
 		blocker := filepath.Join(root, "workspace")
 		// Create a regular file where the directory should be.
-		if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 			t.Fatalf("setup: %v", err)
 		}
 		_, err := openDB(root)

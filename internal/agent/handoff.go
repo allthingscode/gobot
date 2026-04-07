@@ -33,7 +33,7 @@ type HandoffTicket struct {
 // If a handoff.json is found, it is read, its prompt is appended to
 // the response, and the file is deleted to prevent duplicate handoffs.
 func NewHandoffHook(storageRoot string) PostDispatchFn {
-	return func(ctx context.Context, sessionKey string, response string) string {
+	return func(_ context.Context, sessionKey string, response string) string {
 		handoffPath := filepath.Join(storageRoot, ".private", "session", "handoff.json")
 
 		data, err := os.ReadFile(handoffPath)

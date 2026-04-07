@@ -28,7 +28,8 @@ func TestRetryIntegration_5xxFailures(t *testing.T) {
 	}
 
 	err := Do(context.Background(), cfg, IsRetryable, func() error {
-		resp, err := http.Get(fs.URL)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, nil)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -63,7 +64,8 @@ func TestRetryIntegration_NoRetryOn4xx(t *testing.T) {
 	}
 
 	err := Do(context.Background(), cfg, IsRetryable, func() error {
-		resp, err := http.Get(fs.URL)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, nil)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -107,7 +109,8 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 
 	start := time.Now()
 	err := Do(context.Background(), cfg, IsRetryable, func() error {
-		resp, err := http.Get(fs.URL)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, nil)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -156,7 +159,8 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 	// First call: 2 attempts, both fail. CB sees 1 failure.
 	_ = cb.Execute(func() error {
 		return Do(context.Background(), cfg, IsRetryable, func() error {
-			resp, err := http.Get(fs.URL)
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, nil)
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				return err
 			}
@@ -171,7 +175,8 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 	// Second call: 2 attempts, both fail. CB sees 2nd failure and trips.
 	err := cb.Execute(func() error {
 		return Do(context.Background(), cfg, IsRetryable, func() error {
-			resp, err := http.Get(fs.URL)
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, nil)
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				return err
 			}
@@ -216,7 +221,8 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 	// Fail twice to trip CB
 	for i := 0; i < 2; i++ {
 		_ = cb.Execute(func() error {
-			_, err := http.Get(fs.URL)
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, nil)
+			_, err := http.DefaultClient.Do(req)
 			return err
 		})
 	}
@@ -237,9 +243,10 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 	// CB should be in half-open state now (internally in gobreaker)
 	// Execute one successful call to close it
 	err := cb.Execute(func() error {
-		resp, err := http.Get(fs.URL)
-		if err != nil {
-			return err
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, nil)
+		resp, innerErr := http.DefaultClient.Do(req)
+		if innerErr != nil {
+			return innerErr
 		}
 		resp.Body.Close()
 		return nil

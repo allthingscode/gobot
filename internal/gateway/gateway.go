@@ -47,8 +47,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	go func() {
@@ -102,7 +103,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("OK"))
 }

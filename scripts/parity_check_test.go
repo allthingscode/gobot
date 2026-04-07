@@ -10,6 +10,7 @@ import (
 // runParityCheck runs the parity_check script in the given directory.
 func runParityCheck(t *testing.T, dir string) (string, error) {
 	t.Helper()
+	// #nosec G204
 	cmd := exec.Command("go", "run", filepath.Join(srcDir, "parity_check.go"))
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()

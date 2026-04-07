@@ -44,7 +44,7 @@ func TestGetJournalContinuity_ReturnsContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := "# Today\n\n### CONSOLIDATION [10:00:00]\nfirst entry\n"
-	if err := os.WriteFile(journalPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(journalPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,7 +65,7 @@ func TestGetJournalContinuity_TruncatesToMaxChars(t *testing.T) {
 	}
 	// Write a 200-char file; maxChars=50 should truncate to the end.
 	content := "# Journal\n\n" + strings.Repeat("abcdefghij\n", 18)
-	if err := os.WriteFile(journalPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(journalPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,7 +85,7 @@ func TestGetJournalContinuity_NoNewlineInTruncatedPortion(t *testing.T) {
 	// Header, then a long run of chars with no newline at the end.
 	// maxChars=20 will grab the last 20 bytes of "xxxx...xxxx" — no newline there.
 	content := "# Journal\n\n" + strings.Repeat("x", 200)
-	if err := os.WriteFile(journalPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(journalPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +103,7 @@ func TestGetJournalContinuity_EmptyFileReturnsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Create an empty file.
-	if err := os.WriteFile(journalPath, []byte{}, 0o644); err != nil {
+	if err := os.WriteFile(journalPath, []byte{}, 0o600); err != nil {
 		t.Fatal(err)
 	}
 

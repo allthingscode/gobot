@@ -62,47 +62,47 @@ func TestRedactString(t *testing.T) {
 }
 
 func TestRedactingHandler_RedactsMessage(t *testing.T) {
-	cap := &captureHandler{buf: &bytes.Buffer{}}
-	h := NewRedactingHandler(cap)
+	capture := &captureHandler{buf: &bytes.Buffer{}}
+	h := NewRedactingHandler(capture)
 	logger := slog.New(h)
 	logger.Info("secret=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456")
-	if strings.Contains(cap.buf.String(), "AIzaSy") {
-		t.Errorf("log output contains unredacted key: %s", cap.buf.String())
+	if strings.Contains(capture.buf.String(), "AIzaSy") {
+		t.Errorf("log output contains unredacted key: %s", capture.buf.String())
 	}
-	if !strings.Contains(cap.buf.String(), "[REDACTED]") {
-		t.Errorf("log output missing [REDACTED]: %s", cap.buf.String())
+	if !strings.Contains(capture.buf.String(), "[REDACTED]") {
+		t.Errorf("log output missing [REDACTED]: %s", capture.buf.String())
 	}
 }
 
 func TestRedactingHandler_RedactsAttrValue(t *testing.T) {
-	cap := &captureHandler{buf: &bytes.Buffer{}}
-	h := NewRedactingHandler(cap)
+	capture := &captureHandler{buf: &bytes.Buffer{}}
+	h := NewRedactingHandler(capture)
 	logger := slog.New(h)
 	logger.Info("connecting", "token", "ya29.supersecrettoken123456")
-	if strings.Contains(cap.buf.String(), "ya29.") {
-		t.Errorf("log output contains unredacted OAuth token: %s", cap.buf.String())
+	if strings.Contains(capture.buf.String(), "ya29.") {
+		t.Errorf("log output contains unredacted OAuth token: %s", capture.buf.String())
 	}
 }
 
 func TestRedactingHandler_PassesThroughCleanLog(t *testing.T) {
-	cap := &captureHandler{buf: &bytes.Buffer{}}
-	h := NewRedactingHandler(cap)
+	capture := &captureHandler{buf: &bytes.Buffer{}}
+	h := NewRedactingHandler(capture)
 	logger := slog.New(h)
 	logger.Info("user logged in", "user", "alice")
-	if !strings.Contains(cap.buf.String(), "alice") {
-		t.Errorf("clean value was unexpectedly stripped: %s", cap.buf.String())
+	if !strings.Contains(capture.buf.String(), "alice") {
+		t.Errorf("clean value was unexpectedly stripped: %s", capture.buf.String())
 	}
 }
 
 func TestRedactingHandler_PIIDebugMode(t *testing.T) {
 	t.Setenv("PII_DEBUG_MODE", "1")
-	cap := &captureHandler{buf: &bytes.Buffer{}}
-	h := NewRedactingHandler(cap)
+	capture := &captureHandler{buf: &bytes.Buffer{}}
+	h := NewRedactingHandler(capture)
 	logger := slog.New(h)
 	logger.Info("key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456")
 	// Redaction disabled — original value must be present.
-	if !strings.Contains(cap.buf.String(), "AIzaSy") {
-		t.Errorf("PII_DEBUG_MODE: expected unredacted output, got: %s", cap.buf.String())
+	if !strings.Contains(capture.buf.String(), "AIzaSy") {
+		t.Errorf("PII_DEBUG_MODE: expected unredacted output, got: %s", capture.buf.String())
 	}
 }
 
@@ -116,16 +116,16 @@ func TestNeedsRedaction(t *testing.T) {
 }
 
 func TestRedactingHandler_WithAttrs_RedactsSecret(t *testing.T) {
-	cap := &captureHandler{buf: &bytes.Buffer{}}
-	h := NewRedactingHandler(cap)
+	capture := &captureHandler{buf: &bytes.Buffer{}}
+	h := NewRedactingHandler(capture)
 	// Secret is passed via With(), not via Info() args.
 	logger := slog.New(h).With("token", "ya29.supersecrettoken123456")
 	logger.Info("connecting")
-	if strings.Contains(cap.buf.String(), "ya29.") {
-		t.Errorf("WithAttrs: unredacted token in output: %s", cap.buf.String())
+	if strings.Contains(capture.buf.String(), "ya29.") {
+		t.Errorf("WithAttrs: unredacted token in output: %s", capture.buf.String())
 	}
-	if !strings.Contains(cap.buf.String(), "[REDACTED]") {
-		t.Errorf("WithAttrs: [REDACTED] marker missing from output: %s", cap.buf.String())
+	if !strings.Contains(capture.buf.String(), "[REDACTED]") {
+		t.Errorf("WithAttrs: [REDACTED] marker missing from output: %s", capture.buf.String())
 	}
 }
 

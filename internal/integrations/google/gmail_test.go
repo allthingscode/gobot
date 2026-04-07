@@ -34,7 +34,7 @@ func TestGmailSearchAndRead(t *testing.T) {
 	})
 
 	// Mock Get Message
-	mux.HandleFunc("/messages/msg123", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/messages/msg123", func(w http.ResponseWriter, _ *http.Request) {
 		msg := Message{
 			ID:      "msg123",
 			Snippet: "Hello world snippet",
@@ -61,7 +61,7 @@ func TestGmailSearchAndRead(t *testing.T) {
 		Expiry: time.Now().Add(1 * time.Hour),
 	}
 	tokData, _ := json.Marshal(tok)
-	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0644)
+	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0600)
 
 	svc, err := NewService(tmp)
 	if err != nil {

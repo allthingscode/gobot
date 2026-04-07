@@ -18,7 +18,7 @@ func (f *fakeClock) Now() time.Time {
 	return f.now
 }
 
-func (f *fakeClock) After(d time.Duration) <-chan time.Time {
+func (f *fakeClock) After(_ time.Duration) <-chan time.Time {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// Create a new channel for every call.
@@ -26,7 +26,7 @@ func (f *fakeClock) After(d time.Duration) <-chan time.Time {
 	return f.waiter
 }
 
-func (f *fakeClock) Sleep(d time.Duration) {
+func (f *fakeClock) Sleep(_ time.Duration) {
 	// Not used in the current poll loop.
 }
 

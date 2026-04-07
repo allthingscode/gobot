@@ -92,7 +92,9 @@ func TestIndex(t *testing.T) {
 			}
 
 			var count int
-			store.db.QueryRow(`SELECT count(*) FROM memory_fts`).Scan(&count)
+			if err := store.db.QueryRow(`SELECT count(*) FROM memory_fts`).Scan(&count); err != nil {
+				t.Fatalf("failed to scan count: %v", err)
+			}
 			if tc.wantStored && count != 1 {
 				t.Errorf("want 1 entry in DB, got %d", count)
 			}
@@ -283,7 +285,7 @@ func TestSanitizeFTSQuery(t *testing.T) {
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 func writeFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 // ── CleanupExpired (F-068) ─────────────────────────────────────────────────

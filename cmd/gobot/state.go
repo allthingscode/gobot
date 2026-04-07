@@ -31,7 +31,7 @@ func cmdStateList() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List active workflows",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			manager := state.NewManager(state.DefaultManagerConfig())
 
 			ids, err := manager.ListActive()
@@ -68,7 +68,7 @@ func cmdStateInspect() *cobra.Command {
 		Use:   "inspect [workflow-id]",
 		Short: "Inspect workflow state details",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			id := state.WorkflowID(args[0])
 			manager := state.NewManager(state.DefaultManagerConfig())
 
@@ -104,7 +104,7 @@ func cmdStateRecover() *cobra.Command {
 		Use:   "recover [workflow-id]",
 		Short: "Recover a crashed workflow",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			id := state.WorkflowID(args[0])
 			manager := state.NewManager(state.DefaultManagerConfig())
 			hook := agent.NewStateHook(manager)
@@ -132,7 +132,7 @@ func cmdStateArchive() *cobra.Command {
 		Use:   "archive [workflow-id]",
 		Short: "Archive a completed workflow",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			id := state.WorkflowID(args[0])
 			manager := state.NewManager(state.DefaultManagerConfig())
 

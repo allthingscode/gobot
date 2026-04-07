@@ -28,7 +28,7 @@ func cmdSecretsSet() *cobra.Command {
 		Use:   "set <key> <value>",
 		Short: "Encrypt and store a secret",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -48,7 +48,7 @@ func cmdSecretsGet() *cobra.Command {
 		Use:   "get <key>",
 		Short: "Decrypt and print a secret",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -72,7 +72,7 @@ func cmdSecretsList() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List stored secret keys",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -99,7 +99,7 @@ func cmdSecretsDelete() *cobra.Command {
 		Use:   "delete <key>",
 		Short: "Delete a stored secret",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)

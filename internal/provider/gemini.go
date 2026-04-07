@@ -216,7 +216,7 @@ func (p *GeminiProvider) buildConfig(req ChatRequest) *genai.GenerateContentConf
 	}
 
 	if req.MaxTokens > 0 {
-		cfg.MaxOutputTokens = int32(req.MaxTokens)
+		cfg.MaxOutputTokens = int32(req.MaxTokens) // #nosec G115 - MaxTokens is bounded by application limits
 	}
 
 	if req.Temperature > 0 {
@@ -235,7 +235,7 @@ func (p *GeminiProvider) buildConfig(req ChatRequest) *genai.GenerateContentConf
 				// A simple trick is to marshal/unmarshal
 				data, _ := json.Marshal(t.Parameters)
 				var schema genai.Schema
-				json.Unmarshal(data, &schema)
+				_ = json.Unmarshal(data, &schema)
 				decls[i].Parameters = &schema
 
 				// Fix: genai.Schema.Type is an enum (uppercase), but JSON schema usually lowercase

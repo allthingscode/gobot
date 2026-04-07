@@ -77,7 +77,7 @@ func ShouldReload(currentMtime int64, lastMtime int64, currentSize int64, lastSi
 
 // ResolveRoutableChannel implements the [SILENT] and unroutable channel logic.
 // Ported from resolve_routable_channel in cron_logic.py.
-func ResolveRoutableChannel(p Payload, storageRoot string) (channel string, to string, silent bool) {
+func ResolveRoutableChannel(p Payload, _ string) (channel string, to string, silent bool) {
 	if strings.Contains(p.Message, "[SILENT]") {
 		return "", "", true
 	}

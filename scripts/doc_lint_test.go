@@ -21,7 +21,7 @@ func init() {
 // combined stdout+stderr output and any error.
 func runDocLint(t *testing.T, dir string) (string, error) {
 	t.Helper()
-	cmd := exec.Command("go", "run", filepath.Join(srcDir, "doc_lint.go"))
+	cmd := exec.Command("go", "run", filepath.Join(srcDir, "doc_lint.go")) // #nosec G204 - test tool, not a security risk
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -53,7 +53,7 @@ func setupTempProject(t *testing.T) string {
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

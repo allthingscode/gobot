@@ -26,7 +26,7 @@ func writeJobsJSON(t *testing.T, dir string, jobs []Job) string {
 		t.Fatalf("encode jobs: %v", err)
 	}
 	path := filepath.Join(dir, "jobs.json")
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatalf("write jobs.json: %v", err)
 	}
 	return path
@@ -41,7 +41,7 @@ type concDispatcher struct {
 	failIDs map[string]bool
 }
 
-func (m *concDispatcher) Dispatch(ctx context.Context, p Payload) error {
+func (m *concDispatcher) Dispatch(_ context.Context, p Payload) error {
 	if m.delay > 0 {
 		time.Sleep(m.delay)
 	}
@@ -59,7 +59,7 @@ type atomicCountDispatcher struct {
 	counter *atomic.Int64
 }
 
-func (a *atomicCountDispatcher) Dispatch(ctx context.Context, p Payload) error {
+func (a *atomicCountDispatcher) Dispatch(_ context.Context, _ Payload) error {
 	a.counter.Add(1)
 	return nil
 }

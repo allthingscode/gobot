@@ -49,7 +49,7 @@ Returns exit code:
 
 Can be used in CI/CD pipelines to verify configuration before deployment.`,
 		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return &exitCodeError{code: 1, err: fmt.Errorf("failed to load config: %w", err)}
@@ -86,7 +86,7 @@ Can be used in CI/CD pipelines to verify configuration before deployment.`,
 }
 
 // reportConfigValidation is a helper for cmdRun to keep it clean.
-func reportConfigValidation(cfg *config.Config, stderr io.Writer) error {
+func reportConfigValidation(cfg *config.Config, _ io.Writer) error {
 	if err := config.ReportValidation(cfg); err != nil {
 		return err
 	}

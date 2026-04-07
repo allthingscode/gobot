@@ -36,9 +36,9 @@ func TestCompleteTask_Success(t *testing.T) {
 		if r.Method != http.MethodPatch {
 			t.Errorf("want PATCH, got %s", r.Method)
 		}
-		json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer srv.Close()
 
@@ -68,9 +68,13 @@ func TestUpdateTask_NoFields(t *testing.T) {
 func TestUpdateTask_TitleOnly(t *testing.T) {
 	var gotBody map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotBody)
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		if _, err := w.Write([]byte("{}")); err != nil {
+			t.Fatal(err)
+		}
 	}))
 	defer srv.Close()
 

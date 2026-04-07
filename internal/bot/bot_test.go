@@ -115,11 +115,11 @@ type mockAPIWithCircuit struct {
 	mu       sync.Mutex
 }
 
-func (m *mockAPIWithCircuit) Updates(ctx context.Context, timeout int) (<-chan InboundMessage, error) {
+func (m *mockAPIWithCircuit) Updates(_ context.Context, _ int) (<-chan InboundMessage, error) {
 	m.recordCall()
 	return nil, errors.New("circuit breaker: open")
 }
-func (m *mockAPIWithCircuit) Callbacks(ctx context.Context) (<-chan InboundCallback, error) {
+func (m *mockAPIWithCircuit) Callbacks(_ context.Context) (<-chan InboundCallback, error) {
 	m.recordCall()
 	return nil, errors.New("circuit breaker: open")
 }
@@ -133,11 +133,11 @@ func (m *mockAPIWithCircuit) recordCall() {
 	}
 	m.lastCall = now
 }
-func (m *mockAPIWithCircuit) Send(ctx context.Context, msg OutboundMessage) error { return nil }
-func (m *mockAPIWithCircuit) SendWithButtons(ctx context.Context, msg OutboundMessage, _ [][]Button) error {
+func (m *mockAPIWithCircuit) Send(_ context.Context, _ OutboundMessage) error { return nil }
+func (m *mockAPIWithCircuit) SendWithButtons(_ context.Context, _ OutboundMessage, _ [][]Button) error {
 	return nil
 }
-func (m *mockAPIWithCircuit) Typing(ctx context.Context, chatID, threadID int64) func() {
+func (m *mockAPIWithCircuit) Typing(_ context.Context, _, _ int64) func() {
 	return func() {}
 }
 func (m *mockAPIWithCircuit) Stop() {}
@@ -260,7 +260,7 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 		cancel()
 	}()
 
-	bot.Run(ctx)
+	_ = bot.Run(ctx)
 
 	calls := handler.getCalls()
 	if len(calls) != 2 {
@@ -311,7 +311,7 @@ func TestBot_Run_NoReplyForEmptyResponse(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		cancel()
 	}()
-	bot.Run(ctx)
+	_ = bot.Run(ctx)
 
 	if sent := api.getSent(); len(sent) != 0 {
 		t.Errorf("expected no sends for empty response, got %d", len(sent))
@@ -338,7 +338,7 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
-	bot.Run(ctx)
+	_ = bot.Run(ctx)
 
 	if customHandler.callCount() != 2 {
 		t.Errorf("expected 2 handler calls, got %d", customHandler.callCount())
@@ -374,7 +374,7 @@ func TestBot_Run_RetriesOnTransientError(t *testing.T) {
 		}
 	}()
 
-	bot.Run(ctx)
+	_ = bot.Run(ctx)
 
 	if calls := handler.getCalls(); len(calls) == 0 {
 		t.Error("expected at least one handler call after retry")
@@ -424,7 +424,7 @@ func TestBot_Run_ThreadAwareSessionKey(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		cancel()
 	}()
-	bot.Run(ctx)
+	_ = bot.Run(ctx)
 
 	calls := handler.getCalls()
 	if len(calls) != 1 || calls[0] != "telegram:500:12" {
@@ -472,7 +472,7 @@ func TestBot_Run_BackoffOnCircuitOpen(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	bot.Run(ctx)
+	_ = bot.Run(ctx)
 	elapsed := time.Since(start)
 
 	if elapsed < 5*time.Second {

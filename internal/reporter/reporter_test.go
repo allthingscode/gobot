@@ -58,7 +58,7 @@ func TestFallbackNotify(t *testing.T) {
 			setup: func(storageRoot string) {
 				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
 				_ = os.MkdirAll(filepath.Dir(notifFile), 0755)
-				_ = os.WriteFile(notifFile, []byte("# Strategic Notifications (Fallback)\n"), 0644)
+				_ = os.WriteFile(notifFile, []byte("# Strategic Notifications (Fallback)\n"), 0600)
 			},
 			wantRet: "Gmail unavailable (network_error). Report saved to:",
 			checkFile: func(t *testing.T, storageRoot string) {

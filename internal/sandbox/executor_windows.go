@@ -47,7 +47,7 @@ func (e *winExecutor) Run(ctx context.Context, name string, args []string) (stri
 	if err != nil {
 		return "", fmt.Errorf("sandbox: CreateJobObject: %w", err)
 	}
-	defer windows.CloseHandle(job)
+	defer func() { _ = windows.CloseHandle(job) }()
 
 	if err := applyJobLimits(job, e.cfg); err != nil {
 		return "", fmt.Errorf("sandbox: applyJobLimits: %w", err)
@@ -85,12 +85,17 @@ func (e *winExecutor) Run(ctx context.Context, name string, args []string) (stri
 	}()
 
 	// Open a handle to the child process by PID and assign it to the Job Object.
-	ph, err := windows.OpenProcess(windows.PROCESS_ALL_ACCESS, false, uint32(cmd.Process.Pid))
+	pid := cmd.Process.Pid
+	if pid < 0 {
+		_ = cmd.Process.Kill()
+		return "", fmt.Errorf("sandbox: invalid PID: %d", pid)
+	}
+	ph, err := windows.OpenProcess(windows.PROCESS_ALL_ACCESS, false, uint32(pid)) // #nosec G115
 	if err != nil {
 		_ = cmd.Process.Kill()
 		return "", fmt.Errorf("sandbox: OpenProcess: %w", err)
 	}
-	defer windows.CloseHandle(ph)
+	defer func() { _ = windows.CloseHandle(ph) }()
 
 	if err := windows.AssignProcessToJobObject(job, ph); err != nil {
 		_ = cmd.Process.Kill()
@@ -98,7 +103,8 @@ func (e *winExecutor) Run(ctx context.Context, name string, args []string) (stri
 	}
 
 	// Find the main thread of the child process and resume it.
-	if err := resumeMainThread(uint32(cmd.Process.Pid)); err != nil {
+	// #nosec G115 - PID is checked to be non-negative.
+	if err := resumeMainThread(uint32(pid)); err != nil {
 		_ = cmd.Process.Kill()
 		return "", fmt.Errorf("sandbox: resumeMainThread: %w", err)
 	}
@@ -147,7 +153,7 @@ func resumeMainThread(pid uint32) error {
 	if err != nil {
 		return fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
 	}
-	defer windows.CloseHandle(snap)
+	defer func() { _ = windows.CloseHandle(snap) }()
 
 	var te windows.ThreadEntry32
 	te.Size = uint32(unsafe.Sizeof(te))
@@ -160,7 +166,7 @@ func resumeMainThread(pid uint32) error {
 			if err != nil {
 				return fmt.Errorf("OpenThread: %w", err)
 			}
-			defer windows.CloseHandle(th)
+			defer func() { _ = windows.CloseHandle(th) }()
 			if _, err := windows.ResumeThread(th); err != nil {
 				return fmt.Errorf("ResumeThread: %w", err)
 			}

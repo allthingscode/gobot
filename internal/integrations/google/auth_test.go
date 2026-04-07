@@ -32,11 +32,13 @@ func TestBearerToken_ValidNotExpired(t *testing.T) {
 }
 
 func TestBearerToken_ExpiredRefreshes(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "new-token",
 			"expires_in":   3600,
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}))
 	defer srv.Close()
 
@@ -85,7 +87,9 @@ func TestAPIGet_Success(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
 			t.Errorf("want Authorization: Bearer tok, got %q", r.Header.Get("Authorization"))
 		}
-		json.NewEncoder(w).Encode(map[string]string{"id": "evt1"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"id": "evt1"}); err != nil {
+			t.Fatal(err)
+		}
 	}))
 	defer srv.Close()
 
@@ -101,7 +105,7 @@ func TestAPIGet_Success(t *testing.T) {
 }
 
 func TestAPIGet_HTTPError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":{"message":"not found"}}`, http.StatusNotFound)
 	}))
 	defer srv.Close()
@@ -117,7 +121,7 @@ func TestAPIPost_Success(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("want POST, got %s", r.Method)
 		}
-		json.NewEncoder(w).Encode(map[string]string{"id": "new-id-123"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "new-id-123"})
 	}))
 	defer srv.Close()
 
@@ -134,7 +138,7 @@ func TestAPIPost_Success(t *testing.T) {
 }
 
 func TestAPIPost_HTTPError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 	}))
 	defer srv.Close()

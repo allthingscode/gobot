@@ -1,6 +1,7 @@
 package strategic_test
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -137,7 +138,7 @@ func TestCLIXMLStripper_PropagatesToolError(t *testing.T) {
 	cb := strategic.CLIXMLStripper()
 	toolErr := fmt.Errorf("tool failed")
 	result, err := cb(nil, stubTool{"echo_tool"}, nil, nil, toolErr)
-	if err != toolErr {
+	if !errors.Is(err, toolErr) {
 		t.Errorf("expected tool error to propagate, got %v", err)
 	}
 	if result != nil {

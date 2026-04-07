@@ -85,7 +85,7 @@ func TestTruncate_RemovesFile(t *testing.T) {
 	tempDir := t.TempDir()
 	journalPath := filepath.Join(tempDir, "to-truncate.journal")
 
-	if err := os.WriteFile(journalPath, []byte("data"), 0644); err != nil {
+	if err := os.WriteFile(journalPath, []byte("data"), 0600); err != nil {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
@@ -102,12 +102,12 @@ func TestRecoverWorkflow(t *testing.T) {
 	tempDir := t.TempDir()
 
 	journal, _ := OpenJournal(tempDir, "wf-recover")
-	journal.Append(JournalEntry{
+	_ = journal.Append(JournalEntry{
 		Timestamp: time.Now(),
 		Operation: "status_change",
 		Payload:   json.RawMessage(`{"status": "running"}`),
 	})
-	journal.Append(JournalEntry{
+	_ = journal.Append(JournalEntry{
 		Timestamp: time.Now(),
 		Operation: "data_update",
 		Payload:   json.RawMessage(`{"progress": 50}`),
@@ -125,7 +125,7 @@ func TestRecoverWorkflow(t *testing.T) {
 	}
 
 	var data map[string]interface{}
-	json.Unmarshal(state.Data, &data)
+	_ = json.Unmarshal(state.Data, &data)
 	if data["progress"] != float64(50) {
 		t.Errorf("Data progress = %v, want 50", data["progress"])
 	}

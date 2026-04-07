@@ -19,7 +19,8 @@ type delayedRunner struct {
 	calls    int
 }
 
-func (r *delayedRunner) RunText(_ context.Context, sessionKey, prompt string, _ string) (string, error) {
+func (r *delayedRunner) RunText(_ context.Context, _ string, _ string, _ string) (string, error) {
+
 	return r.response, nil
 }
 

@@ -254,7 +254,9 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.WriteString(content)
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
 	f.Close()
 
 	cfg, err := LoadFrom(f.Name())
@@ -291,7 +293,7 @@ func TestDecode_OnlyBOM(t *testing.T) {
 	}
 }
 
-func TestLoad_DoesNotPanic(t *testing.T) {
+func TestLoad_DoesNotPanic(_ *testing.T) {
 	_, _ = Load()
 }
 

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -64,7 +65,7 @@ type CheckResult struct {
 // allowing the caller to return the cached result.
 // Returns CheckResult with HashMismatch=true if the key exists but params don't match
 // (caller should return an error).
-func (s *IdempotencyStore) Check(key, toolName, paramsHash string) (CheckResult, error) {
+func (s *IdempotencyStore) Check(key, _ string, paramsHash string) (CheckResult, error) {
 	var storedHash, storedResult string
 	var createdAt string
 
@@ -74,7 +75,7 @@ func (s *IdempotencyStore) Check(key, toolName, paramsHash string) (CheckResult,
 		WHERE key = ?
 	`, key).Scan(&storedHash, &storedResult, &createdAt)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// Key not found — caller should execute the tool.
 		return CheckResult{Found: false}, nil
 	}

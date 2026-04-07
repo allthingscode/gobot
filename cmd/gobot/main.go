@@ -81,7 +81,7 @@ func cmdVersion() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print gobot version and build info",
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Printf("gobot version %s\n", version)
 			fmt.Printf("  commit: %s\n", commitHash)
 			fmt.Printf("  built:  %s\n", buildTime)
@@ -95,7 +95,7 @@ func cmdInit() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create gobot workspace directories under the configured storage root",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			configPath := config.DefaultConfigPath()
 			_, statErr := os.Stat(configPath)
 			configMissing := os.IsNotExist(statErr)
@@ -157,7 +157,7 @@ func cmdDoctor() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run strategic health checks",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config load failed: %w", err)
@@ -320,7 +320,7 @@ func cmdRun() *cobra.Command {
 	return &cobra.Command{
 		Use:   "run",
 		Short: "Start the strategic agent polling loop",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			defer func() {
 				if r := recover(); r != nil {
 					os.Stderr.WriteString("PANIC CAUGHT IN MAIN: " + fmt.Sprint(r) + "\n")
@@ -525,7 +525,7 @@ func cmdRun() *cobra.Command {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					if err := gw.ListenAndServe(ctx); err != nil && err != context.Canceled {
+					if err := gw.ListenAndServe(ctx); err != nil && !errors.Is(err, context.Canceled) {
 						slog.Error("gateway: server error", "err", err)
 					}
 				}()
@@ -567,11 +567,10 @@ func cmdRun() *cobra.Command {
 						os.Exit(1)
 					}
 				}()
-				if err := scheduler.Run(ctx); err != nil && err != context.Canceled {
+				if err := scheduler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 					slog.Error("cron scheduler stopped", "err", err)
 				}
 			}()
-
 			// Start health heartbeat in background (F-023).
 			{
 				var alertChatID int64
@@ -626,7 +625,7 @@ func cmdReauth() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reauth",
 		Short: "Interactive Google/Gmail OAuth2 re-authorization",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -651,7 +650,7 @@ func cmdCheckpoints() *cobra.Command {
 	return &cobra.Command{
 		Use:   "checkpoints",
 		Short: "List resumable agent sessions",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -691,7 +690,7 @@ func cmdResume() *cobra.Command {
 		Use:   "resume <thread-id>",
 		Short: "Show the last messages from a saved session",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			threadID := args[0]
 			cfg, err := config.Load()
 			if err != nil {
@@ -812,7 +811,7 @@ func cmdCalendar() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "calendar",
 		Short: "List upcoming Google Calendar events",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -853,7 +852,7 @@ func cmdTasks() *cobra.Command {
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List open tasks",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -882,7 +881,7 @@ func cmdTasks() *cobra.Command {
 		Use:   "add <title>",
 		Short: "Create a new task",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -911,7 +910,7 @@ func cmdMemory() *cobra.Command {
 	rebuildCmd := &cobra.Command{
 		Use:   "rebuild",
 		Short: "Re-index all session logs from workspace/sessions into the memory database",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
@@ -937,7 +936,7 @@ func cmdMemory() *cobra.Command {
 		Use:   "search <query>",
 		Short: "Search the memory index for a query",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			query := args[0]
 			cfg, err := config.Load()
 			if err != nil {
@@ -971,7 +970,7 @@ func cmdEmail() *cobra.Command {
 		Use:   "email <subject> <body>",
 		Short: "Send a manual test email",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			subject := args[0]
 			body := args[1]
 			cfg, err := config.Load()
@@ -1006,7 +1005,7 @@ func cmdAuthorize() *cobra.Command {
 		Use:   "authorize <code-or-chat-id>",
 		Short: "Authorize a Telegram user by pairing code or numeric chat ID",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			arg := args[0]
 			cfg, err := config.Load()
 			if err != nil {

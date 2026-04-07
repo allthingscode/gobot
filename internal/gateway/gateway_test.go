@@ -17,12 +17,12 @@ type mockHandler struct {
 	lastMsg string
 }
 
-func (m *mockHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
+func (m *mockHandler) Handle(_ context.Context, _ string, msg bot.InboundMessage) (string, error) {
 	m.lastMsg = msg.Text
 	return "Reply: " + msg.Text, nil
 }
 
-func (m *mockHandler) HandleCallback(ctx context.Context, cb bot.InboundCallback) error {
+func (m *mockHandler) HandleCallback(_ context.Context, _ bot.InboundCallback) error {
 	return nil
 }
 
@@ -59,7 +59,9 @@ func TestGateway(t *testing.T) {
 		}
 
 		var resp OutboundResponse
-		json.NewDecoder(w.Body).Decode(&resp)
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
 
 		if resp.Reply != "Reply: hello gateway" {
 			t.Errorf("unexpected reply: %q", resp.Reply)

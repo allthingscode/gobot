@@ -78,6 +78,7 @@ func Do(ctx context.Context, cfg RetryConfig, shouldRetry func(error) bool, fn f
 		}
 
 		// Compute jittered delay: delay ± (delay * jitterFactor * rand[-1,1])
+		// #nosec G404
 		jitterAmt := float64(delay) * jitterFactor * (2*rand.Float64() - 1)
 		sleep := time.Duration(float64(delay) + jitterAmt)
 		if sleep < 0 {

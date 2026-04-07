@@ -176,6 +176,7 @@ func checkAPIKey(cfg *config.Config) result {
 // checkTelegram validates the Telegram bot token.
 // If probe is nil, only the presence of the token is verified.
 func checkTelegram(token string, probe func(string) (string, error)) result {
+	// #nosec G101 - "REAUTH_REQUIRED" is a placeholder string, not a secret.
 	if token == "" || token == "REAUTH_REQUIRED" {
 		return result{name: "telegram", ok: false, detail: "token not configured or reauth required"}
 	}

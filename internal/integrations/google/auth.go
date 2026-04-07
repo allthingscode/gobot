@@ -1,6 +1,7 @@
 package google
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 )
 
 const (
+	// #nosec G101 - This is a public Google OAuth2 endpoint, not a secret.
 	tokenRefreshURL = "https://oauth2.googleapis.com/token"
 	authURL         = "https://accounts.google.com/o/oauth2/v2/auth"
 )
@@ -98,7 +100,9 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	}
 	defer l.Close()
 
-	srv := &http.Server{}
+	srv := &http.Server{
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		if code == "" {
@@ -164,13 +168,20 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 }
 
 func exchangeCode(code, clientID, clientSecret, redirectURI string) (*storedToken, error) {
-	resp, err := http.PostForm(tokenRefreshURL, url.Values{
+	data := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"redirect_uri":  {redirectURI},
-	})
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenRefreshURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +225,8 @@ func (t *storedToken) expired() bool {
 }
 
 // GoogleTokenPath returns the path to the Google Calendar/Tasks token.
+//
+// revive:disable:exported
 func GoogleTokenPath(secretsRoot string) string {
 	return filepath.Join(secretsRoot, "google_token.json")
 }
@@ -279,12 +292,19 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 	if tokenURI == "" {
 		tokenURI = tokenRefreshURL
 	}
-	resp, err := client.PostForm(tokenURI, url.Values{
+	data := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {tok.RefreshToken},
 		"client_id":     {tok.ClientID},
 		"client_secret": {tok.ClientSecret},
-	})
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenURI, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("build refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("token refresh request: %w", err)
 	}
@@ -314,7 +334,7 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 // apiGet performs an authenticated GET to the given URL and decodes the JSON
 // response body into dest.
 func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, apiURL, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -352,7 +372,7 @@ func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any
 	if err != nil {
 		return fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, apiURL, strings.NewReader(string(payload)))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, apiURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -380,7 +400,7 @@ func apiPatch(accessToken, apiURL string, body any, client *http.Client, dest an
 	if err != nil {
 		return fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPatch, apiURL, strings.NewReader(string(payload)))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPatch, apiURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}

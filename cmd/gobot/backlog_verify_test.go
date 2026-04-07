@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,20 +161,23 @@ func hasCodeReferences(itemID string) bool {
 	}
 
 	for _, codeDir := range codeDirs {
-		err := filepath.Walk(codeDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || !strings.HasSuffix(path, ".go") {
+		err := filepath.Walk(codeDir, func(path string, _ os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !strings.HasSuffix(path, ".go") {
 				return nil
 			}
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return nil
+				return err
 			}
 			if strings.Contains(string(content), itemID) {
 				return os.ErrExist
 			}
 			return nil
 		})
-		if err == os.ErrExist {
+		if errors.Is(err, os.ErrExist) {
 			return true
 		}
 	}

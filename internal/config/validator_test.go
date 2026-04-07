@@ -11,8 +11,12 @@ func baseValidConfig(t *testing.T) *Config {
 	tmpDir := t.TempDir()
 	// Create workspace and AWARENESS.md to satisfy path validation
 	wsDir := filepath.Join(tmpDir, "workspace")
-	os.MkdirAll(wsDir, 0755)
-	os.WriteFile(filepath.Join(wsDir, "AWARENESS.md"), []byte("test"), 0644)
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "AWARENESS.md"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	return &Config{
 		Strategic: StrategicConfig{

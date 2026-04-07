@@ -133,15 +133,19 @@ func TestListUpcomingEventsWithClient(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(r.URL.Path, "calendarList") {
-					json.NewEncoder(w).Encode(map[string]any{
+					if err := json.NewEncoder(w).Encode(map[string]any{
 						"items": []map[string]any{
 							{"id": "primary", "summary": "My Calendar", "selected": true},
 						},
-					})
+					}); err != nil {
+						t.Fatal(err)
+					}
 					return
 				}
 				// Per-calendar events endpoint
-				json.NewEncoder(w).Encode(map[string]any{"items": tc.items})
+				if err := json.NewEncoder(w).Encode(map[string]any{"items": tc.items}); err != nil {
+					t.Fatal(err)
+				}
 			}))
 			defer srv.Close()
 
@@ -181,16 +185,18 @@ func TestListUpcomingEventsWithClient_AuthError(t *testing.T) {
 func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
-			json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{"id": "cal-a", "summary": "Calendar A", "selected": true},
 					{"id": "cal-b", "summary": "Calendar B", "selected": true},
 				},
-			})
+			}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-a") {
-			json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{
 						"id": "a1", "summary": "Event A1",
@@ -198,11 +204,13 @@ func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 						"end":   map[string]string{"dateTime": "2026-03-28T11:00:00Z"},
 					},
 				},
-			})
+			}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-b") {
-			json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{
 						"id": "b1", "summary": "Event B1",
@@ -210,7 +218,9 @@ func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 						"end":   map[string]string{"dateTime": "2026-03-28T10:00:00Z"},
 					},
 				},
-			})
+			}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 	}))
@@ -246,22 +256,28 @@ func TestListUpcomingEventsWithClient_UnselectedCalendarSkipped(t *testing.T) {
 	var calledA, calledB bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
-			json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{"id": "cal-a", "summary": "Calendar A", "selected": true},
 					{"id": "cal-b", "summary": "Calendar B", "selected": false},
 				},
-			})
+			}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-a") {
 			calledA = true
-			json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
+			if err := json.NewEncoder(w).Encode(map[string]any{"items": []any{}}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-b") {
 			calledB = true
-			json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
+			if err := json.NewEncoder(w).Encode(map[string]any{"items": []any{}}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 	}))
@@ -286,12 +302,14 @@ func TestListUpcomingEventsWithClient_UnselectedCalendarSkipped(t *testing.T) {
 func TestListUpcomingEventsWithClient_PartialFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
-			json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{"id": "cal-fail", "summary": "Fail Calendar", "selected": true},
 					{"id": "cal-ok", "summary": "OK Calendar", "selected": true},
 				},
-			})
+			}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-fail") {
@@ -300,7 +318,7 @@ func TestListUpcomingEventsWithClient_PartialFailure(t *testing.T) {
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-ok") {
-			json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{
 						"id": "ok1", "summary": "OK Event",
@@ -308,7 +326,9 @@ func TestListUpcomingEventsWithClient_PartialFailure(t *testing.T) {
 						"end":   map[string]string{"dateTime": "2026-03-28T13:00:00Z"},
 					},
 				},
-			})
+			}); err != nil {
+				t.Fatal(err)
+			}
 			return
 		}
 	}))
@@ -336,7 +356,9 @@ func TestCreateEventWithClient_Success(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
-		json.NewEncoder(w).Encode(map[string]string{"id": "evt-abc-123"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"id": "evt-abc-123"}); err != nil {
+			t.Fatal(err)
+		}
 	}))
 	defer srv.Close()
 
@@ -365,14 +387,16 @@ func TestCreateEventWithClient_Success(t *testing.T) {
 func TestCreateEventWithClient_MinimalFields(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		if _, ok := body["description"]; ok {
 			t.Error("description should be absent when empty")
 		}
 		if _, ok := body["location"]; ok {
 			t.Error("location should be absent when empty")
 		}
-		json.NewEncoder(w).Encode(map[string]string{"id": "evt-min"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"id": "evt-min"}); err != nil {
+			t.Fatal(err)
+		}
 	}))
 	defer srv.Close()
 
@@ -423,7 +447,7 @@ func TestCreateEventWithClient_AuthError(t *testing.T) {
 }
 
 func TestCreateEventWithClient_APIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":{"message":"forbidden"}}`, http.StatusForbidden)
 	}))
 	defer srv.Close()

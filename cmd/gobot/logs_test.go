@@ -23,21 +23,31 @@ func TestCmdLogs(t *testing.T) {
 
 	// Setup config
 	cfgDir := filepath.Join(homeDir, ".gobot")
-	os.MkdirAll(cfgDir, 0755)
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
 	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
-	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	logsDir := filepath.Join(storageRoot, "logs")
-	os.MkdirAll(logsDir, 0755)
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create dummy log files
 	now := time.Now()
 	// Older log file
 	olderLog := filepath.Join(logsDir, fmt.Sprintf("gobot_%s.log", now.Add(-10*time.Hour).Format("20060102_150405")))
-	os.WriteFile(olderLog, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"old message\"\n"), 0644)
-	os.Chtimes(olderLog, now.Add(-10*time.Hour), now.Add(-10*time.Hour))
+	if err := os.WriteFile(olderLog, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"old message\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(olderLog, now.Add(-10*time.Hour), now.Add(-10*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 
 	// Newer log file
 	timeStr1 := now.Add(-5 * time.Minute).Format(time.RFC3339Nano)
@@ -46,8 +56,12 @@ func TestCmdLogs(t *testing.T) {
 	newerLog := filepath.Join(logsDir, fmt.Sprintf("gobot_%s.log", now.Format("20060102_150405")))
 	newerContent := fmt.Sprintf("time=%s level=INFO msg=\"hello world\"\ntime=%s level=ERROR msg=\"an error occurred\"\ntime=%s level=DEBUG msg=\"debug message\"\n", timeStr1, timeStr2, now.Format(time.RFC3339Nano))
 
-	os.WriteFile(newerLog, []byte(newerContent), 0644)
-	os.Chtimes(newerLog, now, now)
+	if err := os.WriteFile(newerLog, []byte(newerContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newerLog, now, now); err != nil {
+		t.Fatal(err)
+	}
 
 	// Helper to run command and capture output
 	runCmd := func(args []string) string {
@@ -106,8 +120,12 @@ func TestCmdLogs(t *testing.T) {
 	timeStr3 := now.Add(1 * time.Second).Format(time.RFC3339Nano)
 	malformedLog := filepath.Join(logsDir, fmt.Sprintf("gobot_%d.log", now.Unix()+1000))
 	malformedContent := fmt.Sprintf("time=INVALID-TIMESTAMP level=INFO msg=\"malformed\"\ntime=%s level=ERROR msg=\"valid error\"\n", timeStr3)
-	os.WriteFile(malformedLog, []byte(malformedContent), 0644)
-	os.Chtimes(malformedLog, now.Add(1*time.Second), now.Add(1*time.Second))
+	if err := os.WriteFile(malformedLog, []byte(malformedContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(malformedLog, now.Add(1*time.Second), now.Add(1*time.Second)); err != nil {
+		t.Fatal(err)
+	}
 
 	// Malformed lines should be skipped entirely
 	out = runCmd([]string{"--filter", "ERROR"})
@@ -129,11 +147,15 @@ func TestLogsCommand_NoLogs(t *testing.T) {
 	}()
 
 	cfgDir := filepath.Join(homeDir, ".gobot")
-	os.MkdirAll(cfgDir, 0755)
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
 	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
-	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := cmdLogs()
 	b := bytes.NewBufferString("")
@@ -155,17 +177,25 @@ func TestLogsCommand_LinesBoundsValidation(t *testing.T) {
 
 	// Setup config and logs
 	cfgDir := filepath.Join(homeDir, ".gobot")
-	os.MkdirAll(cfgDir, 0755)
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
 	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
-	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	logsDir := filepath.Join(storageRoot, "logs")
-	os.MkdirAll(logsDir, 0755)
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	logFile := filepath.Join(logsDir, "gobot_test.log")
-	os.WriteFile(logFile, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"test\"\n"), 0644)
+	if err := os.WriteFile(logFile, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"test\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	runTest := func(linesVal string, expectErr bool) {
 		cmd := cmdLogs()
@@ -203,17 +233,25 @@ func TestLogsCommand_FollowContextCancellation(t *testing.T) {
 
 	// Setup config and logs
 	cfgDir := filepath.Join(homeDir, ".gobot")
-	os.MkdirAll(cfgDir, 0755)
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	storageRoot := filepath.Join(homeDir, "Gobot_Storage")
 	cfgData := fmt.Sprintf(`{"strategic_edition": {"storage_root": "%s"}}`, filepath.ToSlash(storageRoot))
-	os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0644)
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfgData), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	logsDir := filepath.Join(storageRoot, "logs")
-	os.MkdirAll(logsDir, 0755)
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	logFile := filepath.Join(logsDir, "gobot_test.log")
-	os.WriteFile(logFile, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"test\"\n"), 0644)
+	if err := os.WriteFile(logFile, []byte("time=2026-04-03T10:00:00Z level=INFO msg=\"test\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := cmdLogs()
 	cmd.SetArgs([]string{"--follow"})

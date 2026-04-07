@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -26,8 +27,8 @@ func TestPanicFix(t *testing.T) {
 		t.Fatal("Expected error (exit code 1) for invalid flag, but got nil")
 	}
 
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
 		t.Fatalf("Expected *exec.ExitError, got %T", err)
 	}
 

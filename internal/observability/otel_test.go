@@ -19,7 +19,7 @@ func TestNewProvider_NoEndpoint(t *testing.T) {
 	if p == nil {
 		t.Fatal("NewProvider() returned nil")
 	}
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	// Should have a valid tracer even in no-op mode
 	if p.Tracer() == nil {
@@ -34,7 +34,7 @@ func TestProvider_StartSpan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProvider() error = %v", err)
 	}
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	ctx, span := p.StartSpan(context.Background(), "test.span",
 		attribute.String("key", "value"),
@@ -52,12 +52,12 @@ func TestProvider_StartSpan(t *testing.T) {
 func TestDispatchTracer_TraceBotDispatch(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 
 	called := false
-	err := dt.TraceBotDispatch(context.Background(), "session-123", func(ctx context.Context) error {
+	err := dt.TraceBotDispatch(context.Background(), "session-123", func(_ context.Context) error {
 		called = true
 		return nil
 	})
@@ -74,12 +74,12 @@ func TestDispatchTracer_TraceBotDispatch(t *testing.T) {
 func TestDispatchTracer_TraceBotDispatch_Error(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 
 	wantErr := errors.New("dispatch failed")
-	err := dt.TraceBotDispatch(context.Background(), "session-123", func(ctx context.Context) error {
+	err := dt.TraceBotDispatch(context.Background(), "session-123", func(_ context.Context) error {
 		return wantErr
 	})
 
@@ -92,11 +92,11 @@ func TestDispatchTracer_TraceBotDispatch_Error(t *testing.T) {
 func TestDispatchTracer_TraceAgentDispatch(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 
-	response, err := dt.TraceAgentDispatch(context.Background(), "session-456", 5, func(ctx context.Context) (string, error) {
+	response, err := dt.TraceAgentDispatch(context.Background(), "session-456", 5, func(_ context.Context) (string, error) {
 		return "hello world", nil
 	})
 
@@ -112,11 +112,11 @@ func TestDispatchTracer_TraceAgentDispatch(t *testing.T) {
 func TestDispatchTracer_TraceGeminiCall(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 
-	err := dt.TraceGeminiCall(context.Background(), "session-789", 2, func(ctx context.Context) error {
+	err := dt.TraceGeminiCall(context.Background(), "session-789", 2, func(_ context.Context) error {
 		return nil
 	})
 
@@ -129,11 +129,11 @@ func TestDispatchTracer_TraceGeminiCall(t *testing.T) {
 func TestDispatchTracer_TraceToolExecution(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 
-	result, err := dt.TraceToolExecution(context.Background(), "session-abc", "shell", func(ctx context.Context) (string, error) {
+	result, err := dt.TraceToolExecution(context.Background(), "session-abc", "shell", func(_ context.Context) (string, error) {
 		time.Sleep(1 * time.Millisecond) // Ensure some duration
 		return "output", nil
 	})
@@ -150,12 +150,12 @@ func TestDispatchTracer_TraceToolExecution(t *testing.T) {
 func TestDispatchTracer_TraceToolExecution_Error(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 
 	wantErr := errors.New("tool failed")
-	_, err := dt.TraceToolExecution(context.Background(), "session-abc", "shell", func(ctx context.Context) (string, error) {
+	_, err := dt.TraceToolExecution(context.Background(), "session-abc", "shell", func(_ context.Context) (string, error) {
 		return "", wantErr
 	})
 
@@ -168,7 +168,7 @@ func TestDispatchTracer_TraceToolExecution_Error(t *testing.T) {
 func TestProvider_RecordTokens(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	// Should not panic in no-op mode
 	p.RecordTokens(context.Background(), 100)
@@ -178,7 +178,7 @@ func TestProvider_RecordTokens(t *testing.T) {
 func TestProvider_RecordToolDuration(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
-	defer p.Shutdown(context.Background())
+	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	// Should not panic in no-op mode
 	p.RecordToolDuration(context.Background(), 100*time.Millisecond)
@@ -208,7 +208,7 @@ func TestDispatchTracer_NilProvider(t *testing.T) {
 	}
 
 	// Should not panic
-	err := dt.TraceBotDispatch(context.Background(), "session", func(ctx context.Context) error {
+	err := dt.TraceBotDispatch(context.Background(), "session", func(_ context.Context) error {
 		return nil
 	})
 	if err != nil {

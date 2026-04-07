@@ -28,7 +28,7 @@ func GetJournalContinuity(storageRoot string, maxChars int) string {
 		// Initialise the journal file.
 		if mkErr := os.MkdirAll(filepath.Dir(journalPath), 0o755); mkErr == nil {
 			date := time.Now().Format("2006-01-02")
-			_ = os.WriteFile(journalPath, []byte("# "+date+"\n\n"), 0o644)
+			_ = os.WriteFile(journalPath, []byte("# "+date+"\n\n"), 0o600)
 		}
 		return ""
 	}
@@ -61,7 +61,7 @@ func WriteJournalEntry(storageRoot string, entry string) bool {
 	ts := time.Now().Format("15:04:05")
 	line := fmt.Sprintf("\n### CONSOLIDATION [%s]\n%s\n", ts, entry)
 
-	f, err := os.OpenFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return false
 	}

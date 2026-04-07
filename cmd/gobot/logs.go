@@ -23,13 +23,13 @@ func cmdLogs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs",
 		Short: "View the most recent gobot logs",
-		PreRunE: func(cmd *cobra.Command, args []string) error {
+		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if lines <= 0 {
 				return fmt.Errorf("--lines must be greater than 0, got %d", lines)
 			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("config load failed: %w", err)

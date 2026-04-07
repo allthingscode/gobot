@@ -43,13 +43,13 @@ func TestChaos_RandomFailures(t *testing.T) {
 	concurrency := 5
 
 	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			for time.Since(start) < duration {
 				err := cb.Execute(func() error {
 					return Do(context.Background(), cfg, IsRetryable, func() error {
-						resp, err := http.Get(fs.URL)
+						req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, nil)
+						resp, err := http.DefaultClient.Do(req)
 						if err != nil {
 							return err
 						}
@@ -66,6 +66,7 @@ func TestChaos_RandomFailures(t *testing.T) {
 				_ = err
 
 				// Small sleep to prevent tight loop
+				// #nosec G404
 				time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
 			}
 		}(i)

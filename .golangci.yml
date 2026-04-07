@@ -1,6 +1,12 @@
 linters-settings:
     errorlint:
         errorf: true # Ensure fmt.Errorf uses %w for wrapping errors
+    revive:
+        rules:
+            - name: unexported-return
+              disabled: true # Acceptable for test helpers
+            - name: unused-parameter
+              disabled: true # Acceptable for mock/stub implementations
 
 linters:
     disable-all: true
@@ -10,6 +16,9 @@ linters:
         - nilerr
         - revive
         - staticcheck
+        - gosec
+        - noctx
+        - unused
 
 run:
     modules-download-mode: readonly

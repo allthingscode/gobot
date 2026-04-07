@@ -1,9 +1,11 @@
 package context
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 )
 
 // PairingStore manages authorized users and pairing codes in SQLite.
@@ -60,7 +62,7 @@ func (s *PairingStore) GetOrCreateCode(chatID int64) (string, error) {
 	if err == nil {
 		return code, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 
@@ -72,7 +74,11 @@ func (s *PairingStore) GetOrCreateCode(chatID int64) (string, error) {
 		return "", err
 	}
 
-	newCode := fmt.Sprintf("%06d", rand.Intn(1_000_000))
+	nBig, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
+		return "", fmt.Errorf("pairing: generate code: %w", err)
+	}
+	newCode := fmt.Sprintf("%06d", nBig.Int64())
 
 	if _, err := s.db.Exec(
 		`INSERT INTO pairing_codes (code, chat_id, expires_at) VALUES (?, ?, datetime('now', '+24 hours'))`,
@@ -92,7 +98,7 @@ func (s *PairingStore) AuthorizeByCode(code string) (int64, error) {
 		`SELECT chat_id FROM pairing_codes WHERE code = ? AND expires_at > datetime('now')`,
 		code,
 	).Scan(&chatID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("pairing: code %q not found or expired", code)
 	}
 	if err != nil {

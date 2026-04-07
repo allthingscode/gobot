@@ -43,7 +43,7 @@ func TestEnsureAwarenessFile(t *testing.T) {
 	}
 
 	// Second call: should not overwrite existing content.
-	if err := os.WriteFile(path, []byte("custom content"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("custom content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ensureAwarenessFile(cfg)

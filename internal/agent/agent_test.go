@@ -37,7 +37,7 @@ func (r *mockRunner) Run(_ context.Context, sessionKey string, messages []agentc
 	return r.response, updated, nil
 }
 
-func (r *mockRunner) RunText(_ context.Context, sessionKey, prompt string, _ string) (string, error) {
+func (r *mockRunner) RunText(_ context.Context, _ string, _ string, _ string) (string, error) {
 	if r.err != nil {
 		return "", r.err
 	}
@@ -88,7 +88,7 @@ func (s *mockStore) SaveSnapshot(threadID string, iteration int, messages []agen
 	return true, nil
 }
 
-func (s *mockStore) CreateThread(threadID, model string, _ map[string]any) error {
+func (s *mockStore) CreateThread(threadID, _ string, _ map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createCalls = append(s.createCalls, threadID)
@@ -166,7 +166,7 @@ func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
 			Content: &agentctx.MessageContent{Str: &content},
 		}
 	}
-	store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot("sess1", 1, history)
 
 	// Set compaction policy.
 	mgr.SetMemoryWindow(5)
@@ -417,7 +417,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 				{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("prior message")}},
 			}
 			store := newMockStore()
-			store.SaveSnapshot("s1", 1, history)
+			_, _ = store.SaveSnapshot("s1", 1, history)
 			mgr.store = store
 
 			hooks := &Hooks{}
@@ -463,7 +463,7 @@ func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("ok.")}},
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("hello")}},
 	}
-	store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot("sess1", 1, history)
 
 	mgr.SetMemoryWindow(2)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -509,7 +509,7 @@ func TestSessionManager_CompactionWithNilConsolidator(t *testing.T) {
 			Content: &agentctx.MessageContent{Str: &content},
 		}
 	}
-	store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot("sess1", 1, history)
 
 	mgr.SetMemoryWindow(5)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -538,7 +538,7 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("Budget approved: $50k")}},
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("confirmed")}},
 	}
-	store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot("sess1", 1, history)
 
 	mgr.SetMemoryWindow(2)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -560,8 +560,12 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 	} else {
 		// The consolidated text should contain substantive messages, not just trivial ones.
 		text := cons.calls[0].text
-		if text != "" && (strings.Contains(text, "deadline") || strings.Contains(text, "Budget")) {
-			// Good: meaningful content was extracted
+		hasRelevant := strings.Contains(text, "deadline") || strings.Contains(text, "Budget")
+		if text == "" {
+			t.Error("expected non-empty consolidated text")
+		}
+		if !hasRelevant {
+			t.Logf("consolidated text does not contain expected keywords: %q", text)
 		}
 	}
 }
@@ -592,7 +596,7 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("response 1")}},
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("message 2")}},
 	}
-	store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot("sess1", 1, history)
 
 	// Dispatch a new message.
 	_, err := mgr.Dispatch(ctx, "sess1", "new message")

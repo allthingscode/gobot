@@ -97,7 +97,7 @@ func (h *heartbeatRunner) check(ctx context.Context) {
 	// Write LIVENESS file to storageRoot.
 	livenessPath := filepath.Join(h.storageRoot, "LIVENESS")
 	livenessContent := fmt.Sprintf("ok %s failures=%d\n", time.Now().UTC().Format(time.RFC3339), len(failures))
-	if err := os.WriteFile(livenessPath, []byte(livenessContent), 0o644); err != nil {
+	if err := os.WriteFile(livenessPath, []byte(livenessContent), 0o600); err != nil {
 		slog.Warn("heartbeat: failed to write LIVENESS file", "err", err)
 	}
 

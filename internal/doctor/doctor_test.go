@@ -207,7 +207,7 @@ func TestCheckTelegram_NoProbe(t *testing.T) {
 }
 
 func TestCheckTelegram_ProbeSuccess(t *testing.T) {
-	probe := func(token string) (string, error) { return "@gobotprod", nil }
+	probe := func(_ string) (string, error) { return "@gobotprod", nil }
 	r := checkTelegram("bot:token", probe)
 	if !r.ok {
 		t.Errorf("expected ok=true, got: %s", r.detail)
@@ -218,7 +218,7 @@ func TestCheckTelegram_ProbeSuccess(t *testing.T) {
 }
 
 func TestCheckTelegram_ProbeError(t *testing.T) {
-	probe := func(token string) (string, error) { return "", errors.New("401 Unauthorized") }
+	probe := func(_ string) (string, error) { return "", errors.New("401 Unauthorized") }
 	r := checkTelegram("bot:token", probe)
 	if r.ok {
 		t.Error("expected ok=false when probe returns error")
@@ -242,7 +242,7 @@ func TestCheckGeminiLive_NoProbe(t *testing.T) {
 }
 
 func TestCheckGeminiLive_ProbeSuccess(t *testing.T) {
-	probe := func(apiKey string) error { return nil }
+	probe := func(_ string) error { return nil }
 	r := checkGeminiLive("AIzaSy-test", probe)
 	if !r.ok {
 		t.Errorf("expected ok=true, got: %s", r.detail)
@@ -250,7 +250,7 @@ func TestCheckGeminiLive_ProbeSuccess(t *testing.T) {
 }
 
 func TestCheckGeminiLive_ProbeError(t *testing.T) {
-	probe := func(apiKey string) error { return errors.New("quota exceeded") }
+	probe := func(_ string) error { return errors.New("quota exceeded") }
 	r := checkGeminiLive("AIzaSy-test", probe)
 	if r.ok {
 		t.Error("expected ok=false when probe returns error")
@@ -269,7 +269,9 @@ func TestCheckTokenFile_Missing(t *testing.T) {
 func TestCheckTokenFile_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	os.WriteFile(path, []byte("not json"), 0600)
+	if err := os.WriteFile(path, []byte("not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	r := checkTokenFile("test token", path)
 	if r.ok {
@@ -280,7 +282,9 @@ func TestCheckTokenFile_InvalidJSON(t *testing.T) {
 func TestCheckTokenFile_NoExpiry(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tok.json")
-	os.WriteFile(path, []byte(`{"token":"abc"}`), 0600)
+	if err := os.WriteFile(path, []byte(`{"token":"abc"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	r := checkTokenFile("test token", path)
 	if !r.ok {
@@ -329,7 +333,7 @@ func TestCheckJobsDir_Missing(t *testing.T) {
 
 func TestCheckJobsDir_EmptyDir(t *testing.T) {
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755)
 
 	r := checkJobsDir(cfgWithRoot(root))
 	if !r.ok {
@@ -340,9 +344,9 @@ func TestCheckJobsDir_EmptyDir(t *testing.T) {
 func TestCheckJobsDir_WithJobs(t *testing.T) {
 	root := t.TempDir()
 	jobsDir := filepath.Join(root, "workspace", "jobs")
-	os.MkdirAll(jobsDir, 0o755)
-	os.WriteFile(filepath.Join(jobsDir, "morning.md"), []byte("---\nschedule: cron(0 8 * * *)\n---\nhello"), 0644)
-	os.WriteFile(filepath.Join(jobsDir, "nightly.md"), []byte("---\nschedule: cron(0 3 * * *)\n---\nhello"), 0644)
+	_ = os.MkdirAll(jobsDir, 0o755)
+	_ = os.WriteFile(filepath.Join(jobsDir, "morning.md"), []byte("---\nschedule: cron(0 8 * * *)\n---\nhello"), 0600)
+	_ = os.WriteFile(filepath.Join(jobsDir, "nightly.md"), []byte("---\nschedule: cron(0 3 * * *)\n---\nhello"), 0600)
 
 	r := checkJobsDir(cfgWithRoot(root))
 	if !r.ok {
@@ -358,9 +362,15 @@ func TestCheckJobsDir_WithJobs(t *testing.T) {
 func TestRun_AllChecksPass(t *testing.T) {
 	root := t.TempDir()
 	// Setup required subdirs for doctor
-	os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755)
-	os.MkdirAll(filepath.Join(root, "logs"), 0o755)
-	os.MkdirAll(filepath.Join(root, "secrets", "gmail"), 0o755)
+	if err := os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "secrets", "gmail"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Mock valid token files
 	writeTokenJSON(t, filepath.Join(root, "secrets"), "google_token.json", time.Now().Add(1*time.Hour), "")

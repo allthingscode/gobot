@@ -151,7 +151,7 @@ func TestGmailTools_Execute_Validation(t *testing.T) {
 		"expiry": time.Now().Add(1 * time.Hour).Format(time.RFC3339),
 	}
 	tokData, _ := json.Marshal(tok)
-	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0644)
+	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0600)
 
 	tests := []struct {
 		name   string

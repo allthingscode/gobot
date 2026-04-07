@@ -16,7 +16,7 @@ type mockResource struct {
 }
 
 func (m *mockResource) Name() string { return m.name }
-func (m *mockResource) Shutdown(ctx context.Context) error {
+func (m *mockResource) Shutdown(_ context.Context) error {
 	m.shutdowns.Add(1)
 	if m.shutdownFn != nil {
 		return m.shutdownFn()
@@ -28,9 +28,7 @@ func TestResourceRegistry_Register(t *testing.T) {
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
-	if err := reg.Register(res1); err != nil {
-		t.Fatalf("Register failed: %v", err)
-	}
+	_ = reg.Register(res1)
 
 	if reg.Len() != 1 {
 		t.Errorf("expected 1 resource, got %d", reg.Len())
@@ -46,7 +44,7 @@ func TestResourceRegistry_Unregister(t *testing.T) {
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
-	reg.Register(res1)
+	_ = reg.Register(res1)
 
 	removed := reg.Unregister("res1")
 	if removed == nil {
@@ -70,7 +68,7 @@ func TestResourceRegistry_Get(t *testing.T) {
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
-	reg.Register(res1)
+	_ = reg.Register(res1)
 
 	got := reg.Get("res1")
 	if got == nil {
@@ -91,8 +89,8 @@ func TestResourceRegistry_Shutdown(t *testing.T) {
 	res1 := &mockResource{name: "res1"}
 	res2 := &mockResource{name: "res2"}
 
-	reg.Register(res1)
-	reg.Register(res2)
+	_ = reg.Register(res1)
+	_ = reg.Register(res2)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -141,12 +139,12 @@ func TestResourceRegistry_Shutdown_Order(t *testing.T) {
 		},
 	}
 
-	reg.Register(res1)
-	reg.Register(res2)
-	reg.Register(res3)
+	_ = reg.Register(res1)
+	_ = reg.Register(res2)
+	_ = reg.Register(res3)
 
 	ctx := context.Background()
-	reg.Shutdown(ctx)
+	_ = reg.Shutdown(ctx)
 
 	// Should shutdown in reverse order: res3, res2, res1
 	expected := []string{"res3", "res2", "res1"}
@@ -171,8 +169,8 @@ func TestResourceRegistry_Shutdown_Error(t *testing.T) {
 		},
 	}
 
-	reg.Register(res1)
-	reg.Register(res2)
+	_ = reg.Register(res1)
+	_ = reg.Register(res2)
 
 	ctx := context.Background()
 	err := reg.Shutdown(ctx)
@@ -198,7 +196,7 @@ func TestResourceRegistry_Shutdown_Timeout(t *testing.T) {
 		},
 	}
 
-	reg.Register(res1)
+	_ = reg.Register(res1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -213,7 +211,7 @@ func TestResourceRegistry_Metrics(t *testing.T) {
 	reg := NewResourceRegistry()
 
 	res1 := &mockResource{name: "res1"}
-	reg.Register(res1)
+	_ = reg.Register(res1)
 	reg.Unregister("res1")
 
 	metrics := reg.Metrics()

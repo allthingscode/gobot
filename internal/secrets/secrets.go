@@ -11,10 +11,13 @@ import (
 	"sort"
 )
 
+// #nosec G101 - This is a filename, not a secret.
 const secretsFileName = "dpapi_secrets.json"
 
 // SecretsStore persists DPAPI-encrypted secrets in a JSON file at
 // {storageRoot}/workspace/dpapi_secrets.json.
+//
+// revive:disable:exported
 type SecretsStore struct {
 	path string
 }

@@ -36,11 +36,11 @@ type mockInnerHandler struct {
 	err   error
 }
 
-func (m *mockInnerHandler) Handle(ctx context.Context, sessionKey string, msg InboundMessage) (string, error) {
+func (m *mockInnerHandler) Handle(_ context.Context, _ string, _ InboundMessage) (string, error) {
 	return m.reply, m.err
 }
 
-func (m *mockInnerHandler) HandleCallback(ctx context.Context, cb InboundCallback) error {
+func (m *mockInnerHandler) HandleCallback(_ context.Context, _ InboundCallback) error {
 	return nil
 }
 

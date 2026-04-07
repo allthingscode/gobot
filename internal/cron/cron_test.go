@@ -104,7 +104,7 @@ func TestDetectModularChange(t *testing.T) {
 
 	// 2. Add a file
 	f1 := filepath.Join(tmpDir, "job1.md")
-	if err := os.WriteFile(f1, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(f1, []byte("test"), 0600); err != nil {
 		t.Fatal(err)
 	}
 

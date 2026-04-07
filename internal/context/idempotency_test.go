@@ -216,7 +216,7 @@ func TestIdempotencyStore_Concurrent_Access(t *testing.T) {
 
 	// Spawn 10 goroutines that concurrently store and check.
 	for i := 0; i < 10; i++ {
-		go func(id int) {
+		go func(_ int) {
 			key := "concurrent-key"
 
 			// Store might fail due to primary key collision, which is expected.

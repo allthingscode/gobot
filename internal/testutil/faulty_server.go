@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"errors"
 	"math/rand"
 	"net"
 	"net/http"
@@ -54,7 +55,7 @@ func NewFaultyServer() *FaultyServer {
 	return fs
 }
 
-func (fs *FaultyServer) handle(w http.ResponseWriter, r *http.Request) {
+func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
 	fs.mu.Lock()
 	fs.RequestCount++
 
@@ -67,10 +68,10 @@ func (fs *FaultyServer) handle(w http.ResponseWriter, r *http.Request) {
 			// Default to success after sequence is exhausted
 			action = ResponseAction{StatusCode: http.StatusOK}
 		}
-	} else if fs.FailureRate > 0 && rand.Float64() < fs.FailureRate {
+	} else if fs.FailureRate > 0 && rand.Float64() < fs.FailureRate { //nolint:gosec // test-only RNG, not security-sensitive
 		code := http.StatusInternalServerError
 		if len(fs.FailureCodes) > 0 {
-			code = fs.FailureCodes[rand.Intn(len(fs.FailureCodes))]
+			code = fs.FailureCodes[rand.Intn(len(fs.FailureCodes))] // #nosec G404
 		}
 		action = ResponseAction{
 			StatusCode: code,
@@ -101,18 +102,18 @@ func (fs *FaultyServer) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 
 	if action.StatusCode >= 400 {
 		w.WriteHeader(action.StatusCode)
-		w.Write([]byte("error injected by faulty server"))
+		_, _ = w.Write([]byte("error injected by faulty server"))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
+	_, _ = w.Write([]byte("ok"))
 }
 
 // Reset resets the request count and sequence index.
@@ -141,7 +142,8 @@ func IsNetworkError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if _, ok := err.(net.Error); ok {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
 		return true
 	}
 	// Add more checks if needed (e.g. strings.Contains(err.Error(), "EOF"))

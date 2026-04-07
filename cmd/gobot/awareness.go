@@ -101,7 +101,7 @@ func ensureAwarenessFile(cfg *config.Config) {
 	if err := os.MkdirAll(filepath.Dir(awarenessPath), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(awarenessPath, []byte(buildAwarenessContent(cfg)), 0o644)
+	_ = os.WriteFile(awarenessPath, []byte(buildAwarenessContent(cfg)), 0o600)
 }
 
 // buildAwarenessContent returns the default AWARENESS.md content.

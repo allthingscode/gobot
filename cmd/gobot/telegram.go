@@ -81,7 +81,7 @@ func (t *tgAPI) isDuplicate(key string) bool {
 	return false
 }
 
-func (t *tgAPI) Updates(ctx context.Context, timeout int) (<-chan bot.InboundMessage, error) {
+func (t *tgAPI) Updates(ctx context.Context, _ int) (<-chan bot.InboundMessage, error) {
 	if t.breaker.State() == "open" {
 		return nil, resilience.ErrCircuitOpen
 	}

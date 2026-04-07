@@ -76,7 +76,7 @@ func ToHTML(md string) string {
 	// Stage 6: restore stored HTML fragments.
 	out = reSlot.ReplaceAllStringFunc(out, func(m string) string {
 		var i int
-		fmt.Sscanf(m, "\x00%d\x00", &i)
+		_, _ = fmt.Sscanf(m, "\x00%d\x00", &i)
 		if i < len(slots) {
 			return slots[i]
 		}

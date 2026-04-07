@@ -32,7 +32,7 @@ func (v *Validator) checkDiskSpace(root string, result *ValidationResult) error 
 	return nil
 }
 
-func (v *Validator) checkPathPermissions(path string, result *ValidationResult) error {
+func (v *Validator) checkPathPermissions(_ string, _ *ValidationResult) error {
 	// On Windows, we don't perform Unix-style permission bit checks (0700).
 	// ACL-based permissions are complex to check in pure Go and os.Stat mode
 	// bits are not reliable for security validation on Windows.
