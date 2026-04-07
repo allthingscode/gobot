@@ -255,6 +255,13 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 			var sb strings.Builder
 			sb.WriteString(summarizationPrompt)
 			for _, msg := range toSummarize {
+				if sb.Len() >= DefaultMaxCompactionInputBytes {
+					slog.Warn("agent: summarization input exceeded byte cap, truncating",
+						"session", sessionKey,
+						"capBytes", DefaultMaxCompactionInputBytes,
+						"messagesProcessed", len(toSummarize))
+					break
+				}
 				fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
 			}
 			

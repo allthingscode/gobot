@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -121,5 +122,62 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 	}
 	if firstMsg.Content.String() != newSummary {
 		t.Errorf("expected hierarchical summary content %q, got %q", newSummary, firstMsg.Content.String())
+	}
+}
+
+func TestSessionManager_Summarization_CappedInput(t *testing.T) {
+	t.Parallel()
+	// Setup SessionManager with summarization enabled.
+	mock := &mockRunner{response: "summary"}
+	sm := NewSessionManager(mock, nil, "gemini-test")
+	sm.memoryWindow = 10
+	sm.compactionPolicy = config.CompactionPolicyConfig{
+		Summarization: config.SummarizationConfig{
+			IsEnabled:        true,
+			ThresholdPercent: 0.1, // Trigger almost immediately
+		},
+	}
+
+	// Create a history that will exceed DefaultMaxCompactionInputBytes.
+	// DefaultMaxCompactionInputBytes = 512KB.
+	// We'll create 10 messages, each 100KB.
+	largeContent := strings.Repeat("A", 100*1024)
+	messages := make([]agentctx.StrategicMessage, 10)
+	for i := 0; i < 10; i++ {
+		messages[i] = agentctx.StrategicMessage{
+			Role:    agentctx.RoleUser,
+			Content: &agentctx.MessageContent{Str: &largeContent},
+		}
+	}
+
+	// Dispatch.
+	ctx := context.Background()
+	_, err := sm.dispatch(ctx, "test-session", "new message", messages, 1, false)
+	if err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+
+	// Verify that RunText was called with a truncated prompt.
+	// The prompt length should be roughly DefaultMaxCompactionInputBytes (+ prompt overhead),
+	// but definitely much less than the 1MB+ of raw messages.
+	if len(mock.textCalls) == 0 {
+		t.Fatal("mock runner.RunText was not called")
+	}
+
+	prompt := mock.textCalls[0]
+	if len(prompt) > DefaultMaxCompactionInputBytes+2048 { // Allow for some overhead (prompt prefix, role tags)
+		t.Errorf("prompt length %d exceeds cap %d by too much overhead", len(prompt), DefaultMaxCompactionInputBytes)
+	}
+
+	// Verify that not all messages are in the prompt.
+	// 10 messages * 100KB = 1MB.
+	// Cap is 512KB. So at least 4-5 messages should be missing.
+	// The strings.Count(prompt, largeContent) should be less than 10.
+	count := strings.Count(prompt, largeContent)
+	if count >= 10 {
+		t.Errorf("expected some messages to be truncated, but found all %d", count)
+	}
+	if count == 0 {
+		t.Error("expected at least one message in prompt, but found none")
 	}
 }

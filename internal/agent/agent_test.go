@@ -18,6 +18,7 @@ type mockRunner struct {
 	response    string
 	err         error
 	calls       []runCall
+	textCalls   []string
 	activeCalls map[string]int
 	maxActive   map[string]int
 	delay       time.Duration
@@ -62,7 +63,10 @@ func (r *mockRunner) Run(_ context.Context, sessionKey string, messages []agentc
 	return r.response, updated, nil
 }
 
-func (r *mockRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
+func (r *mockRunner) RunText(_ context.Context, _, prompt, _ string) (string, error) {
+	r.mu.Lock()
+	r.textCalls = append(r.textCalls, prompt)
+	r.mu.Unlock()
 	if r.err != nil {
 		return "", r.err
 	}

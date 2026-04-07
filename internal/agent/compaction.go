@@ -14,6 +14,10 @@ const DefaultMaxContextMessages = 50
 // DefaultKeepContextMessages is the number of recent messages to retain after compaction.
 const DefaultKeepContextMessages = 20
 
+// DefaultMaxCompactionInputBytes is the byte-length cap for the string accumulator
+// during compaction summarization to prevent OOM on massive context windows.
+const DefaultMaxCompactionInputBytes = 512 * 1024 // 512KB
+
 // CompactMessages trims messages to at most keepN entries when len(messages) exceeds maxN.
 // It respects the CompactionPolicyConfig strategy and ContextPruningConfig safety nets.
 // Returns (compacted messages, count of dropped, keep array from original messages).
