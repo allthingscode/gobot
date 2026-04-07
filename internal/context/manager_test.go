@@ -631,3 +631,51 @@ func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) { //nolint:parallelt
 		t.Fatal("expected non-nil snapshot for legacy row, got nil")
 	}
 }
+
+func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated by newTestManager, but sticking to convention
+	m := newTestManager(t)
+	if err := m.CreateThread("tidx", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+
+	// Insert some checkpoints
+	for i := 1; i <= 5; i++ {
+		if _, err := m.SaveSnapshot("tidx", i, []StrategicMessage{
+			{Role: RoleUser, Content: &MessageContent{Str: strPtr("test")}},
+		}); err != nil {
+			t.Fatalf("SaveSnapshot: %v", err)
+		}
+	}
+
+	// Run EXPLAIN QUERY PLAN on the exact query used in LoadLatest
+	query := `EXPLAIN QUERY PLAN SELECT iteration, state, checksum FROM checkpoints
+		 WHERE thread_id = 'tidx'
+		 ORDER BY iteration DESC, checkpoint_id DESC
+		 LIMIT 1`
+	
+	rows, err := m.db.Query(query)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	}
+	defer rows.Close()
+
+	var usedIndex bool
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		if strings.Contains(detail, "USING INDEX idx_checkpoints_thread_iteration") {
+			usedIndex = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+
+	if !usedIndex {
+		t.Error("Expected LoadLatest query to use idx_checkpoints_thread_iteration, but it did not. Check query plan.")
+	}
+}

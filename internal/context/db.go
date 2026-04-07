@@ -98,6 +98,14 @@ func initSchema(db *sql.DB) error {
 		return fmt.Errorf("initSchema: create checkpoints: %w", err)
 	}
 
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_iteration 
+		ON checkpoints(thread_id, iteration DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("initSchema: create idx_checkpoints_thread_iteration: %w", err)
+	}
+
 	if err := addChecksumColumnIfMissing(db); err != nil {
 		return fmt.Errorf("initSchema: add checksum column: %w", err)
 	}
