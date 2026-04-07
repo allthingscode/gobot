@@ -33,7 +33,7 @@ func (f *Factory) InitAll(ctx context.Context) error {
 
 	// Anthropic
 	if f.AnthropicAPIKey != "" {
-		if err := Register(NewAnthropicProvider(f.AnthropicAPIKey)); err != nil {
+		if err := Register(NewAnthropicProvider(f.AnthropicAPIKey, "")); err != nil {
 			return fmt.Errorf("register anthropic: %w", err)
 		}
 	}

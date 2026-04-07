@@ -13,21 +13,26 @@ import (
 )
 
 const (
-	anthropicAPIURL  = "https://api.anthropic.com/v1/messages"
-	anthropicVersion = "2023-06-01"
+	defaultAnthropicAPIURL = "https://api.anthropic.com/v1/messages"
+	anthropicVersion       = "2023-06-01"
 )
 
 // AnthropicProvider implements the Provider interface for Anthropic's Claude models.
 type AnthropicProvider struct {
-	apiKey string
-	client *http.Client
+	apiKey  string
+	baseURL string
+	client  *http.Client
 }
 
 // NewAnthropicProvider creates a new AnthropicProvider.
-func NewAnthropicProvider(apiKey string) *AnthropicProvider {
+func NewAnthropicProvider(apiKey, baseURL string) *AnthropicProvider {
+	if baseURL == "" {
+		baseURL = defaultAnthropicAPIURL
+	}
 	return &AnthropicProvider{
-		apiKey: apiKey,
-		client: &http.Client{},
+		apiKey:  apiKey,
+		baseURL: baseURL,
+		client:  &http.Client{},
 	}
 }
 
@@ -57,7 +62,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 		return nil, fmt.Errorf("anthropic: failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", anthropicAPIURL, bytes.NewBuffer(jsonData))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: failed to create request: %w", err)
 	}
