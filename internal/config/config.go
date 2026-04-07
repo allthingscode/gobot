@@ -271,11 +271,16 @@ func (c *Config) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := json.MarshalIndent(c, "", "    ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	return os.WriteFile(path, data, 0o600)
+
+	// Prepend UTF-8 BOM for Windows compatibility as per project mandate
+	finalData := make([]byte, 0, len(bomPrefix)+len(data))
+	finalData = append(finalData, bomPrefix...)
+	finalData = append(finalData, data...)
+	return os.WriteFile(path, finalData, 0o600)
 }
 
 // SecretsRoot returns the path to the secrets directory under StorageRoot.

@@ -9,13 +9,17 @@ $StorageRoot = if ($env:GOBOT_STORAGE) { $env:GOBOT_STORAGE } else { Join-Path $
 $LogDir     = Join-Path $StorageRoot "logs"
 $LockFile   = Join-Path $LogDir "gobot.pid"
 $ConfigPath = Join-Path $env:USERPROFILE ".gobot\config.json"
-$PythonExe  = "python.exe"  # Assume python is in PATH
 
 # --- JSON Auto-Formatting ---
 if (Test-Path $ConfigPath) {
     Write-Host "Reformatting config.json for readability..." -ForegroundColor Gray
-    $PathForPython = $ConfigPath.Replace('\', '/')
-    & $PythonExe -c "import json; d=json.load(open('$PathForPython', 'r', encoding='utf-8-sig')); json.dump(d, open('$PathForPython', 'w', encoding='utf-8-sig'), indent=4, ensure_ascii=False)"
+    try {
+        $json = Get-Content $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json
+        $json | ConvertTo-Json -Depth 100 | Set-Content $ConfigPath -Encoding UTF8 -ErrorAction Stop
+    }
+    catch {
+        Write-Host "Warning: Failed to reformat config.json: $_" -ForegroundColor Yellow
+    }
 }
 
 if (-not (Test-Path $GobotExe)) {
