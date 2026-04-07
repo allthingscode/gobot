@@ -50,6 +50,11 @@ func NewHandoffHook(storageRoot string) PostDispatchFn {
 			return response
 		}
 
+		// F-081: Create a session checkpoint before handoff
+		if err := CreateSnapshot(storageRoot, ticket); err != nil {
+			slog.Warn("handoff: failed to create snapshot", "err", err)
+		}
+
 		// Delete the handoff file so it doesn't trigger again on the next turn
 		// if the agent doesn't write a new one.
 		if err := os.Remove(handoffPath); err != nil {

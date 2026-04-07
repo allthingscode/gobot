@@ -65,6 +65,7 @@ func main() {
 		cmdSecrets(),
 		cmdState(),
 		cmdLogs(),
+		cmdRewind(),
 	)
 
 	if err := root.Execute(); err != nil {
