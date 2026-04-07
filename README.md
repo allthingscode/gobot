@@ -154,6 +154,16 @@ This runs pre-flight diagnostics including:
 - OAuth2 token validity (if `--no-interactive` is not passed)
 - API key reachability
 
+### Security Scanning
+
+Gobot uses `govulncheck` to scan for reachable vulnerabilities in dependencies. Developers should run this before pushing changes:
+
+```powershell
+./scripts/check_security.ps1
+```
+
+This mirrors the CI job and ensures that any security risks are identified and resolved locally. The script will automatically install `govulncheck` if it is not found in your environment.
+
 ### View Logs
 
 ```powershell

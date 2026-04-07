@@ -40,6 +40,12 @@ if ! go vet -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
     exit 1
 fi
 
+if ! go mod verify > "$TEMP_LOG" 2>&1; then
+    echo "ERROR: go mod verify failed (go.sum integrity check)"
+    cat "$TEMP_LOG"
+    exit 1
+fi
+
 if command -v golangci-lint > /dev/null 2>&1; then
     if ! golangci-lint run --modules-download-mode=readonly > "$TEMP_LOG" 2>&1; then
         echo "ERROR: golangci-lint failed"

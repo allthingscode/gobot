@@ -18,4 +18,16 @@ if ! git diff --exit-code vendor/; then
     exit 1
 fi
 
+echo "--- pre-push: running security scan"
+if command -v powershell.exe > /dev/null 2>&1; then
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/check_security.ps1
+else
+    # Fallback for Linux/macOS if govulncheck is installed
+    if command -v govulncheck > /dev/null 2>&1; then
+        govulncheck ./...
+    else
+        echo "WARN: govulncheck not found; skipping local security scan (CI will enforce)"
+    fi
+fi
+
 echo "--- pre-push: all checks passed"
