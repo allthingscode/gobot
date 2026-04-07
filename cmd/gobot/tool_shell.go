@@ -67,7 +67,7 @@ func (t *shellExecTool) Name() string { return shellExecToolName }
 func (t *shellExecTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        shellExecToolName,
-		Description: "Execute a shell command in a sandboxed Windows environment. Working directory is the bot workspace. Output is capped at 4096 characters.",
+		Description: "Execute a shell command in a sandboxed environment. Working directory is the bot workspace. Output is capped at 4096 characters.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

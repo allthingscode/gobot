@@ -1,5 +1,7 @@
-// Package secrets manages encrypted key-value pairs using Windows DPAPI.
-// On non-Windows platforms the protect/unprotect functions return an error.
+// Package secrets manages encrypted key-value pairs.
+// On Windows, DPAPI (CryptProtectData) is used for user-scoped encryption.
+// On Linux/macOS, AES-256-GCM is used with a per-user key stored at
+// ~/.config/gobot/encryption.key (overridable via GOBOT_ENCRYPTION_KEY_FILE).
 package secrets
 
 import (

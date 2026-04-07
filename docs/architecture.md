@@ -82,8 +82,8 @@ This document provides a deep dive into gobot's architecture, covering data flow
 | `reflection` | `internal/reflection` | Pure-function reflection/planning loop utilities | `reflection.go` |
 | `reporter` | `internal/reporter` | HTML report generation | `reporter.go` |
 | `resilience` | `internal/resilience` | Circuit breakers, intelligent retry logic | `retry.go` |
-| `sandbox` | `internal/sandbox` | Tool sandboxing and execution isolation | `executor_windows.go` |
-| `secrets` | `internal/secrets` | DPAPI-encrypted secrets storage (Windows) | `secrets.go` |
+| `sandbox` | `internal/sandbox` | Tool sandboxing and execution isolation | `executor_windows.go`, `executor_other.go` |
+| `secrets` | `internal/secrets` | Encrypted secrets storage (cross-platform) | `secrets.go` |
 | `shell` | `internal/shell` | Shell command execution tool | `redirect.go`, `clixml.go` |
 | `state` | `internal/state` | Durable agent state with atomic writes and file locking | `manager.go` |
 | `telegram` | `internal/telegram` | Telegram API client and formatting utilities | `telegram.go` |
@@ -201,20 +201,26 @@ This document provides a deep dive into gobot's architecture, covering data flow
 
 ---
 
-### 7. DPAPI Secret Encryption (Windows)
+### 7. Secret Encryption (Cross-Platform)
 
-**Decision:** On Windows, OAuth2 tokens and API keys are encrypted via DPAPI (`CryptProtectData` / `CryptUnprotectData`).
+**Decision:** OAuth2 tokens and API keys are encrypted at rest using platform-appropriate mechanisms:
+- **Windows:** DPAPI (`CryptProtectData` / `CryptUnprotectData`) — user-scoped, OS-managed keys
+- **Linux/macOS:** AES-256-GCM with a 32-byte random key persisted at `~/.config/gobot/encryption.key` (mode 0600)
 
 **Rationale:**
-- DPAPI ties encryption to the current user account (tokens are unreadable by other users)
-- No need to manage separate encryption keys (Windows handles key management)
-- Compliance with enterprise security standards
+- DPAPI ties encryption to the current Windows user account; no separate key management needed
+- AES-256-GCM provides strong authenticated encryption on non-Windows; the key file is isolated from the encrypted data directory
+- Both approaches prevent casual reading of token files by other OS users
+- Set `GOBOT_ENCRYPTION_KEY_FILE` to override the key path (useful for CI/containers)
 
 **Implementation:**
-- `internal/secrets/secrets.go` wraps Windows DPAPI calls via `golang.org/x/sys/windows`
-- On Linux/macOS, a fallback file-based encryption is used (less secure than DPAPI)
+- `internal/secrets/dpapi_windows.go` — Windows DPAPI via `golang.org/x/sys/windows`
+- `internal/secrets/dpapi_stub.go` — Linux/macOS AES-256-GCM (standard library only, no CGO)
+- `internal/secrets/secrets.go` — platform-agnostic `SecretsStore` wrapping both
 
-**Impact:** Stolen token files are unusable on different machines or user accounts (Windows only).
+**Limitation:** On Linux/macOS, the key file at `~/.config/gobot/encryption.key` protects tokens within the same user account but is not tied to login credentials the way DPAPI is. Protect this file with OS-level permissions (0600 is enforced on creation).
+
+**Impact:** Token files are unusable without the corresponding key file; cross-platform support is maintained without CGO.
 
 ---
 
