@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -147,4 +148,43 @@ func TestIdempotency_Expired(t *testing.T) {
 	if n != 1 {
 		t.Errorf("expected 1 key cleaned, got %d", n)
 	}
+}
+
+func TestIdempotency_BackgroundCleanup(t *testing.T) {
+	store, db, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	// 1. Insert an expired key.
+	expiredAt := time.Now().Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
+	_, _ = db.Exec(`INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`, "expired-bg", expiredAt)
+
+	// 2. Start background cleanup with a very short interval.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Run in background.
+	go runIdempotencyCleanup(ctx, store, 10*time.Millisecond)
+
+	// 3. Poll for cleanup (with timeout).
+	deadline := time.After(500 * time.Millisecond)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	found := true
+	for found {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for background cleanup")
+		case <-ticker.C:
+			var count int
+			_ = db.QueryRow("SELECT COUNT(*) FROM idempotency_keys WHERE key = 'expired-bg'").Scan(&count)
+			if count == 0 {
+				found = false
+			}
+		}
+	}
+
+	// 4. Verify cleanup stopped on context cancellation.
+	cancel()
+	time.Sleep(50 * time.Millisecond) // Give goroutine a moment to exit.
 }

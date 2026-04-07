@@ -480,6 +480,14 @@ func cmdRun() *cobra.Command {
 				if cleaned, cleanErr := idempStore.CleanupExpired(); cleanErr == nil && cleaned > 0 {
 					slog.Info("run: cleaned up expired idempotency keys", "count", cleaned)
 				}
+
+				// Periodic cleanup of expired keys (background loop).
+				// F-069: Ensure table doesn't grow unbounded on 24/7 servers.
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					runIdempotencyCleanup(ctx, idempStore, 6*time.Hour)
+				}()
 			}
 
 			mgr := agent.NewSessionManager(runner, store, model)
@@ -986,6 +994,29 @@ func cmdMemory() *cobra.Command {
 	}
 	cmd.AddCommand(searchCmd)
 	return cmd
+}
+
+// runIdempotencyCleanup runs periodic background cleanup of expired idempotency keys.
+// F-069: Periodic cleanup to prevent unbounded SQLite growth.
+func runIdempotencyCleanup(ctx context.Context, store *agentctx.IdempotencyStore, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleaned, err := store.CleanupExpired()
+			if err != nil {
+				slog.Error("run: idempotency cleanup failed", "err", err)
+				continue
+			}
+			if cleaned > 0 {
+				slog.Info("run: cleaned up expired idempotency keys", "count", cleaned)
+			}
+		}
+	}
 }
 
 func cmdEmail() *cobra.Command {
