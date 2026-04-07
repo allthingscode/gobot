@@ -73,7 +73,7 @@ This document provides a deep dive into gobot's architecture, covering data flow
 | `context` | `internal/context` | Durable checkpointing and session state persistence (SQLite) | `manager.go`, `db.go`, `pairing.go` |
 | `cron` | `internal/cron` | Autonomous background job scheduler | `scheduler.go`, `cron.go`, `batch.go` |
 | `doctor` | `internal/doctor` | Pre-flight diagnostics and health checks | `doctor.go` |
-| `gateway` | `internal/gateway` | HTTP gateway for Telegram webhook and future web dashboard | `gateway.go` |
+| `gateway` | `internal/gateway` | HTTP gateway for external REST chat clients and future web dashboard | `gateway.go` |
 | `google` | `internal/integrations/google` | Google Workspace integrations (Auth, Gmail, Calendar, Tasks) | `auth.go`, `gmail.go`, `calendar.go`, `tasks.go`, `search.go` |
 | `infra` | `internal/infra` | Infrastructure wiring (DB init, lifecycle management) | `infra.go`, `resource_registry.go` |
 | `memory` | `internal/memory` | SQLite-backed long-term memory with FTS5 search | `memory.go`, `sqlite_store.go`, `consolidator/` |
