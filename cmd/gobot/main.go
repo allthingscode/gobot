@@ -307,7 +307,7 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
 	}
 
 	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
-		tools = append(tools, newSendEmailTool(secretsRoot, userEmail))
+		tools = append(tools, newSendEmailTool(secretsRoot, cfg.StorageRoot(), userEmail))
 		tools = append(tools, newSearchGmailTool(secretsRoot))
 		tools = append(tools, newReadGmailTool(secretsRoot))
 		slog.Info("run: registered gmail tools (send, search, read)")

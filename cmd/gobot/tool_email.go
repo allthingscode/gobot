@@ -7,17 +7,19 @@ import (
 
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/reporter"
 )
 
 type SendEmailTool struct {
 	secretsRoot string
+	storageRoot string
 	userEmail   string
 }
 
 // newSendEmailTool returns a SendEmailTool that loads OAuth credentials from
 // secretsRoot/token.json and always sends to userEmail.
-func newSendEmailTool(secretsRoot, userEmail string) *SendEmailTool {
-	return &SendEmailTool{secretsRoot: secretsRoot, userEmail: userEmail}
+func newSendEmailTool(secretsRoot, storageRoot, userEmail string) *SendEmailTool {
+	return &SendEmailTool{secretsRoot: secretsRoot, storageRoot: storageRoot, userEmail: userEmail}
 }
 
 func (s *SendEmailTool) Name() string { return sendEmailToolName }
@@ -63,7 +65,8 @@ func (s *SendEmailTool) Execute(ctx context.Context, _ string, args map[string]a
 	}
 
 	if err := svc.Send(ctx, s.userEmail, subject, body); err != nil {
-		return "", fmt.Errorf("send_email: %w", err)
+		fallbackMsg := reporter.FallbackNotify(s.storageRoot, subject, body, s.userEmail, err.Error())
+		return fallbackMsg, nil
 	}
 
 	return fmt.Sprintf("Email sent to %s: %s", s.userEmail, subject), nil

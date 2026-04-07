@@ -15,7 +15,7 @@ import (
 func TestSendEmailTool_Basic(t *testing.T) {
 	t.Parallel()
 
-	tool := newSendEmailTool("/tmp/secrets", "user@example.com")
+	tool := newSendEmailTool("/tmp/secrets", "/tmp/storage", "user@example.com")
 
 	t.Run("Name", func(t *testing.T) {
 		t.Parallel()
@@ -53,7 +53,7 @@ func TestSendEmailTool_Basic(t *testing.T) {
 func TestSendEmailTool_Execute_Validation(t *testing.T) {
 	t.Parallel()
 
-	tool := newSendEmailTool(t.TempDir(), "user@example.com")
+	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com")
 
 	tests := []struct {
 		name    string
@@ -87,7 +87,7 @@ func TestSendEmailTool_Execute_AuthFailure(t *testing.T) {
 	t.Parallel()
 
 	// An empty secretsRoot has no token.json, so google.NewService will fail.
-	tool := newSendEmailTool(t.TempDir(), "user@example.com")
+	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com")
 	_, err := tool.Execute(context.Background(), "test-session", map[string]any{
 		"subject": "Test subject",
 		"body":    "Test body",
