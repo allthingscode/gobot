@@ -27,13 +27,12 @@ import (
 var ErrNeedsReauth = errors.New("AUTH_EXPIRED: run gobot reauth")
 
 const (
-	gmailBaseURL    = "https://gmail.googleapis.com/gmail/v1/users/me"
+	gmailBaseURL = "https://gmail.googleapis.com/gmail/v1/users/me"
 )
 
 var timeoutClient = &http.Client{Timeout: 30 * time.Second}
 
 // storedToken mirrors the JSON structure written by google-auth-library (Python).
-
 
 // MessageSummary represents a minimal message object from a list/search result.
 type MessageSummary struct {
@@ -67,10 +66,10 @@ type Body struct {
 }
 
 type Part struct {
-	MimeType string  `json:"mimeType"`
-	Body     *Body   `json:"body"`
-	Parts    []Part  `json:"parts"`
-	Filename string  `json:"filename"`
+	MimeType string   `json:"mimeType"`
+	Body     *Body    `json:"body"`
+	Parts    []Part   `json:"parts"`
+	Filename string   `json:"filename"`
 	Headers  []Header `json:"headers"`
 }
 
@@ -115,7 +114,6 @@ func NewService(secretsRoot string) (*Service, error) {
 		httpClient:  timeoutClient,
 	}, nil
 }
-
 
 // Send delivers an email via the Gmail API.
 func (s *Service) Send(ctx context.Context, to, subject, body string) error {

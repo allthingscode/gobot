@@ -252,7 +252,7 @@ func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 	}
 }
 
-func TestListUpcomingEventsWithClient_UnselectedCalendarSkipped(t *testing.T) {
+func TestListUpcomingEventsWithClient_UnselectedCalendarIncluded(t *testing.T) {
 	var calledA, calledB bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
@@ -294,8 +294,8 @@ func TestListUpcomingEventsWithClient_UnselectedCalendarSkipped(t *testing.T) {
 	if !calledA {
 		t.Error("expected selected calendar to be called")
 	}
-	if calledB {
-		t.Error("expected unselected calendar to be skipped")
+	if !calledB {
+		t.Error("expected unselected calendar to be called")
 	}
 }
 

@@ -30,8 +30,7 @@ type calendarListEntry struct {
 	Selected bool   `json:"selected"`
 }
 
-// listCalendarsWithClient returns all calendars the user has selected in
-// their Google Calendar view (selected=true in calendarList).
+// listCalendarsWithClient returns all calendars the user has reader access to.
 func listCalendarsWithClient(token string, client *http.Client) ([]calendarListEntry, error) {
 	apiURL := calendarBaseURL + "/users/me/calendarList?minAccessRole=reader"
 	var resp struct {
@@ -40,13 +39,7 @@ func listCalendarsWithClient(token string, client *http.Client) ([]calendarListE
 	if err := apiGet(token, apiURL, client, &resp); err != nil {
 		return nil, fmt.Errorf("calendar list: %w", err)
 	}
-	selected := resp.Items[:0]
-	for _, c := range resp.Items {
-		if c.Selected {
-			selected = append(selected, c)
-		}
-	}
-	return selected, nil
+	return resp.Items, nil
 }
 
 // ListUpcomingEvents returns up to maxResults upcoming events from the
