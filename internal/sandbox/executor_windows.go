@@ -166,9 +166,10 @@ func resumeMainThread(pid uint32) error {
 			if err != nil {
 				return fmt.Errorf("OpenThread: %w", err)
 			}
-			defer func() { _ = windows.CloseHandle(th) }()
-			if _, err := windows.ResumeThread(th); err != nil {
-				return fmt.Errorf("ResumeThread: %w", err)
+			_, resumeErr := windows.ResumeThread(th)
+			_ = windows.CloseHandle(th)
+			if resumeErr != nil {
+				return fmt.Errorf("ResumeThread: %w", resumeErr)
 			}
 			return nil
 		}

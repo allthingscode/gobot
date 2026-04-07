@@ -32,7 +32,7 @@ func TestGateway(t *testing.T) {
 	srv := NewServer(cfg, h)
 
 	t.Run("Health", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/health", nil)
+		req := httptest.NewRequest("GET", "/health", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleHealth(w, req)
 
@@ -72,7 +72,7 @@ func TestGateway(t *testing.T) {
 	})
 
 	t.Run("InvalidMethod", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/chat", nil)
+		req := httptest.NewRequest("GET", "/chat", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleChat(w, req)
 

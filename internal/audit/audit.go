@@ -154,7 +154,7 @@ func BuildReport(models []ModelInfo, current map[string]string) string {
 	}
 
 	// Special / embedding / other
-	specialModels := append(byTier["special"], byTier["other"]...)
+	specialModels := append(byTier["special"], byTier["other"]...) //nolint:gocritic // intentional: merge two slices into new slice
 	add("## Special-Purpose & Embedding Models")
 	add("")
 	if len(specialModels) > 0 {

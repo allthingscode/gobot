@@ -60,7 +60,7 @@ type simRunner struct {
 	stepIdx  int
 }
 
-func (r *simRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) {
+func (r *simRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
 	return "", nil
 }
 
@@ -72,7 +72,7 @@ func (r *simRunner) Run(ctx context.Context, sessionKey string, messages []agent
 		if len(step.ToolCalls) == 0 {
 			// Final text step — return the scripted response.
 			text := step.FinalText
-			updated := append(messages, agentctx.StrategicMessage{
+			updated := append(messages, agentctx.StrategicMessage{ //nolint:gocritic // intentional: return a new slice without mutating input
 				Role:    agentctx.RoleAssistant,
 				Content: &agentctx.MessageContent{Str: &text},
 			})

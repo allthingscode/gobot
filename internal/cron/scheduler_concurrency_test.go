@@ -26,7 +26,7 @@ func writeJobsJSON(t *testing.T, dir string, jobs []Job) string {
 		t.Fatalf("encode jobs: %v", err)
 	}
 	path := filepath.Join(dir, "jobs.json")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write jobs.json: %v", err)
 	}
 	return path

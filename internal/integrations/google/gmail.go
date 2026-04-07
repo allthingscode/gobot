@@ -105,7 +105,7 @@ func NewService(secretsRoot string) (*Service, error) {
 			return nil, fmt.Errorf("token refresh failed: %w", err)
 		}
 		if updated, err := json.Marshal(tok); err == nil {
-			_ = os.WriteFile(tokenPath, updated, 0600)
+			_ = os.WriteFile(tokenPath, updated, 0o600)
 		}
 	}
 
@@ -180,7 +180,7 @@ func (s *Service) SearchMessages(ctx context.Context, query string, maxResults i
 	}
 
 	err := resilience.Do(ctx, resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), http.NoBody)
 		req.Header.Set("Authorization", "Bearer "+s.accessToken)
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
@@ -203,7 +203,7 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*Message, error) {
 
 	var msg Message
 	err := resilience.Do(ctx, resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
 		req.Header.Set("Authorization", "Bearer "+s.accessToken)
 		resp, err := s.httpClient.Do(req)
 		if err != nil {

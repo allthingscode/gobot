@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -65,7 +66,7 @@ type CheckResult struct {
 // allowing the caller to return the cached result.
 // Returns CheckResult with HashMismatch=true if the key exists but params don't match
 // (caller should return an error).
-func (s *IdempotencyStore) Check(key, _ string, paramsHash string) (CheckResult, error) {
+func (s *IdempotencyStore) Check(key, _, paramsHash string) (CheckResult, error) {
 	var storedHash, storedResult string
 	var createdAt string
 
@@ -152,4 +153,13 @@ func (s *IdempotencyStore) CleanupExpired() (int64, error) {
 	}
 
 	return rowsAffected, nil
+}
+
+// IsIdempotencyHashMismatch returns true if the error indicates an idempotency key
+// was reused with different parameters.
+func IsIdempotencyHashMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "reused with different parameters")
 }

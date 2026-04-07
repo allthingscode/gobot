@@ -15,7 +15,7 @@ Unlike traditional chatbot frameworks that rely on Python and CGO-heavy dependen
 ## Key Features
 
 - **Zero-Dependency Runtime:** Compiles to a single static binary for trivial deployment (no Python venvs, no CGO, pure-Go SQLite via `modernc.org/sqlite`).
-- **Durable Session State:** Every interaction is checkpointed via a pure-Go SQLite implementation (`modernc.org/sqlite`) under `D:\Gobot_Storage`.
+- **Durable Session State:** Every interaction is checkpointed via a pure-Go SQLite implementation (`modernc.org/sqlite`) under durable storage root (e.g. `~/gobot_data` or configured path).
 - **Long-Term Memory (RAG):** Automatically indexes session history using SQLite FTS5 for semantic search, enabling agents to recall context across sessions.
 - **Autonomous Cron:** Built-in background job scheduler for recurring agent tasks (e.g., morning briefings, calendar checks).
 - **Strategic Hardening:** Integrated PII redaction, circuit breakers, and zero-trust security gates on every inbound message.
@@ -23,10 +23,31 @@ Unlike traditional chatbot frameworks that rely on Python and CGO-heavy dependen
 - **Multi-Model Support:** Abstract provider layer supports Gemini, Anthropic Claude, and OpenAI-compatible APIs with seamless switching.
 - **Observable by Default:** OpenTelemetry integration for traces and metrics, structured logging with `log/slog`, and comprehensive health checks via `gobot doctor`.
 
+## Platform Support
+
+GoBot runs on **Windows**, **Linux**, and **macOS** with the following considerations:
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Windows 10/11 | ✅ Primary | DPAPI-encrypted secrets, Job Object sandboxing, native logging |
+| Linux (x86_64) | ✅ Supported | File-based secret encryption (less secure than DPAPI) |
+| macOS (x86_64/ARM) | ✅ Supported | File-based secret encryption (less secure than DPAPI) |
+
+**Cross-platform features:**
+- Pure Go binary (zero CGO dependencies)
+- SQLite-based state/memory persistence
+- Telegram integration
+- Google Workspace integration (Calendar, Tasks, Gmail)
+- OpenTelemetry observability
+
+**Windows-exclusive features:**
+- DPAPI-encrypted OAuth2 tokens (tied to user account)
+- Sandboxed shell execution via Windows Job Objects
+- Native structured logging via ETW
+
 ## Requirements
 
 - **Go 1.25+** (for building from source; see `go.mod` for exact version)
-- **Windows** (recommended for DPAPI secret encryption) or Linux/macOS
 - **Telegram Bot Token** (from [@BotFather](https://t.me/BotFather))
 - **LLM API Key** (Gemini, Anthropic, or OpenAI)
 
@@ -60,10 +81,10 @@ Run `gobot init` to create the storage structure. This automatically generates a
 ./gobot init
 ```
 
-This creates the following directory structure under the configured storage root (default `D:\Gobot_Storage` on Windows or `$HOME/gobot` on Linux/macOS):
+This creates the following directory structure under the configured storage root (default `~/gobot_data` on Windows/Linux/macOS, or configured path):
 
 ```
-Gobot_Storage/
+<STORAGE_ROOT>/
 ├── config.json          # Main configuration file
 ├── gobot.db             # SQLite checkpoint database
 ├── memory.db            # Long-term memory FTS5 index
@@ -139,7 +160,7 @@ This runs pre-flight diagnostics including:
 ./gobot logs --lines 50 --filter ERROR
 ```
 
-This displays the last 50 log lines filtered by severity. Logs are stored as structured JSON under `Gobot_Storage/logs/`.
+This displays the last 50 log lines filtered by severity. Logs are stored as structured JSON under `<STORAGE_ROOT>/logs/`.
 
 ### Manage Checkpoints
 

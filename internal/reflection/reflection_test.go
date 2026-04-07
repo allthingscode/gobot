@@ -120,7 +120,7 @@ func TestCalculateTotalScore_WeightedAverage(t *testing.T) {
 			map[string]any{"criterion_name": "B", "score": 0.0},
 		},
 	}
-	// Weighted: (1.0*2 + 0.0*1) / 3 = 0.667
+	// Score calculation: (1.0*2 + 0.0*1) / 3 = 0.667
 	got := reflection.CalculateTotalScore(report, rubric)
 	if got < 0.666 || got > 0.668 {
 		t.Errorf("got %.3f, want ~0.667", got)

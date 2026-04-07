@@ -170,7 +170,7 @@ Body`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(tmpDir, tt.filename)
-			err := os.WriteFile(path, []byte(tt.content), 0600)
+			err := os.WriteFile(path, []byte(tt.content), 0o600)
 			if err != nil {
 				t.Fatalf("failed to write test file: %v", err)
 			}

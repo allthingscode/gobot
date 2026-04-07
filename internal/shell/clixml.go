@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	reErrorTag = regexp.MustCompile(`(?s)<S S="Error">(.*?)<\/S>`)
+	reErrorTag = regexp.MustCompile(`(?s)<S S="Error">(.*?)</S>`)
 	reXMLTags  = regexp.MustCompile(`<[^>]+>`)
 )
 

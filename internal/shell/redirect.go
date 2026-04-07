@@ -1,70 +1,66 @@
 package shell
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 var (
-	reDoubleQuotedC = regexp.MustCompile(`(?i)"C:\\[^"]*"`)
-	reSingleQuotedC = regexp.MustCompile(`(?i)'C:\\[^']*'`)
-	reUnquotedC     = regexp.MustCompile(`(?i)C:\\[^;"'\s]+`)
+	// reDoubleQuotedC matches patterns like double-quoted absolute paths.
+	// We use a pattern that matches a volume name followed by a colon and backslash.
+	reDoubleQuotedPath = regexp.MustCompile(`(?i)"[A-Z]:\\[^"]*"`)
+	// reSingleQuotedC matches patterns like single-quoted absolute paths.
+	reSingleQuotedPath = regexp.MustCompile(`(?i)'[A-Z]:\\[^']*'`)
+	// reUnquotedC matches patterns like unquoted absolute paths (standalone).
+	reUnquotedPath = regexp.MustCompile(`(?i)[A-Z]:\\[^;"'\s]+`)
 )
 
-// RedirectCDrive rewrites C:\ paths in a PowerShell command to the mandated
-// workspaceRoot. Three passes handle double-quoted, single-quoted, and unquoted
-// paths. Paths under the projectRoot (e.g. "gobot") are left untouched.
+// RedirectCDrive rewrites absolute Windows system drive paths in a PowerShell command 
+// to the mandated workspace root. This ensures that agents attempting to use 
+// system temp paths are redirected to the durable storage automatically.
 func RedirectCDrive(command, workspaceRoot, projectRoot string) string {
-	command = reDoubleQuotedC.ReplaceAllStringFunc(command, func(m string) string {
-		return redirectPath(m, `"`, workspaceRoot, projectRoot)
+	// Skip redirection if the command contains the workspace root or project root already.
+	// This prevents infinite recursion or double-pathing if the workspace is on the same drive.
+	if (workspaceRoot != "" && strings.Contains(strings.ToLower(command), strings.ToLower(workspaceRoot))) ||
+		(projectRoot != "" && strings.Contains(strings.ToLower(command), strings.ToLower(projectRoot))) {
+		return command
+	}
+
+	res := reDoubleQuotedPath.ReplaceAllStringFunc(command, func(match string) string {
+		return redirectPath(match, workspaceRoot, "\"")
 	})
-	command = reSingleQuotedC.ReplaceAllStringFunc(command, func(m string) string {
-		return redirectPath(m, `'`, workspaceRoot, projectRoot)
+	res = reSingleQuotedPath.ReplaceAllStringFunc(res, func(match string) string {
+		return redirectPath(match, workspaceRoot, "'")
 	})
-	command = reUnquotedC.ReplaceAllStringFunc(command, func(m string) string {
-		return redirectPath(m, "", workspaceRoot, projectRoot)
+	res = reUnquotedPath.ReplaceAllStringFunc(res, func(match string) string {
+		return redirectPath(match, workspaceRoot, "")
 	})
-	return command
+
+	return res
 }
 
-// redirectPath rewrites a single matched C:\ path. quote is the surrounding
-// delimiter ("", `"`, or `'`). Returns path unchanged if it belongs to the
-// projectRoot.
-func redirectPath(path, quote, workspaceRoot, projectRoot string) string {
-	inner := path
+// redirectPath rewrites a single matched absolute path. quote is the surrounding
+// quote character (if any).
+func redirectPath(match, workspaceRoot, quote string) string {
+	// Strip quotes
+	path := match
 	if quote != "" {
-		inner = path[1 : len(path)-1]
+		path = strings.Trim(match, quote)
 	}
 
-	// B-028: If projectRoot is provided, check if the path contains it as a directory component.
-	// We use a case-insensitive check for common project names.
-	if projectRoot != "" {
-		normInner := strings.ToLower(inner)
-		normRoot := strings.ToLower(projectRoot)
-		// Check for \root\ or \root (at end)
-		if strings.Contains(normInner, "\\"+normRoot+"\\") || strings.HasSuffix(normInner, "\\"+normRoot) {
-			return path
-		}
+	vol := filepath.VolumeName(path)
+	if vol == "" {
+		return match // should not happen with our regex
 	}
 
-	// B-027: Use custom base extractor that handles backslashes on any OS.
-	name := winBase(inner)
+	// Extract the part after the volume name (e.g. system drive)
+	inner := path[len(vol):]
 
-	// Ensure we use backslashes for the redirected path since it's for a Windows sandbox.
-	redirected := strings.TrimRight(workspaceRoot, "\\/") + "\\" + name
+	// Build new path using filepath.Join for OS-specific separators.
+	// We trim leading separators from inner to ensure Join works correctly.
+	newPath := filepath.Join(workspaceRoot, strings.TrimLeft(inner, "\\/"))
 
-	if quote != "" {
-		return quote + redirected + quote
-	}
-	return redirected
-}
-
-// winBase returns the last component of a path, handling both \ and /
-// regardless of the host OS.
-func winBase(path string) string {
-	i := strings.LastIndexAny(path, "\\/")
-	if i == -1 {
-		return path
-	}
-	return path[i+1:]
+	// Restore quotes if they were present
+	return quote + newPath + quote
 }

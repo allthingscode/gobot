@@ -11,7 +11,7 @@ func TestWriteFileAtomic_Success(t *testing.T) {
 	targetPath := filepath.Join(tempDir, "subdir", "test.txt")
 	content := []byte("hello, world")
 
-	err := WriteFileAtomic(targetPath, content, 0640)
+	err := WriteFileAtomic(targetPath, content, 0o640)
 	if err != nil {
 		t.Fatalf("WriteFileAtomic failed: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestWriteFileAtomic_Success(t *testing.T) {
 		t.Fatalf("Failed to stat file: %v", err)
 	}
 	// Note: Windows may not respect Unix permissions exactly.
-	if info.Mode().Perm()&0200 == 0 {
+	if info.Mode().Perm()&0o200 == 0 {
 		t.Errorf("File not writable")
 	}
 }
@@ -41,7 +41,7 @@ func TestWriteFileAtomic_CreatesParentDir(t *testing.T) {
 	targetPath := filepath.Join(tempDir, "a", "b", "c", "test.txt")
 	content := []byte("nested content")
 
-	err := WriteFileAtomic(targetPath, content, 0644)
+	err := WriteFileAtomic(targetPath, content, 0o644)
 	if err != nil {
 		t.Fatalf("WriteFileAtomic failed: %v", err)
 	}
@@ -57,13 +57,13 @@ func TestWriteFileAtomic_OverwritesExisting(t *testing.T) {
 	targetPath := filepath.Join(tempDir, "existing.txt")
 
 	// Create initial file.
-	if err := os.WriteFile(targetPath, []byte("old"), 0600); err != nil {
+	if err := os.WriteFile(targetPath, []byte("old"), 0o600); err != nil {
 		t.Fatalf("Failed to create initial file: %v", err)
 	}
 
 	// Overwrite with atomic write.
 	newContent := []byte("new content")
-	err := WriteFileAtomic(targetPath, newContent, 0600)
+	err := WriteFileAtomic(targetPath, newContent, 0o600)
 	if err != nil {
 		t.Fatalf("WriteFileAtomic failed: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestReadFileJSON_Success(t *testing.T) {
 
 	// Write test JSON.
 	content := `{"id": "wf-123", "status": "running", "version": 1}`
-	if err := os.WriteFile(jsonPath, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(jsonPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestReadFileJSON_InvalidJSON(t *testing.T) {
 	jsonPath := filepath.Join(tempDir, "invalid.json")
 
 	// Write invalid JSON.
-	if err := os.WriteFile(jsonPath, []byte("not json"), 0600); err != nil {
+	if err := os.WriteFile(jsonPath, []byte("not json"), 0o600); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestWriteFileJSON_Success(t *testing.T) {
 		Version: 2,
 	}
 
-	err := WriteFileJSON(jsonPath, state, 0644)
+	err := WriteFileJSON(jsonPath, state, 0o644)
 	if err != nil {
 		t.Fatalf("WriteFileJSON failed: %v", err)
 	}

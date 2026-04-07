@@ -44,7 +44,7 @@ type geminiRunner struct {
 }
 
 // newGeminiRunner creates a new geminiRunner for the given provider and model.
-func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, cfg *config.Config) *geminiRunner {
+func newGeminiRunner(prov provider.Provider, model, systemPrompt string, cfg *config.Config) *geminiRunner {
 	maxFail, window, timeout := cfg.Breaker(prov.Name())
 	return &geminiRunner{
 		prov:         prov,
@@ -63,7 +63,7 @@ func newGeminiRunner(prov provider.Provider, model string, systemPrompt string, 
 }
 
 // RunText performs a single-turn, text-only LLM call without tool use.
-func (r *geminiRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) {
+func (r *geminiRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
 	model := r.model
 	if modelOverride != "" {
 		model = modelOverride
@@ -304,11 +304,9 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 					slog.Any("err", execErr),
 				)
 				result = fmt.Sprintf("Error: %v", execErr)
-			} else {
+			} else if r.hooks != nil && !skipExec {
 				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.
-				if r.hooks != nil && !skipExec {
-					result = r.hooks.RunPostTool(ctx, name, result)
-				}
+				result = r.hooks.RunPostTool(ctx, name, result)
 			}
 
 			// F-076: Truncate oversized tool results at dispatch to prevent context overflow.
@@ -335,7 +333,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 // executeTool dispatches a tool call to the matching registered Tool.
 // For side-effecting tools, it checks the idempotency store before execution
 // and caches the result to prevent duplicates on retry.
-func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, idemKey string, name string, args map[string]any, paramsHash string) (string, error) {
+func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
 	// Check if this is a side-effecting tool that needs idempotency protection.
 	if isSideEffectingTool(name) && r.idempStore != nil {
 		// If paramsHash not already computed by caller, compute it now.
@@ -376,7 +374,7 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey string, idemK
 }
 
 // executeToolInner is the inner implementation of executeTool without idempotency checks.
-func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey string, name string, args map[string]any) (result string, err error) {
+func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey, name string, args map[string]any) (result string, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.Error("runner: tool panic recovered", "session", sessionKey, "tool", name, "panic", rec)

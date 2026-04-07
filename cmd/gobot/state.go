@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/state"
 )
 
@@ -32,7 +34,13 @@ func cmdStateList() *cobra.Command {
 		Use:   "list",
 		Short: "List active workflows",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			manager := state.NewManager(state.DefaultManagerConfig())
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			mCfg := state.DefaultManagerConfig()
+			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
+			manager := state.NewManager(mCfg)
 
 			ids, err := manager.ListActive()
 			if err != nil {
@@ -70,7 +78,13 @@ func cmdStateInspect() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			id := state.WorkflowID(args[0])
-			manager := state.NewManager(state.DefaultManagerConfig())
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			mCfg := state.DefaultManagerConfig()
+			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
+			manager := state.NewManager(mCfg)
 
 			wf, err := manager.LoadWithRecovery(id)
 			if err != nil {
@@ -106,7 +120,13 @@ func cmdStateRecover() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			id := state.WorkflowID(args[0])
-			manager := state.NewManager(state.DefaultManagerConfig())
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			mCfg := state.DefaultManagerConfig()
+			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
+			manager := state.NewManager(mCfg)
 			hook := agent.NewStateHook(manager)
 
 			wf, err := hook.RecoverWorkflow(context.Background(), id)
@@ -134,7 +154,13 @@ func cmdStateArchive() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			id := state.WorkflowID(args[0])
-			manager := state.NewManager(state.DefaultManagerConfig())
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			mCfg := state.DefaultManagerConfig()
+			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
+			manager := state.NewManager(mCfg)
 
 			if err := manager.Archive(id); err != nil {
 				return fmt.Errorf("archiving workflow: %w", err)

@@ -26,7 +26,7 @@ func ResolveMediaPath(storageRoot, channelName string) string {
 	}
 
 	// Create directories (equivalent to mkdir -p)
-	_ = os.MkdirAll(path, 0755)
+	_ = os.MkdirAll(path, 0o755)
 
 	return path
 }

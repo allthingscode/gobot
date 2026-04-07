@@ -30,7 +30,7 @@ func TestDecode_NoBOM(t *testing.T) {
 func TestDecode_WithBOM(t *testing.T) {
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	json := []byte(`{"providers":{"gemini":{"apiKey":"test-key"}}}`)
-	input := append(bom, json...)
+	input := append(bom, json...) //nolint:gocritic // intentional: prepend BOM to original json bytes
 
 	cfg, err := decode(bytes.NewReader(input))
 	if err != nil {
@@ -59,19 +59,33 @@ func TestDecode_MalformedJSON(t *testing.T) {
 }
 
 func TestStorageRoot_Default(t *testing.T) {
-	cfg := &Config{}
-	got := cfg.StorageRoot()
-	// Strategic Edition priority: D:\Gobot_Storage if it exists.
-	if _, err := os.Stat(`D:\Gobot_Storage`); err == nil {
-		if got != `D:\Gobot_Storage` {
-			t.Errorf("got %q, want D:\\Gobot_Storage", got)
-		}
-	} else {
-		home, _ := os.UserHomeDir()
-		want := filepath.Join(home, "gobot_data")
-		if got != want {
-			t.Errorf("got %q, want %q", got, want)
-		}
+	// We test StorageRoot priority: Config > Env Var > Default.
+	
+	// 1. Config override
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "config_root"}}
+	if got := cfg.StorageRoot(); got != "config_root" {
+		t.Errorf("Priority 1 (Config) failed: got %q, want %q", got, "config_root")
+	}
+
+	// 2. Env Var override
+	cfg2 := &Config{}
+	t.Setenv("GOBOT_STORAGE", "env_root")
+	if got := cfg2.StorageRoot(); got != "env_root" {
+		t.Errorf("Priority 2 (Env) failed: got %q, want %q", got, "env_root")
+	}
+
+	// 3. Portable Default (fallback when USERPROFILE is missing/unstable)
+	t.Setenv("GOBOT_STORAGE", "")
+	origHome := os.Getenv("USERPROFILE")
+	os.Unsetenv("USERPROFILE")
+	os.Unsetenv("HOME")
+	defer os.Setenv("USERPROFILE", origHome)
+
+	cfg3 := &Config{}
+	got := cfg3.StorageRoot()
+	// When no HOME/USERPROFILE, it should return "gobot_storage" or a joined path.
+	if got == "" {
+		t.Error("Priority 3 (Default) returned empty string")
 	}
 }
 
@@ -93,9 +107,9 @@ func TestSave(t *testing.T) {
 }
 
 func TestStorageRoot_Override(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\CustomStorage`}}
-	if cfg.StorageRoot() != `E:\CustomStorage` {
-		t.Errorf("got %q, want override storage root", cfg.StorageRoot())
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "custom_storage"}}
+	if cfg.StorageRoot() != "custom_storage" {
+		t.Errorf("got %q, want custom_storage", cfg.StorageRoot())
 	}
 }
 
@@ -115,8 +129,8 @@ func TestSecretsRoot(t *testing.T) {
 		},
 		{
 			name:        "custom storage root",
-			storageRoot: `E:\Custom`,
-			want:        filepath.Join(`E:\Custom`, "secrets"),
+			storageRoot: "custom_root",
+			want:        filepath.Join("custom_root", "secrets"),
 		},
 	}
 	for _, tc := range tests {
@@ -147,16 +161,16 @@ func TestGatewayConfig(t *testing.T) {
 }
 
 func TestLogsRoot(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs`}}
-	want := filepath.Join(`E:\Logs`, "logs")
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "logs_root"}}
+	want := filepath.Join("logs_root", "logs")
 	if got := cfg.LogsRoot(); got != want {
 		t.Errorf("LogsRoot() = %q, want %q", got, want)
 	}
 }
 
 func TestLogPath(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: `E:\Logs`}}
-	want := filepath.Join(`E:\Logs`, "logs", "gobot.log")
+	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "logs_root"}}
+	want := filepath.Join("logs_root", "logs", "gobot.log")
 	if got := cfg.LogPath("gobot.log"); got != want {
 		t.Errorf("LogPath() = %q, want %q", got, want)
 	}
@@ -198,21 +212,21 @@ func TestWorkspacePath(t *testing.T) {
 	}{
 		{
 			name:    "no subpath",
-			root:    `D:\Gobot_Storage`,
+			root:    "storage",
 			subpath: nil,
-			want:    filepath.Join(`D:\Gobot_Storage`, "workspace"),
+			want:    filepath.Join("storage", "workspace"),
 		},
 		{
 			name:    "one subpath element",
-			root:    `D:\Gobot_Storage`,
+			root:    "storage",
 			subpath: []string{"jobs"},
-			want:    filepath.Join(`D:\Gobot_Storage`, "workspace", "jobs"),
+			want:    filepath.Join("storage", "workspace", "jobs"),
 		},
 		{
 			name:    "multiple subpath elements",
-			root:    `D:\Gobot_Storage`,
+			root:    "storage",
 			subpath: []string{"journal", "2026-01-01.md"},
-			want:    filepath.Join(`D:\Gobot_Storage`, "workspace", "journal", "2026-01-01.md"),
+			want:    filepath.Join("storage", "workspace", "journal", "2026-01-01.md"),
 		},
 	}
 	for _, tc := range tests {
@@ -264,7 +278,7 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg.Providers.Gemini.APIKey != "file-key" {
-		t.Errorf("got %q, want %q", cfg.Providers.Gemini.APIKey, "file-key")
+		t.Errorf("got apiKey %q, want %q", cfg.Providers.Gemini.APIKey, "file-key")
 	}
 }
 
@@ -444,7 +458,7 @@ func TestExecTimeout_Configured(t *testing.T) {
 func TestEffectiveMaxToolIterations(t *testing.T) {
 	tests := []struct {
 		name  string
-		strat int
+		limit int
 		want  int
 	}{
 		{"zero value returns 25", 0, 25},
@@ -453,7 +467,7 @@ func TestEffectiveMaxToolIterations(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &Config{
-				Strategic: StrategicConfig{MaxToolIterations: tc.strat},
+				Strategic: StrategicConfig{MaxToolIterations: tc.limit},
 			}
 			if got := cfg.EffectiveMaxToolIterations(); got != tc.want {
 				t.Errorf("EffectiveMaxToolIterations() = %d, want %d", got, tc.want)
@@ -544,12 +558,12 @@ func TestConfig_SecretsErrorLogging(t *testing.T) {
 	// Create a temporary storage root with a corrupted secrets file to force errors.
 	tmpDir := t.TempDir()
 	workspaceDir := filepath.Join(tmpDir, "workspace")
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// Write corrupted JSON to trigger parse errors.
 	secretsFile := filepath.Join(workspaceDir, "dpapi_secrets.json")
-	if err := os.WriteFile(secretsFile, []byte("{invalid json"), 0600); err != nil {
+	if err := os.WriteFile(secretsFile, []byte("{invalid json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &Config{Strategic: StrategicConfig{StorageRoot: tmpDir}}

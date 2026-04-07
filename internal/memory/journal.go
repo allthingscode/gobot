@@ -52,7 +52,7 @@ func GetJournalContinuity(storageRoot string, maxChars int) string {
 
 // WriteJournalEntry appends a consolidation entry to the current day's journal.
 // Returns true on success.
-func WriteJournalEntry(storageRoot string, entry string) bool {
+func WriteJournalEntry(storageRoot, entry string) bool {
 	journalPath := DailyJournalPath(storageRoot, time.Now())
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
 		return false

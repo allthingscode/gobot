@@ -252,11 +252,12 @@ func checkTokenFile(name, path string) result {
 
 	remaining := time.Until(tok.Expiry)
 	detail := ""
-	if remaining < 1*time.Hour {
+	switch {
+	case remaining < 1*time.Hour:
 		detail = fmt.Sprintf("expires in %d minute(s)", int(remaining.Minutes()))
-	} else if remaining < 24*time.Hour {
+	case remaining < 24*time.Hour:
 		detail = fmt.Sprintf("expires in %d hour(s)", int(remaining.Hours()))
-	} else {
+	default:
 		detail = fmt.Sprintf("valid, expires in %d day(s)", int(remaining.Hours()/24))
 	}
 

@@ -84,7 +84,7 @@ func TestResolveRoutableChannel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotChannel, gotTo, gotSilent := ResolveRoutableChannel(tt.payload, "D:/storage")
+			gotChannel, gotTo, gotSilent := ResolveRoutableChannel(tt.payload, "/tmp/test-storage")
 			if gotChannel != tt.wantChannel || gotTo != tt.wantTo || gotSilent != tt.wantSilent {
 				t.Errorf("ResolveRoutableChannel() = (%v, %v, %v), want (%v, %v, %v)",
 					gotChannel, gotTo, gotSilent, tt.wantChannel, tt.wantTo, tt.wantSilent)
@@ -104,7 +104,7 @@ func TestDetectModularChange(t *testing.T) {
 
 	// 2. Add a file
 	f1 := filepath.Join(tmpDir, "job1.md")
-	if err := os.WriteFile(f1, []byte("test"), 0600); err != nil {
+	if err := os.WriteFile(f1, []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

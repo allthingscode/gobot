@@ -64,7 +64,7 @@ func (s *SearchService) Execute(ctx context.Context, apiKey, cx, query string) (
 
 	fullURL := s.BaseURL + "?" + params.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("create search request: %w", err)
 	}

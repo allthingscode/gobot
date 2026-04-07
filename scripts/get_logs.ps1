@@ -1,7 +1,8 @@
 # Gobot Log Retrieval Script
 # Extracts critical issues from the LATEST session log for the 'clog' command.
 
-$logDir = "D:\Gobot_Storage\logs"
+$StorageRoot = if ($env:GOBOT_STORAGE) { $env:GOBOT_STORAGE } else { Join-Path $env:USERPROFILE "gobot_data" }
+$logDir = Join-Path $StorageRoot "logs"
 $keywords = @("level=ERROR", "level=WARN", "failed", "Error", "Exception", "panic", "timeout", "Bad Request")
 $pattern = ($keywords | ForEach-Object { [regex]::Escape($_) }) -join "|"
 

@@ -51,7 +51,7 @@ var timestampFormats = []string{
 //   - Older assistant messages are dropped if their timestamp predates the cutoff.
 //   - Tool messages whose tool_call_id is referenced by a kept assistant turn
 //     are kept to preserve the conversation structure.
-func PruneContext(messages []map[string]any, ttlHours int, keepLastAssistants int) []map[string]any {
+func PruneContext(messages []map[string]any, ttlHours, keepLastAssistants int) []map[string]any {
 	cutoff := time.Now().Add(-time.Duration(ttlHours) * time.Hour)
 
 	keepSet := make(map[int]bool, len(messages))
@@ -287,7 +287,7 @@ func IsTrivialMessageForConsolidation(content string) bool {
 
 // FormatRAGBlock formats valid RAG results into a prompt block.
 // Returns (block, count); block is empty string and count is 0 when no results.
-func FormatRAGBlock(results []map[string]any) (string, int) {
+func FormatRAGBlock(results []map[string]any) (block string, count int) {
 	if len(results) == 0 {
 		return "", 0
 	}
@@ -296,7 +296,7 @@ func FormatRAGBlock(results []map[string]any) (string, int) {
 		lines[i] = "- " + r["content"].(string)
 	}
 	warning := "[STRATEGIC MEMORY - MAY BE STALE OR OUTDATED. USE RESEARCH TOOLS TO VERIFY.]\n"
-	block := "### RETRIEVED HISTORICAL CONTEXT:\n" + warning + "\n" + strings.Join(lines, "\n")
+	block = "### RETRIEVED HISTORICAL CONTEXT:\n" + warning + "\n" + strings.Join(lines, "\n")
 	return block, len(results)
 }
 

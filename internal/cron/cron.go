@@ -71,13 +71,13 @@ func (s *Store) DecodeJSON(data []byte) error {
 // ── Logic Ported from cron_logic.py ──────────────────────────────────────────
 
 // ShouldReload returns true if the store file has changed on disk.
-func ShouldReload(currentMtime int64, lastMtime int64, currentSize int64, lastSize int64) bool {
+func ShouldReload(currentMtime, lastMtime, currentSize, lastSize int64) bool {
 	return currentMtime != lastMtime || currentSize != lastSize
 }
 
 // ResolveRoutableChannel implements the [SILENT] and unroutable channel logic.
 // Ported from resolve_routable_channel in cron_logic.py.
-func ResolveRoutableChannel(p Payload, _ string) (channel string, to string, silent bool) {
+func ResolveRoutableChannel(p Payload, _ string) (channel, to string, silent bool) {
 	if strings.Contains(p.Message, "[SILENT]") {
 		return "", "", true
 	}
@@ -128,7 +128,7 @@ func DetectModularChange(itemsDir string, lastItemsMtime float64) (changed bool,
 }
 
 // MergeModularJobs merges modular jobs into the store, preserving state.
-func MergeModularJobs(storeJobs []Job, modularJobs []Job, stateCache map[string]JobState) []Job {
+func MergeModularJobs(storeJobs, modularJobs []Job, stateCache map[string]JobState) []Job {
 	for i, mj := range modularJobs {
 		if state, ok := stateCache[mj.ID]; ok {
 			modularJobs[i].State = state
@@ -136,13 +136,14 @@ func MergeModularJobs(storeJobs []Job, modularJobs []Job, stateCache map[string]
 
 		found := false
 		for j, existing := range storeJobs {
-			if existing.ID == mj.ID {
-				storeJobs[j].Schedule = mj.Schedule
-				storeJobs[j].Payload = mj.Payload
-				storeJobs[j].Name = mj.Name
-				found = true
-				break
+			if existing.ID != mj.ID {
+				continue
 			}
+			storeJobs[j].Schedule = mj.Schedule
+			storeJobs[j].Payload = mj.Payload
+			storeJobs[j].Name = mj.Name
+			found = true
+			break
 		}
 
 		if !found {

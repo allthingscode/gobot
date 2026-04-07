@@ -51,13 +51,13 @@ func (l *MarkdownLogger) Log(sessionKey string, iteration int, messages []agentc
 	filename := fmt.Sprintf("%s_%s.md", safeKey, ts)
 
 	dir := filepath.Join(l.sessionsDir, dateDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("MarkdownLogger: mkdir %s: %w", dir, err)
 	}
 
 	path := filepath.Join(dir, filename)
 	content := renderMarkdown(sessionKey, iteration, messages, now)
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("MarkdownLogger: write %s: %w", path, err)
 	}
 	return nil

@@ -31,7 +31,7 @@ func writeTokenJSON(t *testing.T, dir, filename string, expiry time.Time, refres
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -269,7 +269,7 @@ func TestCheckTokenFile_Missing(t *testing.T) {
 func TestCheckTokenFile_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(path, []byte("not json"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -282,7 +282,7 @@ func TestCheckTokenFile_InvalidJSON(t *testing.T) {
 func TestCheckTokenFile_NoExpiry(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tok.json")
-	if err := os.WriteFile(path, []byte(`{"token":"abc"}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"token":"abc"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -345,8 +345,8 @@ func TestCheckJobsDir_WithJobs(t *testing.T) {
 	root := t.TempDir()
 	jobsDir := filepath.Join(root, "workspace", "jobs")
 	_ = os.MkdirAll(jobsDir, 0o755)
-	_ = os.WriteFile(filepath.Join(jobsDir, "morning.md"), []byte("---\nschedule: cron(0 8 * * *)\n---\nhello"), 0600)
-	_ = os.WriteFile(filepath.Join(jobsDir, "nightly.md"), []byte("---\nschedule: cron(0 3 * * *)\n---\nhello"), 0600)
+	_ = os.WriteFile(filepath.Join(jobsDir, "morning.md"), []byte("---\nschedule: cron(0 8 * * *)\n---\nhello"), 0o600)
+	_ = os.WriteFile(filepath.Join(jobsDir, "nightly.md"), []byte("---\nschedule: cron(0 3 * * *)\n---\nhello"), 0o600)
 
 	r := checkJobsDir(cfgWithRoot(root))
 	if !r.ok {

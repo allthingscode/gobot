@@ -36,7 +36,7 @@ func NewHITLManager(api bot.API, tools []string) *HITLManager {
 }
 
 // PreToolHook is the hook function to be registered with agent.Hooks.
-func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey string, toolName string, args map[string]any) (string, error) {
+func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName string, args map[string]any) (string, error) {
 	if !m.highRiskTools[toolName] {
 		return "", nil
 	}
@@ -57,7 +57,7 @@ func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey string, toolNa
 }
 
 // RequestApproval sends an approval request to Telegram and waits for a response.
-func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey string, toolName string, args map[string]any) (bool, error) {
+func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName string, args map[string]any) (bool, error) {
 	// Parse chatID from sessionKey (format: "telegram:chatID" or "telegram:chatID:threadID")
 	parts := strings.Split(sessionKey, ":")
 	if len(parts) < 2 || parts[0] != "telegram" {

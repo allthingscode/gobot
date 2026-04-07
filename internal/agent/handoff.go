@@ -62,7 +62,7 @@ func NewHandoffHook(storageRoot string) PostDispatchFn {
 
 		// Format the handoff message
 		title := ticket.TargetSpecialist
-		if len(title) > 0 {
+		if title != "" {
 			title = strings.ToUpper(title[:1]) + title[1:]
 		}
 

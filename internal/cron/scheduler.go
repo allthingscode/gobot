@@ -278,7 +278,7 @@ func (s *Scheduler) poll(ctx context.Context) error {
 	if changed {
 		data, err := s.store.EncodeJSON()
 		if err == nil {
-			_ = os.WriteFile(s.storePath, data, 0600)
+			_ = os.WriteFile(s.storePath, data, 0o600)
 			// Update stats to avoid immediate reload
 			if info, err := os.Stat(s.storePath); err == nil {
 				s.lastMtime = info.ModTime().UnixNano()

@@ -43,7 +43,7 @@ func TestAcquireLock_StaleLock(t *testing.T) {
 	lockPath := filepath.Join(tempDir, "wf-789.lock")
 
 	// Create an old lock file.
-	if err := os.WriteFile(lockPath, []byte{}, 0600); err != nil {
+	if err := os.WriteFile(lockPath, []byte{}, 0o600); err != nil {
 		t.Fatalf("Failed to create stale lock: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestAcquireLock_StaleLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireLock failed on stale lock: %v", err)
 	}
-	defer func() { _ = lock.Release() }()
+	_ = lock.Release()
 }
 
 func TestFileLock_Release(t *testing.T) {
@@ -86,13 +86,13 @@ func TestCleanupStaleLocks(t *testing.T) {
 
 	// Create a fresh lock.
 	freshLock := filepath.Join(tempDir, "fresh.lock")
-	if err := os.WriteFile(freshLock, []byte{}, 0600); err != nil {
+	if err := os.WriteFile(freshLock, []byte{}, 0o600); err != nil {
 		t.Fatalf("Failed to create fresh lock: %v", err)
 	}
 
 	// Create a stale lock.
 	staleLock := filepath.Join(tempDir, "stale.lock")
-	if err := os.WriteFile(staleLock, []byte{}, 0600); err != nil {
+	if err := os.WriteFile(staleLock, []byte{}, 0o600); err != nil {
 		t.Fatalf("Failed to create stale lock: %v", err)
 	}
 	oldTime := time.Now().Add(-time.Hour)

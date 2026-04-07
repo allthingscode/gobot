@@ -123,7 +123,7 @@ func TestSessionManager_PreHistoryHook_TrimsBeforeRunner(t *testing.T) {
 // noopRunner returns an empty response and the input messages unchanged.
 type noopRunner struct{}
 
-func (r *noopRunner) RunText(_ context.Context, _ string, _ string, _ string) (string, error) {
+func (r *noopRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
 
@@ -136,7 +136,7 @@ type recordingRunner struct {
 	calls [][]agentctx.StrategicMessage
 }
 
-func (r *recordingRunner) RunText(_ context.Context, _ string, _ string, _ string) (string, error) {
+func (r *recordingRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
 

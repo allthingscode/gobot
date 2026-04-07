@@ -5,10 +5,11 @@
 
 $AppPath    = $PSScriptRoot
 $GobotExe   = Join-Path $AppPath "gobot.exe"
-$LogDir     = "D:\Gobot_Storage\logs"
+$StorageRoot = if ($env:GOBOT_STORAGE) { $env:GOBOT_STORAGE } else { Join-Path $env:USERPROFILE "gobot_data" }
+$LogDir     = Join-Path $StorageRoot "logs"
 $LockFile   = Join-Path $LogDir "gobot.pid"
-$ConfigPath = "C:\Users\HayesChiefOfStaff\.gobot\config.json"
-$PythonExe  = "C:\Users\HayesChiefOfStaff\Documents\nanobot\nanoClaw\Scripts\python.exe"
+$ConfigPath = Join-Path $env:USERPROFILE ".gobot\config.json"
+$PythonExe  = "python.exe"  # Assume python is in PATH
 
 # --- JSON Auto-Formatting ---
 if (Test-Path $ConfigPath) {

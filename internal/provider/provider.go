@@ -65,7 +65,7 @@ var (
 	)
 
 	reTrailingMarker  = regexp.MustCompile(`(?i)\s+(thought|reasoning)[.:]?$`)
-	reOrphanThinkTags = regexp.MustCompile(`(?i)<\/?(think|thought)>`)
+	reOrphanThinkTags = regexp.MustCompile(`(?i)</?(think|thought)>`)
 )
 
 // strategicCircuitBreaker is returned when the entire response was reasoning.

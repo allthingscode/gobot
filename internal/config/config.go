@@ -227,19 +227,21 @@ type MCPServerConfig struct {
 	Env     map[string]string `json:"env"`
 }
 
-// StorageRoot returns the configured storage root, defaulting to D:\Gobot_Storage if it exists,
-// or ~/gobot_data otherwise.
+// StorageRoot returns the configured storage root.
+// Priority:
+// 1. config.json (strategic_edition.storage_root)
+// 2. GOBOT_STORAGE environment variable
+// 3. ~/gobot_data (portable default)
 func (c *Config) StorageRoot() string {
 	if c.Strategic.StorageRoot != "" {
 		return c.Strategic.StorageRoot
 	}
-	// Strategic Edition Default: Prioritize D: drive on Windows if it exists.
-	if _, err := os.Stat(`D:\Gobot_Storage`); err == nil {
-		return `D:\Gobot_Storage`
+	if envRoot := os.Getenv("GOBOT_STORAGE"); envRoot != "" {
+		return envRoot
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return `D:\Gobot_Storage`
+		return "gobot_storage" // last resort fallback to current dir
 	}
 	return filepath.Join(home, "gobot_data")
 }
@@ -266,14 +268,14 @@ func (c *Config) Breaker(name string) (maxFail uint32, window, timeout time.Dura
 
 // Save marshals the config to JSON and writes it to the specified path.
 func (c *Config) Save(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	return os.WriteFile(path, data, 0600)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // SecretsRoot returns the path to the secrets directory under StorageRoot.

@@ -59,7 +59,7 @@ type iterLimitRunner struct {
 	count int
 }
 
-func (r *iterLimitRunner) RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error) {
+func (r *iterLimitRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
 	return r.inner.RunText(ctx, sessionKey, prompt, modelOverride)
 }
 
@@ -72,7 +72,7 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages [
 }
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from a provider.
-func newSpawnTool(prov provider.Provider, model string, specialistPrompts map[string]string, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
+func newSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
 			runner := newGeminiRunner(prov, m, systemPrompt, cfg)

@@ -17,7 +17,7 @@ const DefaultKeepContextMessages = 20
 // CompactMessages trims messages to at most keepN entries when len(messages) exceeds maxN.
 // It respects the CompactionPolicyConfig strategy and ContextPruningConfig safety nets.
 // Returns (compacted messages, count of dropped, keep array from original messages).
-func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ config.CompactionPolicyConfig, pruning config.ContextPruningConfig) ([]agentctx.StrategicMessage, int, []bool) {
+func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ config.CompactionPolicyConfig, pruning config.ContextPruningConfig) (compacted []agentctx.StrategicMessage, droppedCount int, keepArray []bool) {
 	// Defensive: invalid parameters — return unchanged.
 	if maxN <= 0 || keepN <= 0 {
 		return messages, 0, nil
@@ -122,7 +122,6 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ co
 	}
 
 	// Construct the compacted list.
-	var compacted []agentctx.StrategicMessage
 	for i, k := range keep {
 		if k {
 			compacted = append(compacted, messages[i])
@@ -166,7 +165,7 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ co
 }
 
 // PruneMessages removes messages based on TTL and KeepLastAssistants settings.
-func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruningConfig) ([]agentctx.StrategicMessage, int) {
+func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruningConfig) (pruned []agentctx.StrategicMessage, droppedCount int) {
 	if cfg.TTL == "" && cfg.KeepLastAssistants <= 0 {
 		return messages, 0
 	}
@@ -232,7 +231,6 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 		}
 	}
 
-	var pruned []agentctx.StrategicMessage
 	for i, k := range keep {
 		if k {
 			pruned = append(pruned, messages[i])
@@ -249,6 +247,6 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 		}
 	}
 
-	dropped := len(messages) - len(pruned)
-	return pruned, dropped
+	droppedCount = len(messages) - len(pruned)
+	return pruned, droppedCount
 }

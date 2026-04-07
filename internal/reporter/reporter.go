@@ -18,7 +18,7 @@ func FallbackNotify(storageRoot, subject, body, recipient, reason string) string
 	notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
 	dir := filepath.Dir(notifFile)
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Sprintf("CRITICAL: Fallback notification failed. Original: %s. Disk error: %v", reason, err)
 	}
 
@@ -35,7 +35,7 @@ func FallbackNotify(storageRoot, subject, body, recipient, reason string) string
 	_, err := os.Stat(notifFile)
 	isNew := os.IsNotExist(err)
 
-	f, err := os.OpenFile(notifFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(notifFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Sprintf("CRITICAL: Fallback notification failed. Original: %s. Disk error: %v", reason, err)
 	}

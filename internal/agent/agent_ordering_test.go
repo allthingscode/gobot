@@ -19,7 +19,7 @@ type delayedRunner struct {
 	calls    int
 }
 
-func (r *delayedRunner) RunText(_ context.Context, _ string, _ string, _ string) (string, error) {
+func (r *delayedRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
 
 	return r.response, nil
 }
@@ -31,7 +31,7 @@ func (r *delayedRunner) Run(_ context.Context, _ string, messages []agentctx.Str
 	r.mu.Lock()
 	r.calls++
 	r.mu.Unlock()
-	updated := append(messages, agentctx.StrategicMessage{Role: agentctx.RoleAssistant})
+	updated := append(messages, agentctx.StrategicMessage{Role: agentctx.RoleAssistant}) //nolint:gocritic // intentional: return a new slice without mutating input
 	return r.response, updated, nil
 }
 

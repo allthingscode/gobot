@@ -60,7 +60,8 @@ func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
 	fs.RequestCount++
 
 	var action ResponseAction
-	if len(fs.Sequence) > 0 {
+	switch {
+	case len(fs.Sequence) > 0:
 		if fs.current < len(fs.Sequence) {
 			action = fs.Sequence[fs.current]
 			fs.current++
@@ -68,7 +69,7 @@ func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
 			// Default to success after sequence is exhausted
 			action = ResponseAction{StatusCode: http.StatusOK}
 		}
-	} else if fs.FailureRate > 0 && rand.Float64() < fs.FailureRate { //nolint:gosec // test-only RNG, not security-sensitive
+	case fs.FailureRate > 0 && rand.Float64() < fs.FailureRate: //nolint:gosec // test-only RNG, not security-sensitive
 		code := http.StatusInternalServerError
 		if len(fs.FailureCodes) > 0 {
 			code = fs.FailureCodes[rand.Intn(len(fs.FailureCodes))] // #nosec G404
@@ -78,7 +79,7 @@ func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
 			Delay:      fs.Delay,
 			Drop:       fs.DropConnection,
 		}
-	} else {
+	default:
 		action = ResponseAction{
 			StatusCode: http.StatusOK,
 			Delay:      fs.Delay,

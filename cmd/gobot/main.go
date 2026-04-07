@@ -336,7 +336,7 @@ func cmdRun() *cobra.Command {
 			now := time.Now().Format("20060102_150405")
 			logName := fmt.Sprintf("gobot_%s.log", now)
 			logPath := cfg.LogPath(logName)
-			logFile, logErr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			logFile, logErr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			var baseHandler slog.Handler
 			if logErr == nil {
 				// Use a multi-writer to send logs to both file and stderr

@@ -19,12 +19,12 @@ func OpenJournal(journalDir string, id WorkflowID) (*Journal, error) {
 	journalPath := filepath.Join(journalDir, string(id)+".journal")
 
 	// Ensure directory exists.
-	if err := os.MkdirAll(journalDir, 0750); err != nil {
+	if err := os.MkdirAll(journalDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating journal directory: %w", err)
 	}
 
 	// Open for append, create if doesn't exist.
-	file, err := os.OpenFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
+	file, err := os.OpenFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
 		return nil, fmt.Errorf("opening journal file: %w", err)
 	}
@@ -40,7 +40,7 @@ func (j *Journal) Append(entry JournalEntry) error {
 	}
 
 	// Write with newline delimiter for line-by-line reading.
-	line := append(data, '\n')
+	line := append(data, '\n') //nolint:gocritic // intentional: append newline to new slice
 	if _, err := j.file.Write(line); err != nil {
 		return fmt.Errorf("writing journal entry: %w", err)
 	}

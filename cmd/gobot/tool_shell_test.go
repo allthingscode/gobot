@@ -37,7 +37,7 @@ func TestShellExecTool_Execute(t *testing.T) {
 		mockOutput string
 		mockErr    error
 		wantErr    bool
-		wantOutput string // substring; empty = skip
+		wantOutput string // Substring to match; if empty, checking is skipped.
 		wantSuffix string // expected suffix; empty = skip
 		wantArgs   []string
 	}{

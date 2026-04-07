@@ -19,7 +19,7 @@ type Task struct {
 
 // ListTasks returns incomplete tasks from the given task list.
 // Pass "@default" for tasklistID to use the default list.
-func ListTasks(secretsRoot string, tasklistID string) ([]Task, error) {
+func ListTasks(secretsRoot, tasklistID string) ([]Task, error) {
 	return listTasksWithClient(secretsRoot, tasklistID, http.DefaultClient)
 }
 

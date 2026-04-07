@@ -48,7 +48,7 @@ func TestChaos_RandomFailures(t *testing.T) {
 			for time.Since(start) < duration {
 				err := cb.Execute(func() error {
 					return Do(context.Background(), cfg, IsRetryable, func() error {
-						req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, nil)
+						req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, http.NoBody)
 						resp, err := http.DefaultClient.Do(req)
 						if err != nil {
 							return err

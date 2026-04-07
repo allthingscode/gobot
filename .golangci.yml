@@ -7,6 +7,15 @@ linters-settings:
               disabled: true # Acceptable for test helpers
             - name: unused-parameter
               disabled: true # Acceptable for mock/stub implementations
+    gosec:
+        excludes:
+            - G304 # File path from variable — legitimate in config/log loading
+    gocritic:
+        enabled-tags:
+            - diagnostic
+            - style
+        disabled-checks:
+            - hugeParam # Not performance-critical
 
 linters:
     disable-all: true
@@ -19,6 +28,8 @@ linters:
         - gosec
         - noctx
         - unused
+        - gocritic
+        - misspell
 
 run:
     modules-download-mode: readonly

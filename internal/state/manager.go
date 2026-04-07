@@ -18,7 +18,7 @@ type ManagerConfig struct {
 // DefaultManagerConfig returns sensible defaults.
 func DefaultManagerConfig() ManagerConfig {
 	return ManagerConfig{
-		StateDir:    `D:\Gobot_Storage\state`,
+		StateDir:    "state",
 		LockTimeout: 30 * time.Second,
 		MaxRetries:  3,
 	}
@@ -44,7 +44,7 @@ func (m *Manager) Init() error {
 	}
 
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
 		}
 	}
@@ -91,7 +91,7 @@ func (m *Manager) SaveCheckpoint(state *WorkflowState) error {
 	// Write checkpoint atomically. WriteFileJSON calls WriteFileAtomic which
 	// creates the parent directory (workflows/{id}/) automatically.
 	checkpointPath := m.checkpointPath(state.ID)
-	if err := WriteFileJSON(checkpointPath, state, 0640); err != nil {
+	if err := WriteFileJSON(checkpointPath, state, 0o640); err != nil {
 		return fmt.Errorf("writing checkpoint: %w", err)
 	}
 
@@ -154,7 +154,7 @@ func (m *Manager) UpdateStatus(id WorkflowID, status WorkflowStatus) error {
 	entry := JournalEntry{
 		Timestamp: time.Now(),
 		Operation: "status_change",
-		Payload:   json.RawMessage(fmt.Sprintf(`{"status": "%s"}`, status)),
+		Payload:   json.RawMessage(fmt.Sprintf(`{"status": %q}`, status)),
 	}
 
 	if err := journal.Append(entry); err != nil {

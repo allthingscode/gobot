@@ -20,7 +20,7 @@ func AcquireLock(lockDir string, id WorkflowID, timeout time.Duration) (*FileLoc
 	lockPath := filepath.Join(lockDir, string(id)+".lock")
 
 	// Ensure lock directory exists.
-	if err := os.MkdirAll(lockDir, 0750); err != nil {
+	if err := os.MkdirAll(lockDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating lock directory: %w", err)
 	}
 
@@ -28,7 +28,7 @@ func AcquireLock(lockDir string, id WorkflowID, timeout time.Duration) (*FileLoc
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Try to create lock file exclusively.
-		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0640)
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
 		if err == nil {
 			// Lock acquired.
 			return &FileLock{path: lockPath, file: file}, nil

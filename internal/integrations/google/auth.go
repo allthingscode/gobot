@@ -150,16 +150,16 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	}
 
 	googlePath := GoogleTokenPath(secretsRoot)
-	if err := os.WriteFile(googlePath, tokenJSON, 0600); err != nil {
+	if err := os.WriteFile(googlePath, tokenJSON, 0o600); err != nil {
 		return fmt.Errorf("failed to save google_token.json: %w", err)
 	}
 
 	gmailDir := filepath.Join(secretsRoot, "gmail")
-	if err := os.MkdirAll(gmailDir, 0755); err != nil {
+	if err := os.MkdirAll(gmailDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create gmail directory: %w", err)
 	}
 	gmailPath := filepath.Join(gmailDir, "token.json")
-	if err := os.WriteFile(gmailPath, tokenJSON, 0600); err != nil {
+	if err := os.WriteFile(gmailPath, tokenJSON, 0o600); err != nil {
 		return fmt.Errorf("failed to save gmail token: %w", err)
 	}
 
@@ -280,7 +280,7 @@ func bearerTokenWithClient(secretsRoot string, client *http.Client) (string, err
 			return "", fmt.Errorf("google token refresh: %w", err)
 		}
 		if updated, err := json.Marshal(tok); err == nil {
-			_ = os.WriteFile(tokenPath, updated, 0600)
+			_ = os.WriteFile(tokenPath, updated, 0o600)
 		}
 	}
 	return tok.Token, nil
@@ -334,7 +334,7 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 // apiGet performs an authenticated GET to the given URL and decodes the JSON
 // response body into dest.
 func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, apiURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}

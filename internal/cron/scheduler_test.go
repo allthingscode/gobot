@@ -156,7 +156,7 @@ func TestSchedulerPoll(t *testing.T) {
 		},
 	}
 	data, _ := initialStore.EncodeJSON()
-	_ = os.WriteFile(storePath, data, 0600)
+	_ = os.WriteFile(storePath, data, 0o600)
 
 	dispatcher := &mockDispatcher{}
 	start := time.UnixMilli(1000)
@@ -201,7 +201,7 @@ func TestSchedulerPoll_InitializesNewJob(t *testing.T) {
 		},
 	}
 	data, _ := initialStore.EncodeJSON()
-	_ = os.WriteFile(storePath, data, 0600)
+	_ = os.WriteFile(storePath, data, 0o600)
 
 	dispatcher := &mockDispatcher{}
 	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC) // Midnight
@@ -243,7 +243,7 @@ func TestSchedulerPoll_FailureAlert(t *testing.T) {
 		},
 	}
 	data, _ := initialStore.EncodeJSON()
-	_ = os.WriteFile(storePath, data, 0600)
+	_ = os.WriteFile(storePath, data, 0o600)
 
 	dispatcher := &mockDispatcher{
 		failFirst: true,
@@ -302,7 +302,7 @@ func TestSchedulerPoll_JobTimeout(t *testing.T) {
 		},
 	}
 	data, _ := initialStore.EncodeJSON()
-	_ = os.WriteFile(storePath, data, 0600)
+	_ = os.WriteFile(storePath, data, 0o600)
 
 	// Dispatcher that blocks
 	dispatcher := &blockingDispatcher{delay: 50 * time.Millisecond}
@@ -348,7 +348,7 @@ func TestScheduler_FakeClock(t *testing.T) {
 		},
 	}
 	data, _ := initialStore.EncodeJSON()
-	_ = os.WriteFile(storePath, data, 0600)
+	_ = os.WriteFile(storePath, data, 0o600)
 
 	dispatcher := &mockDispatcher{}
 	start := time.UnixMilli(0)

@@ -94,14 +94,15 @@ func (t *shellExecTool) Execute(ctx context.Context, sessionKey string, args map
 		return "", errors.New("shell_exec: command is required")
 	}
 
-	// Always redirect C:\ paths in the command itself if it looks like a script/command
+	// Always redirect absolute Windows system drive paths in the command itself 
+	// if it looks like a script/command
 	cmd = shell.RedirectCDrive(cmd, t.workspaceRoot, t.projectRoot)
 
 	var cmdArgs []string
 	if rawArgs, ok := args["args"].([]any); ok {
 		for _, a := range rawArgs {
 			if s, ok := a.(string); ok {
-				// Redirect C:\ paths in each argument
+				// Redirect absolute Windows system drive paths in each argument
 				redirected := shell.RedirectCDrive(s, t.workspaceRoot, t.projectRoot)
 				cmdArgs = append(cmdArgs, redirected)
 			}

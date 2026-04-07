@@ -12,7 +12,7 @@ import (
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	// Ensure the parent directory exists.
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
 	}
 

@@ -174,13 +174,10 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 }
 
 // loadHistory loads conversation history from checkpoint.
-func (m *SessionManager) loadHistory(sessionKey string) ([]agentctx.StrategicMessage, int, bool, error) {
-	var messages []agentctx.StrategicMessage
-	var iteration int
-	var stateless bool
+func (m *SessionManager) loadHistory(sessionKey string) (messages []agentctx.StrategicMessage, iteration int, stateless bool, err error) {
 	if m.store != nil {
-		snap, err := m.store.LoadLatest(sessionKey)
-		if err == nil && snap != nil {
+		snap, loadErr := m.store.LoadLatest(sessionKey)
+		if loadErr == nil && snap != nil {
 			messages = snap.Messages
 			iteration = snap.Iteration
 		} else {

@@ -33,11 +33,11 @@ func (r *mockRunner) Run(_ context.Context, sessionKey string, messages []agentc
 	if r.err != nil {
 		return "", nil, r.err
 	}
-	updated := append(messages, agentctx.StrategicMessage{Role: agentctx.RoleAssistant})
+	updated := append(messages, agentctx.StrategicMessage{Role: agentctx.RoleAssistant}) //nolint:gocritic // intentional: return a new slice without mutating input
 	return r.response, updated, nil
 }
 
-func (r *mockRunner) RunText(_ context.Context, _ string, _ string, _ string) (string, error) {
+func (r *mockRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
 	if r.err != nil {
 		return "", r.err
 	}

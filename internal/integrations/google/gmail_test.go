@@ -61,7 +61,7 @@ func TestGmailSearchAndRead(t *testing.T) {
 		Expiry: time.Now().Add(1 * time.Hour),
 	}
 	tokData, _ := json.Marshal(tok)
-	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0600)
+	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
 	svc, err := NewService(tmp)
 	if err != nil {

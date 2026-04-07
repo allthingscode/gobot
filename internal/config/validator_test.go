@@ -11,10 +11,10 @@ func baseValidConfig(t *testing.T) *Config {
 	tmpDir := t.TempDir()
 	// Create workspace and AWARENESS.md to satisfy path validation
 	wsDir := filepath.Join(tmpDir, "workspace")
-	if err := os.MkdirAll(wsDir, 0755); err != nil {
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(wsDir, "AWARENESS.md"), []byte("test"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(wsDir, "AWARENESS.md"), []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

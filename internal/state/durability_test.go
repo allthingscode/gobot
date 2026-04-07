@@ -126,7 +126,7 @@ func TestAtomicWrite_InterruptedWrite(t *testing.T) {
 
 	// Write successfully first.
 	content := []byte(`{"valid": true}`)
-	if err := WriteFileAtomic(targetPath, content, 0644); err != nil {
+	if err := WriteFileAtomic(targetPath, content, 0o644); err != nil {
 		t.Fatalf("WriteFileAtomic failed: %v", err)
 	}
 
@@ -162,10 +162,10 @@ func TestStaleLockRecovery(t *testing.T) {
 
 	// Create a stale lock file.
 	lockPath := filepath.Join(tempDir, "locks", "stale.lock")
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o750); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
-	if err := os.WriteFile(lockPath, []byte{}, 0600); err != nil {
+	if err := os.WriteFile(lockPath, []byte{}, 0o600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 

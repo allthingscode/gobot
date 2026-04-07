@@ -113,7 +113,7 @@ func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, message
 	if err != nil {
 		return false, fmt.Errorf("SaveSnapshot: begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback() //nolint:errcheck // Rollback is a no-op if tx is committed
 
 	if _, err := tx.Exec(
 		`INSERT INTO checkpoints (thread_id, iteration, state, checksum) VALUES (?, ?, ?, ?)`,

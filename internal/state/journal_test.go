@@ -85,7 +85,7 @@ func TestTruncate_RemovesFile(t *testing.T) {
 	tempDir := t.TempDir()
 	journalPath := filepath.Join(tempDir, "to-truncate.journal")
 
-	if err := os.WriteFile(journalPath, []byte("data"), 0600); err != nil {
+	if err := os.WriteFile(journalPath, []byte("data"), 0o600); err != nil {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
