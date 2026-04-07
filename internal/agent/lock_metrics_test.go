@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -10,7 +12,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 	defer l.release()
 
 	// First lock
-	err := l.Lock()
+	err := l.Lock(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -31,7 +33,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 	l2 := acquireLock("test-session", 0)
 	defer l2.release()
 
-	err = l.Lock()
+	err = l.Lock(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +42,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 		l.Unlock()
 	}()
 
-	err = l2.Lock()
+	err = l2.Lock(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,16 +66,56 @@ func TestSessionLock_DeadlockError(t *testing.T) {
 	l := acquireLock("deadlock-test", 10*time.Millisecond)
 	defer l.release()
 
-	err := l.Lock() // First acquisition succeeds
+	err := l.Lock(context.Background()) // First acquisition succeeds
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Second acquisition should timeout and return error
-	err = l.Lock()
+	err = l.Lock(context.Background())
 	if err == nil {
 		t.Error("expected error on deadlock, but got nil")
 	}
+}
+
+func TestSessionLock_ContextCancellation(t *testing.T) {
+	l := acquireLock("cancel-test", 120*time.Second)
+	defer l.release()
+
+	// 1. Acquire lock to block others
+	if err := l.Lock(context.Background()); err != nil {
+		t.Fatalf("failed to acquire initial lock: %v", err)
+	}
+
+	// 2. Start a waiter with a cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	
+	start := time.Now()
+	go func() {
+		errCh <- l.Lock(ctx)
+	}()
+
+	// 3. Cancel the context after a short delay
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// 4. Verify the waiter returns immediately with wrapped context.Canceled
+	select {
+	case err := <-errCh:
+		elapsed := time.Since(start)
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled error, got: %v", err)
+		}
+		if elapsed > 500*time.Millisecond {
+			t.Errorf("waiter took too long to return after cancellation: %v", elapsed)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for waiter to return after cancellation")
+	}
+
+	// 5. Cleanup: release initial lock
+	l.Unlock()
 }
 
 func TestSessionLock_Lifecycle(t *testing.T) {

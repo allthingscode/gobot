@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -86,8 +87,8 @@ func (l *sessionLock) release() {
 	}
 }
 
-// Lock acquires the lock, tracking metrics and returning an error on deadlock.
-func (l *sessionLock) Lock() error {
+// Lock acquires the lock, tracking metrics and returning an error on deadlock or context cancellation.
+func (l *sessionLock) Lock(ctx context.Context) error {
 	start := time.Now()
 
 	l.metricsMu.Lock()
@@ -117,6 +118,9 @@ func (l *sessionLock) Lock() error {
 		}
 		l.metricsMu.Unlock()
 		return nil
+	case <-ctx.Done():
+		slog.Info("agent: session lock cancelled", "session", l.sessionKey, "reason", "context_cancelled")
+		return fmt.Errorf("session lock cancelled: %w", ctx.Err())
 	case <-time.After(l.deadlockDur):
 		buf := make([]byte, 64*1024)
 		n := runtime.Stack(buf, true)
