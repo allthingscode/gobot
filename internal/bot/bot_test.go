@@ -8,6 +8,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 )
 
 // ── Mock API ──────────────────────────────────────────────────────────────────
@@ -190,9 +193,8 @@ func TestSessionKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := SessionKey(tt.chatID, tt.threadID, tt.senderID); got != tt.want {
-				t.Errorf("SessionKey(%d, %d, %d) = %q, want %q", tt.chatID, tt.threadID, tt.senderID, got, tt.want)
-			}
+			got := SessionKey(tt.chatID, tt.threadID, tt.senderID)
+			assert.Equal(t, tt.want, got, "SessionKey(%d, %d, %d)", tt.chatID, tt.threadID, tt.senderID)
 		})
 	}
 }
@@ -235,9 +237,8 @@ func TestIsTransientError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsTransientError(tt.err); got != tt.want {
-				t.Errorf("IsTransientError(%v) = %v, want %v", tt.err, got, tt.want)
-			}
+			got := IsTransientError(tt.err)
+			assert.Equal(t, tt.want, got, "IsTransientError(%v)", tt.err)
 		})
 	}
 }
@@ -264,40 +265,19 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 	_ = bot.Run(ctx)
 
 	calls := handler.getCalls()
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 handler calls, got %d: %v", len(calls), calls)
-	}
-	// Check for presence rather than order.
-	has1, has2 := false, false
-	for _, c := range calls {
-		if c == "telegram:1" {
-			has1 = true
-		}
-		if c == "telegram:2" {
-			has2 = true
-		}
-	}
-	if !has1 || !has2 {
-		t.Errorf("missing expected calls: has1=%v, has2=%v, calls=%v", has1, has2, calls)
-	}
+	assert.Len(t, calls, 2, "handler calls")
+	assert.Contains(t, calls, "telegram:1")
+	assert.Contains(t, calls, "telegram:2")
 
 	sent := api.getSent()
-	if len(sent) != 2 {
-		t.Fatalf("expected 2 sends, got %d", len(sent))
-	}
-	// Check for presence rather than order.
-	hasSent1, hasSent2 := false, false
+	assert.Len(t, sent, 2, "sent messages")
+	// Extract chat IDs for easier comparison.
+	var chatIDs []int64
 	for _, s := range sent {
-		if s.ChatID == 1 {
-			hasSent1 = true
-		}
-		if s.ChatID == 2 {
-			hasSent2 = true
-		}
+		chatIDs = append(chatIDs, s.ChatID)
 	}
-	if !hasSent1 || !hasSent2 {
-		t.Errorf("missing expected sends: hasSent1=%v, hasSent2=%v, sent=%v", hasSent1, hasSent2, sent)
-	}
+	assert.Contains(t, chatIDs, int64(1))
+	assert.Contains(t, chatIDs, int64(2))
 }
 
 func TestBot_Run_NoReplyForEmptyResponse(t *testing.T) {
@@ -405,11 +385,9 @@ func TestBot_Send(t *testing.T) {
 		t.Fatalf("Send failed: %v", err)
 	}
 	sent := api.getSent()
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 sent message, got %d", len(sent))
-	}
-	if sent[0] != msg {
-		t.Errorf("sent = %+v, want %+v", sent[0], msg)
+	assert.Len(t, sent, 1, "sent messages")
+	if diff := cmp.Diff(msg, sent[0]); diff != "" {
+		t.Errorf("sent message mismatch (-want +got):\n%s", diff)
 	}
 }
 

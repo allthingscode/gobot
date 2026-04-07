@@ -1,0 +1,15 @@
+# .mockery.yaml
+# F-091: Testing & Quality Enhancements
+
+with-expecter: true
+issue-845-fix: true
+resolve-type-alias: false
+
+packages:
+  github.com/allthingscode/gobot/internal/bot:
+    config:
+      all: true
+      dir: internal/bot
+      output: internal/mocks/bot
+      outpkg: mocks
+      case: snake
