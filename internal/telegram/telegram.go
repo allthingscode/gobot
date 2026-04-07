@@ -9,14 +9,14 @@ import (
 	"strings"
 )
 
-// Regex for .nanobot/media or .nanobot\media (case-insensitive)
-var mediaPathRegex = regexp.MustCompile(`(?i)\.nanobot[\\/]media`)
+// Regex for .gobot/media or .gobot\media (case-insensitive)
+var mediaPathRegex = regexp.MustCompile(`(?i)\.gobot[\\/]media`)
 
 // GetMediaPath calculates the strategic redirection path for Telegram media.
-// If originalPath does not contain ".nanobot/media" or ".nanobot\media" (case-insensitive),
+// If originalPath does not contain ".gobot/media" or ".gobot\media" (case-insensitive),
 // it is returned unchanged. Otherwise, the filename is extracted and joined with
 // {baseWorkspace}/media/{filename}.
-// If baseWorkspace is empty, it defaults to the user's home directory + "/.nanobot/workspace".
+// If baseWorkspace is empty, it defaults to the user's home directory + "/.gobot/workspace".
 func GetMediaPath(baseWorkspace, originalPath string) string {
 	if originalPath == "" {
 		return originalPath
@@ -31,9 +31,9 @@ func GetMediaPath(baseWorkspace, originalPath string) string {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			// Fallback if home directory can't be resolved
-			workspace = filepath.Join(".nanobot", "workspace")
+			workspace = filepath.Join(".gobot", "workspace")
 		} else {
-			workspace = filepath.Join(home, ".nanobot", "workspace")
+			workspace = filepath.Join(home, ".gobot", "workspace")
 		}
 	}
 

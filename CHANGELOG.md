@@ -52,7 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Storage Root Consistency** (B-026): Fixed config drift between C: and D: drives
 - **Human-in-the-Loop Framework** (F-048): Configuration toggle for human-in-the-loop approvals
 - **HTTP Gateway and Control Flags** (F-046): Gateway enabled/disabled configuration flags
-- **Core Agent Loop**: Full feature parity with Python Nanobot Strategic Edition
+- **Core Agent Loop**: Full feature parity with the original Python reference implementation
   - Recursive improvement system with five specialist roles (Researcher, Groomer, Architect, Reviewer, Operator)
   - Modular cron system with markdown-based job definitions
   - Session checkpointing and recovery
@@ -76,7 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Secure Secrets Manager** (F-021): DPAPI-based credential storage for OAuth tokens and API keys
 
 ### Deprecated
-- Python Nanobot is now in maintenance mode only (reference implementation)
+- The original Python implementation is now in maintenance mode only (historical reference)
 
 ---
 

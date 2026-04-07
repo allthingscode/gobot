@@ -10,7 +10,7 @@ import (
 
 func TestGetMediaPath(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	defaultWorkspace := filepath.Join(home, ".nanobot", "workspace")
+	defaultWorkspace := filepath.Join(home, ".gobot", "workspace")
 
 	tests := []struct {
 		name          string
@@ -25,33 +25,33 @@ func TestGetMediaPath(t *testing.T) {
 			want:          "",
 		},
 		{
-			name:          "path without .nanobot/media",
+			name:          "path without .gobot/media",
 			baseWorkspace: "/tmp/ws",
 			originalPath:  "/some/other/path/image.png",
 			want:          "/some/other/path/image.png",
 		},
 		{
-			name:          "path with .nanobot/media (forward slash)",
+			name:          "path with .gobot/media (forward slash)",
 			baseWorkspace: "/tmp/ws",
-			originalPath:  "/home/user/.nanobot/media/photo.jpg",
+			originalPath:  "/home/user/.gobot/media/photo.jpg",
 			want:          filepath.Join(string(os.PathSeparator), "tmp", "ws", "media", "photo.jpg"),
 		},
 		{
-			name:          "path with .nanobot\\media (backslash)",
+			name:          "path with .gobot\\media (backslash)",
 			baseWorkspace: filepath.Join("ws_root", "ws"),
-			originalPath:  filepath.Join("some", "path", ".nanobot", "media", "document.pdf"),
+			originalPath:  filepath.Join("some", "path", ".gobot", "media", "document.pdf"),
 			want:          filepath.Join("ws_root", "ws", "media", "document.pdf"),
 		},
 		{
-			name:          "path with mixed case (.NANOBOT/Media)",
+			name:          "path with mixed case (.GOBOT/Media)",
 			baseWorkspace: "/tmp/ws",
-			originalPath:  "/path/to/.NANOBOT/Media/video.mp4",
+			originalPath:  "/path/to/.GOBOT/Media/video.mp4",
 			want:          filepath.Join(string(os.PathSeparator), "tmp", "ws", "media", "video.mp4"),
 		},
 		{
 			name:          "empty baseWorkspace uses default",
 			baseWorkspace: "",
-			originalPath:  "/path/to/.nanobot/media/audio.mp3",
+			originalPath:  "/path/to/.gobot/media/audio.mp3",
 			want:          filepath.Join(defaultWorkspace, "media", "audio.mp3"),
 		},
 	}

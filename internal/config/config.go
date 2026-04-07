@@ -1,4 +1,4 @@
-// Package config loads the nanobot config.json with BOM stripping and struct validation.
+// Package config loads the gobot config.json with BOM stripping and struct validation.
 package config
 
 import (

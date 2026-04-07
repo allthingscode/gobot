@@ -186,7 +186,7 @@ func BuildReport(models []ModelInfo, current map[string]string) string {
 		}
 		add("")
 		add("> **No changes are applied automatically.**")
-		add("> Edit `~/.nanobot/config.json` to apply updates.")
+		add("> Edit `~/.gobot/config.json` to apply updates.")
 	} else {
 		add("Current configuration already matches the best available candidates." +
 			" No changes suggested.")

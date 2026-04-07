@@ -52,7 +52,7 @@ OpenClaw uses a sophisticated session management system to handle multi-user, mu
 ### Relevance to GoBot:
 *   `gobot/internal/context` (the SQLite store) must support these granular session keys.
 *   GoBot should adopt the `per-channel-peer` isolation logic as a security standard for any non-CLI usage.
-*   The checkpoint logic being ported should include "compaction" events to stay parity with OpenClaw/Nanobot.
+*   The checkpoint logic being ported should include "compaction" events to stay parity with OpenClaw and the original reference implementation.
 
 ---
 

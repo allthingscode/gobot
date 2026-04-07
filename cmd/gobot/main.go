@@ -43,7 +43,7 @@ func main() {
 	root := &cobra.Command{
 		Use:   "gobot",
 		Short: "Strategic Edition agent runtime",
-		Long:  "gobot - the Go-native runtime for Nanobot Strategic Edition.",
+		Long:  "gobot - the Go-native runtime for gobot Strategic Edition.",
 	}
 	root.SilenceErrors = true
 
@@ -351,7 +351,7 @@ func cmdRun() *cobra.Command {
 				slog.Warn("failed to open log file, logging to stderr only", "err", logErr)
 			}
 
-			// Pre-flight diagnostics — mirrors nanobot strategic_launcher.py
+			// Pre-flight diagnostics — mirrors gobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
 				slog.Warn("pre-flight diagnostics found issues", "err", err)
 			}
@@ -753,7 +753,7 @@ func cmdSimulate() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 
-			// Pre-flight diagnostics â€" mirrors nanobot strategic_launcher.py
+			// Pre-flight diagnostics — mirrors gobot strategic_launcher.py
 			if err := doctor.Run(cfg, nil); err != nil {
 				slog.Warn("pre-flight diagnostics found issues", "err", err)
 			}
