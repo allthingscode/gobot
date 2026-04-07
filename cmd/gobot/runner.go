@@ -17,11 +17,14 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/reflection"
 	"github.com/allthingscode/gobot/internal/resilience"
+	"github.com/spf13/cobra"
 )
 
 // geminiRunner implements the agent.Runner interface using a provider.Provider.
@@ -551,4 +554,123 @@ func truncateToolResult(result string, maxBytes int) string {
 
 	const truncationNotice = "\n\n[... truncated: result exceeded %d bytes ...]"
 	return result[:idx] + fmt.Sprintf(truncationNotice, maxBytes)
+}
+
+func cmdSimulate() *cobra.Command {
+	return &cobra.Command{
+		Use:   "simulate <prompt>",
+		Short: "Simulate a user message locally",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prompt := args[0]
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+
+			// Pre-flight diagnostics — mirrors gobot strategic_launcher.py
+			if err := doctor.Run(cfg, nil); err != nil {
+				slog.Warn("pre-flight diagnostics found issues", "err", err)
+			}
+
+			ctx := cmd.Context()
+			stack, cleanup, err := buildAgentStack(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			runner := stack.runner
+
+			// F-012: create shared Hooks instance
+			hooks := &agent.Hooks{}
+			// F-063: Automated Handoffs
+			hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
+
+			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
+			mgr := stack.NewSessionManager(cfg, store, nil)
+			mgr.SetHooks(hooks)
+			runner.SetHooks(hooks)
+
+			fmt.Printf("--- Simulating Prompt ---\n%s\n\n", prompt)
+			fmt.Println("Waiting for response...")
+			reply, err := mgr.Dispatch(ctx, "cli-sim", prompt)
+			if err != nil {
+				return fmt.Errorf("dispatch: %w", err)
+			}
+
+			fmt.Printf("\n--- Agent Response ---\n%s\n", reply)
+			return nil
+		},
+	}
+}
+
+type dispatchHandler struct {
+	mgr          *agent.SessionManager
+	memory       *memory.MemoryStore        // may be nil
+	consolidator *consolidator.Consolidator // may be nil
+	hitl         *agent.HITLManager         // may be nil
+}
+
+func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
+	// Handle admin commands first.
+	if strings.TrimSpace(msg.Text) == "/reset_circuits" {
+		resilience.ResetAll()
+		slog.Info("resilience: all circuit breakers reset by user", "session", sessionKey)
+		return "All circuit breakers have been reset.", nil
+	}
+
+	slog.Debug("handler: dispatching to session manager", "session", sessionKey)
+	reply, err := h.mgr.Dispatch(ctx, sessionKey, msg.Text)
+	if err != nil {
+		if errors.Is(err, resilience.ErrCircuitOpen) {
+			return "I'm sorry, I'm currently having trouble connecting to one of my services. Please try again in a few moments.", nil
+		}
+	}
+	if err == nil && h.memory != nil {
+		// Index user message (if not generic noise)
+		if !memory.ShouldSkipRAG(msg.Text) {
+			_ = h.memory.Index(sessionKey, "USER: "+msg.Text)
+		}
+		// Index assistant reply
+		if reply != "" {
+			if indexErr := h.memory.Index(sessionKey, "ASSISTANT: "+reply); indexErr != nil {
+				slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
+			}
+		}
+	}
+	if err == nil && h.consolidator != nil && reply != "" {
+		h.consolidator.ConsolidateAsync(sessionKey, reply)
+	}
+	return reply, err
+}
+
+func (h *dispatchHandler) HandleCallback(ctx context.Context, cb bot.InboundCallback) error {
+	if h.hitl != nil {
+		return h.hitl.HandleCallback(ctx, cb)
+	}
+	return nil
+}
+
+// runIdempotencyCleanup runs periodic background cleanup of expired idempotency keys.
+// F-069: Periodic cleanup to prevent unbounded SQLite growth.
+func runIdempotencyCleanup(ctx context.Context, store *agentctx.IdempotencyStore, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleaned, err := store.CleanupExpired()
+			if err != nil {
+				slog.Error("run: idempotency cleanup failed", "err", err)
+				continue
+			}
+			if cleaned > 0 {
+				slog.Info("run: cleaned up expired idempotency keys", "count", cleaned)
+			}
+		}
+	}
 }
