@@ -228,7 +228,24 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 			}
 
 			toolSeq = append(toolSeq, name)
-			slog.Info("runner: tool call", "session", sessionKey, "tool", name, "args", args, "iter", iter)
+
+			var paramsHash string
+			var hashErr error
+			paramsHash, hashErr = agentctx.HashParams(args)
+			if hashErr != nil {
+				slog.Warn("runner: failed to hash tool params, skipping idempotency check",
+					slog.String("session", sessionKey),
+					slog.String("tool", name),
+					slog.Any("err", hashErr),
+				)
+			}
+
+			slog.Info("runner: tool call",
+				slog.String("session", sessionKey),
+				slog.String("tool", name),
+				slog.String("params_hash", paramsHash),
+				slog.Int("iter", iter),
+			)
 
 			var result string
 			var execErr error
@@ -242,20 +259,21 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 				} else if override != "" {
 					result = override
 					skipExec = true
-					slog.Debug("runner: tool pre-hook override", "tool", name, "result", result)
+					slog.Debug("runner: tool pre-hook override",
+						slog.String("session", sessionKey),
+						slog.String("tool", name),
+						slog.String("params_hash", paramsHash),
+						slog.String("result", result),
+					)
 				}
 			}
 
-			var paramsHash string
 			if execErr == nil && !skipExec {
 				start := time.Now()
 				// Generate a deterministic idempotency key based on the tool's position in the sequence and parameters.
 				// This ensures that if the agent loop crashes and resumes, the exact same tool call gets the same key,
 				// preventing duplicate real-world side effects.
-				var hashErr error
-				paramsHash, hashErr = agentctx.HashParams(args)
 				if hashErr != nil {
-					slog.Warn("runner: failed to hash tool params, skipping idempotency check", "tool", name, "err", hashErr)
 					result, execErr = r.executeTool(ctx, sessionKey, "", name, args, "")
 				} else {
 					idemKey := fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, len(toolSeq), name, paramsHash)
@@ -269,7 +287,12 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 						slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 						slog.Int("result_len", len(result)),
 					)
-					slog.Debug("runner: tool result detail", "tool", name, "result", result)
+					slog.Debug("runner: tool result detail",
+						slog.String("session", sessionKey),
+						slog.String("tool", name),
+						slog.String("params_hash", paramsHash),
+						slog.String("result", result),
+					)
 				}
 			}
 
