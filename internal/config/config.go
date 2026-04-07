@@ -60,19 +60,42 @@ type ContextPruningConfig struct {
 	KeepLastAssistants int    `json:"keepLastAssistants"`
 }
 
+// DefaultSummarizationThreshold is the default threshold for context summarization (70%).
+const DefaultSummarizationThreshold = 0.7
+
+// SummarizationConfig controls automatic context summarization before pruning.
+// Fields use prefixed names to avoid conflicts with the accessor methods below.
+type SummarizationConfig struct {
+	IsEnabled        bool    `json:"enabled"`
+	ModelName        string  `json:"model"`
+	ThresholdPercent float64 `json:"thresholdPercent"`
+}
+
 type CompactionPolicyConfig struct {
 	Strategy      string              `json:"strategy"`
 	MemoryFlush   MemoryFlushConfig   `json:"memoryFlush"`
 	Summarization SummarizationConfig `json:"summarization"`
 }
 
-// DefaultSummarizationThreshold is the default threshold for context summarization (70%).
-const DefaultSummarizationThreshold = 0.7
+// Enabled returns true if summarization is enabled.
+func (s SummarizationConfig) Enabled() bool {
+	return s.IsEnabled
+}
 
-type SummarizationConfig struct {
-	Enabled          bool    `json:"enabled"`
-	Model            string  `json:"model"`
-	ThresholdPercent float64 `json:"thresholdPercent"` // 0.0 to 1.0; e.g. 0.7 for 70%
+// Threshold returns the configured threshold, or the default (70%) if unset.
+func (s SummarizationConfig) Threshold() float64 {
+	if s.ThresholdPercent > 0 {
+		return s.ThresholdPercent
+	}
+	return DefaultSummarizationThreshold
+}
+
+// Model returns the configured model, falling back to the provided default if empty.
+func (s SummarizationConfig) Model(defaultModel string) string {
+	if s.ModelName != "" {
+		return s.ModelName
+	}
+	return defaultModel
 }
 
 type MemoryFlushConfig struct {
@@ -151,6 +174,7 @@ type ObservabilityConfig struct {
 	ServiceVersion string  `json:"service_version"`
 	OTLPEndpoint   string  `json:"otlp_endpoint"`
 	SamplingRate   float64 `json:"sampling_rate"`
+	DevMode        bool    `json:"dev_mode"`
 }
 
 // MemoryWindow returns the configured agent memory window (max context messages), defaulting to 50.

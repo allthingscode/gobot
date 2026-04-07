@@ -627,7 +627,7 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 	mgr.SetMemoryWindow(1)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
 		Summarization: config.SummarizationConfig{
-			Enabled:          true,
+			IsEnabled:        true,
 			ThresholdPercent: 0.1, // Trigger easily
 		},
 	})

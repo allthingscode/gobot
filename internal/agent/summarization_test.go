@@ -18,7 +18,7 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 	sm.memoryWindow = 10
 	sm.compactionPolicy = config.CompactionPolicyConfig{
 		Summarization: config.SummarizationConfig{
-			Enabled:          true,
+			IsEnabled:        true,
 			ThresholdPercent: 0.5, // Trigger at 5 messages
 		},
 	}
@@ -85,7 +85,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 	sm.memoryWindow = 10
 	sm.compactionPolicy = config.CompactionPolicyConfig{
 		Summarization: config.SummarizationConfig{
-			Enabled:          true,
+			IsEnabled:        true,
 			ThresholdPercent: 0.5,
 		},
 	}

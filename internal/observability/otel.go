@@ -4,9 +4,12 @@ package observability
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
+	"github.com/lmittmann/tint"
+	slogcommon "github.com/samber/slog-otel"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -18,6 +21,52 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// otelSlogHandler wraps a slog.Handler and injects OTel trace_id/span_id
+// from the active span into each log record that carries a context.
+type otelSlogHandler struct {
+	inner    slog.Handler
+	attrFunc func(ctx context.Context) []slog.Attr
+}
+
+// NewSlogHandler wraps base with an OpenTelemetry-aware handler that injects
+// trace_id and span_id attributes when a span is active in the log context.
+func NewSlogHandler(base slog.Handler) slog.Handler {
+	return &otelSlogHandler{
+		inner:    base,
+		attrFunc: slogcommon.ExtractOtelAttrFromContext(nil, "trace_id", "span_id"),
+	}
+}
+
+func (h *otelSlogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h *otelSlogHandler) Handle(ctx context.Context, r slog.Record) error {
+	attrs := h.attrFunc(ctx)
+	if len(attrs) > 0 {
+		r = r.Clone()
+		r.AddAttrs(attrs...)
+	}
+	return h.inner.Handle(ctx, r)
+}
+
+func (h *otelSlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &otelSlogHandler{inner: h.inner.WithAttrs(attrs), attrFunc: h.attrFunc}
+}
+
+func (h *otelSlogHandler) WithGroup(name string) slog.Handler {
+	return &otelSlogHandler{inner: h.inner.WithGroup(name), attrFunc: h.attrFunc}
+}
+
+// NewTintedHandler returns a colorized slog.Handler for development console output.
+// level controls the minimum log level emitted.
+func NewTintedHandler(w io.Writer, level slog.Level) slog.Handler {
+	return tint.NewHandler(w, &tint.Options{
+		Level:   level,
+		NoColor: false,
+	})
+}
 
 // Config holds observability configuration.
 type Config struct {

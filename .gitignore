@@ -39,6 +39,9 @@ GEMINI.md
 .claudeignore.txt
 
 # Temporary/Generated Files
+c
+c.out
+*.out
 coverage
 coverage/
 coverage.out

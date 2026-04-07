@@ -22,6 +22,7 @@ type Resource interface {
 type ResourceRegistry struct {
 	mu        sync.RWMutex
 	resources map[string]Resource
+	order     []string
 	metrics   RegistryMetrics
 }
 
@@ -37,6 +38,7 @@ type RegistryMetrics struct {
 func NewResourceRegistry() *ResourceRegistry {
 	return &ResourceRegistry{
 		resources: make(map[string]Resource),
+		order:     []string{},
 	}
 }
 
@@ -46,13 +48,15 @@ func (r *ResourceRegistry) Register(res Resource) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.resources[res.Name()]; exists {
-		return fmt.Errorf("resource %q already registered", res.Name())
+	name := res.Name()
+	if _, exists := r.resources[name]; exists {
+		return fmt.Errorf("resource %q already registered", name)
 	}
 
-	r.resources[res.Name()] = res
+	r.resources[name] = res
+	r.order = append(r.order, name)
 	r.metrics.Registered++
-	slog.Debug("resource registered", "name", res.Name())
+	slog.Debug("resource registered", "name", name)
 	return nil
 }
 
@@ -68,6 +72,13 @@ func (r *ResourceRegistry) Unregister(name string) Resource {
 	}
 
 	delete(r.resources, name)
+	// Remove from order slice
+	for i, n := range r.order {
+		if n == name {
+			r.order = append(r.order[:i], r.order[i+1:]...)
+			break
+		}
+	}
 	r.metrics.Unregistered++
 	slog.Debug("resource unregistered", "name", name)
 	return res
@@ -92,23 +103,25 @@ func (r *ResourceRegistry) Len() int {
 // Returns an error aggregating all shutdown failures.
 func (r *ResourceRegistry) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
-	// Copy and clear in one operation for thread safety
-	toShutdown := make([]Resource, 0, len(r.resources))
-	for _, res := range r.resources {
-		toShutdown = append(toShutdown, res)
+	// Shutdown in reverse order (LIFO)
+	toShutdown := make([]Resource, 0, len(r.order))
+	for i := len(r.order) - 1; i >= 0; i-- {
+		name := r.order[i]
+		if res, exists := r.resources[name]; exists {
+			toShutdown = append(toShutdown, res)
+		}
 	}
-	// Clear the map
+	// Clear the registry
 	r.resources = make(map[string]Resource)
+	r.order = []string{}
 	r.mu.Unlock()
 
 	if len(toShutdown) == 0 {
 		return nil
 	}
 
-	// Shutdown in reverse order (LIFO)
 	var errs []error
-	for i := len(toShutdown) - 1; i >= 0; i-- {
-		res := toShutdown[i]
+	for _, res := range toShutdown {
 		if err := r.shutdownOne(ctx, res); err != nil {
 			errs = append(errs, fmt.Errorf("shutdown %q: %w", res.Name(), err))
 		}

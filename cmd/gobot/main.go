@@ -334,22 +334,31 @@ func cmdRun() *cobra.Command {
 			}
 
 			// Setup logging to timestamped file and stderr
-			now := time.Now().Format("20060102_150405")
-			logName := fmt.Sprintf("gobot_%s.log", now)
-			logPath := cfg.LogPath(logName)
-			logFile, logErr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			devMode := cfg.Strategic.Observability.DevMode
 			var baseHandler slog.Handler
-			if logErr == nil {
-				// Use a multi-writer to send logs to both file and stderr
-				baseHandler = slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
-				defer logFile.Close()
+			var logFileErr error
+			if devMode {
+				// Dev mode: colorized console output only (no log file).
+				baseHandler = observability.NewTintedHandler(os.Stderr, slog.LevelDebug)
 			} else {
-				baseHandler = slog.NewTextHandler(os.Stderr, nil)
+				now := time.Now().Format("20060102_150405")
+				logName := fmt.Sprintf("gobot_%s.log", now)
+				logPath := cfg.LogPath(logName)
+				logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+				logFileErr = err
+				if logFileErr == nil {
+					// Use a multi-writer to send logs to both file and stderr
+					baseHandler = slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
+					defer logFile.Close()
+				} else {
+					baseHandler = slog.NewTextHandler(os.Stderr, nil)
+				}
 			}
-			// Always install redaction — PII protection must not depend on log file health.
-			slog.SetDefault(slog.New(audit.NewRedactingHandler(baseHandler)))
-			if logErr != nil {
-				slog.Warn("failed to open log file, logging to stderr only", "err", logErr)
+			// Always install redaction and OTel trace correlation.
+			// NewSlogHandler injects trace_id/span_id from the active OTel span (F-093).
+			slog.SetDefault(slog.New(observability.NewSlogHandler(audit.NewRedactingHandler(baseHandler))))
+			if logFileErr != nil {
+				slog.Warn("failed to open log file, logging to stderr only", "err", logFileErr)
 			}
 
 			// Pre-flight diagnostics — mirrors gobot strategic_launcher.py

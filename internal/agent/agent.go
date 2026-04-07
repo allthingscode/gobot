@@ -235,12 +235,8 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 
 	// Compact context if the history has grown too large (F-015, F-047, F-070).
 	// F-070: Summarize-then-Prune step.
-	threshold := m.compactionPolicy.Summarization.ThresholdPercent
-	if threshold <= 0 {
-		threshold = config.DefaultSummarizationThreshold
-	}
-
-	if m.compactionPolicy.Summarization.Enabled && len(messages) > int(float64(m.memoryWindow)*threshold) {
+	summarization := m.compactionPolicy.Summarization
+	if summarization.Enabled() && len(messages) > int(float64(m.memoryWindow)*summarization.Threshold()) {
 		// Trigger summarization when window exceeds threshold.
 		// Identify messages to drop (all but the last keepN messages).
 		keepN := DefaultKeepContextMessages
@@ -262,10 +258,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 				fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
 			}
 			
-			model := m.compactionPolicy.Summarization.Model
-			if model == "" {
-				model = m.model
-			}
+			model := summarization.Model(m.model)
 
 			summary, err := m.runner.RunText(ctx, sessionKey, sb.String(), model)
 			if err == nil {
