@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -491,5 +492,78 @@ func TestBot_Run_BackoffOnCircuitOpen(t *testing.T) {
 		if d < 4*time.Second { // Allow some slack from 5s
 			t.Errorf("delay %d was too short: %v, want ~5s", i, d)
 		}
+	}
+}
+
+type blockingHandler struct {
+	started chan struct{}
+	block   chan struct{}
+}
+
+func (h *blockingHandler) HandleCallback(ctx context.Context, cb InboundCallback) error {
+	close(h.started)
+	<-h.block // Block indefinitely until test allows
+	return nil
+}
+
+func (h *blockingHandler) Handle(ctx context.Context, sessionKey string, msg InboundMessage) (string, error) {
+	return "", nil
+}
+
+func TestBot_CallbackLeakPrevention(t *testing.T) {
+	// Custom API to feed exactly one callback and then block indefinitely
+	api := &mockAPI{
+		updates:   make(chan InboundMessage),
+		callbacks: make(chan InboundCallback, 1),
+	}
+
+	api.callbacks <- InboundCallback{ChatID: 100, SessionKey: "sess_1", Data: "data"}
+
+	handler := &blockingHandler{
+		started: make(chan struct{}),
+		block:   make(chan struct{}),
+	}
+	bot := New(api, handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Capture initial goroutines
+	time.Sleep(10 * time.Millisecond)
+	initialGoroutines := runtime.NumGoroutine()
+
+	done := make(chan struct{})
+	go func() {
+		_ = bot.Run(ctx)
+		close(done)
+	}()
+
+	// Wait for handler to actually start processing the callback
+	select {
+	case <-handler.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not start")
+	}
+
+	// At this point, the callback is blocking. Cancel the bot context.
+	cancel()
+
+	// Wait for Run to return
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bot did not shut down after context cancellation")
+	}
+
+	// Wait a brief moment for goroutines to drain
+	time.Sleep(50 * time.Millisecond)
+
+	finalGoroutines := runtime.NumGoroutine()
+
+	// Unblock to avoid polluting other tests
+	close(handler.block)
+
+	if finalGoroutines > initialGoroutines+2 {
+		t.Errorf("goroutine leak: started with %d, ended with %d", initialGoroutines, finalGoroutines)
 	}
 }

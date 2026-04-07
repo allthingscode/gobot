@@ -188,8 +188,18 @@ func (b *Bot) Run(ctx context.Context) error {
 					}
 					slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
 					go func() {
-						if err := b.handler.HandleCallback(cbCtx, cb); err != nil {
-							slog.Error("bot: HandleCallback failed", "err", err)
+						done := make(chan error, 1)
+						go func() {
+							done <- b.handler.HandleCallback(cbCtx, cb)
+						}()
+
+						select {
+						case <-cbCtx.Done():
+							slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
+						case err := <-done:
+							if err != nil {
+								slog.Error("bot: HandleCallback failed", "err", err)
+							}
 						}
 					}()
 				}
