@@ -249,11 +249,64 @@ func TestIsTransientError(t *testing.T) {
 	}
 }
 
+func TestInboundMessage_Validate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		msg     InboundMessage
+		wantErr bool
+		errText string
+	}{
+		{
+			name:    "valid DM",
+			msg:     InboundMessage{ChatID: 123, SenderID: 123, Text: "hi"},
+			wantErr: false,
+		},
+		{
+			name:    "valid group",
+			msg:     InboundMessage{ChatID: -100123, SenderID: 456, Text: "hi"},
+			wantErr: false,
+		},
+		{
+			name:    "missing ChatID",
+			msg:     InboundMessage{ChatID: 0, SenderID: 123, Text: "hi"},
+			wantErr: true,
+			errText: "missing ChatID",
+		},
+		{
+			name:    "missing SenderID",
+			msg:     InboundMessage{ChatID: 123, SenderID: 0, Text: "hi"},
+			wantErr: true,
+			errText: "missing SenderID",
+		},
+		{
+			name:    "negative ThreadID",
+			msg:     InboundMessage{ChatID: 123, SenderID: 123, ThreadID: -1, Text: "hi"},
+			wantErr: true,
+			errText: "negative ThreadID",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
+			err := tt.msg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errText != "" {
+					assert.Contains(t, err.Error(), tt.errText)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestBot_Run_DispatchesMessages(t *testing.T) {
 	t.Parallel()
 	api := newMockAPI(
-		InboundMessage{ChatID: 1, MessageID: 10, Text: "hello"},
-		InboundMessage{ChatID: 2, MessageID: 20, Text: "world"},
+		InboundMessage{ChatID: 1, MessageID: 10, SenderID: 100, Text: "hello"},
+		InboundMessage{ChatID: 2, MessageID: 20, SenderID: 200, Text: "world"},
 	)
 	handler := &mockHandler{response: "reply"}
 	bot := New(api, handler)
@@ -289,7 +342,7 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 
 func TestBot_Run_NoReplyForEmptyResponse(t *testing.T) {
 	t.Parallel()
-	api := newMockAPI(InboundMessage{ChatID: 1, Text: "hi"})
+	api := newMockAPI(InboundMessage{ChatID: 1, SenderID: 100, Text: "hi"})
 	handler := &mockHandler{response: ""} // empty = no reply
 	bot := New(api, handler)
 
@@ -310,8 +363,8 @@ func TestBot_Run_NoReplyForEmptyResponse(t *testing.T) {
 func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 	t.Parallel()
 	api := newMockAPI(
-		InboundMessage{ChatID: 1, Text: "first"},
-		InboundMessage{ChatID: 2, Text: "second"},
+		InboundMessage{ChatID: 1, SenderID: 100, Text: "first"},
+		InboundMessage{ChatID: 2, SenderID: 200, Text: "second"},
 	)
 	// Override to return error on one, success on other.
 	customHandler := &callCountHandler{
@@ -342,7 +395,7 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 
 func TestBot_Run_RetriesOnTransientError(t *testing.T) {
 	t.Parallel()
-	fallback := newMockAPI(InboundMessage{ChatID: 99, Text: "retry-msg"})
+	fallback := newMockAPI(InboundMessage{ChatID: 99, SenderID: 999, Text: "retry-msg"})
 	api := &mockAPIWithError{fallback: fallback}
 	handler := &mockHandler{response: "ok"}
 	bot := New(api, handler)
@@ -405,7 +458,7 @@ func TestBot_Send(t *testing.T) {
 
 func TestBot_Run_ThreadAwareSessionKey(t *testing.T) {
 	t.Parallel()
-	api := newMockAPI(InboundMessage{ChatID: 500, ThreadID: 12, Text: "topic msg"})
+	api := newMockAPI(InboundMessage{ChatID: 500, ThreadID: 12, SenderID: 100, Text: "topic msg"})
 	handler := &mockHandler{response: ""}
 	bot := New(api, handler)
 
@@ -558,5 +611,32 @@ func TestBot_CallbackLeakPrevention(t *testing.T) {
 
 	if finalGoroutines > initialGoroutines+2 {
 		t.Errorf("goroutine leak: started with %d, ended with %d", initialGoroutines, finalGoroutines)
+	}
+}
+
+func TestBot_Run_DropsInvalidMessages(t *testing.T) {
+	t.Parallel()
+	api := newMockAPI(
+		InboundMessage{ChatID: 0, SenderID: 123, Text: "missing chat"},
+		InboundMessage{ChatID: 123, SenderID: 0, Text: "missing sender"},
+		InboundMessage{ChatID: 123, SenderID: 123, ThreadID: -1, Text: "bad thread"},
+		InboundMessage{ChatID: 123, SenderID: 123, Text: "valid"},
+	)
+	handler := &mockHandler{response: "ok"}
+	bot := New(api, handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(api.updates)
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	_ = bot.Run(ctx)
+
+	calls := handler.getCalls()
+	assert.Len(t, calls, 1, "only valid message should reach handler")
+	if len(calls) > 0 {
+		assert.Equal(t, "telegram:123", calls[0])
 	}
 }

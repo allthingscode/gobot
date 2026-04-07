@@ -25,6 +25,21 @@ type InboundMessage struct {
 	Text      string
 }
 
+// Validate ensures required fields are present and sensible.
+// Mirrors validation constraints in C-042 specification.
+func (m InboundMessage) Validate() error {
+	if m.ChatID == 0 {
+		return errors.New("missing ChatID")
+	}
+	if m.SenderID == 0 {
+		return errors.New("missing SenderID")
+	}
+	if m.ThreadID < 0 {
+		return errors.New("negative ThreadID")
+	}
+	return nil
+}
+
 // Button represents an inline keyboard button.
 type Button struct {
 	Text string
@@ -243,6 +258,11 @@ func (b *Bot) Run(ctx context.Context) error {
 
 // dispatch processes a single inbound message and sends a reply if non-empty.
 func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
+	if err := msg.Validate(); err != nil {
+		slog.Warn("bot: invalid inbound message dropped", "err", err)
+		return
+	}
+
 	sessionKey := SessionKey(msg.ChatID, msg.ThreadID, msg.SenderID)
 	slog.Info("bot: message received", "session", sessionKey, "text", msg.Text)
 
