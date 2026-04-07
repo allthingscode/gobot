@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
@@ -14,10 +15,13 @@ import (
 // ── Mock runner ───────────────────────────────────────────────────────────────
 
 type mockRunner struct {
-	response string
-	err      error
-	calls    []runCall
-	mu       sync.Mutex
+	response    string
+	err         error
+	calls       []runCall
+	activeCalls map[string]int
+	maxActive   map[string]int
+	delay       time.Duration
+	mu          sync.Mutex
 }
 
 type runCall struct {
@@ -28,7 +32,28 @@ type runCall struct {
 func (r *mockRunner) Run(_ context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	r.mu.Lock()
 	r.calls = append(r.calls, runCall{sessionKey: sessionKey, messages: messages})
+	if r.activeCalls == nil {
+		r.activeCalls = make(map[string]int)
+	}
+	if r.maxActive == nil {
+		r.maxActive = make(map[string]int)
+	}
+	r.activeCalls[sessionKey]++
+	if r.activeCalls[sessionKey] > r.maxActive[sessionKey] {
+		r.maxActive[sessionKey] = r.activeCalls[sessionKey]
+	}
+	delay := r.delay
 	r.mu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+
+	defer func() {
+		r.mu.Lock()
+		r.activeCalls[sessionKey]--
+		r.mu.Unlock()
+	}()
 
 	if r.err != nil {
 		return "", nil, r.err
