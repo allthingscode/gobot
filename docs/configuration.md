@@ -107,7 +107,6 @@ Mandates and global environment settings.
 |-------|------|-------------|
 | `user_email` | string | Primary email for Google Workspace tools (Gmail/Calendar). |
 | `storage_root` | string | Directory for databases, logs, and secrets. |
-| `mandate` | string | The core "North Star" mandate for the agent. |
 | `idempotencyTTL` | string | TTL for side-effect tracking keys (default `24h`). |
 
 #### Observability (`observability`)

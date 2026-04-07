@@ -141,7 +141,6 @@ type ToolsConfig struct {
 type StrategicConfig struct {
 	UserEmail         string              `json:"user_email"`
 	StorageRoot       string              `json:"storage_root"`
-	Mandate           string              `json:"mandate"`
 	MaxToolIterations int                 `json:"max_tool_iterations,omitempty"`
 	IdempotencyTTL    string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
 	Observability     ObservabilityConfig `json:"observability"`

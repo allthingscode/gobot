@@ -316,6 +316,65 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
 	return tools
 }
 
+// agentStack holds the core components required to run the strategic agent.
+type agentStack struct {
+	prov     provider.Provider
+	model    string
+	runner   *geminiRunner
+	memStore *memory.MemoryStore // may be nil; caller must defer cleanup() if non-nil
+}
+
+// buildAgentStack extracts the shared provider, system prompt, runner, and tool
+// initialization sequence used by both 'run' and 'simulate' commands.
+// Returns a stack of components and a cleanup function (to close memory store).
+func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func(), error) {
+	factory := &provider.Factory{
+		GeminiAPIKey:    cfg.GeminiAPIKey(),
+		AnthropicAPIKey: cfg.AnthropicAPIKey(),
+		OpenAIAPIKey:    cfg.OpenAIAPIKey(),
+		OpenAIBaseURL:   cfg.OpenAIBaseURL(),
+	}
+	if err := factory.InitAll(ctx); err != nil {
+		return nil, nil, err
+	}
+
+	provName := cfg.DefaultProvider()
+	prov, err := provider.Get(provName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("provider: %w", err)
+	}
+	model := cfg.DefaultModel()
+
+	// Ensure AWARENESS.md exists (mirrors launcher.py)
+	ensureAwarenessFile(cfg)
+
+	systemPrompt := loadSystemPrompt(cfg)
+	if systemPrompt != "" {
+		slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
+	}
+
+	runner := newGeminiRunner(prov, model, systemPrompt, cfg)
+
+	// Init long-term memory store (non-fatal if it fails).
+	cleanup := func() {}
+	memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
+	if memErr != nil {
+		slog.Warn("bootstrap: memory store unavailable, running without long-term memory", "err", memErr)
+	} else if memStore != nil {
+		runner.memStore = memStore
+		cleanup = func() { memStore.Close() }
+	}
+
+	runner.tools = registerTools(cfg, prov, model, memStore)
+
+	return &agentStack{
+		prov:     prov,
+		model:    model,
+		runner:   runner,
+		memStore: memStore,
+	}, cleanup, nil
+}
+
 func cmdRun() *cobra.Command {
 	return &cobra.Command{
 		Use:   "run",
@@ -371,28 +430,14 @@ func cmdRun() *cobra.Command {
 			// F-074: Graceful shutdown with goroutine drain
 			var wg sync.WaitGroup
 
-			factory := &provider.Factory{
-				GeminiAPIKey:    cfg.GeminiAPIKey(),
-				AnthropicAPIKey: cfg.AnthropicAPIKey(),
-				OpenAIAPIKey:    cfg.OpenAIAPIKey(),
-				OpenAIBaseURL:   cfg.OpenAIBaseURL(),
-			}
-			if err := factory.InitAll(ctx); err != nil {
+			stack, cleanup, err := buildAgentStack(ctx, cfg)
+			if err != nil {
 				return err
 			}
+			defer cleanup()
 
-			provName := cfg.DefaultProvider()
-			prov, err := provider.Get(provName)
-			if err != nil {
-				return fmt.Errorf("provider: %w", err)
-			}
-			model := cfg.DefaultModel()
-
-			ensureAwarenessFile(cfg)
-			systemPrompt := loadSystemPrompt(cfg)
-			if systemPrompt != "" {
-				slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
-			}
+			model := stack.model
+			memStore := stack.memStore
 
 			// Init OpenTelemetry observability (F-022)
 			otelConfig := observability.Config{
@@ -416,19 +461,8 @@ func cmdRun() *cobra.Command {
 			}
 			tracer := observability.NewDispatchTracer(otelProvider)
 
-			runner := newGeminiRunner(prov, model, systemPrompt, cfg)
+			runner := stack.runner
 			runner.SetTracer(tracer)
-
-			// Init long-term memory store (non-fatal if it fails).
-			memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
-			if memErr != nil {
-				slog.Warn("run: memory store unavailable, running without long-term memory", "err", memErr)
-			} else {
-				runner.memStore = memStore
-				defer memStore.Close()
-			}
-
-			runner.tools = registerTools(cfg, prov, model, memStore)
 
 			store, storeErr := agentctx.GetCheckpointManager(cfg.StorageRoot())
 			if storeErr != nil {
@@ -759,34 +793,14 @@ func cmdSimulate() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-			factory := &provider.Factory{
-				GeminiAPIKey:    cfg.GeminiAPIKey(),
-				AnthropicAPIKey: cfg.AnthropicAPIKey(),
-				OpenAIAPIKey:    cfg.OpenAIAPIKey(),
-				OpenAIBaseURL:   cfg.OpenAIBaseURL(),
-			}
-			if err := factory.InitAll(ctx); err != nil {
+			stack, cleanup, err := buildAgentStack(ctx, cfg)
+			if err != nil {
 				return err
 			}
+			defer cleanup()
 
-			provName := cfg.DefaultProvider()
-			prov, err := provider.Get(provName)
-			if err != nil {
-				return fmt.Errorf("provider: %w", err)
-			}
-			model := cfg.DefaultModel()
-
-			systemPrompt := loadSystemPrompt(cfg)
-			runner := newGeminiRunner(prov, model, systemPrompt, cfg)
-
-			// Init long-term memory store (non-fatal if it fails).
-			memStore, _ := memory.NewMemoryStore(cfg.StorageRoot())
-			if memStore != nil {
-				runner.memStore = memStore
-				defer memStore.Close()
-			}
-
-			runner.tools = registerTools(cfg, prov, model, memStore)
+			runner := stack.runner
+			model := stack.model
 
 			// F-012: create shared Hooks instance
 			hooks := &agent.Hooks{}

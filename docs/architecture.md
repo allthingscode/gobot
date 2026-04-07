@@ -86,7 +86,6 @@ This document provides a deep dive into gobot's architecture, covering data flow
 | `secrets` | `internal/secrets` | DPAPI-encrypted secrets storage (Windows) | `secrets.go` |
 | `shell` | `internal/shell` | Shell command execution tool | `redirect.go`, `clixml.go` |
 | `state` | `internal/state` | Durable agent state with atomic writes and file locking | `manager.go` |
-| `strategic` | `internal/strategic` | Strategic hooks (F-012) for custom logic injection | `mandate.go` |
 | `telegram` | `internal/telegram` | Telegram API client and formatting utilities | `telegram.go` |
 | `testutil` | `internal/testutil` | Shared test helpers (table-driven test utilities) | `faulty_server.go` |
 | `cmd/gobot` | `cmd/gobot` | Main binary entrypoint and CLI commands | `main.go`, `runner.go`, `tool_*.go` |
@@ -169,7 +168,7 @@ This document provides a deep dive into gobot's architecture, covering data flow
 
 ### 5. Strategic Hooks (F-012)
 
-**Decision:** Custom logic is injected via `internal/strategic` hooks rather than modifying `internal/` core files.
+**Decision:** Custom logic is injected via `agent.Hooks` rather than modifying `internal/` core files.
 
 **Rationale:**
 - Prevents "core pollution" (one-off features scattered across core packages)
@@ -179,7 +178,7 @@ This document provides a deep dive into gobot's architecture, covering data flow
 **Implementation:**
 - `agent.Hooks` struct contains `PreDispatch`, `PostDispatch`, `PreTool`, `PostTool` hooks
 - Hooks are registered at startup in `cmd/gobot/main.go` (e.g., `agent.NewHandoffHook`)
-- Strategic mandates (PII redaction, output hardening) run through hooks
+- Custom logic (PII redaction, output hardening) run through hooks
 
 **Impact:** Custom logic (e.g., automated handoffs, PII redaction) is isolated from core agent logic.
 
