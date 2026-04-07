@@ -9,8 +9,8 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/allthingscode/gobot/internal/doctor"
-	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/infra"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 )
 
 // liveProbes returns doctor.Probes backed by real Telegram and Gemini API calls.

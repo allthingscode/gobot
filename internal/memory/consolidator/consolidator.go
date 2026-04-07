@@ -41,7 +41,7 @@ type Consolidator struct {
 	runner TextRunner
 	store  *memory.MemoryStore
 	prompt string
-	ttl    string // e.g., "2160h" for 90 days; empty means no cleanup
+	ttl    string                  // e.g., "2160h" for 90 days; empty means no cleanup
 	obs    *observability.Provider // optional observability provider
 }
 

@@ -147,16 +147,16 @@ func TestAnthropicProvider_Chat_Error(t *testing.T) {
 func TestAnthropicProvider_MergeMessages(t *testing.T) {
 	t.Parallel()
 	p := NewAnthropicProvider("test-key", "")
-	
+
 	str1 := "msg 1"
 	str2 := "msg 2"
 	messages := []agentctx.StrategicMessage{
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &str1}},
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &str2}},
 	}
-	
+
 	mapped := p.mapMessages(messages)
-	
+
 	if len(mapped) != 1 {
 		t.Fatalf("got %d messages, want 1", len(mapped))
 	}

@@ -89,12 +89,12 @@ type Provider struct {
 	meter          metric.Meter
 
 	// Metrics
-	tokenCounter           metric.Int64Counter
-	toolHistogram          metric.Float64Histogram
+	tokenCounter            metric.Int64Counter
+	toolHistogram           metric.Float64Histogram
 	consolidationsTriggered metric.Int64Counter
-	factsExtracted         metric.Int64Counter
-	factsIndexed           metric.Int64Counter
-	factsSkipped           metric.Int64Counter
+	factsExtracted          metric.Int64Counter
+	factsIndexed            metric.Int64Counter
+	factsSkipped            metric.Int64Counter
 }
 
 // NewProvider initializes OpenTelemetry with OTLP exporters.

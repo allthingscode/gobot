@@ -29,6 +29,7 @@ func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
 	h.buf.WriteString("\n")
 	return nil
 }
+
 func (h *captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &captureHandler{
 		buf:   h.buf,
@@ -54,7 +55,7 @@ func TestRedactString(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := redactString(tt.input)
 			if got != tt.want {
 				t.Errorf("redactString(%q) = %q, want %q", tt.input, got, tt.want)

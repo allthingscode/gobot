@@ -40,7 +40,6 @@ func TestRetryIntegration_5xxFailures(t *testing.T) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		t.Fatalf("expected success after retries, got %v", err)
 	}
@@ -256,7 +255,6 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 		resp.Body.Close()
 		return nil
 	})
-
 	if err != nil {
 		t.Fatalf("expected success on recovery, got %v", err)
 	}

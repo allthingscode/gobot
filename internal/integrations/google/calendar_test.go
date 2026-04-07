@@ -140,7 +140,7 @@ func TestListUpcomingEventsWithClient(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(r.URL.Path, "calendarList") {
 					if err := json.NewEncoder(w).Encode(map[string]any{

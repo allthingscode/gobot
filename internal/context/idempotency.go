@@ -124,7 +124,6 @@ func (s *IdempotencyStore) Store(key, toolName, paramsHash, result, sessionKey s
 		INSERT INTO idempotency_keys (key, tool_name, params_hash, result, session_key, created_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`, key, toolName, paramsHash, result, sessionKey)
-
 	if err != nil {
 		return fmt.Errorf("store idempotency key: %w", err)
 	}
@@ -142,7 +141,6 @@ func (s *IdempotencyStore) CleanupExpired() (int64, error) {
 		DELETE FROM idempotency_keys
 		WHERE created_at < ?
 	`, cutoffStr)
-
 	if err != nil {
 		return 0, fmt.Errorf("cleanup expired idempotency keys: %w", err)
 	}

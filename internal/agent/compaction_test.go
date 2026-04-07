@@ -116,10 +116,9 @@ func TestCompactMessages(t *testing.T) {
 		},
 	}
 
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			msgs := makeMessages(tt.msgCount, tt.startRole)
 			got, dropped, _ := CompactMessages(msgs, tt.maxN, tt.keepN, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 
@@ -306,7 +305,7 @@ func TestPruneMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got, dropped := PruneMessages(tt.msgs, tt.cfg)
 			if len(got) != tt.wantLen {
 				t.Errorf("len(got) = %d, want %d", len(got), tt.wantLen)
@@ -331,7 +330,6 @@ func TestCompactMessages_DroppedMessageIdentification(t *testing.T) {
 	msgs := makeMessages(60, agentctx.RoleUser)
 
 	compacted, dropped, keep := CompactMessages(msgs, 50, 10, config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
-
 
 	// Verify that the keep[] array correctly reflects what was dropped.
 	if len(keep) != 60 {
@@ -423,7 +421,7 @@ func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
 			keepLastAssistants: 2,
 		},
 		{
-			name:               "KeepLastAssistants=0 also no-ops without TTL",
+			name: "KeepLastAssistants=0 also no-ops without TTL",
 			msgs: []agentctx.StrategicMessage{
 				{Role: agentctx.RoleUser, CreatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
 				{Role: agentctx.RoleAssistant, CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339)},
@@ -434,7 +432,7 @@ func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg := config.ContextPruningConfig{KeepLastAssistants: tt.keepLastAssistants}
 			got, dropped := PruneMessages(tt.msgs, cfg)
 
@@ -496,14 +494,14 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 			// Without 3a pass: call at 58 kept, response at 49 dropped → orphaned call
 			// With 3a pass: response 49 is found when scanning from call 58, marked as kept
 			msgs: buildMessages(60, []toolScenario{
-				{idx: 58, role: agentctx.RoleModel, toolCallIDs: []string{"call_mode2"}},  // kept by keepLastAssistants
-				{idx: 49, role: agentctx.RoleTool, toolCallID: "call_mode2"},  // dropped by tail-slice, should be recovered
+				{idx: 58, role: agentctx.RoleModel, toolCallIDs: []string{"call_mode2"}}, // kept by keepLastAssistants
+				{idx: 49, role: agentctx.RoleTool, toolCallID: "call_mode2"},             // dropped by tail-slice, should be recovered
 			}),
-			maxN:          50,
-			keepN:         10,
-			wantNoOrphans: true,
+			maxN:                50,
+			keepN:               10,
+			wantNoOrphans:       true,
 			wantNoUnresolvedIDs: true,
-			wantLen:       11, // tail-slice(10) + tool response(1) + tool call(already in 10) = 11 total
+			wantLen:             11, // tail-slice(10) + tool response(1) + tool call(already in 10) = 11 total
 		},
 		{
 			name:                "clean compaction - no tool calls",
@@ -562,7 +560,7 @@ func TestCompactMessages_ToolChainConsistency(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got, _, keep := CompactMessages(tt.msgs, tt.maxN, tt.keepN,
 				config.CompactionPolicyConfig{}, config.ContextPruningConfig{})
 

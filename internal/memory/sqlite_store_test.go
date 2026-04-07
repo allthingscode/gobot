@@ -88,7 +88,7 @@ func TestIndex(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			store := newTestStore(t)
 			err := store.Index(tc.sessionKey, tc.content)
 			if (err != nil) != tc.wantErr {
@@ -172,7 +172,7 @@ func TestSearch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			results, err := store.Search(tc.query, tc.limit)
 			if err != nil {
 				t.Fatalf("Search() unexpected error: %v", err)
@@ -281,7 +281,7 @@ func TestSanitizeFTSQuery(t *testing.T) {
 	special := []string{`"`, `(`, `)`, `*`, `^`, `-`, `+`, `{`, `}`, `:`, `[`, `]`}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := sanitizeFTSQuery(tc.input)
 			for _, ch := range special {
 				if strings.Contains(got, ch) {
@@ -334,7 +334,7 @@ func TestCleanupExpired(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			deleted, err := store.CleanupExpired(tc.ttl)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("CleanupExpired() error = %v, wantErr %v", err, tc.wantErr)

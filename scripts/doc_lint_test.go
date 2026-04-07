@@ -162,7 +162,7 @@ func TestDocLint_ValidStatuses(t *testing.T) {
 	t.Parallel()
 	for _, s := range []string{"Production", "In Progress", "Planning", "Draft", "Archived", "Resolved"} {
 		t.Run(s, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			dir := setupTempProject(t)
 			writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-001.md"),
 				"---\nstatus: \""+s+"\"\n---\n\nItem.\n")

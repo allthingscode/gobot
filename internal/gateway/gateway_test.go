@@ -160,4 +160,3 @@ func TestGateway_ListenAndServe(t *testing.T) {
 		t.Error("timed out waiting for ListenAndServe to stop")
 	}
 }
-

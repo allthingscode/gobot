@@ -9,7 +9,7 @@ import (
 func TestOpenDB(t *testing.T) {
 	t.Parallel()
 	t.Run("creates workspace dir and db file", func(t *testing.T) {
-	t.Parallel()
+		t.Parallel()
 		root := t.TempDir()
 		db, err := openDB(root)
 		if err != nil {
@@ -24,7 +24,7 @@ func TestOpenDB(t *testing.T) {
 	})
 
 	t.Run("WAL mode enabled", func(t *testing.T) {
-	t.Parallel()
+		t.Parallel()
 		root := t.TempDir()
 		db, err := openDB(root)
 		if err != nil {
@@ -42,7 +42,7 @@ func TestOpenDB(t *testing.T) {
 	})
 
 	t.Run("returns error for invalid path", func(t *testing.T) {
-	t.Parallel()
+		t.Parallel()
 		// Use a path that cannot be created (file in place of dir).
 		root := t.TempDir()
 		blocker := filepath.Join(root, "workspace")
@@ -60,7 +60,7 @@ func TestOpenDB(t *testing.T) {
 func TestInitSchema(t *testing.T) {
 	t.Parallel()
 	t.Run("creates threads and checkpoints tables", func(t *testing.T) {
-	t.Parallel()
+		t.Parallel()
 		root := t.TempDir()
 		db, err := openDB(root)
 		if err != nil {
@@ -84,7 +84,7 @@ func TestInitSchema(t *testing.T) {
 	})
 
 	t.Run("idempotent — calling twice does not error", func(t *testing.T) {
-	t.Parallel()
+		t.Parallel()
 		root := t.TempDir()
 		db, err := openDB(root)
 		if err != nil {

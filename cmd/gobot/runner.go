@@ -32,13 +32,13 @@ type geminiRunner struct {
 	prov                provider.Provider
 	model               string
 	systemPrompt        string
-	memStore            *memory.MemoryStore             // may be nil; used for RAG context injection
-	tools               []Tool                          // registered tools exposed to the provider
-	breaker             *resilience.Breaker             // circuit breaker for API calls
-	limiter             *rate.Limiter                   // token-bucket rate limiter
-	hooks               *agent.Hooks                    // may be nil; set via SetHooks
+	memStore            *memory.MemoryStore // may be nil; used for RAG context injection
+	tools               []Tool              // registered tools exposed to the provider
+	breaker             *resilience.Breaker // circuit breaker for API calls
+	limiter             *rate.Limiter       // token-bucket rate limiter
+	hooks               *agent.Hooks        // may be nil; set via SetHooks
 	tracer              *observability.DispatchTracer
-	idempStore          *agentctx.IdempotencyStore      // may be nil; idempotency for side-effecting tools
+	idempStore          *agentctx.IdempotencyStore // may be nil; idempotency for side-effecting tools
 	maxToolIterations   int
 	maxTokens           int
 	maxToolResultBytes  int

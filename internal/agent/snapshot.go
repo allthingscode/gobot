@@ -52,7 +52,7 @@ func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
 	existing, _ := ListSnapshots(storageRoot)
 	for _, s := range existing {
 		if s.Specialist == specialist && s.TaskID == taskID {
-			slog.Debug("snapshot: already exists for this specialist/task combo, skipping", 
+			slog.Debug("snapshot: already exists for this specialist/task combo, skipping",
 				"specialist", specialist, "task_id", taskID)
 			return nil
 		}

@@ -119,7 +119,7 @@ func TestFallbackNotify(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			storageRoot := t.TempDir()
 			if tt.setup != nil {
 				tt.setup(storageRoot)
@@ -200,7 +200,7 @@ func TestWrapHTML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := WrapHTML(tt.body)
 			if tt.want != "" {
 				if got != tt.want {
@@ -252,7 +252,7 @@ func TestStripHTML(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := StripHTML(tc.input)
 			if got != tc.want {
 				t.Errorf("StripHTML(%q)\n got: %q\nwant: %q", tc.input, got, tc.want)

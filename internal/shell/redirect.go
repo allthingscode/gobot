@@ -16,8 +16,8 @@ var (
 	reUnquotedPath = regexp.MustCompile(`(?i)[A-Z]:\\[^;"'\s]+`)
 )
 
-// RedirectCDrive rewrites absolute Windows system drive paths in a PowerShell command 
-// to the mandated workspace root. This ensures that agents attempting to use 
+// RedirectCDrive rewrites absolute Windows system drive paths in a PowerShell command
+// to the mandated workspace root. This ensures that agents attempting to use
 // system temp paths are redirected to the durable storage automatically.
 func RedirectCDrive(command, workspaceRoot, projectRoot string) string {
 	// Skip redirection if the command contains the workspace root or project root already.

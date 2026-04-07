@@ -78,7 +78,7 @@ func TestShellExecTool_Execute(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mock := &mockExecutor{output: tc.mockOutput, err: tc.mockErr}
 			tool := &shellExecTool{exec: mock}
 

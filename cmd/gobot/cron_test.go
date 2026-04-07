@@ -45,7 +45,7 @@ func TestResolveEmailSubject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := resolveEmailSubject(tt.payload)
 			if !strings.Contains(got, tt.wantFormat) {
 				t.Errorf("resolveEmailSubject() = %q, want to contain %q", got, tt.wantFormat)
@@ -134,7 +134,7 @@ func TestParseSessionKey(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			gotChatID, gotThreadID, err := parseSessionKey(tc.input)
 			if tc.wantErr {
 				if err == nil {
@@ -185,7 +185,7 @@ func TestCronSessionKeyFormat(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cronKey := "cron:" + tc.to
 			if cronKey == tc.to {
 				t.Errorf("cron session key %q must not equal to value %q", cronKey, tc.to)

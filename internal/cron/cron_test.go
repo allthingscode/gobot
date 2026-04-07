@@ -25,7 +25,7 @@ func TestShouldReload(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			if got := ShouldReload(tt.currentMtime, tt.lastMtime, tt.currentSize, tt.lastSize); got != tt.want {
 				t.Errorf("ShouldReload() = %v, want %v", got, tt.want)
 			}
@@ -87,7 +87,7 @@ func TestResolveRoutableChannel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			gotChannel, gotTo, gotSilent := ResolveRoutableChannel(tt.payload, "/tmp/test-storage")
 			if gotChannel != tt.wantChannel || gotTo != tt.wantTo || gotSilent != tt.wantSilent {
 				t.Errorf("ResolveRoutableChannel() = (%v, %v, %v), want (%v, %v, %v)",

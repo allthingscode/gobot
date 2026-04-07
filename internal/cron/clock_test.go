@@ -57,4 +57,3 @@ func NewFakeClock(t time.Time) *fakeClock {
 		now: t,
 	}
 }
-

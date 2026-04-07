@@ -166,7 +166,7 @@ func TestStripSilent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			gotCleaned, gotSilent := StripSilent(tt.input)
 			if gotCleaned != tt.wantCleaned {
 				t.Errorf("%s: got cleaned %q, want %q", tt.name, gotCleaned, tt.wantCleaned)
@@ -228,7 +228,6 @@ func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
 		}
 	}
 }
-
 
 func TestDispatch_BasicRoundtrip(t *testing.T) {
 	t.Parallel()
@@ -450,7 +449,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			runner := &mockRunner{response: "ok"}
 			mgr := NewSessionManager(runner, nil, "model")
 
@@ -619,6 +618,7 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 func ptrStr(s string) *string {
 	return &s
 }
+
 func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

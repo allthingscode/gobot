@@ -170,7 +170,7 @@ Body`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			path := filepath.Join(tmpDir, tt.filename)
 			err := os.WriteFile(path, []byte(tt.content), 0o600)
 			if err != nil {
@@ -208,7 +208,7 @@ func TestParseScheduleString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got, err := parseScheduleString(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseScheduleString() error = %v, wantErr %v", err, tt.wantErr)

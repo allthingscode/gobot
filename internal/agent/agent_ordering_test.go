@@ -20,7 +20,6 @@ type delayedRunner struct {
 }
 
 func (r *delayedRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
-
 	return r.response, nil
 }
 

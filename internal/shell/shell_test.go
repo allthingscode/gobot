@@ -62,7 +62,7 @@ func TestRedirectCDrive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := shell.RedirectCDrive(tt.input, workspaceRoot, projectRoot)
 			if got != tt.want {
 				t.Errorf("RedirectCDrive(%q)\n  got  %q\n  want %q", tt.input, got, tt.want)

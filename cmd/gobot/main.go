@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,7 +26,6 @@ import (
 	"github.com/allthingscode/gobot/internal/gateway"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/observability"
-	"sync"
 )
 
 var (
@@ -445,7 +445,6 @@ func cmdRun() *cobra.Command {
 			drainGoroutines(&wg, 30*time.Second)
 
 			return nil
-
 		},
 	}
 }

@@ -64,7 +64,7 @@ func TestDecode_MalformedJSON(t *testing.T) {
 
 func TestStorageRoot_Default(t *testing.T) {
 	// We test StorageRoot priority: Config > Env Var > Default.
-	
+
 	// 1. Config override
 	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "config_root"}}
 	if got := cfg.StorageRoot(); got != "config_root" {
@@ -142,7 +142,7 @@ func TestSecretsRoot(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.storageRoot}}
 			if got := cfg.SecretsRoot(); got != tc.want {
 				t.Errorf("SecretsRoot() = %q, want %q", got, tc.want)
@@ -207,7 +207,7 @@ func TestDefaultModel(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg := &Config{Agents: AgentsConfig{Defaults: AgentDefaults{Model: tc.model}}}
 			if got := cfg.DefaultModel(); got != tc.want {
 				t.Errorf("DefaultModel() = %q, want %q", got, tc.want)
@@ -245,7 +245,7 @@ func TestWorkspacePath(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.root}}
 			got := cfg.WorkspacePath(tc.subpath...)
 			if got != tc.want {
@@ -498,7 +498,7 @@ func TestEffectiveMaxToolIterations(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg := &Config{
 				Strategic: StrategicConfig{MaxToolIterations: tc.limit},
 			}
@@ -553,7 +553,7 @@ func TestHumanInTheLoop(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg := &Config{Channels: ChannelsConfig{Telegram: TelegramConfig{HITL: tc.hitl}}}
 			if got := cfg.HumanInTheLoop(); got != tc.want {
 				t.Errorf("HumanInTheLoop() = %v, want %v", got, tc.want)
@@ -657,7 +657,7 @@ func TestConfig_SecretsErrorLogging(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			logBuf.Reset()
 			got := tc.getKey(cfg)
 			if got != tc.wantValue {
@@ -697,7 +697,7 @@ func TestLockTimeoutDuration(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg := &Config{
 				Agents: AgentsConfig{
 					Defaults: AgentDefaults{

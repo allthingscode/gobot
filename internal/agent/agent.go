@@ -250,7 +250,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 
 		if len(messages) > keepN {
 			toSummarize := messages[:len(messages)-keepN]
-			
+
 			// Build prompt for summarization
 			var sb strings.Builder
 			sb.WriteString(summarizationPrompt)
@@ -264,20 +264,20 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 				}
 				fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
 			}
-			
+
 			model := summarization.Model(m.model)
 
 			summary, err := m.runner.RunText(ctx, sessionKey, sb.String(), model)
 			if err == nil {
 				slog.Info("agent: context summarized", "session", sessionKey, "summary_len", len(summary))
-				
+
 				// Prepend summary as a system message.
 				summaryMsg := agentctx.StrategicMessage{
 					Role:      agentctx.RoleSystem,
 					Content:   &agentctx.MessageContent{Str: &summary},
 					CreatedAt: time.Now().Format(time.RFC3339),
 				}
-				
+
 				newMessages := []agentctx.StrategicMessage{summaryMsg}
 				newMessages = append(newMessages, messages[len(messages)-keepN:]...)
 				messages = newMessages

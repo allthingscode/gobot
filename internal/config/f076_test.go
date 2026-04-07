@@ -31,7 +31,7 @@ func TestMaxToolResultBytes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			cfg, err := decode(bytes.NewReader([]byte(tt.input)))
 			if err != nil {
 				t.Fatalf("decode failed: %v", err)
@@ -52,9 +52,9 @@ func TestMaxToolResultBytes_Disabled(t *testing.T) {
 	//     return c.Agents.Defaults.MaxToolResultBytes
 	// }
 	// return 32768
-	// This means 0 falls back to 32768. 
+	// This means 0 falls back to 32768.
 	// If the user wants to disable it, they might use -1.
-	
+
 	cfg := &Config{Agents: AgentsConfig{Defaults: AgentDefaults{MaxToolResultBytes: -1}}}
 	if cfg.MaxToolResultBytes() != -1 {
 		t.Errorf("expected -1, got %d", cfg.MaxToolResultBytes())

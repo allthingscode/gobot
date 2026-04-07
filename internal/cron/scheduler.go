@@ -289,4 +289,3 @@ func (s *Scheduler) poll(ctx context.Context) error {
 
 	return nil
 }
-

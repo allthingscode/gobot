@@ -57,7 +57,7 @@ func TestExecutor(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			exec := sandbox.New(tc.cfg)
 			output, err := exec.Run(ctx, tc.cmd, tc.args)
 			if tc.wantErr && err == nil {

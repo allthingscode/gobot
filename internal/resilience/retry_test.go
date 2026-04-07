@@ -133,7 +133,7 @@ func TestIsRetryable(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			if got := IsRetryable(tc.err); got != tc.want {
 				t.Errorf("IsRetryable(%v) = %v, want %v", tc.err, got, tc.want)
 			}

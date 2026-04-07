@@ -166,8 +166,10 @@ func TestSimilarity(t *testing.T) {
 }
 
 // Ensure os and filepath are used (suppress unused import if needed).
-var _ = os.TempDir
-var _ = filepath.Join
+var (
+	_ = os.TempDir
+	_ = filepath.Join
+)
 
 // ── F-068: Integration Tests ────────────────────────────────────────────────
 

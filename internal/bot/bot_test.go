@@ -98,15 +98,19 @@ func (m *mockAPIWithError) Updates(ctx context.Context, timeout int) (<-chan Inb
 	}
 	return m.fallback.Updates(ctx, timeout)
 }
+
 func (m *mockAPIWithError) Callbacks(ctx context.Context) (<-chan InboundCallback, error) {
 	return m.fallback.Callbacks(ctx)
 }
+
 func (m *mockAPIWithError) Send(ctx context.Context, msg OutboundMessage) error {
 	return m.fallback.Send(ctx, msg)
 }
+
 func (m *mockAPIWithError) SendWithButtons(ctx context.Context, msg OutboundMessage, buttons [][]Button) error {
 	return m.fallback.SendWithButtons(ctx, msg, buttons)
 }
+
 func (m *mockAPIWithError) Typing(ctx context.Context, chatID, threadID int64) func() {
 	return m.fallback.Typing(ctx, chatID, threadID)
 }
@@ -123,6 +127,7 @@ func (m *mockAPIWithCircuit) Updates(_ context.Context, _ int) (<-chan InboundMe
 	m.recordCall()
 	return nil, errors.New("circuit breaker: open")
 }
+
 func (m *mockAPIWithCircuit) Callbacks(_ context.Context) (<-chan InboundCallback, error) {
 	m.recordCall()
 	return nil, errors.New("circuit breaker: open")
@@ -141,6 +146,7 @@ func (m *mockAPIWithCircuit) Send(_ context.Context, _ OutboundMessage) error { 
 func (m *mockAPIWithCircuit) SendWithButtons(_ context.Context, _ OutboundMessage, _ [][]Button) error {
 	return nil
 }
+
 func (m *mockAPIWithCircuit) Typing(_ context.Context, _, _ int64) func() {
 	return func() {}
 }
@@ -194,7 +200,7 @@ func TestSessionKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := SessionKey(tt.chatID, tt.threadID, tt.senderID)
 			assert.Equal(t, tt.want, got, "SessionKey(%d, %d, %d)", tt.chatID, tt.threadID, tt.senderID)
 		})
@@ -242,7 +248,7 @@ func TestIsTransientError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := IsTransientError(tt.err)
 			assert.Equal(t, tt.want, got, "IsTransientError(%v)", tt.err)
 		})
@@ -288,7 +294,7 @@ func TestInboundMessage_Validate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			err := tt.msg.Validate()
 			if tt.wantErr {
 				assert.Error(t, err)

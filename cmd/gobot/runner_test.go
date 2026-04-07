@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"bytes"
@@ -54,7 +54,7 @@ func TestExtractText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := extractText(tt.msg)
 			if got != tt.want {
 				t.Errorf("extractText() = %q, want %q", got, tt.want)
@@ -110,20 +110,20 @@ func TestTruncateToolResult(t *testing.T) {
 		{
 			name:     "utf-8 multi-byte boundary (keep)",
 			result:   "Hello 世界", // "世界" is 6 bytes. Total 12 bytes.
-			maxBytes: 9,        // Should keep "Hello 世" (9 bytes)
+			maxBytes: 9,          // Should keep "Hello 世" (9 bytes)
 			want:     "Hello 世\n\n[... truncated: result exceeded 9 bytes ...]",
 		},
 		{
 			name:     "utf-8 multi-byte boundary (cut middle)",
 			result:   "Hello 世界",
-			maxBytes: 8,        // Cuts in middle of "世". Should fallback to "Hello " (6 bytes).
+			maxBytes: 8, // Cuts in middle of "世". Should fallback to "Hello " (6 bytes).
 			want:     "Hello \n\n[... truncated: result exceeded 8 bytes ...]",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := truncateToolResult(tt.result, tt.maxBytes)
 			if got != tt.want {
 				t.Errorf("truncateToolResult() = %q, want %q", got, tt.want)
@@ -204,7 +204,7 @@ func TestBuildCorrectionMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := buildCorrectionMessage(tt.report)
 			for _, check := range tt.checks {
 				if !strings.Contains(got, check) {
@@ -342,7 +342,7 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mock := &mockProvider{
 				responses: []*provider.ChatResponse{
 					{
@@ -395,16 +395,24 @@ type mockTool struct {
 	name string
 }
 
-func (m *mockTool) Name() string                     { return m.name }
-func (m *mockTool) Description() string              { return "mock" }
-func (m *mockTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: m.name} }
+func (m *mockTool) Name() string        { return m.name }
+func (m *mockTool) Description() string { return "mock" }
+func (m *mockTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: m.name}
+}
+
 func (m *mockTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return "result", nil
 }
-type panicTool struct {}
-func (p *panicTool) Name() string                     { return "panic_tool" }
-func (p *panicTool) Description() string              { return "panics" }
-func (p *panicTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: "panic_tool"} }
+
+type panicTool struct{}
+
+func (p *panicTool) Name() string        { return "panic_tool" }
+func (p *panicTool) Description() string { return "panics" }
+func (p *panicTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: "panic_tool"}
+}
+
 func (p *panicTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
 	panic("simulated panic")
 }
@@ -416,7 +424,7 @@ func TestRunner_ToolPanicRecovery(t *testing.T) {
 	}
 	ctx := context.Background()
 	result, err := r.executeToolInner(ctx, "session-123", "panic_tool", nil)
-	
+
 	if err == nil {
 		t.Fatal("Expected error due to panic, got nil")
 	}
@@ -429,14 +437,16 @@ func TestRunner_ToolPanicRecovery(t *testing.T) {
 	}
 }
 
-
 type largeTool struct {
 	size int
 }
 
-func (l *largeTool) Name() string                     { return "large_tool" }
-func (l *largeTool) Description() string              { return "returns large string" }
-func (l *largeTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: "large_tool"} }
+func (l *largeTool) Name() string        { return "large_tool" }
+func (l *largeTool) Description() string { return "returns large string" }
+func (l *largeTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: "large_tool"}
+}
+
 func (l *largeTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return strings.Repeat("A", l.size), nil
 }
@@ -499,7 +509,7 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 	if !strings.Contains(content, "truncated") {
 		t.Errorf("Tool result missing truncation notice: %q", content)
 	}
-	if len(content) != 100 + len(fmt.Sprintf("\n\n[... truncated: result exceeded %d bytes ...]", 100)) {
+	if len(content) != 100+len(fmt.Sprintf("\n\n[... truncated: result exceeded %d bytes ...]", 100)) {
 		t.Errorf("Unexpected truncated length: %d", len(content))
 	}
 }
@@ -566,20 +576,24 @@ type failTool struct {
 	name string
 }
 
-func (m *failTool) Name() string                     { return m.name }
-func (m *failTool) Description() string              { return "fails" }
-func (m *failTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: m.name} }
+func (m *failTool) Name() string        { return m.name }
+func (m *failTool) Description() string { return "fails" }
+func (m *failTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: m.name}
+}
+
 func (m *failTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return "", fmt.Errorf("simulated failure")
 }
 
 type failWithOutputTool struct{}
 
-func (f *failWithOutputTool) Name() string { return "fail_with_output" }
+func (f *failWithOutputTool) Name() string        { return "fail_with_output" }
 func (f *failWithOutputTool) Description() string { return "fails but returns output" }
 func (f *failWithOutputTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{Name: "fail_with_output"}
 }
+
 func (f *failWithOutputTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return "important diagnostic output", fmt.Errorf("exit status 1")
 }

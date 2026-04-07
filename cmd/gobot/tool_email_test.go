@@ -56,9 +56,9 @@ func TestSendEmailTool_Execute_Validation(t *testing.T) {
 	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com")
 
 	tests := []struct {
-		name    string
-		args    map[string]any
-		errSub  string
+		name   string
+		args   map[string]any
+		errSub string
 	}{
 		{"missing subject key", map[string]any{"body": "Hello"}, "subject is required"},
 		{"empty subject string", map[string]any{"subject": "", "body": "Hello"}, "subject is required"},

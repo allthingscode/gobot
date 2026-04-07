@@ -12,8 +12,10 @@ type BreakerStats struct {
 	Rejections uint64 // rejected due to open circuit
 }
 
-var globalStats = make(map[string]*BreakerStats)
-var statsMu sync.RWMutex
+var (
+	globalStats = make(map[string]*BreakerStats)
+	statsMu     sync.RWMutex
+)
 
 func getStats(name string) *BreakerStats {
 	statsMu.RLock()

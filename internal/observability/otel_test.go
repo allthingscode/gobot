@@ -105,7 +105,6 @@ func TestDispatchTracer_TraceAgentDispatch(t *testing.T) {
 	response, err := dt.TraceAgentDispatch(context.Background(), "session-456", 5, func(_ context.Context) (string, error) {
 		return "hello world", nil
 	})
-
 	if err != nil {
 		t.Errorf("TraceAgentDispatch() error = %v", err)
 	}
@@ -125,7 +124,6 @@ func TestDispatchTracer_TraceGeminiCall(t *testing.T) {
 	err := dt.TraceGeminiCall(context.Background(), "session-789", 2, func(_ context.Context) error {
 		return nil
 	})
-
 	if err != nil {
 		t.Errorf("TraceGeminiCall() error = %v", err)
 	}
@@ -143,7 +141,6 @@ func TestDispatchTracer_TraceToolExecution(t *testing.T) {
 		time.Sleep(1 * time.Millisecond) // Ensure some duration
 		return "output", nil
 	})
-
 	if err != nil {
 		t.Errorf("TraceToolExecution() error = %v", err)
 	}

@@ -13,6 +13,7 @@ func TestFactory_InitAll_Empty(t *testing.T) {
 		t.Fatalf("expected no error with empty config, got %v", err)
 	}
 }
+
 func TestRegistry_RegisterGetList(t *testing.T) {
 	t.Parallel()
 	// Clear registry for test
@@ -21,7 +22,7 @@ func TestRegistry_RegisterGetList(t *testing.T) {
 	providersMu.Unlock()
 
 	p1 := NewOpenAIProvider("key1", "url1")
-	
+
 	err := Register(p1)
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)

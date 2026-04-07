@@ -136,7 +136,7 @@ func TestSpawnTool_Execute(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mock := &mockRunner{response: tc.runnerResp, err: tc.runnerErr}
 			tool := newTestSpawnTool(mock, map[string]string{
 				"custom": "You are a custom specialist.",
@@ -265,7 +265,7 @@ func TestDefaultSpecialistPrompt(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.agentType, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			p := defaultSpecialistPrompt(tc.agentType)
 			if tc.wantNonEmpty && p == "" {
 				t.Errorf("defaultSpecialistPrompt(%q) = %q, want non-empty", tc.agentType, p)

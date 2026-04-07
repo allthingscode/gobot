@@ -23,7 +23,7 @@ func TestGeminiProvider_NameAndModels(t *testing.T) {
 	if len(models) == 0 {
 		t.Fatal("expected models")
 	}
-	
+
 	found := false
 	for _, m := range models {
 		if m.ID == "gemini-2.0-flash" {
@@ -135,7 +135,7 @@ func TestGeminiProvider_Chat(t *testing.T) {
 			}
 
 			resp, err := p.Chat(ctx, req)
-			
+
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
@@ -153,13 +153,13 @@ func TestGeminiProvider_Chat(t *testing.T) {
 			if resp.Usage.TotalTokens != tt.wantTokens {
 				t.Errorf("got %d total tokens, want %d", resp.Usage.TotalTokens, tt.wantTokens)
 			}
-			
+
 			if tt.wantContent != "" {
 				if resp.Message.Content == nil || *resp.Message.Content.Str != tt.wantContent {
 					t.Errorf("unexpected content: %v", resp.Message.Content)
 				}
 			}
-			
+
 			if tt.wantTool != "" {
 				if len(resp.Message.ToolCalls) == 0 || resp.Message.ToolCalls[0]["name"] != tt.wantTool {
 					t.Errorf("expected tool %q, got: %v", tt.wantTool, resp.Message.ToolCalls)

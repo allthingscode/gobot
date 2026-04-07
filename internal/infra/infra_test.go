@@ -40,7 +40,7 @@ func TestResolveMediaPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := ResolveMediaPath(tt.storageRoot, tt.channel)
 			if tt.storageRoot != "" {
 				if !strings.Contains(got, tt.storageRoot) {
@@ -95,7 +95,7 @@ func TestListDirectory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := ListDirectory(tt.pathStr, tt.workspacePath)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
@@ -169,7 +169,7 @@ func TestReadLogFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got, ok := ReadLogFile(tt.pathStr, tt.workspacePath, tt.maxChars)
 			if ok != tt.wantOk {
 				t.Errorf("ReadLogFile() ok = %v, want %v", ok, tt.wantOk)

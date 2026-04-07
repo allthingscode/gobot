@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
+	"strings"
+
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
-	"strings"
+	"github.com/spf13/cobra"
 )
 
 func cmdRewind() *cobra.Command {
@@ -56,7 +57,7 @@ func cmdRewind() *cobra.Command {
 
 			fmt.Printf("%-35s  %-20s  %-10s  %s\n", "NAME", "TIMESTAMP", "TASK ID", "GIT SHA")
 			fmt.Println(strings.Repeat("-", 100))
-			
+
 			// Show last 10 as per spec (though ListSnapshots returns all)
 			limit := len(snapshots)
 			if limit > 10 {
@@ -65,7 +66,7 @@ func cmdRewind() *cobra.Command {
 
 			for i := 0; i < limit; i++ {
 				s := snapshots[i]
-				fmt.Printf("%-35s  %-20s  %-10s  %s\n", 
+				fmt.Printf("%-35s  %-20s  %-10s  %s\n",
 					s.Name, s.Timestamp[:19], s.TaskID, s.GitSHA[:7])
 			}
 			return nil

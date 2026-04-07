@@ -93,7 +93,7 @@ func TestSessionLock_ContextCancellation(t *testing.T) {
 	// 2. Start a waiter with a cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
-	
+
 	start := time.Now()
 	go func() {
 		errCh <- l.Lock(ctx)

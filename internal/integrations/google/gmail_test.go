@@ -318,7 +318,6 @@ func TestGmailErrors(t *testing.T) {
 	})
 }
 
-
 func TestExtractBodyFromParts(t *testing.T) {
 	t.Parallel()
 
@@ -412,4 +411,3 @@ func TestExtractBodyFromParts(t *testing.T) {
 		})
 	}
 }
-

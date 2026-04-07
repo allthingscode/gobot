@@ -25,7 +25,7 @@ func TestFormatStrategicError_ContextOverflow(t *testing.T) {
 	tests := []string{"too many tokens", "context_length exceeded", "context window full"}
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := provider.FormatStrategicError(input)
 			if !strings.Contains(got, "Context Overflow (400)") {
 				t.Errorf("got %q", got)

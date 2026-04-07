@@ -59,7 +59,7 @@ func TestGetMediaPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := GetMediaPath(tt.baseWorkspace, tt.originalPath)
 			if got != tt.want {
 				t.Errorf("GetMediaPath() = %v, want %v", got, tt.want)
@@ -95,7 +95,7 @@ func TestDetectThreadMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := DetectThreadMetadata(tt.messageThreadID, tt.chatID)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("DetectThreadMetadata() = %v, want %v", got, tt.want)

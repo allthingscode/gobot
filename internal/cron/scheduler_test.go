@@ -69,7 +69,7 @@ func TestComputeNextRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			if got := ComputeNextRun(tt.schedule, tt.nowMS); got != tt.want {
 				t.Errorf("ComputeNextRun() = %v, want %v", got, tt.want)
 			}
@@ -130,7 +130,7 @@ func TestComputeNextRunKindCron(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := ComputeNextRun(tt.schedule, tt.nowMS)
 			if got != tt.wantMS {
 				t.Errorf("ComputeNextRun() = %v (%s), want %v (%s)",
@@ -383,7 +383,7 @@ func TestScheduler_FakeClock(t *testing.T) {
 
 	// 1. Advance to 1000ms. Poll should trigger.
 	fc.Advance(1000 * time.Millisecond)
-	
+
 	// Wait for poll to complete and Scheduler to wait on After() again
 	for i := 0; i < 100; i++ {
 		dispatcher.mu.Lock()
@@ -394,7 +394,7 @@ func TestScheduler_FakeClock(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	
+
 	dispatcher.mu.Lock()
 	if len(dispatcher.payloads) != 1 {
 		dispatcher.mu.Unlock()
@@ -456,4 +456,3 @@ func (m *blockingDispatcher) Alert(_ context.Context, p Payload) error {
 	m.alerts = append(m.alerts, p)
 	return nil
 }
-

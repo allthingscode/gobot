@@ -61,7 +61,7 @@ func TestCreateThread(t *testing.T) { //nolint:paralleltest // modifies global e
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 
 			m := newTestManager(t)
 			if err := m.CreateThread(tt.threadID, tt.model, tt.metadata); (err != nil) != tt.wantErr {
@@ -116,7 +116,7 @@ func TestSaveSnapshot(t *testing.T) { //nolint:paralleltest // modifies global e
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 
 			m := newTestManager(t)
 			if err := m.CreateThread(tt.threadID, "model", nil); err != nil {
@@ -652,7 +652,7 @@ func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated
 		 WHERE thread_id = 'tidx'
 		 ORDER BY iteration DESC, checkpoint_id DESC
 		 LIMIT 1`
-	
+
 	rows, err := m.db.Query(query)
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)

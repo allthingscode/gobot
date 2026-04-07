@@ -24,8 +24,8 @@ func TestSnapshot(t *testing.T) {
 	// Create dummy session files
 	files := map[string]string{
 		"session_state.json": `{"state": "active"}`,
-		"task.md":           "# Task 1",
-		"review_report.md":  "LGTM",
+		"task.md":            "# Task 1",
+		"review_report.md":   "LGTM",
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(sessionDir, name), []byte(content), 0o600); err != nil {

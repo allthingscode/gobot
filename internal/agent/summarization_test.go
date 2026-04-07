@@ -51,14 +51,14 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 	if len(mock.calls) == 0 {
 		t.Fatal("mock runner was not called")
 	}
-	
+
 	lastCall := mock.calls[len(mock.calls)-1]
-	
+
 	// The history should start with the summary message.
 	if len(lastCall.messages) == 0 {
 		t.Fatal("last call history is empty")
 	}
-	
+
 	firstMsg := lastCall.messages[0]
 	if firstMsg.Role != agentctx.RoleSystem {
 		t.Errorf("expected first message role 'system', got %q", firstMsg.Role)
@@ -66,7 +66,7 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 	if firstMsg.Content.String() != expectedSummary {
 		t.Errorf("expected summary content %q, got %q", expectedSummary, firstMsg.Content.String())
 	}
-	
+
 	// The total messages in history passed to Run should be:
 	// 1 (summary) + 5 (retained) = 6.
 	// Then dispatch appends the new user message, so 7.
@@ -80,7 +80,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 	// Setup SessionManager with summarization enabled.
 	initialSummary := "<context_summary>\n* Old decision: Use Go\n</context_summary>"
 	newSummary := "<context_summary>\n* Old decision: Use Go\n* New decision: Use SQLite\n</context_summary>"
-	
+
 	mock := &mockRunner{response: newSummary}
 	sm := NewSessionManager(mock, nil, "gemini-test")
 	sm.memoryWindow = 10
@@ -116,7 +116,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 
 	lastCall := mock.calls[len(mock.calls)-1]
 	firstMsg := lastCall.messages[0]
-	
+
 	if firstMsg.Role != agentctx.RoleSystem {
 		t.Errorf("expected first message role 'system', got %q", firstMsg.Role)
 	}

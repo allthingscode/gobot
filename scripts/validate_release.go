@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	maxFileSize   = 2 * 1024 * 1024 * 1024 // 2GB GitHub limit
-	githubAPIURL  = "https://api.github.com"
-	tagPattern    = `^v\d+\.\d+\.\d+$`
+	maxFileSize  = 2 * 1024 * 1024 * 1024 // 2GB GitHub limit
+	githubAPIURL = "https://api.github.com"
+	tagPattern   = `^v\d+\.\d+\.\d+$`
 )
 
 type ReleaseValidation struct {

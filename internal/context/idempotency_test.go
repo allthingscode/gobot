@@ -310,7 +310,7 @@ func TestHashParams_Different_Values(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			hash, err := context.HashParams(tt.params)
 			if err != nil {
 				t.Fatalf("HashParams() error: %v", err)

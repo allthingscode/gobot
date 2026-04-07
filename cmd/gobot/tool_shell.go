@@ -94,7 +94,7 @@ func (t *shellExecTool) Execute(ctx context.Context, sessionKey string, args map
 		return "", errors.New("shell_exec: command is required")
 	}
 
-	// Always redirect absolute Windows system drive paths in the command itself 
+	// Always redirect absolute Windows system drive paths in the command itself
 	// if it looks like a script/command
 	cmd = shell.RedirectCDrive(cmd, t.workspaceRoot, t.projectRoot)
 
