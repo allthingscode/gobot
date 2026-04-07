@@ -54,7 +54,7 @@ func newGeminiRunner(prov provider.Provider, model, systemPrompt string, cfg *co
 		breaker: resilience.New(prov.Name(), maxFail, window, timeout),
 		// 3 requests/second burst; conservative default.
 		limiter:             rate.NewLimiter(rate.Every(time.Second), 3),
-		maxToolIterations:   25,
+		maxToolIterations:   cfg.EffectiveMaxToolIterations(),
 		maxTokens:           cfg.MaxTokens(),
 		maxToolResultBytes:  cfg.MaxToolResultBytes(),
 		enableReflection:    false,

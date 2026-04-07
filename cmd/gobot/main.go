@@ -317,65 +317,6 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
 	return tools
 }
 
-// agentStack holds the core components required to run the strategic agent.
-type agentStack struct {
-	prov     provider.Provider
-	model    string
-	runner   *geminiRunner
-	memStore *memory.MemoryStore // may be nil; caller must defer cleanup() if non-nil
-}
-
-// buildAgentStack extracts the shared provider, system prompt, runner, and tool
-// initialization sequence used by both 'run' and 'simulate' commands.
-// Returns a stack of components and a cleanup function (to close memory store).
-func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func(), error) {
-	factory := &provider.Factory{
-		GeminiAPIKey:    cfg.GeminiAPIKey(),
-		AnthropicAPIKey: cfg.AnthropicAPIKey(),
-		OpenAIAPIKey:    cfg.OpenAIAPIKey(),
-		OpenAIBaseURL:   cfg.OpenAIBaseURL(),
-	}
-	if err := factory.InitAll(ctx); err != nil {
-		return nil, nil, err
-	}
-
-	provName := cfg.DefaultProvider()
-	prov, err := provider.Get(provName)
-	if err != nil {
-		return nil, nil, fmt.Errorf("provider: %w", err)
-	}
-	model := cfg.DefaultModel()
-
-	// Ensure AWARENESS.md exists (mirrors launcher.py)
-	ensureAwarenessFile(cfg)
-
-	systemPrompt := loadSystemPrompt(cfg)
-	if systemPrompt != "" {
-		slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
-	}
-
-	runner := newGeminiRunner(prov, model, systemPrompt, cfg)
-
-	// Init long-term memory store (non-fatal if it fails).
-	cleanup := func() {}
-	memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
-	if memErr != nil {
-		slog.Warn("bootstrap: memory store unavailable, running without long-term memory", "err", memErr)
-	} else if memStore != nil {
-		runner.memStore = memStore
-		cleanup = func() { memStore.Close() }
-	}
-
-	runner.tools = registerTools(cfg, prov, model, memStore)
-
-	return &agentStack{
-		prov:     prov,
-		model:    model,
-		runner:   runner,
-		memStore: memStore,
-	}, cleanup, nil
-}
-
 func cmdRun() *cobra.Command {
 	return &cobra.Command{
 		Use:   "run",
@@ -491,14 +432,7 @@ func cmdRun() *cobra.Command {
 				}()
 			}
 
-			mgr := agent.NewSessionManager(runner, store, model)
-			mgr.SetTracer(tracer)
-			mgr.SetLockTimeout(cfg.LockTimeoutDuration())
-			mgr.SetMemoryWindow(cfg.MemoryWindow())
-			mgr.SetPruningPolicy(cfg.ContextPruning())
-			mgr.SetCompactionPolicy(cfg.Compaction())
-			mgr.SetStorageRoot(cfg.StorageRoot())
-			mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
+			mgr := stack.NewSessionManager(cfg, store, tracer)
 
 			slog.Info("run: configuration loaded",
 				"storage_root", cfg.StorageRoot(),
@@ -589,10 +523,8 @@ func cmdRun() *cobra.Command {
 			storePath := cfg.WorkspacePath("jobs.json")
 			itemsDir := cfg.WorkspacePath("jobs")
 			// Cron jobs use an ephemeral session manager (nil store) so they never
-						// share checkpoint history with DM conversations (F-013).
-			cronMgr := agent.NewSessionManager(runner, nil, model)
-			cronMgr.SetTracer(tracer)
-			cronMgr.SetLockTimeout(cfg.LockTimeoutDuration())
+			// share checkpoint history with DM conversations (F-013).
+			cronMgr := stack.NewSessionManager(cfg, nil, tracer)
 			cronDisp := &cronDispatcher{
 				mgr:         cronMgr,
 				b:           b,
@@ -809,7 +741,6 @@ func cmdSimulate() *cobra.Command {
 			defer cleanup()
 
 			runner := stack.runner
-			model := stack.model
 
 			// F-012: create shared Hooks instance
 			hooks := &agent.Hooks{}
@@ -817,13 +748,9 @@ func cmdSimulate() *cobra.Command {
 			hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
 
 			store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
-			mgr := agent.NewSessionManager(runner, store, model)
+			mgr := stack.NewSessionManager(cfg, store, nil)
 			mgr.SetHooks(hooks)
-			mgr.SetLockTimeout(cfg.LockTimeoutDuration())
-			mgr.SetMemoryWindow(cfg.MemoryWindow())
-			mgr.SetPruningPolicy(cfg.ContextPruning())
-			mgr.SetCompactionPolicy(cfg.Compaction())
-			mgr.SetStorageRoot(cfg.StorageRoot()) // F-037
+			runner.SetHooks(hooks)
 
 			fmt.Printf("--- Simulating Prompt ---\n%s\n\n", prompt)
 			fmt.Println("Waiting for response...")

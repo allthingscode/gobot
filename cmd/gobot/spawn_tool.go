@@ -76,7 +76,6 @@ func newSpawnTool(prov provider.Provider, model string, specialistPrompts, speci
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
 			runner := newGeminiRunner(prov, m, systemPrompt, cfg)
-			runner.maxToolIterations = cfg.EffectiveMaxToolIterations()
 			runner.memStore = memStore
 			return runner
 		},
