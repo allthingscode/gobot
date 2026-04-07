@@ -39,8 +39,8 @@ func TestRedirectCDrive(t *testing.T) {
 		},
 		{
 			name:  "project_root_untouched",
-			input: `python ` + filepath.Join(projectRoot, "run.py"),
-			want:  `python ` + filepath.Join(projectRoot, "run.py"),
+			input: `node ` + filepath.Join(projectRoot, "run.js"),
+			want:  `node ` + filepath.Join(projectRoot, "run.js"),
 		},
 		{
 			name:  "case_insensitive_match",
