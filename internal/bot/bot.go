@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"github.com/allthingscode/gobot/internal/observability"
 )
 
@@ -157,20 +158,35 @@ func IsTransientError(err error) bool {
 }
 
 // Run starts the polling loop. Blocks until ctx is cancelled.
-//
-// Any error from API.Updates triggers exponential backoff:
-// initial 5s, doubles each retry, capped at 60s, resets to 5s on success.
+// It coordinates parallel execution of callback and update polling loops.
 // Mirrors strategic_telegram_polling_loop in patches/telegram.py.
 func (b *Bot) Run(ctx context.Context) error {
-	const initialDelay = 5 * time.Second
-	const maxDelay = 60 * time.Second
-	retryDelay := initialDelay
-
 	if b.api == nil {
 		slog.Info("bot: no Telegram API configured, skipping polling loop")
 		<-ctx.Done()
 		return ctx.Err()
 	}
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		return b.runCallbackLoop(ctx)
+	})
+
+	g.Go(func() error {
+		return b.runUpdateLoop(ctx)
+	})
+
+	return g.Wait()
+}
+
+// runCallbackLoop manages the lifecycle of the callback polling channel.
+// Any error from API.Callbacks triggers exponential backoff:
+// initial 5s, doubles each retry, capped at 60s, resets to 5s on success.
+func (b *Bot) runCallbackLoop(ctx context.Context) error {
+	const initialDelay = 5 * time.Second
+	const maxDelay = 60 * time.Second
+	retryDelay := initialDelay
 
 	for {
 		callbacks, err := b.api.Callbacks(ctx)
@@ -187,43 +203,51 @@ func (b *Bot) Run(ctx context.Context) error {
 			}
 			continue
 		}
+		retryDelay = initialDelay
 
-		// Handle callbacks in a dedicated goroutine so they never block on updates.
-		// Use a local context linked to the polling session to prevent leaks.
-		cbCtx, cbCancel := context.WithCancel(ctx)
-		go func() {
-			defer cbCancel()
-			for {
-				select {
-				case <-cbCtx.Done():
-					return
-				case cb, ok := <-callbacks:
-					if !ok {
-						return
-					}
-					slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
-					go func() {
-						done := make(chan error, 1)
-						go func() {
-							done <- b.handler.HandleCallback(cbCtx, cb)
-						}()
-
-						select {
-						case <-cbCtx.Done():
-							slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
-						case err := <-done:
-							if err != nil {
-								slog.Error("bot: HandleCallback failed", "err", err)
-							}
-						}
-					}()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case cb, ok := <-callbacks:
+				if !ok {
+					break // reconnect
 				}
-			}
-		}()
+				slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
 
+				// Handle callbacks in a dedicated goroutine.
+				// Use the loop context to manage lifecycle.
+				go func() {
+					done := make(chan error, 1)
+					go func() {
+						done <- b.handler.HandleCallback(ctx, cb)
+					}()
+
+					select {
+					case <-ctx.Done():
+						slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
+					case err := <-done:
+						if err != nil {
+							slog.Error("bot: HandleCallback failed", "err", err)
+						}
+					}
+				}()
+			}
+		}
+	}
+}
+
+// runUpdateLoop manages the lifecycle of the update polling channel.
+// Any error from API.Updates triggers exponential backoff:
+// initial 5s, doubles each retry, capped at 60s, resets to 5s on success.
+func (b *Bot) runUpdateLoop(ctx context.Context) error {
+	const initialDelay = 5 * time.Second
+	const maxDelay = 60 * time.Second
+	retryDelay := initialDelay
+
+	for {
 		updates, err := b.api.Updates(ctx, 30)
 		if err != nil {
-			cbCancel() // stop callback poller
 			slog.Error("bot: Updates failed", "err", err, "retry_in", retryDelay)
 			select {
 			case <-ctx.Done():
@@ -239,16 +263,13 @@ func (b *Bot) Run(ctx context.Context) error {
 		retryDelay = initialDelay // reset on successful connect
 
 		slog.Debug("bot: update stream connected, draining messages")
-	drain:
 		for {
 			select {
 			case <-ctx.Done():
-				cbCancel()
 				return ctx.Err()
 			case msg, ok := <-updates:
 				if !ok {
-					cbCancel()
-					break drain // channel closed — reconnect
+					break // channel closed — reconnect
 				}
 				go b.dispatch(ctx, msg)
 			}

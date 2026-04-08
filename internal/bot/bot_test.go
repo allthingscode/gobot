@@ -118,29 +118,32 @@ func (m *mockAPIWithError) Stop() { m.fallback.Stop() }
 
 // mockAPIWithCircuit returns ErrCircuitOpen on Updates/Callbacks.
 type mockAPIWithCircuit struct {
-	lastCall time.Time
-	delays   []time.Duration
-	mu       sync.Mutex
+	lastUpdate   time.Time
+	lastCallback time.Time
+	delays       []time.Duration
+	mu           sync.Mutex
 }
 
 func (m *mockAPIWithCircuit) Updates(_ context.Context, _ int) (<-chan InboundMessage, error) {
-	m.recordCall()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	if !m.lastUpdate.IsZero() {
+		m.delays = append(m.delays, now.Sub(m.lastUpdate))
+	}
+	m.lastUpdate = now
 	return nil, errors.New("circuit breaker: open")
 }
 
 func (m *mockAPIWithCircuit) Callbacks(_ context.Context) (<-chan InboundCallback, error) {
-	m.recordCall()
-	return nil, errors.New("circuit breaker: open")
-}
-
-func (m *mockAPIWithCircuit) recordCall() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
-	if !m.lastCall.IsZero() {
-		m.delays = append(m.delays, now.Sub(m.lastCall))
+	if !m.lastCallback.IsZero() {
+		m.delays = append(m.delays, now.Sub(m.lastCallback))
 	}
-	m.lastCall = now
+	m.lastCallback = now
+	return nil, errors.New("circuit breaker: open")
 }
 func (m *mockAPIWithCircuit) Send(_ context.Context, _ OutboundMessage) error { return nil }
 func (m *mockAPIWithCircuit) SendWithButtons(_ context.Context, _ OutboundMessage, _ [][]Button) error {
