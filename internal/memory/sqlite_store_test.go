@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,6 +258,29 @@ func TestRebuild_NonexistentDir(t *testing.T) {
 	_, err := store.Rebuild(filepath.Join(t.TempDir(), "does-not-exist"))
 	if err == nil {
 		t.Error("expected error for nonexistent directory, got nil")
+	}
+}
+
+func TestMemoryStore_Rebuild_Limit(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+
+	sessionDir := t.TempDir()
+	
+	// Create maxRebuildFiles + 100 mock files
+	for i := 0; i < maxRebuildFiles+100; i++ {
+		name := filepath.Join(sessionDir, fmt.Sprintf("session-%d.md", i))
+		if err := writeFile(name, "Summary: mock"); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+
+	n, err := store.Rebuild(sessionDir)
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if n != maxRebuildFiles {
+		t.Errorf("Rebuild indexed %d files, want %d", n, maxRebuildFiles)
 	}
 }
 

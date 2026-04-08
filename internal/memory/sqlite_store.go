@@ -2,6 +2,7 @@ package memory
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 )
 
 const memoryDBFileName = "memory.db"
+const maxRebuildFiles = 10_000
 
 // MemoryStore is a SQLite FTS5-backed long-term memory index.
 // It indexes agent responses by session key and supports full-text search.
@@ -135,7 +137,12 @@ func (m *MemoryStore) Search(query string, limit int) ([]map[string]any, error) 
 // Returns the count of files successfully indexed.
 func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
 	count := 0
+	errLimit := fmt.Errorf("memory: Rebuild truncated at maxFiles limit")
 	err := filepath.WalkDir(sessionDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if count >= maxRebuildFiles {
+			slog.Warn("memory: Rebuild truncated at maxFiles limit", "limit", maxRebuildFiles)
+			return errLimit
+		}
 		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
 			return walkErr
 		}
@@ -152,6 +159,9 @@ func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
 		count++
 		return nil
 	})
+	if errors.Is(err, errLimit) {
+		err = nil
+	}
 	return count, err
 }
 
