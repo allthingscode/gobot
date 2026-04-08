@@ -7,9 +7,20 @@ $COMMIT = git rev-parse --short HEAD
 $BUILD_TIME = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 $LDFLAGS = "-X main.version=$VERSION -X main.commitHash=$COMMIT -X main.buildTime=$BUILD_TIME"
 
+if (Get-Command goversioninfo -ErrorAction SilentlyContinue) {
+    Write-Host "Generating Windows version resources..."
+    goversioninfo -platform-specific -o resource.syso versioninfo.json
+}
+
 Write-Host "Building gobot $VERSION ($COMMIT)..."
 go build -mod=vendor -ldflags $LDFLAGS -o gobot.exe ./cmd/gobot
-if ($LASTEXITCODE -eq 0) {
+$EXIT_CODE = $LASTEXITCODE
+
+if (Test-Path resource.syso) {
+    Remove-Item resource.syso
+}
+
+if ($EXIT_CODE -eq 0) {
     Write-Host "Build successful: gobot.exe"
 } else {
     Write-Error "Build failed"

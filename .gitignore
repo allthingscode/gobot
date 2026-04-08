@@ -2,6 +2,7 @@
 *.exe
 *.exe~
 /gobot.exe
+resource.syso
 
 # Test cache
 *.test
