@@ -122,9 +122,10 @@ func (l *sessionLock) Lock(ctx context.Context) error {
 		slog.Info("agent: session lock cancelled", "session", l.sessionKey, "reason", "context_cancelled")
 		return fmt.Errorf("session lock cancelled: %w", ctx.Err())
 	case <-time.After(l.deadlockDur):
-		buf := make([]byte, 64*1024)
-		n := runtime.Stack(buf, true)
-		slog.Error("agent: session lock held too long — possible deadlock", "session", l.sessionKey, "stack", string(buf[:n]))
+		buf := make([]byte, 4096)
+		n := runtime.Stack(buf, false)
+		slog.Debug("agent: session lock timeout — waiter stack", "session", l.sessionKey, "stack", string(buf[:n]))
+		slog.Error("agent: session lock held too long — possible deadlock", "session", l.sessionKey)
 		return fmt.Errorf("session lock timeout: possible deadlock in session %s", l.sessionKey)
 	}
 }
