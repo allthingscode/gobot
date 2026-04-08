@@ -89,23 +89,17 @@ func (v *Validator) Validate() *ValidationResult {
 	v.validatePaths(result)
 	v.validateDiskSpace(result)
 	v.validateAgentDefaults(result)
+	v.validateStrategic(result)
 
 	return result
 }
 
 func (v *Validator) validateAgentDefaults(result *ValidationResult) {
 	// Validate Context Pruning TTL
-	ttl := v.cfg.Agents.Defaults.ContextPruning.TTL
-	if ttl != "" {
-		if _, err := time.ParseDuration(ttl); err != nil {
-			result.Errors = append(result.Errors, ValidationError{
-				Field:    "agents.defaults.contextPruning.ttl",
-				Message:  fmt.Sprintf("invalid duration: %v", err),
-				Remedy:   "use a valid Go duration string like '6h', '30m', or '1d'",
-				Severity: SeverityCritical,
-			})
-		}
-	}
+	v.validateTTL("agents.defaults.contextPruning.ttl", v.cfg.Agents.Defaults.ContextPruning.TTL, result)
+
+	// Validate Compaction Memory Flush TTL
+	v.validateTTL("agents.defaults.compaction.memoryFlush.ttl", v.cfg.Agents.Defaults.Compaction.MemoryFlush.TTL, result)
 
 	// Validate Lock Timeout (10s - 3600s)
 	lockTimeout := v.cfg.Agents.Defaults.LockTimeoutSeconds
@@ -114,6 +108,25 @@ func (v *Validator) validateAgentDefaults(result *ValidationResult) {
 			Field:    "agents.defaults.lockTimeoutSeconds",
 			Message:  fmt.Sprintf("invalid lock timeout: %ds (must be between 10 and 3600)", lockTimeout),
 			Remedy:   "set a value between 10 and 3600, or 0 for default (120s)",
+			Severity: SeverityCritical,
+		})
+	}
+}
+
+func (v *Validator) validateStrategic(result *ValidationResult) {
+	// Validate Idempotency TTL
+	v.validateTTL("strategic_edition.idempotencyTTL", v.cfg.Strategic.IdempotencyTTL, result)
+}
+
+func (v *Validator) validateTTL(field, value string, result *ValidationResult) {
+	if value == "" {
+		return
+	}
+	if _, err := time.ParseDuration(value); err != nil {
+		result.Errors = append(result.Errors, ValidationError{
+			Field:    field,
+			Message:  fmt.Sprintf("invalid duration: %v", err),
+			Remedy:   "use a valid Go duration string like '6h', '30m', or '1d'",
 			Severity: SeverityCritical,
 		})
 	}

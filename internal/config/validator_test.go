@@ -249,11 +249,13 @@ func TestValidator_Validate_Telegram(t *testing.T) {
 func TestValidator_Validate_AgentDefaults(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		lockTimeout int
-		ttl         string
-		wantError   bool
-		errorField  string
+		name           string
+		lockTimeout    int
+		pruningTTL     string
+		compactionTTL  string
+		idempotencyTTL string
+		wantError      bool
+		errorField     string
 	}{
 		{
 			name:        "valid lock timeout (60s)",
@@ -279,14 +281,36 @@ func TestValidator_Validate_AgentDefaults(t *testing.T) {
 		},
 		{
 			name:       "invalid context pruning ttl",
-			ttl:        "invalid",
+			pruningTTL: "invalid",
 			wantError:  true,
 			errorField: "agents.defaults.contextPruning.ttl",
 		},
 		{
-			name:      "valid context pruning ttl",
-			ttl:       "6h",
-			wantError: false,
+			name:       "valid context pruning ttl",
+			pruningTTL: "6h",
+			wantError:  false,
+		},
+		{
+			name:          "invalid compaction ttl",
+			compactionTTL: "not-a-duration",
+			wantError:     true,
+			errorField:    "agents.defaults.compaction.memoryFlush.ttl",
+		},
+		{
+			name:          "valid compaction ttl",
+			compactionTTL: "2160h",
+			wantError:     false,
+		},
+		{
+			name:           "invalid idempotency ttl",
+			idempotencyTTL: "10", // missing unit
+			wantError:      true,
+			errorField:     "strategic_edition.idempotencyTTL",
+		},
+		{
+			name:           "valid idempotency ttl",
+			idempotencyTTL: "24h",
+			wantError:      false,
 		},
 	}
 
@@ -296,7 +320,9 @@ func TestValidator_Validate_AgentDefaults(t *testing.T) {
 			t.Parallel()
 			cfg := baseValidConfig(t)
 			cfg.Agents.Defaults.LockTimeoutSeconds = tt.lockTimeout
-			cfg.Agents.Defaults.ContextPruning.TTL = tt.ttl
+			cfg.Agents.Defaults.ContextPruning.TTL = tt.pruningTTL
+			cfg.Agents.Defaults.Compaction.MemoryFlush.TTL = tt.compactionTTL
+			cfg.Strategic.IdempotencyTTL = tt.idempotencyTTL
 
 			validator := NewValidator(cfg)
 			result := validator.Validate()
