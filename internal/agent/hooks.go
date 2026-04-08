@@ -60,6 +60,11 @@ func (h *Hooks) RegisterPreTool(fn PreToolFn) {
 	h.preTool = append(h.preTool, fn)
 }
 
+// HasPreHistory returns true if at least one PreHistory hook is registered.
+func (h *Hooks) HasPreHistory() bool {
+	return len(h.preHistory) > 0
+}
+
 // RunPostDispatch runs all registered PostDispatch hooks in order.
 // Returns response unchanged if no hooks are registered.
 func (h *Hooks) RunPostDispatch(ctx context.Context, sessionKey, response string) string {

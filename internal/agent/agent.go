@@ -222,7 +222,13 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 		original := messages
 		messages = m.hooks.RunPreHistory(ctx, messages)
 		if len(messages) == 0 && len(original) > 0 {
-			slog.Warn("agent: RunPreHistory returned nil or empty slice, falling back to original history to prevent context loss", "session", sessionKey)
+			if m.hooks.HasPreHistory() {
+				slog.Warn("agent: RunPreHistory hook returned empty — preserving history as fallback", "session", sessionKey)
+			} else {
+				// This case is logically unreachable under normal circumstances as RunPreHistory
+				// returns original if no hooks are registered, but we handle it for completeness.
+				slog.Debug("agent: RunPreHistory returned empty — no pre-history hooks registered, preserving full history", "session", sessionKey)
+			}
 			messages = original
 		}
 	}
