@@ -7,7 +7,6 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
-	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -75,7 +74,7 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 // NewSessionManager initializes a new agent.SessionManager with standard gobot defaults.
 // It ensures that all commands (run, simulate, cron) use consistent settings for
 // timeouts, memory window, pruning, and compaction.
-func (s *agentStack) NewSessionManager(cfg *config.Config, store *agentctx.CheckpointManager, tracer *observability.DispatchTracer) *agent.SessionManager {
+func (s *agentStack) NewSessionManager(cfg *config.Config, store agent.CheckpointStore, tracer *observability.DispatchTracer) *agent.SessionManager {
 	mgr := agent.NewSessionManager(s.runner, store, s.model)
 	if tracer != nil {
 		mgr.SetTracer(tracer)

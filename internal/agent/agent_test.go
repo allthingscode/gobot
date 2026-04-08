@@ -703,3 +703,40 @@ func TestSessionManager_Dispatch_StatelessDegradation(t *testing.T) {
 		t.Errorf("expected 0 SaveSnapshot calls in stateless mode, got %d", store.saveCalls)
 	}
 }
+
+// TestNilStore prevents regression of nil pointer dereference when CheckpointStore is nil.
+// This reproduces the issue where cron jobs would panic due to nil store handling.
+func TestSessionManager_Dispatch_NilStore(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runner := &mockRunner{response: "pong"}
+	// Nil store simulates cron job scenario where no persistence is desired.
+	mgr := NewSessionManager(runner, nil, "test-model")
+
+	// Dispatch should work normally without panicking.
+	resp, err := mgr.Dispatch(ctx, "cron-session", "hello")
+	if err != nil {
+		t.Fatalf("Dispatch failed with nil store: %v", err)
+	}
+	if resp != "pong" {
+		t.Errorf("response = %q, want %q", resp, "pong")
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 runner call, got %d", len(runner.calls))
+	}
+	call := runner.calls[0]
+	if call.sessionKey != "cron-session" {
+		t.Errorf("sessionKey = %q, want %q", call.sessionKey, "cron-session")
+	}
+	if len(call.messages) != 1 || call.messages[0].Role != agentctx.RoleUser {
+		t.Errorf("expected one user message, got: %v", call.messages)
+	}
+	var text string
+	c := call.messages[0].Content
+	if c != nil && c.Str != nil {
+		text = *c.Str
+	}
+	if text != "hello" {
+		t.Errorf("runner received %q, want %q", text, "hello")
+	}
+}
