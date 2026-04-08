@@ -46,6 +46,7 @@ type CheckpointStore interface {
 
 // Consolidator abstracts the memory consolidation/fact extraction layer (F-028, F-047).
 type Consolidator interface {
+	// ConsolidateAsync extracts facts from text in a background goroutine.
 	ConsolidateAsync(sessionKey, text string)
 }
 
@@ -205,9 +206,14 @@ Format the summary as a clear, bulleted list within <context_summary> tags. If a
 
 Conversation history to summarize:
 `
+
+	// DefaultMaxContextMessages is the message count above which compaction triggers.
+	DefaultMaxContextMessages = 50
+	// DefaultKeepContextMessages is the number of recent messages to retain after compaction.
+	DefaultKeepContextMessages = 20
+
 	statelessWarning = "⚠️ Warning: session history could not be initialized. This conversation will not be persisted.\n\n"
 )
-
 // dispatch is the implementation of Dispatch, potentially wrapped by tracing.
 func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage string, messages []agentctx.StrategicMessage, iteration int, stateless bool) (string, error) {
 	// Strip [SILENT] prefix — the cron layer uses it to suppress routing
@@ -243,52 +249,57 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	// F-070: Summarize-then-Prune step.
 	summarization := m.compactionPolicy.Summarization
 	if summarization.Enabled() && len(messages) > int(float64(m.memoryWindow)*summarization.Threshold()) {
-		// Trigger summarization when window exceeds threshold.
-		// Identify messages to drop (all but the last keepN messages).
-		keepN := DefaultKeepContextMessages
-		if m.memoryWindow < keepN*2 {
-			keepN = m.memoryWindow / 2
-			if keepN < 1 {
-				keepN = 1
-				slog.Warn("agent: memoryWindow too small, clamping keepN to 1", "memoryWindow", m.memoryWindow, "keepN", keepN)
-			}
-		}
-
-		if len(messages) > keepN {
-			toSummarize := messages[:len(messages)-keepN]
-
-			// Build prompt for summarization
-			var sb strings.Builder
-			sb.WriteString(summarizationPrompt)
-			for _, msg := range toSummarize {
-				if sb.Len() >= DefaultMaxCompactionInputBytes {
-					slog.Warn("agent: summarization input exceeded byte cap, truncating",
-						"session", sessionKey,
-						"capBytes", DefaultMaxCompactionInputBytes,
-						"messagesProcessed", len(toSummarize))
-					break
+		// Validate summarization configuration when enabled
+		if summarization.Model(m.model) == "" {
+			slog.Warn("agent: summarization enabled but no model configured, skipping summarization", "session", sessionKey)
+		} else {
+			// Trigger summarization when window exceeds threshold.
+			// Identify messages to drop (all but the last keepN messages).
+			keepN := DefaultKeepContextMessages
+			if m.memoryWindow < keepN*2 {
+				keepN = m.memoryWindow / 2
+				if keepN < 1 {
+					keepN = 1
+					slog.Warn("agent: memoryWindow too small, clamping keepN to 1", "memoryWindow", m.memoryWindow, "keepN", keepN)
 				}
-				fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
 			}
 
-			model := summarization.Model(m.model)
+			if len(messages) > keepN {
+				toSummarize := messages[:len(messages)-keepN]
 
-			summary, err := m.runner.RunText(ctx, sessionKey, sb.String(), model)
-			if err == nil {
-				slog.Info("agent: context summarized", "session", sessionKey, "summary_len", len(summary))
-
-				// Prepend summary as a system message.
-				summaryMsg := agentctx.StrategicMessage{
-					Role:      agentctx.RoleSystem,
-					Content:   &agentctx.MessageContent{Str: &summary},
-					CreatedAt: time.Now().Format(time.RFC3339),
+				// Build prompt for summarization
+				var sb strings.Builder
+				sb.WriteString(summarizationPrompt)
+				for _, msg := range toSummarize {
+					if sb.Len() >= DefaultMaxCompactionInputBytes {
+						slog.Warn("agent: summarization input exceeded byte cap, truncating",
+							"session", sessionKey,
+							"capBytes", DefaultMaxCompactionInputBytes,
+							"messagesProcessed", len(toSummarize))
+						break
+					}
+					fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
 				}
 
-				newMessages := []agentctx.StrategicMessage{summaryMsg}
-				newMessages = append(newMessages, messages[len(messages)-keepN:]...)
-				messages = newMessages
-			} else {
-				slog.Warn("agent: summarization failed (falling back to plain compaction)", "session", sessionKey, "err", err)
+				model := summarization.Model(m.model)
+
+				summary, err := m.runner.RunText(ctx, sessionKey, sb.String(), model)
+				if err == nil {
+					slog.Info("agent: context summarized", "session", sessionKey, "summary_len", len(summary))
+
+					// Prepend summary as a system message.
+					summaryMsg := agentctx.StrategicMessage{
+						Role:      agentctx.RoleSystem,
+						Content:   &agentctx.MessageContent{Str: &summary},
+						CreatedAt: time.Now().Format(time.RFC3339),
+					}
+
+					newMessages := []agentctx.StrategicMessage{summaryMsg}
+					newMessages = append(newMessages, messages[len(messages)-keepN:]...)
+					messages = newMessages
+				} else {
+					slog.Warn("agent: summarization failed (falling back to plain compaction)", "session", sessionKey, "err", err)
+				}
 			}
 		}
 	}

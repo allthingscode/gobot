@@ -8,12 +8,6 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
-// DefaultMaxContextMessages is the message count above which compaction triggers.
-const DefaultMaxContextMessages = 50
-
-// DefaultKeepContextMessages is the number of recent messages to retain after compaction.
-const DefaultKeepContextMessages = 20
-
 // DefaultMaxCompactionInputBytes is the byte-length cap for the string accumulator
 // during compaction summarization to prevent OOM on massive context windows.
 const DefaultMaxCompactionInputBytes = 512 * 1024 // 512KB
