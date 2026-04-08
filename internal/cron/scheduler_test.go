@@ -427,6 +427,71 @@ func TestScheduler_FakeClock(t *testing.T) {
 	<-errCh
 }
 
+func TestSchedulerReloadObservability(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	// 1. Valid initial store
+	initialStore := Store{Jobs: []Job{}}
+	data, _ := initialStore.EncodeJSON()
+	_ = os.WriteFile(storePath, data, 0o600)
+
+	dispatcher := &mockDispatcher{}
+	start := time.UnixMilli(0)
+	fc := NewFakeClock(start)
+	s := NewScheduler(storePath, "", dispatcher).WithClock(fc)
+
+	ctx := context.Background()
+	_ = s.poll(ctx)
+	if s.lastReloadErr != nil {
+		t.Fatalf("expected no reload error, got %v", s.lastReloadErr)
+	}
+
+	// 2. Break store
+	_ = os.WriteFile(storePath, []byte("invalid json"), 0o600)
+	// Update file time to trigger reload - Must be different from initial load
+	// Initial load in NewScheduler sets lastMtime
+	info, _ := os.Stat(storePath)
+	s.lastMtime = info.ModTime().UnixNano()
+	s.lastSize = info.Size()
+
+	// Now modify it again to trigger ShouldReload
+	_ = os.WriteFile(storePath, []byte("even more invalid json"), 0o600)
+	mtime := info.ModTime().Add(1 * time.Second)
+	_ = os.Chtimes(storePath, mtime, mtime)
+
+	_ = s.poll(ctx)
+	if s.lastReloadErr == nil {
+		t.Fatal("expected reload error, got nil")
+	}
+	firstErrAt := s.lastReloadErrAt
+
+	// 3. Poll again immediately (no repeat warning yet)
+	fc.Advance(1 * time.Minute)
+	_ = s.poll(ctx)
+	if !s.lastReloadErrAt.Equal(firstErrAt) {
+		t.Errorf("lastReloadErrAt change too early: got %v, want %v", s.lastReloadErrAt, firstErrAt)
+	}
+
+	// 4. Advance 5 minutes - should trigger repeat and update timestamp
+	fc.Advance(5 * time.Minute)
+	_ = s.poll(ctx)
+	if s.lastReloadErrAt.Equal(firstErrAt) {
+		t.Error("expected lastReloadErrAt to be updated after 5m warning")
+	}
+
+	// 5. Fix store
+	_ = os.WriteFile(storePath, data, 0o600)
+	mtime = s.clock.Now().Add(1 * time.Second)
+	_ = os.Chtimes(storePath, mtime, mtime)
+
+	_ = s.poll(ctx)
+	if s.lastReloadErr != nil {
+		t.Errorf("expected reload error to be cleared, got %v", s.lastReloadErr)
+	}
+}
+
 type blockingDispatcher struct {
 	mu       sync.Mutex
 	delay    time.Duration

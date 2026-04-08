@@ -34,6 +34,8 @@ type Scheduler struct {
 	lastMtime        int64
 	lastSize         int64
 	lastModularMtime float64
+	lastReloadErr    error
+	lastReloadErrAt  time.Time
 	clock            Clock
 }
 
@@ -133,15 +135,32 @@ func (s *Scheduler) poll(ctx context.Context) error {
 		if ShouldReload(info.ModTime().UnixNano(), s.lastMtime, info.Size(), s.lastSize) {
 			slog.Debug("Cron: jobs.json modified externally, reloading")
 			data, err := os.ReadFile(s.storePath)
-			if err == nil {
+			if err != nil {
+				s.recordReloadError(fmt.Errorf("read jobs.json: %w", err))
+			} else {
 				var newStore Store
-				if err := newStore.DecodeJSON(data); err == nil {
+				if err := newStore.DecodeJSON(data); err != nil {
+					s.recordReloadError(fmt.Errorf("decode jobs.json: %w", err))
+				} else {
 					s.store = &newStore
 					s.lastMtime = info.ModTime().UnixNano()
 					s.lastSize = info.Size()
+					s.clearReloadError()
 				}
 			}
 		}
+	} else if s.lastMtime != 0 {
+		// Only record error if the file existed previously
+		s.recordReloadError(fmt.Errorf("stat jobs.json: %w", err))
+	}
+
+	// Emit repeated warning if reload is still failing
+	if s.lastReloadErr != nil && s.clock.Now().Sub(s.lastReloadErrAt) >= 5*time.Minute {
+		slog.Warn("Cron: persistent jobs.json reload failure",
+			"err", s.lastReloadErr,
+			"failed_at", s.lastReloadErrAt)
+		// Update timestamp to throttle next warning
+		s.lastReloadErrAt = s.clock.Now()
 	}
 
 	// 2. Check for modular job changes.
@@ -288,4 +307,23 @@ func (s *Scheduler) poll(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *Scheduler) recordReloadError(err error) {
+	if s.lastReloadErr == nil {
+		slog.Error("Cron: jobs.json reload failed", "err", err)
+		s.lastReloadErr = err
+		s.lastReloadErrAt = s.clock.Now()
+	} else {
+		// Update the error but keep the original timestamp for the 5m warning
+		s.lastReloadErr = err
+	}
+}
+
+func (s *Scheduler) clearReloadError() {
+	if s.lastReloadErr != nil {
+		slog.Info("Cron: jobs.json reload recovered")
+		s.lastReloadErr = nil
+		s.lastReloadErrAt = time.Time{}
+	}
 }
