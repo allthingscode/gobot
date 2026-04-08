@@ -23,6 +23,7 @@ config.local.json
 # Strategic Private Data
 .private/
 .gemini/
+.agent-workspaces/
 
 # Vendor dependencies
 vendor/
