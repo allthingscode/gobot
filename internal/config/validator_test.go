@@ -139,6 +139,32 @@ func TestValidator_Validate_APIKeys(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			// Isolate test from environment variables that could affect validation
+			origGemini := os.Getenv("GEMINI_API_KEY")
+			origAnthropic := os.Getenv("ANTHROPIC_API_KEY")
+			origOpenAI := os.Getenv("OPENAI_API_KEY")
+			origOpenAIBaseURL := os.Getenv("OPENAI_BASE_URL")
+			origGoogleKey := os.Getenv("GOOGLE_API_KEY")
+			origGoogleCX := os.Getenv("GOOGLE_CX")
+			origTelegram := os.Getenv("TELEGRAM_BOT_TOKEN")
+			defer func() {
+				os.Setenv("GEMINI_API_KEY", origGemini)
+				os.Setenv("ANTHROPIC_API_KEY", origAnthropic)
+				os.Setenv("OPENAI_API_KEY", origOpenAI)
+				os.Setenv("OPENAI_BASE_URL", origOpenAIBaseURL)
+				os.Setenv("GOOGLE_API_KEY", origGoogleKey)
+				os.Setenv("GOOGLE_CX", origGoogleCX)
+				os.Setenv("TELEGRAM_BOT_TOKEN", origTelegram)
+			}()
+			// Unset all relevant environment variables for clean test
+			os.Unsetenv("GEMINI_API_KEY")
+			os.Unsetenv("ANTHROPIC_API_KEY")
+			os.Unsetenv("OPENAI_API_KEY")
+			os.Unsetenv("OPENAI_BASE_URL")
+			os.Unsetenv("GOOGLE_API_KEY")
+			os.Unsetenv("GOOGLE_CX")
+			os.Unsetenv("TELEGRAM_BOT_TOKEN")
+
 			cfg := baseValidConfig(t)
 			cfg.Providers = ProvidersConfig{
 				Gemini:    GeminiConfig{APIKey: tt.geminiKey},
@@ -410,6 +436,32 @@ func TestValidationError_Error(t *testing.T) {
 
 func TestReportValidation(t *testing.T) {
 	t.Parallel()
+	// Isolate test from environment variables that could affect validation
+	origGemini := os.Getenv("GEMINI_API_KEY")
+	origAnthropic := os.Getenv("ANTHROPIC_API_KEY")
+	origOpenAI := os.Getenv("OPENAI_API_KEY")
+	origOpenAIBaseURL := os.Getenv("OPENAI_BASE_URL")
+	origGoogleKey := os.Getenv("GOOGLE_API_KEY")
+	origGoogleCX := os.Getenv("GOOGLE_CX")
+	origTelegram := os.Getenv("TELEGRAM_BOT_TOKEN")
+	defer func() {
+		os.Setenv("GEMINI_API_KEY", origGemini)
+		os.Setenv("ANTHROPIC_API_KEY", origAnthropic)
+		os.Setenv("OPENAI_API_KEY", origOpenAI)
+		os.Setenv("OPENAI_BASE_URL", origOpenAIBaseURL)
+		os.Setenv("GOOGLE_API_KEY", origGoogleKey)
+		os.Setenv("GOOGLE_CX", origGoogleCX)
+		os.Setenv("TELEGRAM_BOT_TOKEN", origTelegram)
+	}()
+	// Unset all relevant environment variables for clean test
+	os.Unsetenv("GEMINI_API_KEY")
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	os.Unsetenv("OPENAI_API_KEY")
+	os.Unsetenv("OPENAI_BASE_URL")
+	os.Unsetenv("GOOGLE_API_KEY")
+	os.Unsetenv("GOOGLE_CX")
+	os.Unsetenv("TELEGRAM_BOT_TOKEN")
+
 	// Valid config should return nil
 	validCfg := baseValidConfig(t)
 
