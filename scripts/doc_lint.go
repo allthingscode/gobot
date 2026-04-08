@@ -142,7 +142,9 @@ func lintStaleReferences(root string) []string {
 		}
 		// Skip archived items — they are historical and may reference paths
 		// that no longer exist.
-		if strings.Contains(path, "archived") {
+		rel, _ := filepath.Rel(backlogDir, path)
+		if strings.HasPrefix(rel, "archived"+string(filepath.Separator)) ||
+			strings.Contains(rel, string(filepath.Separator)+"archived"+string(filepath.Separator)) {
 			return nil
 		}
 		data, readErr := os.ReadFile(path)
@@ -154,8 +156,8 @@ func lintStaleReferences(root string) []string {
 			ref := m[1]
 			absPath := filepath.Join(root, filepath.FromSlash(ref))
 			if _, statErr := os.Stat(absPath); errors.Is(statErr, os.ErrNotExist) {
-				rel, _ := filepath.Rel(root, path)
-				out = append(out, fmt.Sprintf("%s references non-existent path %q", rel, ref))
+				relFile, _ := filepath.Rel(root, path)
+				out = append(out, fmt.Sprintf("%s references non-existent path %q", relFile, ref))
 			}
 		}
 		return nil
