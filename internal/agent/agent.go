@@ -31,6 +31,7 @@ import (
 // Implementations must be safe for concurrent use across different sessionKeys;
 // SessionManager ensures calls with the same key are serialized.
 type Runner interface {
+	// Run executes a full turn of the agent, including tool calls and history updates.
 	Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (response string, updated []agentctx.StrategicMessage, err error)
 	// RunText executes a single-turn completion (text-only) with no tool use.
 	RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error)
@@ -39,8 +40,11 @@ type Runner interface {
 // CheckpointStore abstracts the checkpoint persistence layer.
 // Pass nil to SessionManager to run statelessly (no history loaded or saved).
 type CheckpointStore interface {
+	// LoadLatest retrieves the most recent thread snapshot for the given threadID.
 	LoadLatest(threadID string) (*agentctx.ThreadSnapshot, error)
+	// SaveSnapshot persists a conversation snapshot for a specific iteration.
 	SaveSnapshot(threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error)
+	// CreateThread initializes a new durable thread record.
 	CreateThread(threadID, model string, metadata map[string]any) error
 }
 

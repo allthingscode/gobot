@@ -182,12 +182,12 @@ func (m *MessageContent) String() string {
 // StrategicMessage is a single entry in the agent conversation history.
 // It mirrors the Pydantic StrategicMessage in checkpoint_logic.py.
 type StrategicMessage struct {
-	Role             MessageRole      `json:"role"`
-	Content          *MessageContent  `json:"content,omitempty"`
-	Name             *string          `json:"name,omitempty"`
-	ToolCallID       *string          `json:"tool_call_id,omitempty"`
-	ToolCalls        []map[string]any `json:"tool_calls,omitempty"`
-	ReasoningContent *string          `json:"reasoning_content,omitempty"`
-	ThinkingBlocks   []map[string]any `json:"thinking_blocks,omitempty"`
-	CreatedAt        string           `json:"created_at,omitempty"`
+	Role             MessageRole      `json:"role"`               // Role (user, assistant, system, etc.).
+	Content          *MessageContent  `json:"content,omitempty"`  // Text or structured content.
+	Name             *string          `json:"name,omitempty"`     // Optional author name (for multi-user/multi-agent).
+	ToolCallID       *string          `json:"tool_call_id,omitempty"` // ID of the tool call this message responds to.
+	ToolCalls        []map[string]any `json:"tool_calls,omitempty"`   // List of tool calls generated (assistant role).
+	ReasoningContent *string          `json:"reasoning_content,omitempty"` // Raw internal reasoning from the model.
+	ThinkingBlocks   []map[string]any `json:"thinking_blocks,omitempty"`   // Structured internal thinking steps.
+	CreatedAt        string           `json:"created_at,omitempty"`        // Timestamp (RFC3339).
 }

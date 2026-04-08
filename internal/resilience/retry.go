@@ -13,8 +13,8 @@ import (
 // HTTPStatusError wraps an HTTP error response so IsRetryable can make
 // status-code-based retry decisions.
 type HTTPStatusError struct {
-	StatusCode int
-	Body       string
+	StatusCode int    // The HTTP response status code (e.g. 503).
+	Body       string // The raw response body (if any).
 }
 
 // Error implements the error interface.
@@ -24,11 +24,11 @@ func (e *HTTPStatusError) Error() string {
 
 // RetryConfig controls retry behavior for Do.
 type RetryConfig struct {
-	MaxAttempts  int           // total attempts including the first; 0 treated as 3
-	InitialDelay time.Duration // delay before the second attempt
-	MaxDelay     time.Duration // upper bound on computed delay; 0 means no cap
-	Multiplier   float64       // exponential backoff multiplier; 0 treated as 2.0
-	JitterFactor float64       // fraction of delay added as ±jitter; 0 treated as 0.2
+	MaxAttempts  int           // Total attempts including the first; 0 treated as 3.
+	InitialDelay time.Duration // Delay before the second attempt.
+	MaxDelay     time.Duration // Upper bound on computed delay; 0 means no cap.
+	Multiplier   float64       // Exponential backoff multiplier; 0 treated as 2.0.
+	JitterFactor float64       // Fraction of delay added as ±jitter; 0 treated as 0.2.
 }
 
 // DefaultRetryConfig is the standard retry configuration for gobot API calls:

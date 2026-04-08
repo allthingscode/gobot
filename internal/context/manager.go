@@ -12,18 +12,18 @@ import (
 
 // ThreadSnapshot is the return type for LoadLatest.
 type ThreadSnapshot struct {
-	Iteration int
-	Messages  []StrategicMessage
-	Model     string
-	Metadata  map[string]any
+	Iteration int                // The sequential iteration number of this snapshot.
+	Messages  []StrategicMessage // The full message history up to this point.
+	Model     string             // The model used when the thread was created.
+	Metadata  map[string]any     // Arbitrary key-value metadata.
 }
 
 // ResumableThread is one entry in the ListResumable result.
 type ResumableThread struct {
-	ThreadID        string
-	Model           string
-	UpdatedAt       string
-	LatestIteration int
+	ThreadID        string // Unique identifier for the thread.
+	Model           string // Model associated with the thread.
+	UpdatedAt       string // Timestamp of the last update (RFC3339).
+	LatestIteration int    // The highest iteration number recorded for this thread.
 }
 
 // CheckpointManager manages SQLite-based durability for the Strategic Edition

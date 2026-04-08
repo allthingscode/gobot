@@ -9,7 +9,7 @@ import (
 
 func TestSessionLock_Metrics(t *testing.T) {
 	t.Parallel()
-	l := acquireLock("test-session", 0)
+	l := acquireLock("metrics-test-session", 0)
 	defer l.release()
 
 	// First lock
@@ -21,9 +21,9 @@ func TestSessionLock_Metrics(t *testing.T) {
 	l.Unlock()
 
 	metrics := GetLockMetrics()
-	m, ok := metrics["test-session"]
+	m, ok := metrics["metrics-test-session"]
 	if !ok {
-		t.Fatal("metrics not found for test-session")
+		t.Fatal("metrics not found for metrics-test-session")
 	}
 
 	if m.WaitCount != 0 {
@@ -31,7 +31,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 	}
 
 	// Wait, we need to test contention
-	l2 := acquireLock("test-session", 0)
+	l2 := acquireLock("metrics-test-session", 0)
 	defer l2.release()
 
 	err = l.Lock(context.Background())
@@ -51,7 +51,7 @@ func TestSessionLock_Metrics(t *testing.T) {
 	l2.Unlock()
 
 	metrics = GetLockMetrics()
-	m = metrics["test-session"]
+	m = metrics["metrics-test-session"]
 	if m.ContentionCount < 1 {
 		t.Errorf("expected contention count >= 1, got %d", m.ContentionCount)
 	}
