@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 type mockRunner struct {
 	response    string
 	err         error
+	runTextErr  error
 	calls       []runCall
 	textCalls   []string
 	activeCalls map[string]int
@@ -67,6 +69,9 @@ func (r *mockRunner) RunText(_ context.Context, _, prompt, _ string) (string, er
 	r.mu.Lock()
 	r.textCalls = append(r.textCalls, prompt)
 	r.mu.Unlock()
+	if r.runTextErr != nil {
+		return "", r.runTextErr
+	}
 	if r.err != nil {
 		return "", r.err
 	}
@@ -740,3 +745,116 @@ func TestSessionManager_Dispatch_NilStore(t *testing.T) {
 		t.Errorf("runner received %q, want %q", text, "hello")
 	}
 }
+
+// TestSessionManager_CompactionSummarizationFailure tests the fallback path when summarization fails.
+// It verifies that the system falls back to plain compaction (truncation) and continues operating.
+func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Create a mock runner that returns an error for RunText (summarization) but succeeds for Run
+	runner := &mockRunner{
+		response:   "ok",
+		err:        nil, // Run succeeds
+		runTextErr: errors.New("summarization failed"),
+	}
+
+	store := newMockStore()
+	mgr := NewSessionManager(runner, store, "mock")
+
+	// Set up conditions to trigger summarization:
+	// - Low memoryWindow to make threshold easy to reach
+	// - Summarization enabled with low threshold
+	mgr.SetMemoryWindow(10) // Keep last 10 messages after compaction
+	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
+		Summarization: config.SummarizationConfig{
+			IsEnabled:        true,
+			ThresholdPercent: 0.5, // Trigger when >50% of window used
+		},
+	})
+
+	// Pre-fill history with 15 messages (more than memoryWindow * threshold = 10 * 0.5 = 5)
+	// This will trigger compaction when we add one more message
+	history := make([]agentctx.StrategicMessage, 15)
+	for i := range history {
+		role := agentctx.RoleUser
+		if i%2 == 1 {
+			role = agentctx.RoleAssistant
+		}
+		content := fmt.Sprintf("message %d", i+1)
+		history[i] = agentctx.StrategicMessage{
+			Role:    role,
+			Content: &agentctx.MessageContent{Str: &content},
+		}
+	}
+	_, _ = store.SaveSnapshot("sess1", 1, history)
+
+	// Dispatch a new message to trigger compaction (16th message)
+	// This should trigger summarization, which will fail due to our mock,
+	// causing fallback to plain compaction (truncation to last 10 messages)
+	_, err := mgr.Dispatch(ctx, "sess1", "trigger compaction message")
+	if err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+
+	// Verify the session continued (no error returned to caller)
+	// Verify that the snapshot was saved (compaction succeeded via fallback)
+	if store.saveCalls < 2 { // Initial save + save after dispatch
+		t.Errorf("expected at least 2 SaveSnapshot calls, got %d", store.saveCalls)
+	}
+
+	// Check the final state in the store
+	snap, err := store.LoadLatest("sess1")
+	if err != nil {
+		t.Fatalf("Failed to load snapshot: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected snapshot to exist")
+	}
+
+	// With fallback to plain compaction:
+	// 1. Existing 15 messages (1=U, 2=A, ..., 15=U).
+	// 2. Compaction (maxN=10) keeps last 9 messages (Indices 6-14: 7=U, 8=A, 9=U, 10=A, 11=U, 12=A, 13=U, 14=A, 15=U).
+	// 3. New user message is appended (16=U).
+	// 4. Runner is called with 10 messages (9 from history + 1 new).
+	// 5. Runner appends an assistant message (17=A).
+	// Final count should be 11.
+	if len(snap.Messages) != 11 {
+		t.Errorf("expected 11 messages after compaction (fallback) and turn execution, got %d", len(snap.Messages))
+	}
+
+	// Verify that the kept messages are the most recent ones (the fallback should truncate from the beginning)
+	expectedRoles := []agentctx.MessageRole{
+		agentctx.RoleUser,      // msg 7
+		agentctx.RoleAssistant, // msg 8
+		agentctx.RoleUser,      // msg 9
+		agentctx.RoleAssistant, // msg 10
+		agentctx.RoleUser,      // msg 11
+		agentctx.RoleAssistant, // msg 12
+		agentctx.RoleUser,      // msg 13
+		agentctx.RoleAssistant, // msg 14
+		agentctx.RoleUser,      // msg 15
+		agentctx.RoleUser,      // msg 16 ("trigger compaction message")
+		agentctx.RoleAssistant, // msg 17 (mock response)
+	}
+
+	for i, expectedRole := range expectedRoles {
+		if i >= len(snap.Messages) {
+			t.Errorf("message %d missing", i+7)
+			break
+		}
+		if snap.Messages[i].Role != expectedRole {
+			t.Errorf("message %d (index %d): expected role %v, got %v", i+7, i, expectedRole, snap.Messages[i].Role)
+		}
+	}
+
+	// Verify the content of the "trigger" message (index 9)
+	if len(snap.Messages) > 9 {
+		triggerMsg := snap.Messages[9]
+		if triggerMsg.Content.String() != "trigger compaction message" {
+			t.Errorf("trigger message content unexpected: %q", triggerMsg.Content.String())
+		}
+	}
+}
+
+

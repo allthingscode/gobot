@@ -302,7 +302,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 					newMessages = append(newMessages, messages[len(messages)-keepN:]...)
 					messages = newMessages
 				} else {
-					slog.Warn("agent: summarization failed (falling back to plain compaction)", "session", sessionKey, "err", err)
+					slog.Warn("agent: summarization failed, falling back to plain compaction", "session", sessionKey, "err", err)
 				}
 			}
 		}
