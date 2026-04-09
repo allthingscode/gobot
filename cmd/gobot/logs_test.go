@@ -19,14 +19,14 @@ func TestLogsCommand(t *testing.T) { //nolint:paralleltest // modifies global en
 	}
 	defer os.RemoveAll(homeDir)
 
-	origHome := os.Getenv("USERPROFILE")
+	origProfile := os.Getenv("USERPROFILE")
+	origHome := os.Getenv("HOME")
 	os.Setenv("USERPROFILE", homeDir)
+	os.Setenv("HOME", homeDir)
 	defer func() {
-		os.Setenv("USERPROFILE", origHome)
-		os.Unsetenv("USERPROFILE")
-		os.Unsetenv("HOME")
+	        os.Setenv("USERPROFILE", origProfile)
+	        os.Setenv("HOME", origHome)
 	}()
-
 	// Setup config
 	cfgDir := filepath.Join(homeDir, ".gobot")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
@@ -121,10 +121,13 @@ func TestLogsCommand_StorageRootOverride(t *testing.T) { //nolint:paralleltest /
 	}
 	defer os.RemoveAll(homeDir)
 
-	origHome := os.Getenv("USERPROFILE")
+	origProfile := os.Getenv("USERPROFILE")
+	origHome := os.Getenv("HOME")
 	os.Setenv("USERPROFILE", homeDir)
+	os.Setenv("HOME", homeDir)
 	defer func() {
-		os.Setenv("USERPROFILE", origHome)
+		os.Setenv("USERPROFILE", origProfile)
+		os.Setenv("HOME", origHome)
 	}()
 
 	cfgDir := filepath.Join(homeDir, ".gobot")
