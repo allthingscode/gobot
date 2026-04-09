@@ -4,21 +4,6 @@ param (
     [string]$Specialist
 )
 
-$Path = ".private/session/session_state.json"
-
-if (-not (Test-Path $Path)) {
-    Write-Host "No session state file found at $Path"
-    exit 0
-}
-
-try {
-    $RawJson = Get-Content $Path -Raw -Encoding utf8
-    $State = $RawJson | ConvertFrom-Json
-} catch {
-    Write-Error "Failed to parse ${Path}: $_"
-    exit 1
-}
-
 # Define idle states for each specialist
 $IdleStates = @{
     "groomer" = @{
@@ -67,20 +52,8 @@ $IdleStates = @{
     }
 }
 
-if ($State.specialists.PSObject.Properties[$Specialist]) {
-    $State.specialists.$Specialist = $IdleStates[$Specialist]
-    
-    # Use PowerShell's built-in JSON conversion (default is 2 spaces, but we want 4)
-    # Since PowerShell 7.1, ConvertTo-Json doesn't support custom indentation easily.
-    # We will use a regex replace to convert 2-space to 4-space if needed, 
-    # but the primary goal is a clean multi-line write.
-    $JsonOutput = $State | ConvertTo-Json -Depth 10
-    
-    # Force 4-space indentation for compliance with project mandates
-    $JsonOutput = $JsonOutput -replace '^(\s+)', { $args[0].Value + $args[0].Value }
-    
-    $JsonOutput | Set-Content $Path -Encoding utf8
-    Write-Host "Successfully cleared $Specialist session state (with 4-space indentation)."
-} else {
-    Write-Host "Specialist $Specialist not found in session state."
-}
+$IdleJson = $IdleStates[$Specialist] | ConvertTo-Json -Compress
+$ScriptPath = Join-Path $PSScriptRoot "update_session_state.ps1"
+
+Write-Host "[CLEANUP] Clearing $Specialist session state..." -ForegroundColor Cyan
+& $ScriptPath -Specialist $Specialist -UpdateJson $IdleJson -Merge:$false
