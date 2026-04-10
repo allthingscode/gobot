@@ -19,7 +19,12 @@ type GeminiProvider struct {
 
 // NewGeminiProvider creates a new GeminiProvider using the provided genai.Client.
 func NewGeminiProvider(client *genai.Client) *GeminiProvider {
-	return &GeminiProvider{client: client}
+        return &GeminiProvider{client: client}
+}
+
+// Client returns the underlying genai.Client.
+func (p *GeminiProvider) Client() *genai.Client {
+        return p.client
 }
 
 // Name returns the provider name.
