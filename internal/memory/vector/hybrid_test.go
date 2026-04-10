@@ -26,6 +26,7 @@ func (m *mockEmbedder) Embed(ctx context.Context, text string) ([]float32, error
 }
 
 func TestMergeResults(t *testing.T) {
+	t.Parallel()
 	fts := []FTSResult{
 		{ID: "fts1", Content: "keyword match", Timestamp: "2026-04-10T10:00:00Z"},
 		{ID: "fts2", Content: "another keyword", Timestamp: "2026-04-10T10:01:00Z"},
@@ -55,6 +56,7 @@ func TestMergeResults(t *testing.T) {
 }
 
 func TestHybridSearch(t *testing.T) {
+	t.Parallel()
 	tmpDir, err := os.MkdirTemp("", "hybrid-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
