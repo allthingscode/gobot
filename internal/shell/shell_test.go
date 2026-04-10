@@ -58,6 +58,11 @@ func TestRedirectCDrive(t *testing.T) {
 			input: `New-Item C:\temp/slash\file.txt`,
 			want:  `New-Item ` + filepath.Join(workspaceRoot, "temp", "slash", "file.txt"),
 		},
+		{
+			name:  "forward_slash_drive_redirected",
+			input: `ls C:/temp/file.txt`,
+			want:  `ls ` + filepath.Join(workspaceRoot, "temp", "file.txt"),
+		},
 	}
 
 	for _, tt := range tests {

@@ -33,6 +33,7 @@ linters:
         - paralleltest
 
 run:
+    version: 1
     modules-download-mode: readonly
     allow-parallel-runners: true
     timeout: 5m

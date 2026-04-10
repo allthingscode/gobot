@@ -27,8 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Enhanced error reporting with structured logging
 
 ### Fixed
+- **GoLang CI Lint Configuration** (B-012): Updated `golangci-lint-action` to a stable version (v1.64.5) and added the mandatory `version: 1` field to `.golangci.yml` to resolve configuration loading errors.
+- **Cross-Platform Path Redirection** (B-013): Enhanced `RedirectCDrive` to normalize Windows-style backslashes to forward slashes before joining, fixing test failures on Linux CI and improving robustness for mixed separators.
 - **Bot Package Stale Comment** (B-010): Updated `internal/bot/bot.go` package comment to reference `telego` instead of deprecated `go-telegram-bot-api`.
-- Pending issues to be documented as they are resolved
 
 ---
 

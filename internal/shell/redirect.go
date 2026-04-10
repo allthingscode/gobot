@@ -8,12 +8,12 @@ import (
 
 var (
 	// reDoubleQuotedC matches patterns like double-quoted absolute paths.
-	// We use a pattern that matches a volume name followed by a colon and backslash.
-	reDoubleQuotedPath = regexp.MustCompile(`(?i)"[A-Z]:\\[^"]*"`)
+	// We use a pattern that matches a volume name followed by a colon and a separator.
+	reDoubleQuotedPath = regexp.MustCompile(`(?i)"[A-Z]:[\\/][^"]*"`)
 	// reSingleQuotedC matches patterns like single-quoted absolute paths.
-	reSingleQuotedPath = regexp.MustCompile(`(?i)'[A-Z]:\\[^']*'`)
+	reSingleQuotedPath = regexp.MustCompile(`(?i)'[A-Z]:[\\/][^']*'`)
 	// reUnquotedC matches patterns like unquoted absolute paths (standalone).
-	reUnquotedPath = regexp.MustCompile(`(?i)[A-Z]:\\[^;"'\s]+`)
+	reUnquotedPath = regexp.MustCompile(`(?i)[A-Z]:[\\/][^;"'\s]+`)
 )
 
 // RedirectCDrive rewrites absolute Windows system drive paths in a PowerShell command
@@ -55,10 +55,12 @@ func redirectPath(match, workspaceRoot, quote string) string {
                 return match // should not happen with our regex
         }
         inner := path[2:]
+        // Normalize separators to forward slashes for cross-platform filepath handling.
+        normalizedInner := strings.ReplaceAll(inner, "\\", "/")
 
         // Build new path using filepath.Join for OS-specific separators.
         // We trim leading separators from inner to ensure Join works correctly.
-        newPath := filepath.Join(workspaceRoot, strings.TrimLeft(inner, "\\/"))
+        newPath := filepath.Join(workspaceRoot, strings.TrimLeft(normalizedInner, "/"))
 
         // Restore quotes if they were present
         return quote + newPath + quote
