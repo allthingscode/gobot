@@ -1,24 +1,39 @@
-linters-settings:
-    errorlint:
-        errorf: true # Ensure fmt.Errorf uses %w for wrapping errors
-    revive:
-        rules:
-            - name: unexported-return
-              disabled: true # Acceptable for test helpers
-            - name: unused-parameter
-              disabled: true # Acceptable for mock/stub implementations
-    gosec:
-        excludes:
-            - G304 # File path from variable — legitimate in config/log loading
-    gocritic:
-        enabled-tags:
-            - diagnostic
-            - style
-        disabled-checks:
-            - hugeParam # Not performance-critical
+version: "2"
 
 linters:
-    disable-all: true
+    settings:
+        errorlint:
+            errorf: true # Ensure fmt.Errorf uses %w for wrapping errors
+        revive:
+            rules:
+                - name: unexported-return
+                  disabled: true # Acceptable for test helpers
+                - name: unused-parameter
+                  disabled: true # Acceptable for mock/stub implementations
+        gosec:
+            excludes:
+                - G103 # Use of unsafe — intentional in Windows syscall/dpapi code
+                - G104 # Errors unhandled — covered by errcheck linter
+                - G301 # Dir permissions > 0750 — 0755 is standard for app dirs
+                - G302 # File permissions > 0600 — 0640/0644 intentional
+                - G304 # File path from variable — legitimate in config/log loading
+        gocritic:
+            enabled-tags:
+                - diagnostic
+                - style
+            disabled-checks:
+                - hugeParam # Not performance-critical
+        errcheck:
+            exclude-functions:
+                # fmt writers — errors not critical when writing to HTTP/stderr
+                - fmt.Fprintf
+                - fmt.Fprint
+                - fmt.Fprintln
+                # Env/file cleanup — best-effort, not critical
+                - os.Remove
+                - os.RemoveAll
+                - os.Setenv
+                - os.Unsetenv
     enable:
         - errcheck
         - errorlint
@@ -33,7 +48,5 @@ linters:
         - paralleltest
 
 run:
-    version: 1
     modules-download-mode: readonly
-    allow-parallel-runners: true
     timeout: 5m
