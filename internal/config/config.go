@@ -162,11 +162,12 @@ type ToolsConfig struct {
 }
 
 type StrategicConfig struct {
-	UserEmail         string              `json:"user_email"`
-	StorageRoot       string              `json:"storage_root"`
-	MaxToolIterations int                 `json:"max_tool_iterations,omitempty"`
-	IdempotencyTTL    string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
-	Observability     ObservabilityConfig `json:"observability"`
+	UserEmail           string              `json:"user_email"`
+	StorageRoot         string              `json:"storage_root"`
+	MaxToolIterations   int                 `json:"max_tool_iterations,omitempty"`
+	IdempotencyTTL      string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
+	VectorSearchEnabled bool                `json:"vector_search_enabled"`   // F-030
+	Observability       ObservabilityConfig `json:"observability"`
 }
 
 type ObservabilityConfig struct {
@@ -175,6 +176,11 @@ type ObservabilityConfig struct {
 	OTLPEndpoint   string  `json:"otlp_endpoint"`
 	SamplingRate   float64 `json:"sampling_rate"`
 	DevMode        bool    `json:"dev_mode"`
+}
+
+// VectorSearchEnabled returns true if semantic hybrid search is enabled (F-030).
+func (c *Config) VectorSearchEnabled() bool {
+	return c.Strategic.VectorSearchEnabled
 }
 
 // MemoryWindow returns the configured agent memory window (max context messages), defaulting to 50.

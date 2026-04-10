@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- **Vector/Semantic Memory Layer** (F-030): Implements a semantic similarity layer for long-term memory using `chromem-go`.
+  - Adds hybrid retrieval (FTS5 keyword + Vector semantic) with Reciprocal Rank Fusion (RRF) re-ranking.
+  - Integrates Gemini `text-embedding-004` generation into the memory consolidation pipeline.
+  - Adds `vector_search_enabled` configuration flag for opt-in hybrid search.
+  - Updates `search_memory` tool and RAG context injection to support semantic retrieval.
 - **Advanced Context Pruning & Compaction Policies** (F-047): Sophisticated context management for long-running sessions.
   - Implements TTL-based pruning (e.g., "6h" window) for history retention.
   - Adds `KeepLastAssistants` safety net to preserve critical assistant turns.

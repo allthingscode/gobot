@@ -75,6 +75,8 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 			slog.Warn("bootstrap: vector store unavailable", "err", vsErr)
 		} else {
 			vecStore = vs
+			runner.vecStore = vs
+			runner.embedProv = embedProv
 			oldCleanup := cleanup
 			cleanup = func() {
 				oldCleanup()

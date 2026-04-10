@@ -9,6 +9,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
@@ -86,12 +87,20 @@ type memorySearcher interface {
 
 // SearchMemoryTool implements Tool and queries the FTS5 long-term memory store.
 type SearchMemoryTool struct {
-	store memorySearcher
+	store     memorySearcher
+	vecStore  *vector.Store
+	embedProv vector.EmbeddingProvider
+	cfg       *config.Config
 }
 
 // newSearchMemoryTool returns a SearchMemoryTool backed by store.
-func newSearchMemoryTool(store *memory.MemoryStore) *SearchMemoryTool {
-	return &SearchMemoryTool{store: store}
+func newSearchMemoryTool(store *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, cfg *config.Config) *SearchMemoryTool {
+	return &SearchMemoryTool{
+		store:     store,
+		vecStore:  vecStore,
+		embedProv: embedProv,
+		cfg:       cfg,
+	}
 }
 
 func (t *SearchMemoryTool) Name() string { return searchMemoryToolName }
@@ -119,7 +128,7 @@ func (t *SearchMemoryTool) Declaration() provider.ToolDeclaration {
 
 // Execute searches the memory store and returns results as a JSON string.
 // If no results are found, returns a plain-text message saying so.
-func (t *SearchMemoryTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (t *SearchMemoryTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return "", fmt.Errorf("search_memory: query is required")
@@ -140,11 +149,30 @@ func (t *SearchMemoryTool) Execute(_ context.Context, _ string, args map[string]
 		limit = 5
 	}
 
-	results, err := t.store.Search(query, limit)
+	var results any
+	var err error
+
+	// F-030: Use hybrid search if enabled and store is available
+	if t.cfg.VectorSearchEnabled() && t.vecStore != nil && t.embedProv != nil {
+		results, err = vector.HybridSearch(ctx, t.store, t.vecStore, t.embedProv, query, limit)
+	} else {
+		results, err = t.store.Search(query, limit)
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("search_memory: %w", err)
 	}
-	if len(results) == 0 {
+
+	// Handle empty results based on type (slice of maps or slice of HybridResult)
+	count := 0
+	switch v := results.(type) {
+	case []map[string]any:
+		count = len(v)
+	case []vector.HybridResult:
+		count = len(v)
+	}
+
+	if count == 0 {
 		return "No matching memories found.", nil
 	}
 

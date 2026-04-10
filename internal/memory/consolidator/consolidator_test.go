@@ -79,7 +79,7 @@ func TestConsolidator_IndexesFacts(t *testing.T) {
 	runner := &mockTextRunner{
 		response: `["Project Alpha deadline is May 1 2026", "User prefers Friday updates"]`,
 	}
-	c := New(runner, store)
+	c := New(runner, store, nil, nil)
 	n, err := c.consolidate(context.Background(), "sess1", strings.Repeat("x", 200))
 	if err != nil {
 		t.Fatalf("consolidate: %v", err)
@@ -102,7 +102,7 @@ func TestConsolidator_EmptyLLMResponse_IndexesNothing(t *testing.T) {
 	t.Parallel()
 	store := newTestStore(t)
 	runner := &mockTextRunner{response: `[]`}
-	c := New(runner, store)
+	c := New(runner, store, nil, nil)
 	n, err := c.consolidate(context.Background(), "sess1", strings.Repeat("x", 200))
 	if err != nil {
 		t.Fatalf("consolidate: %v", err)
@@ -118,7 +118,7 @@ func TestConsolidator_ShortReply_SkippedByConsolidateAsync(t *testing.T) {
 	// We verify by using a runner that would panic if called.
 	store := newTestStore(t)
 	runner := &mockTextRunner{response: "should not be called"}
-	c := New(runner, store)
+	c := New(runner, store, nil, nil)
 	// "OK" is 2 runes — well below minConsolidateLength.
 	c.ConsolidateAsync("sess", "OK")
 	// If the goroutine were spawned and panicked, the test would fail.
@@ -133,7 +133,7 @@ func TestConsolidator_DeduplicatesFacts(t *testing.T) {
 	runner := &mockTextRunner{
 		response: `["Project Alpha deadline is May 1 2026"]`,
 	}
-	c := New(runner, store)
+	c := New(runner, store, nil, nil)
 	n, err := c.consolidate(context.Background(), "sess1", strings.Repeat("x", 200))
 	if err != nil {
 		t.Fatalf("consolidate: %v", err)
@@ -188,7 +188,7 @@ func TestConsolidator_EndToEnd_CompactConsolidateRetrieve(t *testing.T) {
 		]`,
 	}
 
-	c := New(runner, store)
+	c := New(runner, store, nil, nil)
 
 	// Simulate messages being dropped during compaction.
 	// These messages contain substantive information.
@@ -242,7 +242,7 @@ func TestConsolidator_TTLCleanupRunsWithoutError(t *testing.T) {
 		response: `["new fact to consolidate"]`,
 	}
 
-	c := New(runner, store)
+	c := New(runner, store, nil, nil)
 	c.SetTTL("87600h") // Very long TTL (10 years) — nothing should be deleted
 
 	// Consolidate with TTL cleanup configured.
@@ -266,7 +266,7 @@ func TestConsolidator_NoConsolidateOnShortReply(t *testing.T) {
 		response: `["should not be reached"]`,
 	}
 
-	c := New(runner, store)
+	c := New(runner, store, nil, nil)
 
 	// These messages are too short to trigger consolidation (minConsolidateLength = 80).
 	shortMsgs := []string{"ok", "yes", "confirmed", "thanks"}

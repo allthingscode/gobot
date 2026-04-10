@@ -77,9 +77,8 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
         }
 
         if memStore != nil {
-                tools = append(tools, newSearchMemoryTool(memStore))
+        	tools = append(tools, newSearchMemoryTool(memStore, vecStore, embedProv, cfg))
         }
-
         if memStore != nil && vecStore != nil && embedProv != nil {
                 tools = append(tools, newSearchDocsTool(memStore, vecStore, embedProv))
         }

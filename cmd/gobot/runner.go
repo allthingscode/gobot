@@ -19,6 +19,7 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -32,11 +33,14 @@ type geminiRunner struct {
 	prov                provider.Provider
 	model               string
 	systemPrompt        string
-	memStore            *memory.MemoryStore // may be nil; used for RAG context injection
-	tools               []Tool              // registered tools exposed to the provider
-	breaker             *resilience.Breaker // circuit breaker for API calls
-	limiter             *rate.Limiter       // token-bucket rate limiter
-	hooks               *agent.Hooks        // may be nil; set via SetHooks
+	memStore            *memory.MemoryStore      // may be nil; used for RAG context injection
+	vecStore            *vector.Store            // F-030: Semantic memory
+	embedProv           vector.EmbeddingProvider // F-030: Semantic memory
+	cfg                 *config.Config           // F-030: Configuration
+	tools               []Tool                   // registered tools exposed to the provider
+	breaker             *resilience.Breaker      // circuit breaker for API calls
+	limiter             *rate.Limiter            // token-bucket rate limiter
+	hooks               *agent.Hooks             // may be nil; set via SetHooks
 	tracer              *observability.DispatchTracer
 	idempStore          *agentctx.IdempotencyStore // may be nil; idempotency for side-effecting tools
 	maxToolIterations   int
@@ -53,6 +57,7 @@ func newGeminiRunner(prov provider.Provider, model, systemPrompt string, cfg *co
 		prov:         prov,
 		model:        model,
 		systemPrompt: systemPrompt,
+		cfg:          cfg,
 		// Configured circuit breaker for LLM provider.
 		breaker: resilience.New(prov.Name(), maxFail, window, timeout),
 		// 3 requests/second burst; conservative default.
@@ -112,15 +117,38 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 	sysPrompt := r.systemPrompt
 	if r.memStore != nil {
 		if userText := lastUserText(messages); !memory.ShouldSkipRAG(userText) {
-			if results, _ := r.memStore.Search(userText, 5); len(results) > 0 {
-				filtered := memory.FilterRAGResults(results, 0.0)
-				if block, n := memory.FormatRAGBlock(filtered); n > 0 {
-					slog.Debug("runner: injecting RAG context", "entries", n)
-					if sysPrompt != "" {
-						sysPrompt = block + "\n\n" + sysPrompt
-					} else {
-						sysPrompt = block
+			var filtered []map[string]any
+
+			// F-030: Use hybrid search for RAG if enabled
+			if r.cfg.VectorSearchEnabled() && r.vecStore != nil && r.embedProv != nil {
+				hybridResults, err := vector.HybridSearch(ctx, r.memStore, r.vecStore, r.embedProv, userText, 5)
+				if err == nil {
+					// Map hybrid results to the format expected by FormatRAGBlock
+					for _, res := range hybridResults {
+						filtered = append(filtered, map[string]any{
+							"content": res.Content,
+							"score":   res.Score,
+						})
 					}
+				} else {
+					slog.Warn("runner: hybrid RAG search failed, falling back to FTS5", "err", err)
+					if results, _ := r.memStore.Search(userText, 5); len(results) > 0 {
+						filtered = memory.FilterRAGResults(results, 0.0)
+					}
+				}
+			} else {
+				// Classic FTS5-only RAG
+				if results, _ := r.memStore.Search(userText, 5); len(results) > 0 {
+					filtered = memory.FilterRAGResults(results, 0.0)
+				}
+			}
+
+			if block, n := memory.FormatRAGBlock(filtered); n > 0 {
+				slog.Debug("runner: injecting RAG context", "entries", n)
+				if sysPrompt != "" {
+					sysPrompt = block + "\n\n" + sysPrompt
+				} else {
+					sysPrompt = block
 				}
 			}
 		}

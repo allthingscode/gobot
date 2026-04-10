@@ -1,6 +1,8 @@
 package vector
 
 import (
+	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -20,6 +22,57 @@ type FTSResult struct {
 	ID        string
 	Content   string
 	Timestamp string
+}
+
+// memorySearcher defines the subset of MemoryStore needed for hybrid search.
+type memorySearcher interface {
+	Search(query string, limit int) ([]map[string]any, error)
+}
+
+// HybridSearch orchestrates a keyword search (FTS5) and a semantic search (vector),
+// merging them using Reciprocal Rank Fusion (RRF).
+func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv EmbeddingProvider, query string, limit int) ([]HybridResult, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	// 1. FTS5 Keyword Search
+	ftsResultsRaw, err := fts.Search(query, limit*2) // fetch more for re-ranking
+	if err != nil {
+		return nil, fmt.Errorf("fts search: %w", err)
+	}
+
+	var ftsResults []FTSResult
+	for _, res := range ftsResultsRaw {
+		id, _ := res["session_key"].(string)
+		content, _ := res["content"].(string)
+		timestamp, _ := res["timestamp"].(string)
+		ftsResults = append(ftsResults, FTSResult{
+			ID:        id,
+			Content:   content,
+			Timestamp: timestamp,
+		})
+	}
+
+	// 2. Vector Semantic Search
+	embedFunc := func(c context.Context, text string) ([]float32, error) {
+		return embedProv.Embed(c, text)
+	}
+
+	// For memory facts, we use a 'memory_facts' collection
+	vecResults, err := vec.Search(ctx, "memory_facts", query, limit*2, embedFunc)
+	if err != nil {
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+
+	// 3. Hybrid RRF Merge
+	merged := MergeResults(ftsResults, vecResults, 60)
+
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+
+	return merged, nil
 }
 
 // MergeResults applies Reciprocal Rank Fusion (RRF) to combine keyword and semantic search results.

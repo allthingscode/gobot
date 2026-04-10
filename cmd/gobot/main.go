@@ -331,7 +331,7 @@ func cmdRun() *cobra.Command {
 			runner.SetHooks(hooks)
 			handler := &dispatchHandler{mgr: mgr, memory: memStore, hitl: hitl}
 			if memStore != nil {
-				h := consolidator.New(runner, memStore)
+				h := consolidator.New(runner, memStore, stack.vecStore, stack.embedProv)
 				if cfg.Agents.Defaults.Compaction.Strategy == "memoryFlush" {
 					h.SetPrompt(cfg.Agents.Defaults.Compaction.MemoryFlush.Prompt)
 					h.SetTTL(cfg.Agents.Defaults.Compaction.MemoryFlush.TTL)

@@ -62,6 +62,11 @@ func (s *Store) AddDocuments(ctx context.Context, collectionName string, docs []
 	return nil
 }
 
+// AddDocument adds a single document to a collection.
+func (s *Store) AddDocument(ctx context.Context, collectionName string, doc chromem.Document, embeddingFunc chromem.EmbeddingFunc) error {
+	return s.AddDocuments(ctx, collectionName, []chromem.Document{doc}, embeddingFunc)
+}
+
 // Search performs a cosine similarity search on the collection.
 func (s *Store) Search(ctx context.Context, collectionName, query string, limit int, embeddingFunc chromem.EmbeddingFunc) ([]chromem.Result, error) {
 	s.mu.RLock()
@@ -70,6 +75,15 @@ func (s *Store) Search(ctx context.Context, collectionName, query string, limit 
 	col := s.db.GetCollection(collectionName, embeddingFunc)
 	if col == nil {
 		return nil, nil // Collection does not exist yet
+	}
+
+	// chromem-go requires nResults <= count
+	count := col.Count()
+	if limit > count {
+		limit = count
+	}
+	if limit <= 0 {
+		return nil, nil
 	}
 
 	results, err := col.Query(ctx, query, limit, nil, nil)

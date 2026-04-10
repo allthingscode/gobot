@@ -10,7 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
+	"github.com/philippgille/chromem-go"
 )
 
 // minConsolidateLength is the minimum reply length (runes) worth consolidating.
@@ -38,21 +40,26 @@ type TextRunner interface {
 // long-term memory store. All operations are best-effort — errors are logged
 // and never propagated to the caller.
 type Consolidator struct {
-	runner TextRunner
-	store  *memory.MemoryStore
-	prompt string
-	ttl    string                  // e.g., "2160h" for 90 days; empty means no cleanup
-	obs    *observability.Provider // optional observability provider
+	runner    TextRunner
+	store     *memory.MemoryStore
+	vecStore  *vector.Store             // F-030: Semantic memory
+	embedProv vector.EmbeddingProvider // F-030: Semantic memory
+	prompt    string
+	ttl       string                  // e.g., "2160h" for 90 days; empty means no cleanup
+	obs       *observability.Provider // optional observability provider
 }
 
 // New creates a Consolidator. Both runner and store must be non-nil.
-func New(runner TextRunner, store *memory.MemoryStore) *Consolidator {
+// vecStore and embedProv may be nil (semantic memory disabled).
+func New(runner TextRunner, store *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider) *Consolidator {
 	return &Consolidator{
-		runner: runner,
-		store:  store,
-		prompt: consolidationPrompt,
-		ttl:    "",
-		obs:    nil,
+		runner:    runner,
+		store:     store,
+		vecStore:  vecStore,
+		embedProv: embedProv,
+		prompt:    consolidationPrompt,
+		ttl:       "",
+		obs:       nil,
 	}
 }
 
@@ -145,7 +152,34 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 			skipped++
 			continue
 		}
+
+		// F-030: Also index in vector store if available (semantic memory)
+		if c.vecStore != nil && c.embedProv != nil {
+			doc := chromem.Document{
+				ID:      fmt.Sprintf("%s-%d", sessionKey, time.Now().UnixNano()),
+				Content: fact,
+				Metadata: map[string]string{
+					"session_key": sessionKey,
+					"timestamp":   time.Now().UTC().Format(time.RFC3339),
+					"source":      "consolidator",
+				},
+			}
+			embedFunc := func(ctx context.Context, text string) ([]float32, error) {
+				return c.embedProv.Embed(ctx, text)
+			}
+			if err := c.vecStore.AddDocument(ctx, "memory_facts", doc, embedFunc); err != nil {
+				slog.Warn("consolidator: vector index failed", "fact", fact, "err", err)
+			}
+		}
+
 		indexed++
+	}
+
+	// F-030: Save vector store after batch indexing
+	if c.vecStore != nil && indexed > 0 {
+		if err := c.vecStore.Save(); err != nil {
+			slog.Warn("consolidator: failed to save vector db", "err", err)
+		}
 	}
 
 	// Record metrics (F-068)
