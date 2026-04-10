@@ -1,29 +1,34 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
+        "context"
+        "fmt"
+        "log/slog"
+        "path/filepath"
+        "strconv"
+        "strings"
+        "time"
 
-	"github.com/allthingscode/gobot/internal/agent"
-	"github.com/allthingscode/gobot/internal/bot"
-	"github.com/allthingscode/gobot/internal/cron"
-	"github.com/allthingscode/gobot/internal/integrations/google"
+        "github.com/allthingscode/gobot/internal/agent"
+        "github.com/allthingscode/gobot/internal/bot"
+        "github.com/allthingscode/gobot/internal/cron"
+        "github.com/allthingscode/gobot/internal/integrations/google"
+        "github.com/allthingscode/gobot/internal/memory/vector"
 )
 
 // cronDispatcher implements cron.Dispatcher.
 // It routes job payloads to the agent SessionManager and sends
 // any non-empty response back via the Telegram bot.
 type cronDispatcher struct {
-	mgr         *agent.SessionManager
-	b           *bot.Bot
-	storageRoot string
-	secretsRoot string
-	userEmail   string
+        mgr         *agent.SessionManager
+        b           *bot.Bot
+        storageRoot string
+        secretsRoot string
+        userEmail   string
+
+        vecStore     *vector.Store
+        embedProv    vector.EmbeddingProvider
+        workspaceDir string
 }
 
 // Dispatch routes a cron job payload to the agent and sends the reply.
@@ -37,8 +42,24 @@ type cronDispatcher struct {
 //  3. If silent == false and response != "": parse sessionKey into chatID + threadID
 //     and call b.Send() with the response.
 func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
-	channel, to, silent := cron.ResolveRoutableChannel(p, d.storageRoot)
+        if p.Message == "[SYSTEM] INDEX_WORKSPACE" {
+                if d.vecStore != nil && d.embedProv != nil && d.workspaceDir != "" {
+                        slog.Info("cron: starting workspace vector indexing")
+                        err := vector.IndexWorkspaceMarkdown(ctx, d.vecStore, d.workspaceDir, func(c context.Context, text string) ([]float32, error) {
+                                return d.embedProv.Embed(c, text)
+                        })
+                        if err != nil {
+                                slog.Error("cron: vector index error", "err", err)
+                                return err
+                        }
+                        slog.Info("cron: workspace vector indexing complete")
+                        return nil
+                }
+                slog.Warn("cron: vector store not initialized, skipping INDEX_WORKSPACE")
+                return nil
+        }
 
+        channel, to, silent := cron.ResolveRoutableChannel(p, d.storageRoot)
 	if silent {
 		if p.To == "" {
 			slog.Warn("unroutable cron job", "channel", channel, "to", to)

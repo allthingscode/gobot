@@ -4,20 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
 // agentStack holds the core components required to run the strategic agent.
 type agentStack struct {
-	prov     provider.Provider
-	model    string
-	runner   *geminiRunner
-	memStore *memory.MemoryStore // may be nil; caller must defer cleanup() if non-nil
+	prov      provider.Provider
+	model     string
+	runner    *geminiRunner
+	memStore  *memory.MemoryStore // may be nil; caller must defer cleanup() if non-nil
+	vecStore  *vector.Store
+	embedProv vector.EmbeddingProvider
 }
 
 // buildAgentStack extracts the shared provider, system prompt, runner, and tool
@@ -61,13 +65,34 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 		cleanup = func() { _ = memStore.Close() }
 	}
 
-	runner.tools = registerTools(cfg, prov, model, memStore)
+	var vecStore *vector.Store
+	var embedProv vector.EmbeddingProvider
+	if gp, ok := prov.(*provider.GeminiProvider); ok && gp.Client() != nil {
+		embedProv = vector.NewGeminiProvider(gp.Client())
+		vsPath := filepath.Join(cfg.StorageRoot(), "memory", "vectors.db")
+		vs, vsErr := vector.NewStore(vsPath)
+		if vsErr != nil {
+			slog.Warn("bootstrap: vector store unavailable", "err", vsErr)
+		} else {
+			vecStore = vs
+			oldCleanup := cleanup
+			cleanup = func() {
+				oldCleanup()
+				_ = vs.Save()
+				_ = vs.Close()
+			}
+		}
+	}
+
+	runner.tools = registerTools(cfg, prov, model, memStore, vecStore, embedProv)
 
 	return &agentStack{
-		prov:     prov,
-		model:    model,
-		runner:   runner,
-		memStore: memStore,
+		prov:      prov,
+		model:     model,
+		runner:    runner,
+		memStore:  memStore,
+		vecStore:  vecStore,
+		embedProv: embedProv,
 	}, cleanup, nil
 }
 

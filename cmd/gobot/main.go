@@ -387,11 +387,14 @@ func cmdRun() *cobra.Command {
 			// share checkpoint history with DM conversations (F-013).
 			cronMgr := stack.NewSessionManager(cfg, nil, tracer)
 			cronDisp := &cronDispatcher{
-				mgr:         cronMgr,
-				b:           b,
-				storageRoot: cfg.StorageRoot(),
-				secretsRoot: cfg.SecretsRoot(),
-				userEmail:   cfg.Strategic.UserEmail,
+				mgr:          cronMgr,
+				b:            b,
+				storageRoot:  cfg.StorageRoot(),
+				secretsRoot:  cfg.SecretsRoot(),
+				userEmail:    cfg.Strategic.UserEmail,
+				vecStore:     stack.vecStore,
+				embedProv:    stack.embedProv,
+				workspaceDir: cfg.WorkspacePath(),
 			}
 			scheduler := cron.NewScheduler(storePath, itemsDir, cronDisp)
 			wg.Add(1)
