@@ -35,11 +35,11 @@ func (m *mockHandler) HandleCallback(_ context.Context, _ bot.InboundCallback) e
 func TestGateway(t *testing.T) {
 	t.Parallel()
 	cfg := config.GatewayConfig{Enabled: true, Host: "localhost", Port: 18790}
-	h := &mockHandler{}
-	srv := NewServer(cfg, h)
 
 	t.Run("Health", func(t *testing.T) {
 		t.Parallel()
+		h := &mockHandler{}
+		srv := NewServer(cfg, h)
 		req := httptest.NewRequest("GET", "/health", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleHealth(w, req)
@@ -54,6 +54,8 @@ func TestGateway(t *testing.T) {
 
 	t.Run("Chat", func(t *testing.T) {
 		t.Parallel()
+		h := &mockHandler{}
+		srv := NewServer(cfg, h)
 		in := InboundRequest{
 			SessionKey: "test-session",
 			Text:       "hello gateway",
@@ -82,6 +84,8 @@ func TestGateway(t *testing.T) {
 
 	t.Run("Chat_DefaultSession", func(t *testing.T) {
 		t.Parallel()
+		h := &mockHandler{}
+		srv := NewServer(cfg, h)
 		in := InboundRequest{
 			Text: "no session",
 		}
@@ -97,6 +101,8 @@ func TestGateway(t *testing.T) {
 
 	t.Run("InvalidMethod", func(t *testing.T) {
 		t.Parallel()
+		h := &mockHandler{}
+		srv := NewServer(cfg, h)
 		req := httptest.NewRequest("GET", "/chat", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleChat(w, req)
@@ -108,6 +114,8 @@ func TestGateway(t *testing.T) {
 
 	t.Run("InvalidJSON", func(t *testing.T) {
 		t.Parallel()
+		h := &mockHandler{}
+		srv := NewServer(cfg, h)
 		req := httptest.NewRequest("POST", "/chat", bytes.NewReader([]byte("not json")))
 		w := httptest.NewRecorder()
 		srv.handleChat(w, req)
@@ -119,13 +127,13 @@ func TestGateway(t *testing.T) {
 
 	t.Run("HandlerError", func(t *testing.T) {
 		t.Parallel()
-		hErr := &mockHandler{err: true}
-		srvErr := NewServer(cfg, hErr)
+		h := &mockHandler{err: true}
+		srv := NewServer(cfg, h)
 		in := InboundRequest{Text: "fail"}
 		body, _ := json.Marshal(in)
 		req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
 		w := httptest.NewRecorder()
-		srvErr.handleChat(w, req)
+		srv.handleChat(w, req)
 
 		var resp OutboundResponse
 		_ = json.NewDecoder(w.Body).Decode(&resp)
