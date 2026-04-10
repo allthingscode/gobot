@@ -30,7 +30,7 @@ func cmdMemory() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("memory store: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			sessionDir := cfg.WorkspacePath("sessions")
 			n, err := store.Rebuild(sessionDir)
 			if err != nil {
@@ -57,7 +57,7 @@ func cmdMemory() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			results, err := store.Search(query, 10)
 			if err != nil {
 				return err

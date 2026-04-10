@@ -78,7 +78,7 @@ func cmdLogs() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to open log file: %w", err)
 			}
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 
 			reader := bufio.NewReader(file)
 			var ringBuffer []string

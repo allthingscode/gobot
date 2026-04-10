@@ -39,7 +39,7 @@ func FallbackNotify(storageRoot, subject, body, recipient, reason string) string
 	if err != nil {
 		return fmt.Sprintf("CRITICAL: Fallback notification failed. Original: %s. Disk error: %v", reason, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if isNew {
 		if _, err := f.WriteString("# Strategic Notifications (Fallback)\n"); err != nil {

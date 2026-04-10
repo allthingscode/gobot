@@ -54,7 +54,7 @@ func TestChaos_RandomFailures(t *testing.T) {
 						if err != nil {
 							return err
 						}
-						defer resp.Body.Close()
+						defer func() { _ = resp.Body.Close() }()
 						if resp.StatusCode >= 500 {
 							return &HTTPStatusError{StatusCode: resp.StatusCode}
 						}

@@ -98,7 +98,7 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on localhost:%d: %w", port, err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	srv := &http.Server{
 		ReadHeaderTimeout: 5 * time.Second,
@@ -185,7 +185,7 @@ func exchangeCode(code, clientID, clientSecret, redirectURI string) (*storedToke
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response body: %w", err)
@@ -308,7 +308,7 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 	if err != nil {
 		return fmt.Errorf("token refresh request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)
@@ -343,7 +343,7 @@ func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", apiURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)
@@ -382,7 +382,7 @@ func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any
 	if err != nil {
 		return fmt.Errorf("POST %s: %w", apiURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)
@@ -410,7 +410,7 @@ func apiPatch(accessToken, apiURL string, body any, client *http.Client, dest an
 	if err != nil {
 		return fmt.Errorf("PATCH %s: %w", apiURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)

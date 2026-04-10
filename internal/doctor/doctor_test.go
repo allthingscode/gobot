@@ -62,7 +62,7 @@ func TestCheckStorageRoot_IsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	r := checkStorageRoot(cfgWithRoot(f.Name()))
 	if r.ok {
@@ -133,7 +133,7 @@ func TestCheckLogs_BlockedByFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	r := checkLogs(cfgWithRoot(root))
 	if r.ok {

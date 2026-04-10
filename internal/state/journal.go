@@ -66,7 +66,7 @@ func Replay(journalPath string) ([]JournalEntry, error) {
 		}
 		return nil, fmt.Errorf("opening journal: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var entries []JournalEntry
 	scanner := bufio.NewScanner(file)

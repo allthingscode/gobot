@@ -41,14 +41,14 @@ func NewMemoryStore(storageRoot string) (*MemoryStore, error) {
 	}
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("memory: WAL mode: %w", err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
 	if err := initMemorySchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("memory: schema: %w", err)
 	}
 	return &MemoryStore{db: db}, nil
@@ -109,7 +109,7 @@ func (m *MemoryStore) Search(query string, limit int) ([]map[string]any, error) 
 		slog.Debug("memory: search query rejected (returning empty)", "err", err)
 		return nil, nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []map[string]any
 	for rows.Next() {

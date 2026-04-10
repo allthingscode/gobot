@@ -554,7 +554,7 @@ func LoadFrom(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("open config %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return decode(f)
 }

@@ -176,7 +176,7 @@ func cmdRun() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			defer func() {
 				if r := recover(); r != nil {
-					os.Stderr.WriteString("PANIC CAUGHT IN MAIN: " + fmt.Sprint(r) + "\n")
+					_, _ = os.Stderr.WriteString("PANIC CAUGHT IN MAIN: " + fmt.Sprint(r) + "\n")
 					os.Exit(1)
 				}
 			}()
@@ -201,7 +201,7 @@ func cmdRun() *cobra.Command {
 				if logFileErr == nil {
 					// Use a multi-writer to send logs to both file and stderr
 					baseHandler = slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)
-					defer logFile.Close()
+					defer func() { _ = logFile.Close() }()
 				} else {
 					baseHandler = slog.NewTextHandler(os.Stderr, nil)
 				}
@@ -399,7 +399,7 @@ func cmdRun() *cobra.Command {
 				defer wg.Done()
 				defer func() {
 					if r := recover(); r != nil {
-						os.Stderr.WriteString("PANIC IN CRON: " + fmt.Sprint(r) + "\n")
+						_, _ = os.Stderr.WriteString("PANIC IN CRON: " + fmt.Sprint(r) + "\n")
 						os.Exit(1)
 					}
 				}()
@@ -421,7 +421,7 @@ func cmdRun() *cobra.Command {
 					defer wg.Done()
 					defer func() {
 						if r := recover(); r != nil {
-							os.Stderr.WriteString("PANIC IN HEARTBEAT: " + fmt.Sprint(r) + "\n")
+							_, _ = os.Stderr.WriteString("PANIC IN HEARTBEAT: " + fmt.Sprint(r) + "\n")
 							os.Exit(1)
 						}
 					}()

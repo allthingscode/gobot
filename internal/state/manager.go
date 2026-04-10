@@ -148,7 +148,7 @@ func (m *Manager) UpdateStatus(id WorkflowID, status WorkflowStatus) error {
 	if err != nil {
 		return fmt.Errorf("opening journal: %w", err)
 	}
-	defer journal.Close()
+	defer func() { _ = journal.Close() }()
 
 	// Append status change.
 	entry := JournalEntry{

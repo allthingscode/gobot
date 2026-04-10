@@ -58,7 +58,7 @@ func setupTestStore(t *testing.T) (*context.IdempotencyStore, *sql.DB, func()) {
 
 	store := context.NewIdempotencyStore(db, 1*time.Hour)
 	cleanup := func() {
-		db.Close()
+		_ = db.Close()
 		os.RemoveAll(tmpDir)
 	}
 

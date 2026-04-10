@@ -19,7 +19,7 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 		t.Fatalf("phase1 openDB: %v", err)
 	}
 	if err := initSchema(db1); err != nil {
-		db1.Close()
+		_ = db1.Close()
 		t.Fatalf("phase1 initSchema: %v", err)
 	}
 	m1 := &CheckpointManager{db: db1}
@@ -35,14 +35,14 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("phase1 SaveSnapshot: ok=%v err=%v", ok, err)
 	}
-	db1.Close() // simulate process crash / restart
+	_ = db1.Close() // simulate process crash / restart
 
 	// ── Phase 2: reopen the same DB, verify data survives ─────────────────────
 	db2, err := openDB(root)
 	if err != nil {
 		t.Fatalf("phase2 openDB: %v", err)
 	}
-	defer db2.Close()
+	defer func() { _ = db2.Close() }()
 	if err := initSchema(db2); err != nil {
 		t.Fatalf("phase2 initSchema: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 		t.Fatalf("openDB: %v", err)
 	}
 	if err := initSchema(db1); err != nil {
-		db1.Close()
+		_ = db1.Close()
 		t.Fatalf("initSchema: %v", err)
 	}
 	m1 := &CheckpointManager{db: db1}
@@ -106,13 +106,13 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 			t.Fatalf("SaveSnapshot iter %d: %v", i, err)
 		}
 	}
-	db1.Close() // crash
+	_ = db1.Close() // crash
 
 	db2, err := openDB(root)
 	if err != nil {
 		t.Fatalf("reopen openDB: %v", err)
 	}
-	defer db2.Close()
+	defer func() { _ = db2.Close() }()
 	if err := initSchema(db2); err != nil {
 		t.Fatalf("reopen initSchema: %v", err)
 	}

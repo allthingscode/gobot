@@ -142,8 +142,8 @@ func checkWorkspace(cfg *config.Config) result {
 	if err != nil {
 		return result{name: "workspace writable", ok: false, detail: fmt.Sprintf("%s: %v", ws, err)}
 	}
-	tmp.Close()
-	os.Remove(tmp.Name())
+	_ = tmp.Close()
+	_ = os.Remove(tmp.Name())
 	return result{name: "workspace writable", ok: true, detail: ws}
 }
 

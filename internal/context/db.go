@@ -27,7 +27,7 @@ func openDB(storageRoot string) (*sql.DB, error) {
 	}
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("openDB: set WAL mode: %w", err)
 	}
 
@@ -45,7 +45,7 @@ func addChecksumColumnIfMissing(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var cid int

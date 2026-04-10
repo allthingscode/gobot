@@ -34,7 +34,7 @@ func TestRetryIntegration_5xxFailures(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
 			return &HTTPStatusError{StatusCode: resp.StatusCode}
 		}
@@ -70,7 +70,7 @@ func TestRetryIntegration_NoRetryOn4xx(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
 			return &HTTPStatusError{StatusCode: resp.StatusCode}
 		}
@@ -116,7 +116,7 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
 			return &HTTPStatusError{StatusCode: resp.StatusCode}
 		}
@@ -167,7 +167,7 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode >= 400 {
 				return &HTTPStatusError{StatusCode: resp.StatusCode}
 			}
@@ -183,7 +183,7 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode >= 400 {
 				return &HTTPStatusError{StatusCode: resp.StatusCode}
 			}
@@ -252,7 +252,7 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 		if innerErr != nil {
 			return innerErr
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil
 	})
 	if err != nil {

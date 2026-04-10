@@ -16,7 +16,7 @@ func TestOpenJournal_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenJournal failed: %v", err)
 	}
-	defer journal.Close()
+	defer func() { _ = journal.Close() }()
 
 	journalPath := filepath.Join(tempDir, "wf-123.journal")
 	if _, err := os.Stat(journalPath); err != nil {
@@ -51,7 +51,7 @@ func TestJournal_AppendAndReplay(t *testing.T) {
 		t.Fatalf("Append failed: %v", err)
 	}
 
-	journal.Close()
+	_ = journal.Close()
 
 	journalPath := filepath.Join(tempDir, "wf-456.journal")
 	entries, err := Replay(journalPath)
@@ -117,7 +117,7 @@ func TestRecoverWorkflow(t *testing.T) {
 		Operation: "data_update",
 		Payload:   json.RawMessage(`{"progress": 50}`),
 	})
-	journal.Close()
+	_ = journal.Close()
 
 	state := &WorkflowState{ID: "wf-recover", Status: StatusPending}
 	err := RecoverWorkflow(tempDir, "wf-recover", state)

@@ -49,7 +49,7 @@ func liveProbes() *doctor.Probes {
 				// genai.Client doesn't have Close, but we document the pattern
 				return nil
 			})
-			defer res.Close()
+			defer func() { _ = res.Close() }()
 
 			_, err = client.Models.GenerateContent(ctx, "gemini-2.0-flash",
 				[]*genai.Content{{Parts: []*genai.Part{{Text: "ping"}}}},

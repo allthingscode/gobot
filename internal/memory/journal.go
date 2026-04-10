@@ -65,7 +65,7 @@ func WriteJournalEntry(storageRoot, entry string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, err = f.WriteString(line)
 	return err == nil

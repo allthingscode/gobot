@@ -35,11 +35,11 @@ func (m *mockHandler) HandleCallback(_ context.Context, _ bot.InboundCallback) e
 func TestGateway(t *testing.T) {
 	t.Parallel()
 	cfg := config.GatewayConfig{Enabled: true, Host: "localhost", Port: 18790}
+	h := &mockHandler{}
+	srv := NewServer(cfg, h)
 
 	t.Run("Health", func(t *testing.T) {
 		t.Parallel()
-		h := &mockHandler{}
-		srv := NewServer(cfg, h)
 		req := httptest.NewRequest("GET", "/health", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleHealth(w, req)
@@ -54,8 +54,8 @@ func TestGateway(t *testing.T) {
 
 	t.Run("Chat", func(t *testing.T) {
 		t.Parallel()
-		h := &mockHandler{}
-		srv := NewServer(cfg, h)
+		localH := &mockHandler{}
+		localSrv := NewServer(cfg, localH)
 		in := InboundRequest{
 			SessionKey: "test-session",
 			Text:       "hello gateway",
@@ -63,7 +63,7 @@ func TestGateway(t *testing.T) {
 		body, _ := json.Marshal(in)
 		req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
 		w := httptest.NewRecorder()
-		srv.handleChat(w, req)
+		localSrv.handleChat(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", w.Code)
@@ -77,15 +77,12 @@ func TestGateway(t *testing.T) {
 		if resp.Reply != "Reply: hello gateway" {
 			t.Errorf("unexpected reply: %q", resp.Reply)
 		}
-		if h.lastMsg != "hello gateway" {
-			t.Errorf("handler did not receive correct message: %q", h.lastMsg)
+		if localH.lastMsg != "hello gateway" {
+			t.Errorf("handler did not receive correct message: %q", localH.lastMsg)
 		}
 	})
-
 	t.Run("Chat_DefaultSession", func(t *testing.T) {
 		t.Parallel()
-		h := &mockHandler{}
-		srv := NewServer(cfg, h)
 		in := InboundRequest{
 			Text: "no session",
 		}
@@ -101,8 +98,6 @@ func TestGateway(t *testing.T) {
 
 	t.Run("InvalidMethod", func(t *testing.T) {
 		t.Parallel()
-		h := &mockHandler{}
-		srv := NewServer(cfg, h)
 		req := httptest.NewRequest("GET", "/chat", http.NoBody)
 		w := httptest.NewRecorder()
 		srv.handleChat(w, req)
@@ -114,8 +109,6 @@ func TestGateway(t *testing.T) {
 
 	t.Run("InvalidJSON", func(t *testing.T) {
 		t.Parallel()
-		h := &mockHandler{}
-		srv := NewServer(cfg, h)
 		req := httptest.NewRequest("POST", "/chat", bytes.NewReader([]byte("not json")))
 		w := httptest.NewRecorder()
 		srv.handleChat(w, req)
@@ -127,13 +120,13 @@ func TestGateway(t *testing.T) {
 
 	t.Run("HandlerError", func(t *testing.T) {
 		t.Parallel()
-		h := &mockHandler{err: true}
-		srv := NewServer(cfg, h)
+		hErr := &mockHandler{err: true}
+		srvErr := NewServer(cfg, hErr)
 		in := InboundRequest{Text: "fail"}
 		body, _ := json.Marshal(in)
 		req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
 		w := httptest.NewRecorder()
-		srv.handleChat(w, req)
+		srvErr.handleChat(w, req)
 
 		var resp OutboundResponse
 		_ = json.NewDecoder(w.Body).Decode(&resp)

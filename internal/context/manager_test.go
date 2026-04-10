@@ -21,7 +21,7 @@ func newTestManager(t *testing.T) *CheckpointManager {
 	if err := initSchema(db); err != nil {
 		t.Fatalf("initSchema: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return &CheckpointManager{db: db}
 }
 
@@ -341,7 +341,7 @@ func TestSaveSnapshot_TxBeginError(t *testing.T) { //nolint:paralleltest // modi
 	if err := m.CreateThread("t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
-	m.db.Close() // force all subsequent DB operations to fail
+	_ = m.db.Close() // force all subsequent DB operations to fail
 
 	content := MessageContent{Str: strPtr("hi")}
 	msgs := []StrategicMessage{{Role: RoleUser, Content: &content}}
@@ -354,7 +354,7 @@ func TestSaveSnapshot_TxBeginError(t *testing.T) { //nolint:paralleltest // modi
 func TestListResumable_QueryError(t *testing.T) { //nolint:paralleltest // modifies global environment
 
 	m := newTestManager(t)
-	m.db.Close() // force query to fail
+	_ = m.db.Close() // force query to fail
 
 	_, err := m.ListResumable()
 	if err == nil {
@@ -365,7 +365,7 @@ func TestListResumable_QueryError(t *testing.T) { //nolint:paralleltest // modif
 func TestCreateThread_ExecError(t *testing.T) { //nolint:paralleltest // modifies global environment
 
 	m := newTestManager(t)
-	m.db.Close()
+	_ = m.db.Close()
 
 	err := m.CreateThread("t1", "model", nil)
 	if err == nil {
@@ -380,7 +380,7 @@ func TestCreateThread_ExecError(t *testing.T) { //nolint:paralleltest // modifie
 func TestCompleteThread_ExecError(t *testing.T) { //nolint:paralleltest // modifies global environment
 
 	m := newTestManager(t)
-	m.db.Close()
+	_ = m.db.Close()
 
 	err := m.CompleteThread("t1")
 	if err == nil {
@@ -520,7 +520,7 @@ func TestGetCheckpointManager_Error(t *testing.T) { //nolint:paralleltest // mod
 		m, err := GetCheckpointManager(root)
 		if err == nil {
 			if m != nil {
-				m.db.Close()
+				_ = m.db.Close()
 			}
 			t.Error("expected error, got nil")
 		}
@@ -539,7 +539,7 @@ func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest //
 	root := t.TempDir()
 	t.Cleanup(func() {
 		if cmInstance != nil {
-			cmInstance.db.Close()
+			_ = cmInstance.db.Close()
 		}
 		cmOnce = sync.Once{}
 		cmInstance = nil
@@ -657,7 +657,7 @@ func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var usedIndex bool
 	for rows.Next() {

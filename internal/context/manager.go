@@ -49,7 +49,7 @@ func GetCheckpointManager(storageRoot string) (*CheckpointManager, error) {
 			return
 		}
 		if err := initSchema(db); err != nil {
-			db.Close()
+			_ = db.Close()
 			cmInitErr = err
 			return
 		}
@@ -225,7 +225,7 @@ func (m *CheckpointManager) ListResumable() ([]ResumableThread, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListResumable: query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []ResumableThread
 	for rows.Next() {

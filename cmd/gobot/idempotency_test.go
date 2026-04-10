@@ -66,8 +66,8 @@ func setupTestStore(t *testing.T) (store *agentctx.IdempotencyStore, db *sql.DB,
 
 	store = agentctx.NewIdempotencyStore(db, 1*time.Hour)
 	cleanup = func() {
-		db.Close()
-		os.RemoveAll(tmpDir)
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
 	}
 
 	return store, db, cleanup

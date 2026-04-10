@@ -58,7 +58,7 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 		slog.Warn("bootstrap: memory store unavailable, running without long-term memory", "err", memErr)
 	} else if memStore != nil {
 		runner.memStore = memStore
-		cleanup = func() { memStore.Close() }
+		cleanup = func() { _ = memStore.Close() }
 	}
 
 	runner.tools = registerTools(cfg, prov, model, memStore)

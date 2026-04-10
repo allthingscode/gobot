@@ -73,7 +73,7 @@ func (s *SearchService) Execute(ctx context.Context, apiKey, cx, query string) (
 	if err != nil {
 		return nil, fmt.Errorf("search request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

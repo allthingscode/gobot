@@ -15,7 +15,7 @@ func TestOpenDB(t *testing.T) {
 		if err != nil {
 			t.Fatalf("openDB: %v", err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		expected := filepath.Join(root, "workspace", dbFileName)
 		if _, err := os.Stat(expected); os.IsNotExist(err) {
@@ -30,7 +30,7 @@ func TestOpenDB(t *testing.T) {
 		if err != nil {
 			t.Fatalf("openDB: %v", err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		var mode string
 		if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
@@ -66,7 +66,7 @@ func TestInitSchema(t *testing.T) {
 		if err != nil {
 			t.Fatalf("openDB: %v", err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		if err := initSchema(db); err != nil {
 			t.Fatalf("initSchema: %v", err)
@@ -90,7 +90,7 @@ func TestInitSchema(t *testing.T) {
 		if err != nil {
 			t.Fatalf("openDB: %v", err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		if err := initSchema(db); err != nil {
 			t.Fatalf("first initSchema: %v", err)

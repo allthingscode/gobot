@@ -14,7 +14,7 @@ func newTestStore(t *testing.T) *MemoryStore {
 	if err != nil {
 		t.Fatalf("NewMemoryStore: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
@@ -27,7 +27,7 @@ func TestNewMemoryStore_CreatesDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Verify WAL mode is set.
 	var mode string
@@ -47,13 +47,13 @@ func TestNewMemoryStore_IdempotentSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
-	s1.Close()
+	_ = s1.Close()
 
 	s2, err := NewMemoryStore(root)
 	if err != nil {
 		t.Fatalf("second open: %v", err)
 	}
-	s2.Close()
+	_ = s2.Close()
 }
 
 // ── Index ──────────────────────────────────────────────────────────────────────

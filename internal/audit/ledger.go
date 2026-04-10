@@ -58,13 +58,13 @@ func NewAuditLedger(storageRoot string) (*AuditLedger, error) {
 		return nil, fmt.Errorf("audit ledger: open db: %w", err)
 	}
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("audit ledger: WAL mode: %w", err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if err := initAuditSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return &AuditLedger{db: db}, nil
@@ -120,7 +120,7 @@ func (l *AuditLedger) GetAll() ([]AuditRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("audit: get all: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var records []AuditRecord
 	for rows.Next() {

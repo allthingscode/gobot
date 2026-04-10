@@ -185,8 +185,8 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 		})
 		return
 	}
-	tmpFile.Close()
-	os.Remove(tmpFile.Name())
+	_ = tmpFile.Close()
+	_ = os.Remove(tmpFile.Name())
 }
 
 func (v *Validator) validateWorkspace(result *ValidationResult) {

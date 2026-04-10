@@ -11,7 +11,7 @@ func newTestLedger(t *testing.T) *AuditLedger {
 	if err != nil {
 		t.Fatalf("NewAuditLedger: %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	return l
 }
 

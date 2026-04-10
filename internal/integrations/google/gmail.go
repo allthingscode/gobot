@@ -154,7 +154,7 @@ func (s *Service) Send(ctx context.Context, to, subject, body string) error {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(resp.Body)
 			return &resilience.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(b)}
@@ -184,7 +184,7 @@ func (s *Service) SearchMessages(ctx context.Context, query string, maxResults i
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(resp.Body)
 			return &resilience.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(b)}
@@ -207,7 +207,7 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*Message, error) {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(resp.Body)
 			return &resilience.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(b)}

@@ -81,9 +81,9 @@ func TestStorageRoot_Default(t *testing.T) {
 	// 3. Portable Default (fallback when USERPROFILE is missing/unstable)
 	t.Setenv("GOBOT_STORAGE", "")
 	origHome := os.Getenv("USERPROFILE")
-	os.Unsetenv("USERPROFILE")
-	os.Unsetenv("HOME")
-	defer os.Setenv("USERPROFILE", origHome)
+	_ = os.Unsetenv("USERPROFILE")
+	_ = os.Unsetenv("HOME")
+	defer func() { _ = os.Setenv("USERPROFILE", origHome) }()
 
 	cfg3 := &Config{}
 	got := cfg3.StorageRoot()
@@ -289,7 +289,7 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 	if _, err := f.WriteString(content); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	cfg, err := LoadFrom(f.Name())
 	if err != nil {
