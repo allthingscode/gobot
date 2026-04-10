@@ -36,6 +36,7 @@ _current_task.md
 CLAUDE.md
 GEMINI.md
 AGENTS.md
+opencode.json
 
 # Claude local settings
 .claude/
