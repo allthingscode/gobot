@@ -1,0 +1,36 @@
+{{define "content"}}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Active Sessions</h1>
+</div>
+
+<div class="card p-4">
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Thread ID</th>
+                    <th>Model</th>
+                    <th>Iteration</th>
+                    <th>Last Updated</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Sessions}}
+                <tr>
+                    <td><code>{{.ThreadID}}</code></td>
+                    <td><span class="badge bg-secondary">{{.Model}}</span></td>
+                    <td>{{.LatestIteration}}</td>
+                    <td>{{.UpdatedAt}}</td>
+                </tr>
+                {{else}}
+                <tr>
+                    <td colspan="4" class="text-center py-4 text-muted">
+                        No active sessions found.
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{end}}

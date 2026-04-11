@@ -265,6 +265,13 @@ func (m *MemoryStore) Close() error {
 	return m.db.Close()
 }
 
+// Stats returns the total count of memory entries.
+func (m *MemoryStore) Stats() (int, error) {
+	var count int
+	err := m.db.QueryRow("SELECT count(*) FROM memory_fts").Scan(&count)
+	return count, err
+}
+
 // sanitizeFTSQuery removes FTS5 operator characters that could cause parse
 // errors when a raw user message is passed as a search query.
 func sanitizeFTSQuery(q string) string {

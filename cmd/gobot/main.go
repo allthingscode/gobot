@@ -24,6 +24,7 @@ import (
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/gateway"
+	"github.com/allthingscode/gobot/internal/gateway/dash"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/observability"
 )
@@ -362,7 +363,13 @@ func cmdRun() *cobra.Command {
 
 			// Start HTTP Gateway if enabled (F-046)
 			if cfg.Gateway.Enabled {
-				gw := gateway.NewServer(cfg.Gateway, gateHandler)
+				res := dash.Resources{
+					Config:      cfg,
+					Checkpoints: store,
+					Memory:      memStore,
+					Version:     version,
+				}
+				gw := gateway.NewServer(cfg.Gateway, gateHandler, res)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()

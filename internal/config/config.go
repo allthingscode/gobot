@@ -147,9 +147,11 @@ type TelegramConfig struct {
 }
 
 type GatewayConfig struct {
-	Enabled bool   `json:"enabled"`
-	Host    string `json:"host"`
-	Port    int    `json:"port"`
+	Enabled          bool   `json:"enabled"`
+	DashboardEnabled bool   `json:"dashboard_enabled"`
+	AuthToken        string `json:"auth_token"`
+	Host             string `json:"host"`
+	Port             int    `json:"port"`
 }
 
 // ExecConfig holds settings for the shell_exec tool.

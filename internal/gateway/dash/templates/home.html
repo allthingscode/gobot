@@ -1,0 +1,38 @@
+{{define "content"}}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">System Overview</h1>
+</div>
+<div class="row">
+    <div class="col-md-4">
+        <div class="card p-4">
+            <h6 class="text-muted text-uppercase mb-2">Status</h6>
+            <p class="display-6 status-ok">Online</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card p-4">
+            <h6 class="text-muted text-uppercase mb-2">Uptime</h6>
+            <p class="display-6">{{.Uptime}}</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card p-4">
+            <h6 class="text-muted text-uppercase mb-2">Version</h6>
+            <p class="display-6">{{.Version}}</p>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card p-4">
+            <h5 class="mb-4">Quick Diagnostic</h5>
+            <div hx-get="/dash/doctor?partial=true" hx-trigger="load">
+                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

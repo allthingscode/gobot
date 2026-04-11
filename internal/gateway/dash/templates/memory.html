@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Strategic Memory</h1>
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card p-4 text-center">
+            <h6 class="text-muted text-uppercase mb-2">Total Indexed Facts</h6>
+            <p class="display-4">{{if ge .Count 0}}{{.Count}}{{else}}Offline{{end}}</p>
+        </div>
+    </div>
+</div>
+
+<div class="card p-4 mt-4">
+    <h5>Search Engine</h5>
+    <p class="text-muted">Memory search UI coming soon.</p>
+</div>
+{{end}}

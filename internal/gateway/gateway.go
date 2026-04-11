@@ -11,18 +11,21 @@ import (
 
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/gateway/dash"
 )
 
 // Server is an HTTP gateway that dispatches requests to a bot.Handler.
 type Server struct {
 	cfg     config.GatewayConfig
+	dashRes dash.Resources
 	handler bot.Handler
 }
 
 // NewServer creates a new Gateway server.
-func NewServer(cfg config.GatewayConfig, handler bot.Handler) *Server {
+func NewServer(cfg config.GatewayConfig, handler bot.Handler, dashRes dash.Resources) *Server {
 	return &Server{
 		cfg:     cfg,
+		dashRes: dashRes,
 		handler: handler,
 	}
 }
@@ -44,6 +47,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat", s.handleChat)
 	mux.HandleFunc("/health", s.handleHealth)
+
+	// Dashboard routes with authentication
+	if s.cfg.DashboardEnabled {
+		dashHandler := dash.NewHandler(s.dashRes)
+		mux.Handle("/dash/", dash.AuthMiddleware(s.cfg.AuthToken, dashHandler))
+		slog.Info("gateway: dashboard enabled", "path", "/dash/")
+	}
 
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 	srv := &http.Server{

@@ -12,6 +12,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/gateway/dash"
 )
 
 // mockHandler implements bot.Handler for testing.
@@ -36,7 +37,7 @@ func TestGateway(t *testing.T) {
 	t.Parallel()
 	cfg := config.GatewayConfig{Enabled: true, Host: "localhost", Port: 18790}
 	h := &mockHandler{}
-	srv := NewServer(cfg, h)
+	srv := NewServer(cfg, h, dash.Resources{})
 
 	t.Run("Health", func(t *testing.T) {
 		t.Parallel()
@@ -55,7 +56,7 @@ func TestGateway(t *testing.T) {
 	t.Run("Chat", func(t *testing.T) {
 		t.Parallel()
 		localH := &mockHandler{}
-		localSrv := NewServer(cfg, localH)
+		localSrv := NewServer(cfg, localH, dash.Resources{})
 		in := InboundRequest{
 			SessionKey: "test-session",
 			Text:       "hello gateway",
@@ -121,7 +122,7 @@ func TestGateway(t *testing.T) {
 	t.Run("HandlerError", func(t *testing.T) {
 		t.Parallel()
 		hErr := &mockHandler{err: true}
-		srvErr := NewServer(cfg, hErr)
+		srvErr := NewServer(cfg, hErr, dash.Resources{})
 		in := InboundRequest{Text: "fail"}
 		body, _ := json.Marshal(in)
 		req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
@@ -140,7 +141,7 @@ func TestGateway_ListenAndServe(t *testing.T) {
 	t.Parallel()
 	cfg := config.GatewayConfig{Host: "localhost", Port: 0}
 	h := &mockHandler{}
-	srv := NewServer(cfg, h)
+	srv := NewServer(cfg, h, dash.Resources{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errChan := make(chan error, 1)

@@ -43,16 +43,16 @@ func TestCheckStorageRoot_Exists(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	r := checkStorageRoot(cfgWithRoot(dir))
-	if !r.ok {
-		t.Errorf("expected ok=true for existing dir, got detail: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for existing dir, got detail: %s", r.Detail)
 	}
 }
 
 func TestCheckStorageRoot_Missing(t *testing.T) {
 	t.Parallel()
 	r := checkStorageRoot(cfgWithRoot(filepath.Join(t.TempDir(), "nonexistent")))
-	if r.ok {
-		t.Error("expected ok=false for missing directory")
+	if r.OK {
+		t.Error("expected OK=false for missing directory")
 	}
 }
 
@@ -65,8 +65,8 @@ func TestCheckStorageRoot_IsFile(t *testing.T) {
 	_ = f.Close()
 
 	r := checkStorageRoot(cfgWithRoot(f.Name()))
-	if r.ok {
-		t.Error("expected ok=false when storage root is a file, not a directory")
+	if r.OK {
+		t.Error("expected OK=false when storage root is a file, not a directory")
 	}
 }
 
@@ -81,8 +81,8 @@ func TestCheckWorkspace_Writable(t *testing.T) {
 	}
 
 	r := checkWorkspace(cfgWithRoot(root))
-	if !r.ok {
-		t.Errorf("expected ok=true for writable workspace, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for writable workspace, got: %s", r.Detail)
 	}
 }
 
@@ -90,8 +90,8 @@ func TestCheckWorkspace_Missing(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	r := checkWorkspace(cfgWithRoot(root))
-	if r.ok {
-		t.Error("expected ok=false when workspace directory does not exist")
+	if r.OK {
+		t.Error("expected OK=false when workspace directory does not exist")
 	}
 }
 
@@ -101,8 +101,8 @@ func TestCheckLogs_CreatesDir(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	r := checkLogs(cfgWithRoot(root))
-	if !r.ok {
-		t.Errorf("expected ok=true after creating logs dir, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true after creating logs dir, got: %s", r.Detail)
 	}
 	info, err := os.Stat(filepath.Join(root, "logs"))
 	if err != nil {
@@ -120,8 +120,8 @@ func TestCheckLogs_AlreadyExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := checkLogs(cfgWithRoot(root))
-	if !r.ok {
-		t.Errorf("expected ok=true for existing logs dir, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for existing logs dir, got: %s", r.Detail)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestCheckLogs_BlockedByFile(t *testing.T) {
 	_ = f.Close()
 
 	r := checkLogs(cfgWithRoot(root))
-	if r.ok {
-		t.Error("expected ok=false when 'logs' path is a file, not a directory")
+	if r.OK {
+		t.Error("expected OK=false when 'logs' path is a file, not a directory")
 	}
 }
 
@@ -149,8 +149,8 @@ func TestCheckAPIKey_FromConfig(t *testing.T) {
 	cfg.Providers.Gemini.APIKey = "test-api-key-1234"
 
 	r := checkAPIKey(cfg)
-	if !r.ok {
-		t.Errorf("expected ok=true for key in config, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for key in config, got: %s", r.Detail)
 	}
 }
 
@@ -158,8 +158,8 @@ func TestCheckAPIKey_FromEnv(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "env-api-key-5678")
 
 	r := checkAPIKey(cfgWithRoot(t.TempDir()))
-	if !r.ok {
-		t.Errorf("expected ok=true for key in env, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for key in env, got: %s", r.Detail)
 	}
 }
 
@@ -169,11 +169,11 @@ func TestCheckAPIKey_Short(t *testing.T) {
 	cfg.Providers.Gemini.APIKey = "short"
 
 	r := checkAPIKey(cfg)
-	if !r.ok {
-		t.Errorf("expected ok=true for short key, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for short key, got: %s", r.Detail)
 	}
-	if r.detail != "***" {
-		t.Errorf("expected detail *** for short key, got: %s", r.detail)
+	if r.Detail != "***" {
+		t.Errorf("expected detail *** for short key, got: %s", r.Detail)
 	}
 }
 
@@ -183,12 +183,12 @@ func TestCheckAPIKey_Exact8(t *testing.T) {
 	cfg.Providers.Gemini.APIKey = "12345678"
 
 	r := checkAPIKey(cfg)
-	if !r.ok {
-		t.Errorf("expected ok=true for 8-char key, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for 8-char key, got: %s", r.Detail)
 	}
 	expected := "1234...5678"
-	if r.detail != expected {
-		t.Errorf("expected detail %s for 8-char key, got: %s", expected, r.detail)
+	if r.Detail != expected {
+		t.Errorf("expected detail %s for 8-char key, got: %s", expected, r.Detail)
 	}
 }
 
@@ -196,8 +196,8 @@ func TestCheckAPIKey_Missing(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 
 	r := checkAPIKey(cfgWithRoot(t.TempDir()))
-	if r.ok {
-		t.Error("expected ok=false when no API key is configured")
+	if r.OK {
+		t.Error("expected OK=false when no API key is configured")
 	}
 }
 
@@ -206,16 +206,16 @@ func TestCheckAPIKey_Missing(t *testing.T) {
 func TestCheckTelegram_TokenMissing(t *testing.T) {
 	t.Parallel()
 	r := checkTelegram("", nil)
-	if r.ok {
-		t.Error("expected ok=false for empty token")
+	if r.OK {
+		t.Error("expected OK=false for empty token")
 	}
 }
 
 func TestCheckTelegram_NoProbe(t *testing.T) {
 	t.Parallel()
 	r := checkTelegram("bot:token", nil)
-	if !r.ok {
-		t.Errorf("expected ok=true (skipped) for present token with no probe, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true (skipped) for present token with no probe, got: %s", r.Detail)
 	}
 }
 
@@ -223,11 +223,11 @@ func TestCheckTelegram_ProbeSuccess(t *testing.T) {
 	t.Parallel()
 	probe := func(_ string) (string, error) { return "@gobotprod", nil }
 	r := checkTelegram("bot:token", probe)
-	if !r.ok {
-		t.Errorf("expected ok=true, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true, got: %s", r.Detail)
 	}
-	if r.detail != "@gobotprod" {
-		t.Errorf("expected detail @gobotprod, got %q", r.detail)
+	if r.Detail != "@gobotprod" {
+		t.Errorf("expected detail @gobotprod, got %q", r.Detail)
 	}
 }
 
@@ -235,8 +235,8 @@ func TestCheckTelegram_ProbeError(t *testing.T) {
 	t.Parallel()
 	probe := func(_ string) (string, error) { return "", errors.New("401 Unauthorized") }
 	r := checkTelegram("bot:token", probe)
-	if r.ok {
-		t.Error("expected ok=false when probe returns error")
+	if r.OK {
+		t.Error("expected OK=false when probe returns error")
 	}
 }
 
@@ -245,16 +245,16 @@ func TestCheckTelegram_ProbeError(t *testing.T) {
 func TestCheckGeminiLive_NoKey(t *testing.T) {
 	t.Parallel()
 	r := checkGeminiLive("", nil)
-	if r.ok {
-		t.Error("expected ok=false for empty api key")
+	if r.OK {
+		t.Error("expected OK=false for empty api key")
 	}
 }
 
 func TestCheckGeminiLive_NoProbe(t *testing.T) {
 	t.Parallel()
 	r := checkGeminiLive("AIzaSy-test", nil)
-	if !r.ok {
-		t.Errorf("expected ok=true (skipped) for present key with no probe, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true (skipped) for present key with no probe, got: %s", r.Detail)
 	}
 }
 
@@ -262,8 +262,8 @@ func TestCheckGeminiLive_ProbeSuccess(t *testing.T) {
 	t.Parallel()
 	probe := func(_ string) error { return nil }
 	r := checkGeminiLive("AIzaSy-test", probe)
-	if !r.ok {
-		t.Errorf("expected ok=true, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true, got: %s", r.Detail)
 	}
 }
 
@@ -271,8 +271,8 @@ func TestCheckGeminiLive_ProbeError(t *testing.T) {
 	t.Parallel()
 	probe := func(_ string) error { return errors.New("quota exceeded") }
 	r := checkGeminiLive("AIzaSy-test", probe)
-	if r.ok {
-		t.Error("expected ok=false when probe returns error")
+	if r.OK {
+		t.Error("expected OK=false when probe returns error")
 	}
 }
 
@@ -281,8 +281,8 @@ func TestCheckGeminiLive_ProbeError(t *testing.T) {
 func TestCheckTokenFile_Missing(t *testing.T) {
 	t.Parallel()
 	r := checkTokenFile("test token", filepath.Join(t.TempDir(), "nonexistent.json"))
-	if r.ok {
-		t.Error("expected ok=false for missing token file")
+	if r.OK {
+		t.Error("expected OK=false for missing token file")
 	}
 }
 
@@ -295,8 +295,8 @@ func TestCheckTokenFile_InvalidJSON(t *testing.T) {
 	}
 
 	r := checkTokenFile("test token", path)
-	if r.ok {
-		t.Error("expected ok=false for invalid JSON")
+	if r.OK {
+		t.Error("expected OK=false for invalid JSON")
 	}
 }
 
@@ -309,8 +309,8 @@ func TestCheckTokenFile_NoExpiry(t *testing.T) {
 	}
 
 	r := checkTokenFile("test token", path)
-	if !r.ok {
-		t.Errorf("expected ok=true for token with no expiry, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for token with no expiry, got: %s", r.Detail)
 	}
 }
 
@@ -320,8 +320,8 @@ func TestCheckTokenFile_Valid(t *testing.T) {
 	writeTokenJSON(t, dir, "tok.json", time.Now().Add(30*24*time.Hour), "")
 
 	r := checkTokenFile("test token", filepath.Join(dir, "tok.json"))
-	if !r.ok {
-		t.Errorf("expected ok=true for valid token, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for valid token, got: %s", r.Detail)
 	}
 }
 
@@ -331,8 +331,8 @@ func TestCheckTokenFile_ExpiredNoRefresh(t *testing.T) {
 	writeTokenJSON(t, dir, "tok.json", time.Now().Add(-48*time.Hour), "")
 
 	r := checkTokenFile("test token", filepath.Join(dir, "tok.json"))
-	if r.ok {
-		t.Error("expected ok=false for expired token with no refresh token")
+	if r.OK {
+		t.Error("expected OK=false for expired token with no refresh token")
 	}
 }
 
@@ -342,8 +342,8 @@ func TestCheckTokenFile_ExpiredWithRefresh(t *testing.T) {
 	writeTokenJSON(t, dir, "tok.json", time.Now().Add(-48*time.Hour), "some_refresh_token")
 
 	r := checkTokenFile("test token", filepath.Join(dir, "tok.json"))
-	if !r.ok {
-		t.Errorf("expected ok=true for expired token with refresh token, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for expired token with refresh token, got: %s", r.Detail)
 	}
 }
 
@@ -352,8 +352,8 @@ func TestCheckTokenFile_ExpiredWithRefresh(t *testing.T) {
 func TestCheckJobsDir_Missing(t *testing.T) {
 	t.Parallel()
 	r := checkJobsDir(cfgWithRoot(t.TempDir()))
-	if r.ok {
-		t.Error("expected ok=false for missing jobs directory")
+	if r.OK {
+		t.Error("expected OK=false for missing jobs directory")
 	}
 }
 
@@ -363,8 +363,8 @@ func TestCheckJobsDir_EmptyDir(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755)
 
 	r := checkJobsDir(cfgWithRoot(root))
-	if !r.ok {
-		t.Errorf("expected ok=true for empty jobs dir, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true for empty jobs dir, got: %s", r.Detail)
 	}
 }
 
@@ -377,10 +377,10 @@ func TestCheckJobsDir_WithJobs(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(jobsDir, "nightly.md"), []byte("---\nschedule: cron(0 3 * * *)\n---\nhello"), 0o600)
 
 	r := checkJobsDir(cfgWithRoot(root))
-	if !r.ok {
-		t.Errorf("expected ok=true with .md jobs, got: %s", r.detail)
+	if !r.OK {
+		t.Errorf("expected OK=true with .md jobs, got: %s", r.Detail)
 	}
-	if r.detail == "" {
+	if r.Detail == "" {
 		t.Error("expected detail to mention job count")
 	}
 }
