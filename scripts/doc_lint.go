@@ -249,67 +249,41 @@ func lintBacklogStatus(root string) []string {
 // handoffRequiredFields lists mandatory keys in handoff.json.
 var handoffRequiredFields = []string{
 	"task_id", "source_specialist", "target_specialist",
-	"state_file_path", "timestamp",
+	"prompt_version", "cumulative_handoff_count",
 }
 
 // staleLockAge is the threshold after which a lock file is considered stale.
 const staleLockAge = 24 * time.Hour
 
-// lintSpecialistProtocols validates handoff.json schema, checks for stale lock
+// lintSpecialistProtocols validates handoff JSON files, checks for stale lock
 // files, and ensures session state JSON is well-formed.
 func lintSpecialistProtocols(root string) []string {
 	var out []string
 	sessionDir := filepath.Join(root, ".private", "session")
-	locksDir := filepath.Join(root, ".private", "locks")
+	handoffsDir := filepath.Join(sessionDir, "handoffs")
+	globalDir := filepath.Join(sessionDir, "global")
 
-	// handoff.json schema validation.
-	handoffPath := filepath.Join(sessionDir, "handoff.json")
-	if data, err := os.ReadFile(handoffPath); err == nil {
-		// Handle UTF-8 BOM
-		data = []byte(strings.TrimPrefix(string(data), "\ufeff"))
-		var obj map[string]json.RawMessage
-		if jsonErr := json.Unmarshal(data, &obj); jsonErr != nil {
-			out = append(out, fmt.Sprintf(".private/session/handoff.json: invalid JSON: %v", jsonErr))
-		} else {
-			for _, field := range handoffRequiredFields {
-				if _, ok := obj[field]; !ok {
-					out = append(out,
-						fmt.Sprintf(".private/session/handoff.json: missing required field %q", field))
-				}
+	// handoff.json schema validation (check all files in handoffs dir).
+	if entries, err := os.ReadDir(handoffsDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
 			}
-			// Verify task_id is NOT in archived (Production/Resolved).
-			if raw, ok := obj["task_id"]; ok {
-				var id string
-				if json.Unmarshal(raw, &id) == nil {
-					archivedDir := filepath.Join(root, ".private", "backlog", "archived")
-					filepath.WalkDir(archivedDir, func(path string, d os.DirEntry, err error) error {
-						if err != nil || d.IsDir() || !strings.Contains(d.Name(), id) {
-							return nil
-						}
-						data, readErr := os.ReadFile(path)
-						if readErr != nil {
-							return nil
-						}
-						m := frontmatterStatusRe.FindSubmatch(data)
-						if m != nil {
-							status := string(m[1])
-							if status == "Production" || status == "Resolved" {
-								out = append(out, fmt.Sprintf(".private/session/handoff.json: task_id %q is already %s (archived)", id, status))
-							}
-						}
-						return nil
-					})
-				}
+			path := filepath.Join(handoffsDir, e.Name())
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
 			}
-
-			// Verify state_file_path points to an existing file.
-			if raw, ok := obj["state_file_path"]; ok {
-				var p string
-				if json.Unmarshal(raw, &p) == nil {
-					abs := filepath.Join(root, filepath.FromSlash(p))
-					if _, statErr := os.Stat(abs); errors.Is(statErr, os.ErrNotExist) {
+			// Handle UTF-8 BOM
+			data = []byte(strings.TrimPrefix(string(data), "\ufeff"))
+			var obj map[string]json.RawMessage
+			if jsonErr := json.Unmarshal(data, &obj); jsonErr != nil {
+				out = append(out, fmt.Sprintf(".private/session/handoffs/%s: invalid JSON: %v", e.Name(), jsonErr))
+			} else {
+				for _, field := range handoffRequiredFields {
+					if _, ok := obj[field]; !ok {
 						out = append(out,
-							fmt.Sprintf(".private/session/handoff.json: state_file_path %q does not exist", p))
+							fmt.Sprintf(".private/session/handoffs/%s: missing required field %q", e.Name(), field))
 					}
 				}
 			}
@@ -317,35 +291,22 @@ func lintSpecialistProtocols(root string) []string {
 	}
 
 	// session_state.json validity.
-	statePath := filepath.Join(sessionDir, "session_state.json")
+	statePath := filepath.Join(globalDir, "session_state.json")
 	if data, err := os.ReadFile(statePath); err == nil {
 		// Handle UTF-8 BOM
 		data = []byte(strings.TrimPrefix(string(data), "\ufeff"))
 		var obj map[string]interface{}
 		if jsonErr := json.Unmarshal(data, &obj); jsonErr != nil {
 			out = append(out,
-				fmt.Sprintf(".private/session/session_state.json: invalid JSON: %v", jsonErr))
+				fmt.Sprintf(".private/session/global/session_state.json: invalid JSON: %v", jsonErr))
 		}
 	}
 
 	// Stale lock files.
-	entries, err := os.ReadDir(locksDir)
-	if err != nil {
-		return out // no locks dir — not an error
-	}
-	now := time.Now()
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, infoErr := e.Info()
-		if infoErr != nil {
-			continue
-		}
-		if now.Sub(info.ModTime()) > staleLockAge {
-			out = append(out,
-				fmt.Sprintf(".private/locks/%s: lock file is stale (older than %s)",
-					e.Name(), staleLockAge))
+	// Note: locksDir in previous version was a directory, now it's session_state.lock file
+	if info, err := os.Stat(filepath.Join(globalDir, "session_state.lock")); err == nil {
+		if !info.IsDir() && time.Since(info.ModTime()) > 10*time.Minute {
+			out = append(out, fmt.Sprintf(".private/session/global/session_state.lock: stale lock detected (age: %v)", time.Since(info.ModTime())))
 		}
 	}
 	return out
