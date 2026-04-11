@@ -45,17 +45,19 @@ func loadSystemPrompt(cfg *config.Config) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// loadPrivateFile reads a file from .private/ next to the binary (dev) or
+// loadPrivateFile reads a file from ~/.gobot/ (canonical user config), or
 // {storageRoot}/workspace/ (production fallback). Returns empty string if not found.
 func loadPrivateFile(cfg *config.Config, filename string) string {
-	candidates := []string{
-		cfg.WorkspacePath("", filename),
+	var candidates []string
+
+	// Primary: ~/.gobot/{filename} — canonical user config dir (next to config.json)
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".gobot", filename))
 	}
-	if exe, err := os.Executable(); err == nil {
-		candidates = append([]string{
-			filepath.Join(filepath.Dir(exe), ".private", filename),
-		}, candidates...)
-	}
+
+	// Fallback: {storage_root}/workspace/{filename} — workspace override
+	candidates = append(candidates, cfg.WorkspacePath("", filename))
+
 	for _, p := range candidates {
 		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
 			return strings.TrimSpace(string(data))

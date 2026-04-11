@@ -54,3 +54,90 @@ func TestEnsureAwarenessFile(t *testing.T) {
 		t.Error("ensureAwarenessFile overwrote existing file")
 	}
 }
+
+// nolint:paralleltest // USERPROFILE is process-wide
+func TestLoadPrivateFile(t *testing.T) {
+	// Not t.Parallel() because we are messing with USERPROFILE
+
+	t.Run("returns empty when file missing", func(t *testing.T) {
+		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: t.TempDir()}}
+		got := loadPrivateFile(cfg, "NON_EXISTENT.md")
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("finds file in ~/.gobot (primary)", func(t *testing.T) {
+		tempHome := t.TempDir()
+		originalHome := os.Getenv("USERPROFILE")
+		os.Setenv("USERPROFILE", tempHome)
+		defer os.Setenv("USERPROFILE", originalHome)
+
+		dotGobot := filepath.Join(tempHome, ".gobot")
+		if err := os.MkdirAll(dotGobot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		dir := t.TempDir()
+		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
+
+		want := "home content"
+		if err := os.WriteFile(filepath.Join(dotGobot, "HOME.md"), []byte(want), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := loadPrivateFile(cfg, "HOME.md")
+		if got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("finds file in workspace (fallback)", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
+		workspaceDir := filepath.Join(dir, "workspace")
+		if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		want := "workspace content"
+		if err := os.WriteFile(filepath.Join(workspaceDir, "WORK.md"), []byte(want), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := loadPrivateFile(cfg, "WORK.md")
+		if got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("prioritizes ~/.gobot over workspace", func(t *testing.T) {
+		tempHome := t.TempDir()
+		originalHome := os.Getenv("USERPROFILE")
+		os.Setenv("USERPROFILE", tempHome)
+		defer os.Setenv("USERPROFILE", originalHome)
+
+		dotGobot := filepath.Join(tempHome, ".gobot")
+		if err := os.MkdirAll(dotGobot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		dir := t.TempDir()
+		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
+		workspaceDir := filepath.Join(dir, "workspace")
+		if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		homeWant := "home priority"
+		workWant := "workspace content"
+		if err := os.WriteFile(filepath.Join(dotGobot, "BOTH.md"), []byte(homeWant), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(workspaceDir, "BOTH.md"), []byte(workWant), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := loadPrivateFile(cfg, "BOTH.md")
+		if got != homeWant {
+			t.Errorf("expected %q, got %q", homeWant, got)
+		}
+	})
+}
