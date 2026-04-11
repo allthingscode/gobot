@@ -89,24 +89,16 @@ func newSpawnTool(prov provider.Provider, model string, specialistPrompts, speci
 
 func (s *SpawnTool) Name() string { return spawnToolName }
 
+type spawnArgs struct {
+	AgentType string `json:"agent_type" schema:"The specialist type to spawn. Options: 'researcher' (fact-finding, web research), 'analyst' (data/situation analysis), 'writer' (drafting content)."`
+	Objective string `json:"objective" schema:"The specific, self-contained task or question for the sub-agent to complete. Be explicit -- the sub-agent has no conversation context. Required."`
+}
+
 func (s *SpawnTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        spawnToolName,
 		Description: "Delegate a complex or research-heavy task to a specialized sub-agent that works independently and returns a structured summary. Use this when a task would saturate your context window or benefits from a separate focused agent (e.g. deep research, drafting a long document, multi-step analysis).",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"agent_type": map[string]any{
-					"type":        "string",
-					"description": "The specialist type to spawn. Options: 'researcher' (fact-finding, web research), 'analyst' (data/situation analysis), 'writer' (drafting content).",
-				},
-				"objective": map[string]any{
-					"type":        "string",
-					"description": "The specific, self-contained task or question for the sub-agent to complete. Be explicit -- the sub-agent has no conversation context.",
-				},
-			},
-			"required": []string{"agent_type", "objective"},
-		},
+		Parameters:  agent.DeriveSchema(spawnArgs{}),
 	}
 }
 

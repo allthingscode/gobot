@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/provider"
 )
@@ -201,24 +202,16 @@ func (t *mcpTool) Name() string {
 	return strings.ReplaceAll(t.server.name, "-", "_")
 }
 
+type mcpArgs struct {
+	Method string         `json:"method" schema:"The JSON-RPC method to call (e.g. 'tools/list', 'tools/call')."`
+	Params map[string]any `json:"params,omitempty" schema:"The parameters for the JSON-RPC call."`
+}
+
 func (t *mcpTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        t.Name(),
 		Description: fmt.Sprintf("Execute the %s MCP server with a JSON-RPC request.", t.server.name),
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"method": map[string]any{
-					"type":        "string",
-					"description": "The JSON-RPC method to call (e.g. 'tools/list', 'tools/call').",
-				},
-				"params": map[string]any{
-					"type":        "object",
-					"description": "The parameters for the JSON-RPC call.",
-				},
-			},
-			"required": []string{"method"},
-		},
+		Parameters:  agent.DeriveSchema(mcpArgs{}),
 	}
 }
 

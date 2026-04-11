@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
@@ -105,24 +106,16 @@ func newSearchMemoryTool(store *memory.MemoryStore, vecStore *vector.Store, embe
 
 func (t *SearchMemoryTool) Name() string { return searchMemoryToolName }
 
+type searchMemoryArgs struct {
+	Query string `json:"query" schema:"Keywords or a natural language query describing what to recall."`
+	Limit int    `json:"limit,omitempty" schema:"Maximum number of results to return. Defaults to 5."`
+}
+
 func (t *SearchMemoryTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        searchMemoryToolName,
 		Description: "Search your long-term memory for facts, past decisions, or context from previous sessions. Use this when you need to recall specific information that may not be in the current conversation.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{
-					"type":        "string",
-					"description": "Keywords or a natural language query describing what to recall.",
-				},
-				"limit": map[string]any{
-					"type":        "integer",
-					"description": "Maximum number of results to return. Defaults to 5.",
-				},
-			},
-			"required": []string{"query"},
-		},
+		Parameters:  agent.DeriveSchema(searchMemoryArgs{}),
 	}
 }
 

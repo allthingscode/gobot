@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -28,26 +29,18 @@ func newListCalendarTool(secretsRoot string) *ListCalendarTool {
 	return &ListCalendarTool{secretsRoot: secretsRoot}
 }
 
+type listCalendarArgs struct {
+	DaysAhead  int `json:"days_ahead,omitempty" schema:"How many days ahead to look for events. Defaults to 7."`
+	MaxResults int `json:"max_results,omitempty" schema:"Maximum number of events to return. Defaults to 10."`
+}
+
 func (t *ListCalendarTool) Name() string { return listCalendarToolName }
 
 func (t *ListCalendarTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        listCalendarToolName,
 		Description: "List upcoming Google Calendar events. Returns a Markdown-formatted list of events ordered by start time.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"days_ahead": map[string]any{
-					"type":        "integer",
-					"description": "How many days ahead to look for events. Defaults to 7.",
-				},
-				"max_results": map[string]any{
-					"type":        "integer",
-					"description": "Maximum number of events to return. Defaults to 10.",
-				},
-			},
-			"required": []string{},
-		},
+		Parameters:  agent.DeriveSchema(listCalendarArgs{}),
 	}
 }
 
@@ -90,22 +83,17 @@ func newListTasksTool(secretsRoot string) *ListTasksTool {
 	return &ListTasksTool{secretsRoot: secretsRoot}
 }
 
+type listTasksArgs struct {
+	TasklistID string `json:"tasklist_id,omitempty" schema:"The task list ID to query. Defaults to \"@default\" (the user's default list)."`
+}
+
 func (t *ListTasksTool) Name() string { return listTasksToolName }
 
 func (t *ListTasksTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        listTasksToolName,
 		Description: "List open (incomplete) Google Tasks. Returns a Markdown-formatted checklist of pending tasks.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"tasklist_id": map[string]any{
-					"type":        "string",
-					"description": "The task list ID to query. Defaults to \"@default\" (the user's default list).",
-				},
-			},
-			"required": []string{},
-		},
+		Parameters:  agent.DeriveSchema(listTasksArgs{}),
 	}
 }
 
@@ -142,28 +130,17 @@ func newCreateTaskTool(secretsRoot string) *CreateTaskTool {
 
 func (t *CreateTaskTool) Name() string { return createTaskToolName }
 
+type createTaskArgs struct {
+	Title      string `json:"title" schema:"The title of the task to create. Required."`
+	Notes      string `json:"notes,omitempty" schema:"Optional notes or description to attach to the task."`
+	TasklistID string `json:"tasklist_id,omitempty" schema:"The task list ID to add the task to. Defaults to \"@default\"."`
+}
+
 func (t *CreateTaskTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        createTaskToolName,
 		Description: "Create a new task in Google Tasks. Returns a confirmation with the task title and its assigned ID.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"title": map[string]any{
-					"type":        "string",
-					"description": "The title of the task to create. Required.",
-				},
-				"notes": map[string]any{
-					"type":        "string",
-					"description": "Optional notes or description to attach to the task.",
-				},
-				"tasklist_id": map[string]any{
-					"type":        "string",
-					"description": "The task list ID to add the task to. Defaults to \"@default\".",
-				},
-			},
-			"required": []string{"title"},
-		},
+		Parameters:  agent.DeriveSchema(createTaskArgs{}),
 	}
 }
 
@@ -201,24 +178,16 @@ func newCompleteTaskTool(secretsRoot string) *CompleteTaskTool {
 
 func (t *CompleteTaskTool) Name() string { return completeTaskToolName }
 
+type completeTaskArgs struct {
+	TaskID     string `json:"task_id" schema:"The ID of the task to complete. Required."`
+	TasklistID string `json:"tasklist_id,omitempty" schema:"The task list ID. Defaults to \"@default\"."`
+}
+
 func (t *CompleteTaskTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        completeTaskToolName,
 		Description: "Mark a Google Task as completed. Use the task ID returned by list_tasks.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"task_id": map[string]any{
-					"type":        "string",
-					"description": "The ID of the task to complete. Required.",
-				},
-				"tasklist_id": map[string]any{
-					"type":        "string",
-					"description": "The task list ID. Defaults to \"@default\".",
-				},
-			},
-			"required": []string{"task_id"},
-		},
+		Parameters:  agent.DeriveSchema(completeTaskArgs{}),
 	}
 }
 
@@ -246,36 +215,19 @@ func newUpdateTaskTool(secretsRoot string) *UpdateTaskTool {
 
 func (t *UpdateTaskTool) Name() string { return updateTaskToolName }
 
+type updateTaskArgs struct {
+	TaskID     string `json:"task_id" schema:"The ID of the task to update. Required."`
+	Title      string `json:"title,omitempty" schema:"New title for the task. Omit to leave unchanged."`
+	Notes      string `json:"notes,omitempty" schema:"New notes for the task. Omit to leave unchanged."`
+	Due        string `json:"due,omitempty" schema:"New due date in RFC3339 format (e.g. 2026-04-01T00:00:00Z). Omit to leave unchanged."`
+	TasklistID string `json:"tasklist_id,omitempty" schema:"The task list ID. Defaults to \"@default\"."`
+}
+
 func (t *UpdateTaskTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        updateTaskToolName,
 		Description: "Update an existing Google Task's title, notes, or due date. Use the task ID returned by list_tasks. Only provide the fields you want to change.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"task_id": map[string]any{
-					"type":        "string",
-					"description": "The ID of the task to update. Required.",
-				},
-				"title": map[string]any{
-					"type":        "string",
-					"description": "New title for the task. Omit to leave unchanged.",
-				},
-				"notes": map[string]any{
-					"type":        "string",
-					"description": "New notes for the task. Omit to leave unchanged.",
-				},
-				"due": map[string]any{
-					"type":        "string",
-					"description": "New due date in RFC3339 format (e.g. 2026-04-01T00:00:00Z). Omit to leave unchanged.",
-				},
-				"tasklist_id": map[string]any{
-					"type":        "string",
-					"description": "The task list ID. Defaults to \"@default\".",
-				},
-			},
-			"required": []string{"task_id"},
-		},
+		Parameters:  agent.DeriveSchema(updateTaskArgs{}),
 	}
 }
 
@@ -310,40 +262,20 @@ func newCreateCalendarEventTool(secretsRoot string) *CreateCalendarEventTool {
 
 func (t *CreateCalendarEventTool) Name() string { return createCalendarEventToolName }
 
+type createCalendarEventArgs struct {
+	CalendarID  string `json:"calendar_id,omitempty" schema:"The calendar ID to create the event in. Defaults to \"primary\"."`
+	Summary     string `json:"summary" schema:"The title/summary of the event. Required."`
+	Description string `json:"description,omitempty" schema:"Optional description or notes for the event."`
+	StartTime   string `json:"start_time" schema:"Start time in ISO 8601 / RFC3339 format (e.g. 2026-04-05T10:00:00-05:00). Required."`
+	EndTime     string `json:"end_time" schema:"End time in ISO 8601 / RFC3339 format (e.g. 2026-04-05T11:00:00-05:00). Required."`
+	Location    string `json:"location,omitempty" schema:"Optional location for the event."`
+}
+
 func (t *CreateCalendarEventTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        createCalendarEventToolName,
 		Description: "Create a new event in a Google Calendar.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"calendar_id": map[string]any{
-					"type":        "string",
-					"description": "The calendar ID to create the event in. Defaults to \"primary\".",
-				},
-				"summary": map[string]any{
-					"type":        "string",
-					"description": "The title/summary of the event. Required.",
-				},
-				"description": map[string]any{
-					"type":        "string",
-					"description": "Optional description or notes for the event.",
-				},
-				"start_time": map[string]any{
-					"type":        "string",
-					"description": "Start time in ISO 8601 / RFC3339 format (e.g. 2026-04-05T10:00:00-05:00). Required.",
-				},
-				"end_time": map[string]any{
-					"type":        "string",
-					"description": "End time in ISO 8601 / RFC3339 format (e.g. 2026-04-05T11:00:00-05:00). Required.",
-				},
-				"location": map[string]any{
-					"type":        "string",
-					"description": "Optional location for the event.",
-				},
-			},
-			"required": []string{"summary", "start_time", "end_time"},
-		},
+		Parameters:  agent.DeriveSchema(createCalendarEventArgs{}),
 	}
 }
 
@@ -393,20 +325,15 @@ func newWebSearchTool(apiKey, cx string) *WebSearchTool {
 
 func (t *WebSearchTool) Name() string { return webSearchToolName }
 
+type webSearchArgs struct {
+	Query string `json:"query" schema:"The search query. Required."`
+}
+
 func (t *WebSearchTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        webSearchToolName,
 		Description: "Perform a live web search using Google Custom Search. Returns a list of titles, links, and snippets from the top results.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{
-					"type":        "string",
-					"description": "The search query. Required.",
-				},
-			},
-			"required": []string{"query"},
-		},
+		Parameters:  agent.DeriveSchema(webSearchArgs{}),
 	}
 }
 

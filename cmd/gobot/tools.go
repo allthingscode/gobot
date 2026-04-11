@@ -7,6 +7,7 @@ import (
         "os"
 
         "github.com/allthingscode/gobot/internal/config"
+        "github.com/allthingscode/gobot/internal/agent"
         "github.com/allthingscode/gobot/internal/memory"
         "github.com/allthingscode/gobot/internal/memory/vector"
         "github.com/allthingscode/gobot/internal/provider"
@@ -22,21 +23,16 @@ type ReadTextFileTool struct {
         workspace string
 }
 
+type readTextFileArgs struct {
+        Path string `json:"path" schema:"The absolute or relative path to the file."`
+}
+
 func (t *ReadTextFileTool) Name() string { return readTextFileToolName }
 func (t *ReadTextFileTool) Declaration() provider.ToolDeclaration {
         return provider.ToolDeclaration{
                 Name:        readTextFileToolName,
                 Description: "Read the complete contents of a text file from the workspace.",
-                Parameters: map[string]any{
-                        "type": "object",
-                        "properties": map[string]any{
-                                "path": map[string]any{
-                                        "type":        "string",
-                                        "description": "The absolute or relative path to the file.",
-                                },
-                        },
-                        "required": []string{"path"},
-                },
+                Parameters:  agent.DeriveSchema(readTextFileArgs{}),
         }
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -30,24 +31,16 @@ func newSearchDocsTool(memStore *memory.MemoryStore, vecStore *vector.Store, emb
 
 func (t *SearchDocsTool) Name() string { return searchDocsToolName }
 
+type searchDocsArgs struct {
+	Query string `json:"query" schema:"The natural language query or keywords to search for."`
+	Limit int    `json:"limit,omitempty" schema:"Optional maximum number of results to return. Defaults to 5."`
+}
+
 func (t *SearchDocsTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        searchDocsToolName,
 		Description: "Searches the project workspace Markdown files for architectural notes, project specifications, and historical context using semantic hybrid retrieval (keyword + vector).",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{
-					"type":        "string",
-					"description": "The natural language query or keywords to search for.",
-				},
-				"limit": map[string]any{
-					"type":        "integer",
-					"description": "Optional maximum number of results to return. Defaults to 5.",
-				},
-			},
-			"required": []string{"query"},
-		},
+		Parameters:  agent.DeriveSchema(searchDocsArgs{}),
 	}
 }
 

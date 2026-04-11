@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/sandbox"
 	"github.com/allthingscode/gobot/internal/shell"
@@ -18,6 +19,11 @@ const (
 	shellExecToolName = "shell_exec"
 	shellMaxOutput    = 4096
 )
+
+type shellExecArgs struct {
+	Command string   `json:"command" schema:"Executable to run (e.g. 'cmd', 'powershell', 'python')."`
+	Args    []string `json:"args,omitempty" schema:"Arguments to pass to the command."`
+}
 
 // isSideEffectingTool returns true for tools that modify external state
 // and should be protected by idempotency keys.
@@ -68,23 +74,7 @@ func (t *shellExecTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        shellExecToolName,
 		Description: "Execute a shell command in a sandboxed environment. Working directory is the bot workspace. Output is capped at 4096 characters.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"command": map[string]any{
-					"type":        "string",
-					"description": "Executable to run (e.g. 'cmd', 'powershell', 'python').",
-				},
-				"args": map[string]any{
-					"type":        "array",
-					"description": "Arguments to pass to the command.",
-					"items": map[string]any{
-						"type": "string",
-					},
-				},
-			},
-			"required": []string{"command"},
-		},
+		Parameters:  agent.DeriveSchema(shellExecArgs{}),
 	}
 }
 

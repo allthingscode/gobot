@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -61,26 +62,18 @@ func newSendEmailTool(secretsRoot, storageRoot, userEmail string) *SendEmailTool
 	return &SendEmailTool{secretsRoot: secretsRoot, storageRoot: storageRoot, userEmail: userEmail}
 }
 
+type sendEmailArgs struct {
+	Subject string `json:"subject" schema:"Email subject line."`
+	Body    string `json:"body" schema:"Email body. Use HTML for best results: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists. Plain text is also accepted."`
+}
+
 func (s *SendEmailTool) Name() string { return sendEmailToolName }
 
 func (s *SendEmailTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        sendEmailToolName,
 		Description: "Send an email via google. The recipient is fixed to the configured user address; only subject and body are required.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"subject": map[string]any{
-					"type":        "string",
-					"description": "Email subject line.",
-				},
-				"body": map[string]any{
-					"type":        "string",
-					"description": "Email body. Use HTML for best results: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists. Plain text is also accepted.",
-				},
-			},
-			"required": []string{"subject", "body"},
-		},
+		Parameters:  agent.DeriveSchema(sendEmailArgs{}),
 	}
 }
 
@@ -123,26 +116,18 @@ func newSearchGmailTool(secretsRoot string) *SearchGmailTool {
 	return &SearchGmailTool{secretsRoot: secretsRoot}
 }
 
+type searchGmailArgs struct {
+	Query      string `json:"query" schema:"Gmail search query (e.g. 'from:example.com', 'is:unread', 'subject:report')."`
+	MaxResults int    `json:"max_results,omitempty" schema:"Maximum number of results to return. Defaults to 5."`
+}
+
 func (s *SearchGmailTool) Name() string { return searchGmailToolName }
 
 func (s *SearchGmailTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        searchGmailToolName,
 		Description: "Search the user's Gmail inbox for messages matching a query. Returns a list of message IDs, subjects, and snippets.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{
-					"type":        "string",
-					"description": "Gmail search query (e.g. 'from:example.com', 'is:unread', 'subject:report').",
-				},
-				"max_results": map[string]any{
-					"type":        "integer",
-					"description": "Maximum number of results to return. Defaults to 5.",
-				},
-			},
-			"required": []string{"query"},
-		},
+		Parameters:  agent.DeriveSchema(searchGmailArgs{}),
 	}
 }
 
@@ -206,20 +191,15 @@ func newReadGmailTool(secretsRoot string) *ReadGmailTool {
 
 func (s *ReadGmailTool) Name() string { return readGmailToolName }
 
+type readGmailArgs struct {
+	MessageID string `json:"message_id" schema:"The Gmail message ID (obtained from search_gmail)."`
+}
+
 func (s *ReadGmailTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        readGmailToolName,
 		Description: "Read the full content of a specific Gmail message by its ID.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"message_id": map[string]any{
-					"type":        "string",
-					"description": "The Gmail message ID (obtained from search_gmail).",
-				},
-			},
-			"required": []string{"message_id"},
-		},
+		Parameters:  agent.DeriveSchema(readGmailArgs{}),
 	}
 }
 
