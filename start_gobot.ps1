@@ -12,13 +12,14 @@ $ConfigPath = Join-Path $env:USERPROFILE ".gobot\config.json"
 
 # --- JSON Auto-Formatting ---
 if (Test-Path $ConfigPath) {
-    Write-Host "Reformatting config.json for readability..." -ForegroundColor Gray
-    try {
-        $json = Get-Content $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json
-        $json | ConvertTo-Json -Depth 100 | Set-Content $ConfigPath -Encoding UTF8 -ErrorAction Stop
-    }
-    catch {
-        Write-Host "Warning: Failed to reformat config.json: $_" -ForegroundColor Yellow
+    if (Test-Path $GobotExe) {
+        Write-Host "Reformatting config.json for readability..." -ForegroundColor Gray
+        try {
+            & $GobotExe config reformat
+        }
+        catch {
+            Write-Host "Warning: Failed to reformat config.json: $_" -ForegroundColor Yellow
+        }
     }
 }
 

@@ -31,13 +31,32 @@ func cmdConfig() *cobra.Command {
 
 	cmd.AddCommand(
 		cmdConfigValidate(),
+		cmdConfigReformat(),
 	)
 
 	return cmd
 }
 
-func cmdConfigValidate() *cobra.Command {
-	cmd := &cobra.Command{
+func cmdConfigReformat() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reformat",
+		Short: "Reformat config.json with standard 4-space indentation",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			path := config.DefaultConfigPath()
+			cfg, err := config.LoadFrom(path)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if err := cfg.Save(path); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+			fmt.Printf("Successfully reformatted %s\n", path)
+			return nil
+		},
+	}
+}
+
+func cmdConfigValidate() *cobra.Command {	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate configuration and exit with appropriate code",
 		Long: `Validate the current configuration and report any errors.
