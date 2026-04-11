@@ -170,6 +170,7 @@ type StrategicConfig struct {
 	IdempotencyTTL      string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
 	VectorSearchEnabled bool                `json:"vector_search_enabled"`   // F-030
 	Observability       ObservabilityConfig `json:"observability"`
+	TemplatesPath    string              `json:"templates_path,omitempty"` // Custom directory for email templates
 }
 
 type ObservabilityConfig struct {
@@ -183,6 +184,11 @@ type ObservabilityConfig struct {
 // VectorSearchEnabled returns true if semantic hybrid search is enabled (F-030).
 func (c *Config) VectorSearchEnabled() bool {
 	return c.Strategic.VectorSearchEnabled
+}
+
+// TemplatesPath returns the custom directory for email templates, if configured.
+func (c *Config) TemplatesPath() string {
+	return c.Strategic.TemplatesPath
 }
 
 // MemoryWindow returns the configured agent memory window (max context messages), defaulting to 50.

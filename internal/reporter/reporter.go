@@ -1,15 +1,88 @@
 package reporter
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/config"
 )
 
-const emailCSS = `body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;line-height:1.6;color:#f0f6fc;background-color:#0a0b10;margin:0;padding:20px;font-size:18px}.container{max-width:800px;margin:0 auto;background:#161b22;padding:40px;border:1px solid #30363d;border-radius:4px;color:#f0f6fc !important}h1,h2,h3{color:#58a6ff;border-bottom:2px solid #30363d;padding-bottom:10px}a{color:#58a6ff;text-decoration:none}code{background:#0d1117;padding:2px 5px;color:#79c0ff}.vitality{font-family:'Georgia',serif;font-style:italic;color:#a5d6ff !important;font-size:1.25em;line-height:1.5;margin:20px 0}.audit{font-family:'Cascadia Code','Consolas',monospace;font-size:12px;color:#8b949e;background-color:#0d1117;border:1px solid #30363d;padding:15px;border-radius:4px;margin-top:30px}`
+//go:embed templates/email.css
+var defaultCSS string
+
+//go:embed templates/email.html
+var defaultHTML string
+
+var (
+	tmMu sync.RWMutex
+	tm   *TemplateManager
+)
+
+// TemplateManager handles the loading and substitution of email templates.
+type TemplateManager struct {
+	css  string
+	html string
+}
+
+// NewTemplateManager initializes a TemplateManager, loading from dir if provided.
+func NewTemplateManager(dir string) *TemplateManager {
+	mgr := &TemplateManager{
+		css:  strings.TrimSpace(defaultCSS),
+		html: strings.TrimSpace(defaultHTML),
+	}
+
+	if dir != "" {
+		cssPath := filepath.Join(dir, "email.css")
+		if b, err := os.ReadFile(cssPath); err == nil {
+			mgr.css = strings.TrimSpace(string(b))
+		}
+
+		htmlPath := filepath.Join(dir, "email.html")
+		if b, err := os.ReadFile(htmlPath); err == nil {
+			mgr.html = strings.TrimSpace(string(b))
+		}
+	}
+
+	return mgr
+}
+
+// Wrap inspects the body and wraps it with CSS and HTML if necessary.
+func (m *TemplateManager) Wrap(body string) string {
+	lowerBody := strings.ToLower(body)
+	htmlTags := []string{"<html", "<body>", "<h1", "<h2", "<h3", "<p>", "<div", "<ul>", "<ol>", "<li>", "<strong>", "<em>", "<span"}
+	isHTML := false
+	for _, tag := range htmlTags {
+		if strings.Contains(lowerBody, tag) {
+			isHTML = true
+			break
+		}
+	}
+	if !isHTML {
+		return body
+	}
+
+	style := "<style>" + m.css + "</style>"
+
+	if !strings.Contains(lowerBody, "<html") {
+		out := m.html
+		out = strings.Replace(out, "{{.Style}}", m.css, 1)
+		out = strings.Replace(out, "{{.Body}}", body, 1)
+		return out
+	}
+
+	headIdx := strings.Index(lowerBody, "</head>")
+	if headIdx != -1 {
+		return body[:headIdx] + style + body[headIdx:]
+	}
+
+	return style + body
+}
 
 // FallbackNotify writes a notification entry to {storageRoot}/workspace/NOTIFICATIONS.md
 // when email delivery is unavailable. Creates the file if it does not exist.
@@ -58,35 +131,28 @@ func FallbackNotify(storageRoot, subject, body, recipient, reason string) string
 // wraps the content in a container div. Plain text bodies are returned unchanged.
 // HTML is detected if the lowercased body contains any common HTML tag.
 func WrapHTML(body string) string {
-	lowerBody := strings.ToLower(body)
-	htmlTags := []string{"<html", "<body>", "<h1", "<h2", "<h3", "<p>", "<div", "<ul>", "<ol>", "<li>", "<strong>", "<em>", "<span"}
-	isHTML := false
-	for _, tag := range htmlTags {
-		if strings.Contains(lowerBody, tag) {
-			isHTML = true
-			break
+	tmMu.RLock()
+	localTM := tm
+	tmMu.RUnlock()
+
+	if localTM == nil {
+		tmMu.Lock()
+		if tm == nil {
+			dir := ""
+			if cfg, err := config.Load(); err == nil && cfg != nil {
+				dir = cfg.TemplatesPath()
+			}
+			tm = NewTemplateManager(dir)
 		}
-	}
-	if !isHTML {
-		return body
-	}
-
-	style := "<style>" + emailCSS + "</style>"
-
-	if !strings.Contains(lowerBody, "<html") {
-		return "<!DOCTYPE html><html><head>" + style + "</head><body><div class='container'>" + body + "</div></body></html>"
+		localTM = tm
+		tmMu.Unlock()
 	}
 
-	headIdx := strings.Index(lowerBody, "</head>")
-	if headIdx != -1 {
-		return body[:headIdx] + style + body[headIdx:]
-	}
-
-	return style + body
+	return localTM.Wrap(body)
 }
 
 // htmlTagRe matches any HTML tag for stripping purposes.
-var htmlTagRe = regexp.MustCompile(`<[^>]+>`)
+var htmlTagRe = regexp.MustCompile("<[^>]+>")
 
 // StripHTML removes HTML tags from s to produce a plain-text fallback.
 // Block-level closing tags are replaced with newlines for readability.

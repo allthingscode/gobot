@@ -156,7 +156,7 @@ func TestWrapHTML(t *testing.T) {
 			match: []string{
 				"<!DOCTYPE html>",
 				"<html><head><style>",
-				emailCSS,
+				strings.TrimSpace(defaultCSS),
 				"color:#f0f6fc !important",
 				"color:#a5d6ff !important",
 				"Georgia",
@@ -172,7 +172,7 @@ func TestWrapHTML(t *testing.T) {
 			match: []string{
 				"<!DOCTYPE html>",
 				"<html><head><style>",
-				emailCSS,
+				strings.TrimSpace(defaultCSS),
 				"</style></head><body><div class='container'>",
 				"Just a <p>paragraph</p>",
 				"</div></body></html>",
@@ -183,7 +183,7 @@ func TestWrapHTML(t *testing.T) {
 			body: "<html><head><title>Test</title></head><body>Content</body></html>",
 			match: []string{
 				"<html><head><title>Test</title><style>",
-				emailCSS,
+				strings.TrimSpace(defaultCSS),
 				"</style></head><body>Content</body></html>",
 			},
 		},
@@ -192,7 +192,7 @@ func TestWrapHTML(t *testing.T) {
 			body: "<html><body>Content</body></html>",
 			match: []string{
 				"<style>",
-				emailCSS,
+				strings.TrimSpace(defaultCSS),
 				"</style><html><body>Content</body></html>",
 			},
 		},
@@ -258,5 +258,32 @@ func TestStripHTML(t *testing.T) {
 				t.Errorf("StripHTML(%q)\n got: %q\nwant: %q", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTemplateManager_CustomDir(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	customCSS := "body { color: red; }"
+	customHTML := "<html><head><style>{{.Style}}</style></head><body>CUSTOM: {{.Body}}</body></html>"
+
+	err := os.WriteFile(filepath.Join(tempDir, "email.css"), []byte(customCSS), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(tempDir, "email.html"), []byte(customHTML), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewTemplateManager(tempDir)
+	body := "<h1>Test</h1>"
+	got := mgr.Wrap(body)
+
+	if !strings.Contains(got, customCSS) {
+		t.Errorf("expected custom CSS in output")
+	}
+	if !strings.Contains(got, "CUSTOM: <h1>Test</h1>") {
+		t.Errorf("expected custom HTML wrapper in output")
 	}
 }
