@@ -174,6 +174,13 @@ type StrategicConfig struct {
 	MultiUserEnabled    bool                `json:"multi_user_enabled"`      // F-073
 	Observability       ObservabilityConfig `json:"observability"`
 	TemplatesPath       string              `json:"templates_path,omitempty"` // Custom directory for email templates
+	Routing             RoutingConfig       `json:"routing"`                  // F-102
+}
+
+type RoutingConfig struct {
+	Enabled         bool   `json:"enabled"`
+	ManagerModel    string `json:"manager_model"`
+	ManagerProvider string `json:"manager_provider,omitempty"` // defaults to main provider if empty
 }
 
 type ObservabilityConfig struct {

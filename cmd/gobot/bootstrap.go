@@ -45,6 +45,21 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 	}
 	model := cfg.DefaultModel()
 
+	// F-102: Manager-Executor Cost Routing
+	if cfg.Strategic.Routing.Enabled {
+		mgrProvName := cfg.Strategic.Routing.ManagerProvider
+		if mgrProvName == "" {
+			mgrProvName = provName
+		}
+		mgrProv, err := provider.Get(mgrProvName)
+		if err != nil {
+			slog.Warn("bootstrap: manager provider not found, disabling cost routing", "provider", mgrProvName)
+		} else {
+			slog.Info("bootstrap: cost routing enabled", "manager_model", cfg.Strategic.Routing.ManagerModel, "manager_provider", mgrProvName)
+			prov = provider.NewRoutingProvider(prov, mgrProv, cfg.Strategic.Routing)
+		}
+	}
+
 	// Ensure AWARENESS.md exists (mirrors launcher.py)
 	ensureAwarenessFile(cfg)
 
