@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,6 +55,63 @@ func TestNewMemoryStore_IdempotentSchema(t *testing.T) {
 		t.Fatalf("second open: %v", err)
 	}
 	_ = s2.Close()
+}
+
+func TestMigrationV0ToV1(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "workspace", "memory.db")
+	_ = os.MkdirAll(filepath.Dir(dbPath), 0o755)
+
+	// 1. Create a V0 database manually
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open raw db: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE VIRTUAL TABLE memory_fts USING fts5(
+			session_key UNINDEXED,
+			content,
+			timestamp   UNINDEXED
+		)
+	`)
+	if err != nil {
+		t.Fatalf("failed to create V0 table: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO memory_fts(session_key, content, timestamp) VALUES (?, ?, ?)`,
+		"sess123", "legacy content", "2026-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("failed to insert legacy data: %v", err)
+	}
+	_ = db.Close()
+
+	// 2. Open with NewMemoryStore (triggers migration)
+	store, err := NewMemoryStore(root)
+	if err != nil {
+		t.Fatalf("failed to open for migration: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// 3. Verify PRAGMA user_version is 1
+	var version int
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("failed to query version: %v", err)
+	}
+	if version != 1 {
+		t.Errorf("user_version = %d, want 1", version)
+	}
+
+	// 4. Verify data is migrated with session: prefix
+	results, err := store.Search("legacy", "sess123", 5)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0]["namespace"] != "session:sess123" {
+		t.Errorf("namespace = %q, want 'session:sess123'", results[0]["namespace"])
+	}
 }
 
 // ── Index ──────────────────────────────────────────────────────────────────────

@@ -78,7 +78,10 @@ func TestHybridSearch(t *testing.T) {
 
 	// Seed vector store
 	docs := []chromem.Document{
-		{ID: "v1", Content: "semantic fact about projects", Metadata: map[string]string{"timestamp": "2026-04-10T10:00:00Z"}},
+		{ID: "v1", Content: "semantic fact about projects", Metadata: map[string]string{
+			"timestamp": "2026-04-10T10:00:00Z",
+			"namespace": "session:f1",
+		}},
 	}
 	if err := store.AddDocuments(ctx, "memory_facts", docs, embedFunc); err != nil {
 		t.Fatalf("AddDocuments: %v", err)
@@ -104,5 +107,67 @@ func TestHybridSearch(t *testing.T) {
 		if !strings.Contains(strings.ToLower(r.Content), "projects") {
 			t.Errorf("result %s content %q does not contain 'projects'", r.ID, r.Content)
 		}
+	}
+}
+
+func TestHybridSearch_Isolation(t *testing.T) {
+	t.Parallel()
+	tmpDir, err := os.MkdirTemp("", "hybrid-isolation-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "vectors.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	embedProv := &mockEmbedder{}
+	embedFunc := func(ctx context.Context, text string) ([]float32, error) {
+		return embedProv.Embed(ctx, text)
+	}
+
+	ctx := context.Background()
+
+	// Seed vector store with multiple namespaces
+	docs := []chromem.Document{
+		{ID: "v1", Content: "private fact from session A", Metadata: map[string]string{"namespace": "session:A"}},
+		{ID: "v2", Content: "private fact from session B", Metadata: map[string]string{"namespace": "session:B"}},
+		{ID: "v3", Content: "shared global fact", Metadata: map[string]string{"namespace": "global"}},
+	}
+	if err := store.AddDocuments(ctx, "memory_facts", docs, embedFunc); err != nil {
+		t.Fatalf("AddDocuments: %v", err)
+	}
+
+	fts := &mockSearcher{} // returns empty
+
+	// Search from session A
+	results, err := HybridSearch(ctx, fts, store, embedProv, "fact", "A", 5)
+	if err != nil {
+		t.Fatalf("HybridSearch: %v", err)
+	}
+
+	// Should find v1 (session A) and v3 (global), but NOT v2 (session B)
+	foundA := false
+	foundGlobal := false
+	for _, r := range results {
+		if r.Content == "private fact from session A" {
+			foundA = true
+		}
+		if r.Content == "private fact from session B" {
+			t.Errorf("found private fact from session B while searching from session A")
+		}
+		if r.Content == "shared global fact" {
+			foundGlobal = true
+		}
+	}
+
+	if !foundA {
+		t.Error("did not find private fact from session A")
+	}
+	if !foundGlobal {
+		t.Error("did not find shared global fact")
 	}
 }

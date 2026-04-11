@@ -96,7 +96,7 @@ func (t *SearchDocsTool) Execute(ctx context.Context, _ string, args map[string]
 	}
 
 	// F-025 specifies 'workspace_docs' collection in vector store
-	vecResults, err := t.vecStore.Search(ctx, "workspace_docs", query, limit*2, embedFunc)
+	vecResults, err := t.vecStore.Search(ctx, "workspace_docs", query, limit*2, nil, embedFunc)
 	if err != nil {
 		return "", fmt.Errorf("vector search: %w", err)
 	}

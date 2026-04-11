@@ -59,10 +59,24 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 		return embedProv.Embed(c, text)
 	}
 
-	// For memory facts, we use a 'memory_facts' collection
-	vecResults, err := vec.Search(ctx, "memory_facts", query, limit*2, embedFunc)
+	// For memory facts, we use a 'memory_facts' collection.
+	// Search with a larger limit to allow for in-memory filtering.
+	rawVecResults, err := vec.Search(ctx, "memory_facts", query, limit*4, nil, embedFunc)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
+	}
+
+	// Filter by namespace in memory to preserve session isolation.
+	var vecResults []chromem.Result
+	sessionNamespace := "session:" + sessionKey
+	for _, res := range rawVecResults {
+		ns := res.Metadata["namespace"]
+		if ns == sessionNamespace || ns == "global" {
+			vecResults = append(vecResults, res)
+		}
+	}
+	if len(vecResults) > limit*2 {
+		vecResults = vecResults[:limit*2]
 	}
 
 	// 3. Hybrid RRF Merge
