@@ -58,7 +58,7 @@ func TestSearchMemoryTool_Execute_ReturnsJSON(t *testing.T) {
 		},
 	}
 	tool := &SearchMemoryTool{store: mock, cfg: &config.Config{}}
-	got, err := tool.Execute(context.Background(), "sess", map[string]any{"query": "Project Alpha"})
+	got, err := tool.Execute(context.Background(), "sess", "", map[string]any{"query": "Project Alpha"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestSearchMemoryTool_Execute_ReturnsJSON(t *testing.T) {
 func TestSearchMemoryTool_Execute_NoResults(t *testing.T) {
 	t.Parallel()
 	tool := &SearchMemoryTool{store: &mockMemorySearcher{results: nil}, cfg: &config.Config{}}
-	got, err := tool.Execute(context.Background(), "sess", map[string]any{"query": "unknown topic"})
+	got, err := tool.Execute(context.Background(), "sess", "", map[string]any{"query": "unknown topic"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestSearchMemoryTool_Execute_NoResults(t *testing.T) {
 func TestSearchMemoryTool_Execute_EmptyQuery(t *testing.T) {
 	t.Parallel()
 	tool := &SearchMemoryTool{store: &mockMemorySearcher{}, cfg: &config.Config{}}
-	_, err := tool.Execute(context.Background(), "sess", map[string]any{"query": ""})
+	_, err := tool.Execute(context.Background(), "sess", "", map[string]any{"query": ""})
 	if err == nil {
 		t.Error("expected error for empty query, got nil")
 	}
@@ -100,7 +100,7 @@ func TestSearchMemoryTool_Execute_DefaultLimit(t *testing.T) {
 	t.Parallel()
 	mock := &mockMemorySearcher{results: nil}
 	tool := &SearchMemoryTool{store: mock, cfg: &config.Config{}}
-	_, _ = tool.Execute(context.Background(), "sess", map[string]any{"query": "test"})
+	_, _ = tool.Execute(context.Background(), "sess", "", map[string]any{"query": "test"})
 	if mock.lastLimit != 5 {
 		t.Errorf("expected default limit 5, got %d", mock.lastLimit)
 	}
@@ -110,7 +110,7 @@ func TestSearchMemoryTool_Execute_CustomLimit(t *testing.T) {
 	t.Parallel()
 	mock := &mockMemorySearcher{results: nil}
 	tool := &SearchMemoryTool{store: mock, cfg: &config.Config{}}
-	_, _ = tool.Execute(context.Background(), "sess", map[string]any{"query": "test", "limit": float64(3)})
+	_, _ = tool.Execute(context.Background(), "sess", "", map[string]any{"query": "test", "limit": float64(3)})
 	if mock.lastLimit != 3 {
 		t.Errorf("expected limit 3, got %d", mock.lastLimit)
 	}

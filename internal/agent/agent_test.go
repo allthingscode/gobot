@@ -32,7 +32,7 @@ type runCall struct {
 	messages   []agentctx.StrategicMessage
 }
 
-func (r *mockRunner) Run(_ context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *mockRunner) Run(_ context.Context, sessionKey, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	r.mu.Lock()
 	r.calls = append(r.calls, runCall{sessionKey: sessionKey, messages: messages})
 	if r.activeCalls == nil {
@@ -214,7 +214,7 @@ func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
 	mgr.SetConsolidator(cons)
 
 	// Dispatch a new message.
-	_, err := mgr.Dispatch(ctx, "sess1", "new message")
+	_, err := mgr.Dispatch(ctx, "sess1", "", "new message")
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestDispatch_BasicRoundtrip(t *testing.T) {
 	runner := &mockRunner{response: "pong"}
 	mgr := NewSessionManager(runner, nil, "test-model")
 
-	resp, err := mgr.Dispatch(context.Background(), "session-1", "ping")
+	resp, err := mgr.Dispatch(context.Background(), "session-1", "", "ping")
 	if err != nil {
 		t.Fatalf("Dispatch failed: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestDispatch_SilentPrefixStripped(t *testing.T) {
 	runner := &mockRunner{response: "ok"}
 	mgr := NewSessionManager(runner, nil, "test-model")
 
-	_, err := mgr.Dispatch(context.Background(), "s1", "[SILENT] run quietly")
+	_, err := mgr.Dispatch(context.Background(), "s1", "", "[SILENT] run quietly")
 	if err != nil {
 		t.Fatalf("Dispatch failed: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestDispatch_RunnerError(t *testing.T) {
 	runner := &mockRunner{err: errors.New("model overloaded")}
 	mgr := NewSessionManager(runner, nil, "test-model")
 
-	_, err := mgr.Dispatch(context.Background(), "s1", "hello")
+	_, err := mgr.Dispatch(context.Background(), "s1", "", "hello")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -302,7 +302,7 @@ func TestDispatch_WithCheckpointStore(t *testing.T) {
 	mgr := NewSessionManager(runner, store, "test-model")
 
 	// First turn — no prior history.
-	_, err := mgr.Dispatch(context.Background(), "thread-1", "first message")
+	_, err := mgr.Dispatch(context.Background(), "thread-1", "", "first message")
 	if err != nil {
 		t.Fatalf("first Dispatch failed: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestDispatch_WithCheckpointStore(t *testing.T) {
 	}
 
 	// Second turn — history should be loaded and prepended.
-	_, err = mgr.Dispatch(context.Background(), "thread-1", "second message")
+	_, err = mgr.Dispatch(context.Background(), "thread-1", "", "second message")
 	if err != nil {
 		t.Fatalf("second Dispatch failed: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestDispatch_SerializesConcurrentCallsSameSession(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			resp, err := mgr.Dispatch(context.Background(), "shared-session", "msg")
+			resp, err := mgr.Dispatch(context.Background(), "shared-session", "", "msg")
 			results[idx] = resp
 			errs[idx] = err
 		}(i)
@@ -373,7 +373,7 @@ func TestDispatch_ParallelDifferentSessions(t *testing.T) {
 		wg.Add(1)
 		go func(sessionKey string) {
 			defer wg.Done()
-			if _, err := mgr.Dispatch(context.Background(), sessionKey, "hello"); err != nil {
+			if _, err := mgr.Dispatch(context.Background(), sessionKey, "", "hello"); err != nil {
 				t.Errorf("session %s: unexpected error: %v", sessionKey, err)
 			}
 		}(s)
@@ -392,7 +392,7 @@ func TestDispatch_CheckpointSaveFailureIsNonFatal(t *testing.T) {
 	mgr := NewSessionManager(runner, store, "model")
 
 	// SaveSnapshot fails but Dispatch should still return the response.
-	resp, err := mgr.Dispatch(context.Background(), "s1", "hello")
+	resp, err := mgr.Dispatch(context.Background(), "s1", "", "hello")
 	if err != nil {
 		t.Fatalf("expected no error despite save failure, got: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestDispatch_PostDispatchHook(t *testing.T) {
 	})
 	mgr.SetHooks(hooks)
 
-	resp, err := mgr.Dispatch(context.Background(), "s1", "hi")
+	resp, err := mgr.Dispatch(context.Background(), "s1", "", "hi")
 	if err != nil {
 		t.Fatalf("Dispatch failed: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 			hooks.RegisterPreHistory(tt.hook)
 			mgr.SetHooks(hooks)
 
-			_, err := mgr.Dispatch(context.Background(), "s1", "new message")
+			_, err := mgr.Dispatch(context.Background(), "s1", "", "new message")
 			if err != nil {
 				t.Fatalf("Dispatch failed: %v", err)
 			}
@@ -520,7 +520,7 @@ func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
 	mgr.SetConsolidator(cons)
 
 	// Dispatch a message to trigger compaction.
-	_, err := mgr.Dispatch(ctx, "sess1", "new message")
+	_, err := mgr.Dispatch(ctx, "sess1", "", "new message")
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestSessionManager_CompactionWithNilConsolidator(t *testing.T) {
 	// No consolidator set (nil)
 
 	// Dispatch should not crash with nil consolidator.
-	_, err := mgr.Dispatch(ctx, "sess1", "new message")
+	_, err := mgr.Dispatch(ctx, "sess1", "", "new message")
 	if err != nil {
 		t.Fatalf("Dispatch with nil consolidator should not crash: %v", err)
 	}
@@ -596,7 +596,7 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 	cons := &mockConsolidator{}
 	mgr.SetConsolidator(cons)
 
-	_, err := mgr.Dispatch(ctx, "sess1", "new")
+	_, err := mgr.Dispatch(ctx, "sess1", "", "new")
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
@@ -650,7 +650,7 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 	_, _ = store.SaveSnapshot("sess1", 1, history)
 
 	// Dispatch a new message.
-	_, err := mgr.Dispatch(ctx, "sess1", "new message")
+	_, err := mgr.Dispatch(ctx, "sess1", "", "new message")
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
@@ -685,7 +685,7 @@ func TestSessionManager_Dispatch_StatelessDegradation(t *testing.T) {
 	mgr := NewSessionManager(runner, store, "test-model")
 
 	// First turn — CreateThread fails.
-	resp, err := mgr.Dispatch(ctx, "sess-fail", "ping")
+	resp, err := mgr.Dispatch(ctx, "sess-fail", "", "ping")
 	if err != nil {
 		t.Fatalf("Dispatch failed: %v", err)
 	}
@@ -719,7 +719,7 @@ func TestSessionManager_Dispatch_NilStore(t *testing.T) {
 	mgr := NewSessionManager(runner, nil, "test-model")
 
 	// Dispatch should work normally without panicking.
-	resp, err := mgr.Dispatch(ctx, "cron-session", "hello")
+	resp, err := mgr.Dispatch(ctx, "cron-session", "", "hello")
 	if err != nil {
 		t.Fatalf("Dispatch failed with nil store: %v", err)
 	}
@@ -792,7 +792,7 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 	// Dispatch a new message to trigger compaction (16th message)
 	// This should trigger summarization, which will fail due to our mock,
 	// causing fallback to plain compaction (truncation to last 10 messages)
-	_, err := mgr.Dispatch(ctx, "sess1", "trigger compaction message")
+	_, err := mgr.Dispatch(ctx, "sess1", "", "trigger compaction message")
 	if err != nil {
 		t.Fatalf("Dispatch failed: %v", err)
 	}

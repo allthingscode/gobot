@@ -222,7 +222,7 @@ func (t *mcpTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *mcpTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (t *mcpTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	method, _ := args["method"].(string)
 	if method == "" {
 		return "", fmt.Errorf("mcp %s: method is required", t.server.name)

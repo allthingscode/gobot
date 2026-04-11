@@ -11,16 +11,15 @@ import (
 
 const dbFileName = "checkpoints.db"
 
-// openDB opens (or creates) the SQLite database at
-// {storageRoot}/workspace/checkpoints.db with WAL mode enabled.
-// The caller is responsible for closing the returned *sql.DB.
-func openDB(storageRoot string) (*sql.DB, error) {
-	dir := filepath.Join(storageRoot, "workspace")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// openDB opens (or creates) the SQLite database at dbDir/workspace/checkpoints.db
+// with WAL mode enabled. The caller is responsible for closing the returned *sql.DB.
+func openDB(dbDir string) (*sql.DB, error) {
+	workspaceDir := filepath.Join(dbDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return nil, fmt.Errorf("openDB: create workspace dir: %w", err)
 	}
 
-	dbPath := filepath.Join(dir, dbFileName)
+	dbPath := filepath.Join(workspaceDir, dbFileName)
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("openDB: open %s: %w", dbPath, err)

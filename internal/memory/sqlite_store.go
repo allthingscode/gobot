@@ -26,15 +26,15 @@ type MemoryStore struct {
 }
 
 // NewMemoryStore opens (or creates) the memory database at
-// {storageRoot}/workspace/memory.db with WAL mode enabled.
+// dbDir/workspace/memory.db with WAL mode enabled.
 // The caller is responsible for calling Close when done.
-func NewMemoryStore(storageRoot string) (*MemoryStore, error) {
-	dir := filepath.Join(storageRoot, "workspace")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func NewMemoryStore(dbDir string) (*MemoryStore, error) {
+	workspaceDir := filepath.Join(dbDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		return nil, fmt.Errorf("memory: mkdir: %w", err)
 	}
 
-	dbPath := filepath.Join(dir, memoryDBFileName)
+	dbPath := filepath.Join(workspaceDir, memoryDBFileName)
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)

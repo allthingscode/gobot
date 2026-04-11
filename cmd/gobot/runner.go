@@ -112,7 +112,7 @@ func (r *geminiRunner) SetIdempotencyStore(store *agentctx.IdempotencyStore) {
 //  3. If the response contains no tool calls, extracts the text and returns.
 //
 // Returns an error if maxToolIterations is exceeded or prov.Chat fails.
-func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	// 1. Build System Prompt with RAG and Hooks
 	sysPrompt := r.systemPrompt
 	if r.memStore != nil {
@@ -307,10 +307,10 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 				// This ensures that if the agent loop crashes and resumes, the exact same tool call gets the same key,
 				// preventing duplicate real-world side effects.
 				if hashErr != nil {
-					result, execErr = r.executeTool(ctx, sessionKey, "", name, args, "")
+					result, execErr = r.executeTool(ctx, sessionKey, userID, "", name, args, "")
 				} else {
 					idemKey := fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, len(toolSeq), name, paramsHash)
-					result, execErr = r.executeTool(ctx, sessionKey, idemKey, name, args, paramsHash)
+					result, execErr = r.executeTool(ctx, sessionKey, userID, idemKey, name, args, paramsHash)
 				}
 				if execErr == nil {
 					slog.Info("runner: tool execution completed",
@@ -370,7 +370,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 // executeTool dispatches a tool call to the matching registered Tool.
 // For side-effecting tools, it checks the idempotency store before execution
 // and caches the result to prevent duplicates on retry.
-func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
+func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, userID, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
 	// Check if this is a side-effecting tool that needs idempotency protection.
 	if isSideEffectingTool(name) && r.idempStore != nil {
 		// If paramsHash not already computed by caller, compute it now.
@@ -396,7 +396,7 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, idemKey, nam
 		}
 
 		// Cache miss — execute the tool and store result.
-		result, execErr := r.executeToolInner(ctx, sessionKey, name, args)
+		result, execErr := r.executeToolInner(ctx, sessionKey, userID, name, args)
 		if execErr == nil {
 			// Store result in idempotency cache.
 			if storeErr := r.idempStore.Store(idemKey, name, paramsHash, result, sessionKey); storeErr != nil {
@@ -407,11 +407,11 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, idemKey, nam
 	}
 
 	// Non-side-effecting tool or no idempotency store — execute normally.
-	return r.executeToolInner(ctx, sessionKey, name, args)
+	return r.executeToolInner(ctx, sessionKey, userID, name, args)
 }
 
 // executeToolInner is the inner implementation of executeTool without idempotency checks.
-func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey, name string, args map[string]any) (result string, err error) {
+func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey, userID, name string, args map[string]any) (result string, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.Error("runner: tool panic recovered", "session", sessionKey, "tool", name, "panic", rec)
@@ -423,10 +423,10 @@ func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey, name st
 		if t.Name() == name {
 			if r.tracer != nil {
 				return r.tracer.TraceToolExecution(ctx, sessionKey, name, func(ctx context.Context) (string, error) {
-					return t.Execute(ctx, sessionKey, args)
+					return t.Execute(ctx, sessionKey, userID, args)
 				})
 			}
-			return t.Execute(ctx, sessionKey, args)
+			return t.Execute(ctx, sessionKey, userID, args)
 		}
 	}
 	return "", fmt.Errorf("unknown tool: %s", name)
@@ -624,7 +624,7 @@ func cmdSimulate() *cobra.Command {
 
 			fmt.Printf("--- Simulating Prompt ---\n%s\n\n", prompt)
 			fmt.Println("Waiting for response...")
-			reply, err := mgr.Dispatch(ctx, "cli-sim", prompt)
+			reply, err := mgr.Dispatch(ctx, "cli-sim", "cli-user", prompt)
 			if err != nil {
 				return fmt.Errorf("dispatch: %w", err)
 			}
@@ -651,7 +651,8 @@ func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot
 	}
 
 	slog.Debug("handler: dispatching to session manager", "session", sessionKey)
-	reply, err := h.mgr.Dispatch(ctx, sessionKey, msg.Text)
+	userID := bot.UserID(msg.ChatID, msg.SenderID)
+	reply, err := h.mgr.Dispatch(ctx, sessionKey, userID, msg.Text)
 	if err != nil {
 		if errors.Is(err, resilience.ErrCircuitOpen) {
 			return "I'm sorry, I'm currently having trouble connecting to one of my services. Please try again in a few moments.", nil

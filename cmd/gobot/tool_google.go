@@ -51,7 +51,7 @@ func (t *ListCalendarTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *ListCalendarTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (t *ListCalendarTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
 	maxResults := 10
 	if v, ok := args["max_results"]; ok {
 		switch n := v.(type) {
@@ -109,7 +109,7 @@ func (t *ListTasksTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *ListTasksTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (t *ListTasksTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
 	tasklistID := "@default"
 	if v, ok := args["tasklist_id"]; ok {
 		if s, _ := v.(string); s != "" {
@@ -167,7 +167,7 @@ func (t *CreateTaskTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *CreateTaskTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (t *CreateTaskTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
 	title, _ := args["title"].(string)
 	if strings.TrimSpace(title) == "" {
 		return "", fmt.Errorf("create_task: title is required")
@@ -222,7 +222,7 @@ func (t *CompleteTaskTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *CompleteTaskTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (t *CompleteTaskTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
 	taskID, _ := args["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
 		return "", fmt.Errorf("complete_task: task_id is required")
@@ -279,7 +279,7 @@ func (t *UpdateTaskTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *UpdateTaskTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (t *UpdateTaskTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
 	taskID, _ := args["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
 		return "", fmt.Errorf("update_task: task_id is required")
@@ -347,7 +347,7 @@ func (t *CreateCalendarEventTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *CreateCalendarEventTool) Execute(_ context.Context, _ string, args map[string]any) (string, error) {
+func (t *CreateCalendarEventTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
 	summary, _ := args["summary"].(string)
 	if strings.TrimSpace(summary) == "" {
 		return "", fmt.Errorf("create_calendar_event: summary is required")
@@ -410,7 +410,7 @@ func (t *WebSearchTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *WebSearchTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (t *WebSearchTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if strings.TrimSpace(query) == "" {
 		return "", fmt.Errorf("google_search: query is required")

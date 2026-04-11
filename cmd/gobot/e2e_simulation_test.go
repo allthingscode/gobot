@@ -64,7 +64,7 @@ func (r *simRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverri
 	return "", nil
 }
 
-func (r *simRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *simRunner) Run(ctx context.Context, sessionKey, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	for r.stepIdx < len(r.steps) {
 		step := r.steps[r.stepIdx]
 		r.stepIdx++
@@ -98,7 +98,7 @@ func (r *simRunner) Run(ctx context.Context, sessionKey string, messages []agent
 func (r *simRunner) dispatchTool(ctx context.Context, sessionKey string, fc SimToolCall) (string, error) {
 	for _, t := range r.tools {
 		if t.Name() == fc.Name {
-			return t.Execute(ctx, sessionKey, fc.Args)
+			return t.Execute(ctx, sessionKey, "", fc.Args)
 		}
 	}
 	return fmt.Sprintf("[tool %q not registered in scenario]", fc.Name), nil
@@ -117,7 +117,7 @@ func (t *simTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{Name: t.name, Description: "mock tool for simulation"}
 }
 
-func (t *simTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+func (t *simTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	if t.err != nil {
 		return "", t.err
 	}
@@ -136,7 +136,7 @@ func RunScenario(t *testing.T, s Scenario, tools []Tool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	reply, err := mgr.Dispatch(ctx, "e2e:"+s.Name, s.UserPrompt)
+	reply, err := mgr.Dispatch(ctx, "e2e:"+s.Name, "", s.UserPrompt)
 	if err != nil {
 		t.Fatalf("[%s] Dispatch error: %v", s.Name, err)
 	}
@@ -279,7 +279,7 @@ func TestE2ESimulation_NoSteps(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := mgr.Dispatch(ctx, "e2e:no_steps", "hello")
+	_, err := mgr.Dispatch(ctx, "e2e:no_steps", "", "hello")
 	if err == nil {
 		t.Fatal("expected error when scenario has no steps, got nil")
 	}

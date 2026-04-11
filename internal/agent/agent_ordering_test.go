@@ -23,7 +23,7 @@ func (r *delayedRunner) RunText(_ context.Context, _, _, _ string) (string, erro
 	return r.response, nil
 }
 
-func (r *delayedRunner) Run(_ context.Context, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *delayedRunner) Run(_ context.Context, _, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	if r.delay > 0 {
 		time.Sleep(r.delay)
 	}
@@ -49,7 +49,7 @@ func TestSessionManager_OrderedIterations(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := mgr.Dispatch(context.Background(), "ordered-session", "msg"); err != nil {
+			if _, err := mgr.Dispatch(context.Background(), "ordered-session", "", "msg"); err != nil {
 				t.Errorf("Dispatch: %v", err)
 			}
 		}()
@@ -92,7 +92,7 @@ func TestSessionManager_ParallelSessionsNoInterference(t *testing.T) {
 			go func(sessionIdx int) {
 				defer wg.Done()
 				key := fmt.Sprintf("sess-%d", sessionIdx)
-				if _, err := mgr.Dispatch(context.Background(), key, "msg"); err != nil {
+				if _, err := mgr.Dispatch(context.Background(), key, "", "msg"); err != nil {
 					t.Errorf("Dispatch: %v", err)
 				}
 			}(s)

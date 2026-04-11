@@ -247,7 +247,7 @@ func TestWorkspacePath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.root}}
-			got := cfg.WorkspacePath(tc.subpath...)
+			got := cfg.WorkspacePath("", tc.subpath...)
 			if got != tc.want {
 				t.Errorf("WorkspacePath(%v) = %q, want %q", tc.subpath, got, tc.want)
 			}

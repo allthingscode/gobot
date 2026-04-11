@@ -82,7 +82,7 @@ func TestShellExecTool_Execute(t *testing.T) {
 			mock := &mockExecutor{output: tc.mockOutput, err: tc.mockErr}
 			tool := &shellExecTool{exec: mock}
 
-			output, err := tool.Execute(ctx, "test-session", tc.args)
+			output, err := tool.Execute(ctx, "test-session", "", tc.args)
 
 			if tc.wantErr && err == nil {
 				t.Errorf("expected error, got nil")

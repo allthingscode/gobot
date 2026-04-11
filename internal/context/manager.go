@@ -34,28 +34,41 @@ type CheckpointManager struct {
 }
 
 var (
-	cmInstance *CheckpointManager
-	cmOnce     sync.Once
-	cmInitErr  error
+	cmInstances = make(map[string]*CheckpointManager)
+	cmMu        sync.Mutex
 )
 
-// GetCheckpointManager returns the process-wide singleton CheckpointManager,
-// initialising it on the first call. Subsequent calls ignore storageRoot.
-func GetCheckpointManager(storageRoot string) (*CheckpointManager, error) {
-	cmOnce.Do(func() {
-		db, err := openDB(storageRoot)
-		if err != nil {
-			cmInitErr = err
-			return
-		}
-		if err := initSchema(db); err != nil {
-			_ = db.Close()
-			cmInitErr = err
-			return
-		}
-		cmInstance = &CheckpointManager{db: db}
-	})
-	return cmInstance, cmInitErr
+// resetCheckpointManagerInstances clears the cached instances. Used only for testing.
+func resetCheckpointManagerInstances() {
+	cmMu.Lock()
+	defer cmMu.Unlock()
+	for _, mgr := range cmInstances {
+		_ = mgr.db.Close()
+	}
+	cmInstances = make(map[string]*CheckpointManager)
+}
+
+// GetCheckpointManager returns a CheckpointManager for the specified dbDir.
+// It caches instances to ensure only one handle is open per directory.
+func GetCheckpointManager(dbDir string) (*CheckpointManager, error) {
+	cmMu.Lock()
+	defer cmMu.Unlock()
+
+	if mgr, ok := cmInstances[dbDir]; ok {
+		return mgr, nil
+	}
+
+	db, err := openDB(dbDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := initSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	mgr := &CheckpointManager{db: db}
+	cmInstances[dbDir] = mgr
+	return mgr, nil
 }
 
 // CreateThread initialises a new durable thread, replacing any existing row

@@ -128,7 +128,7 @@ func (t *SearchMemoryTool) Declaration() provider.ToolDeclaration {
 
 // Execute searches the memory store and returns results as a JSON string.
 // If no results are found, returns a plain-text message saying so.
-func (t *SearchMemoryTool) Execute(ctx context.Context, sessionKey string, args map[string]any) (string, error) {
+func (t *SearchMemoryTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return "", fmt.Errorf("search_memory: query is required")

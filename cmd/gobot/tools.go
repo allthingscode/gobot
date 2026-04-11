@@ -40,7 +40,7 @@ func (t *ReadTextFileTool) Declaration() provider.ToolDeclaration {
         }
 }
 
-func (t *ReadTextFileTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
         path, _ := args["path"].(string)
         if path == "" {
                 return "", fmt.Errorf("read_text_file: path is required")
@@ -65,9 +65,9 @@ func registerTools(cfg *config.Config, prov provider.Provider, model string, mem
         secretsRoot := cfg.SecretsRoot()
         tools := []Tool{
                 newSpawnTool(prov, model, nil, specialistModels, memStore, cfg),
-                &ReadTextFileTool{workspace: cfg.WorkspacePath()},
+                &ReadTextFileTool{workspace: cfg.WorkspacePath("", "")},
         }
-        tools = append(tools, newShellExecTool(cfg.WorkspacePath(), cfg.ExecTimeout()))
+        tools = append(tools, newShellExecTool(cfg.WorkspacePath("", ""), cfg.ExecTimeout()))
 
         // Initialize MCP tools from config
         for name, srvCfg := range cfg.Tools.MCPServers {
@@ -121,5 +121,6 @@ type Tool interface {
 	Declaration() provider.ToolDeclaration
 
 	// Execute runs the tool with the supplied arguments.
-	Execute(ctx context.Context, sessionKey string, args map[string]any) (string, error)
+	// userID is used for workspace and memory isolation (F-073).
+	Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error)
 }

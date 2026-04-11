@@ -88,7 +88,7 @@ func (t *shellExecTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *shellExecTool) Execute(ctx context.Context, sessionKey string, args map[string]any) (string, error) {
+func (t *shellExecTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	cmd, _ := args["command"].(string)
 	if cmd == "" {
 		return "", errors.New("shell_exec: command is required")

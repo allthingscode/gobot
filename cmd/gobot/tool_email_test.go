@@ -72,7 +72,7 @@ func TestSendEmailTool_Execute_Validation(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := tool.Execute(context.Background(), "test-session", tt.args)
+			_, err := tool.Execute(context.Background(), "test-session", "", tt.args)
 			if err == nil {
 				t.Fatal("Execute() expected error, got nil")
 			}
@@ -88,7 +88,7 @@ func TestSendEmailTool_Execute_AuthFailure(t *testing.T) {
 
 	// An empty secretsRoot has no token.json, so google.NewService will fail.
 	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com")
-	_, err := tool.Execute(context.Background(), "test-session", map[string]any{
+	_, err := tool.Execute(context.Background(), "test-session", "", map[string]any{
 		"subject": "Test subject",
 		"body":    "Test body",
 	})
@@ -177,7 +177,7 @@ func TestGmailTools_Execute_Validation(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := tt.tool.Execute(context.Background(), "s", tt.args)
+			_, err := tt.tool.Execute(context.Background(), "s", "", tt.args)
 			if err == nil {
 				t.Error("Expected error for missing required arg")
 			}

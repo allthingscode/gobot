@@ -67,7 +67,7 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 		}
 		sessionKey := "cron:" + p.To
 		slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", true)
-		_, err := d.mgr.Dispatch(ctx, sessionKey, "[SILENT] [AUTONOMOUS] "+p.Message)
+		_, err := d.mgr.Dispatch(ctx, sessionKey, "", "[SILENT] [AUTONOMOUS] "+p.Message)
 		return err
 	}
 
@@ -87,7 +87,7 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 		}
 		sessionKey := "cron:" + jobID + ":email:" + recipient
 		slog.Info("dispatching cron job", "sessionKey", sessionKey, "channel", "email")
-		response, err := d.mgr.Dispatch(ctx, sessionKey, "[AUTONOMOUS] "+p.Message)
+		response, err := d.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 		if err != nil {
 			return err
 		}
@@ -114,7 +114,7 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 
 	sessionKey := "cron:" + to
 	slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", false)
-	response, err := d.mgr.Dispatch(ctx, sessionKey, "[AUTONOMOUS] "+p.Message)
+	response, err := d.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
 		return err
 	}

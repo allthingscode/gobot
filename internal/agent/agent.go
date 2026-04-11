@@ -32,7 +32,8 @@ import (
 // SessionManager ensures calls with the same key are serialized.
 type Runner interface {
 	// Run executes a full turn of the agent, including tool calls and history updates.
-	Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (response string, updated []agentctx.StrategicMessage, err error)
+	// userID is used for workspace and memory isolation (F-073).
+	Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (response string, updated []agentctx.StrategicMessage, err error)
 	// RunText executes a single-turn completion (text-only) with no tool use.
 	RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error)
 }
@@ -149,7 +150,7 @@ func (m *SessionManager) SetHooks(h *Hooks) {
 //
 // The [SILENT] prefix is stripped from userMessage before it reaches the runner.
 // Returns the runner's response, or an error if the runner or store fails.
-func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage string) (string, error) {
+func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userMessage string) (string, error) {
 	lock := acquireLock(sessionKey, m.lockTimeout)
 	if err := lock.Lock(ctx); err != nil {
 		lock.release()
@@ -167,7 +168,7 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 			return "", err
 		}
 		return m.tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
-			return m.dispatch(ctx, sessionKey, userMessage, messages, iteration, stateless)
+			return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless)
 		})
 	}
 
@@ -175,7 +176,7 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userMessage s
 	if err != nil {
 		return "", err
 	}
-	return m.dispatch(ctx, sessionKey, userMessage, messages, iteration, stateless)
+	return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless)
 }
 
 // loadHistory loads conversation history from checkpoint.
@@ -218,8 +219,9 @@ Conversation history to summarize:
 
 	statelessWarning = "⚠️ Warning: session history could not be initialized. This conversation will not be persisted.\n\n"
 )
+
 // dispatch is the implementation of Dispatch, potentially wrapped by tracing.
-func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage string, messages []agentctx.StrategicMessage, iteration int, stateless bool) (string, error) {
+func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userMessage string, messages []agentctx.StrategicMessage, iteration int, stateless bool) (string, error) {
 	// Strip [SILENT] prefix — the cron layer uses it to suppress routing
 	// but the model should never see it (mirrors _patched_dispatch in loop.py).
 	cleaned, silent := StripSilent(userMessage)
@@ -348,7 +350,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userMessage s
 	})
 
 	// Execute the turn.
-	response, updated, err := m.runner.Run(ctx, sessionKey, messages)
+	response, updated, err := m.runner.Run(ctx, sessionKey, userID, messages)
 	if err != nil {
 		return "", fmt.Errorf("runner.Run: %w", err)
 	}

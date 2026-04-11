@@ -39,6 +39,8 @@ func setupTempProject(t *testing.T) string {
 		filepath.Join(dir, ".private", "backlog", "bugs"),
 		filepath.Join(dir, ".private", "backlog", "archived"),
 		filepath.Join(dir, ".private", "session"),
+		filepath.Join(dir, ".private", "session", "handoffs"),
+		filepath.Join(dir, ".private", "session", "global"),
 		filepath.Join(dir, ".private", "locks"),
 	} {
 		if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -179,7 +181,7 @@ func TestDocLint_ValidStatuses(t *testing.T) {
 func TestDocLint_InvalidHandoffJSON(t *testing.T) {
 	t.Parallel()
 	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "session", "handoff.json"),
+	writeFile(t, filepath.Join(dir, ".private", "session", "handoffs", "test.json"),
 		`{invalid json}`)
 	out, err := runDocLint(t, dir)
 	if err == nil {
@@ -193,7 +195,7 @@ func TestDocLint_InvalidHandoffJSON(t *testing.T) {
 func TestDocLint_MissingHandoffField(t *testing.T) {
 	t.Parallel()
 	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "session", "handoff.json"),
+	writeFile(t, filepath.Join(dir, ".private", "session", "handoffs", "test.json"),
 		`{"task_id": "F-001"}`)
 	out, err := runDocLint(t, dir)
 	if err == nil {

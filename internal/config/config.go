@@ -171,8 +171,9 @@ type StrategicConfig struct {
 	MaxToolIterations   int                 `json:"max_tool_iterations,omitempty"`
 	IdempotencyTTL      string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
 	VectorSearchEnabled bool                `json:"vector_search_enabled"`   // F-030
+	MultiUserEnabled    bool                `json:"multi_user_enabled"`      // F-073
 	Observability       ObservabilityConfig `json:"observability"`
-	TemplatesPath    string              `json:"templates_path,omitempty"` // Custom directory for email templates
+	TemplatesPath       string              `json:"templates_path,omitempty"` // Custom directory for email templates
 }
 
 type ObservabilityConfig struct {
@@ -181,6 +182,11 @@ type ObservabilityConfig struct {
 	OTLPEndpoint   string  `json:"otlp_endpoint"`
 	SamplingRate   float64 `json:"sampling_rate"`
 	DevMode        bool    `json:"dev_mode"`
+}
+
+// MultiUserEnabled returns true if multi-user workspace isolation is enabled (F-073).
+func (c *Config) MultiUserEnabled() bool {
+	return c.Strategic.MultiUserEnabled
 }
 
 // VectorSearchEnabled returns true if semantic hybrid search is enabled (F-030).
@@ -364,9 +370,15 @@ func (c *Config) SpecialistProvider(name string) string {
 }
 
 // WorkspacePath returns the path to a resource under {StorageRoot}/workspace/.
+// If MultiUserEnabled is true and userID is non-empty, the path is scoped to
+// {StorageRoot}/workspace/users/{userID}/.
 // Subpath elements are joined after the workspace directory.
-func (c *Config) WorkspacePath(subpath ...string) string {
-	parts := append([]string{c.StorageRoot(), "workspace"}, subpath...)
+func (c *Config) WorkspacePath(userID string, subpath ...string) string {
+	base := filepath.Join(c.StorageRoot(), "workspace")
+	if c.MultiUserEnabled() && userID != "" {
+		base = filepath.Join(base, "users", userID)
+	}
+	parts := append([]string{base}, subpath...)
 	return filepath.Join(parts...)
 }
 

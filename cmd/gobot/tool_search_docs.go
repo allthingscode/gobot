@@ -51,7 +51,7 @@ func (t *SearchDocsTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *SearchDocsTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (t *SearchDocsTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return "", fmt.Errorf("search_docs: query is required")

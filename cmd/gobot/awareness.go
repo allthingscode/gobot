@@ -28,7 +28,7 @@ func loadSystemPrompt(cfg *config.Config) string {
 		}
 	}
 
-	awarenessPath := cfg.WorkspacePath("AWARENESS.md")
+	awarenessPath := cfg.WorkspacePath("", "AWARENESS.md")
 	if data, err := os.ReadFile(awarenessPath); err == nil && len(data) > 0 {
 		parts = append(parts, strings.TrimSpace(string(data)))
 	}
@@ -49,7 +49,7 @@ func loadSystemPrompt(cfg *config.Config) string {
 // {storageRoot}/workspace/ (production fallback). Returns empty string if not found.
 func loadPrivateFile(cfg *config.Config, filename string) string {
 	candidates := []string{
-		cfg.WorkspacePath(filename),
+		cfg.WorkspacePath("", filename),
 	}
 	if exe, err := os.Executable(); err == nil {
 		candidates = append([]string{
@@ -94,7 +94,7 @@ func loadScheduleContext(secretsRoot string) string {
 // {storageRoot}/workspace/ if the file does not already exist.
 // Safe to call on every startup — no-op when the file is present.
 func ensureAwarenessFile(cfg *config.Config) {
-	awarenessPath := cfg.WorkspacePath("AWARENESS.md")
+	awarenessPath := cfg.WorkspacePath("", "AWARENESS.md")
 	if _, err := os.Stat(awarenessPath); err == nil {
 		return
 	}
@@ -108,7 +108,7 @@ func ensureAwarenessFile(cfg *config.Config) {
 // Kept separate so it can be tested without filesystem side effects.
 func buildAwarenessContent(cfg *config.Config) string {
 	storageRoot := cfg.StorageRoot()
-	cronItemsDir := cfg.WorkspacePath("jobs")
+	cronItemsDir := cfg.WorkspacePath("", "jobs")
 	return "# STRATEGIC AWARENESS\n" +
 		"- **Workspace Root:** " + storageRoot + "\n" +
 		"- **System Role:** Strategic Orchestrator\n" +
@@ -121,9 +121,9 @@ func buildAwarenessContent(cfg *config.Config) string {
 		"- **Trigger:** The scheduler automatically loads these files and converts them into cron jobs.\n" +
 		"\n" +
 		"## MEMORY & CONTINUITY\n" +
-		"- **Daily Journal:** `" + cfg.WorkspacePath("journal", "YYYY-MM-DD.md") + "`\n" +
+		"- **Daily Journal:** `" + cfg.WorkspacePath("", "journal", "YYYY-MM-DD.md") + "`\n" +
 		"- **Chronological Continuity:** A rolling journal snippet is injected into context on every turn.\n" +
-		"- **Long-Term Memory:** Checkpoint database at `" + cfg.WorkspacePath("checkpoints.db") + "`.\n" +
+		"- **Long-Term Memory:** Checkpoint database at `" + cfg.WorkspacePath("", "checkpoints.db") + "`.\n" +
 		"\n" +
 		"## OPERATOR MANDATES\n" +
 		"- **Zero Drive-Root Writes:** Never write to drive roots. All output goes under `" + storageRoot + "`.\n"

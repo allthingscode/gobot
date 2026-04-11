@@ -87,7 +87,7 @@ func (s *SendEmailTool) Declaration() provider.ToolDeclaration {
 // Execute sends an email to the hardcoded userEmail using args["subject"] and
 // args["body"]. The "to" address is never read from args. Returns a
 // confirmation string on success.
-func (s *SendEmailTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	subject, _ := args["subject"].(string)
 	body, _ := args["body"].(string)
 
@@ -146,7 +146,7 @@ func (s *SearchGmailTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (s *SearchGmailTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if strings.TrimSpace(query) == "" {
 		return "", fmt.Errorf("search_gmail: query is required")
@@ -223,7 +223,7 @@ func (s *ReadGmailTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (s *ReadGmailTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	msgID, _ := args["message_id"].(string)
 	if msgID == "" {
 		return "", fmt.Errorf("read_gmail: message_id is required")

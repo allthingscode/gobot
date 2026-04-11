@@ -39,7 +39,7 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 	_, _ = store.SaveSnapshot("test-session", 1, messages)
 
 	ctx := context.Background()
-	_, err := sm.Dispatch(ctx, "test-session", "new message")
+	_, err := sm.Dispatch(ctx, "test-session", "", "new message")
 	if err != nil {
 		t.Fatalf("dispatch failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 	_, _ = store.SaveSnapshot("test-session", 1, messages)
 
 	ctx := context.Background()
-	_, err := sm.Dispatch(ctx, "test-session", "new message")
+	_, err := sm.Dispatch(ctx, "test-session", "", "new message")
 	if err != nil {
 		t.Fatalf("dispatch failed: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestSessionManager_Summarization_CappedInput(t *testing.T) {
 	_, _ = store.SaveSnapshot("test-session", 1, messages)
 
 	ctx := context.Background()
-	_, err := sm.Dispatch(ctx, "test-session", "new message")
+	_, err := sm.Dispatch(ctx, "test-session", "", "new message")
 	if err != nil {
 		t.Fatalf("dispatch failed: %v", err)
 	}

@@ -127,12 +127,12 @@ func cmdInit() *cobra.Command {
 			}
 
 			dirs := []string{
-				cfg.WorkspacePath(),
-				cfg.WorkspacePath("jobs"),
-				cfg.WorkspacePath("journal"),
-				cfg.WorkspacePath("sessions"),
-				cfg.WorkspacePath("projects"),
-				cfg.WorkspacePath("reports"),
+				cfg.WorkspacePath(""),
+				cfg.WorkspacePath("", "jobs"),
+				cfg.WorkspacePath("", "journal"),
+				cfg.WorkspacePath("", "sessions"),
+				cfg.WorkspacePath("", "projects"),
+				cfg.WorkspacePath("", "reports"),
 				cfg.LogsRoot(),
 				cfg.SecretsRoot(),
 			}
@@ -404,7 +404,7 @@ func cmdRun() *cobra.Command {
 				userEmail:    cfg.Strategic.UserEmail,
 				vecStore:     stack.vecStore,
 				embedProv:    stack.embedProv,
-				workspaceDir: cfg.WorkspacePath(),
+				workspaceDir: cfg.WorkspacePath(""),
 			}
 			scheduler := cron.NewScheduler(storePath, itemsDir, cronDisp)
 			wg.Add(1)

@@ -101,7 +101,7 @@ func TestWebSearchTool(t *testing.T) {
 			tool := newWebSearchTool(tt.apiKey, tt.cx)
 			tool.baseURL = server.URL // Override for testing
 
-			res, err := tool.Execute(context.Background(), "test-session", tt.args)
+			res, err := tool.Execute(context.Background(), "test-session", "", tt.args)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Execute() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -126,7 +126,7 @@ func TestCompleteTaskTool_Name(t *testing.T) {
 func TestCompleteTaskTool_MissingTaskID(t *testing.T) {
 	t.Parallel()
 	tool := newCompleteTaskTool("/tmp/secrets")
-	_, err := tool.Execute(context.Background(), "session:1", map[string]any{"task_id": ""})
+	_, err := tool.Execute(context.Background(), "session:1", "", map[string]any{"task_id": ""})
 	if err == nil {
 		t.Fatal("expected error for missing task_id, got nil")
 	}
@@ -146,7 +146,7 @@ func TestUpdateTaskTool_Name(t *testing.T) {
 func TestUpdateTaskTool_MissingTaskID(t *testing.T) {
 	t.Parallel()
 	tool := newUpdateTaskTool("/tmp/secrets")
-	_, err := tool.Execute(context.Background(), "session:1", map[string]any{
+	_, err := tool.Execute(context.Background(), "session:1", "", map[string]any{
 		"task_id": "",
 		"title":   "something",
 	})

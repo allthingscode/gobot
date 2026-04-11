@@ -287,7 +287,7 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &userMsg}},
 	}
 
-	got, _, err := r.Run(context.Background(), "test-session", messages)
+	got, _, err := r.Run(context.Background(), "test-session", "", messages)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 				},
 			}
 
-			got, _, err := r.Run(context.Background(), "test-session", nil)
+			got, _, err := r.Run(context.Background(), "test-session", "", nil)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatal("Run() expected error, got nil")
@@ -401,7 +401,7 @@ func (m *mockTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{Name: m.name}
 }
 
-func (m *mockTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+func (m *mockTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	return "result", nil
 }
 
@@ -413,7 +413,7 @@ func (p *panicTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{Name: "panic_tool"}
 }
 
-func (p *panicTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+func (p *panicTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	panic("simulated panic")
 }
 
@@ -423,7 +423,7 @@ func TestRunner_ToolPanicRecovery(t *testing.T) {
 		tools: []Tool{&panicTool{}},
 	}
 	ctx := context.Background()
-	result, err := r.executeToolInner(ctx, "session-123", "panic_tool", nil)
+	result, err := r.executeToolInner(ctx, "session-123", "", "panic_tool", nil)
 
 	if err == nil {
 		t.Fatal("Expected error due to panic, got nil")
@@ -447,7 +447,7 @@ func (l *largeTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{Name: "large_tool"}
 }
 
-func (l *largeTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+func (l *largeTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	return strings.Repeat("A", l.size), nil
 }
 
@@ -484,7 +484,7 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 		},
 	}
 
-	_, messages, err := r.Run(context.Background(), "test-session", nil)
+	_, messages, err := r.Run(context.Background(), "test-session", "", nil)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestRunner_StructuredLogging(t *testing.T) {
 		},
 	}
 
-	_, _, _ = r.Run(context.Background(), "test-session", nil)
+	_, _, _ = r.Run(context.Background(), "test-session", "", nil)
 
 	logOutput := buf.String()
 	if !strings.Contains(logOutput, "runner: tool execution failed") {
@@ -582,7 +582,7 @@ func (m *failTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{Name: m.name}
 }
 
-func (m *failTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+func (m *failTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	return "", fmt.Errorf("simulated failure")
 }
 
@@ -594,7 +594,7 @@ func (f *failWithOutputTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{Name: "fail_with_output"}
 }
 
-func (f *failWithOutputTool) Execute(_ context.Context, _ string, _ map[string]any) (string, error) {
+func (f *failWithOutputTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	return "important diagnostic output", fmt.Errorf("exit status 1")
 }
 
@@ -630,7 +630,7 @@ func TestRunner_PreservesOutputOnError(t *testing.T) {
 		},
 	}
 
-	_, messages, err := r.Run(context.Background(), "test-session", nil)
+	_, messages, err := r.Run(context.Background(), "test-session", "", nil)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}

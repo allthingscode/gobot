@@ -91,7 +91,7 @@ func TestSessionManager_PreHistoryHook_Applied(t *testing.T) {
 	sm := NewSessionManager(&noopRunner{}, nil, "test-model")
 	sm.SetHooks(hooks)
 
-	_, _ = sm.Dispatch(context.Background(), "sess1", "hello")
+	_, _ = sm.Dispatch(context.Background(), "sess1", "", "hello")
 	if !called {
 		t.Error("PreHistory hook was not called")
 	}
@@ -114,9 +114,9 @@ func TestSessionManager_PreHistoryHook_TrimsBeforeRunner(t *testing.T) {
 	sm.SetHooks(hooks)
 
 	// First dispatch (no history): hook has nothing to trim, 1 user msg sent.
-	_, _ = sm.Dispatch(context.Background(), "sess2", "first")
+	_, _ = sm.Dispatch(context.Background(), "sess2", "", "first")
 	// Second dispatch (no checkpoint store, so history is always empty): same.
-	_, _ = sm.Dispatch(context.Background(), "sess2", "second")
+	_, _ = sm.Dispatch(context.Background(), "sess2", "", "second")
 
 	// With no store, history is always empty — hook always sees 0 msgs.
 	// Runner always receives exactly 1 user msg.
@@ -134,7 +134,7 @@ func (r *noopRunner) RunText(_ context.Context, _, _, _ string) (string, error) 
 	return "", nil
 }
 
-func (r *noopRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *noopRunner) Run(ctx context.Context, sessionKey, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	return "ok", messages, nil
 }
 
@@ -147,7 +147,7 @@ func (r *recordingRunner) RunText(_ context.Context, _, _, _ string) (string, er
 	return "", nil
 }
 
-func (r *recordingRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *recordingRunner) Run(ctx context.Context, sessionKey, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	cp := make([]agentctx.StrategicMessage, len(messages))
 	copy(cp, messages)
 	r.calls = append(r.calls, cp)

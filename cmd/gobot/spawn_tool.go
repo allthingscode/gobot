@@ -63,12 +63,12 @@ func (r *iterLimitRunner) RunText(ctx context.Context, sessionKey, prompt, model
 	return r.inner.RunText(ctx, sessionKey, prompt, modelOverride)
 }
 
-func (r *iterLimitRunner) Run(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	r.count++
 	if r.count > r.max {
 		return "", nil, fmt.Errorf("spawn: sub-agent exceeded maximum iterations (%d)", r.max)
 	}
-	return r.inner.Run(ctx, sessionKey, messages)
+	return r.inner.Run(ctx, sessionKey, userID, messages)
 }
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from a provider.
@@ -110,7 +110,7 @@ func (s *SpawnTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (s *SpawnTool) Execute(ctx context.Context, parentSessionKey string, args map[string]any) (string, error) {
+func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	agentType, _ := args["agent_type"].(string)
 	objective, _ := args["objective"].(string)
 
@@ -121,31 +121,31 @@ func (s *SpawnTool) Execute(ctx context.Context, parentSessionKey string, args m
 		agentType = "researcher"
 	}
 
-	systemPrompt := s.specialistPrompts[agentType]
+	systemPrompt := t.specialistPrompts[agentType]
 	if systemPrompt == "" {
 		systemPrompt = defaultSpecialistPrompt(agentType)
 	}
 
 	// Resolve model: specialist override -> default.
-	model := s.specialistModels[agentType]
+	model := t.specialistModels[agentType]
 	if model == "" {
-		model = s.model
+		model = t.model
 	}
 
-	subRunner := s.runnerFactory(model, systemPrompt)
+	subRunner := t.runnerFactory(model, systemPrompt)
 	// Wrap in an iteration limiter (F-001: max 5 iterations to prevent infinite loops).
 	limitedRunner := &iterLimitRunner{inner: subRunner, max: spawnMaxIterations}
 	// Sub-agents are ephemeral -- no checkpoint store.
 	subMgr := agent.NewSessionManager(limitedRunner, nil, model)
 
-	subKey := fmt.Sprintf("agent:%s:%s", agentType, parentSessionKey)
+	subKey := fmt.Sprintf("agent:%s:%s", agentType, sessionKey)
 	start := time.Now()
-	slog.Info("spawn: starting sub-agent", "type", agentType, "model", model, "parent", parentSessionKey, "subKey", subKey)
+	slog.Info("spawn: starting sub-agent", "type", agentType, "model", model, "parent", sessionKey, "subKey", subKey)
 
 	subCtx, cancel := context.WithTimeout(ctx, spawnMaxTimeout)
 	defer cancel()
 
-	reply, err := subMgr.Dispatch(subCtx, subKey, objective)
+	reply, err := subMgr.Dispatch(subCtx, subKey, userID, objective)
 	elapsed := time.Since(start)
 	if err != nil {
 		slog.Error("spawn: sub-agent failed", "subKey", subKey, "model", model, "elapsed", elapsed, "err", err)

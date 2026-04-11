@@ -91,6 +91,15 @@ type Handler interface {
 	HandleCallback(ctx context.Context, cb InboundCallback) error
 }
 
+// UserID returns a unique identifier for the user to support workspace isolation (F-073).
+// For DMs, this is the chatID. For groups, it is the senderID.
+func UserID(chatID, senderID int64) string {
+	if chatID > 0 {
+		return fmt.Sprintf("%d", chatID)
+	}
+	return fmt.Sprintf("%d", senderID)
+}
+
 // Bot is the Telegram polling runtime.
 type Bot struct {
 	api     API

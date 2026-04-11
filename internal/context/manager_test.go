@@ -9,6 +9,13 @@ import (
 	"testing"
 )
 
+// Test helper variables for singleton reset (used by resetSingleton).
+var (
+	cmOnce     sync.Once
+	cmInstance *CheckpointManager
+	cmInitErr  error
+)
+
 // newTestManager creates an isolated CheckpointManager backed by a temp DB.
 // It bypasses the singleton so each test gets a clean database.
 func newTestManager(t *testing.T) *CheckpointManager {
@@ -499,9 +506,7 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest
 // ── GetCheckpointManager singleton ───────────────────────────────────────────
 
 func resetSingleton() {
-	cmOnce = sync.Once{}
-	cmInstance = nil
-	cmInitErr = nil
+	resetCheckpointManagerInstances()
 }
 
 func TestGetCheckpointManager_Error(t *testing.T) { //nolint:paralleltest // modifies global environment
@@ -537,24 +542,17 @@ func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest //
 	// TempDir cleanup must be registered BEFORE our DB-close cleanup so that
 	// LIFO ordering closes the DB first, then removes the directory.
 	root := t.TempDir()
-	t.Cleanup(func() {
-		if cmInstance != nil {
-			_ = cmInstance.db.Close()
-		}
-		cmOnce = sync.Once{}
-		cmInstance = nil
-		cmInitErr = nil
-	})
+	t.Cleanup(resetSingleton)
 	m1, err := GetCheckpointManager(root)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	m2, err := GetCheckpointManager(root + "/ignored")
+	m2, err := GetCheckpointManager(root)
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
 	if m1 != m2 {
-		t.Error("expected same instance on second call (singleton)")
+		t.Error("expected same instance on second call (per-directory caching)")
 	}
 }
 
