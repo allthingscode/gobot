@@ -391,8 +391,8 @@ func cmdRun() *cobra.Command {
 			}
 
 			// Start cron scheduler in background.
-			storePath := cfg.WorkspacePath("jobs.json")
-			itemsDir := cfg.WorkspacePath("jobs")
+			storePath := cfg.WorkspacePath("", "jobs.json")
+			itemsDir := cfg.WorkspacePath("", "jobs")
 			// Cron jobs use an ephemeral session manager (nil store) so they never
 			// share checkpoint history with DM conversations (F-013).
 			cronMgr := stack.NewSessionManager(cfg, nil, tracer)
