@@ -11,14 +11,16 @@ import (
 
 // mockMemorySearcher is a test double for memorySearcher.
 type mockMemorySearcher struct {
-	results   []map[string]any
-	err       error
-	lastQuery string
-	lastLimit int
+	results       []map[string]any
+	err           error
+	lastQuery     string
+	lastSessionKey string
+	lastLimit     int
 }
 
-func (m *mockMemorySearcher) Search(query string, limit int) ([]map[string]any, error) {
+func (m *mockMemorySearcher) Search(query, sessionKey string, limit int) ([]map[string]any, error) {
 	m.lastQuery = query
+	m.lastSessionKey = sessionKey
 	m.lastLimit = limit
 	return m.results, m.err
 }

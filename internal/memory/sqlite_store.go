@@ -55,29 +55,63 @@ func NewMemoryStore(storageRoot string) (*MemoryStore, error) {
 }
 
 func initMemorySchema(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-			session_key UNINDEXED,
-			content,
-			timestamp   UNINDEXED
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("initMemorySchema: create memory_fts: %w", err)
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("initMemorySchema: get version: %w", err)
+	}
+
+	if version == 0 {
+		// Check if table exists with old schema
+		var name string
+		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'").Scan(&name)
+		if err == nil {
+			// Migrate: rename old, create new, copy data, drop old
+			migration := []string{
+				`ALTER TABLE memory_fts RENAME TO memory_fts_old`,
+				`CREATE VIRTUAL TABLE memory_fts USING fts5(
+					namespace UNINDEXED,
+					content,
+					timestamp UNINDEXED
+				)`,
+				`INSERT INTO memory_fts(namespace, content, timestamp)
+				 SELECT 'session:' || session_key, content, timestamp FROM memory_fts_old`,
+				`DROP TABLE memory_fts_old`,
+				`PRAGMA user_version = 1`,
+			}
+			for _, stmt := range migration {
+				if _, err := db.Exec(stmt); err != nil {
+					return fmt.Errorf("migration failed: %s: %w", stmt, err)
+				}
+			}
+			slog.Info("memory: schema migrated to V1 (namespaces)")
+		} else {
+			// Fresh install
+			_, err := db.Exec(`
+				CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+					namespace UNINDEXED,
+					content,
+					timestamp UNINDEXED
+				);
+				PRAGMA user_version = 1;
+			`)
+			if err != nil {
+				return fmt.Errorf("initMemorySchema: create V1: %w", err)
+			}
+		}
 	}
 	return nil
 }
 
-// Index adds content to the memory index under sessionKey.
+// Index adds content to the memory index under the specified namespace.
 // Empty or whitespace-only content is silently ignored.
-func (m *MemoryStore) Index(sessionKey, content string) error {
+func (m *MemoryStore) Index(namespace, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
 	ts := time.Now().UTC().Format(time.RFC3339)
 	_, err := m.db.Exec(
-		`INSERT INTO memory_fts(session_key, content, timestamp) VALUES (?, ?, ?)`,
-		sessionKey, content, ts,
+		`INSERT INTO memory_fts(namespace, content, timestamp) VALUES (?, ?, ?)`,
+		namespace, content, ts,
 	)
 	if err != nil {
 		return fmt.Errorf("memory: index: %w", err)
@@ -86,23 +120,26 @@ func (m *MemoryStore) Index(sessionKey, content string) error {
 }
 
 // Search performs a full-text search and returns up to limit results as
-// []map[string]any with "session_key", "content", and "timestamp" keys.
+// []map[string]any with "namespace", "content", and "timestamp" keys.
+// It searches both the provided session namespace and the "global" namespace.
 // Compatible with FilterRAGResults and FormatRAGBlock.
 //
 // Returns nil (not an error) when the query is empty, no results match,
 // or FTS5 rejects the query syntax.
-func (m *MemoryStore) Search(query string, limit int) ([]map[string]any, error) {
+func (m *MemoryStore) Search(query, sessionKey string, limit int) ([]map[string]any, error) {
 	safe := sanitizeFTSQuery(query)
 	if safe == "" || limit <= 0 {
 		return nil, nil
 	}
+
+	sessionNamespace := "session:" + sessionKey
 	rows, err := m.db.Query(
-		`SELECT session_key, content, timestamp
+		`SELECT namespace, content, timestamp
 		 FROM memory_fts
-		 WHERE memory_fts MATCH ?
+		 WHERE memory_fts MATCH ? AND namespace IN (?, 'global')
 		 ORDER BY rank
 		 LIMIT ?`,
-		safe, limit,
+		safe, sessionNamespace, limit,
 	)
 	if err != nil {
 		// FTS5 returns an error on bad query syntax — treat as empty result set.
@@ -112,15 +149,22 @@ func (m *MemoryStore) Search(query string, limit int) ([]map[string]any, error) 
 	defer func() { _ = rows.Close() }()
 
 	var results []map[string]any
+	seen := make(map[string]bool)
 	for rows.Next() {
-		var sessionKey, content, timestamp string
-		if err := rows.Scan(&sessionKey, &content, &timestamp); err != nil {
+		var namespace, content, timestamp string
+		if err := rows.Scan(&namespace, &content, &timestamp); err != nil {
 			continue
 		}
+		// Basic deduplication by content
+		if seen[content] {
+			continue
+		}
+		seen[content] = true
+
 		results = append(results, map[string]any{
-			"session_key": sessionKey,
-			"content":     content,
-			"timestamp":   timestamp,
+			"namespace": namespace,
+			"content":   content,
+			"timestamp": timestamp,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -130,7 +174,7 @@ func (m *MemoryStore) Search(query string, limit int) ([]map[string]any, error) 
 }
 
 // Rebuild walks sessionDir and re-indexes every .md file it finds.
-// Each file is indexed under a session key derived from the filename (no extension).
+// Each file is indexed under a session namespace 'session:{filename}'.
 // Does not clear existing entries — existing duplicates may accumulate; run a
 // fresh database if a clean rebuild is required.
 //
@@ -152,7 +196,8 @@ func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
 			return nil
 		}
 		sessionKey := strings.TrimSuffix(filepath.Base(path), ".md")
-		if err := m.Index(sessionKey, string(data)); err != nil {
+		namespace := "session:" + sessionKey
+		if err := m.Index(namespace, string(data)); err != nil {
 			slog.Warn("memory rebuild: index failed", "path", path, "err", err)
 			return nil
 		}
@@ -165,11 +210,12 @@ func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
 	return count, err
 }
 
-// CleanupExpired removes entries older than the specified duration.
-// ttl should be a duration string like "2160h" (90 days) or "720h" (30 days).
+// CleanupNamespace removes entries in the specified namespace older than the TTL.
+// ttl should be a duration string like "2160h" (90 days).
+// If namespace is empty, it cleans up ALL namespaces (legacy behavior).
 // If ttl is empty or invalid, this is a no-op (returns nil).
 // Returns the number of rows deleted.
-func (m *MemoryStore) CleanupExpired(ttl string) (int64, error) {
+func (m *MemoryStore) CleanupNamespace(namespace, ttl string) (int64, error) {
 	if ttl == "" {
 		return 0, nil
 	}
@@ -182,21 +228,36 @@ func (m *MemoryStore) CleanupExpired(ttl string) (int64, error) {
 		return 0, nil
 	}
 	cutoff := time.Now().UTC().Add(-duration)
-	result, err := m.db.Exec(
-		`DELETE FROM memory_fts WHERE timestamp < ?`,
-		cutoff.Format(time.RFC3339),
-	)
+
+	var result sql.Result
+	if namespace == "" {
+		result, err = m.db.Exec(
+			`DELETE FROM memory_fts WHERE timestamp < ?`,
+			cutoff.Format(time.RFC3339),
+		)
+	} else {
+		result, err = m.db.Exec(
+			`DELETE FROM memory_fts WHERE namespace = ? AND timestamp < ?`,
+			namespace, cutoff.Format(time.RFC3339),
+		)
+	}
+
 	if err != nil {
-		return 0, fmt.Errorf("memory: cleanup: %w", err)
+		return 0, fmt.Errorf("memory: cleanup %s: %w", namespace, err)
 	}
 	deleted, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("memory: rows affected: %w", err)
 	}
 	if deleted > 0 {
-		slog.Info("memory: cleanup removed expired entries", "count", deleted, "ttl", ttl)
+		slog.Info("memory: cleanup removed expired entries", "namespace", namespace, "count", deleted, "ttl", ttl)
 	}
 	return deleted, nil
+}
+
+// CleanupExpired is a legacy wrapper for CleanupNamespace("") to maintain backward compatibility.
+func (m *MemoryStore) CleanupExpired(ttl string) (int64, error) {
+	return m.CleanupNamespace("", ttl)
 }
 
 // Close releases the database connection.

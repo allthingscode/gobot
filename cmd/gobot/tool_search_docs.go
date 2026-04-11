@@ -73,14 +73,14 @@ func (t *SearchDocsTool) Execute(ctx context.Context, _ string, args map[string]
 	}
 
 	// 1. FTS5 Keyword Search (searches agent conversation memory)
-	ftsResults, err := t.memStore.Search(query, limit*2) // fetch more for re-ranking
+	ftsResults, err := t.memStore.Search(query, "", limit*2) // fetch more for re-ranking
 	if err != nil {
 		return "", fmt.Errorf("fts search: %w", err)
 	}
 
 	var mappedFTS []vector.FTSResult
 	for _, res := range ftsResults {
-		id, _ := res["session_key"].(string)
+		id, _ := res["namespace"].(string)
 		content, _ := res["content"].(string)
 		timestamp, _ := res["timestamp"].(string)
 		mappedFTS = append(mappedFTS, vector.FTSResult{

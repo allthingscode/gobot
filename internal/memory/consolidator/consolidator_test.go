@@ -89,7 +89,7 @@ func TestConsolidator_IndexesFacts(t *testing.T) {
 	}
 
 	// Verify facts are searchable.
-	results, err := store.Search("Project Alpha", 5)
+	results, err := store.Search("Project Alpha", "sess1", 5)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestConsolidator_DeduplicatesFacts(t *testing.T) {
 	t.Parallel()
 	store := newTestStore(t)
 	// Pre-seed a fact.
-	_ = store.Index("sess1", "Project Alpha deadline is May 1 2026")
+	_ = store.Index("session:sess1", "Project Alpha deadline is May 1 2026")
 
 	runner := &mockTextRunner{
 		response: `["Project Alpha deadline is May 1 2026"]`,
@@ -218,7 +218,7 @@ assistant: Budget approved for Q2`
 	}
 
 	for _, tc := range tests {
-		results, err := store.Search(tc.query, 5)
+		results, err := store.Search(tc.query, "sess1", 5)
 		if err != nil {
 			t.Logf("Search(%q): %v", tc.query, err)
 		}
@@ -277,11 +277,49 @@ func TestConsolidator_NoConsolidateOnShortReply(t *testing.T) {
 	// Verify nothing was indexed. If ConsolidateAsync had run the consolidate function,
 	// facts would be indexed. Since they're not, we know it returned early.
 	// We can verify this by trying a search that would only match if the fact was indexed.
-	results, err := store.Search("should not be reached", 100)
+	results, err := store.Search("should not be reached", "sess1", 100)
 	if err != nil {
 		t.Logf("Search error: %v", err) // Empty results are okay
 	}
 	if len(results) > 0 {
 		t.Error("expected no entries indexed for short messages, but found results")
+	}
+}
+
+func TestConsolidator_GlobalRouting(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	runner := &mockTextRunner{
+		response: `["User prefers metric units", "Project Alpha deadline is May 1 2026", "Session specific fact"]`,
+	}
+	c := New(runner, store, nil, nil)
+	c.SetGlobalPatterns([]string{"prefer", "deadline"})
+
+	_, err := c.consolidate(context.Background(), "sess1", strings.Repeat("x", 200))
+	if err != nil {
+		t.Fatalf("consolidate: %v", err)
+	}
+
+	// Verify global facts are findable from a different session
+	results, _ := store.Search("metric", "sess2", 5)
+	if len(results) == 0 {
+		t.Error("expected to find global fact 'metric' from sess2")
+	}
+
+	results, _ = store.Search("deadline", "sess2", 5)
+	if len(results) == 0 {
+		t.Error("expected to find global fact 'deadline' from sess2")
+	}
+
+	// Verify session fact is NOT findable from a different session
+	results, _ = store.Search("specific", "sess2", 5)
+	if len(results) > 0 {
+		t.Errorf("did NOT expect to find session fact from sess2, got %d results", len(results))
+	}
+
+	// Verify session fact IS findable from its own session
+	results, _ = store.Search("specific", "sess1", 5)
+	if len(results) == 0 {
+		t.Error("expected to find session fact from its own session (sess1)")
 	}
 }

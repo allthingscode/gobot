@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- **Cross-Session Shared Memory Namespace** (F-071): Implements a namespaced memory model for long-term storage.
+  - Adds `session:{key}` and `global` namespaces to the memory store.
+  - Implements schema migration to transition from legacy session-only model to namespaced model.
+  - Updates memory search to query both current session and global facts.
+  - Integrates pattern-based routing in the consolidator to promote specific facts to global memory.
+  - Adds `globalTTL` and `globalNamespacePatterns` configuration for semantic routing control.
 - **Vector/Semantic Memory Layer** (F-030): Implements a semantic similarity layer for long-term memory using `chromem-go`.
   - Adds hybrid retrieval (FTS5 keyword + Vector semantic) with Reciprocal Rank Fusion (RRF) re-ranking.
   - Integrates Gemini `text-embedding-004` generation into the memory consolidation pipeline.

@@ -14,7 +14,7 @@ type mockSearcher struct {
 	results []map[string]any
 }
 
-func (m *mockSearcher) Search(query string, limit int) ([]map[string]any, error) {
+func (m *mockSearcher) Search(query, sessionKey string, limit int) ([]map[string]any, error) {
 	return m.results, nil
 }
 
@@ -86,11 +86,11 @@ func TestHybridSearch(t *testing.T) {
 
 	fts := &mockSearcher{
 		results: []map[string]any{
-			{"session_key": "f1", "content": "keyword fact about projects", "timestamp": "2026-04-10T10:05:00Z"},
+			{"namespace": "session:f1", "content": "keyword fact about projects", "timestamp": "2026-04-10T10:05:00Z"},
 		},
 	}
 
-	results, err := HybridSearch(ctx, fts, store, embedProv, "projects", 5)
+	results, err := HybridSearch(ctx, fts, store, embedProv, "projects", "f1", 5)
 	if err != nil {
 		t.Fatalf("HybridSearch: %v", err)
 	}

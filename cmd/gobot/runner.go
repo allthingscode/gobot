@@ -121,7 +121,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 
 			// F-030: Use hybrid search for RAG if enabled
 			if r.cfg.VectorSearchEnabled() && r.vecStore != nil && r.embedProv != nil {
-				hybridResults, err := vector.HybridSearch(ctx, r.memStore, r.vecStore, r.embedProv, userText, 5)
+				hybridResults, err := vector.HybridSearch(ctx, r.memStore, r.vecStore, r.embedProv, userText, sessionKey, 5)
 				if err == nil {
 					// Map hybrid results to the format expected by FormatRAGBlock
 					for _, res := range hybridResults {
@@ -132,13 +132,15 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey string, messages []ag
 					}
 				} else {
 					slog.Warn("runner: hybrid RAG search failed, falling back to FTS5", "err", err)
-					if results, _ := r.memStore.Search(userText, 5); len(results) > 0 {
+					// F-071: Pass sessionKey to Search
+					if results, _ := r.memStore.Search(userText, sessionKey, 5); len(results) > 0 {
 						filtered = memory.FilterRAGResults(results, 0.0)
 					}
 				}
 			} else {
 				// Classic FTS5-only RAG
-				if results, _ := r.memStore.Search(userText, 5); len(results) > 0 {
+				// F-071: Pass sessionKey to Search
+				if results, _ := r.memStore.Search(userText, sessionKey, 5); len(results) > 0 {
 					filtered = memory.FilterRAGResults(results, 0.0)
 				}
 			}
@@ -656,13 +658,15 @@ func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot
 		}
 	}
 	if err == nil && h.memory != nil {
+		// F-071: Use session: namespace
+		ns := "session:" + sessionKey
 		// Index user message (if not generic noise)
 		if !memory.ShouldSkipRAG(msg.Text) {
-			_ = h.memory.Index(sessionKey, "USER: "+msg.Text)
+			_ = h.memory.Index(ns, "USER: "+msg.Text)
 		}
 		// Index assistant reply
 		if reply != "" {
-			if indexErr := h.memory.Index(sessionKey, "ASSISTANT: "+reply); indexErr != nil {
+			if indexErr := h.memory.Index(ns, "ASSISTANT: "+reply); indexErr != nil {
 				slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
 			}
 		}

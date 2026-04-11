@@ -59,7 +59,7 @@ func cmdMemory() *cobra.Command {
 				return err
 			}
 			defer func() { _ = store.Close() }()
-			results, err := store.Search(query, 10)
+			results, err := store.Search(query, "", 10)
 			if err != nil {
 				return err
 			}
@@ -82,7 +82,7 @@ const searchMemoryToolName = "search_memory"
 // memorySearcher is the subset of *memory.MemoryStore used by SearchMemoryTool.
 // Defined as an interface so tests can supply a mock.
 type memorySearcher interface {
-	Search(query string, limit int) ([]map[string]any, error)
+	Search(query, sessionKey string, limit int) ([]map[string]any, error)
 }
 
 // SearchMemoryTool implements Tool and queries the FTS5 long-term memory store.
@@ -128,7 +128,7 @@ func (t *SearchMemoryTool) Declaration() provider.ToolDeclaration {
 
 // Execute searches the memory store and returns results as a JSON string.
 // If no results are found, returns a plain-text message saying so.
-func (t *SearchMemoryTool) Execute(ctx context.Context, _ string, args map[string]any) (string, error) {
+func (t *SearchMemoryTool) Execute(ctx context.Context, sessionKey string, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return "", fmt.Errorf("search_memory: query is required")
@@ -154,9 +154,12 @@ func (t *SearchMemoryTool) Execute(ctx context.Context, _ string, args map[strin
 
 	// F-030: Use hybrid search if enabled and store is available
 	if t.cfg.VectorSearchEnabled() && t.vecStore != nil && t.embedProv != nil {
-		results, err = vector.HybridSearch(ctx, t.store, t.vecStore, t.embedProv, query, limit)
+		// F-071: Update HybridSearch if needed, or handle namespace here.
+		// For now, let's update HybridSearch signature too.
+		results, err = vector.HybridSearch(ctx, t.store, t.vecStore, t.embedProv, query, sessionKey, limit)
 	} else {
-		results, err = t.store.Search(query, limit)
+		// F-071: Pass sessionKey to Search
+		results, err = t.store.Search(query, sessionKey, limit)
 	}
 
 	if err != nil {

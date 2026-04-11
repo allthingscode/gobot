@@ -335,6 +335,8 @@ func cmdRun() *cobra.Command {
 				if cfg.Agents.Defaults.Compaction.Strategy == "memoryFlush" {
 					h.SetPrompt(cfg.Agents.Defaults.Compaction.MemoryFlush.Prompt)
 					h.SetTTL(cfg.Agents.Defaults.Compaction.MemoryFlush.TTL)
+					h.SetGlobalTTL(cfg.Agents.Defaults.Compaction.MemoryFlush.GlobalTTL)
+					h.SetGlobalPatterns(cfg.Agents.Defaults.Compaction.MemoryFlush.GlobalNamespacePatterns)
 				}
 				// Wire observability provider for metrics (F-068)
 				if otelProvider != nil {

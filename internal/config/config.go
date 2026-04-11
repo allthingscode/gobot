@@ -99,8 +99,10 @@ func (s SummarizationConfig) Model(defaultModel string) string {
 }
 
 type MemoryFlushConfig struct {
-	Prompt string `json:"prompt"`
-	TTL    string `json:"ttl"` // e.g., "2160h" for 90 days; empty means no cleanup
+	Prompt                  string   `json:"prompt"`
+	TTL                     string   `json:"ttl"` // e.g., "2160h" for 90 days; empty means no cleanup
+	GlobalTTL               string   `json:"globalTTL"`
+	GlobalNamespacePatterns []string `json:"globalNamespacePatterns"`
 }
 
 type SpecialistConfig struct {

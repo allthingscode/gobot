@@ -46,6 +46,8 @@ type Consolidator struct {
 	embedProv vector.EmbeddingProvider // F-030: Semantic memory
 	prompt    string
 	ttl       string                  // e.g., "2160h" for 90 days; empty means no cleanup
+	globalTTL string                  // F-071: TTL for global namespace
+	patterns  []string                // F-071: Patterns for global routing
 	obs       *observability.Provider // optional observability provider
 }
 
@@ -59,6 +61,8 @@ func New(runner TextRunner, store *memory.MemoryStore, vecStore *vector.Store, e
 		embedProv: embedProv,
 		prompt:    consolidationPrompt,
 		ttl:       "",
+		globalTTL: "",
+		patterns:  nil,
 		obs:       nil,
 	}
 }
@@ -70,9 +74,19 @@ func (c *Consolidator) SetPrompt(p string) {
 	}
 }
 
-// SetTTL sets the TTL for memory cleanup (e.g., "2160h" for 90 days).
+// SetTTL sets the TTL for session memory cleanup (e.g., "2160h" for 90 days).
 func (c *Consolidator) SetTTL(ttl string) {
 	c.ttl = ttl
+}
+
+// SetGlobalTTL sets the TTL for global memory cleanup (F-071).
+func (c *Consolidator) SetGlobalTTL(ttl string) {
+	c.globalTTL = ttl
+}
+
+// SetGlobalPatterns sets the patterns used to route facts to the global namespace (F-071).
+func (c *Consolidator) SetGlobalPatterns(patterns []string) {
+	c.patterns = patterns
 }
 
 // SetObservability sets the observability provider for metrics recording.
@@ -138,7 +152,8 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 			continue
 		}
 		// Deduplication: skip if a very similar fact is already in the store.
-		if existing, err := c.store.Search(fact, 1); err == nil && len(existing) > 0 {
+		// F-071: Search across both session and global namespaces.
+		if existing, err := c.store.Search(fact, sessionKey, 1); err == nil && len(existing) > 0 {
 			if existingContent, ok := existing[0]["content"].(string); ok {
 				if similarity(fact, existingContent) > 0.8 {
 					slog.Debug("consolidator: skipping duplicate fact", "fact", fact)
@@ -147,7 +162,17 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 				}
 			}
 		}
-		if indexErr := c.store.Index(sessionKey, fact); indexErr != nil {
+
+		// F-071: Route to global if matches patterns, else session-scoped.
+		namespace := "session:" + sessionKey
+		for _, p := range c.patterns {
+			if strings.Contains(strings.ToLower(fact), strings.ToLower(p)) {
+				namespace = "global"
+				break
+			}
+		}
+
+		if indexErr := c.store.Index(namespace, fact); indexErr != nil {
 			slog.Warn("consolidator: index failed", "fact", fact, "err", indexErr)
 			skipped++
 			continue
@@ -160,6 +185,7 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 				Content: fact,
 				Metadata: map[string]string{
 					"session_key": sessionKey,
+					"namespace":   namespace, // F-071: Support namespacing in vectors
 					"timestamp":   time.Now().UTC().Format(time.RFC3339),
 					"source":      "consolidator",
 				},
@@ -190,12 +216,19 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 		}
 	}
 
-	// Perform TTL-based cleanup if configured (F-068).
+	// F-071: Perform per-namespace TTL cleanup.
 	if c.ttl != "" {
-		if deleted, err := c.store.CleanupExpired(c.ttl); err != nil {
-			slog.Warn("consolidator: cleanup failed", "err", err)
+		if deleted, err := c.store.CleanupNamespace("session:"+sessionKey, c.ttl); err != nil {
+			slog.Warn("consolidator: session cleanup failed", "err", err)
 		} else if deleted > 0 {
-			slog.Debug("consolidator: cleanup completed", "deleted", deleted)
+			slog.Debug("consolidator: session cleanup completed", "deleted", deleted)
+		}
+	}
+	if c.globalTTL != "" {
+		if deleted, err := c.store.CleanupNamespace("global", c.globalTTL); err != nil {
+			slog.Warn("consolidator: global cleanup failed", "err", err)
+		} else if deleted > 0 {
+			slog.Debug("consolidator: global cleanup completed", "deleted", deleted)
 		}
 	}
 

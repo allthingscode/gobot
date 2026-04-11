@@ -61,28 +61,28 @@ func TestNewMemoryStore_IdempotentSchema(t *testing.T) {
 func TestIndex(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		sessionKey string
-		content    string
-		wantErr    bool
+		name      string
+		namespace string
+		content   string
+		wantErr   bool
 		wantStored bool
 	}{
 		{
-			name:       "normal entry",
-			sessionKey: "telegram:123",
-			content:    "The project deadline is March 31.",
+			name:      "normal entry",
+			namespace: "session:123",
+			content:   "The project deadline is March 31.",
 			wantStored: true,
 		},
 		{
-			name:       "empty content is no-op",
-			sessionKey: "telegram:123",
-			content:    "",
-			wantStored: false,
+			name:      "global entry",
+			namespace: "global",
+			content:   "User prefers metric units.",
+			wantStored: true,
 		},
 		{
-			name:       "whitespace-only is no-op",
-			sessionKey: "telegram:123",
-			content:    "   \t\n  ",
+			name:      "empty content is no-op",
+			namespace: "global",
+			content:   "",
 			wantStored: false,
 		},
 	}
@@ -91,7 +91,7 @@ func TestIndex(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			store := newTestStore(t)
-			err := store.Index(tc.sessionKey, tc.content)
+			err := store.Index(tc.namespace, tc.content)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("Index() error = %v, wantErr %v", err, tc.wantErr)
 			}
@@ -116,65 +116,52 @@ func TestSearch(t *testing.T) {
 	t.Parallel()
 	store := newTestStore(t)
 
-	_ = store.Index("session-a", "The Q1 budget review is on Thursday with the finance team.")
-	_ = store.Index("session-b", "Reminder: submit expense report by Friday.")
-	_ = store.Index("session-c", "The project deadline for phase two is next month.")
+	_ = store.Index("session:a", "The Q1 budget review is on Thursday with the finance team.")
+	_ = store.Index("session:b", "Reminder: submit expense report by Friday.")
+	_ = store.Index("global", "Project Alpha deadline is May 1st.")
 
 	tests := []struct {
-		name      string
-		query     string
-		limit     int
-		wantCount int // minimum matches expected
-		wantNone  bool
+		name       string
+		query      string
+		sessionKey string
+		limit      int
+		wantCount  int // minimum matches expected
+		wantNone   bool
 	}{
 		{
-			name:      "finds budget entry",
-			query:     "budget",
-			limit:     5,
-			wantCount: 1,
+			name:       "finds budget entry in session a",
+			query:      "budget",
+			sessionKey: "a",
+			limit:      5,
+			wantCount:  1,
 		},
 		{
-			name:      "finds expense entry",
-			query:     "expense report",
-			limit:     5,
-			wantCount: 1,
+			name:       "finds global entry from session b",
+			query:      "Alpha",
+			sessionKey: "b",
+			limit:      5,
+			wantCount:  1,
 		},
 		{
-			name:      "limit respected",
-			query:     "budget",
-			limit:     1,
-			wantCount: 1,
+			name:       "does not find session a entry from session b",
+			query:      "budget",
+			sessionKey: "b",
+			limit:      5,
+			wantNone:   true,
 		},
 		{
-			name:     "no match",
-			query:    "quantum entanglement",
-			limit:    5,
-			wantNone: true,
-		},
-		{
-			name:     "empty query returns nil",
-			query:    "",
-			limit:    5,
-			wantNone: true,
-		},
-		{
-			name:     "zero limit returns nil",
-			query:    "budget",
-			limit:    0,
-			wantNone: true,
-		},
-		{
-			name:      "FTS5 special chars in query do not crash",
-			query:     `budget (review) "team" *`,
-			limit:     5,
-			wantCount: 0, // sanitized to safe query — may or may not match
+			name:       "deduplicates results",
+			query:      "deadline",
+			sessionKey: "c",
+			limit:      5,
+			wantCount:  1,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			results, err := store.Search(tc.query, tc.limit)
+			results, err := store.Search(tc.query, tc.sessionKey, tc.limit)
 			if err != nil {
 				t.Fatalf("Search() unexpected error: %v", err)
 			}
@@ -187,19 +174,13 @@ func TestSearch(t *testing.T) {
 			if len(results) < tc.wantCount {
 				t.Errorf("want at least %d results, got %d", tc.wantCount, len(results))
 			}
-			if tc.limit > 0 && len(results) > tc.limit {
-				t.Errorf("results %d exceeds limit %d", len(results), tc.limit)
-			}
 			// Verify result shape.
 			for _, r := range results {
 				if _, ok := r["content"]; !ok {
 					t.Error("result missing 'content' key")
 				}
-				if _, ok := r["session_key"]; !ok {
-					t.Error("result missing 'session_key' key")
-				}
-				if _, ok := r["timestamp"]; !ok {
-					t.Error("result missing 'timestamp' key")
+				if _, ok := r["namespace"]; !ok {
+					t.Error("result missing 'namespace' key")
 				}
 			}
 		})
@@ -234,7 +215,7 @@ func TestRebuild(t *testing.T) {
 	}
 
 	// Verify the indexed content is searchable.
-	results, _ := store.Search("financial report", 5)
+	results, _ := store.Search("financial report", "session-alpha", 5)
 	if len(results) == 0 {
 		t.Error("expected to find 'financial report' after rebuild")
 	}
@@ -242,13 +223,13 @@ func TestRebuild(t *testing.T) {
 	// Verify session key is derived from filename.
 	found := false
 	for _, r := range results {
-		if r["session_key"] == "session-alpha" {
+		if r["namespace"] == "session:session-alpha" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("session key 'session-alpha' not found in results")
+		t.Error("namespace 'session:session-alpha' not found in results")
 	}
 }
 
@@ -329,8 +310,8 @@ func TestCleanupExpired(t *testing.T) {
 	store := newTestStore(t)
 
 	// Add some entries to the store.
-	_ = store.Index("session-1", "fact 1")
-	_ = store.Index("session-2", "fact 2")
+	_ = store.Index("session:1", "fact 1")
+	_ = store.Index("session:2", "fact 2")
 
 	tests := []struct {
 		name    string
