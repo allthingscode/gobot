@@ -28,9 +28,14 @@ try {
 Write-Host "Simulating merge from task/$TaskId..." -ForegroundColor Gray
 # We use -no-commit and --no-ff to ensure we don't actually finish the merge.
 # We want to see if it *can* merge cleanly.
-$mergeResult = git merge --no-commit --no-ff "task/$TaskId" 2>&1
 
-if ($LASTEXITCODE -ne 0) {
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$mergeResult = git merge --no-commit --no-ff "task/$TaskId"
+$gitExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousPreference
+
+if ($gitExitCode -ne 0) {
     Write-Host "!!! CONFLICT DETECTED !!!" -ForegroundColor Red
     
     $conflictingFiles = git diff --name-only --diff-filter=U
