@@ -10,13 +10,13 @@ set -e
 cd "$(git rev-parse --show-toplevel)"
 
 # 0. Block accidental .private/ leakage
-PRIVATE_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^.private/' || true)
+PRIVATE_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(.private/|.gemini/|.agent-workspaces/)' || true)
 if [ -n "$PRIVATE_FILES" ]; then
-    echo "CRITICAL ERROR: Attempting to commit private files in .private/"
-    echo "The .private directory is for local Dev Factory use only and must NEVER be committed."
+    echo "CRITICAL ERROR: Attempting to commit private files in restricted directories (.private/, .gemini/, or .agent-workspaces/)"
+    echo "These directories are for local Dev Factory use only and must NEVER be committed."
     echo "Offending files:"
     echo "$PRIVATE_FILES"
-    echo "Please run: git rm --cached -r .private"
+    echo "Please run: git rm --cached -r <dir>"
     exit 1
 fi
 
