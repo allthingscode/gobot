@@ -30,7 +30,7 @@ func listTasksWithClient(secretsRoot, tasklistID string, client *http.Client) ([
 	}
 
 	if tasklistID == "" {
-		tasklistID = "@default"
+		tasklistID = "@default" //nolint:goconst // Google API default task list identifier
 	}
 
 	apiURL := fmt.Sprintf("%s/lists/%s/tasks?showCompleted=false&showHidden=false",
@@ -79,7 +79,7 @@ func createTaskWithClient(secretsRoot, tasklistID, title, notes string, client *
 	}
 
 	if tasklistID == "" {
-		tasklistID = "@default"
+		tasklistID = "@default" //nolint:goconst // Google API default task list identifier
 	}
 
 	apiURL := fmt.Sprintf("%s/lists/%s/tasks", tasksBaseURL, tasklistID)
@@ -132,7 +132,7 @@ func completeTaskWithClient(secretsRoot, tasklistID, taskID string, client *http
 		return fmt.Errorf("tasks auth: %w", err)
 	}
 	if tasklistID == "" {
-		tasklistID = "@default"
+		tasklistID = "@default" //nolint:goconst // Google API default task list identifier
 	}
 	apiURL := fmt.Sprintf("%s/lists/%s/tasks/%s", tasksBaseURL, tasklistID, taskID)
 	var updated struct{}
@@ -153,7 +153,7 @@ func updateTaskWithClient(secretsRoot, tasklistID, taskID, title, notes, due str
 		return fmt.Errorf("tasks auth: %w", err)
 	}
 	if tasklistID == "" {
-		tasklistID = "@default"
+		tasklistID = "@default" //nolint:goconst // Google API default task list identifier
 	}
 	body := map[string]string{}
 	if title != "" {

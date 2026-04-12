@@ -11,16 +11,16 @@ func TestDeriveSchema(t *testing.T) {
 	}
 
 	type TestArgs struct {
-		Command     string   `json:"command" schema:"Executable to run"`
-		Args        []string `json:"args,omitempty" schema:"Arguments to pass"`
-		Count       int      `json:"count" schema:"Number of times"`
-		Enabled     bool     `json:"enabled" schema:"Flag"`
-		Ratio       float64  `json:"ratio" schema:"Success ratio"`
-		Internal    string   `json:"-"`
-		unexported  string
-		NoTag       string
-		Optional    string `json:"optional,omitempty" schema:"Optional field"`
-		NestedObj   Nested `json:"nested" schema:"Nested object"`
+		Command    string   `json:"command" schema:"Executable to run"`
+		Args       []string `json:"args,omitempty" schema:"Arguments to pass"`
+		Count      int      `json:"count" schema:"Number of times"`
+		Enabled    bool     `json:"enabled" schema:"Flag"`
+		Ratio      float64  `json:"ratio" schema:"Success ratio"`
+		Internal   string   `json:"-"`
+		unexported string
+		NoTag      string
+		Optional   string `json:"optional,omitempty" schema:"Optional field"`
+		NestedObj  Nested `json:"nested" schema:"Nested object"`
 	}
 
 	// Satisfy linter for unused field
@@ -28,7 +28,7 @@ func TestDeriveSchema(t *testing.T) {
 
 	schema := DeriveSchema(TestArgs{})
 
-	if schema["type"] != "object" {
+	if schema["type"] != "object" { //nolint:goconst // test fixture
 		t.Errorf("expected type object, got %v", schema["type"])
 	}
 
@@ -68,7 +68,7 @@ func TestDeriveSchema(t *testing.T) {
 			items, ok := prop["items"].(map[string]any)
 			if !ok {
 				t.Errorf("property %s: items not found", ep.name)
-			} else if items["type"] != "string" {
+			} else if items["type"] != "string" { //nolint:goconst // test fixture
 				t.Errorf("property %s: expected items type string, got %s", ep.name, items["type"])
 			}
 		}

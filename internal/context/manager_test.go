@@ -14,7 +14,7 @@ import (
 var (
 	cmOnce     sync.Once
 	cmInstance *CheckpointManager
-	cmInitErr  error
+	ErrCmInit  error
 )
 
 // newTestManager creates an isolated CheckpointManager backed by a temp DB.
@@ -538,7 +538,7 @@ func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest //
 	// Reset the singleton state for this test.
 	cmOnce = sync.Once{}
 	cmInstance = nil
-	cmInitErr = nil
+	ErrCmInit = nil
 
 	// TempDir cleanup must be registered BEFORE our DB-close cleanup so that
 	// LIFO ordering closes the DB first, then removes the directory.

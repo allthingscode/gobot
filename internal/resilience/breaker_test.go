@@ -9,7 +9,7 @@ import (
 func TestBreaker_ClosedByDefault(t *testing.T) {
 	t.Parallel()
 	b := New("test", 3, 10*time.Second, 1*time.Second)
-	if got := b.State(); got != "closed" {
+	if got := b.State(); got != "closed" { //nolint:goconst // test fixture
 		t.Fatalf("expected state %q, got %q", "closed", got)
 	}
 }
@@ -29,7 +29,7 @@ func TestBreaker_TripsAfterConsecutiveFailures(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		_ = b.Execute(func() error { return errors.New("fail") })
 	}
-	if got := b.State(); got != "open" {
+	if got := b.State(); got != "open" { //nolint:goconst // test fixture
 		t.Fatalf("expected state %q after 3 failures, got %q", "open", got)
 	}
 }
@@ -56,7 +56,7 @@ func TestBreaker_Execute_NonFatalError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a non-nil error from fn, got nil")
 	}
-	if got := b.State(); got != "closed" {
+	if got := b.State(); got != "closed" { //nolint:goconst // test fixture
 		t.Fatalf("expected state %q, got %q", "closed", got)
 	}
 }

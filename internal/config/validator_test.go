@@ -8,6 +8,7 @@ import (
 
 // helper to create a base valid config for testing
 func baseValidConfig(t *testing.T) *Config {
+	t.Helper()
 	tmpDir := t.TempDir()
 	// Create workspace and AWARENESS.md to satisfy path validation
 	wsDir := filepath.Join(tmpDir, "workspace")

@@ -78,8 +78,8 @@ func TestIdempotency_Success(t *testing.T) {
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	key := "test-key"
-	tool := "shell_exec"
+	key := "test-key"    //nolint:goconst // test fixture
+	tool := "shell_exec" //nolint:goconst // test fixture
 	hash := "params-hash-123"
 	result := "exec-output"
 	session := "session-abc"
@@ -108,8 +108,8 @@ func TestIdempotency_HashMismatch(t *testing.T) {
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	key := "test-key"
-	tool := "shell_exec"
+	key := "test-key"    //nolint:goconst // test fixture
+	tool := "shell_exec" //nolint:goconst // test fixture
 	hash1 := "hash-1"
 	hash2 := "hash-2"
 	result := "output"

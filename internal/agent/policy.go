@@ -27,7 +27,7 @@ func (d PolicyDecision) String() string {
 	case PolicyRequireHITL:
 		return "require_hitl"
 	default:
-		return "unknown"
+		return "unknown" //nolint:goconst // default sentinel value in switch
 	}
 }
 

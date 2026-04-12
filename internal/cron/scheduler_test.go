@@ -274,7 +274,7 @@ func TestSchedulerPoll_FailureAlert(t *testing.T) {
 		t.Fatalf("want 1 alert, got %d", len(dispatcher.alerts))
 	}
 	alert := dispatcher.alerts[0]
-	if alert.Channel != "telegram" {
+	if alert.Channel != "telegram" { //nolint:goconst // test fixture
 		t.Errorf("alert channel: want telegram, got %q", alert.Channel)
 	}
 	if alert.To != "telegram:999" {

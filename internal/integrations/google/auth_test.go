@@ -59,7 +59,7 @@ func TestBearerToken_ExpiredRefreshes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "new-token" {
+	if got != "new-token" { //nolint:goconst // test fixture token
 		t.Errorf("want new-token, got %q", got)
 	}
 }

@@ -34,6 +34,13 @@ linters:
                 - os.RemoveAll
                 - os.Setenv
                 - os.Unsetenv
+        goconst:
+            min-len: 3
+            min-occurrences: 3
+            ignore-tests: true
+        loggercheck:
+            checks:
+                - "key-value"
     enable:
         - errcheck
         - errorlint
@@ -46,6 +53,12 @@ linters:
         - gocritic
         - misspell
         - paralleltest
+        - goconst
+        - loggercheck
+        - thelper
+        - sloglint
+        - dupword
+        - errname
 
 run:
     modules-download-mode: readonly

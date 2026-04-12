@@ -14,7 +14,7 @@ import (
 func TestOpenAIProvider_Name(t *testing.T) {
 	t.Parallel()
 	p := NewOpenAIProvider("test-key", "")
-	if p.Name() != "openai" {
+	if p.Name() != "openai" { //nolint:goconst // test fixture
 		t.Errorf("got %q, want %q", p.Name(), "openai")
 	}
 }
@@ -130,7 +130,7 @@ func TestOpenAIProvider_Chat_Success(t *testing.T) {
 	if len(resp.Message.ToolCalls) != 1 {
 		t.Fatalf("got %d tool calls, want 1", len(resp.Message.ToolCalls))
 	}
-	if resp.Message.ToolCalls[0]["name"] != "my_tool" {
+	if resp.Message.ToolCalls[0]["name"] != "my_tool" { //nolint:goconst // test fixture
 		t.Errorf("got tool name %q, want 'my_tool'", resp.Message.ToolCalls[0]["name"])
 	}
 }

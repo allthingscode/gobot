@@ -33,7 +33,7 @@ func TestPruneContext_UserMessagesAlwaysKept(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
-	if result[0]["role"] != "user" {
+	if result[0]["role"] != "user" { //nolint:goconst // test fixture
 		t.Error("expected the kept message to be the user message")
 	}
 }
@@ -393,7 +393,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 			toolArguments: nil,
 			currentMemory: "old",
 			wantError:     false,
-			checkResult: func(t *testing.T, result map[string]any) {
+			checkResult: func(t *testing.T, result map[string]any) { //nolint:thelper // table-driven test helper
 				if result["history_entry"] != "valid" {
 					t.Errorf("expected history_entry='valid', got %v", result["history_entry"])
 				}
@@ -406,7 +406,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 			toolArguments: nil,
 			currentMemory: "old",
 			wantError:     false,
-			checkResult: func(t *testing.T, result map[string]any) {
+			checkResult: func(t *testing.T, result map[string]any) { //nolint:thelper // test helper closure
 				if result["history_entry"] != "recovered" {
 					t.Errorf("expected history_entry='recovered', got %v", result["history_entry"])
 				}
@@ -419,7 +419,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 			toolArguments: nil,
 			currentMemory: "old",
 			wantError:     true,
-			checkResult: func(t *testing.T, result map[string]any) {
+			checkResult: func(t *testing.T, result map[string]any) { //nolint:thelper // test helper closure
 				if result != nil {
 					t.Errorf("expected nil result on error, got %v", result)
 				}

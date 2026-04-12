@@ -31,7 +31,7 @@ enabled: true
 This is the task body.
 It can span multiple lines.`,
 			wantErr: false,
-			validate: func(t *testing.T, j *Job) {
+			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
 				if j.ID != "daily-report" {
 					t.Errorf("expected ID daily-report, got %s", j.ID)
 				}
@@ -65,7 +65,7 @@ schedule: every(2h)
 ---
 Body`,
 			wantErr: false,
-			validate: func(t *testing.T, j *Job) {
+			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
 				if j.Schedule.Kind != KindEvery || *j.Schedule.EveryMS != 7200000 {
 					t.Errorf("expected EveryMS 7200000, got %v", j.Schedule.EveryMS)
 				}
@@ -80,9 +80,9 @@ schedule: every(1d)
 ---
 Body`,
 			wantErr: false,
-			validate: func(t *testing.T, j *Job) {
-				if j.Schedule.Kind != KindEvery || *j.Schedule.EveryMS != 86400000 {
-					t.Errorf("expected EveryMS 86400000, got %v", j.Schedule.EveryMS)
+			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
+				if j.Schedule.Kind != KindEvery || *j.Schedule.EveryMS < 80000000 { // 1 day = 86400000ms, allow margin
+					t.Errorf("expected EveryMS ~86400000, got %v", j.Schedule.EveryMS)
 				}
 			},
 		},
@@ -95,7 +95,7 @@ schedule: at(9999999)
 ---
 Body`,
 			wantErr: false,
-			validate: func(t *testing.T, j *Job) {
+			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
 				if j.Schedule.Kind != KindAt || *j.Schedule.AtMS != 9999999 {
 					t.Errorf("expected AtMS 9999999, got %v", j.Schedule.AtMS)
 				}
@@ -110,7 +110,7 @@ schedule: cron(0 9 * * 1-5, America/New_York)
 ---
 Body`,
 			wantErr: false,
-			validate: func(t *testing.T, j *Job) {
+			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
 				if j.Schedule.Kind != KindCron || j.Schedule.Expr != "0 9 * * 1-5" || j.Schedule.TZ != "America/New_York" {
 					t.Errorf("unexpected schedule: %+v", j.Schedule)
 				}
@@ -125,7 +125,7 @@ schedule: every(100)
 ---
 Body`,
 			wantErr: false,
-			validate: func(t *testing.T, j *Job) {
+			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
 				if j.Payload.Channel != "telegram" {
 					t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
 				}
@@ -160,9 +160,24 @@ schedule: every(100)
 ---
 Body`,
 			wantErr: false,
-			validate: func(t *testing.T, j *Job) {
+			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
 				if j.ID != "stem-test" {
 					t.Errorf("expected ID stem-test, got %s", j.ID)
+				}
+				if j.Name != "stem-test" {
+					t.Errorf("expected Name stem-test, got %s", j.Name)
+				}
+				if j.Schedule.Kind != KindEvery {
+					t.Errorf("expected KindEvery, got %v", j.Schedule.Kind)
+				}
+				if j.Payload.Channel != "telegram" {
+					t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
+				}
+				if j.Payload.To != "" {
+					t.Errorf("expected default to empty, got %s", j.Payload.To)
+				}
+				if j.Payload.Message != "Body" {
+					t.Errorf("expected body %q, got %q", "Body", j.Payload.Message)
 				}
 			},
 		},

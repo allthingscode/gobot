@@ -26,7 +26,7 @@ func TestFallbackNotify(t *testing.T) {
 			recipient: "user@example.com",
 			reason:    "quota_exceeded",
 			wantRet:   "Gmail unavailable (quota_exceeded). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) {
+			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // table-driven test helper
 				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
 				data, err := os.ReadFile(notifFile)
 				if err != nil {
@@ -62,7 +62,7 @@ func TestFallbackNotify(t *testing.T) {
 				_ = os.WriteFile(notifFile, []byte("# Strategic Notifications (Fallback)\n"), 0o600)
 			},
 			wantRet: "Gmail unavailable (network_error). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) {
+			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // test helper closure
 				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
 				data, err := os.ReadFile(notifFile)
 				if err != nil {
@@ -84,7 +84,7 @@ func TestFallbackNotify(t *testing.T) {
 			recipient: "user@example.com",
 			reason:    "Error: invalid_grant",
 			wantRet:   "Gmail unavailable (AUTH EXPIRED. Run: gobot reauth). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) {
+			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // table-driven test helper
 				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
 				data, err := os.ReadFile(notifFile)
 				if err != nil {
@@ -103,7 +103,7 @@ func TestFallbackNotify(t *testing.T) {
 			recipient: "user@example.com",
 			reason:    "some token expired error",
 			wantRet:   "Gmail unavailable (AUTH EXPIRED. Run: gobot reauth). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) {
+			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // table-driven test helper
 				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
 				data, err := os.ReadFile(notifFile)
 				if err != nil {

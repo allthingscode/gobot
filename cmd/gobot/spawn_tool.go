@@ -110,7 +110,7 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 		return "", fmt.Errorf("spawn: objective is required")
 	}
 	if agentType == "" {
-		agentType = "researcher"
+		agentType = "researcher" //nolint:goconst // specialist default
 	}
 
 	systemPrompt := t.specialistPrompts[agentType]
