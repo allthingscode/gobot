@@ -8,6 +8,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
@@ -80,6 +81,20 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 		cleanup = func() { _ = memStore.Close() }
 	}
 
+	// F-105: Wire per-user memory store provider when multi-user isolation is enabled.
+	if cfg.MultiUserEnabled() {
+		runner.SetMemoryStoreProvider(func(userID string) *memory.MemoryStore {
+			dbDir := cfg.WorkspacePath(userID)
+			store, err := memory.GetMemoryStore(dbDir)
+			if err != nil {
+				slog.Warn("bootstrap: per-user memory store unavailable", "userID", userID, "err", err)
+				return nil
+			}
+			return store
+		})
+		slog.Info("bootstrap: multi-user memory isolation enabled")
+	}
+
 	var vecStore *vector.Store
 	var embedProv vector.EmbeddingProvider
 	if gp, ok := prov.(*provider.GeminiProvider); ok && gp.Client() != nil {
@@ -127,6 +142,15 @@ func (s *agentStack) NewSessionManager(cfg *config.Config, store agent.Checkpoin
 	mgr.SetCompactionPolicy(cfg.Compaction())
 	mgr.SetStorageRoot(cfg.StorageRoot())
 	mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
+
+	// F-105: Wire per-user checkpoint store provider when multi-user isolation is enabled.
+	if cfg.MultiUserEnabled() {
+		mgr.SetCheckpointStoreProvider(func(userID string) (agent.CheckpointStore, error) {
+			dbDir := cfg.WorkspacePath(userID)
+			return agentctx.GetCheckpointManager(dbDir)
+		})
+		slog.Info("bootstrap: multi-user checkpoint isolation enabled")
+	}
 
 	return mgr
 }
