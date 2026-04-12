@@ -170,11 +170,12 @@ type StrategicConfig struct {
 	StorageRoot         string              `json:"storage_root"`
 	MaxToolIterations   int                 `json:"max_tool_iterations,omitempty"`
 	IdempotencyTTL      string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
-	VectorSearchEnabled bool                `json:"vector_search_enabled"`   // F-030
-	MultiUserEnabled    bool                `json:"multi_user_enabled"`      // F-073
+	VectorSearchEnabled bool                `json:"vector_search_enabled"`    // F-030
+	MultiUserEnabled    bool                `json:"multi_user_enabled"`       // F-073
 	Observability       ObservabilityConfig `json:"observability"`
-	TemplatesPath       string              `json:"templates_path,omitempty"` // Custom directory for email templates
-	Routing             RoutingConfig       `json:"routing"`                  // F-102
+	TemplatesPath       string              `json:"templates_path,omitempty"`   // Custom directory for email templates
+	Routing             RoutingConfig       `json:"routing"`                    // F-102
+	PolicyFilePath      string              `json:"policy_file_path,omitempty"` // F-103
 }
 
 type RoutingConfig struct {
@@ -567,6 +568,11 @@ func (c *Config) ExecTimeout() time.Duration {
 // HumanInTheLoop returns true if the human-in-the-loop approval framework is enabled.
 func (c *Config) HumanInTheLoop() bool {
 	return c.Channels.Telegram.HITL
+}
+
+// PolicyFilePath returns the configured tool policy file path.
+func (c *Config) PolicyFilePath() string {
+	return c.Strategic.PolicyFilePath
 }
 
 // DefaultConfigPath returns ~/.gobot/config.json.

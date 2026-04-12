@@ -1,0 +1,29 @@
+# tool_policy.yaml
+# Policy-driven tool execution configuration for GoBot (F-103)
+#
+# Rules are evaluated top-to-bottom; first match wins.
+# The "*" wildcard matches any tool name as the default catch-all.
+#
+# decision values:
+#   - allow        : tool executes without additional checks
+#   - deny         : tool is blocked; returns error to the model
+#   - require_hitl : tool requires human approval via Telegram HITL
+
+rules:
+  # Always deny shell execution for security
+  - tool: "shell.run"
+    decision: deny
+
+  # High-risk tools always require HITL approval
+  - tool: "send_email"
+    decision: require_hitl
+
+  - tool: "gmail.send"
+    decision: require_hitl
+
+  - tool: "calendar.create_event"
+    decision: require_hitl
+
+  # Default: allow all other tools
+  - tool: "*"
+    decision: allow
