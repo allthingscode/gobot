@@ -306,7 +306,7 @@ func TestResolvePolicyFilePath(t *testing.T) {
 		want        string
 	}{
 		{"/custom/path.yaml", "/storage", "/custom/path.yaml"},
-		{"", "C:\\storage", "C:\\storage\\tool_policy.yaml"},
+		{"", filepath.Join("tmp", "storage"), filepath.Join("tmp", "storage", "tool_policy.yaml")},
 	}
 	for _, tt := range tests {
 		if got := ResolvePolicyFilePath(tt.configPath, tt.storageRoot); got != tt.want {

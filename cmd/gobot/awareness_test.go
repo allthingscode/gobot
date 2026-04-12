@@ -69,9 +69,8 @@ func TestLoadPrivateFile(t *testing.T) {
 
 	t.Run("finds file in ~/.gobot (primary)", func(t *testing.T) {
 		tempHome := t.TempDir()
-		originalHome := os.Getenv("USERPROFILE")
-		os.Setenv("USERPROFILE", tempHome)
-		defer os.Setenv("USERPROFILE", originalHome)
+		t.Setenv("USERPROFILE", tempHome)
+		t.Setenv("HOME", tempHome)
 
 		dotGobot := filepath.Join(tempHome, ".gobot")
 		if err := os.MkdirAll(dotGobot, 0o755); err != nil {
@@ -111,9 +110,8 @@ func TestLoadPrivateFile(t *testing.T) {
 
 	t.Run("prioritizes ~/.gobot over workspace", func(t *testing.T) {
 		tempHome := t.TempDir()
-		originalHome := os.Getenv("USERPROFILE")
-		os.Setenv("USERPROFILE", tempHome)
-		defer os.Setenv("USERPROFILE", originalHome)
+		t.Setenv("USERPROFILE", tempHome)
+		t.Setenv("HOME", tempHome)
 
 		dotGobot := filepath.Join(tempHome, ".gobot")
 		if err := os.MkdirAll(dotGobot, 0o755); err != nil {
