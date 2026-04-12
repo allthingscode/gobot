@@ -33,7 +33,8 @@ type geminiRunner struct {
 	prov                provider.Provider
 	model               string
 	systemPrompt        string
-	memStore            *memory.MemoryStore      // may be nil; used for RAG context injection
+	memStore            *memory.MemoryStore                      // may be nil; shared single-user RAG store
+	memStoreProvider    func(userID string) *memory.MemoryStore  // may be nil; F-105 per-user store factory
 	vecStore            *vector.Store            // F-030: Semantic memory
 	embedProv           vector.EmbeddingProvider // F-030: Semantic memory
 	cfg                 *config.Config           // F-030: Configuration
@@ -103,6 +104,13 @@ func (r *geminiRunner) SetIdempotencyStore(store *agentctx.IdempotencyStore) {
 	r.idempStore = store
 }
 
+// SetMemoryStoreProvider configures a factory that returns a per-user MemoryStore
+// when multi-user workspace isolation is enabled (F-105). When set and userID is
+// non-empty, Run will call this factory instead of using the shared r.memStore.
+func (r *geminiRunner) SetMemoryStoreProvider(fn func(userID string) *memory.MemoryStore) {
+	r.memStoreProvider = fn
+}
+
 // Run executes the tool-call/response loop until the provider returns a terminal text response.
 //
 // Each iteration:
@@ -113,15 +121,21 @@ func (r *geminiRunner) SetIdempotencyStore(store *agentctx.IdempotencyStore) {
 //
 // Returns an error if maxToolIterations is exceeded or prov.Chat fails.
 func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+	// F-105: Resolve per-user memory store when multi-user isolation is enabled.
+	memStore := r.memStore
+	if r.memStoreProvider != nil && userID != "" {
+		memStore = r.memStoreProvider(userID)
+	}
+
 	// 1. Build System Prompt with RAG and Hooks
 	sysPrompt := r.systemPrompt
-	if r.memStore != nil {
+	if memStore != nil {
 		if userText := lastUserText(messages); !memory.ShouldSkipRAG(userText) {
 			var filtered []map[string]any
 
 			// F-030: Use hybrid search for RAG if enabled
 			if r.cfg.VectorSearchEnabled() && r.vecStore != nil && r.embedProv != nil {
-				hybridResults, err := vector.HybridSearch(ctx, r.memStore, r.vecStore, r.embedProv, userText, sessionKey, 5)
+				hybridResults, err := vector.HybridSearch(ctx, memStore, r.vecStore, r.embedProv, userText, sessionKey, 5)
 				if err == nil {
 					// Map hybrid results to the format expected by FormatRAGBlock
 					for _, res := range hybridResults {
@@ -133,14 +147,14 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messa
 				} else {
 					slog.Warn("runner: hybrid RAG search failed, falling back to FTS5", "err", err)
 					// F-071: Pass sessionKey to Search
-					if results, _ := r.memStore.Search(userText, sessionKey, 5); len(results) > 0 {
+					if results, _ := memStore.Search(userText, sessionKey, 5); len(results) > 0 {
 						filtered = memory.FilterRAGResults(results, 0.0)
 					}
 				}
 			} else {
 				// Classic FTS5-only RAG
 				// F-071: Pass sessionKey to Search
-				if results, _ := r.memStore.Search(userText, sessionKey, 5); len(results) > 0 {
+				if results, _ := memStore.Search(userText, sessionKey, 5); len(results) > 0 {
 					filtered = memory.FilterRAGResults(results, 0.0)
 				}
 			}

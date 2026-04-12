@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // register "sqlite" driver
@@ -16,6 +17,32 @@ import (
 
 const memoryDBFileName = "memory.db"
 const maxRebuildFiles = 10_000
+
+var (
+	msInstances sync.Map  // map[string]*MemoryStore; keyed by dbDir
+	msMu        sync.Mutex // serializes new-instance creation
+)
+
+// GetMemoryStore returns a MemoryStore for the specified dbDir, creating it if
+// necessary. Instances are cached so only one handle is open per directory.
+// Mirrors the GetCheckpointManager pattern in internal/context.
+func GetMemoryStore(dbDir string) (*MemoryStore, error) {
+	if v, ok := msInstances.Load(dbDir); ok {
+		return v.(*MemoryStore), nil
+	}
+	msMu.Lock()
+	defer msMu.Unlock()
+	// Double-check after acquiring the mutex.
+	if v, ok := msInstances.Load(dbDir); ok {
+		return v.(*MemoryStore), nil
+	}
+	store, err := NewMemoryStore(dbDir)
+	if err != nil {
+		return nil, err
+	}
+	msInstances.Store(dbDir, store)
+	return store, nil
+}
 
 // MemoryStore is a SQLite FTS5-backed long-term memory index.
 // It indexes agent responses by session key and supports full-text search.

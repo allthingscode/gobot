@@ -65,20 +65,21 @@ type Consolidator interface {
 // Concurrent calls with the same sessionKey are queued; concurrent calls
 // with different sessionKeys proceed in parallel.
 type SessionManager struct {
-	runner           Runner
-	store            CheckpointStore // may be nil
-	model            string
-	storageRoot      string        // may be ""; used for journal writes on compaction
-	logger           SessionLogger // may be nil; set via SetLogger
-	consolidator     Consolidator  // may be nil; set via SetConsolidator
-	hooks            *Hooks        // may be nil; set via SetHooks
-	tracer           *observability.DispatchTracer
-	memoryWindow     int
-	lockTimeout      time.Duration
-	pruningPolicy    config.ContextPruningConfig
-	compactionPolicy config.CompactionPolicyConfig
-	tokenBudget      int // per-session token budget before triggering compaction (F-104)
-	summaryTurns     int // how many oldest turns to summarize per compaction pass (F-104)
+	runner                   Runner
+	store                    CheckpointStore // may be nil; shared single-user store
+	checkpointStoreProvider  func(userID string) (CheckpointStore, error) // may be nil; F-105 per-user
+	model                    string
+	storageRoot              string        // may be ""; used for journal writes on compaction
+	logger                   SessionLogger // may be nil; set via SetLogger
+	consolidator             Consolidator  // may be nil; set via SetConsolidator
+	hooks                    *Hooks        // may be nil; set via SetHooks
+	tracer                   *observability.DispatchTracer
+	memoryWindow             int
+	lockTimeout              time.Duration
+	pruningPolicy            config.ContextPruningConfig
+	compactionPolicy         config.CompactionPolicyConfig
+	tokenBudget              int // per-session token budget before triggering compaction (F-104)
+	summaryTurns             int // how many oldest turns to summarize per compaction pass (F-104)
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -164,6 +165,28 @@ func (m *SessionManager) SetSummaryTurns(turns int) {
 	}
 }
 
+// SetCheckpointStoreProvider configures a factory that returns a per-user
+// CheckpointStore when multi-user workspace isolation is enabled (F-105).
+// When set and userID is non-empty, Dispatch will call this factory to obtain
+// the store rather than using the shared m.store.
+func (m *SessionManager) SetCheckpointStoreProvider(fn func(userID string) (CheckpointStore, error)) {
+	m.checkpointStoreProvider = fn
+}
+
+// resolveStore returns the CheckpointStore to use for the given userID.
+// If a checkpointStoreProvider is configured and userID is non-empty it is
+// called; otherwise the shared m.store is returned.
+func (m *SessionManager) resolveStore(userID string) CheckpointStore {
+	if m.checkpointStoreProvider != nil && userID != "" {
+		if s, err := m.checkpointStoreProvider(userID); err == nil {
+			return s
+		} else {
+			slog.Warn("agent: CheckpointStoreProvider failed, falling back to shared store", "userID", userID, "err", err)
+		}
+	}
+	return m.store
+}
+
 // Dispatch delivers userMessage to the runner under a per-session lock.
 //
 // If a CheckpointStore is configured:
@@ -183,34 +206,37 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userM
 		lock.release()
 	}()
 
+	// F-105: resolve per-user store when multi-user isolation is enabled.
+	store := m.resolveStore(userID)
+
 	if m.tracer != nil {
 		// Load history first so we can report message count to tracer.
-		messages, iteration, stateless, err := m.loadHistory(sessionKey)
+		messages, iteration, stateless, err := m.loadHistory(sessionKey, store)
 		if err != nil {
 			return "", err
 		}
 		return m.tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
-			return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless)
+			return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless, store)
 		})
 	}
 
-	messages, iteration, stateless, err := m.loadHistory(sessionKey)
+	messages, iteration, stateless, err := m.loadHistory(sessionKey, store)
 	if err != nil {
 		return "", err
 	}
-	return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless)
+	return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless, store)
 }
 
-// loadHistory loads conversation history from checkpoint.
-func (m *SessionManager) loadHistory(sessionKey string) (messages []agentctx.StrategicMessage, iteration int, stateless bool, err error) {
-	if m.store != nil {
-		snap, loadErr := m.store.LoadLatest(sessionKey)
+// loadHistory loads conversation history from the provided checkpoint store.
+func (m *SessionManager) loadHistory(sessionKey string, store CheckpointStore) (messages []agentctx.StrategicMessage, iteration int, stateless bool, err error) {
+	if store != nil {
+		snap, loadErr := store.LoadLatest(sessionKey)
 		if loadErr == nil && snap != nil {
 			messages = snap.Messages
 			iteration = snap.Iteration
 		} else {
 			// First turn for this session — create the thread record.
-			if createErr := m.store.CreateThread(sessionKey, m.model, nil); createErr != nil {
+			if createErr := store.CreateThread(sessionKey, m.model, nil); createErr != nil {
 				slog.Error("agent: CreateThread failed (continuing statelessly)", "session_id", sessionKey, "err", createErr)
 				stateless = true
 			}
@@ -243,7 +269,8 @@ Conversation history to summarize:
 )
 
 // dispatch is the implementation of Dispatch, potentially wrapped by tracing.
-func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userMessage string, messages []agentctx.StrategicMessage, iteration int, stateless bool) (string, error) {
+// store is the resolved per-user (or shared) CheckpointStore for this session.
+func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userMessage string, messages []agentctx.StrategicMessage, iteration int, stateless bool, store CheckpointStore) (string, error) {
 	// Strip [SILENT] prefix — the cron layer uses it to suppress routing
 	// but the model should never see it (mirrors _patched_dispatch in loop.py).
 	cleaned, silent := StripSilent(userMessage)
@@ -389,24 +416,24 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userM
 	}
 
 	// F-104: Update per-session token budget and trigger async compaction if needed.
-	if m.tokenBudget > 0 && m.store != nil {
-		tokens, _, _ := m.store.GetSessionTokens(sessionKey)
+	if m.tokenBudget > 0 && store != nil {
+		tokens, _, _ := store.GetSessionTokens(sessionKey)
 		newTokens := tokens + estimateTokensForMessages(updated)
-		if err := m.store.UpdateSessionTokens(sessionKey, newTokens, nil); err != nil {
+		if err := store.UpdateSessionTokens(sessionKey, newTokens, nil); err != nil {
 			slog.Warn("agent: UpdateSessionTokens failed", "session", sessionKey, "err", err)
 		} else {
 			slog.Debug("agent: session token budget", "session", sessionKey, "tokens", newTokens, "budget", m.tokenBudget)
 			if newTokens > m.tokenBudget && m.summaryTurns > 0 {
 				slog.Info("agent: session token budget exceeded, triggering compaction", "session", sessionKey, "tokens", newTokens, "budget", m.tokenBudget)
-				go m.compactSessionAsync(sessionKey)
+				go m.compactSessionAsync(sessionKey, store)
 			}
 		}
 	}
 
 	// Persist the updated history.
-	if !stateless && m.store != nil && len(updated) > 0 {
+	if !stateless && store != nil && len(updated) > 0 {
 		iteration++
-		if _, saveErr := m.store.SaveSnapshot(sessionKey, iteration, updated); saveErr != nil {
+		if _, saveErr := store.SaveSnapshot(sessionKey, iteration, updated); saveErr != nil {
 			slog.Warn("agent: SaveSnapshot failed", "session", sessionKey, "err", saveErr)
 		}
 		// Write markdown session log (F-037).
@@ -449,10 +476,11 @@ func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
 
 // compactSessionAsync loads the session history, compacts the oldest N turns by
 // summarizing them into a single system message, and persists the result.
+// store is the resolved per-user (or shared) CheckpointStore for this session.
 // Errors are logged but not returned since compaction runs in a background goroutine.
-func (m *SessionManager) compactSessionAsync(sessionKey string) {
+func (m *SessionManager) compactSessionAsync(sessionKey string, store CheckpointStore) {
 	slog.Info("agent: starting per-session compaction", "session", sessionKey)
-	snap, err := m.store.LoadLatest(sessionKey)
+	snap, err := store.LoadLatest(sessionKey)
 	if err != nil {
 		slog.Warn("agent: compactSessionAsync LoadLatest failed", "session", sessionKey, "err", err)
 		return
@@ -495,10 +523,10 @@ func (m *SessionManager) compactSessionAsync(sessionKey string) {
 	compacted := append([]agentctx.StrategicMessage{summaryMsg}, kept...)
 	now := time.Now()
 	tokens := estimateTokensForMessages(compacted)
-	if err := m.store.UpdateSessionTokens(sessionKey, tokens, &now); err != nil {
+	if err := store.UpdateSessionTokens(sessionKey, tokens, &now); err != nil {
 		slog.Warn("agent: UpdateSessionTokens after compaction failed", "session", sessionKey, "err", err)
 	}
-	_, err = m.store.SaveSnapshot(sessionKey, snap.Iteration, compacted)
+	_, err = store.SaveSnapshot(sessionKey, snap.Iteration, compacted)
 	if err != nil {
 		slog.Warn("agent: SaveSnapshot after compaction failed", "session", sessionKey, "err", err)
 		return
