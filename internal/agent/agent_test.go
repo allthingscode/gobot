@@ -132,6 +132,26 @@ func (s *mockStore) CreateThread(threadID, _ string, _ map[string]any) error {
 	return nil
 }
 
+func (s *mockStore) UpdateSessionTokens(threadID string, tokens int, _ *time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snapshots[threadID] != nil {
+		s.snapshots[threadID].Metadata["estimated_tokens"] = tokens
+	}
+	return nil
+}
+
+func (s *mockStore) GetSessionTokens(threadID string) (int, *time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if snap, ok := s.snapshots[threadID]; ok {
+		if tokens, ok := snap.Metadata["estimated_tokens"].(int); ok {
+			return tokens, nil, nil
+		}
+	}
+	return 0, nil, nil
+}
+
 // ── Mock consolidator ──────────────────────────────────────────────────────────
 
 type mockConsolidator struct {
@@ -856,5 +876,3 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 		}
 	}
 }
-
-

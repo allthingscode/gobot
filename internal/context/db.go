@@ -68,15 +68,63 @@ func addChecksumColumnIfMissing(db *sql.DB) error {
 	return err
 }
 
+// addTokenColumnsIfMissing adds estimated_tokens and last_compacted_at columns
+// to the threads table if they do not already exist. Idempotent and safe for
+// existing databases.
+func addTokenColumnsIfMissing(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(threads)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	hasTokens := false
+	hasCompactedAt := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var typeStr string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typeStr, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "estimated_tokens" {
+			hasTokens = true
+		}
+		if name == "last_compacted_at" {
+			hasCompactedAt = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if !hasTokens {
+		if _, err := db.Exec("ALTER TABLE threads ADD COLUMN estimated_tokens INTEGER DEFAULT 0"); err != nil {
+			return fmt.Errorf("addTokenColumnsIfMissing: estimated_tokens: %w", err)
+		}
+	}
+	if !hasCompactedAt {
+		if _, err := db.Exec("ALTER TABLE threads ADD COLUMN last_compacted_at DATETIME"); err != nil {
+			return fmt.Errorf("addTokenColumnsIfMissing: last_compacted_at: %w", err)
+		}
+	}
+	return nil
+}
+
 // initSchema creates the threads, checkpoints, and idempotency_keys tables if they do not exist.
 func initSchema(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS threads (
-			thread_id  TEXT PRIMARY KEY,
-			status     TEXT    DEFAULT 'active',
-			model      TEXT,
-			metadata   JSON,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			thread_id         TEXT PRIMARY KEY,
+			status            TEXT    DEFAULT 'active',
+			model             TEXT,
+			metadata          JSON,
+			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			estimated_tokens  INTEGER DEFAULT 0,
+			last_compacted_at DATETIME
 		)
 	`)
 	if err != nil {
@@ -107,6 +155,10 @@ func initSchema(db *sql.DB) error {
 
 	if err := addChecksumColumnIfMissing(db); err != nil {
 		return fmt.Errorf("initSchema: add checksum column: %w", err)
+	}
+
+	if err := addTokenColumnsIfMissing(db); err != nil {
+		return fmt.Errorf("initSchema: add token columns: %w", err)
 	}
 
 	_, err = db.Exec(`

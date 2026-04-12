@@ -26,6 +26,7 @@ type Config struct {
 	Strategic  StrategicConfig  `json:"strategic_edition"`
 	Gateway    GatewayConfig    `json:"gateway"`
 	Resilience ResilienceConfig `json:"resilience"`
+	Context    ContextConfig    `json:"context"`
 }
 
 type ResilienceConfig struct {
@@ -58,6 +59,11 @@ type AgentDefaults struct {
 type ContextPruningConfig struct {
 	TTL                string `json:"ttl"`
 	KeepLastAssistants int    `json:"keepLastAssistants"`
+}
+
+type ContextConfig struct {
+	SessionTokenBudget     int `json:"session_token_budget"`
+	CompactionSummaryTurns int `json:"compaction_summary_turns"`
 }
 
 // DefaultSummarizationThreshold is the default threshold for context summarization (70%).
@@ -223,6 +229,24 @@ func (c *Config) ContextPruning() ContextPruningConfig {
 // Compaction returns the configured compaction policy.
 func (c *Config) Compaction() CompactionPolicyConfig {
 	return c.Agents.Defaults.Compaction
+}
+
+// SessionTokenBudget returns the per-session token budget for compaction,
+// defaulting to 80000 if unset or zero.
+func (c *Config) SessionTokenBudget() int {
+	if c.Context.SessionTokenBudget > 0 {
+		return c.Context.SessionTokenBudget
+	}
+	return 80000
+}
+
+// CompactionSummaryTurns returns how many oldest turns to summarize per compaction
+// pass, defaulting to 20 if unset or zero.
+func (c *Config) CompactionSummaryTurns() int {
+	if c.Context.CompactionSummaryTurns > 0 {
+		return c.Context.CompactionSummaryTurns
+	}
+	return 20
 }
 
 // EffectiveIdempotencyTTL returns the configured idempotency key TTL,

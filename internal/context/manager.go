@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // ThreadSnapshot is the return type for LoadLatest.
@@ -222,6 +223,49 @@ func (m *CheckpointManager) CompleteThread(threadID string) error {
 // additional tables (e.g. PairingStore) without opening a second handle.
 func (m *CheckpointManager) DB() *sql.DB {
 	return m.db
+}
+
+// UpdateSessionTokens updates the estimated_tokens and last_compacted_at for a
+// thread. Called by the agent after each turn to maintain per-session budgets.
+func (m *CheckpointManager) UpdateSessionTokens(threadID string, tokens int, compactedAt *time.Time) error {
+	var compactArg interface{}
+	if compactedAt != nil {
+		compactArg = compactedAt.Format("2006-01-02T15:04:05Z")
+	}
+	_, err := m.db.Exec(
+		`UPDATE threads SET estimated_tokens = ?, last_compacted_at = ? WHERE thread_id = ?`,
+		tokens, compactArg, threadID,
+	)
+	if err != nil {
+		return fmt.Errorf("UpdateSessionTokens: exec: %w", err)
+	}
+	return nil
+}
+
+// GetSessionTokens reads estimated_tokens and last_compacted_at for a thread.
+func (m *CheckpointManager) GetSessionTokens(threadID string) (tokens int, compactedAt *time.Time, err error) {
+	row := m.db.QueryRow(
+		`SELECT estimated_tokens, last_compacted_at FROM threads WHERE thread_id = ?`,
+		threadID,
+	)
+	var tokensNull sql.NullInt64
+	var compactNull sql.NullString
+	if err := row.Scan(&tokensNull, &compactNull); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil, nil
+		}
+		return 0, nil, fmt.Errorf("GetSessionTokens: scan: %w", err)
+	}
+	if tokensNull.Valid {
+		tokens = int(tokensNull.Int64)
+	}
+	if compactNull.Valid && compactNull.String != "" {
+		t, err := time.Parse("2006-01-02T15:04:05Z", compactNull.String)
+		if err == nil {
+			compactedAt = &t
+		}
+	}
+	return tokens, compactedAt, nil
 }
 
 // ListResumable returns all active threads that have at least one checkpoint,

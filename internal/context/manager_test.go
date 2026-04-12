@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Test helper variables for singleton reset (used by resetSingleton).
@@ -675,5 +676,93 @@ func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated
 
 	if !usedIndex {
 		t.Error("Expected LoadLatest query to use idx_checkpoints_thread_iteration, but it did not. Check query plan.")
+	}
+}
+
+func TestUpdateSessionTokens(t *testing.T) { //nolint:paralleltest // uses newTestManager isolation
+	m := newTestManager(t)
+	if err := m.CreateThread("t1", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+
+	// Update tokens for session.
+	if err := m.UpdateSessionTokens("t1", 5000, nil); err != nil {
+		t.Fatalf("UpdateSessionTokens: %v", err)
+	}
+
+	// Verify tokens were stored.
+	tokens, compactedAt, err := m.GetSessionTokens("t1")
+	if err != nil {
+		t.Fatalf("GetSessionTokens: %v", err)
+	}
+	if tokens != 5000 {
+		t.Errorf("expected tokens=5000, got %d", tokens)
+	}
+	if compactedAt != nil {
+		t.Errorf("expected nil compactedAt, got %v", compactedAt)
+	}
+}
+
+func TestUpdateSessionTokens_WithCompactedAt(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+	m := newTestManager(t)
+	if err := m.CreateThread("t1", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+
+	compactTime := time.Date(2026, 4, 11, 20, 0, 0, 0, time.UTC)
+	if err := m.UpdateSessionTokens("t1", 10000, &compactTime); err != nil {
+		t.Fatalf("UpdateSessionTokens: %v", err)
+	}
+
+	tokens, compactedAt, err := m.GetSessionTokens("t1")
+	if err != nil {
+		t.Fatalf("GetSessionTokens: %v", err)
+	}
+	if tokens != 10000 {
+		t.Errorf("expected tokens=10000, got %d", tokens)
+	}
+	if compactedAt == nil {
+		t.Fatal("expected non-nil compactedAt")
+	}
+	if !compactedAt.Equal(compactTime) {
+		t.Errorf("expected compactedAt=%v, got %v", compactTime, compactedAt)
+	}
+}
+
+func TestGetSessionTokens_UnknownSession(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+	m := newTestManager(t)
+	tokens, compactedAt, err := m.GetSessionTokens("unknown-session")
+	if err != nil {
+		t.Fatalf("GetSessionTokens: unexpected error: %v", err)
+	}
+	if tokens != 0 {
+		t.Errorf("expected tokens=0, got %d", tokens)
+	}
+	if compactedAt != nil {
+		t.Errorf("expected nil compactedAt, got %v", compactedAt)
+	}
+}
+
+func TestUpdateSessionTokens_UpdatesExistingRow(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+	m := newTestManager(t)
+	if err := m.CreateThread("t1", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+
+	// First update.
+	if err := m.UpdateSessionTokens("t1", 1000, nil); err != nil {
+		t.Fatalf("UpdateSessionTokens: %v", err)
+	}
+	// Second update (should overwrite).
+	if err := m.UpdateSessionTokens("t1", 2000, nil); err != nil {
+		t.Fatalf("UpdateSessionTokens: %v", err)
+	}
+
+	tokens, _, err := m.GetSessionTokens("t1")
+	if err != nil {
+		t.Fatalf("GetSessionTokens: %v", err)
+	}
+	if tokens != 2000 {
+		t.Errorf("expected tokens=2000 (latest update), got %d", tokens)
 	}
 }

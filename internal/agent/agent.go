@@ -47,6 +47,10 @@ type CheckpointStore interface {
 	SaveSnapshot(threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error)
 	// CreateThread initializes a new durable thread record.
 	CreateThread(threadID, model string, metadata map[string]any) error
+	// UpdateSessionTokens updates the estimated_tokens and last_compacted_at for a thread.
+	UpdateSessionTokens(threadID string, tokens int, compactedAt *time.Time) error
+	// GetSessionTokens reads estimated_tokens and last_compacted_at for a thread.
+	GetSessionTokens(threadID string) (tokens int, compactedAt *time.Time, err error)
 }
 
 // Consolidator abstracts the memory consolidation/fact extraction layer (F-028, F-047).
@@ -73,6 +77,8 @@ type SessionManager struct {
 	lockTimeout      time.Duration
 	pruningPolicy    config.ContextPruningConfig
 	compactionPolicy config.CompactionPolicyConfig
+	tokenBudget      int // per-session token budget before triggering compaction (F-104)
+	summaryTurns     int // how many oldest turns to summarize per compaction pass (F-104)
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -140,6 +146,22 @@ func (m *SessionManager) SetConsolidator(c Consolidator) {
 // Call this at startup before the first Dispatch. Hooks run in registration order.
 func (m *SessionManager) SetHooks(h *Hooks) {
 	m.hooks = h
+}
+
+// SetTokenBudget configures the per-session token budget before triggering
+// per-session compaction (F-104). Defaults to 80000 if not set.
+func (m *SessionManager) SetTokenBudget(budget int) {
+	if budget > 0 {
+		m.tokenBudget = budget
+	}
+}
+
+// SetSummaryTurns configures how many oldest turns to summarize per compaction
+// pass (F-104). Defaults to 20 if not set.
+func (m *SessionManager) SetSummaryTurns(turns int) {
+	if turns > 0 {
+		m.summaryTurns = turns
+	}
 }
 
 // Dispatch delivers userMessage to the runner under a per-session lock.
@@ -366,6 +388,21 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userM
 		}
 	}
 
+	// F-104: Update per-session token budget and trigger async compaction if needed.
+	if m.tokenBudget > 0 && m.store != nil {
+		tokens, _, _ := m.store.GetSessionTokens(sessionKey)
+		newTokens := tokens + estimateTokensForMessages(updated)
+		if err := m.store.UpdateSessionTokens(sessionKey, newTokens, nil); err != nil {
+			slog.Warn("agent: UpdateSessionTokens failed", "session", sessionKey, "err", err)
+		} else {
+			slog.Debug("agent: session token budget", "session", sessionKey, "tokens", newTokens, "budget", m.tokenBudget)
+			if newTokens > m.tokenBudget && m.summaryTurns > 0 {
+				slog.Info("agent: session token budget exceeded, triggering compaction", "session", sessionKey, "tokens", newTokens, "budget", m.tokenBudget)
+				go m.compactSessionAsync(sessionKey)
+			}
+		}
+	}
+
 	// Persist the updated history.
 	if !stateless && m.store != nil && len(updated) > 0 {
 		iteration++
@@ -390,6 +427,83 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userM
 	}
 
 	return response, nil
+}
+
+// estimateTokensForMessages estimates the total token count for a message slice.
+// Uses a simple word-based heuristic: ~1.3 tokens per word, with per-message overhead.
+// This avoids adding a tokenizer dependency.
+func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
+	const wordsPerToken = 0.77
+	const overheadPerMsg = 4
+	total := 0
+	for _, msg := range messages {
+		content := ""
+		if msg.Content != nil {
+			content = msg.Content.String()
+		}
+		words := len(strings.Fields(content))
+		total += words + overheadPerMsg
+	}
+	return int(float64(total) / wordsPerToken)
+}
+
+// compactSessionAsync loads the session history, compacts the oldest N turns by
+// summarizing them into a single system message, and persists the result.
+// Errors are logged but not returned since compaction runs in a background goroutine.
+func (m *SessionManager) compactSessionAsync(sessionKey string) {
+	slog.Info("agent: starting per-session compaction", "session", sessionKey)
+	snap, err := m.store.LoadLatest(sessionKey)
+	if err != nil {
+		slog.Warn("agent: compactSessionAsync LoadLatest failed", "session", sessionKey, "err", err)
+		return
+	}
+	if snap == nil || len(snap.Messages) == 0 {
+		slog.Warn("agent: compactSessionAsync no messages to compact", "session", sessionKey)
+		return
+	}
+	summaryTurns := m.summaryTurns
+	if summaryTurns <= 0 {
+		summaryTurns = 20
+	}
+	if len(snap.Messages) <= summaryTurns {
+		slog.Info("agent: compactSessionAsync not enough messages to compact", "session", sessionKey, "have", len(snap.Messages), "need", summaryTurns+1)
+		return
+	}
+	toSummarize := snap.Messages[:len(snap.Messages)-summaryTurns]
+	kept := snap.Messages[len(snap.Messages)-summaryTurns:]
+	var sb strings.Builder
+	for _, msg := range toSummarize {
+		fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
+	}
+	inputText := sb.String()
+	model := m.model
+	if m.compactionPolicy.Summarization.Model(m.model) != "" {
+		model = m.compactionPolicy.Summarization.Model(m.model)
+	}
+	summary, err := m.runner.RunText(context.Background(), sessionKey,
+		"You are a context summarization assistant. Summarize the following conversation history into a concise summary that preserves key decisions, active items, user preferences, and current task state. Format as bullet points.\n\n"+inputText,
+		model)
+	if err != nil {
+		slog.Warn("agent: compactSessionAsync summarization failed", "session", sessionKey, "err", err)
+		return
+	}
+	summaryMsg := agentctx.StrategicMessage{
+		Role:      agentctx.RoleSystem,
+		Content:   &agentctx.MessageContent{Str: &summary},
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	compacted := append([]agentctx.StrategicMessage{summaryMsg}, kept...)
+	now := time.Now()
+	tokens := estimateTokensForMessages(compacted)
+	if err := m.store.UpdateSessionTokens(sessionKey, tokens, &now); err != nil {
+		slog.Warn("agent: UpdateSessionTokens after compaction failed", "session", sessionKey, "err", err)
+	}
+	_, err = m.store.SaveSnapshot(sessionKey, snap.Iteration, compacted)
+	if err != nil {
+		slog.Warn("agent: SaveSnapshot after compaction failed", "session", sessionKey, "err", err)
+		return
+	}
+	slog.Info("agent: per-session compaction complete", "session", sessionKey, "before", len(snap.Messages), "after", len(compacted), "tokens_after", tokens)
 }
 
 // StripSilent removes the "[SILENT]" prefix from message (trimming surrounding
