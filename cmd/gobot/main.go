@@ -310,6 +310,7 @@ func cmdRun() *cobra.Command {
 
 			var api *tgAPI
 			var hitl *agent.HITLManager
+			var policyHook *agent.PolicyHook
 			if cfg.Channels.Telegram.Enabled {
 				var tgErr error
 				api, tgErr = newTgAPI(token, cfg.Channels.Telegram.AllowFrom, cfg)
@@ -328,6 +329,17 @@ func cmdRun() *cobra.Command {
 			} else {
 				slog.Info("run: telegram disabled by config")
 			}
+
+			// F-103: Policy-Driven Tool Execution
+			policyPath := agent.ResolvePolicyFilePath(cfg.PolicyFilePath(), cfg.StorageRoot())
+			policy, err := agent.NewFilePolicy(policyPath)
+			if err != nil {
+				slog.Warn("run: policy file load failed, using allow-all", "err", err)
+				policy = agent.AllowAllPolicy{}
+			}
+			policyHook = agent.NewPolicyHook(policy, hitl)
+			hooks.RegisterPreTool(policyHook.PreToolHook)
+			slog.Info("run: policy hook registered", "policy_file", policyPath)
 
 			mgr.SetHooks(hooks)
 			runner.SetHooks(hooks)
