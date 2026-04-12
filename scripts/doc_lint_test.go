@@ -35,8 +35,9 @@ func setupTempProject(t *testing.T) string {
 		filepath.Join(dir, "internal"),
 		filepath.Join(dir, "cmd"),
 		filepath.Join(dir, "cmd", "gobot"),
-		filepath.Join(dir, ".private", "backlog", "features"),
-		filepath.Join(dir, ".private", "backlog", "bugs"),
+		filepath.Join(dir, ".private", "backlog", "features", "active"),
+		filepath.Join(dir, ".private", "backlog", "bugs", "active"),
+		filepath.Join(dir, ".private", "backlog", "chores", "active"),
 		filepath.Join(dir, ".private", "backlog", "archived"),
 		filepath.Join(dir, ".private", "session"),
 		filepath.Join(dir, ".private", "session", "handoffs"),
@@ -49,7 +50,7 @@ func setupTempProject(t *testing.T) string {
 	}
 	// Minimal BACKLOG.md.
 	writeFile(t, filepath.Join(dir, ".private", "backlog", "BACKLOG.md"),
-		"# Backlog\n\n## Features\n\n## Bugs\n\n")
+		"# Backlog\n\n## Features\n\n## Bugs\n\n## Chores\n\n")
 	return dir
 }
 
@@ -119,7 +120,7 @@ func TestDocLint_MethodSkipped(t *testing.T) {
 func TestDocLint_StaleReference(t *testing.T) {
 	t.Parallel()
 	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-999.md"),
+	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-999.md"),
 		"---\nstatus: \"Planning\"\n---\n\nSee `internal/nonexistent.go` for details.\n")
 	out, err := runDocLint(t, dir)
 	if err == nil {
@@ -133,7 +134,7 @@ func TestDocLint_StaleReference(t *testing.T) {
 func TestDocLint_UnindexedItem(t *testing.T) {
 	t.Parallel()
 	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-999_Orphan.md"),
+	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-999_Orphan.md"),
 		"---\nstatus: \"Planning\"\n---\n\nAn orphaned feature.\n")
 	out, err := runDocLint(t, dir)
 	if err == nil {
@@ -147,8 +148,8 @@ func TestDocLint_UnindexedItem(t *testing.T) {
 func TestDocLint_InvalidStatus(t *testing.T) {
 	t.Parallel()
 	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-999_Bad.md"),
-		"---\nstatus: \"Ready for Review\"\n---\n\nBad status.\n")
+	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-999_Bad.md"),
+		"---\nstatus: \"NonExistentStatus\"\n---\n\nBad status.\n")
 	writeFile(t, filepath.Join(dir, ".private", "backlog", "BACKLOG.md"),
 		"# Backlog\n\nF-999_Bad.md\n\n## Features\n\n## Bugs\n\n")
 	out, err := runDocLint(t, dir)
@@ -162,11 +163,15 @@ func TestDocLint_InvalidStatus(t *testing.T) {
 
 func TestDocLint_ValidStatuses(t *testing.T) {
 	t.Parallel()
-	for _, s := range []string{"Production", "In Progress", "Planning", "Draft", "Archived", "Resolved"} {
+	statuses := []string{
+		"Production", "In Progress", "Planning", "Draft", "Archived", "Resolved",
+		"Ready", "Ready for Review", "Ready for Deploy",
+	}
+	for _, s := range statuses {
 		t.Run(s, func(t *testing.T) {
 			t.Parallel()
 			dir := setupTempProject(t)
-			writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "F-001.md"),
+			writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-001.md"),
 				"---\nstatus: \""+s+"\"\n---\n\nItem.\n")
 			writeFile(t, filepath.Join(dir, ".private", "backlog", "BACKLOG.md"),
 				"# Backlog\n\nF-001.md\n\n## Features\n\n## Bugs\n\n")

@@ -61,6 +61,8 @@ type FilePolicy struct {
 	rules []policyRule
 }
 
+// NewFilePolicy loads a tool execution policy from the specified YAML file.
+// If the path is empty or the file does not exist, it returns an AllowAllPolicy.
 func NewFilePolicy(path string) (Policy, error) {
 	if path == "" {
 		slog.Debug("agent/policy: empty path, using allow-all policy")
@@ -113,6 +115,9 @@ func matchTool(pattern, toolName string) bool {
 	return false
 }
 
+// ResolvePolicyFilePath determines the absolute path to the tool policy file.
+// It prioritizes the explicitly provided configPath; if empty, it defaults
+// to tool_policy.yaml within the storageRoot.
 func ResolvePolicyFilePath(configPath, storageRoot string) string {
 	if configPath != "" {
 		return configPath
@@ -125,6 +130,7 @@ type PolicyHook struct {
 	hitl   *HITLManager
 }
 
+// NewPolicyHook creates a new PolicyHook with the given policy and HITL manager.
 func NewPolicyHook(policy Policy, hitl *HITLManager) *PolicyHook {
 	return &PolicyHook{
 		policy: policy,

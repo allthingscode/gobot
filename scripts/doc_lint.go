@@ -143,8 +143,11 @@ func lintStaleReferences(root string) []string {
 		// Skip archived items — they are historical and may reference paths
 		// that no longer exist.
 		rel, _ := filepath.Rel(backlogDir, path)
-		if strings.HasPrefix(rel, "archived"+string(filepath.Separator)) ||
-			strings.Contains(rel, string(filepath.Separator)+"archived"+string(filepath.Separator)) {
+		lowerRel := strings.ToLower(rel)
+		if strings.Contains(lowerRel, string(filepath.Separator)+"archive"+string(filepath.Separator)) ||
+			strings.Contains(lowerRel, string(filepath.Separator)+"archived"+string(filepath.Separator)) ||
+			strings.HasPrefix(lowerRel, "archive"+string(filepath.Separator)) ||
+			strings.HasPrefix(lowerRel, "archived"+string(filepath.Separator)) {
 			return nil
 		}
 		data, readErr := os.ReadFile(path)
@@ -165,7 +168,7 @@ func lintStaleReferences(root string) []string {
 	return out
 }
 
-// lintBacklogIndex ensures every .md in features/ and bugs/ is referenced
+// lintBacklogIndex ensures every .md in features/, bugs/, and chores/ is referenced
 // (by filename) somewhere in BACKLOG.md.
 // This check is skipped in CI where .private/ is gitignored.
 func lintBacklogIndex(root string) []string {
@@ -182,8 +185,11 @@ func lintBacklogIndex(root string) []string {
 	}
 	content := string(data)
 
-	for _, subDir := range []string{"features", "bugs"} {
-		dir := filepath.Join(root, ".private", "backlog", subDir)
+	for _, subDir := range []string{"features", "bugs", "chores"} {
+		dir := filepath.Join(root, ".private", "backlog", subDir, "active")
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
@@ -191,7 +197,7 @@ func lintBacklogIndex(root string) []string {
 			}
 			if !strings.Contains(content, e.Name()) {
 				out = append(out,
-					fmt.Sprintf("%s/%s is not referenced in BACKLOG.md", subDir, e.Name()))
+					fmt.Sprintf("%s/active/%s is not referenced in BACKLOG.md", subDir, e.Name()))
 			}
 		}
 	}
@@ -203,22 +209,25 @@ var frontmatterStatusRe = regexp.MustCompile(`(?m)^status:\s*"?(.+?)"?\s*$`)
 
 // validStatuses lists the allowed status values per the BACKLOG.md status key.
 var validStatuses = map[string]bool{
-	"Production":  true,
-	"In Progress": true,
-	"Planning":    true,
-	"Draft":       true,
-	"Archived":    true,
-	"Resolved":    true,
+	"Production":       true,
+	"In Progress":      true,
+	"Planning":         true,
+	"Draft":            true,
+	"Archived":         true,
+	"Resolved":         true,
+	"Ready":            true,
+	"Ready for Review": true,
+	"Ready for Deploy": true,
 }
 
 // lintBacklogStatus checks that each backlog item has a valid YAML status.
 // This check is skipped in CI where .private/ is gitignored.
 func lintBacklogStatus(root string) []string {
 	var out []string
-	for _, subDir := range []string{"features", "bugs"} {
-		dir := filepath.Join(root, ".private", "backlog", subDir)
+	for _, subDir := range []string{"features", "bugs", "chores"} {
+		dir := filepath.Join(root, ".private", "backlog", subDir, "active")
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-			return nil // In CI, .private/ is gitignored - skip gracefully
+			continue
 		}
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
@@ -232,13 +241,13 @@ func lintBacklogStatus(root string) []string {
 			}
 			m := frontmatterStatusRe.FindSubmatch(data)
 			if m == nil {
-				out = append(out, fmt.Sprintf("%s/%s: missing or unparseable status field", subDir, e.Name()))
+				out = append(out, fmt.Sprintf("%s/active/%s: missing or unparseable status field", subDir, e.Name()))
 				continue
 			}
 			status := string(m[1])
 			if !validStatuses[status] {
 				out = append(out,
-					fmt.Sprintf("%s/%s: invalid status %q (valid: Production, In Progress, Planning, Draft, Archived, Resolved)",
+					fmt.Sprintf("%s/active/%s: invalid status %q (valid: Production, In Progress, Planning, Draft, Archived, Resolved, Ready, Ready for Review, Ready for Deploy)",
 						subDir, e.Name(), status))
 			}
 		}
