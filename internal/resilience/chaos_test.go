@@ -74,5 +74,5 @@ func TestChaos_RandomFailures(t *testing.T) {
 
 	wg.Wait()
 
-	t.Logf("Chaos test completed: %d total requests", fs.RequestCount)
+	t.Logf("Chaos test completed: %d total requests", fs.Count())
 }

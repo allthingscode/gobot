@@ -116,6 +116,13 @@ func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+// Count returns the number of requests received, safe for concurrent use.
+func (fs *FaultyServer) Count() int {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.RequestCount
+}
+
 // Reset resets the request count and sequence index.
 func (fs *FaultyServer) Reset() {
 	fs.mu.Lock()
