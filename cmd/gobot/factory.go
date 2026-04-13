@@ -151,19 +151,19 @@ func mapSpecialistRole(role string, roleData map[string]interface{}, tState *fac
 	}
 
 	switch role {
-	case "groomer":
+	case roleGroomer:
 		tState.Specialists.Groomer = &factory.GroomerState{}
 		mapFn(tState.Specialists.Groomer)
-	case "architect":
+	case roleArchitect:
 		tState.Specialists.Architect = &factory.ArchitectState{}
 		mapFn(tState.Specialists.Architect)
-	case "reviewer":
+	case roleReviewer:
 		tState.Specialists.Reviewer = &factory.ReviewerState{}
 		mapFn(tState.Specialists.Reviewer)
-	case "operator":
+	case roleOperator:
 		tState.Specialists.Operator = &factory.OperatorState{}
 		mapFn(tState.Specialists.Operator)
-	case "researcher":
+	case roleResearcher:
 		tState.Specialists.Researcher = &factory.ResearcherState{}
 		mapFn(tState.Specialists.Researcher)
 	}

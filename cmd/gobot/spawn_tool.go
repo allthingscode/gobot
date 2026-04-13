@@ -110,7 +110,7 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 		return "", fmt.Errorf("spawn: objective is required")
 	}
 	if agentType == "" {
-		agentType = "researcher" //nolint:goconst // specialist default
+		agentType = roleResearcher
 	}
 
 	systemPrompt := t.specialistPrompts[agentType]
@@ -150,11 +150,11 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 // defaultSpecialistPrompt returns a built-in system prompt for known agent types.
 func defaultSpecialistPrompt(agentType string) string {
 	switch agentType {
-	case "researcher":
+	case roleResearcher:
 		return "You are a focused research specialist. Research the given topic thoroughly using available search tools and return a concise, factual, well-structured report. Do not ask clarifying questions -- work with what you have and deliver your best findings."
-	case "analyst":
+	case roleAnalyst:
 		return "You are a strategic analyst. Analyze the given data or situation and return actionable insights in a structured format. Be direct and evidence-based. Do not ask clarifying questions -- deliver your analysis."
-	case "writer":
+	case roleWriter:
 		return "You are a professional writer and editor. Produce clear, well-structured content based on the given objective. Deliver the final written output directly without preamble."
 	default:
 		return "You are a specialized sub-agent. Complete the given objective thoroughly and return a structured summary of your findings. Be concise and direct."
