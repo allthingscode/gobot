@@ -50,13 +50,26 @@ type SpawnTool struct {
 	cfg *config.Config
 }
 
+// toolLimitConfigurable is an optional interface that runners can implement
+// to allow the tool to set their internal iteration limit (F-001).
+type toolLimitConfigurable interface {
+	SetMaxToolIterations(int)
+}
+
 // iterLimitRunner wraps a Runner and enforces a maximum number of Run calls.
 // Each call increments count; when count exceeds max, Run returns an error without
-// calling inner. This prevents sub-agents from looping indefinitely.
+// calling inner. This prevents sub-agents from looping indefinitely at the
+// session/turn level.
 type iterLimitRunner struct {
 	inner agent.Runner
 	max   int
 	count int
+}
+
+func (r *iterLimitRunner) SetMaxToolIterations(n int) {
+	if c, ok := r.inner.(toolLimitConfigurable); ok {
+		c.SetMaxToolIterations(n)
+	}
 }
 
 func (r *iterLimitRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
@@ -125,7 +138,15 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 	}
 
 	subRunner := t.runnerFactory(model, systemPrompt)
-	// Wrap in an iteration limiter (F-001: max 5 iterations to prevent infinite loops).
+
+	// F-001: Configure the tool iteration limit on the sub-runner to prevent infinite loops.
+	// We check for a toolLimitConfigurable interface so we can apply the limit
+	// even if the runner is wrapped (e.g. for testing).
+	if c, ok := subRunner.(toolLimitConfigurable); ok {
+		c.SetMaxToolIterations(spawnMaxIterations)
+	}
+
+	// Wrap in an iteration limiter (F-001: max 5 turns to prevent infinite turn-level loops).
 	limitedRunner := &iterLimitRunner{inner: subRunner, max: spawnMaxIterations}
 	// Sub-agents are ephemeral -- no checkpoint store.
 	subMgr := agent.NewSessionManager(limitedRunner, nil, model)

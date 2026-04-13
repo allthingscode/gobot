@@ -265,6 +265,37 @@ func (c *captureKeyRunner) Run(_ context.Context, sessionKey, _ string, messages
 	}), nil
 }
 
+// limitCaptureRunner captures the iteration limit passed to SetMaxToolIterations.
+type limitCaptureRunner struct {
+	mockRunner
+	capturedLimit int
+}
+
+func (c *limitCaptureRunner) SetMaxToolIterations(n int) {
+	c.capturedLimit = n
+}
+
+func TestSpawnTool_ConfiguresSubRunnerToolLimit(t *testing.T) {
+	t.Parallel()
+	mock := &limitCaptureRunner{}
+	tool := &SpawnTool{
+		runnerFactory: func(_, _ string) agent.Runner {
+			return mock
+		},
+		model: "test-model",
+	}
+	_, err := tool.Execute(context.Background(), "parent:1", "", map[string]any{
+		"agent_type": "researcher",
+		"objective":  "test limit",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.capturedLimit != spawnMaxIterations {
+		t.Errorf("capturedLimit = %d, want %d", mock.capturedLimit, spawnMaxIterations)
+	}
+}
+
 // ── defaultSpecialistPrompt ────────────────────────────────────────────────────
 
 func TestDefaultSpecialistPrompt(t *testing.T) {
