@@ -72,10 +72,22 @@ else
     echo "WARN: golangci-lint not found locally; CI will enforce lint"
 fi
 
-if ! go test -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
-    echo "ERROR: go test failed"
-    cat "$TEMP_LOG"
-    exit 1
+# Run tests with the race detector when a C compiler is available; fall back
+# gracefully when CGO is absent (e.g. bare Windows without WSL).
+if ! go test -race -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+    if grep -q "requires cgo\|requires a C compiler" "$TEMP_LOG"; then
+        echo "WARN: Race detector unavailable (no C compiler — CGO disabled)."
+        echo "      Run 'wsl -e go test -race -mod=readonly ./...' to catch data races."
+        if ! go test -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+            echo "ERROR: go test failed"
+            cat "$TEMP_LOG"
+            exit 1
+        fi
+    else
+        echo "ERROR: go test -race failed"
+        cat "$TEMP_LOG"
+        exit 1
+    fi
 fi
 
 echo "--- Pre-commit: all checks passed (vet, lint, test)"

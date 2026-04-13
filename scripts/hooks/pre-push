@@ -30,4 +30,33 @@ else
     fi
 fi
 
+echo "--- pre-push: checking CI status on remote branch"
+if command -v gh > /dev/null 2>&1; then
+    # Determine the branch being pushed to
+    TARGET_BRANCH=$(git for-each-ref --format='%(upstream:short)' "$(git symbolic-ref HEAD 2>/dev/null)" 2>/dev/null | sed 's|.*/||')
+    if [ -z "$TARGET_BRANCH" ]; then
+        TARGET_BRANCH="master"
+    fi
+    LAST_RUN=$(gh run list --branch="$TARGET_BRANCH" --limit 1 --json conclusion,status,url 2>/dev/null || echo "")
+    if [ -n "$LAST_RUN" ] && [ "$LAST_RUN" != "[]" ]; then
+        CONCLUSION=$(echo "$LAST_RUN" | grep -o '"conclusion":"[^"]*"' | head -1 | sed 's/"conclusion":"//;s/"//')
+        STATUS=$(echo "$LAST_RUN" | grep -o '"status":"[^"]*"' | head -1 | sed 's/"status":"//;s/"//')
+        RUN_URL=$(echo "$LAST_RUN" | grep -o '"url":"[^"]*"' | head -1 | sed 's/"url":"//;s/"//')
+        if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
+            echo "    CI is running on $TARGET_BRANCH — push proceeds."
+        elif [ "$CONCLUSION" = "success" ]; then
+            echo "    CI is GREEN on $TARGET_BRANCH — push proceeds."
+        elif [ "$CONCLUSION" = "failure" ]; then
+            echo ""
+            echo "WARNING: CI is FAILING on $TARGET_BRANCH — last run: $RUN_URL"
+            echo "         Push proceeds only if this commit is the fix."
+            echo ""
+        fi
+    else
+        echo "    (no recent CI runs found for $TARGET_BRANCH)"
+    fi
+else
+    echo "    WARN: gh not found; skipping CI status check"
+fi
+
 echo "--- pre-push: all checks passed"
