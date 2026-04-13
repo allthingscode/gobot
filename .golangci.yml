@@ -1,68 +1,70 @@
-linters-settings:
-    errorlint:
-        errorf: true # Ensure fmt.Errorf uses %w for wrapping errors
-    revive:
-        rules:
-            - name: unexported-return
-              disabled: true # Acceptable for test helpers
-            - name: unused-parameter
-              disabled: true # Acceptable for mock/stub implementations
-    gosec:
-        excludes:
-            - G103 # Use of unsafe — intentional in Windows syscall/dpapi code
-            - G104 # Errors unhandled — covered by errcheck linter
-            - G301 # Dir permissions > 0750 — 0755 is standard for app dirs
-            - G302 # File permissions > 0600 — 0640/0644 intentional
-            - G304 # File path from variable — legitimate in config/log loading
-    gocritic:
-        enabled-tags:
-            - diagnostic
-            - style
-        disabled-checks:
-            - hugeParam # Not performance-critical
-    errcheck:
-        exclude-functions:
-            # fmt writers — errors not critical when writing to HTTP/stderr
-            - fmt.Fprintf
-            - fmt.Fprint
-            - fmt.Fprintln
-            # Env/file cleanup — best-effort, not critical
-            - os.Remove
-            - os.RemoveAll
-            - os.Setenv
-            - os.Unsetenv
-    goconst:
-        min-len: 3
-        min-occurrences: 3
-        ignore-tests: true
-    loggercheck: {}
-    cyclop:
-        max-complexity: 10
-        skip-tests: false
-    gocognit:
-        min-complexity: 15
-    funlen:
-        lines: 80
-        statements: 50
-        ignore-comments: true
-    dupl:
-        threshold: 150
-    exhaustive:
-        default-signifies-exhaustive: true
-        check:
-            - switch
-            - map
-    prealloc:
-        simple: true
-        range-loops: true
-        for-loops: false
-    godot:
-        scope: declarations
-        period: true
-    testpackage:
-        skip-regexp: "export_test\\.go"
+version: "2"
 
 linters:
+    settings:
+        errorlint:
+            errorf: true # Ensure fmt.Errorf uses %w for wrapping errors
+        revive:
+            rules:
+                - name: unexported-return
+                  disabled: true # Acceptable for test helpers
+                - name: unused-parameter
+                  disabled: true # Acceptable for mock/stub implementations
+        gosec:
+            excludes:
+                - G103 # Use of unsafe — intentional in Windows syscall/dpapi code
+                - G104 # Errors unhandled — covered by errcheck linter
+                - G301 # Dir permissions > 0750 — 0755 is standard for app dirs
+                - G302 # File permissions > 0600 — 0640/0644 intentional
+                - G304 # File path from variable — legitimate in config/log loading
+        gocritic:
+            enabled-tags:
+                - diagnostic
+                - style
+            disabled-checks:
+                - hugeParam # Not performance-critical
+        errcheck:
+            exclude-functions:
+                # fmt writers — errors not critical when writing to HTTP/stderr
+                - fmt.Fprintf
+                - fmt.Fprint
+                - fmt.Fprintln
+                # Env/file cleanup — best-effort, not critical
+                - os.Remove
+                - os.RemoveAll
+                - os.Setenv
+                - os.Unsetenv
+        goconst:
+            min-len: 3
+            min-occurrences: 3
+            ignore-tests: true
+        loggercheck: {}
+        cyclop:
+            max-complexity: 10
+            skip-tests: false
+        gocognit:
+            min-complexity: 15
+        funlen:
+            lines: 80
+            statements: 50
+            ignore-comments: true
+        dupl:
+            threshold: 150
+        exhaustive:
+            default-signifies-exhaustive: true
+            check:
+                - switch
+                - map
+        prealloc:
+            simple: true
+            range-loops: true
+            for-loops: false
+        godot:
+            scope: declarations
+            period: true
+        testpackage:
+            skip-regexp: "export_test\\.go"
+
     enable:
         - errcheck
         - errorlint

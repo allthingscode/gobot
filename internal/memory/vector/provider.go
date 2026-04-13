@@ -13,17 +13,18 @@ type EmbeddingProvider interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
-// GeminiProvider implements EmbeddingProvider using the Gemini text-embedding-004 model.
+// GeminiProvider implements EmbeddingProvider using a configurable Gemini embedding model.
 type GeminiProvider struct {
 	client *genai.Client
 	model  string
 }
 
-// NewGeminiProvider creates a new EmbeddingProvider with the Gemini client.
-func NewGeminiProvider(client *genai.Client) *GeminiProvider {
+// NewGeminiProvider creates a new EmbeddingProvider with the Gemini client and the
+// specified embedding model name (e.g. "text-embedding-004").
+func NewGeminiProvider(client *genai.Client, model string) *GeminiProvider {
 	return &GeminiProvider{
 		client: client,
-		model:  "text-embedding-004",
+		model:  model,
 	}
 }
 

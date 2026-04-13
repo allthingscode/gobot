@@ -184,6 +184,7 @@ type StrategicConfig struct {
 	TemplatesPath       string              `json:"templates_path,omitempty"`   // Custom directory for email templates
 	Routing             RoutingConfig       `json:"routing"`                    // F-102
 	PolicyFilePath      string              `json:"policy_file_path,omitempty"` // F-103
+	EmbeddingModel      string              `json:"embedding_model,omitempty"`  // B-049
 }
 
 type RoutingConfig struct {
@@ -375,6 +376,15 @@ func (c *Config) LogsRoot() string {
 // LogPath returns the path to a specific log file under LogsRoot.
 func (c *Config) LogPath(filename string) string {
 	return filepath.Join(c.LogsRoot(), filename)
+}
+
+// EmbeddingModel returns the configured embedding model name,
+// falling back to "text-embedding-004" if unset or empty.
+func (c *Config) EmbeddingModel() string {
+	if c.Strategic.EmbeddingModel != "" {
+		return c.Strategic.EmbeddingModel
+	}
+	return "text-embedding-004"
 }
 
 // DefaultModel returns the configured default model, falling back to gemini-3-flash-preview.

@@ -696,4 +696,33 @@ func TestLockTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestEmbeddingModel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		field string
+		want  string
+	}{
+		{
+			name:  "empty field returns default",
+			field: "",
+			want:  "text-embedding-004",
+		},
+		{
+			name:  "explicit value is returned as-is",
+			field: "my-custom-model",
+			want:  "my-custom-model",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &Config{Strategic: StrategicConfig{EmbeddingModel: tc.field}}
+			if got := cfg.EmbeddingModel(); got != tc.want {
+				t.Errorf("EmbeddingModel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 var _ io.Reader = errReader{}
