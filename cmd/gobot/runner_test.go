@@ -13,10 +13,81 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
+
+func TestRunner_EnforcesToolIterationLimit(t *testing.T) {
+	t.Parallel()
+	name := "test_tool"
+	// Provide more tool call responses than the limit (3).
+	mock := &mockProvider{
+		responses: []*provider.ChatResponse{
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []map[string]any{
+						{"name": name, "args": map[string]any{"x": 1}},
+					},
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []map[string]any{
+						{"name": name, "args": map[string]any{"x": 2}},
+					},
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []map[string]any{
+						{"name": name, "args": map[string]any{"x": 3}},
+					},
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []map[string]any{
+						{"name": name, "args": map[string]any{"x": 4}},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := &config.Config{}
+	runner := newGeminiRunner(mock, "model", "sys", cfg)
+	runner.maxToolIterations = 3 // Set a low limit for testing
+	runner.tools = []Tool{&iterLimitMockTool{name: name}}
+
+	_, _, err := runner.Run(context.Background(), "session", "user", nil)
+	if err == nil {
+		t.Fatal("expected error from exhausted tool loop, got nil")
+	}
+	if !strings.Contains(err.Error(), "tool dispatch loop exceeded 3 iterations") {
+		t.Errorf("error %q does not contain expected message", err.Error())
+	}
+	// Verify it stopped after exactly 3 calls to the provider.
+	if mock.idx != 3 {
+		t.Errorf("mock provider called %d times, want 3", mock.idx)
+	}
+}
+
+type iterLimitMockTool struct {
+	name string
+	err  error
+}
+
+func (m *iterLimitMockTool) Name() string                        { return m.name }
+func (m *iterLimitMockTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: m.name} }
+func (m *iterLimitMockTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
+	return "ok", m.err
+}
 
 func TestExtractText(t *testing.T) {
 	t.Parallel()
