@@ -35,9 +35,7 @@ linters-settings:
         min-len: 3
         min-occurrences: 3
         ignore-tests: true
-    loggercheck:
-        checks:
-            - "key-value"
+    loggercheck: {}
     cyclop:
         max-complexity: 10
         skip-tests: false
@@ -54,7 +52,6 @@ linters-settings:
         check:
             - switch
             - map
-    gochecknoglobals: {}
     prealloc:
         simple: true
         range-loops: true
