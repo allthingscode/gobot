@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,19 +12,30 @@ import (
 
 type mockBotAPI struct {
 	bot.API
+	mu           sync.Mutex
 	sentMessages []bot.OutboundMessage
 	sentButtons  [][][]bot.Button
 }
 
 func (m *mockBotAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sentMessages = append(m.sentMessages, msg)
 	return nil
 }
 
 func (m *mockBotAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, buttons [][]bot.Button) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sentMessages = append(m.sentMessages, msg)
 	m.sentButtons = append(m.sentButtons, buttons)
 	return nil
+}
+
+func (m *mockBotAPI) getSentButtons() [][][]bot.Button {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sentButtons
 }
 
 func TestHITLManager_PreToolHook_NonHighRisk(t *testing.T) {
@@ -70,10 +82,11 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 	}
 
 	// Extract reqID from sent buttons
-	if len(api.sentButtons) == 0 {
+	sentButtons := api.getSentButtons()
+	if len(sentButtons) == 0 {
 		t.Fatal("no buttons sent")
 	}
-	data := api.sentButtons[0][0][0].Data // hitl:approve:reqID
+	data := sentButtons[0][0][0].Data // hitl:approve:reqID
 
 	// Simulate approval callback
 	cb := bot.InboundCallback{
@@ -124,7 +137,11 @@ func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 	}
 
 	// Extract reqID from sent buttons
-	data := api.sentButtons[0][0][1].Data // hitl:reject:reqID
+	sentButtons := api.getSentButtons()
+	if len(sentButtons) == 0 {
+		t.Fatal("no buttons sent")
+	}
+	data := sentButtons[0][0][1].Data // hitl:reject:reqID
 
 	// Simulate rejection callback
 	cb := bot.InboundCallback{

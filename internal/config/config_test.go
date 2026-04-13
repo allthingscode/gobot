@@ -623,7 +623,6 @@ func runSecretsFallbackTests(t *testing.T, cfg *Config, logBuf *bytes.Buffer) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.k, func(t *testing.T) {
-			t.Parallel()
 			logBuf.Reset()
 			got := getConfigValue(cfg, tc.k)
 			if got != tc.v {

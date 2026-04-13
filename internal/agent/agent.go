@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -65,6 +66,7 @@ type Consolidator interface {
 // Concurrent calls with the same sessionKey are queued; concurrent calls
 // with different sessionKeys proceed in parallel.
 type SessionManager struct {
+	mu                      sync.RWMutex
 	runner                  Runner
 	store                   CheckpointStore                              // may be nil; shared single-user store
 	checkpointStoreProvider func(userID string) (CheckpointStore, error) // may be nil; F-105 per-user
@@ -97,11 +99,15 @@ func NewSessionManager(runner Runner, store CheckpointStore, model string) *Sess
 
 // SetTracer configures the observability tracer for the session manager.
 func (m *SessionManager) SetTracer(t *observability.DispatchTracer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.tracer = t
 }
 
 // SetLockTimeout configures the maximum time to wait for a session lock.
 func (m *SessionManager) SetLockTimeout(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if d > 0 {
 		m.lockTimeout = d
 	}
@@ -109,6 +115,8 @@ func (m *SessionManager) SetLockTimeout(d time.Duration) {
 
 // SetMemoryWindow configures the maximum context messages kept before compaction.
 func (m *SessionManager) SetMemoryWindow(w int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if w > 0 {
 		m.memoryWindow = w
 	}
@@ -116,11 +124,15 @@ func (m *SessionManager) SetMemoryWindow(w int) {
 
 // SetPruningPolicy configures the context pruning policy.
 func (m *SessionManager) SetPruningPolicy(p config.ContextPruningConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.pruningPolicy = p
 }
 
 // SetCompactionPolicy configures the context compaction policy.
 func (m *SessionManager) SetCompactionPolicy(p config.CompactionPolicyConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.compactionPolicy = p
 }
 
@@ -128,38 +140,48 @@ func (m *SessionManager) SetCompactionPolicy(p config.CompactionPolicyConfig) {
 // context compaction. Call this after NewSessionManager when journaling is
 // desired. An empty root disables journal writes.
 func (m *SessionManager) SetStorageRoot(root string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.storageRoot = root
 }
 
 // SetLogger configures a SessionLogger that receives a copy of the conversation
 // after every successful SaveSnapshot. If nil, no logging is performed.
 func (m *SessionManager) SetLogger(l SessionLogger) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.logger = l
 }
 
 // SetConsolidator configures a Consolidator that extracts facts from dropped
 // history during memoryFlush compaction. If nil, no consolidation is performed.
 func (m *SessionManager) SetConsolidator(c Consolidator) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.consolidator = c
 }
 
 // SetHooks configures the lifecycle hooks for this SessionManager.
 // Call this at startup before the first Dispatch. Hooks run in registration order.
 func (m *SessionManager) SetHooks(h *Hooks) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.hooks = h
 }
 
-// SetTokenBudget configures the per-session token budget before triggering
-// per-session compaction (F-104). Defaults to 80000 if not set.
+// SetTokenBudget configures the per-session token budget (F-104).
 func (m *SessionManager) SetTokenBudget(budget int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if budget > 0 {
 		m.tokenBudget = budget
 	}
 }
 
-// SetSummaryTurns configures how many oldest turns to summarize per compaction
-// pass (F-104). Defaults to 20 if not set.
+// SetSummaryTurns configures how many turns to summarize per compaction (F-104).
 func (m *SessionManager) SetSummaryTurns(turns int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if turns > 0 {
 		m.summaryTurns = turns
 	}
@@ -170,6 +192,8 @@ func (m *SessionManager) SetSummaryTurns(turns int) {
 // When set and userID is non-empty, Dispatch will call this factory to obtain
 // the store rather than using the shared m.store.
 func (m *SessionManager) SetCheckpointStoreProvider(fn func(userID string) (CheckpointStore, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.checkpointStoreProvider = fn
 }
 
@@ -177,14 +201,19 @@ func (m *SessionManager) SetCheckpointStoreProvider(fn func(userID string) (Chec
 // If a checkpointStoreProvider is configured and userID is non-empty it is
 // called; otherwise the shared m.store is returned.
 func (m *SessionManager) resolveStore(userID string) CheckpointStore {
-	if m.checkpointStoreProvider != nil && userID != "" {
-		if s, err := m.checkpointStoreProvider(userID); err == nil {
+	m.mu.RLock()
+	provider := m.checkpointStoreProvider
+	sharedStore := m.store
+	m.mu.RUnlock()
+
+	if provider != nil && userID != "" {
+		if s, err := provider(userID); err == nil {
 			return s
 		} else {
 			slog.Warn("agent: CheckpointStoreProvider failed, falling back to shared store", "userID", userID, "err", err)
 		}
 	}
-	return m.store
+	return sharedStore
 }
 
 // Dispatch delivers userMessage to the runner under a per-session lock.
@@ -196,7 +225,12 @@ func (m *SessionManager) resolveStore(userID string) CheckpointStore {
 // The [SILENT] prefix is stripped from userMessage before it reaches the runner.
 // Returns the runner's response, or an error if the runner or store fails.
 func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userMessage string) (string, error) {
-	lock := acquireLock(sessionKey, m.lockTimeout)
+	m.mu.RLock()
+	lockTimeout := m.lockTimeout
+	tracer := m.tracer
+	m.mu.RUnlock()
+
+	lock := acquireLock(sessionKey, lockTimeout)
 	if err := lock.Lock(ctx); err != nil {
 		lock.release()
 		return "", err
@@ -209,13 +243,13 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userM
 	// F-105: resolve per-user store when multi-user isolation is enabled.
 	store := m.resolveStore(userID)
 
-	if m.tracer != nil {
+	if tracer != nil {
 		// Load history first so we can report message count to tracer.
 		messages, iteration, stateless, err := m.loadHistory(sessionKey, store)
 		if err != nil {
 			return "", err
 		}
-		return m.tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
+		return tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
 			return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless, store)
 		})
 	}
@@ -236,7 +270,10 @@ func (m *SessionManager) loadHistory(sessionKey string, store CheckpointStore) (
 			iteration = snap.Iteration
 		} else {
 			// First turn for this session — create the thread record.
-			if createErr := store.CreateThread(sessionKey, m.model, nil); createErr != nil {
+			m.mu.RLock()
+			model := m.model
+			m.mu.RUnlock()
+			if createErr := store.CreateThread(sessionKey, model, nil); createErr != nil {
 				slog.Error("agent: CreateThread failed (continuing statelessly)", "session_id", sessionKey, "err", createErr)
 				stateless = true
 			}

@@ -187,6 +187,7 @@ func copySnapshotContents(snapshotDir, sessionDir string) error {
 	return nil
 }
 
+// RestoreSnapshot overwrites the current session state with the contents of a named snapshot.
 func RestoreSnapshot(storageRoot, snapshotName string) error {
 	sessionDir := filepath.Join(storageRoot, ".private", "session")
 	historyDir := filepath.Join(sessionDir, "history")

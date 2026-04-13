@@ -23,22 +23,27 @@ func TestDispatch_Concurrent_SameSession(t *testing.T) {
 	const n = 10
 	var wg sync.WaitGroup
 	errs := make([]error, n)
+	var mu sync.Mutex
 
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
 			_, err := mgr.Dispatch(context.Background(), "shared-key", "", "msg")
+			mu.Lock()
 			errs[idx] = err
+			mu.Unlock()
 		}(i)
 	}
 	wg.Wait()
 
+	mu.Lock()
 	for i, err := range errs {
 		if err != nil {
 			t.Errorf("goroutine %d: unexpected error: %v", i, err)
 		}
 	}
+	mu.Unlock()
 
 	runner.mu.Lock()
 	maxActive := runner.maxActive["shared-key"]

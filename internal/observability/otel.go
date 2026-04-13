@@ -161,6 +161,7 @@ func (p *Provider) createCounters(meter metric.Meter) error {
 	return nil
 }
 
+// NewProvider initializes a new OpenTelemetry provider with the given configuration.
 func NewProvider(cfg Config) (*Provider, error) {
 	if cfg.ServiceName == "" {
 		cfg.ServiceName = "gobot"

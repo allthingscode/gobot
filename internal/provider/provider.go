@@ -30,6 +30,7 @@ func truncateDetail(detail string, maxLen int) string {
 	return detail
 }
 
+// FormatStrategicError converts common provider errors into human-readable strategic messages.
 func FormatStrategicError(errorText string) string {
 	if containsAny(errorText, []string{"too many tokens", "context_length", "context window"}) {
 		return "[STRATEGIC] Context Overflow (400): The conversation history has exceeded the model's limits. Try a shorter message."

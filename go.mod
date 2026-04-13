@@ -25,6 +25,7 @@ require (
 	golang.org/x/time v0.15.0
 	golang.org/x/vuln v1.1.4
 	google.golang.org/genai v1.40.0
+	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools/gotestsum v1.13.0
 	modernc.org/sqlite v1.48.0
 	mvdan.cc/gofumpt v0.9.2
@@ -90,7 +91,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
 	google.golang.org/grpc v1.79.3 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

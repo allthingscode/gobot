@@ -16,14 +16,18 @@ const DefaultMaxCompactionInputBytes = 512 * 1024 // 512KB
 // It respects the CompactionPolicyConfig strategy and ContextPruningConfig safety nets.
 // Returns (compacted messages, count of dropped, keep array from original messages).
 func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ config.CompactionPolicyConfig, pruning config.ContextPruningConfig) (compacted []agentctx.StrategicMessage, droppedCount int, keepArray []bool) {
+	// Work on a copy of the slice to avoid races if input is shared
+	msgs := make([]agentctx.StrategicMessage, len(messages))
+	copy(msgs, messages)
+
 	// Defensive: invalid parameters — return unchanged.
 	if maxN <= 0 || keepN <= 0 {
-		return messages, 0, nil
+		return msgs, 0, nil
 	}
 
 	// If not over the threshold, nothing to do.
-	if len(messages) <= maxN {
-		return messages, 0, nil
+	if len(msgs) <= maxN {
+		return msgs, 0, nil
 	}
 
 	// Clamp keepN so compaction always drops at least 1 message when triggered.
@@ -35,31 +39,31 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ co
 	}
 
 	// Identify messages to keep.
-	keep := make([]bool, len(messages))
+	keep := make([]bool, len(msgs))
 
 	// 1. Always keep the last keepN messages.
-	start := len(messages) - keepN
-	for i := start; i < len(messages); i++ {
+	start := len(msgs) - keepN
+	for i := start; i < len(msgs); i++ {
 		keep[i] = true
 	}
 
 	// 2. Safety net: keep the last N assistants (and their preceding user turn).
-	applyKeepLastAssistants(messages, keep, pruning.KeepLastAssistants)
+	applyKeepLastAssistants(msgs, keep, pruning.KeepLastAssistants)
 
 	// 3. Tool chain consistency pass: ensure tool-call/response pairs are not split.
-	applyToolChainConsistency(messages, keep)
+	applyToolChainConsistency(msgs, keep)
 
 	// Construct the compacted list.
 	for i, k := range keep {
 		if k {
-			compacted = append(compacted, messages[i])
+			compacted = append(compacted, msgs[i])
 		}
 	}
 
 	// Gemini requires conversations to start with a user turn.
 	compacted = stripLeadingAssistantTurns(compacted)
 
-	dropped := len(messages) - len(compacted)
+	dropped := len(msgs) - len(compacted)
 	return compacted, dropped, keep
 }
 
@@ -194,34 +198,38 @@ func hasKeptToolCalls(compacted []agentctx.StrategicMessage) bool {
 
 // PruneMessages removes messages based on TTL and KeepLastAssistants settings.
 func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruningConfig) (pruned []agentctx.StrategicMessage, droppedCount int) {
+	// Work on a copy of the slice to avoid races if input is shared
+	msgs := make([]agentctx.StrategicMessage, len(messages))
+	copy(msgs, messages)
+
 	if cfg.TTL == "" && cfg.KeepLastAssistants <= 0 {
-		return messages, 0
+		return msgs, 0
 	}
 
 	ttl, ok := parseTTL(cfg.TTL)
 	if !ok || ttl <= 0 {
-		return messages, 0
+		return msgs, 0
 	}
 
 	cutoff := time.Now().Add(-ttl)
-	keep := make([]bool, len(messages))
+	keep := make([]bool, len(msgs))
 
 	// 1. Keep the last N assistant messages (and their preceding user message) as a safety net.
-	applyKeepLastAssistants(messages, keep, cfg.KeepLastAssistants)
+	applyKeepLastAssistants(msgs, keep, cfg.KeepLastAssistants)
 
 	// 2. Keep messages newer than cutoff.
-	applyTTLPruning(messages, keep, cutoff)
+	applyTTLPruning(msgs, keep, cutoff)
 
 	for i, k := range keep {
 		if k {
-			pruned = append(pruned, messages[i])
+			pruned = append(pruned, msgs[i])
 		}
 	}
 
 	// Gemini requires conversations to start with a user turn.
 	pruned = ensureStartsAndEndsWithUser(pruned) // Simplified name but following logic
 
-	droppedCount = len(messages) - len(pruned)
+	droppedCount = len(msgs) - len(pruned)
 	return pruned, droppedCount
 }
 
