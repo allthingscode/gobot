@@ -57,6 +57,9 @@ if ! go mod verify > "$TEMP_LOG" 2>&1; then
     exit 1
 fi
 
+# golangci-lint must be compiled with a Go version >= the project's go directive
+# (currently go 1.26.x). Minimum required: v2.11.4.
+# Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
 if command -v golangci-lint > /dev/null 2>&1; then
     if ! golangci-lint config verify > "$TEMP_LOG" 2>&1; then
         echo "ERROR: golangci-lint config verify failed (schema mismatch — fix .golangci.yml before committing)"
