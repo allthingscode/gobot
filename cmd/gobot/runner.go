@@ -111,6 +111,10 @@ func (r *geminiRunner) SetMemoryStoreProvider(fn func(userID string) *memory.Mem
 	r.memStoreProvider = fn
 }
 
+func (r *geminiRunner) SetMaxToolIterations(n int) {
+	r.maxToolIterations = n
+}
+
 // Run executes the tool-call/response loop until the provider returns a terminal text response.
 //
 // Each iteration:
