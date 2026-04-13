@@ -37,11 +37,9 @@ linters:
         goconst:
             min-len: 3
             min-occurrences: 3
-            ignore-tests: true
         loggercheck: {}
         cyclop:
             max-complexity: 10
-            skip-tests: false
         gocognit:
             min-complexity: 15
         funlen:

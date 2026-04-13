@@ -164,16 +164,17 @@ func TestIdempotency_BackgroundCleanup(t *testing.T) {
 	expiredAt := time.Now().Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
 	_, _ = db.Exec(`INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`, "expired-bg", expiredAt)
 
-	// 2. Start background cleanup with a very short interval.
+	// 2. Start background cleanup with a short interval.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Run in background.
-	go runIdempotencyCleanup(ctx, store, 10*time.Millisecond)
+	go runIdempotencyCleanup(ctx, store, 50*time.Millisecond)
 
 	// 3. Poll for cleanup (with timeout).
-	deadline := time.After(500 * time.Millisecond)
-	ticker := time.NewTicker(20 * time.Millisecond)
+	// 5s timeout: Windows CI has coarse timer resolution and high scheduler jitter.
+	deadline := time.After(5 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	found := true
@@ -192,5 +193,5 @@ func TestIdempotency_BackgroundCleanup(t *testing.T) {
 
 	// 4. Verify cleanup stopped on context cancellation.
 	cancel()
-	time.Sleep(50 * time.Millisecond) // Give goroutine a moment to exit.
+	time.Sleep(200 * time.Millisecond) // Give goroutine a moment to exit.
 }
