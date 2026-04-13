@@ -18,7 +18,7 @@ jobs:
             -   name: golangci-lint
                 uses: golangci/golangci-lint-action@v6
                 with:
-                    version: latest
+                    version: v2.1.6
                     args: --modules-download-mode=readonly
                     # Use goinstall to ensure it's built with the Go version from go.mod
                     install-mode: goinstall

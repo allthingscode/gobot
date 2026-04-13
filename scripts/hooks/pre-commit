@@ -58,6 +58,11 @@ if ! go mod verify > "$TEMP_LOG" 2>&1; then
 fi
 
 if command -v golangci-lint > /dev/null 2>&1; then
+    if ! golangci-lint config verify > "$TEMP_LOG" 2>&1; then
+        echo "ERROR: golangci-lint config verify failed (schema mismatch — fix .golangci.yml before committing)"
+        cat "$TEMP_LOG"
+        exit 1
+    fi
     if ! golangci-lint run --modules-download-mode=readonly > "$TEMP_LOG" 2>&1; then
         echo "ERROR: golangci-lint failed"
         cat "$TEMP_LOG"
