@@ -1,6 +1,6 @@
 module github.com/allthingscode/gobot
 
-go 1.25.7
+go 1.24.0
 
 require (
 	github.com/google/go-cmp v0.7.0
@@ -95,3 +95,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+
