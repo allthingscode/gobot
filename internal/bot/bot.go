@@ -229,16 +229,10 @@ func (b *Bot) drainCallbacks(ctx context.Context, callbacks <-chan InboundCallba
 }
 
 func (b *Bot) dispatchCallback(ctx context.Context, cb InboundCallback) {
-	done := make(chan error, 1)
-	go func() {
-		done <- b.handler.HandleCallback(ctx, cb)
-	}()
-
-	select {
-	case <-ctx.Done():
-		slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
-	case err := <-done:
-		if err != nil {
+	if err := b.handler.HandleCallback(ctx, cb); err != nil {
+		if errors.Is(err, context.Canceled) {
+			slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
+		} else {
 			slog.Error("bot: HandleCallback failed", "err", err)
 		}
 	}
