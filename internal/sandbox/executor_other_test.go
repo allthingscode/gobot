@@ -89,7 +89,7 @@ func TestExecutor_WorkingDirectory_Unix(t *testing.T) {
 
 	// Write a sentinel file into the sandbox dir; verify it is visible from the subprocess.
 	sentinel := "gobot_sandbox_sentinel.txt"
-	if err := os.WriteFile(filepath.Join(dir, sentinel), []byte("ok"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, sentinel), []byte("ok"), 0o600); err != nil {
 		t.Fatalf("write sentinel: %v", err)
 	}
 

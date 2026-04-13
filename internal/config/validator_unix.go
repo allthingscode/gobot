@@ -15,7 +15,7 @@ func (v *Validator) checkDiskSpace(root string, result *ValidationResult) error 
 	}
 
 	// Calculate available space in bytes
-	available := stat.Bavail * uint64(stat.Bsize)
+	available := uint64(stat.Bavail) * uint64(stat.Bsize)
 	const minFree = 1 << 30 // 1GB in bytes
 
 	if available < minFree {
