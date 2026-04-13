@@ -1,0 +1,26 @@
+version: 2
+updates:
+    # GitHub Actions — keeps action versions and their tool compatibility in sync.
+    # This is what would have caught the golangci-lint-action v6/v7 mismatch.
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
+          day: monday
+      labels:
+          - dependencies
+
+    # Go modules — keeps direct dependencies current.
+    - package-ecosystem: gomod
+      directory: /
+      schedule:
+          interval: weekly
+          day: monday
+      labels:
+          - dependencies
+      # Group all non-major Go dependency bumps into a single PR to reduce noise.
+      groups:
+          go-minor-patch:
+              update-types:
+                  - minor
+                  - patch
