@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported manager internals for testing
 package context
 
 import (
@@ -11,6 +12,8 @@ import (
 )
 
 // Test helper variables for singleton reset (used by resetSingleton).
+//
+//nolint:gochecknoglobals // Test helper singletons are isolated per test run
 var (
 	cmOnce     sync.Once
 	cmInstance *CheckpointManager
@@ -143,91 +146,81 @@ func TestSaveSnapshot(t *testing.T) { //nolint:paralleltest // modifies global e
 
 // ── LoadLatest ────────────────────────────────────────────────────────────────
 
-func TestLoadLatest(t *testing.T) { //nolint:paralleltest // modifies global environment
-
+func setupThreadWithSnapshots(t *testing.T, m *CheckpointManager, threadID string, iterations int) []StrategicMessage {
+	t.Helper()
 	msg := func(role MessageRole, text string) StrategicMessage {
 		content := MessageContent{Str: strPtr(text)}
 		return StrategicMessage{Role: role, Content: &content}
 	}
+	if err := m.CreateThread(threadID, "gemini-3-flash", map[string]any{"k": "v"}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	var lastMsgs []StrategicMessage
+	for i := 1; i <= iterations; i++ {
+		lastMsgs = append(lastMsgs, msg(RoleUser, "msg"))
+		if _, err := m.SaveSnapshot(threadID, i, lastMsgs); err != nil {
+			t.Fatalf("SaveSnapshot iter%d: %v", i, err)
+		}
+	}
+	return lastMsgs
+}
 
-	t.Run("returns nil for unknown thread", func(t *testing.T) {
-		t.Parallel()
+func TestLoadLatest_UnknownThread(t *testing.T) { //nolint:paralleltest // modifies global environment
+	t.Parallel()
+	m := newTestManager(t)
+	snap, err := m.LoadLatest("no-such-thread")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if snap != nil {
+		t.Errorf("expected nil snapshot, got %+v", snap)
+	}
+}
 
-		m := newTestManager(t)
-		snap, err := m.LoadLatest("no-such-thread")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if snap != nil {
-			t.Errorf("expected nil snapshot, got %+v", snap)
-		}
-	})
+func TestLoadLatest_MultipleSnapshots(t *testing.T) { //nolint:paralleltest // modifies global environment
+	t.Parallel()
+	m := newTestManager(t)
+	setupThreadWithSnapshots(t, m, "t1", 2)
 
-	t.Run("returns latest iteration when multiple snapshots exist", func(t *testing.T) {
-		t.Parallel()
+	snap, err := m.LoadLatest("t1")
+	if err != nil {
+		t.Fatalf("LoadLatest: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected snapshot, got nil")
+	}
+	if snap.Iteration != 2 {
+		t.Errorf("expected iteration 2, got %d", snap.Iteration)
+	}
+	if len(snap.Messages) != 2 {
+		t.Errorf("expected 2 messages, got %d", len(snap.Messages))
+	}
+	if snap.Model != "gemini-3-flash" {
+		t.Errorf("expected model gemini-3-flash, got %q", snap.Model)
+	}
+	if snap.Metadata["k"] != "v" {
+		t.Errorf("expected metadata k=v, got %v", snap.Metadata)
+	}
+}
 
-		m := newTestManager(t)
-		if err := m.CreateThread("t1", "gemini-3-flash", map[string]any{"k": "v"}); err != nil {
-			t.Fatalf("CreateThread: %v", err)
-		}
-		msgs1 := []StrategicMessage{msg(RoleUser, "first")}
-		msgs2 := []StrategicMessage{msg(RoleUser, "first"), msg(RoleAssistant, "second")}
-		if _, err := m.SaveSnapshot("t1", 1, msgs1); err != nil {
-			t.Fatalf("SaveSnapshot iter1: %v", err)
-		}
-		if _, err := m.SaveSnapshot("t1", 2, msgs2); err != nil {
-			t.Fatalf("SaveSnapshot iter2: %v", err)
-		}
+func TestLoadLatest_RoundTrip(t *testing.T) { //nolint:paralleltest // modifies global environment
+	t.Parallel()
+	m := newTestManager(t)
+	original := setupThreadWithSnapshots(t, m, "t1", 1)
 
-		snap, err := m.LoadLatest("t1")
-		if err != nil {
-			t.Fatalf("LoadLatest: %v", err)
+	snap, err := m.LoadLatest("t1")
+	if err != nil {
+		t.Fatalf("LoadLatest: %v", err)
+	}
+	for i, got := range snap.Messages {
+		want := original[i]
+		if got.Role != want.Role {
+			t.Errorf("msg[%d].Role = %q, want %q", i, got.Role, want.Role)
 		}
-		if snap == nil {
-			t.Fatal("expected snapshot, got nil")
+		if got.Content.Str == nil || *got.Content.Str != *want.Content.Str {
+			t.Errorf("msg[%d].Content mismatch", i)
 		}
-		if snap.Iteration != 2 {
-			t.Errorf("expected iteration 2, got %d", snap.Iteration)
-		}
-		if len(snap.Messages) != 2 {
-			t.Errorf("expected 2 messages, got %d", len(snap.Messages))
-		}
-		if snap.Model != "gemini-3-flash" {
-			t.Errorf("expected model gemini-3-flash, got %q", snap.Model)
-		}
-		if snap.Metadata["k"] != "v" {
-			t.Errorf("expected metadata k=v, got %v", snap.Metadata)
-		}
-	})
-
-	t.Run("messages round-trip correctly", func(t *testing.T) {
-		t.Parallel()
-
-		m := newTestManager(t)
-		if err := m.CreateThread("t1", "m", nil); err != nil {
-			t.Fatalf("CreateThread: %v", err)
-		}
-		original := []StrategicMessage{
-			msg(RoleUser, "hello"),
-			msg(RoleAssistant, "world"),
-		}
-		if _, err := m.SaveSnapshot("t1", 1, original); err != nil {
-			t.Fatalf("SaveSnapshot: %v", err)
-		}
-		snap, err := m.LoadLatest("t1")
-		if err != nil {
-			t.Fatalf("LoadLatest: %v", err)
-		}
-		for i, got := range snap.Messages {
-			want := original[i]
-			if got.Role != want.Role {
-				t.Errorf("msg[%d].Role = %q, want %q", i, got.Role, want.Role)
-			}
-			if got.Content.Str == nil || *got.Content.Str != *want.Content.Str {
-				t.Errorf("msg[%d].Content mismatch", i)
-			}
-		}
-	})
+	}
 }
 
 // ── CompleteThread ────────────────────────────────────────────────────────────
@@ -257,13 +250,7 @@ func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global
 		t.Parallel()
 
 		m := newTestManager(t)
-		if err := m.CreateThread("t1", "m", nil); err != nil {
-			t.Fatalf("CreateThread: %v", err)
-		}
-		content := MessageContent{Str: strPtr("hi")}
-		if _, err := m.SaveSnapshot("t1", 1, []StrategicMessage{{Role: RoleUser, Content: &content}}); err != nil {
-			t.Fatalf("SaveSnapshot: %v", err)
-		}
+		setupThreadWithSnapshots(t, m, "t1", 1)
 		if err := m.CompleteThread("t1"); err != nil {
 			t.Fatalf("CompleteThread: %v", err)
 		}
@@ -279,66 +266,52 @@ func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global
 
 // ── ListResumable ─────────────────────────────────────────────────────────────
 
-func TestListResumable(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestListResumable_Empty(t *testing.T) { //nolint:paralleltest // modifies global environment
+	t.Parallel()
+	m := newTestManager(t)
+	result, err := m.ListResumable()
+	if err != nil {
+		t.Fatalf("ListResumable: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty, got %v", result)
+	}
+}
 
-	t.Run("returns empty list when no threads", func(t *testing.T) {
-		t.Parallel()
+func TestListResumable_Ordered(t *testing.T) { //nolint:paralleltest // modifies global environment
+	t.Parallel()
+	m := newTestManager(t)
+	for _, id := range []string{"tA", "tB"} {
+		setupThreadWithSnapshots(t, m, id, 1)
+	}
 
-		m := newTestManager(t)
-		result, err := m.ListResumable()
-		if err != nil {
-			t.Fatalf("ListResumable: %v", err)
+	result, err := m.ListResumable()
+	if err != nil {
+		t.Fatalf("ListResumable: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("expected 2 results, got %d", len(result))
+	}
+	for _, r := range result {
+		if r.LatestIteration != 1 {
+			t.Errorf("thread %s: expected LatestIteration=1, got %d", r.ThreadID, r.LatestIteration)
 		}
-		if len(result) != 0 {
-			t.Errorf("expected empty, got %v", result)
-		}
-	})
+	}
+}
 
-	t.Run("returns active threads with snapshots ordered by updated_at desc", func(t *testing.T) {
-		t.Parallel()
-
-		m := newTestManager(t)
-		content := MessageContent{Str: strPtr("msg")}
-		snap := []StrategicMessage{{Role: RoleUser, Content: &content}}
-
-		for _, id := range []string{"tA", "tB"} {
-			if err := m.CreateThread(id, "model", nil); err != nil {
-				t.Fatalf("CreateThread %s: %v", id, err)
-			}
-			if _, err := m.SaveSnapshot(id, 1, snap); err != nil {
-				t.Fatalf("SaveSnapshot %s: %v", id, err)
-			}
-		}
-
-		result, err := m.ListResumable()
-		if err != nil {
-			t.Fatalf("ListResumable: %v", err)
-		}
-		if len(result) != 2 {
-			t.Errorf("expected 2 results, got %d", len(result))
-		}
-		for _, r := range result {
-			if r.LatestIteration != 1 {
-				t.Errorf("thread %s: expected LatestIteration=1, got %d", r.ThreadID, r.LatestIteration)
-			}
-		}
-	})
-
-	t.Run("thread without snapshot not included", func(t *testing.T) {
-		t.Parallel()
-
-		m := newTestManager(t)
-		if err := m.CreateThread("no-snap", "model", nil); err != nil {
-			t.Fatalf("CreateThread: %v", err)
-		}
-		result, err := m.ListResumable()
-		if err != nil {
-			t.Fatalf("ListResumable: %v", err)
-		}
-		if len(result) != 0 {
-			t.Errorf("expected empty, got %v", result)
-		}
-	})
+func TestListResumable_NoSnapshotExcluded(t *testing.T) { //nolint:paralleltest // modifies global environment
+	t.Parallel()
+	m := newTestManager(t)
+	if err := m.CreateThread("no-snap", "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	result, err := m.ListResumable()
+	if err != nil {
+		t.Fatalf("ListResumable: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty, got %v", result)
+	}
 }
 
 // ── Closed-DB error paths ─────────────────────────────────────────────────────

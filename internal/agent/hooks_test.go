@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported mock types for testing
 package agent
 
 import (

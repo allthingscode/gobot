@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported internals for testing
 package resilience
 
 import (

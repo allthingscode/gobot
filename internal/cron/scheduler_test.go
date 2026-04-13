@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported scheduler internals for testing
 package cron
 
 import (
@@ -337,6 +338,7 @@ func TestSchedulerPoll_JobTimeout(t *testing.T) {
 	}
 }
 
+//nolint:cyclop,funlen // test complexity justified by clock scenario coverage
 func TestScheduler_FakeClock(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()

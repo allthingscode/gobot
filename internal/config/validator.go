@@ -209,7 +209,6 @@ func (v *Validator) validateWorkspace(result *ValidationResult) {
 }
 
 func (v *Validator) validateAPIKeys(result *ValidationResult) {
-	// Check at least one provider has an API key
 	hasGemini := v.cfg.GeminiAPIKey() != ""
 	hasAnthropic := v.cfg.AnthropicAPIKey() != ""
 	hasOpenAI := v.cfg.OpenAIAPIKey() != ""
@@ -224,44 +223,34 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 		return
 	}
 
-	// Validate key format (basic length check)
-	if hasGemini {
-		key := v.cfg.GeminiAPIKey()
-		if len(key) < 10 {
-			result.Errors = append(result.Errors, ValidationError{
-				Field:    "providers.gemini.apiKey",
-				Message:  "API key appears invalid (too short)",
-				Remedy:   "check your Gemini API key",
-				Severity: SeverityCritical,
-			})
-		}
-	}
+	v.validateProviderKeyFormat(result, "gemini", hasGemini, v.cfg.GeminiAPIKey(), func(key string) bool {
+		return len(key) < 10
+	})
+	v.validateProviderKeyFormat(result, "anthropic", hasAnthropic, v.cfg.AnthropicAPIKey(), func(key string) bool {
+		return !strings.HasPrefix(key, "sk-")
+	})
+	v.validateProviderKeyFormat(result, "openai", hasOpenAI, v.cfg.OpenAIAPIKey(), func(key string) bool {
+		return !strings.HasPrefix(key, "sk-")
+	})
 
-	if hasAnthropic {
-		key := v.cfg.AnthropicAPIKey()
-		if !strings.HasPrefix(key, "sk-") {
-			result.Errors = append(result.Errors, ValidationError{
-				Field:    "providers.anthropic.apiKey",
-				Message:  "API key format appears invalid (should start with 'sk-')",
-				Remedy:   "check your Anthropic API key",
-				Severity: SeverityCritical,
-			})
-		}
-	}
+	v.validateGoogleSearch(result)
+}
 
-	if hasOpenAI {
-		key := v.cfg.OpenAIAPIKey()
-		if !strings.HasPrefix(key, "sk-") {
-			result.Errors = append(result.Errors, ValidationError{
-				Field:    "providers.openai.apiKey",
-				Message:  "API key format appears invalid (should start with 'sk-')",
-				Remedy:   "check your OpenAI API key",
-				Severity: SeverityCritical,
-			})
-		}
+func (v *Validator) validateProviderKeyFormat(result *ValidationResult, provider string, hasKey bool, key string, isInvalid func(string) bool) {
+	if !hasKey {
+		return
 	}
+	if isInvalid(key) {
+		result.Errors = append(result.Errors, ValidationError{
+			Field:    fmt.Sprintf("providers.%s.apiKey", provider),
+			Message:  fmt.Sprintf("API key format appears invalid for %s", provider),
+			Remedy:   fmt.Sprintf("check your %s API key", provider),
+			Severity: SeverityCritical,
+		})
+	}
+}
 
-	// Validate Google Custom Search (Optional but check if partially configured)
+func (v *Validator) validateGoogleSearch(result *ValidationResult) {
 	googleKey := v.cfg.GoogleAPIKey()
 	googleCX := v.cfg.GoogleCX()
 

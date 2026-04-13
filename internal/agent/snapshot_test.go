@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported mock types for testing
 package agent
 
 import (
@@ -9,29 +10,7 @@ import (
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
 
-	tempDir, err := os.MkdirTemp("", "gobot-snapshot-test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	storageRoot := tempDir
-	sessionDir := filepath.Join(storageRoot, ".private", "session")
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		t.Fatalf("failed to create session dir: %v", err)
-	}
-
-	// Create dummy session files
-	files := map[string]string{
-		"session_state.json": `{"state": "active"}`,
-		"task.md":            "# Task 1",
-		"review_report.md":   "LGTM",
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(sessionDir, name), []byte(content), 0o600); err != nil {
-			t.Fatalf("failed to write %s: %v", name, err)
-		}
-	}
+	storageRoot, sessionDir, files := setupSnapshotTest(t)
 
 	ticket := HandoffTicket{
 		TargetSpecialist: "Reviewer",
@@ -43,22 +22,38 @@ func TestSnapshot(t *testing.T) {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
-	// Verify snapshot directory exists
 	snapshots, err := ListSnapshots(storageRoot)
 	if err != nil {
 		t.Fatalf("ListSnapshots failed: %v", err)
 	}
+	verifySnapshotMetadata(t, snapshots)
+
+	snap := snapshots[0]
+	verifySnapshotFiles(t, sessionDir, snap.Name, files)
+
+	// Test deduplication
+	if err := CreateSnapshot(storageRoot, ticket); err != nil {
+		t.Fatalf("CreateSnapshot failed on second call: %v", err)
+	}
+	verifyDeduplication(t, storageRoot)
+
+	verifyRestore(t, storageRoot, sessionDir, snap.Name)
+}
+
+func verifySnapshotMetadata(t *testing.T, snapshots []SnapshotMetadata) {
+	t.Helper()
 	if len(snapshots) != 1 {
 		t.Fatalf("expected 1 snapshot, got %d", len(snapshots))
 	}
-
 	snap := snapshots[0]
 	if snap.Specialist != "Reviewer" || snap.TaskID != "F-081" {
 		t.Errorf("unexpected snapshot metadata: %+v", snap)
 	}
+}
 
-	// Verify files in snapshot
-	snapshotDir := filepath.Join(sessionDir, "history", snap.Name)
+func verifySnapshotFiles(t *testing.T, sessionDir, snapName string, files map[string]string) {
+	t.Helper()
+	snapshotDir := filepath.Join(sessionDir, "history", snapName)
 	for name, expected := range files {
 		content, err := os.ReadFile(filepath.Join(snapshotDir, name))
 		if err != nil {
@@ -68,16 +63,46 @@ func TestSnapshot(t *testing.T) {
 			t.Errorf("unexpected content in %s: got %q, want %q", name, string(content), expected)
 		}
 	}
+}
 
-	// Test deduplication
-	if err := CreateSnapshot(storageRoot, ticket); err != nil {
-		t.Fatalf("CreateSnapshot failed on second call: %v", err)
-	}
-	snapshots, _ = ListSnapshots(storageRoot)
+func verifyDeduplication(t *testing.T, storageRoot string) {
+	t.Helper()
+	snapshots, _ := ListSnapshots(storageRoot)
 	if len(snapshots) != 1 {
 		t.Fatalf("expected still 1 snapshot due to deduplication, got %d", len(snapshots))
 	}
+}
 
+func setupSnapshotTest(t *testing.T) (storageRoot, sessionDir string, files map[string]string) {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "gobot-snapshot-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	storageRoot = tempDir
+	sessionDir = filepath.Join(storageRoot, ".private", "session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("failed to create session dir: %v", err)
+	}
+
+	// Create dummy session files
+	files = map[string]string{
+		"session_state.json": `{"state": "active"}`,
+		"task.md":            "# Task 1",
+		"review_report.md":   "LGTM",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(sessionDir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("failed to write %s: %v", name, err)
+		}
+	}
+	return storageRoot, sessionDir, files
+}
+
+func verifyRestore(t *testing.T, storageRoot, sessionDir, snapName string) {
+	t.Helper()
 	// Test RestoreSnapshot
 	// Modify current session files
 	if err := os.WriteFile(filepath.Join(sessionDir, "session_state.json"), []byte(`{"state": "corrupted"}`), 0o600); err != nil {
@@ -88,7 +113,7 @@ func TestSnapshot(t *testing.T) {
 		t.Fatalf("failed to write garbage: %v", err)
 	}
 
-	if err := RestoreSnapshot(storageRoot, snap.Name); err != nil {
+	if err := RestoreSnapshot(storageRoot, snapName); err != nil {
 		t.Fatalf("RestoreSnapshot failed: %v", err)
 	}
 

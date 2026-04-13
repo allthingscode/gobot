@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported batch internals for testing
 package cron
 
 import (
@@ -17,180 +18,22 @@ func TestParseModularJobFile(t *testing.T) {
 		wantErr  bool
 		validate func(*testing.T, *Job)
 	}{
-		{
-			name:     "valid cron schedule",
-			filename: "cron-job.md",
-			content: `---
-id: daily-report
-name: Daily Report
-schedule: cron(0 9 * * *)
-specialist: researcher
-to: telegram:12345
-enabled: true
----
-This is the task body.
-It can span multiple lines.`,
-			wantErr: false,
-			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
-				if j.ID != "daily-report" {
-					t.Errorf("expected ID daily-report, got %s", j.ID)
-				}
-				if j.Name != "Daily Report" {
-					t.Errorf("expected Name Daily Report, got %s", j.Name)
-				}
-				if j.Schedule.Kind != KindCron || j.Schedule.Expr != "0 9 * * *" {
-					t.Errorf("unexpected schedule: %+v", j.Schedule)
-				}
-				if j.Payload.Channel != "researcher" {
-					t.Errorf("expected channel researcher, got %s", j.Payload.Channel)
-				}
-				if j.Payload.To != "telegram:12345" {
-					t.Errorf("expected to telegram:12345, got %s", j.Payload.To)
-				}
-				if !j.Enabled {
-					t.Errorf("expected enabled true")
-				}
-				expectedBody := "This is the task body.\nIt can span multiple lines."
-				if j.Payload.Message != expectedBody {
-					t.Errorf("expected body %q, got %q", expectedBody, j.Payload.Message)
-				}
-			},
-		},
-		{
-			name:     "valid every schedule hours",
-			filename: "every-h.md",
-			content: `---
-id: every-h
-schedule: every(2h)
----
-Body`,
-			wantErr: false,
-			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
-				if j.Schedule.Kind != KindEvery || *j.Schedule.EveryMS != 7200000 {
-					t.Errorf("expected EveryMS 7200000, got %v", j.Schedule.EveryMS)
-				}
-			},
-		},
-		{
-			name:     "valid every schedule days",
-			filename: "every-d.md",
-			content: `---
-id: every-d
-schedule: every(1d)
----
-Body`,
-			wantErr: false,
-			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
-				if j.Schedule.Kind != KindEvery || *j.Schedule.EveryMS < 80000000 { // 1 day = 86400000ms, allow margin
-					t.Errorf("expected EveryMS ~86400000, got %v", j.Schedule.EveryMS)
-				}
-			},
-		},
-		{
-			name:     "valid at schedule",
-			filename: "at-job.md",
-			content: `---
-id: at-job
-schedule: at(9999999)
----
-Body`,
-			wantErr: false,
-			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
-				if j.Schedule.Kind != KindAt || *j.Schedule.AtMS != 9999999 {
-					t.Errorf("expected AtMS 9999999, got %v", j.Schedule.AtMS)
-				}
-			},
-		},
-		{
-			name:     "cron with timezone",
-			filename: "cron-tz.md",
-			content: `---
-id: cron-tz
-schedule: cron(0 9 * * 1-5, America/New_York)
----
-Body`,
-			wantErr: false,
-			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
-				if j.Schedule.Kind != KindCron || j.Schedule.Expr != "0 9 * * 1-5" || j.Schedule.TZ != "America/New_York" {
-					t.Errorf("unexpected schedule: %+v", j.Schedule)
-				}
-			},
-		},
-		{
-			name:     "defaults applied",
-			filename: "defaults.md",
-			content: `---
-id: defaults
-schedule: every(100)
----
-Body`,
-			wantErr: false,
-			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
-				if j.Payload.Channel != "telegram" {
-					t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
-				}
-				if !j.Enabled {
-					t.Errorf("expected default enabled true")
-				}
-				if j.Payload.To != "" {
-					t.Errorf("expected default to empty, got %s", j.Payload.To)
-				}
-			},
-		},
-		{
-			name:     "missing front-matter",
-			filename: "missing-fm.md",
-			content:  `No front matter here`,
-			wantErr:  true,
-		},
-		{
-			name:     "missing schedule",
-			filename: "missing-sched.md",
-			content: `---
-id: no-sched
----
-Body`,
-			wantErr: true,
-		},
-		{
-			name:     "id defaults to filename stem",
-			filename: "stem-test.md",
-			content: `---
-schedule: every(100)
----
-Body`,
-			wantErr: false,
-			validate: func(t *testing.T, j *Job) { //nolint:thelper // table-driven test helper
-				if j.ID != "stem-test" {
-					t.Errorf("expected ID stem-test, got %s", j.ID)
-				}
-				if j.Name != "stem-test" {
-					t.Errorf("expected Name stem-test, got %s", j.Name)
-				}
-				if j.Schedule.Kind != KindEvery {
-					t.Errorf("expected KindEvery, got %v", j.Schedule.Kind)
-				}
-				if j.Payload.Channel != "telegram" {
-					t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
-				}
-				if j.Payload.To != "" {
-					t.Errorf("expected default to empty, got %s", j.Payload.To)
-				}
-				if j.Payload.Message != "Body" {
-					t.Errorf("expected body %q, got %q", "Body", j.Payload.Message)
-				}
-			},
-		},
+		{"valid cron schedule", "cron-job.md", cronJobContent(), false, validateCronJob},
+		{"valid every schedule hours", "every-h.md", everyHContent(), false, validateEveryH},
+		{"valid every schedule days", "every-d.md", everyDContent(), false, validateEveryD},
+		{"valid at schedule", "at-job.md", atJobContent(), false, validateAtJob},
+		{"cron with timezone", "cron-tz.md", cronTZContent(), false, validateCronTZ},
+		{"defaults applied", "defaults.md", defaultsContent(), false, validateDefaults},
+		{"missing front-matter", "missing-fm.md", "No front matter here", true, nil},
+		{"missing schedule", "missing-sched.md", missingSchedContent(), true, nil},
+		{"id defaults to filename stem", "stem-test.md", stemTestContent(), false, validateStemTest},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(tmpDir, tt.filename)
-			err := os.WriteFile(path, []byte(tt.content), 0o600)
-			if err != nil {
-				t.Fatalf("failed to write test file: %v", err)
-			}
+			_ = os.WriteFile(path, []byte(tt.content), 0o600)
 
 			job, err := ParseModularJobFile(path)
 			if (err != nil) != tt.wantErr {
@@ -201,6 +44,136 @@ Body`,
 				tt.validate(t, job)
 			}
 		})
+	}
+}
+
+func cronJobContent() string {
+	return `---
+id: daily-report
+name: Daily Report
+schedule: cron(0 9 * * *)
+specialist: researcher
+to: telegram:12345
+enabled: true
+---
+This is the task body.
+It can span multiple lines.`
+}
+
+func validateCronJob(t *testing.T, j *Job) {
+	t.Helper()
+	if j.ID != "daily-report" {
+		t.Errorf("expected ID daily-report, got %s", j.ID)
+	}
+	if j.Name != "Daily Report" {
+		t.Errorf("expected Name Daily Report, got %s", j.Name)
+	}
+	if j.Schedule.Kind != KindCron || j.Schedule.Expr != "0 9 * * *" {
+		t.Errorf("unexpected schedule: %+v", j.Schedule)
+	}
+	if j.Payload.Channel != "researcher" {
+		t.Errorf("expected channel researcher, got %s", j.Payload.Channel)
+	}
+	if j.Payload.To != "telegram:12345" {
+		t.Errorf("expected to telegram:12345, got %s", j.Payload.To)
+	}
+	if !j.Enabled {
+		t.Errorf("expected enabled true")
+	}
+	expectedBody := "This is the task body.\nIt can span multiple lines."
+	if j.Payload.Message != expectedBody {
+		t.Errorf("expected body %q, got %q", expectedBody, j.Payload.Message)
+	}
+}
+
+func everyHContent() string {
+	return "---\nid: every-h\nschedule: every(2h)\n---\nBody"
+}
+
+func validateEveryH(t *testing.T, j *Job) {
+	t.Helper()
+	if j.Schedule.Kind != KindEvery || *j.Schedule.EveryMS != 7200000 {
+		t.Errorf("expected EveryMS 7200000, got %v", j.Schedule.EveryMS)
+	}
+}
+
+func everyDContent() string {
+	return "---\nid: every-d\nschedule: every(1d)\n---\nBody"
+}
+
+func validateEveryD(t *testing.T, j *Job) {
+	t.Helper()
+	if j.Schedule.Kind != KindEvery || *j.Schedule.EveryMS < 80000000 {
+		t.Errorf("expected EveryMS ~86400000, got %v", j.Schedule.EveryMS)
+	}
+}
+
+func atJobContent() string {
+	return "---\nid: at-job\nschedule: at(9999999)\n---\nBody"
+}
+
+func validateAtJob(t *testing.T, j *Job) {
+	t.Helper()
+	if j.Schedule.Kind != KindAt || *j.Schedule.AtMS != 9999999 {
+		t.Errorf("expected AtMS 9999999, got %v", j.Schedule.AtMS)
+	}
+}
+
+func cronTZContent() string {
+	return "---\nid: cron-tz\nschedule: cron(0 9 * * 1-5, America/New_York)\n---\nBody"
+}
+
+func validateCronTZ(t *testing.T, j *Job) {
+	t.Helper()
+	if j.Schedule.Kind != KindCron || j.Schedule.Expr != "0 9 * * 1-5" || j.Schedule.TZ != "America/New_York" {
+		t.Errorf("unexpected schedule: %+v", j.Schedule)
+	}
+}
+
+func defaultsContent() string {
+	return "---\nid: defaults\nschedule: every(100)\n---\nBody"
+}
+
+func validateDefaults(t *testing.T, j *Job) {
+	t.Helper()
+	if j.Payload.Channel != "telegram" {
+		t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
+	}
+	if !j.Enabled {
+		t.Errorf("expected default enabled true")
+	}
+	if j.Payload.To != "" {
+		t.Errorf("expected default to empty, got %s", j.Payload.To)
+	}
+}
+
+func missingSchedContent() string {
+	return "---\nid: no-sched\n---\nBody"
+}
+
+func stemTestContent() string {
+	return "---\nschedule: every(100)\n---\nBody"
+}
+
+func validateStemTest(t *testing.T, j *Job) {
+	t.Helper()
+	if j.ID != "stem-test" {
+		t.Errorf("expected ID stem-test, got %s", j.ID)
+	}
+	if j.Name != "stem-test" {
+		t.Errorf("expected Name stem-test, got %s", j.Name)
+	}
+	if j.Schedule.Kind != KindEvery {
+		t.Errorf("expected KindEvery, got %v", j.Schedule.Kind)
+	}
+	if j.Payload.Channel != "telegram" {
+		t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
+	}
+	if j.Payload.To != "" {
+		t.Errorf("expected default to empty, got %s", j.Payload.To)
+	}
+	if j.Payload.Message != "Body" {
+		t.Errorf("expected body %q, got %q", "Body", j.Payload.Message)
 	}
 }
 
@@ -230,20 +203,25 @@ func TestParseScheduleString(t *testing.T) {
 				return
 			}
 			if !tt.wantErr {
-				if got.Kind != tt.want.Kind || got.Expr != tt.want.Expr || got.TZ != tt.want.TZ {
-					t.Errorf("got %+v, want %+v", got, tt.want)
-				}
-				if tt.want.EveryMS != nil {
-					if got.EveryMS == nil || *got.EveryMS != *tt.want.EveryMS {
-						t.Errorf("got EveryMS %v, want %v", got.EveryMS, tt.want.EveryMS)
-					}
-				}
-				if tt.want.AtMS != nil {
-					if got.AtMS == nil || *got.AtMS != *tt.want.AtMS {
-						t.Errorf("got AtMS %v, want %v", got.AtMS, tt.want.AtMS)
-					}
-				}
+				validateSchedule(t, got, tt.want)
 			}
 		})
+	}
+}
+
+func validateSchedule(t *testing.T, got, want Schedule) {
+	t.Helper()
+	if got.Kind != want.Kind || got.Expr != want.Expr || got.TZ != want.TZ {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if want.EveryMS != nil {
+		if got.EveryMS == nil || *got.EveryMS != *want.EveryMS {
+			t.Errorf("got EveryMS %v, want %v", got.EveryMS, want.EveryMS)
+		}
+	}
+	if want.AtMS != nil {
+		if got.AtMS == nil || *got.AtMS != *want.AtMS {
+			t.Errorf("got AtMS %v, want %v", got.AtMS, want.AtMS)
+		}
 	}
 }

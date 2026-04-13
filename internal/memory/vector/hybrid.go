@@ -42,7 +42,7 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 		return nil, fmt.Errorf("fts search: %w", err)
 	}
 
-	var ftsResults []FTSResult
+	ftsResults := make([]FTSResult, 0, len(ftsResultsRaw))
 	for _, res := range ftsResultsRaw {
 		id, _ := res["namespace"].(string)
 		content, _ := res["content"].(string)
@@ -120,7 +120,7 @@ func MergeResults(ftsResults []FTSResult, vecResults []chromem.Result, k int) []
 		}
 	}
 
-	var merged []HybridResult
+	merged := make([]HybridResult, 0, len(scores))
 	for id, score := range scores {
 		merged = append(merged, HybridResult{
 			ID:        id,

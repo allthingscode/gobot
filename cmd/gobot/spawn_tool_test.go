@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (
@@ -143,26 +144,39 @@ func TestSpawnTool_Execute(t *testing.T) {
 			})
 
 			result, err := tool.Execute(context.Background(), "telegram:123", "", tc.args)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("Execute() expected error, got nil")
-				}
-				if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
-					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Execute() unexpected error: %v", err)
-			}
-			if result != tc.wantResult {
-				t.Errorf("result = %q, want %q", result, tc.wantResult)
-			}
-			// Runner must have been called exactly once.
-			if tc.runnerErr == nil && mock.called != 1 {
-				t.Errorf("runner called %d times, want 1", mock.called)
-			}
+			validateSpawnResult(t, tc, result, err, mock)
 		})
+	}
+}
+
+func validateSpawnResult(t *testing.T, tc struct {
+	name          string
+	args          map[string]any
+	runnerResp    string
+	runnerErr     error
+	wantResult    string
+	wantErr       bool
+	wantErrSubstr string
+}, result string, err error, mock *mockRunner) {
+	t.Helper()
+	if tc.wantErr {
+		if err == nil {
+			t.Fatal("Execute() expected error, got nil")
+		}
+		if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
+			t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("Execute() unexpected error: %v", err)
+	}
+	if result != tc.wantResult {
+		t.Errorf("result = %q, want %q", result, tc.wantResult)
+	}
+	// Runner must have been called exactly once.
+	if tc.runnerErr == nil && mock.called != 1 {
+		t.Errorf("runner called %d times, want 1", mock.called)
 	}
 }
 

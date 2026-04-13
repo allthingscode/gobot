@@ -53,50 +53,70 @@ type storedToken struct {
 // AuthorizeInteractive starts a local server to handle the OAuth2 callback,
 // prints the auth URL, and returns the exchanged token.
 func AuthorizeInteractive(secretsRoot string, scopes []string) error {
-	// Try reading client credentials from DPAPI first.
-	store := tokenStore(secretsRoot)
-	clientID, _ := store.Get("google_client_id")         // Error ignored; fall back to client_secrets.json if key is missing.
-	clientSecret, _ := store.Get("google_client_secret") // Error ignored; fall back to client_secrets.json if key is missing.
-
-	if clientID == "" || clientSecret == "" {
-		// Fall back to client_secrets.json
-		secretsPath := filepath.Join(secretsRoot, "client_secrets.json")
-		data, err := os.ReadFile(secretsPath)
-		if err != nil {
-			return fmt.Errorf("client_secrets.json missing (and DPAPI keys not set): %w", err)
-		}
-		var cs clientSecrets
-		if err := json.Unmarshal(data, &cs); err != nil {
-			return fmt.Errorf("invalid client_secrets.json: %w", err)
-		}
-		clientID = cs.Installed.ClientID
-		clientSecret = cs.Installed.ClientSecret
+	clientID, clientSecret, err := resolveClientCredentials(secretsRoot)
+	if err != nil {
+		return err
 	}
 
-	// Use a fixed port 8080 to match most client secrets
-	port := 8080
+	const port = 8080
 	redirectURI := fmt.Sprintf("http://localhost:%d", port)
+	fullAuthURL := buildAuthURL(clientID, redirectURI, scopes)
 
+	fmt.Println("Please open the following URL in your browser to authorize gobot:")
+	fmt.Println("\n" + fullAuthURL + "\n")
+
+	code, err := waitForAuthCode(port)
+	if err != nil {
+		return err
+	}
+
+	token, err := exchangeCode(code, clientID, clientSecret, redirectURI)
+	if err != nil {
+		return fmt.Errorf("token exchange: %w", err)
+	}
+
+	return persistToken(secretsRoot, token)
+}
+
+func resolveClientCredentials(secretsRoot string) (clientID, clientSecret string, err error) {
+	store := tokenStore(secretsRoot)
+	clientID, _ = store.Get("google_client_id")
+	clientSecret, _ = store.Get("google_client_secret")
+
+	if clientID != "" && clientSecret != "" {
+		return clientID, clientSecret, nil
+	}
+
+	secretsPath := filepath.Join(secretsRoot, "client_secrets.json")
+	data, err := os.ReadFile(secretsPath)
+	if err != nil {
+		return "", "", fmt.Errorf("client_secrets.json missing (and DPAPI keys not set): %w", err)
+	}
+	var cs clientSecrets
+	if err := json.Unmarshal(data, &cs); err != nil {
+		return "", "", fmt.Errorf("invalid client_secrets.json: %w", err)
+	}
+	return cs.Installed.ClientID, cs.Installed.ClientSecret, nil
+}
+
+func buildAuthURL(clientID, redirectURI string, scopes []string) string {
 	v := url.Values{}
 	v.Set("client_id", clientID)
 	v.Set("redirect_uri", redirectURI)
 	v.Set("response_type", "code")
 	v.Set("scope", strings.Join(scopes, " "))
 	v.Set("access_type", "offline")
-	v.Set("prompt", "consent") // Force refresh token
+	v.Set("prompt", "consent")
+	return authURL + "?" + v.Encode()
+}
 
-	fullAuthURL := authURL + "?" + v.Encode()
-
-	fmt.Println("Please open the following URL in your browser to authorize gobot:")
-	fmt.Println("\n" + fullAuthURL + "\n")
-
-	// Start local server to catch the code
+func waitForAuthCode(port int) (string, error) {
 	codeChan := make(chan string)
 	errChan := make(chan error)
 
 	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
-		return fmt.Errorf("failed to listen on localhost:%d: %w", port, err)
+		return "", fmt.Errorf("failed to listen on localhost:%d: %w", port, err)
 	}
 	defer func() { _ = l.Close() }()
 
@@ -120,33 +140,25 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 		}
 	}()
 
-	var code string
 	select {
-	case code = <-codeChan:
-		// success
+	case code := <-codeChan:
+		return code, nil
 	case err := <-errChan:
-		return fmt.Errorf("auth server error: %w", err)
+		return "", fmt.Errorf("auth server error: %w", err)
 	case <-time.After(5 * time.Minute):
-		return fmt.Errorf("timeout waiting for browser authorization")
+		return "", fmt.Errorf("timeout waiting for browser authorization")
 	}
+}
 
-	// Exchange code for token
-	token, err := exchangeCode(code, clientID, clientSecret, redirectURI)
-	if err != nil {
-		return fmt.Errorf("token exchange: %w", err)
-	}
-
-	// Save token to DPAPI for secure storage.
-	if tokenJSON, marshalErr := json.MarshalIndent(token, "", "  "); marshalErr == nil {
-		if saveErr := store.Set("google_oauth_token", string(tokenJSON)); saveErr == nil {
-			fmt.Println("Saved OAuth token to DPAPI secure storage.")
-		}
-	}
-
-	// Save to both google_token.json and gmail/token.json for compatibility
+func persistToken(secretsRoot string, token *storedToken) error {
+	store := tokenStore(secretsRoot)
 	tokenJSON, err := json.MarshalIndent(token, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal token: %w", err)
+	}
+
+	if saveErr := store.Set("google_oauth_token", string(tokenJSON)); saveErr == nil {
+		fmt.Println("Saved OAuth token to DPAPI secure storage.")
 	}
 
 	googlePath := GoogleTokenPath(secretsRoot)
@@ -155,9 +167,7 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	}
 
 	gmailDir := filepath.Join(secretsRoot, "gmail")
-	if err := os.MkdirAll(gmailDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create gmail directory: %w", err)
-	}
+	_ = os.MkdirAll(gmailDir, 0o755)
 	gmailPath := filepath.Join(gmailDir, "token.json")
 	if err := os.WriteFile(gmailPath, tokenJSON, 0o600); err != nil {
 		return fmt.Errorf("failed to save gmail token: %w", err)
@@ -240,50 +250,74 @@ func BearerToken(secretsRoot string) (string, error) {
 
 // bearerTokenWithClient is the testable inner implementation.
 func bearerTokenWithClient(secretsRoot string, client *http.Client) (string, error) {
-	// Try DPAPI first; fall back to google_token.json if key is absent or DPAPI unavailable.
-	store := tokenStore(secretsRoot)
-	if tokenJSON, err := store.Get("google_oauth_token"); err == nil && tokenJSON != "" {
-		var tok storedToken
-		if jsonErr := json.Unmarshal([]byte(tokenJSON), &tok); jsonErr == nil {
-			if tok.expired() {
-				if tok.RefreshToken == "" {
-					return "", fmt.Errorf("google token expired and no refresh_token present")
-				}
-				if refreshErr := refreshToken(&tok, client); refreshErr != nil {
-					return "", fmt.Errorf("google token refresh: %w", refreshErr)
-				}
-				// Persist refreshed token back to DPAPI.
-				if updated, marshalErr := json.Marshal(tok); marshalErr == nil {
-					_ = store.Set("google_oauth_token", string(updated))
-				}
-			}
-			return tok.Token, nil
-		}
+	if token, ok := tryLoadTokenFromDPAPI(secretsRoot, client); ok {
+		return token, nil
 	}
 
-	tokenPath := GoogleTokenPath(secretsRoot)
-	data, err := os.ReadFile(tokenPath)
+	tok, path, err := loadTokenFromFile(secretsRoot)
 	if err != nil {
-		return "", fmt.Errorf("google_token.json not found at %s: %w", tokenPath, err)
+		return "", err
+	}
+
+	if tok.expired() {
+		if err := refreshAndSaveToken(tok, path, client); err != nil {
+			return "", err
+		}
+	}
+	return tok.Token, nil
+}
+
+func tryLoadTokenFromDPAPI(secretsRoot string, client *http.Client) (string, bool) {
+	store := tokenStore(secretsRoot)
+	tokenJSON, err := store.Get("google_oauth_token")
+	if err != nil || tokenJSON == "" {
+		return "", false
 	}
 
 	var tok storedToken
-	if err := json.Unmarshal(data, &tok); err != nil {
-		return "", fmt.Errorf("invalid google_token.json: %w", err)
+	if err := json.Unmarshal([]byte(tokenJSON), &tok); err != nil {
+		return "", false
 	}
 
 	if tok.expired() {
 		if tok.RefreshToken == "" {
-			return "", fmt.Errorf("google token expired and no refresh_token present")
+			return "", false
 		}
 		if err := refreshToken(&tok, client); err != nil {
-			return "", fmt.Errorf("google token refresh: %w", err)
+			return "", false
 		}
 		if updated, err := json.Marshal(tok); err == nil {
-			_ = os.WriteFile(tokenPath, updated, 0o600)
+			_ = store.Set("google_oauth_token", string(updated))
 		}
 	}
-	return tok.Token, nil
+	return tok.Token, true
+}
+
+func loadTokenFromFile(secretsRoot string) (*storedToken, string, error) {
+	path := GoogleTokenPath(secretsRoot)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("google_token.json not found at %s: %w", path, err)
+	}
+
+	var tok storedToken
+	if err := json.Unmarshal(data, &tok); err != nil {
+		return nil, "", fmt.Errorf("invalid google_token.json: %w", err)
+	}
+	return &tok, path, nil
+}
+
+func refreshAndSaveToken(tok *storedToken, path string, client *http.Client) error {
+	if tok.RefreshToken == "" {
+		return fmt.Errorf("google token expired and no refresh_token present")
+	}
+	if err := refreshToken(tok, client); err != nil {
+		return fmt.Errorf("google token refresh: %w", err)
+	}
+	if updated, err := json.Marshal(tok); err == nil {
+		_ = os.WriteFile(path, updated, 0o600)
+	}
+	return nil
 }
 
 // refreshToken exchanges a refresh_token for a new access token, updating tok in place.
@@ -365,14 +399,14 @@ func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
 	return json.Unmarshal(body, dest)
 }
 
-// apiPost performs an authenticated POST with a JSON body and decodes the
-// JSON response into dest.
-func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any) error {
+// doGoogleRequest performs an authenticated HTTP request with a JSON body
+// and decodes the JSON response into dest.
+func doGoogleRequest(method, accessToken, apiURL string, body any, client *http.Client, dest any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, apiURL, strings.NewReader(string(payload)))
+	req, err := http.NewRequestWithContext(context.Background(), method, apiURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -380,7 +414,7 @@ func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("POST %s: %w", apiURL, err)
+		return fmt.Errorf("%s %s: %w", method, apiURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
@@ -393,30 +427,14 @@ func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any
 	return json.Unmarshal(respBody, dest)
 }
 
+// apiPost performs an authenticated POST with a JSON body and decodes the
+// JSON response into dest.
+func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any) error {
+	return doGoogleRequest(http.MethodPost, accessToken, apiURL, body, client, dest)
+}
+
 // apiPatch performs an authenticated PATCH with a JSON body and decodes the
 // JSON response into dest.
 func apiPatch(accessToken, apiURL string, body any, client *http.Client, dest any) error {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal body: %w", err)
-	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPatch, apiURL, strings.NewReader(string(payload)))
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("PATCH %s: %w", apiURL, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("google API %d: %s", resp.StatusCode, string(respBody))
-	}
-	return json.Unmarshal(respBody, dest)
+	return doGoogleRequest(http.MethodPatch, accessToken, apiURL, body, client, dest)
 }

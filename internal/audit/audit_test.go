@@ -60,6 +60,7 @@ func makeModel(name, display, desc string) audit.ModelInfo {
 	return audit.ModelInfo{Name: name, DisplayName: display, Description: desc}
 }
 
+//nolint:gochecknoglobals // Test fixture: static model mapping for audit tests
 var current = map[string]string{
 	"default":    "gemini-3-flash-preview",
 	"researcher": "gemini-2.5-flash-lite",

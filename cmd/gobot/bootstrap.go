@@ -29,6 +29,39 @@ type agentStack struct {
 // initialization sequence used by both 'run' and 'simulate' commands.
 // Returns a stack of components and a cleanup function (to close memory store).
 func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func(), error) {
+	prov, model, err := initProviders(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ensureAwarenessFile(cfg)
+	systemPrompt := loadSystemPrompt(cfg)
+	if systemPrompt != "" {
+		slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
+	}
+
+	runner := newGeminiRunner(prov, model, systemPrompt, cfg)
+	memStore, cleanup := initMemory(cfg, runner)
+	vecStore, embedProv, vecCleanup := initVectorStore(cfg, prov, runner)
+
+	runner.tools = registerTools(cfg, prov, model, memStore, vecStore, embedProv)
+
+	finalCleanup := func() {
+		cleanup()
+		vecCleanup()
+	}
+
+	return &agentStack{
+		prov:      prov,
+		model:     model,
+		runner:    runner,
+		memStore:  memStore,
+		vecStore:  vecStore,
+		embedProv: embedProv,
+	}, finalCleanup, nil
+}
+
+func initProviders(ctx context.Context, cfg *config.Config) (provider.Provider, string, error) {
 	factory := &provider.Factory{
 		GeminiAPIKey:    cfg.GeminiAPIKey(),
 		AnthropicAPIKey: cfg.AnthropicAPIKey(),
@@ -36,52 +69,46 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 		OpenAIBaseURL:   cfg.OpenAIBaseURL(),
 	}
 	if err := factory.InitAll(ctx); err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 
 	provName := cfg.DefaultProvider()
 	prov, err := provider.Get(provName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("provider: %w", err)
+		return nil, "", fmt.Errorf("provider: %w", err)
 	}
 	model := cfg.DefaultModel()
 
-	// F-102: Manager-Executor Cost Routing
 	if cfg.Strategic.Routing.Enabled {
-		mgrProvName := cfg.Strategic.Routing.ManagerProvider
-		if mgrProvName == "" {
-			mgrProvName = provName
-		}
-		mgrProv, err := provider.Get(mgrProvName)
-		if err != nil {
-			slog.Warn("bootstrap: manager provider not found, disabling cost routing", "provider", mgrProvName)
-		} else {
-			slog.Info("bootstrap: cost routing enabled", "manager_model", cfg.Strategic.Routing.ManagerModel, "manager_provider", mgrProvName)
-			prov = provider.NewRoutingProvider(prov, mgrProv, cfg.Strategic.Routing)
-		}
+		prov = wrapRoutingProvider(prov, provName, cfg)
 	}
+	return prov, model, nil
+}
 
-	// Ensure AWARENESS.md exists (mirrors launcher.py)
-	ensureAwarenessFile(cfg)
-
-	systemPrompt := loadSystemPrompt(cfg)
-	if systemPrompt != "" {
-		slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
+func wrapRoutingProvider(base provider.Provider, provName string, cfg *config.Config) provider.Provider {
+	mgrProvName := cfg.Strategic.Routing.ManagerProvider
+	if mgrProvName == "" {
+		mgrProvName = provName
 	}
+	mgrProv, err := provider.Get(mgrProvName)
+	if err != nil {
+		slog.Warn("bootstrap: manager provider not found, disabling cost routing", "provider", mgrProvName)
+		return base
+	}
+	slog.Info("bootstrap: cost routing enabled", "manager_model", cfg.Strategic.Routing.ManagerModel, "manager_provider", mgrProvName)
+	return provider.NewRoutingProvider(base, mgrProv, cfg.Strategic.Routing)
+}
 
-	runner := newGeminiRunner(prov, model, systemPrompt, cfg)
-
-	// Init long-term memory store (non-fatal if it fails).
-	cleanup := func() {}
-	memStore, memErr := memory.NewMemoryStore(cfg.StorageRoot())
-	if memErr != nil {
-		slog.Warn("bootstrap: memory store unavailable, running without long-term memory", "err", memErr)
+func initMemory(cfg *config.Config, runner *geminiRunner) (memStore *memory.MemoryStore, cleanup func()) {
+	cleanup = func() {}
+	memStore, err := memory.NewMemoryStore(cfg.StorageRoot())
+	if err != nil {
+		slog.Warn("bootstrap: memory store unavailable, running without long-term memory", "err", err)
 	} else if memStore != nil {
 		runner.memStore = memStore
 		cleanup = func() { _ = memStore.Close() }
 	}
 
-	// F-105: Wire per-user memory store provider when multi-user isolation is enabled.
 	if cfg.MultiUserEnabled() {
 		runner.SetMemoryStoreProvider(func(userID string) *memory.MemoryStore {
 			dbDir := cfg.WorkspacePath(userID)
@@ -94,38 +121,35 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 		})
 		slog.Info("bootstrap: multi-user memory isolation enabled")
 	}
+	return memStore, cleanup
+}
 
+func initVectorStore(cfg *config.Config, prov provider.Provider, runner *geminiRunner) (*vector.Store, vector.EmbeddingProvider, func()) {
+	cleanup := func() {}
 	var vecStore *vector.Store
 	var embedProv vector.EmbeddingProvider
-	if gp, ok := prov.(*provider.GeminiProvider); ok && gp.Client() != nil {
-		embedProv = vector.NewGeminiProvider(gp.Client())
-		vsPath := filepath.Join(cfg.StorageRoot(), "memory", "vectors.db")
-		vs, vsErr := vector.NewStore(vsPath)
-		if vsErr != nil {
-			slog.Warn("bootstrap: vector store unavailable", "err", vsErr)
-		} else {
-			vecStore = vs
-			runner.vecStore = vs
-			runner.embedProv = embedProv
-			oldCleanup := cleanup
-			cleanup = func() {
-				oldCleanup()
-				_ = vs.Save()
-				_ = vs.Close()
-			}
-		}
+
+	gp, ok := prov.(*provider.GeminiProvider)
+	if !ok || gp.Client() == nil {
+		return nil, nil, cleanup
 	}
 
-	runner.tools = registerTools(cfg, prov, model, memStore, vecStore, embedProv)
+	embedProv = vector.NewGeminiProvider(gp.Client())
+	vsPath := filepath.Join(cfg.StorageRoot(), "memory", "vectors.db")
+	vs, err := vector.NewStore(vsPath)
+	if err != nil {
+		slog.Warn("bootstrap: vector store unavailable", "err", err)
+		return nil, nil, cleanup
+	}
 
-	return &agentStack{
-		prov:      prov,
-		model:     model,
-		runner:    runner,
-		memStore:  memStore,
-		vecStore:  vecStore,
-		embedProv: embedProv,
-	}, cleanup, nil
+	vecStore = vs
+	runner.vecStore = vs
+	runner.embedProv = embedProv
+	cleanup = func() {
+		_ = vs.Save()
+		_ = vs.Close()
+	}
+	return vecStore, embedProv, cleanup
 }
 
 // NewSessionManager initializes a new agent.SessionManager with standard gobot defaults.

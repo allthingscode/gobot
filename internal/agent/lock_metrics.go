@@ -22,6 +22,7 @@ type LockStatus struct {
 	MaxWaitTime     time.Duration `json:"max_wait_time"`
 }
 
+//nolint:gochecknoglobals // Non-mutable: sync.Mutex protects map, used only for metrics collection
 var (
 	allLocks   = make(map[string]*sessionLock)
 	allLocksMu sync.Mutex

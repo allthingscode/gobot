@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported doctor internals for testing
 package doctor
 
 import (

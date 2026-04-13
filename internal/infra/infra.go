@@ -52,7 +52,7 @@ func ListDirectory(pathStr, workspacePath string) string {
 		return fmt.Sprintf("Directory %s is empty (or all items are restricted)", pathStr)
 	}
 
-	var items []string
+	items := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		prefix := "📄 "
 		if entry.IsDir() {

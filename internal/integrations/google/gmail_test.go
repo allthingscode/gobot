@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported gmail internals for testing
 package google
 
 import (
@@ -15,28 +16,39 @@ import (
 
 func TestGmailSearchAndRead(t *testing.T) {
 	t.Parallel()
-	mux := http.NewServeMux()
+	server := setupGmailSearchMockServer(t)
+	t.Cleanup(server.Close)
 
-	// Mock List/Search
+	svc := setupGmailService(t, server.URL)
+	ctx := context.Background()
+
+	t.Run("Search", func(t *testing.T) {
+		t.Parallel()
+		validateGmailSearch(t, svc, ctx)
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		t.Parallel()
+		validateGmailGet(t, svc, ctx)
+	})
+}
+
+func setupGmailSearchMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
 	mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query().Get("q")
-		if q == "empty" {
+		if r.URL.Query().Get("q") == "empty" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"messages": []any{}})
 			return
 		}
-		resp := struct {
+		_ = json.NewEncoder(w).Encode(struct {
 			Messages []MessageSummary `json:"messages"`
 		}{
-			Messages: []MessageSummary{
-				{ID: "msg123", ThreadID: "thread123"},
-			},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
+			Messages: []MessageSummary{{ID: "msg123", ThreadID: "thread123"}},
+		})
 	})
-
-	// Mock Get Message
 	mux.HandleFunc("/messages/msg123", func(w http.ResponseWriter, _ *http.Request) {
-		msg := Message{
+		_ = json.NewEncoder(w).Encode(Message{
 			ID:      "msg123",
 			Snippet: "Hello world snippet",
 			Payload: &Payload{
@@ -48,19 +60,15 @@ func TestGmailSearchAndRead(t *testing.T) {
 					Data: base64.URLEncoding.EncodeToString([]byte("Full body text")),
 				},
 			},
-		}
-		_ = json.NewEncoder(w).Encode(msg)
+		})
 	})
+	return httptest.NewServer(mux)
+}
 
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
-	// Setup fake secrets
+func setupGmailService(t *testing.T, baseURL string) *Service {
+	t.Helper()
 	tmp := t.TempDir()
-	tok := storedToken{
-		Token:  "fake-token",
-		Expiry: time.Now().Add(1 * time.Hour),
-	}
+	tok := storedToken{Token: "fake-token", Expiry: time.Now().Add(1 * time.Hour)}
 	tokData, _ := json.Marshal(tok)
 	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
@@ -68,37 +76,36 @@ func TestGmailSearchAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
-	svc.baseURL = server.URL
+	svc.baseURL = baseURL
+	return svc
+}
 
-	ctx := context.Background()
+func validateGmailSearch(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
+	res, err := svc.SearchMessages(ctx, "query", 5)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(res) != 1 || res[0].ID != "msg123" {
+		t.Errorf("Unexpected search results: %+v", res)
+	}
+}
 
-	t.Run("Search", func(t *testing.T) {
-		t.Parallel()
-		res, err := svc.SearchMessages(ctx, "query", 5)
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
-		}
-		if len(res) != 1 || res[0].ID != "msg123" {
-			t.Errorf("Unexpected search results: %+v", res)
-		}
-	})
-
-	t.Run("Get", func(t *testing.T) {
-		t.Parallel()
-		msg, err := svc.GetMessage(ctx, "msg123")
-		if err != nil {
-			t.Fatalf("GetMessage failed: %v", err)
-		}
-		if msg.Snippet != "Hello world snippet" {
-			t.Errorf("Unexpected snippet: %s", msg.Snippet)
-		}
-		if msg.GetHeader("Subject") != "Test Subject" {
-			t.Errorf("Unexpected subject: %s", msg.GetHeader("Subject"))
-		}
-		if msg.ExtractBody() != "Full body text" {
-			t.Errorf("Unexpected body: %s", msg.ExtractBody())
-		}
-	})
+func validateGmailGet(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
+	msg, err := svc.GetMessage(ctx, "msg123")
+	if err != nil {
+		t.Fatalf("GetMessage failed: %v", err)
+	}
+	if msg.Snippet != "Hello world snippet" {
+		t.Errorf("Unexpected snippet: %s", msg.Snippet)
+	}
+	if msg.GetHeader("Subject") != "Test Subject" {
+		t.Errorf("Unexpected subject: %s", msg.GetHeader("Subject"))
+	}
+	if msg.ExtractBody() != "Full body text" {
+		t.Errorf("Unexpected body: %s", msg.ExtractBody())
+	}
 }
 
 func TestNewService_Refresh(t *testing.T) {
@@ -133,7 +140,7 @@ func TestNewService_Refresh(t *testing.T) {
 	if !refreshCalled {
 		t.Error("expected token refresh to be called")
 	}
-	if svc.accessToken != "new-token" {
+	if svc.accessToken != "new-token" { //nolint:goconst // test fixture token
 		t.Errorf("expected new-token, got %s", svc.accessToken)
 	}
 
@@ -203,44 +210,7 @@ func TestNewService_RefreshError(t *testing.T) {
 
 func TestGmailSend(t *testing.T) {
 	t.Parallel()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/messages/send", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload struct {
-			Raw string `json:"raw"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-		raw, _ := base64.URLEncoding.DecodeString(payload.Raw)
-		sraw := string(raw)
-
-		if !strings.Contains(sraw, "To: user@example.com") {
-			http.Error(w, "missing to", http.StatusBadRequest)
-			return
-		}
-
-		// Check for multipart structure in HTML sends
-		if strings.Contains(sraw, "Subject: Hello HTML") {
-			if !strings.Contains(sraw, "Content-Type: multipart/alternative") {
-				http.Error(w, "missing multipart content-type", http.StatusBadRequest)
-				return
-			}
-			if !strings.Contains(sraw, "boundary=\"gobot_alt_20260328\"") {
-				http.Error(w, "missing boundary", http.StatusBadRequest)
-				return
-			}
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": "sent123"})
-	})
-
-	server := httptest.NewServer(mux)
+	server := setupGmailSendMockServer(t)
 	t.Cleanup(server.Close)
 
 	svc := &Service{
@@ -266,6 +236,46 @@ func TestGmailSend(t *testing.T) {
 			t.Fatalf("Send HTML failed: %v", err)
 		}
 	})
+}
+
+func setupGmailSendMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Raw string `json:"raw"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		validateGmailSendPayload(t, w, payload.Raw)
+	}))
+}
+
+func validateGmailSendPayload(t *testing.T, w http.ResponseWriter, rawPayload string) {
+	t.Helper()
+	raw, _ := base64.URLEncoding.DecodeString(rawPayload)
+	sraw := string(raw)
+
+	if !strings.Contains(sraw, "To: user@example.com") {
+		http.Error(w, "missing to", http.StatusBadRequest)
+		return
+	}
+
+	// Check for multipart structure in HTML sends
+	if strings.Contains(sraw, "Subject: Hello HTML") {
+		if !strings.Contains(sraw, "Content-Type: multipart/alternative") || !strings.Contains(sraw, "boundary=\"gobot_alt_20260328\"") {
+			http.Error(w, "invalid HTML send structure", http.StatusBadRequest)
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"id": "sent123"})
 }
 
 func TestGmailErrors(t *testing.T) {
@@ -320,93 +330,29 @@ func TestGmailErrors(t *testing.T) {
 
 func TestExtractBodyFromParts(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
+	type tc struct {
 		name     string
 		payload  *Payload
 		wantBody string
-	}{
-		{
-			name: "SimpleBody",
-			payload: &Payload{
-				Body: &Body{
-					Data: base64.URLEncoding.EncodeToString([]byte("Simple body")),
-				},
-			},
-			wantBody: "Simple body",
-		},
-		{
-			name: "MultipartAlternativePreferText",
-			payload: &Payload{
-				Parts: []Part{
-					{
-						MimeType: "text/plain",
-						Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("Plain text"))},
-					},
-					{
-						MimeType: "text/html",
-						Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("<p>HTML text</p>"))},
-					},
-				},
-			},
-			wantBody: "Plain text",
-		},
-		{
-			name: "NestedMultipart",
-			payload: &Payload{
-				Parts: []Part{
-					{
-						MimeType: "multipart/alternative",
-						Parts: []Part{
-							{
-								MimeType: "text/plain",
-								Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("Nested plain text"))},
-							},
-						},
-					},
-				},
-			},
-			wantBody: "Nested plain text",
-		},
-		{
-			name: "MixedWithAttachments",
-			payload: &Payload{
-				Parts: []Part{
-					{
-						MimeType: "multipart/alternative",
-						Parts: []Part{
-							{
-								MimeType: "text/plain",
-								Body:     &Body{Data: base64.URLEncoding.EncodeToString([]byte("Mixed body text"))},
-							},
-						},
-					},
-					{
-						MimeType: "application/pdf",
-						Filename: "test.pdf",
-						Body:     &Body{Data: "SOMEBASE64DATA"},
-					},
-				},
-			},
-			wantBody: "Mixed body text",
-		},
-		{
-			name: "NoBodyData",
-			payload: &Payload{
-				Body: &Body{Data: ""},
-			},
-			wantBody: "",
-		},
 	}
-
+	plain := func(s string) *Body { return &Body{Data: base64.URLEncoding.EncodeToString([]byte(s))} }
+	part := func(mime, body string) Part { return Part{MimeType: mime, Body: plain(body)} }
+	text := "text/plain"
+	alt := "multipart/alternative"
+	appPdf := "application/pdf"
+	tests := []tc{
+		{"Simple", &Payload{Body: plain("Simple body")}, "Simple body"},
+		{"TextPrefer", &Payload{Parts: []Part{part(text, "Plain text"), {MimeType: "text/html", Body: plain("<p>HTML</p>")}}}, "Plain text"},
+		{"Nested", &Payload{Parts: []Part{{MimeType: alt, Parts: []Part{part(text, "Nested plain text")}}}}, "Nested plain text"},
+		{"Mixed", &Payload{Parts: []Part{{MimeType: alt, Parts: []Part{part(text, "Mixed body text")}}, {MimeType: appPdf, Filename: "test.pdf", Body: &Body{Data: "SOMEBASE64DATA"}}}}, "Mixed body text"},
+		{"Empty", &Payload{Body: &Body{Data: ""}}, ""},
+	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &Message{Payload: tt.payload}
-			got := msg.ExtractBody()
+			got := (&Message{Payload: tt.payload}).ExtractBody()
 			if !strings.Contains(got, tt.wantBody) {
-				t.Errorf("ExtractBody() = %q, want it to contain %q", got, tt.wantBody)
+				t.Errorf("got %q, want %q", got, tt.wantBody)
 			}
 		})
 	}

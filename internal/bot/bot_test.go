@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported bot internals for testing
 package bot
 
 import (
@@ -341,7 +342,7 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 	sent := api.getSent()
 	assert.Len(t, sent, 2, "sent messages")
 	// Extract chat IDs for easier comparison.
-	var chatIDs []int64
+	chatIDs := make([]int64, 0, len(sent))
 	for _, s := range sent {
 		chatIDs = append(chatIDs, s.ChatID)
 	}

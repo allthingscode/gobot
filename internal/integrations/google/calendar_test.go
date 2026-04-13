@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported calendar internals for testing
 package google
 
 import (
@@ -141,47 +142,63 @@ func TestListUpcomingEventsWithClient(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.Contains(r.URL.Path, "calendarList") {
-					if err := json.NewEncoder(w).Encode(map[string]any{
-						"items": []map[string]any{
-							{"id": "primary", "summary": "My Calendar", "selected": true},
-						},
-					}); err != nil {
-						t.Fatal(err)
-					}
-					return
-				}
-				// Per-calendar events endpoint
-				if err := json.NewEncoder(w).Encode(map[string]any{"items": tc.items}); err != nil {
-					t.Fatal(err)
-				}
-			}))
-			defer srv.Close()
+			srv := setupCalendarMockServer(t, tc.items)
+			t.Cleanup(srv.Close)
 
-			dir := t.TempDir()
-			writeToken(t, dir, storedToken{
-				Token:  "access",
-				Expiry: time.Now().Add(1 * time.Hour),
-			})
-
+			dir := setupTestToken(t)
 			client := redirectClient(calendarBaseURL, srv.URL)
+
 			events, err := listUpcomingEventsWithClient(dir, 10, client)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(events) != tc.wantCount {
-				t.Fatalf("want %d events, got %d", tc.wantCount, len(events))
-			}
-			if tc.wantCount > 0 {
-				if events[0].Summary != tc.wantSummary {
-					t.Errorf("want summary %q, got %q", tc.wantSummary, events[0].Summary)
-				}
-				if events[0].AllDay != tc.wantAllDay {
-					t.Errorf("want AllDay=%v, got %v", tc.wantAllDay, events[0].AllDay)
-				}
-			}
+			validateCalendarEvents(t, events, tc.wantCount, tc.wantSummary, tc.wantAllDay)
 		})
+	}
+}
+
+func setupCalendarMockServer(t *testing.T, items []map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "calendarList") {
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{
+					{"id": "primary", "summary": "My Calendar", "selected": true},
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		// Per-calendar events endpoint
+		if err := json.NewEncoder(w).Encode(map[string]any{"items": items}); err != nil {
+			t.Fatal(err)
+		}
+	}))
+}
+
+func setupTestToken(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeToken(t, dir, storedToken{
+		Token:  "access",
+		Expiry: time.Now().Add(1 * time.Hour),
+	})
+	return dir
+}
+
+func validateCalendarEvents(t *testing.T, events []CalendarEvent, wantCount int, wantSummary string, wantAllDay bool) {
+	t.Helper()
+	if len(events) != wantCount {
+		t.Fatalf("want %d events, got %d", wantCount, len(events))
+	}
+	if wantCount > 0 {
+		if events[0].Summary != wantSummary {
+			t.Errorf("want summary %q, got %q", wantSummary, events[0].Summary)
+		}
+		if events[0].AllDay != wantAllDay {
+			t.Errorf("want AllDay=%v, got %v", wantAllDay, events[0].AllDay)
+		}
 	}
 }
 
@@ -195,20 +212,33 @@ func TestListUpcomingEventsWithClient_AuthError(t *testing.T) {
 
 func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := setupMultipleCalendarsMockServer(t)
+	defer srv.Close()
+
+	dir := setupTestToken(t)
+	client := redirectClient(calendarBaseURL, srv.URL)
+
+	events, err := listUpcomingEventsWithClient(dir, 10, client)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	validateMultipleCalendarEvents(t, events)
+}
+
+func setupMultipleCalendarsMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "calendarList") {
-			if err := json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{"id": "cal-a", "summary": "Calendar A", "selected": true},
 					{"id": "cal-b", "summary": "Calendar B", "selected": true},
 				},
-			}); err != nil {
-				t.Fatal(err)
-			}
+			})
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-a") {
-			if err := json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{
 						"id": "a1", "summary": "Event A1",
@@ -216,13 +246,11 @@ func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 						"end":   map[string]string{"dateTime": "2026-03-28T11:00:00Z"},
 					},
 				},
-			}); err != nil {
-				t.Fatal(err)
-			}
+			})
 			return
 		}
 		if strings.Contains(r.URL.Path, "cal-b") {
-			if err := json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"items": []map[string]any{
 					{
 						"id": "b1", "summary": "Event B1",
@@ -230,37 +258,23 @@ func TestListUpcomingEventsWithClient_MultipleCalendars(t *testing.T) {
 						"end":   map[string]string{"dateTime": "2026-03-28T10:00:00Z"},
 					},
 				},
-			}); err != nil {
-				t.Fatal(err)
-			}
+			})
 			return
 		}
 	}))
-	defer srv.Close()
+}
 
-	dir := t.TempDir()
-	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
-	client := redirectClient(calendarBaseURL, srv.URL)
-
-	events, err := listUpcomingEventsWithClient(dir, 10, client)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+func validateMultipleCalendarEvents(t *testing.T, events []CalendarEvent) {
+	t.Helper()
 	if len(events) != 2 {
 		t.Fatalf("want 2 events, got %d", len(events))
 	}
 	// Sorted by start time: B1 (09:00) then A1 (10:00)
-	if events[0].Summary != "Event B1" {
-		t.Errorf("want first event 'Event B1', got %q", events[0].Summary)
+	if events[0].Summary != "Event B1" || events[0].CalendarName != "Calendar B" {
+		t.Errorf("want first event 'Event B1' from 'Calendar B', got %q from %q", events[0].Summary, events[0].CalendarName)
 	}
-	if events[0].CalendarName != "Calendar B" {
-		t.Errorf("want CalendarName 'Calendar B', got %q", events[0].CalendarName)
-	}
-	if events[1].Summary != "Event A1" {
-		t.Errorf("want second event 'Event A1', got %q", events[1].Summary)
-	}
-	if events[1].CalendarName != "Calendar A" {
-		t.Errorf("want CalendarName 'Calendar A', got %q", events[1].CalendarName)
+	if events[1].Summary != "Event A1" || events[1].CalendarName != "Calendar A" {
+		t.Errorf("want second event 'Event A1' from 'Calendar A', got %q from %q", events[1].Summary, events[1].CalendarName)
 	}
 }
 
@@ -268,47 +282,42 @@ func TestListUpcomingEventsWithClient_UnselectedCalendarIncluded(t *testing.T) {
 	t.Parallel()
 	var calledA, calledB bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "calendarList") {
-			if err := json.NewEncoder(w).Encode(map[string]any{
-				"items": []map[string]any{
-					{"id": "cal-a", "summary": "Calendar A", "selected": true},
-					{"id": "cal-b", "summary": "Calendar B", "selected": false},
-				},
-			}); err != nil {
-				t.Fatal(err)
-			}
-			return
-		}
-		if strings.Contains(r.URL.Path, "cal-a") {
-			calledA = true
-			if err := json.NewEncoder(w).Encode(map[string]any{"items": []any{}}); err != nil {
-				t.Fatal(err)
-			}
-			return
-		}
-		if strings.Contains(r.URL.Path, "cal-b") {
-			calledB = true
-			if err := json.NewEncoder(w).Encode(map[string]any{"items": []any{}}); err != nil {
-				t.Fatal(err)
-			}
-			return
-		}
+		handleUnselectedCalendarMock(t, w, r, &calledA, &calledB)
 	}))
 	defer srv.Close()
 
-	dir := t.TempDir()
-	writeToken(t, dir, storedToken{Token: "access", Expiry: time.Now().Add(1 * time.Hour)})
+	dir := setupTestToken(t)
 	client := redirectClient(calendarBaseURL, srv.URL)
 
 	_, err := listUpcomingEventsWithClient(dir, 10, client)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !calledA {
-		t.Error("expected selected calendar to be called")
+	if !calledA || !calledB {
+		t.Errorf("expected both calendars to be called: A=%v, B=%v", calledA, calledB)
 	}
-	if !calledB {
-		t.Error("expected unselected calendar to be called")
+}
+
+func handleUnselectedCalendarMock(t *testing.T, w http.ResponseWriter, r *http.Request, calledA, calledB *bool) {
+	t.Helper()
+	if strings.Contains(r.URL.Path, "calendarList") {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"id": "cal-a", "summary": "Calendar A", "selected": true},
+				{"id": "cal-b", "summary": "Calendar B", "selected": false},
+			},
+		})
+		return
+	}
+	if strings.Contains(r.URL.Path, "cal-a") {
+		*calledA = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
+		return
+	}
+	if strings.Contains(r.URL.Path, "cal-b") {
+		*calledB = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
+		return
 	}
 }
 

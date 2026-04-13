@@ -15,6 +15,8 @@ import (
 
 // genericSkipPatterns is the set of short/trivial messages that should not
 // trigger a RAG lookup (F-030).
+//
+//nolint:gochecknoglobals // Immutable skip patterns for RAG noise filtering
 var genericSkipPatterns = map[string]bool{
 	"yes": true, "no": true, "ok": true, "okay": true,
 	"hello": true, "hi": true, "thanks": true, "thank you": true,
@@ -23,6 +25,8 @@ var genericSkipPatterns = map[string]bool{
 }
 
 // ragNoisePatterns are substrings that identify orchestration noise in RAG results.
+//
+//nolint:gochecknoglobals // Immutable noise patterns for RAG filtering
 var ragNoisePatterns = []string{
 	"spawned subagent",
 	"i have spawned",
@@ -32,6 +36,8 @@ var ragNoisePatterns = []string{
 }
 
 // timestampFormats tried in order when parsing message timestamps.
+//
+//nolint:gochecknoglobals // Immutable timestamp formats for parsing
 var timestampFormats = []string{
 	time.RFC3339,
 	"2006-01-02T15:04:05",
@@ -61,14 +67,7 @@ func PruneContext(messages []map[string]any, ttlHours, keepLastAssistants int) [
 	// Pass 1: identify keepers (reverse order so newest assistant turns count first).
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
-		role, _ := m["role"].(string)
-
-		isOld := false
-		if ts, ok := m["timestamp"].(string); ok {
-			if t := parseTimestamp(ts); !t.IsZero() {
-				isOld = t.Before(cutoff)
-			}
-		}
+		role := stringVal(m, "role")
 
 		keep := false
 		switch role {
@@ -76,18 +75,9 @@ func PruneContext(messages []map[string]any, ttlHours, keepLastAssistants int) [
 			keep = true
 		case "assistant":
 			assistantCount++
-			if !isOld || assistantCount <= keepLastAssistants {
+			if shouldKeepAssistant(m, cutoff, assistantCount, keepLastAssistants) {
 				keep = true
-				// Collect tool call IDs so their tool responses are kept too.
-				if tcs, ok := m["tool_calls"].([]any); ok {
-					for _, tc := range tcs {
-						if tcm, ok := tc.(map[string]any); ok {
-							if id, ok := tcm["id"].(string); ok && id != "" {
-								neededToolIDs[id] = true
-							}
-						}
-					}
-				}
+				collectToolIDs(m, neededToolIDs)
 			}
 		}
 		if keep {
@@ -95,14 +85,45 @@ func PruneContext(messages []map[string]any, ttlHours, keepLastAssistants int) [
 		}
 	}
 
-	// Pass 2: build result in original order, adding tool responses as needed.
+	return buildPrunedResult(messages, keepSet, neededToolIDs)
+}
+
+func shouldKeepAssistant(m map[string]any, cutoff time.Time, count, minKeep int) bool {
+	if count <= minKeep {
+		return true
+	}
+	if ts, ok := m["timestamp"].(string); ok {
+		if t := parseTimestamp(ts); !t.IsZero() {
+			return !t.Before(cutoff)
+		}
+	}
+	return true // keep if timestamp missing or unparseable
+}
+
+func collectToolIDs(m map[string]any, needed map[string]bool) {
+	tcs, ok := m["tool_calls"].([]any)
+	if !ok {
+		return
+	}
+	for _, tc := range tcs {
+		tcm, ok := tc.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, ok := tcm["id"].(string); ok && id != "" {
+			needed[id] = true
+		}
+	}
+}
+
+func buildPrunedResult(messages []map[string]any, keepSet map[int]bool, neededToolIDs map[string]bool) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
 	for i, m := range messages {
 		if keepSet[i] {
 			result = append(result, m)
 			continue
 		}
-		role, _ := m["role"].(string)
+		role := stringVal(m, "role")
 		if role == "tool" {
 			if id, ok := m["tool_call_id"].(string); ok && neededToolIDs[id] {
 				result = append(result, m)
@@ -111,6 +132,7 @@ func PruneContext(messages []map[string]any, ttlHours, keepLastAssistants int) [
 	}
 	return result
 }
+
 
 func parseTimestamp(s string) time.Time {
 	for _, f := range timestampFormats {
@@ -126,7 +148,7 @@ func parseTimestamp(s string) time.Time {
 // FormatConsolidationMessages formats a slice of messages into a human-readable
 // string for use in the consolidator prompt.
 func FormatConsolidationMessages(messages []map[string]any) string {
-	var lines []string
+	lines := make([]string, 0, len(messages))
 	for _, m := range messages {
 		content, ok := m["content"].(string)
 		if !ok || content == "" {
@@ -153,68 +175,84 @@ func FormatConsolidationMessages(messages []map[string]any) string {
 // Returns a map with "history_entry" and/or "memory_update" keys, or an error if
 // the response cannot be parsed into a valid consolidation result.
 func ParseConsolidationResponse(content any, hasToolCalls bool, toolArguments any, currentMemory string) (map[string]any, error) {
-	var args map[string]any
-	var jsonErr error
-
-	if hasToolCalls {
-		switch v := toolArguments.(type) {
-		case map[string]any:
-			args = v
-		case string:
-			jsonErr = json.Unmarshal([]byte(v), &args)
-			if jsonErr != nil {
-				slog.Error("consolidation: failed to unmarshal tool arguments",
-					"error", jsonErr,
-					"raw_content", truncateString(v, 500))
-			}
-		}
+	args, err := tryParseFromTool(hasToolCalls, toolArguments)
+	if err == nil && len(args) > 0 {
+		return validateConsolidationKeys(args, content)
 	}
 
 	// Regex recovery if tool call failed or content is raw text.
-	if len(args) == 0 {
-		contentStr := ""
-		switch v := content.(type) {
-		case string:
-			contentStr = v
-		default:
-			if b, err := json.Marshal(v); err == nil {
-				contentStr = string(b)
-			}
-		}
-		candidate, extractErr := extractJSON(contentStr)
-		if extractErr != nil {
-			slog.Error("consolidation: failed to parse LLM response as JSON",
-				"error", extractErr,
-				"json_error", jsonErr,
-				"regex_error", "no match",
-				"raw_response", truncateString(contentStr, 500))
-			return nil, fmt.Errorf("consolidation: failed to parse LLM response as JSON (json: %w; regex: no match)", jsonErr)
-		}
-		args = map[string]any{
-			"history_entry": firstNonEmpty(
-				stringVal(candidate, "history_entry"),
-				stringVal(candidate, "summary"),
-				"No summary available.",
-			),
-			"memory_update": firstNonEmpty(
-				stringVal(candidate, "memory_update"),
-				stringVal(candidate, "facts"),
-				currentMemory,
-			),
-		}
+	args, err = tryParseFromText(content, currentMemory)
+	if err != nil {
+		return nil, err
 	}
 
+	return validateConsolidationKeys(args, content)
+}
+
+func tryParseFromTool(hasToolCalls bool, toolArguments any) (map[string]any, error) {
+	if !hasToolCalls {
+		return nil, nil
+	}
+	switch v := toolArguments.(type) {
+	case map[string]any:
+		return v, nil
+	case string:
+		var args map[string]any
+		if err := json.Unmarshal([]byte(v), &args); err != nil {
+			slog.Error("consolidation: failed to unmarshal tool arguments",
+				"error", err,
+				"raw_content", truncateString(v, 500))
+			return nil, err
+		}
+		return args, nil
+	}
+	return nil, nil
+}
+
+func tryParseFromText(content any, currentMemory string) (map[string]any, error) {
+	contentStr := stringify(content)
+	candidate, err := extractJSON(contentStr)
+	if err != nil {
+		slog.Error("consolidation: failed to parse LLM response as JSON",
+			"error", err,
+			"raw_response", truncateString(contentStr, 500))
+		return nil, fmt.Errorf("consolidation: failed to parse LLM response as JSON: %w", err)
+	}
+
+	return map[string]any{
+		"history_entry": firstNonEmpty(
+			stringVal(candidate, "history_entry"),
+			stringVal(candidate, "summary"),
+			"No summary available.",
+		),
+		"memory_update": firstNonEmpty(
+			stringVal(candidate, "memory_update"),
+			stringVal(candidate, "facts"),
+			currentMemory,
+		),
+	}, nil
+}
+
+func stringify(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+	}
+	return ""
+}
+
+func validateConsolidationKeys(args map[string]any, content any) (map[string]any, error) {
 	if len(args) == 0 {
-		slog.Error("consolidation: no valid consolidation data found",
-			"raw_content", truncateString(fmt.Sprintf("%v", content), 500))
-		return nil, fmt.Errorf("consolidation: no valid consolidation data found in response")
+		return nil, fmt.Errorf("consolidation: no valid consolidation data found")
 	}
 	_, hasHistory := args["history_entry"]
 	_, hasMemory := args["memory_update"]
 	if !hasHistory && !hasMemory {
 		slog.Error("consolidation: response missing required keys",
-			"has_history", hasHistory,
-			"has_memory", hasMemory,
 			"raw_content", truncateString(fmt.Sprintf("%v", content), 500))
 		return nil, fmt.Errorf("consolidation: response missing required keys (history_entry/memory_update)")
 	}

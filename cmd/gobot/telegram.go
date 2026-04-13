@@ -107,11 +107,8 @@ func (t *tgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, erro
 func (t *tgAPI) startPoller(ctx context.Context) {
 	defer close(t.msgChan)
 	defer close(t.cbChan)
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("PANIC IN STARTPOLLER", "err", r)
-		}
-	}()
+	defer t.recoverFromPollerPanic()
+
 	offset := 0
 	for {
 		select {
@@ -120,22 +117,8 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 		default:
 		}
 
-		var updates []telego.Update
-		err := t.breaker.Execute(func() error {
-			var pollErr error
-			updates, pollErr = t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
-				Offset:         offset,
-				Timeout:        30,
-				AllowedUpdates: []string{"message", "callback_query"},
-			})
-			return pollErr
-		})
+		updates, err := t.fetchUpdates(ctx, offset)
 		if err != nil {
-			if errors.Is(err, resilience.ErrCircuitOpen) {
-				slog.Warn("telegram: circuit breaker is open, stopping poller session")
-				return // Return error to trigger Bot.Run reconnection/backoff
-			}
-			slog.Error("telegram: GetUpdates failed", "err", err)
 			return // Return to allow Bot.Run to handle retry delay
 		}
 
@@ -143,75 +126,113 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 			if update.UpdateID >= offset {
 				offset = update.UpdateID + 1
 			}
-			slog.Info("telegram: raw update received",
-				"updateID", update.UpdateID,
-				"hasMessage", update.Message != nil,
-				"hasCallback", update.CallbackQuery != nil,
-				"hasEditedMessage", update.EditedMessage != nil,
-				"hasChannelPost", update.ChannelPost != nil,
-			)
-
-			// Handle Messages
-			if update.Message != nil && update.Message.Text != "" {
-				msgID := int64(update.Message.MessageID)
-				dedupKey := fmt.Sprintf("%d:%d", update.Message.Chat.ID, msgID)
-				if !t.isDuplicate(dedupKey) {
-					if len(t.allowFrom) > 0 && !t.allowFrom[update.Message.Chat.ID] {
-						slog.Warn("telegram: message from unlisted chat ID dropped", "chatID", update.Message.Chat.ID)
-					} else {
-						slog.Info("telegram: message received", "chatID", update.Message.Chat.ID, "text", update.Message.Text)
-						var senderID int64
-						if update.Message.From != nil {
-							senderID = update.Message.From.ID
-						}
-						select {
-						case t.msgChan <- bot.InboundMessage{
-							ChatID:    update.Message.Chat.ID,
-							MessageID: msgID,
-							ThreadID:  int64(update.Message.MessageThreadID),
-							SenderID:  senderID,
-							Text:      update.Message.Text,
-						}:
-						case <-ctx.Done():
-							return
-						}
-					}
-				}
-			}
-
-			// Handle Callback Queries
-			if update.CallbackQuery != nil {
-				cb := update.CallbackQuery
-				slog.Info("telegram: callback query received", "id", cb.ID, "data", cb.Data, "from", cb.From.ID)
-				var chatID int64
-				var msgID int64
-				if cb.Message != nil {
-					chatID = cb.Message.GetChat().ID
-					msgID = int64(cb.Message.GetMessageID())
-				}
-
-				// Answer callback immediately to stop loading spinner
-				_ = t.breaker.Execute(func() error {
-					return t.client.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
-						CallbackQueryID: cb.ID,
-					})
-				})
-
-				slog.Debug("telegram: forwarding callback to channel", "id", cb.ID, "reqID", cb.Data)
-				select {
-				case t.cbChan <- bot.InboundCallback{
-					ChatID:     chatID,
-					MessageID:  msgID,
-					SenderID:   cb.From.ID,
-					Data:       cb.Data,
-					SessionKey: bot.SessionKey(chatID, 0, cb.From.ID),
-				}:
-					slog.Debug("telegram: callback sent to channel", "id", cb.ID)
-				case <-ctx.Done():
-					return
-				}
-			}
+			t.handleUpdate(ctx, update)
 		}
+	}
+}
+
+func (t *tgAPI) recoverFromPollerPanic() {
+	if r := recover(); r != nil {
+		slog.Error("PANIC IN STARTPOLLER", "err", r)
+	}
+}
+
+func (t *tgAPI) fetchUpdates(ctx context.Context, offset int) ([]telego.Update, error) {
+	var updates []telego.Update
+	err := t.breaker.Execute(func() error {
+		var pollErr error
+		updates, pollErr = t.client.GetUpdates(ctx, &telego.GetUpdatesParams{
+			Offset:         offset,
+			Timeout:        30,
+			AllowedUpdates: []string{"message", "callback_query"},
+		})
+		return pollErr
+	})
+
+	if err != nil {
+		if errors.Is(err, resilience.ErrCircuitOpen) {
+			slog.Warn("telegram: circuit breaker is open, stopping poller session")
+		} else {
+			slog.Error("telegram: GetUpdates failed", "err", err)
+		}
+		return nil, err
+	}
+	return updates, nil
+}
+
+func (t *tgAPI) handleUpdate(ctx context.Context, update telego.Update) {
+	slog.Info("telegram: raw update received",
+		"updateID", update.UpdateID,
+		"hasMessage", update.Message != nil,
+		"hasCallback", update.CallbackQuery != nil,
+	)
+
+	if update.Message != nil && update.Message.Text != "" {
+		t.handleMessage(ctx, update.Message)
+	}
+
+	if update.CallbackQuery != nil {
+		t.handleCallbackQuery(ctx, update.CallbackQuery)
+	}
+}
+
+func (t *tgAPI) handleMessage(ctx context.Context, m *telego.Message) {
+	msgID := int64(m.MessageID)
+	dedupKey := fmt.Sprintf("%d:%d", m.Chat.ID, msgID)
+	if t.isDuplicate(dedupKey) {
+		return
+	}
+
+	if len(t.allowFrom) > 0 && !t.allowFrom[m.Chat.ID] {
+		slog.Warn("telegram: message from unlisted chat ID dropped", "chatID", m.Chat.ID)
+		return
+	}
+
+	slog.Info("telegram: message received", "chatID", m.Chat.ID, "text", m.Text)
+	var senderID int64
+	if m.From != nil {
+		senderID = m.From.ID
+	}
+
+	select {
+	case t.msgChan <- bot.InboundMessage{
+		ChatID:    m.Chat.ID,
+		MessageID: msgID,
+		ThreadID:  int64(m.MessageThreadID),
+		SenderID:  senderID,
+		Text:      m.Text,
+	}:
+	case <-ctx.Done():
+	}
+}
+
+func (t *tgAPI) handleCallbackQuery(ctx context.Context, cb *telego.CallbackQuery) {
+	slog.Info("telegram: callback query received", "id", cb.ID, "data", cb.Data, "from", cb.From.ID)
+	var chatID int64
+	var msgID int64
+	if cb.Message != nil {
+		chatID = cb.Message.GetChat().ID
+		msgID = int64(cb.Message.GetMessageID())
+	}
+
+	// Answer callback immediately to stop loading spinner
+	_ = t.breaker.Execute(func() error {
+		return t.client.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+			CallbackQueryID: cb.ID,
+		})
+	})
+
+	slog.Debug("telegram: forwarding callback to channel", "id", cb.ID, "reqID", cb.Data)
+	select {
+	case t.cbChan <- bot.InboundCallback{
+		ChatID:     chatID,
+		MessageID:  msgID,
+		SenderID:   cb.From.ID,
+		Data:       cb.Data,
+		SessionKey: bot.SessionKey(chatID, 0, cb.From.ID),
+	}:
+		slog.Debug("telegram: callback sent to channel", "id", cb.ID)
+	case <-ctx.Done():
 	}
 }
 

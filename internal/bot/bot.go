@@ -200,55 +200,50 @@ func (b *Bot) runCallbackLoop(ctx context.Context) error {
 	for {
 		callbacks, err := b.api.Callbacks(ctx)
 		if err != nil {
-			slog.Error("bot: Callbacks failed", "err", err, "retry_in", retryDelay)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(retryDelay):
-			}
-			retryDelay *= 2
-			if retryDelay > maxDelay {
-				retryDelay = maxDelay
+			if e := b.waitRetry(ctx, "Callbacks", err, &retryDelay, maxDelay); e != nil {
+				return e
 			}
 			continue
 		}
 		retryDelay = initialDelay
 
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case cb, ok := <-callbacks:
-				if !ok {
-					break // reconnect
-				}
-				slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
-
-				// Handle callbacks in a dedicated goroutine.
-				// Use the loop context to manage lifecycle.
-				go func() {
-					done := make(chan error, 1)
-					go func() {
-						done <- b.handler.HandleCallback(ctx, cb)
-					}()
-
-					select {
-					case <-ctx.Done():
-						slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
-					case err := <-done:
-						if err != nil {
-							slog.Error("bot: HandleCallback failed", "err", err)
-						}
-					}
-				}()
-			}
+		if err := b.drainCallbacks(ctx, callbacks); err != nil {
+			return err
 		}
 	}
 }
 
-// runUpdateLoop manages the lifecycle of the update polling channel.
-// Any error from API.Updates triggers exponential backoff:
-// initial 5s, doubles each retry, capped at 60s, resets to 5s on success.
+func (b *Bot) drainCallbacks(ctx context.Context, callbacks <-chan InboundCallback) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case cb, ok := <-callbacks:
+			if !ok {
+				return nil // reconnect
+			}
+			slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
+			go b.dispatchCallback(ctx, cb)
+		}
+	}
+}
+
+func (b *Bot) dispatchCallback(ctx context.Context, cb InboundCallback) {
+	done := make(chan error, 1)
+	go func() {
+		done <- b.handler.HandleCallback(ctx, cb)
+	}()
+
+	select {
+	case <-ctx.Done():
+		slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
+	case err := <-done:
+		if err != nil {
+			slog.Error("bot: HandleCallback failed", "err", err)
+		}
+	}
+}
+
 func (b *Bot) runUpdateLoop(ctx context.Context) error {
 	const initialDelay = 5 * time.Second
 	const maxDelay = 60 * time.Second
@@ -257,33 +252,46 @@ func (b *Bot) runUpdateLoop(ctx context.Context) error {
 	for {
 		updates, err := b.api.Updates(ctx, 30)
 		if err != nil {
-			slog.Error("bot: Updates failed", "err", err, "retry_in", retryDelay)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(retryDelay):
-			}
-			retryDelay *= 2
-			if retryDelay > maxDelay {
-				retryDelay = maxDelay
+			if e := b.waitRetry(ctx, "Updates", err, &retryDelay, maxDelay); e != nil {
+				return e
 			}
 			continue
 		}
-		retryDelay = initialDelay // reset on successful connect
+		retryDelay = initialDelay
 
 		slog.Debug("bot: update stream connected, draining messages")
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case msg, ok := <-updates:
-				if !ok {
-					break // channel closed — reconnect
-				}
-				go b.dispatch(ctx, msg)
-			}
+		if err := b.drainUpdates(ctx, updates); err != nil {
+			return err
 		}
 	}
+}
+
+func (b *Bot) drainUpdates(ctx context.Context, updates <-chan InboundMessage) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case msg, ok := <-updates:
+			if !ok {
+				return nil // reconnect
+			}
+			go b.dispatch(ctx, msg)
+		}
+	}
+}
+
+func (b *Bot) waitRetry(ctx context.Context, op string, err error, delay *time.Duration, maxDelay time.Duration) error {
+	slog.Error("bot: "+op+" failed", "err", err, "retry_in", *delay)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(*delay):
+	}
+	*delay *= 2
+	if *delay > maxDelay {
+		*delay = maxDelay
+	}
+	return nil
 }
 
 // dispatch processes a single inbound message and sends a reply if non-empty.

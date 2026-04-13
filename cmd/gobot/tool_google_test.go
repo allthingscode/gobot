@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (
@@ -15,45 +16,12 @@ func TestWebSearchTool(t *testing.T) {
 	t.Parallel()
 	// Mock Google Search API
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
-		cx := r.URL.Query().Get("cx")
-		query := r.URL.Query().Get("q")
-
-		if key != "test-key" || cx != "test-cx" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error": map[string]any{"message": "invalid key or cx"},
-			})
-			return
-		}
-
-		if query == "empty" {
-			_ = json.NewEncoder(w).Encode(google.SearchResponse{Items: []google.SearchResult{}})
-			return
-		}
-
-		resp := google.SearchResponse{
-			Items: []google.SearchResult{
-				{
-					Title:   "Gobot GitHub",
-					Link:    "https://github.com/allthingscode/gobot",
-					Snippet: "Go-native strategic agent.",
-				},
-				{
-					Title:   "Golang Home",
-					Link:    "https://go.dev",
-					Snippet: "Build simple, secure, and maintainable systems.",
-				},
-			},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
-	})
+	mux.HandleFunc("/", mockGoogleSearchHandler)
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	tests := []struct {
+	type testCase struct {
 		name    string
 		apiKey  string
 		cx      string
@@ -61,7 +29,8 @@ func TestWebSearchTool(t *testing.T) {
 		wantErr bool
 		errSub  string
 		wantSub string
-	}{
+	}
+	tests := []testCase{
 		{
 			name:    "BasicSearch",
 			apiKey:  "test-key",
@@ -102,16 +71,64 @@ func TestWebSearchTool(t *testing.T) {
 			tool.baseURL = server.URL // Override for testing
 
 			res, err := tool.Execute(context.Background(), "test-session", "", tt.args)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Execute() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr && tt.errSub != "" && !strings.Contains(err.Error(), tt.errSub) {
-				t.Errorf("Execute() error = %v, want error containing %q", err, tt.errSub)
-			}
-			if !tt.wantErr && tt.wantSub != "" && !strings.Contains(res, tt.wantSub) {
-				t.Errorf("Execute() = %q, want it to contain %q", res, tt.wantSub)
-			}
+			validateWebSearchResult(t, tt, res, err)
 		})
+	}
+}
+
+func mockGoogleSearchHandler(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Query().Get("key")
+	cx := r.URL.Query().Get("cx")
+	query := r.URL.Query().Get("q")
+
+	if key != "test-key" || cx != "test-cx" {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "invalid key or cx"},
+		})
+		return
+	}
+
+	if query == "empty" {
+		_ = json.NewEncoder(w).Encode(google.SearchResponse{Items: []google.SearchResult{}})
+		return
+	}
+
+	resp := google.SearchResponse{
+		Items: []google.SearchResult{
+			{
+				Title:   "Gobot GitHub",
+				Link:    "https://github.com/allthingscode/gobot",
+				Snippet: "Go-native strategic agent.",
+			},
+			{
+				Title:   "Golang Home",
+				Link:    "https://go.dev",
+				Snippet: "Build simple, secure, and maintainable systems.",
+			},
+		},
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func validateWebSearchResult(t *testing.T, tt struct {
+	name    string
+	apiKey  string
+	cx      string
+	args    map[string]any
+	wantErr bool
+	errSub  string
+	wantSub string
+}, res string, err error) {
+	t.Helper()
+	if (err != nil) != tt.wantErr {
+		t.Fatalf("Execute() error = %v, wantErr %v", err, tt.wantErr)
+	}
+	if tt.wantErr && tt.errSub != "" && !strings.Contains(err.Error(), tt.errSub) {
+		t.Errorf("Execute() error = %v, want error containing %q", err, tt.errSub)
+	}
+	if !tt.wantErr && tt.wantSub != "" && !strings.Contains(res, tt.wantSub) {
+		t.Errorf("Execute() = %q, want it to contain %q", res, tt.wantSub)
 	}
 }
 

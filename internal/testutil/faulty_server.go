@@ -55,36 +55,36 @@ func NewFaultyServer() *FaultyServer {
 	return fs
 }
 
-func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
-	fs.mu.Lock()
-	fs.RequestCount++
-
-	var action ResponseAction
-	switch {
-	case len(fs.Sequence) > 0:
+func (fs *FaultyServer) determineAction() ResponseAction {
+	if len(fs.Sequence) > 0 {
 		if fs.current < len(fs.Sequence) {
-			action = fs.Sequence[fs.current]
+			action := fs.Sequence[fs.current]
 			fs.current++
-		} else {
-			// Default to success after sequence is exhausted
-			action = ResponseAction{StatusCode: http.StatusOK}
+			return action
 		}
-	case fs.FailureRate > 0 && rand.Float64() < fs.FailureRate: //nolint:gosec // test-only RNG, not security-sensitive
+		return ResponseAction{StatusCode: http.StatusOK}
+	}
+	if fs.FailureRate > 0 && rand.Float64() < fs.FailureRate { //nolint:gosec // test-only RNG, not security-sensitive
 		code := http.StatusInternalServerError
 		if len(fs.FailureCodes) > 0 {
 			code = fs.FailureCodes[rand.Intn(len(fs.FailureCodes))] // #nosec G404
 		}
-		action = ResponseAction{
+		return ResponseAction{
 			StatusCode: code,
 			Delay:      fs.Delay,
 			Drop:       fs.DropConnection,
 		}
-	default:
-		action = ResponseAction{
-			StatusCode: http.StatusOK,
-			Delay:      fs.Delay,
-		}
 	}
+	return ResponseAction{
+		StatusCode: http.StatusOK,
+		Delay:      fs.Delay,
+	}
+}
+
+func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
+	fs.mu.Lock()
+	fs.RequestCount++
+	action := fs.determineAction()
 	fs.mu.Unlock()
 
 	if action.Delay > 0 {
@@ -94,7 +94,6 @@ func (fs *FaultyServer) handle(w http.ResponseWriter, _ *http.Request) {
 	if action.Drop {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
-			// Fallback if hijacking is not supported
 			http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
 			return
 		}

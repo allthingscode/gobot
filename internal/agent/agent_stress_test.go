@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported mock types for testing
 package agent
 
 import (
@@ -27,7 +28,7 @@ func TestDispatch_Concurrent_SameSession(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_, err := mgr.Dispatch(context.Background(),"shared-key", "", "msg")
+			_, err := mgr.Dispatch(context.Background(), "shared-key", "", "msg")
 			errs[idx] = err
 		}(i)
 	}
@@ -72,7 +73,7 @@ func TestDispatch_Concurrent_DifferentSessions(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			key := fmt.Sprintf("session-%d", idx)
-			_, err := mgr.Dispatch(context.Background(),key, "", "msg")
+			_, err := mgr.Dispatch(context.Background(), key, "", "msg")
 			errs[idx] = err
 		}(i)
 	}
@@ -112,7 +113,7 @@ func TestDispatch_LockMap_Stability(t *testing.T) {
 	// Sequential dispatches with unique keys
 	for i := 0; i < numSessions; i++ {
 		key := fmt.Sprintf("stability-session-%d", i)
-		if _, err := mgr.Dispatch(context.Background(),key, "", "msg"); err != nil {
+		if _, err := mgr.Dispatch(context.Background(), key, "", "msg"); err != nil {
 			t.Fatalf("session %d failed: %v", i, err)
 		}
 	}
@@ -145,7 +146,7 @@ func TestSessionManagerStress_WithStore(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_, err := mgr.Dispatch(context.Background(),"shared-key", "", "msg")
+			_, err := mgr.Dispatch(context.Background(), "shared-key", "", "msg")
 			errs[idx] = err
 		}(i)
 	}

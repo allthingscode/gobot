@@ -27,42 +27,62 @@ func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
 	sessionDir := filepath.Join(storageRoot, ".private", "session")
 	historyDir := filepath.Join(sessionDir, "history")
 
-	// Ensure history directory exists
 	if err := os.MkdirAll(historyDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create history dir: %w", err)
 	}
 
-	timestamp := time.Now().Format("20060102_150405")
-	specialist := ticket.TargetSpecialist
-	if specialist == "" {
-		specialist = "unknown"
-	}
-	taskID := ticket.TaskID
-	if taskID == "" {
-		taskID = "untasked"
+	specialist, taskID := resolveHandoffMetadata(ticket)
+	if shouldSkipSnapshot(storageRoot, specialist, taskID) {
+		return nil
 	}
 
+	timestamp := time.Now().Format("20060102_150405")
 	snapshotName := fmt.Sprintf("%s_%s_%s", timestamp, specialist, taskID)
 	snapshotDir := filepath.Join(historyDir, snapshotName)
-
-	// Check if a snapshot for this specialist/task_id already exists in the last few minutes
-	// to avoid duplicates on retries.
-	// Actually, the spec says "if snapshot doesn't already exist for this specialist/task_id combo, create one."
-	// We can check if any existing snapshot has the same specialist and taskID.
-	existing, _ := ListSnapshots(storageRoot)
-	for _, s := range existing {
-		if s.Specialist == specialist && s.TaskID == taskID {
-			slog.Debug("snapshot: already exists for this specialist/task combo, skipping",
-				"specialist", specialist, "task_id", taskID)
-			return nil
-		}
-	}
 
 	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create snapshot dir: %w", err)
 	}
 
-	// Files to copy
+	copySessionFiles(sessionDir, snapshotDir)
+	if err := writeSnapshotMetadata(snapshotDir, snapshotName, specialist, taskID); err != nil {
+		return err
+	}
+
+	slog.Info("snapshot: created checkpoint", "name", snapshotName)
+	return nil
+}
+
+const (
+	unknownSpecialist = "unknown"
+	untaskedID        = "untasked"
+)
+
+func resolveHandoffMetadata(ticket HandoffTicket) (specialist, taskID string) {
+	specialist = ticket.TargetSpecialist
+	if specialist == "" {
+		specialist = unknownSpecialist
+	}
+	taskID = ticket.TaskID
+	if taskID == "" {
+		taskID = untaskedID
+	}
+	return
+}
+
+func shouldSkipSnapshot(storageRoot, specialist, taskID string) bool {
+	existing, _ := ListSnapshots(storageRoot)
+	for _, s := range existing {
+		if s.Specialist == specialist && s.TaskID == taskID {
+			slog.Debug("snapshot: already exists for this specialist/task combo, skipping",
+				"specialist", specialist, "task_id", taskID)
+			return true
+		}
+	}
+	return false
+}
+
+func copySessionFiles(sessionDir, snapshotDir string) {
 	filesToCopy := []string{"session_state.json", "task.md", "review_report.md"}
 	for _, f := range filesToCopy {
 		src := filepath.Join(sessionDir, f)
@@ -73,14 +93,15 @@ func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
 			}
 		}
 	}
+}
 
-	// Create metadata
+func writeSnapshotMetadata(snapshotDir, name, specialist, taskID string) error {
 	meta := SnapshotMetadata{
 		Timestamp:  time.Now().Format(time.RFC3339),
 		Specialist: specialist,
 		TaskID:     taskID,
 		GitSHA:     getGitSHA(),
-		Name:       snapshotName,
+		Name:       name,
 	}
 
 	metaData, err := json.MarshalIndent(meta, "", "  ")
@@ -91,8 +112,6 @@ func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
 	if err := os.WriteFile(filepath.Join(snapshotDir, "snapshot_metadata.json"), metaData, 0o600); err != nil {
 		return fmt.Errorf("failed to write metadata: %w", err)
 	}
-
-	slog.Info("snapshot: created checkpoint", "name", snapshotName)
 	return nil
 }
 
@@ -107,7 +126,7 @@ func ListSnapshots(storageRoot string) ([]SnapshotMetadata, error) {
 		return nil, err
 	}
 
-	var snapshots []SnapshotMetadata
+	snapshots := make([]SnapshotMetadata, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -133,17 +152,7 @@ func ListSnapshots(storageRoot string) ([]SnapshotMetadata, error) {
 	return snapshots, nil
 }
 
-// RestoreSnapshot rolls back the session state to a specific snapshot.
-func RestoreSnapshot(storageRoot, snapshotName string) error {
-	sessionDir := filepath.Join(storageRoot, ".private", "session")
-	historyDir := filepath.Join(sessionDir, "history")
-	snapshotDir := filepath.Join(historyDir, snapshotName)
-
-	if _, err := os.Stat(snapshotDir); err != nil {
-		return fmt.Errorf("snapshot not found: %s", snapshotName)
-	}
-
-	// 1. Delete current session files (except history and archived)
+func deleteSessionFilesForRestore(sessionDir string) error {
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
 		return err
@@ -157,8 +166,10 @@ func RestoreSnapshot(storageRoot, snapshotName string) error {
 			slog.Warn("restore: failed to remove file", "name", name, "err", err)
 		}
 	}
+	return nil
+}
 
-	// 2. Copy snapshot contents back
+func copySnapshotContents(snapshotDir, sessionDir string) error {
 	snapEntries, err := os.ReadDir(snapshotDir)
 	if err != nil {
 		return err
@@ -172,6 +183,25 @@ func RestoreSnapshot(storageRoot, snapshotName string) error {
 		if err := copyFile(src, dst); err != nil {
 			return fmt.Errorf("failed to restore %s: %w", entry.Name(), err)
 		}
+	}
+	return nil
+}
+
+func RestoreSnapshot(storageRoot, snapshotName string) error {
+	sessionDir := filepath.Join(storageRoot, ".private", "session")
+	historyDir := filepath.Join(sessionDir, "history")
+	snapshotDir := filepath.Join(historyDir, snapshotName)
+
+	if _, err := os.Stat(snapshotDir); err != nil {
+		return fmt.Errorf("snapshot not found: %s", snapshotName)
+	}
+
+	if err := deleteSessionFilesForRestore(sessionDir); err != nil {
+		return err
+	}
+
+	if err := copySnapshotContents(snapshotDir, sessionDir); err != nil {
+		return err
 	}
 
 	slog.Info("snapshot: restored state from checkpoint", "name", snapshotName)
@@ -199,7 +229,7 @@ func getGitSHA() string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
-		return "unknown"
+		return unknownSpecialist
 	}
 	return strings.TrimSpace(string(out))
 }

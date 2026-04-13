@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported config internals for testing
 package config
 
 import (

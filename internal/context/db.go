@@ -71,15 +71,7 @@ func addChecksumColumnIfMissing(db *sql.DB) error {
 // addTokenColumnsIfMissing adds estimated_tokens and last_compacted_at columns
 // to the threads table if they do not already exist. Idempotent and safe for
 // existing databases.
-func addTokenColumnsIfMissing(db *sql.DB) error {
-	rows, err := db.Query("PRAGMA table_info(threads)")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	hasTokens := false
-	hasCompactedAt := false
+func checkColumnExists(rows *sql.Rows, colName string) (exists bool, err error) {
 	for rows.Next() {
 		var cid int
 		var name string
@@ -88,23 +80,37 @@ func addTokenColumnsIfMissing(db *sql.DB) error {
 		var dfltValue sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typeStr, &notNull, &dfltValue, &pk); err != nil {
-			return err
+			return false, err
 		}
-		if name == "estimated_tokens" {
-			hasTokens = true
-		}
-		if name == "last_compacted_at" {
-			hasCompactedAt = true
+		if name == colName {
+			return true, nil
 		}
 	}
-	if err := rows.Err(); err != nil {
+	return false, rows.Err()
+}
+
+func hasColumn(db *sql.DB, colName string) (bool, error) {
+	rows, err := db.Query("PRAGMA table_info(threads)")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	return checkColumnExists(rows, colName)
+}
+
+func addTokenColumnsIfMissing(db *sql.DB) error {
+	hasTokens, err := hasColumn(db, "estimated_tokens")
+	if err != nil {
 		return err
 	}
-
 	if !hasTokens {
 		if _, err := db.Exec("ALTER TABLE threads ADD COLUMN estimated_tokens INTEGER DEFAULT 0"); err != nil {
 			return fmt.Errorf("addTokenColumnsIfMissing: estimated_tokens: %w", err)
 		}
+	}
+	hasCompactedAt, err := hasColumn(db, "last_compacted_at")
+	if err != nil {
+		return err
 	}
 	if !hasCompactedAt {
 		if _, err := db.Exec("ALTER TABLE threads ADD COLUMN last_compacted_at DATETIME"); err != nil {

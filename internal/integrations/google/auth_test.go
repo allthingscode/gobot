@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported auth internals for testing
 package google
 
 import (

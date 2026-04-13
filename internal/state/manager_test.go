@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported manager internals for testing
 package state
 
 import (

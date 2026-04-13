@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported gemini provider internals for testing
 package provider
 
 import (
@@ -38,19 +39,85 @@ func TestGeminiProvider_NameAndModels(t *testing.T) {
 	}
 }
 
+type chatTestCase struct {
+	name        string
+	httpStatus  int
+	mockResp    any
+	reqModel    string
+	reqStr      string
+	wantErr     string
+	wantTokens  int
+	wantContent string
+	wantTool    string
+}
+
+func setupGeminiMock(t *testing.T, status int, resp any) (*httptest.Server, *genai.Client) {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey: "fake-key",
+		HTTPOptions: genai.HTTPOptions{
+			BaseURL: ts.URL,
+		},
+	})
+	if err != nil {
+		ts.Close()
+		t.Fatalf("failed to create client: %v", err)
+	}
+	return ts, client
+}
+
+func validateChatResponse(t *testing.T, resp *ChatResponse, err error, tt chatTestCase) {
+	t.Helper()
+	if tt.wantErr != "" {
+		verifyChatError(t, err, tt.wantErr)
+		return
+	}
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	verifyChatSuccess(t, resp, tt)
+}
+
+func verifyChatError(t *testing.T, err error, wantErr string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error containing %q, got nil", wantErr)
+	}
+	if !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("expected error containing %q, got: %v", wantErr, err)
+	}
+}
+
+func verifyChatSuccess(t *testing.T, resp *ChatResponse, tt chatTestCase) {
+	t.Helper()
+	if resp.Usage.TotalTokens != tt.wantTokens {
+		t.Errorf("got %d total tokens, want %d", resp.Usage.TotalTokens, tt.wantTokens)
+	}
+
+	if tt.wantContent != "" {
+		if resp.Message.Content == nil || *resp.Message.Content.Str != tt.wantContent {
+			t.Errorf("unexpected content: %v", resp.Message.Content)
+		}
+	}
+
+	if tt.wantTool != "" {
+		if len(resp.Message.ToolCalls) == 0 || resp.Message.ToolCalls[0]["name"] != tt.wantTool {
+			t.Errorf("expected tool %q, got: %v", tt.wantTool, resp.Message.ToolCalls)
+		}
+	}
+}
+
 func TestGeminiProvider_Chat(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name        string
-		httpStatus  int
-		mockResp    any
-		reqModel    string
-		reqStr      string
-		wantErr     string
-		wantTokens  int
-		wantContent string
-		wantTool    string
-	}{
+	tests := []chatTestCase{
 		{
 			name:       "success with tool call",
 			httpStatus: http.StatusOK,
@@ -105,24 +172,10 @@ func TestGeminiProvider_Chat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.httpStatus)
-				_ = json.NewEncoder(w).Encode(tt.mockResp)
-			}))
+			ts, client := setupGeminiMock(t, tt.httpStatus, tt.mockResp)
 			defer ts.Close()
 
 			ctx := context.Background()
-			client, err := genai.NewClient(ctx, &genai.ClientConfig{
-				APIKey: "fake-key",
-				HTTPOptions: genai.HTTPOptions{
-					BaseURL: ts.URL,
-				},
-			})
-			if err != nil {
-				t.Fatalf("failed to create client: %v", err)
-			}
-
 			p := NewGeminiProvider(client)
 			req := ChatRequest{
 				Model: tt.reqModel,
@@ -135,36 +188,7 @@ func TestGeminiProvider_Chat(t *testing.T) {
 			}
 
 			resp, err := p.Chat(ctx, req)
-
-			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
-				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
-				}
-				return // expected error occurred
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if resp.Usage.TotalTokens != tt.wantTokens {
-				t.Errorf("got %d total tokens, want %d", resp.Usage.TotalTokens, tt.wantTokens)
-			}
-
-			if tt.wantContent != "" {
-				if resp.Message.Content == nil || *resp.Message.Content.Str != tt.wantContent {
-					t.Errorf("unexpected content: %v", resp.Message.Content)
-				}
-			}
-
-			if tt.wantTool != "" {
-				if len(resp.Message.ToolCalls) == 0 || resp.Message.ToolCalls[0]["name"] != tt.wantTool {
-					t.Errorf("expected tool %q, got: %v", tt.wantTool, resp.Message.ToolCalls)
-				}
-			}
+			validateChatResponse(t, resp, err, tt)
 		})
 	}
 }

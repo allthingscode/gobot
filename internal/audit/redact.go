@@ -10,6 +10,8 @@ import (
 
 // redactPatterns are compiled once at init. Each pattern matches a secret prefix
 // followed by the token body; the entire match is replaced with [REDACTED].
+//
+//nolint:gochecknoglobals // Compiled once at init, immutable patterns for redaction
 var redactPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`AIzaSy[A-Za-z0-9_\-]{33}`),   // Google / Gemini API key
 	regexp.MustCompile(`ya29\.[A-Za-z0-9_\-.]{10,}`), // Google OAuth access token
@@ -17,6 +19,8 @@ var redactPatterns = []*regexp.Regexp{
 }
 
 // triggerPrefixes are used for a fast pre-check before applying regex.
+//
+//nolint:gochecknoglobals // Immutable pre-check list for redaction optimization
 var triggerPrefixes = []string{"AIzaSy", "ya29.", "xoxb-"}
 
 // needsRedaction returns true if s contains at least one trigger prefix.

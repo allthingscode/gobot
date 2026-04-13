@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported checkpoint internals for testing
 package context
 
 import (
@@ -9,6 +10,8 @@ import (
 // 1. Opening a DB, saving state, then closing it (simulating a crash).
 // 2. Reopening the same DB path and verifying the state is fully intact.
 // This is the core F-018 durability guarantee.
+//
+//nolint:cyclop // test complexity justified by crash/recover scenarios
 func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -80,6 +83,8 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 
 // TestCheckpointManager_CrashAndRecover_MultipleIterations verifies that
 // after a restart, LoadLatest returns the HIGHEST iteration saved before crash.
+//
+//nolint:cyclop // test complexity justified by iteration verification
 func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

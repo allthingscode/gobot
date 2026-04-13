@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported tasks internals for testing
 package google
 
 import (

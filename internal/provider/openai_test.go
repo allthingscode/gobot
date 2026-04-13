@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported openai provider internals for testing
 package provider
 
 import (
@@ -41,6 +42,7 @@ func TestOpenAIProvider_Models(t *testing.T) {
 	}
 }
 
+//nolint:cyclop,funlen // test complexity justified by multi-step verification
 func TestOpenAIProvider_Chat_Success(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

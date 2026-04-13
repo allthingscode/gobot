@@ -166,6 +166,7 @@ func (r *ResourceRegistry) Metrics() RegistryMetrics {
 
 // DefaultRegistry is the global registry instance.
 // Use this for process-wide resource tracking.
+//nolint:gochecknoglobals // Global registry is the canonical instance for process-wide tracking
 var DefaultRegistry = NewResourceRegistry()
 
 // Register is a convenience wrapper for DefaultRegistry.Register.

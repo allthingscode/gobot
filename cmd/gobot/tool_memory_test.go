@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (
@@ -11,11 +12,11 @@ import (
 
 // mockMemorySearcher is a test double for memorySearcher.
 type mockMemorySearcher struct {
-	results       []map[string]any
-	err           error
-	lastQuery     string
+	results        []map[string]any
+	err            error
+	lastQuery      string
 	lastSessionKey string
-	lastLimit     int
+	lastLimit      int
 }
 
 func (m *mockMemorySearcher) Search(query, sessionKey string, limit int) ([]map[string]any, error) {

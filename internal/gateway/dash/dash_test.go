@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported handler internals for testing
 package dash
 
 import (
@@ -9,7 +10,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 )
 
-// mockMemoryStats implements MemoryStatsProvider
+// mockMemoryStats implements MemoryStatsProvider.
 type mockMemoryStats struct {
 	count int
 	err   error
@@ -21,93 +22,51 @@ func (m *mockMemoryStats) Stats() (int, error) {
 
 func TestDashboardHandlers(t *testing.T) {
 	t.Parallel()
+	h := setupDashboardHandler()
+	tests := []struct {
+		path   string
+		status int
+		body   []string
+	}{
+		{"/dash/", http.StatusOK, []string{"GoBot Dashboard", "test-v1", "System Overview"}},
+		{"/dash/sessions", http.StatusOK, []string{"Active Sessions"}},
+		{"/dash/memory", http.StatusOK, []string{"Strategic Memory", "42"}},
+		{"/dash/cron", http.StatusOK, []string{"Cron Jobs"}},
+		{"/dash/doctor", http.StatusOK, []string{"Doctor Diagnostics"}},
+		{"/dash/doctor?partial=true", http.StatusOK, []string{"Last checked:"}},
+		{"/dash/logs", http.StatusOK, []string{"System Logs"}},
+		{"/dash/unknown", http.StatusFound, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
+			validateDashboardResponse(t, h, tt.path, tt.status, tt.body)
+		})
+	}
+}
 
+func setupDashboardHandler() *Handler {
 	cfg := &config.Config{}
 	cfg.Gateway.DashboardEnabled = true
+	res := Resources{Config: cfg, Checkpoints: nil, Memory: &mockMemoryStats{count: 42}, Version: "test-v1"}
+	return NewHandler(res)
+}
 
-	res := Resources{
-		Config:      cfg,
-		Checkpoints: nil, // Mocking CheckpointManager is complex, nil is fine for partial test
-		Memory:      &mockMemoryStats{count: 42},
-		Version:     "test-v1",
+func validateDashboardResponse(t *testing.T, h *Handler, path string, expectedStatus int, expectedBody []string) {
+	t.Helper()
+	req := httptest.NewRequest("GET", path, http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != expectedStatus {
+		t.Errorf("status: got %d, want %d", w.Code, expectedStatus)
 	}
-
-	h := NewHandler(res)
-
-	tests := []struct {
-		name           string
-		path           string
-		expectedStatus int
-		expectedBody   []string
-	}{
-		{
-			name:           "Home",
-			path:           "/dash/",
-			expectedStatus: http.StatusOK,
-			expectedBody:   []string{"GoBot Dashboard", "test-v1", "System Overview"},
-		},
-		{
-			name:           "Sessions",
-			path:           "/dash/sessions",
-			expectedStatus: http.StatusOK,
-			expectedBody:   []string{"Active Sessions"},
-		},
-		{
-			name:           "Memory",
-			path:           "/dash/memory",
-			expectedStatus: http.StatusOK,
-			expectedBody:   []string{"Strategic Memory", "42"},
-		},
-		{
-			name:           "Cron",
-			path:           "/dash/cron",
-			expectedStatus: http.StatusOK,
-			expectedBody:   []string{"Cron Jobs"},
-		},
-		{
-			name:           "Doctor",
-			path:           "/dash/doctor",
-			expectedStatus: http.StatusOK,
-			expectedBody:   []string{"Doctor Diagnostics"},
-		},
-		{
-			name:           "Doctor_Partial",
-			path:           "/dash/doctor?partial=true",
-			expectedStatus: http.StatusOK,
-			expectedBody:   []string{"Last checked:"},
-		},
-		{
-			name:           "Logs",
-			path:           "/dash/logs",
-			expectedStatus: http.StatusOK,
-			expectedBody:   []string{"System Logs"},
-		},
-		{
-			name:           "Redirect_Unknown",
-			path:           "/dash/unknown",
-			expectedStatus: http.StatusFound,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			req := httptest.NewRequest("GET", tt.path, http.NoBody)
-			w := httptest.NewRecorder()
-
-			h.ServeHTTP(w, req)
-
-			if w.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
+	if expectedBody != nil {
+		body := w.Body.String()
+		for _, exp := range expectedBody {
+			if !strings.Contains(body, exp) {
+				t.Errorf("body missing %q", exp)
 			}
-
-			body := w.Body.String()
-			for _, exp := range tt.expectedBody {
-				if !strings.Contains(body, exp) {
-					t.Errorf("expected body to contain %q", exp)
-				}
-			}
-		})
+		}
 	}
 }
 

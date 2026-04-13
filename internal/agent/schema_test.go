@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported mock types for testing
 package agent
 
 import (
@@ -37,11 +38,28 @@ func TestDeriveSchema(t *testing.T) {
 		t.Fatal("properties not found or not a map")
 	}
 
-	expectedProps := []struct {
-		name        string
-		jsonType    string
-		description string
-	}{
+	verifyProperties(t, properties)
+
+	// Check skipped fields
+	if _, ok := properties["Internal"]; ok {
+		t.Error("Internal field should be skipped")
+	}
+	if _, ok := properties["unexported"]; ok {
+		t.Error("unexported field should be skipped")
+	}
+
+	verifyRequired(t, schema)
+}
+
+type expectedProp struct {
+	name        string
+	jsonType    string
+	description string
+}
+
+func verifyProperties(t *testing.T, properties map[string]any) {
+	t.Helper()
+	expectedProps := []expectedProp{
 		{"command", "string", "Executable to run"},
 		{"args", "array", "Arguments to pass"},
 		{"count", "integer", "Number of times"},
@@ -73,15 +91,10 @@ func TestDeriveSchema(t *testing.T) {
 			}
 		}
 	}
+}
 
-	// Check skipped fields
-	if _, ok := properties["Internal"]; ok {
-		t.Error("Internal field should be skipped")
-	}
-	if _, ok := properties["unexported"]; ok {
-		t.Error("unexported field should be skipped")
-	}
-
+func verifyRequired(t *testing.T, schema map[string]any) {
+	t.Helper()
 	// Check required fields
 	required, ok := schema["required"].([]string)
 	if !ok {

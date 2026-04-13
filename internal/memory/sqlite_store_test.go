@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported Store methods for testing
 package memory
 
 import (
@@ -119,28 +120,28 @@ func TestMigrationV0ToV1(t *testing.T) {
 func TestIndex(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		namespace string
-		content   string
-		wantErr   bool
+		name       string
+		namespace  string
+		content    string
+		wantErr    bool
 		wantStored bool
 	}{
 		{
-			name:      "normal entry",
-			namespace: "session:123",
-			content:   "The project deadline is March 31.",
+			name:       "normal entry",
+			namespace:  "session:123",
+			content:    "The project deadline is March 31.",
 			wantStored: true,
 		},
 		{
-			name:      "global entry",
-			namespace: "global",
-			content:   "User prefers metric units.",
+			name:       "global entry",
+			namespace:  "global",
+			content:    "User prefers metric units.",
 			wantStored: true,
 		},
 		{
-			name:      "empty content is no-op",
-			namespace: "global",
-			content:   "",
+			name:       "empty content is no-op",
+			namespace:  "global",
+			content:    "",
 			wantStored: false,
 		},
 	}
@@ -170,13 +171,39 @@ func TestIndex(t *testing.T) {
 
 // ── Search ─────────────────────────────────────────────────────────────────────
 
-func TestSearch(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-
+func seedSearchData(t *testing.T, store *MemoryStore) {
+	t.Helper()
 	_ = store.Index("session:a", "The Q1 budget review is on Thursday with the finance team.")
 	_ = store.Index("session:b", "Reminder: submit expense report by Friday.")
 	_ = store.Index("global", "Project Alpha deadline is May 1st.")
+}
+
+func validateSearchResults(t *testing.T, results []map[string]any, wantCount int, wantNone bool) {
+	t.Helper()
+	if wantNone {
+		if len(results) != 0 {
+			t.Errorf("want no results, got %d", len(results))
+		}
+		return
+	}
+	if len(results) < wantCount {
+		t.Errorf("want at least %d results, got %d", wantCount, len(results))
+	}
+	// Verify result shape.
+	for _, r := range results {
+		if _, ok := r["content"]; !ok {
+			t.Error("result missing 'content' key")
+		}
+		if _, ok := r["namespace"]; !ok {
+			t.Error("result missing 'namespace' key")
+		}
+	}
+}
+
+func TestSearch(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	seedSearchData(t, store)
 
 	tests := []struct {
 		name       string
@@ -223,24 +250,7 @@ func TestSearch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Search() unexpected error: %v", err)
 			}
-			if tc.wantNone {
-				if len(results) != 0 {
-					t.Errorf("want no results, got %d", len(results))
-				}
-				return
-			}
-			if len(results) < tc.wantCount {
-				t.Errorf("want at least %d results, got %d", tc.wantCount, len(results))
-			}
-			// Verify result shape.
-			for _, r := range results {
-				if _, ok := r["content"]; !ok {
-					t.Error("result missing 'content' key")
-				}
-				if _, ok := r["namespace"]; !ok {
-					t.Error("result missing 'namespace' key")
-				}
-			}
+			validateSearchResults(t, results, tc.wantCount, tc.wantNone)
 		})
 	}
 }
@@ -305,7 +315,7 @@ func TestMemoryStore_Rebuild_Limit(t *testing.T) {
 	store := newTestStore(t)
 
 	sessionDir := t.TempDir()
-	
+
 	// Create maxRebuildFiles + 100 mock files
 	for i := 0; i < maxRebuildFiles+100; i++ {
 		name := filepath.Join(sessionDir, fmt.Sprintf("session-%d.md", i))

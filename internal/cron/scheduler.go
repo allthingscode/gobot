@@ -83,33 +83,47 @@ func (s *Scheduler) WithClock(c Clock) *Scheduler {
 func ComputeNextRun(s Schedule, nowMS int64) int64 {
 	switch s.Kind {
 	case KindAt:
-		if s.AtMS != nil && *s.AtMS > nowMS {
-			return *s.AtMS
-		}
+		return computeNextRunAt(s, nowMS)
 	case KindEvery:
-		if s.EveryMS != nil && *s.EveryMS > 0 {
-			return nowMS + *s.EveryMS
-		}
+		return computeNextRunEvery(s, nowMS)
 	case KindCron:
-		if s.Expr == "" {
-			return 0
-		}
-		loc := time.UTC
-		if s.TZ != "" {
-			if l, err := time.LoadLocation(s.TZ); err == nil {
-				loc = l
-			}
-		}
-		parser := robfigcron.NewParser(robfigcron.Minute | robfigcron.Hour | robfigcron.Dom | robfigcron.Month | robfigcron.Dow)
-		schedule, err := parser.Parse(s.Expr)
-		if err != nil {
-			slog.Warn("KindCron: invalid cron expression", "expr", s.Expr, "err", err)
-			return 0
-		}
-		now := time.UnixMilli(nowMS).In(loc)
-		return schedule.Next(now).UnixMilli()
+		return computeNextRunCron(s, nowMS)
 	}
 	return 0
+}
+
+func computeNextRunAt(s Schedule, nowMS int64) int64 {
+	if s.AtMS != nil && *s.AtMS > nowMS {
+		return *s.AtMS
+	}
+	return 0
+}
+
+func computeNextRunEvery(s Schedule, nowMS int64) int64 {
+	if s.EveryMS != nil && *s.EveryMS > 0 {
+		return nowMS + *s.EveryMS
+	}
+	return 0
+}
+
+func computeNextRunCron(s Schedule, nowMS int64) int64 {
+	if s.Expr == "" {
+		return 0
+	}
+	loc := time.UTC
+	if s.TZ != "" {
+		if l, err := time.LoadLocation(s.TZ); err == nil {
+			loc = l
+		}
+	}
+	parser := robfigcron.NewParser(robfigcron.Minute | robfigcron.Hour | robfigcron.Dom | robfigcron.Month | robfigcron.Dow)
+	schedule, err := parser.Parse(s.Expr)
+	if err != nil {
+		slog.Warn("KindCron: invalid cron expression", "expr", s.Expr, "err", err)
+		return 0
+	}
+	now := time.UnixMilli(nowMS).In(loc)
+	return schedule.Next(now).UnixMilli()
 }
 
 // Run starts the polling loop.
@@ -129,78 +143,110 @@ func (s *Scheduler) Run(ctx context.Context) error {
 }
 
 func (s *Scheduler) poll(ctx context.Context) error {
-	// 1. Check for reloads of jobs.json
-	info, err := os.Stat(s.storePath)
-	if err == nil {
-		if ShouldReload(info.ModTime().UnixNano(), s.lastMtime, info.Size(), s.lastSize) {
-			slog.Debug("Cron: jobs.json modified externally, reloading")
-			data, err := os.ReadFile(s.storePath)
-			if err != nil {
-				s.recordReloadError(fmt.Errorf("read jobs.json: %w", err))
-			} else {
-				var newStore Store
-				if err := newStore.DecodeJSON(data); err != nil {
-					s.recordReloadError(fmt.Errorf("decode jobs.json: %w", err))
-				} else {
-					s.store = &newStore
-					s.lastMtime = info.ModTime().UnixNano()
-					s.lastSize = info.Size()
-					s.clearReloadError()
-				}
-			}
-		}
-	} else if s.lastMtime != 0 {
-		// Only record error if the file existed previously
-		s.recordReloadError(fmt.Errorf("stat jobs.json: %w", err))
-	}
+	s.reloadJobsJSON()
+	s.reloadModularJobs()
 
-	// Emit repeated warning if reload is still failing
-	if s.lastReloadErr != nil && s.clock.Now().Sub(s.lastReloadErrAt) >= 5*time.Minute {
-		slog.Warn("Cron: persistent jobs.json reload failure",
-			"err", s.lastReloadErr,
-			"failed_at", s.lastReloadErrAt)
-		// Update timestamp to throttle next warning
-		s.lastReloadErrAt = s.clock.Now()
-	}
-
-	// 2. Check for modular job changes.
-	if s.itemsDir != "" {
-		if changed, newMtime := DetectModularChange(s.itemsDir, s.lastModularMtime); changed {
-			modularJobs, err := LoadModularJobs(s.itemsDir)
-			if err != nil {
-				slog.Warn("Cron: failed to load modular jobs", "err", err)
-			} else {
-				stateCache := make(map[string]JobState)
-				if s.store != nil {
-					for _, j := range s.store.Jobs {
-						stateCache[j.ID] = j.State
-					}
-				}
-				if s.store == nil {
-					s.store = &Store{}
-				}
-				s.store.Jobs = MergeModularJobs(s.store.Jobs, modularJobs, stateCache)
-				s.lastModularMtime = newMtime
-				slog.Info("Cron: loaded modular jobs", "count", len(modularJobs))
-			}
-		}
-	}
-
-	// 3. Trigger due jobs
-	nowMS := s.clock.Now().UnixMilli()
 	if s.store == nil {
 		return nil
 	}
 
-	// dueJob captures the state needed to dispatch a single job concurrently.
-	type dueJob struct {
-		index   int
-		id      string
-		name    string
-		payload Payload
-		sched   Schedule
+	nowMS := s.clock.Now().UnixMilli()
+	due, changed := s.identifyDueJobs(nowMS)
+
+	if len(due) > 0 {
+		s.dispatchDueJobs(ctx, due, nowMS)
+		changed = true
 	}
 
+	if changed {
+		s.saveStore()
+	}
+
+	return nil
+}
+
+func (s *Scheduler) reloadJobsJSON() {
+	info, err := os.Stat(s.storePath)
+	if err != nil {
+		if s.lastMtime != 0 {
+			s.recordReloadError(fmt.Errorf("stat jobs.json: %w", err))
+		}
+		s.checkPersistentReloadFailure()
+		return
+	}
+
+	if !ShouldReload(info.ModTime().UnixNano(), s.lastMtime, info.Size(), s.lastSize) {
+		s.checkPersistentReloadFailure()
+		return
+	}
+
+	slog.Debug("Cron: jobs.json modified externally, reloading")
+	data, err := os.ReadFile(s.storePath)
+	if err != nil {
+		s.recordReloadError(fmt.Errorf("read jobs.json: %w", err))
+	} else {
+		var newStore Store
+		if err := newStore.DecodeJSON(data); err != nil {
+			s.recordReloadError(fmt.Errorf("decode jobs.json: %w", err))
+		} else {
+			s.store = &newStore
+			s.lastMtime = info.ModTime().UnixNano()
+			s.lastSize = info.Size()
+			s.clearReloadError()
+		}
+	}
+	s.checkPersistentReloadFailure()
+}
+
+func (s *Scheduler) checkPersistentReloadFailure() {
+	if s.lastReloadErr != nil && s.clock.Now().Sub(s.lastReloadErrAt) >= 5*time.Minute {
+		slog.Warn("Cron: persistent jobs.json reload failure",
+			"err", s.lastReloadErr,
+			"failed_at", s.lastReloadErrAt)
+		s.lastReloadErrAt = s.clock.Now()
+	}
+}
+
+func (s *Scheduler) reloadModularJobs() {
+	if s.itemsDir == "" {
+		return
+	}
+
+	changed, newMtime := DetectModularChange(s.itemsDir, s.lastModularMtime)
+	if !changed {
+		return
+	}
+
+	modularJobs, err := LoadModularJobs(s.itemsDir)
+	if err != nil {
+		slog.Warn("Cron: failed to load modular jobs", "err", err)
+		return
+	}
+
+	stateCache := make(map[string]JobState)
+	if s.store != nil {
+		for _, j := range s.store.Jobs {
+			stateCache[j.ID] = j.State
+		}
+	}
+	if s.store == nil {
+		s.store = &Store{}
+	}
+	s.store.Jobs = MergeModularJobs(s.store.Jobs, modularJobs, stateCache)
+	s.lastModularMtime = newMtime
+	slog.Info("Cron: loaded modular jobs", "count", len(modularJobs))
+}
+
+// dueJob captures the state needed to dispatch a single job concurrently.
+type dueJob struct {
+	index   int
+	id      string
+	name    string
+	payload Payload
+	sched   Schedule
+}
+
+func (s *Scheduler) identifyDueJobs(nowMS int64) ([]dueJob, bool) {
 	changed := false
 	var due []dueJob
 
@@ -209,7 +255,6 @@ func (s *Scheduler) poll(ctx context.Context) error {
 			continue
 		}
 
-		// Initialize NextRunAtMS on first load (new jobs have zero value).
 		if job.State.NextRunAtMS == 0 {
 			s.store.Jobs[i].State.NextRunAtMS = ComputeNextRun(job.Schedule, nowMS)
 			slog.Info("Cron: scheduled new job", "id", job.ID, "nextRunAt", time.UnixMilli(s.store.Jobs[i].State.NextRunAtMS))
@@ -231,82 +276,89 @@ func (s *Scheduler) poll(ctx context.Context) error {
 			changed = true
 		}
 	}
+	return due, changed
+}
 
-	// Fan-out: dispatch all due jobs concurrently, then apply results.
-	if len(due) > 0 && s.dispatcher != nil {
-		type dispatchResult struct {
-			index int
-			err   error
-		}
-		results := make(chan dispatchResult, len(due))
-		var wg sync.WaitGroup
-		for _, dj := range due {
-			wg.Add(1)
-			go func(dj dueJob) {
-				defer wg.Done()
-
-				jobCtx := ctx
-				var cancel context.CancelFunc
-				if s.jobTimeout > 0 {
-					jobCtx, cancel = context.WithTimeout(ctx, s.jobTimeout)
-					defer cancel()
-				}
-
-				p := dj.payload
-				p.ID = dj.id
-				err := s.dispatcher.Dispatch(jobCtx, p)
-				if err != nil {
-					slog.Error("Job dispatch failed", "id", dj.id, "error", err)
-					alert := Payload{
-						Channel: dj.payload.Channel,
-						To:      dj.payload.To,
-						Message: fmt.Sprintf("Job %q failed: %v", dj.name, err),
-					}
-					if a, ok := s.dispatcher.(Alerter); ok {
-						if alertErr := a.Alert(ctx, alert); alertErr != nil {
-							slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
-						}
-					} else {
-						if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
-							slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
-						}
-					}
-				}
-				results <- dispatchResult{index: dj.index, err: err}
-			}(dj)
-		}
-		wg.Wait()
-		close(results)
-
-		for r := range results {
-			if r.err != nil {
-				s.store.Jobs[r.index].State.FailureCount++
-			} else {
-				s.store.Jobs[r.index].State.SuccessCount++
-			}
-			s.store.Jobs[r.index].State.NextRunAtMS = ComputeNextRun(s.store.Jobs[r.index].Schedule, nowMS)
-		}
-	} else if len(due) > 0 {
-		// No dispatcher configured: still advance the schedule.
+func (s *Scheduler) dispatchDueJobs(ctx context.Context, due []dueJob, nowMS int64) {
+	if s.dispatcher == nil {
 		for _, dj := range due {
 			s.store.Jobs[dj.index].State.NextRunAtMS = ComputeNextRun(dj.sched, nowMS)
 		}
+		return
 	}
 
-	// 4. Save store if changes occurred
-	if changed {
-		data, err := s.store.EncodeJSON()
-		if err == nil {
-			_ = os.WriteFile(s.storePath, data, 0o600)
-			// Update stats to avoid immediate reload
-			if info, err := os.Stat(s.storePath); err == nil {
-				s.lastMtime = info.ModTime().UnixNano()
-				s.lastSize = info.Size()
-			}
+	type dispatchResult struct {
+		index int
+		err   error
+	}
+	results := make(chan dispatchResult, len(due))
+	var wg sync.WaitGroup
+	for _, dj := range due {
+		wg.Add(1)
+		go func(dj dueJob) {
+			defer wg.Done()
+			err := s.executeJob(ctx, dj)
+			results <- dispatchResult{index: dj.index, err: err}
+		}(dj)
+	}
+	wg.Wait()
+	close(results)
+
+	for r := range results {
+		if r.err != nil {
+			s.store.Jobs[r.index].State.FailureCount++
+		} else {
+			s.store.Jobs[r.index].State.SuccessCount++
+		}
+		s.store.Jobs[r.index].State.NextRunAtMS = ComputeNextRun(s.store.Jobs[r.index].Schedule, nowMS)
+	}
+}
+
+func (s *Scheduler) executeJob(ctx context.Context, dj dueJob) error {
+	jobCtx := ctx
+	var cancel context.CancelFunc
+	if s.jobTimeout > 0 {
+		jobCtx, cancel = context.WithTimeout(ctx, s.jobTimeout)
+		defer cancel()
+	}
+
+	p := dj.payload
+	p.ID = dj.id
+	err := s.dispatcher.Dispatch(jobCtx, p)
+	if err != nil {
+		slog.Error("Job dispatch failed", "id", dj.id, "error", err)
+		s.sendFailureAlert(ctx, dj, err)
+	}
+	return err
+}
+
+func (s *Scheduler) sendFailureAlert(ctx context.Context, dj dueJob, err error) {
+	alert := Payload{
+		Channel: dj.payload.Channel,
+		To:      dj.payload.To,
+		Message: fmt.Sprintf("Job %q failed: %v", dj.name, err),
+	}
+	if a, ok := s.dispatcher.(Alerter); ok {
+		if alertErr := a.Alert(ctx, alert); alertErr != nil {
+			slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
+		}
+	} else {
+		if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
+			slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
 		}
 	}
+}
 
-	return nil
+func (s *Scheduler) saveStore() {
+	data, err := s.store.EncodeJSON()
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.storePath, data, 0o600)
+	if info, err := os.Stat(s.storePath); err == nil {
+		s.lastMtime = info.ModTime().UnixNano()
+		s.lastSize = info.Size()
+	}
 }
 
 func (s *Scheduler) recordReloadError(err error) {

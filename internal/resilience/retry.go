@@ -33,6 +33,7 @@ type RetryConfig struct {
 
 // DefaultRetryConfig is the standard retry configuration for gobot API calls:
 // 3 attempts, 500ms initial delay, 10s cap, 2x multiplier, ±20% jitter.
+//nolint:gochecknoglobals // Package-level default retry config; immutable
 var DefaultRetryConfig = RetryConfig{
 	MaxAttempts:  3,
 	InitialDelay: 500 * time.Millisecond,
@@ -47,68 +48,92 @@ var DefaultRetryConfig = RetryConfig{
 // ctx cancellation during a sleep returns ctx.Err() immediately.
 // Each retry attempt is logged at Warn level; final failure is also logged.
 func Do(ctx context.Context, cfg RetryConfig, shouldRetry func(error) bool, fn func() error) error {
-	maxAttempts := cfg.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 3
-	}
-	multiplier := cfg.Multiplier
-	if multiplier <= 0 {
-		multiplier = 2.0
-	}
-	jitterFactor := cfg.JitterFactor
-	if jitterFactor <= 0 {
-		jitterFactor = 0.2
-	}
-
+	cfg = normalizeConfig(cfg)
 	delay := cfg.InitialDelay
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+
+	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
 		lastErr = fn()
 		if lastErr == nil {
-			if attempt > 0 {
-				slog.Info("retry: succeeded after retry", "attempt", attempt+1)
-			}
+			logRetrySuccess(attempt)
 			return nil
 		}
-		if !shouldRetry(lastErr) {
-			return lastErr
-		}
-		if attempt == maxAttempts-1 {
-			break // last attempt — skip sleep
+
+		if !shouldRetry(lastErr) || attempt == cfg.MaxAttempts {
+			break
 		}
 
-		// Compute jittered delay: delay ± (delay * jitterFactor * rand[-1,1])
-		// #nosec G404
-		jitterAmt := float64(delay) * jitterFactor * (2*rand.Float64() - 1)
-		sleep := time.Duration(float64(delay) + jitterAmt)
-		if sleep < 0 {
-			sleep = 0
-		}
-		if cfg.MaxDelay > 0 && sleep > cfg.MaxDelay {
-			sleep = cfg.MaxDelay
+		sleep := calculateSleep(delay, cfg)
+		logRetryAttempt(attempt, cfg.MaxAttempts, lastErr, sleep)
+
+		if err := wait(ctx, sleep); err != nil {
+			return err
 		}
 
-		slog.Warn("retry: attempt failed, retrying",
-			"attempt", attempt+1,
-			"max_attempts", maxAttempts,
-			"err", lastErr,
-			"delay", sleep,
-		)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(sleep):
-		}
-
-		delay = time.Duration(float64(delay) * multiplier)
-		if cfg.MaxDelay > 0 && delay > cfg.MaxDelay {
-			delay = cfg.MaxDelay
-		}
+		delay = nextDelay(delay, cfg)
 	}
 
-	slog.Warn("retry: all attempts exhausted", "attempts", maxAttempts, "err", lastErr)
+	slog.Warn("retry: all attempts exhausted", "attempts", cfg.MaxAttempts, "err", lastErr)
 	return lastErr
+}
+
+func normalizeConfig(cfg RetryConfig) RetryConfig {
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = 3
+	}
+	if cfg.Multiplier <= 0 {
+		cfg.Multiplier = 2.0
+	}
+	if cfg.JitterFactor <= 0 {
+		cfg.JitterFactor = 0.2
+	}
+	return cfg
+}
+
+func calculateSleep(delay time.Duration, cfg RetryConfig) time.Duration {
+	// Compute jittered delay: delay ± (delay * jitterFactor * rand[-1,1])
+	// #nosec G404
+	jitterAmt := float64(delay) * cfg.JitterFactor * (2*rand.Float64() - 1)
+	sleep := time.Duration(float64(delay) + jitterAmt)
+	if sleep < 0 {
+		sleep = 0
+	}
+	if cfg.MaxDelay > 0 && sleep > cfg.MaxDelay {
+		sleep = cfg.MaxDelay
+	}
+	return sleep
+}
+
+func nextDelay(current time.Duration, cfg RetryConfig) time.Duration {
+	delay := time.Duration(float64(current) * cfg.Multiplier)
+	if cfg.MaxDelay > 0 && delay > cfg.MaxDelay {
+		delay = cfg.MaxDelay
+	}
+	return delay
+}
+
+func wait(ctx context.Context, sleep time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(sleep):
+		return nil
+	}
+}
+
+func logRetrySuccess(attempt int) {
+	if attempt > 1 {
+		slog.Info("retry: succeeded after retry", "attempt", attempt)
+	}
+}
+
+func logRetryAttempt(attempt, maxAttempts int, err error, sleep time.Duration) {
+	slog.Warn("retry: attempt failed, retrying",
+		"attempt", attempt,
+		"max_attempts", maxAttempts,
+		"err", err,
+		"delay", sleep,
+	)
 }
 
 // IsRetryable returns true for errors that are safe to retry:

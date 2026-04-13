@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported pairing handler internals for testing
 package bot
 
 import (

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported ledger internals for testing
 package audit
 
 import (

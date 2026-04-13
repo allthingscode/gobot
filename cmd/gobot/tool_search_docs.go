@@ -9,18 +9,17 @@ import (
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/philippgille/chromem-go"
 )
 
 const searchDocsToolName = "search_docs"
 
-// SearchDocsTool implements Tool and performs hybrid retrieval on workspace docs.
 type SearchDocsTool struct {
-	memStore  memorySearcher // reusing from tool_memory.go
+	memStore  memorySearcher
 	vecStore  *vector.Store
 	embedProv vector.EmbeddingProvider
 }
 
-// newSearchDocsTool creates a new SearchDocsTool.
 func newSearchDocsTool(memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider) *SearchDocsTool {
 	return &SearchDocsTool{
 		memStore:  memStore,
@@ -50,53 +49,63 @@ func (t *SearchDocsTool) Execute(ctx context.Context, sessionKey, userID string,
 		return "", fmt.Errorf("search_docs: query is required")
 	}
 
+	limit := parseLimit(args["limit"])
+
+	mappedFTS, err := t.searchFTS(query, limit)
+	if err != nil {
+		return "", err
+	}
+
+	vecResults, err := t.searchVectors(ctx, query, limit)
+	if err != nil {
+		return "", err
+	}
+
+	merged := vector.MergeResults(mappedFTS, vecResults, 60)
+
+	return formatResults(merged, limit)
+}
+
+func parseLimit(arg any) int {
 	limit := 5
-	if v, ok := args["limit"]; ok {
-		switch n := v.(type) {
-		case float64:
-			limit = int(n)
-		case int:
-			limit = n
-		case int64:
-			limit = int(n)
-		}
+	switch v := arg.(type) {
+	case float64:
+		limit = int(v)
+	case int:
+		limit = v
+	case int64:
+		limit = int(v)
 	}
 	if limit <= 0 {
 		limit = 5
 	}
+	return limit
+}
 
-	// 1. FTS5 Keyword Search (searches agent conversation memory)
-	ftsResults, err := t.memStore.Search(query, "", limit*2) // fetch more for re-ranking
+func (t *SearchDocsTool) searchFTS(query string, limit int) ([]vector.FTSResult, error) {
+	ftsResults, err := t.memStore.Search(query, "", limit*2)
 	if err != nil {
-		return "", fmt.Errorf("fts search: %w", err)
+		return nil, fmt.Errorf("fts search: %w", err)
 	}
 
-	var mappedFTS []vector.FTSResult
+	mappedFTS := make([]vector.FTSResult, 0, len(ftsResults))
 	for _, res := range ftsResults {
 		id, _ := res["namespace"].(string)
 		content, _ := res["content"].(string)
 		timestamp, _ := res["timestamp"].(string)
-		mappedFTS = append(mappedFTS, vector.FTSResult{
-			ID:        id,
-			Content:   content,
-			Timestamp: timestamp,
-		})
+		mappedFTS = append(mappedFTS, vector.FTSResult{ID: id, Content: content, Timestamp: timestamp})
 	}
+	return mappedFTS, nil
+}
 
-	// 2. Vector Semantic Search (searches workspace documents)
+func (t *SearchDocsTool) searchVectors(ctx context.Context, query string, limit int) ([]chromem.Result, error) {
 	embedFunc := func(c context.Context, text string) ([]float32, error) {
 		return t.embedProv.Embed(c, text)
 	}
+	return t.vecStore.Search(ctx, "workspace_docs", query, limit*2, nil, embedFunc)
+}
 
-	// F-025 specifies 'workspace_docs' collection in vector store
-	vecResults, err := t.vecStore.Search(ctx, "workspace_docs", query, limit*2, nil, embedFunc)
-	if err != nil {
-		return "", fmt.Errorf("vector search: %w", err)
-	}
-
-	// 3. Hybrid RRF Merge
-	merged := vector.MergeResults(mappedFTS, vecResults, 60)
-
+func formatResults(merged []vector.HybridResult, limit int) (string, error) {
 	if len(merged) == 0 {
 		return "No matching documents found in the workspace or memory.", nil
 	}

@@ -19,8 +19,8 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/memory"
-	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/reflection"
@@ -33,15 +33,15 @@ type geminiRunner struct {
 	prov                provider.Provider
 	model               string
 	systemPrompt        string
-	memStore            *memory.MemoryStore                      // may be nil; shared single-user RAG store
-	memStoreProvider    func(userID string) *memory.MemoryStore  // may be nil; F-105 per-user store factory
-	vecStore            *vector.Store            // F-030: Semantic memory
-	embedProv           vector.EmbeddingProvider // F-030: Semantic memory
-	cfg                 *config.Config           // F-030: Configuration
-	tools               []Tool                   // registered tools exposed to the provider
-	breaker             *resilience.Breaker      // circuit breaker for API calls
-	limiter             *rate.Limiter            // token-bucket rate limiter
-	hooks               *agent.Hooks             // may be nil; set via SetHooks
+	memStore            *memory.MemoryStore                     // may be nil; shared single-user RAG store
+	memStoreProvider    func(userID string) *memory.MemoryStore // may be nil; F-105 per-user store factory
+	vecStore            *vector.Store                           // F-030: Semantic memory
+	embedProv           vector.EmbeddingProvider                // F-030: Semantic memory
+	cfg                 *config.Config                          // F-030: Configuration
+	tools               []Tool                                  // registered tools exposed to the provider
+	breaker             *resilience.Breaker                     // circuit breaker for API calls
+	limiter             *rate.Limiter                           // token-bucket rate limiter
+	hooks               *agent.Hooks                            // may be nil; set via SetHooks
 	tracer              *observability.DispatchTracer
 	idempStore          *agentctx.IdempotencyStore // may be nil; idempotency for side-effecting tools
 	maxToolIterations   int
@@ -128,67 +128,14 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messa
 	}
 
 	// 1. Build System Prompt with RAG and Hooks
-	sysPrompt := r.systemPrompt
-	if memStore != nil {
-		if userText := lastUserText(messages); !memory.ShouldSkipRAG(userText) {
-			var filtered []map[string]any
-
-			// F-030: Use hybrid search for RAG if enabled
-			if r.cfg.VectorSearchEnabled() && r.vecStore != nil && r.embedProv != nil {
-				hybridResults, err := vector.HybridSearch(ctx, memStore, r.vecStore, r.embedProv, userText, sessionKey, 5)
-				if err == nil {
-					// Map hybrid results to the format expected by FormatRAGBlock
-					for _, res := range hybridResults {
-						filtered = append(filtered, map[string]any{
-							"content": res.Content,
-							"score":   res.Score,
-						})
-					}
-				} else {
-					slog.Warn("runner: hybrid RAG search failed, falling back to FTS5", "err", err)
-					// F-071: Pass sessionKey to Search
-					if results, _ := memStore.Search(userText, sessionKey, 5); len(results) > 0 {
-						filtered = memory.FilterRAGResults(results, 0.0)
-					}
-				}
-			} else {
-				// Classic FTS5-only RAG
-				// F-071: Pass sessionKey to Search
-				if results, _ := memStore.Search(userText, sessionKey, 5); len(results) > 0 {
-					filtered = memory.FilterRAGResults(results, 0.0)
-				}
-			}
-
-			if block, n := memory.FormatRAGBlock(filtered); n > 0 {
-				slog.Debug("runner: injecting RAG context", "entries", n)
-				if sysPrompt != "" {
-					sysPrompt = block + "\n\n" + sysPrompt
-				} else {
-					sysPrompt = block
-				}
-			}
-		}
-	}
-
-	if r.hooks != nil {
-		sysPrompt = r.hooks.RunPrePrompt(ctx, sysPrompt)
-	}
+	sysPrompt := r.buildSystemPrompt(ctx, sessionKey, messages, memStore)
 
 	// Planning phase (F-049): generate a validation rubric before executing.
-	var rubric map[string]any
 	userText := lastUserText(messages)
-	if r.enableReflection && userText != "" {
-		planPrompt := reflection.GenerateRubricPrompt(userText)
-		if planStr, planErr := r.RunText(ctx, sessionKey, planPrompt, ""); planErr == nil {
-			if parsed, ok := reflection.ParseJSONResponse(planStr); ok {
-				rubric = parsed
-				slog.Debug("runner: planning rubric generated", "session", sessionKey)
-			}
-		}
-	}
+	rubric := r.generateReflectionRubric(ctx, sessionKey, userText)
 
 	// 2. Prepare Tool Declarations
-	var toolDecls []provider.ToolDeclaration
+	toolDecls := make([]provider.ToolDeclaration, 0, len(r.tools))
 	for _, t := range r.tools {
 		toolDecls = append(toolDecls, t.Declaration())
 	}
@@ -221,156 +168,19 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messa
 
 		// 6. Check for Tool Calls
 		if len(resp.Message.ToolCalls) == 0 {
-			// Terminal text response
-			text := extractText(resp.Message)
-
-			// Reflection phase (F-049): audit the terminal response against the rubric.
-			if r.enableReflection && rubric != nil && reflectionRounds < r.maxReflectionRounds {
-				criticPrompt := reflection.GenerateCriticPrompt(userText, rubric, text)
-				if criticStr, criticErr := r.RunText(ctx, sessionKey, criticPrompt, ""); criticErr == nil {
-					if report, ok := reflection.ParseJSONResponse(criticStr); ok {
-						score := reflection.CalculateTotalScore(report, rubric)
-						threshold := 0.7
-						if t, ok := rubric["success_threshold"].(float64); ok {
-							threshold = t
-						}
-						if score < threshold {
-							reflectionRounds++
-							correction := buildCorrectionMessage(report)
-							messages = append(messages, agentctx.StrategicMessage{
-								Role:    agentctx.RoleUser,
-								Content: &agentctx.MessageContent{Str: &correction},
-							})
-							slog.Info("runner: reflection backtrack triggered",
-								"session", sessionKey,
-								"score", score,
-								"threshold", threshold,
-								"round", reflectionRounds,
-							)
-							continue
-						}
-						slog.Debug("runner: reflection passed", "session", sessionKey, "score", score)
-					}
-				}
+			text, shouldContinue := r.handleTerminalResponse(ctx, sessionKey, userText, rubric, resp.Message, &messages, &reflectionRounds)
+			if shouldContinue {
+				continue
 			}
-
 			return text, messages, nil
 		}
 
 		// 7. Execute Tools
-		for _, tc := range resp.Message.ToolCalls {
-			name, ok := tc["name"].(string)
-			if !ok {
-				return "", nil, fmt.Errorf("malformed tool call: missing or non-string 'name' field: %v", tc)
-			}
-			args, ok := tc["args"].(map[string]any)
-			if !ok {
-				return "", nil, fmt.Errorf("malformed tool call: missing or non-map 'args' field for tool %s: %v", name, tc)
-			}
-
-			// Some providers might not provide an ID, but internal/context expects it if available.
-			var toolCallID *string
-			if id, ok := tc["id"].(string); ok {
-				toolCallID = &id
-			}
-
-			toolSeq = append(toolSeq, name)
-
-			var paramsHash string
-			var hashErr error
-			paramsHash, hashErr = agentctx.HashParams(args)
-			if hashErr != nil {
-				slog.Warn("runner: failed to hash tool params, skipping idempotency check",
-					slog.String("session", sessionKey),
-					slog.String("tool", name),
-					slog.Any("err", hashErr),
-				)
-			}
-
-			slog.Info("runner: tool call",
-				slog.String("session", sessionKey),
-				slog.String("tool", name),
-				slog.String("params_hash", paramsHash),
-				slog.Int("iter", iter),
-			)
-
-			var result string
-			var execErr error
-			var skipExec bool
-
-			// Run PreTool hooks (F-048) -- allow interception/approval.
-			if r.hooks != nil {
-				override, err := r.hooks.RunPreTool(ctx, sessionKey, name, args)
-				if err != nil {
-					execErr = err
-				} else if override != "" {
-					result = override
-					skipExec = true
-					slog.Debug("runner: tool pre-hook override",
-						slog.String("session", sessionKey),
-						slog.String("tool", name),
-						slog.String("params_hash", paramsHash),
-						slog.String("result", result),
-					)
-				}
-			}
-
-			if execErr == nil && !skipExec {
-				start := time.Now()
-				// Generate a deterministic idempotency key based on the tool's position in the sequence and parameters.
-				// This ensures that if the agent loop crashes and resumes, the exact same tool call gets the same key,
-				// preventing duplicate real-world side effects.
-				if hashErr != nil {
-					result, execErr = r.executeTool(ctx, sessionKey, userID, "", name, args, "")
-				} else {
-					idemKey := fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, len(toolSeq), name, paramsHash)
-					result, execErr = r.executeTool(ctx, sessionKey, userID, idemKey, name, args, paramsHash)
-				}
-				if execErr == nil {
-					slog.Info("runner: tool execution completed",
-						slog.String("session", sessionKey),
-						slog.String("tool", name),
-						slog.String("params_hash", paramsHash),
-						slog.Int64("duration_ms", time.Since(start).Milliseconds()),
-						slog.Int("result_len", len(result)),
-					)
-					slog.Debug("runner: tool result detail",
-						slog.String("session", sessionKey),
-						slog.String("tool", name),
-						slog.String("params_hash", paramsHash),
-						slog.String("result", result),
-					)
-				}
-			}
-
-			if execErr != nil {
-				slog.Error("runner: tool execution failed",
-					slog.String("session", sessionKey),
-					slog.String("tool", name),
-					slog.String("params_hash", paramsHash),
-					slog.Any("err", execErr),
-				)
-				if result != "" {
-					result = fmt.Sprintf("%s\nError: %v", result, execErr)
-				} else {
-					result = fmt.Sprintf("Error: %v", execErr)
-				}
-			} else if r.hooks != nil && !skipExec {
-				// Run PostTool hooks (F-012) -- transform tool results before returning to agent.
-				result = r.hooks.RunPostTool(ctx, name, result)
-			}
-
-			// F-076: Truncate oversized tool results at dispatch to prevent context overflow.
-			result = truncateToolResult(result, r.maxToolResultBytes)
-
-			// Append result as a new message
-			messages = append(messages, agentctx.StrategicMessage{
-				Role:       agentctx.RoleTool,
-				Name:       &name,
-				Content:    &agentctx.MessageContent{Str: &result},
-				ToolCallID: toolCallID,
-			})
+		newMsgs, err := r.processToolCalls(ctx, sessionKey, userID, resp.Message.ToolCalls, iter, &toolSeq)
+		if err != nil {
+			return "", nil, err
 		}
+		messages = append(messages, newMsgs...)
 	}
 
 	slog.Error("runner: tool loop exhausted",
@@ -381,47 +191,290 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messa
 	return "", nil, fmt.Errorf("runner: tool dispatch loop exceeded %d iterations", r.maxToolIterations)
 }
 
+func (r *geminiRunner) buildSystemPrompt(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage, memStore *memory.MemoryStore) string {
+	sysPrompt := r.systemPrompt
+	if memStore != nil {
+		if userText := lastUserText(messages); !memory.ShouldSkipRAG(userText) {
+			ragBlock := r.getRagBlock(ctx, sessionKey, userText, memStore)
+			if ragBlock != "" {
+				if sysPrompt != "" {
+					sysPrompt = ragBlock + "\n\n" + sysPrompt
+				} else {
+					sysPrompt = ragBlock
+				}
+			}
+		}
+	}
+
+	if r.hooks != nil {
+		sysPrompt = r.hooks.RunPrePrompt(ctx, sysPrompt)
+	}
+	return sysPrompt
+}
+
+func (r *geminiRunner) getRagBlock(ctx context.Context, sessionKey, userText string, memStore *memory.MemoryStore) string {
+	var filtered []map[string]any
+
+	// F-030: Use hybrid search for RAG if enabled
+	if r.cfg.VectorSearchEnabled() && r.vecStore != nil && r.embedProv != nil {
+		hybridResults, err := vector.HybridSearch(ctx, memStore, r.vecStore, r.embedProv, userText, sessionKey, 5)
+		if err == nil {
+			// Map hybrid results to the format expected by FormatRAGBlock
+			for _, res := range hybridResults {
+				filtered = append(filtered, map[string]any{
+					"content": res.Content,
+					"score":   res.Score,
+				})
+			}
+		} else {
+			slog.Warn("runner: hybrid RAG search failed, falling back to FTS5", "err", err)
+			filtered = r.ftsSearch(userText, sessionKey, memStore)
+		}
+	} else {
+		filtered = r.ftsSearch(userText, sessionKey, memStore)
+	}
+
+	block, n := memory.FormatRAGBlock(filtered)
+	if n > 0 {
+		slog.Debug("runner: injecting RAG context", "entries", n)
+		return block
+	}
+	return ""
+}
+
+func (r *geminiRunner) ftsSearch(userText, sessionKey string, memStore *memory.MemoryStore) []map[string]any {
+	// F-071: Pass sessionKey to Search
+	if results, _ := memStore.Search(userText, sessionKey, 5); len(results) > 0 {
+		return memory.FilterRAGResults(results, 0.0)
+	}
+	return nil
+}
+
+
+func (r *geminiRunner) generateReflectionRubric(ctx context.Context, sessionKey, userText string) map[string]any {
+	if !r.enableReflection || userText == "" {
+		return nil
+	}
+	planPrompt := reflection.GenerateRubricPrompt(userText)
+	planStr, planErr := r.RunText(ctx, sessionKey, planPrompt, "")
+	if planErr != nil {
+		return nil
+	}
+	parsed, ok := reflection.ParseJSONResponse(planStr)
+	if !ok {
+		return nil
+	}
+	slog.Debug("runner: planning rubric generated", "session", sessionKey)
+	return parsed
+}
+
+func (r *geminiRunner) performReflectionAudit(ctx context.Context, sessionKey, userText string, rubric map[string]any, text string, reflectionRounds *int) (agentctx.StrategicMessage, bool) {
+	criticPrompt := reflection.GenerateCriticPrompt(userText, rubric, text)
+	criticStr, criticErr := r.RunText(ctx, sessionKey, criticPrompt, "")
+	if criticErr != nil {
+		return agentctx.StrategicMessage{}, true
+	}
+
+	report, ok := reflection.ParseJSONResponse(criticStr)
+	if !ok {
+		return agentctx.StrategicMessage{}, true
+	}
+
+	score := reflection.CalculateTotalScore(report, rubric)
+	threshold := 0.7
+	if t, ok := rubric["success_threshold"].(float64); ok {
+		threshold = t
+	}
+
+	if score < threshold {
+		*reflectionRounds++
+		correction := buildCorrectionMessage(report)
+		slog.Info("runner: reflection backtrack triggered",
+			"session", sessionKey,
+			"score", score,
+			"threshold", threshold,
+			"round", *reflectionRounds,
+		)
+		return agentctx.StrategicMessage{
+			Role:    agentctx.RoleUser,
+			Content: &agentctx.MessageContent{Str: &correction},
+		}, false
+	}
+
+	slog.Debug("runner: reflection passed", "session", sessionKey, "score", score)
+	return agentctx.StrategicMessage{}, true
+}
+
+func (r *geminiRunner) processToolCalls(ctx context.Context, sessionKey, userID string, toolCalls []map[string]any, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
+	messages := make([]agentctx.StrategicMessage, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		name, ok := tc["name"].(string)
+		if !ok {
+			return nil, fmt.Errorf("malformed tool call: missing or non-string 'name' field: %v", tc)
+		}
+		args, ok := tc["args"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("malformed tool call: missing or non-map 'args' field for tool %s: %v", name, tc)
+		}
+
+		var toolCallID *string
+		if id, ok := tc["id"].(string); ok {
+			toolCallID = &id
+		}
+
+		*toolSeq = append(*toolSeq, name)
+		result, err := r.executeSingleToolCall(ctx, sessionKey, userID, name, args, iter, len(*toolSeq))
+		if err != nil {
+			// Even on error, we might want to return what we have so far?
+			// But original code returned nil, err.
+			return nil, err
+		}
+
+		messages = append(messages, agentctx.StrategicMessage{
+			Role:       agentctx.RoleTool,
+			Name:       &name,
+			Content:    &agentctx.MessageContent{Str: &result},
+			ToolCallID: toolCallID,
+		})
+	}
+	return messages, nil
+}
+
+func (r *geminiRunner) executeSingleToolCall(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int) (string, error) {
+	paramsHash, hashErr := agentctx.HashParams(args)
+	if hashErr != nil {
+		slog.Warn("runner: failed to hash tool params, skipping idempotency check",
+			slog.String("session", sessionKey),
+			slog.String("tool", name),
+			slog.Any("err", hashErr),
+		)
+	}
+
+	slog.Info("runner: tool call",
+		slog.String("session", sessionKey),
+		slog.String("tool", name),
+		slog.String("params_hash", paramsHash),
+		slog.Int("iter", iter),
+	)
+
+	result, err := r.runToolWithHooks(ctx, sessionKey, userID, name, args, iter, seqLen, paramsHash, hashErr != nil)
+	if err != nil {
+		return "", err
+	}
+
+	return truncateToolResult(result, r.maxToolResultBytes), nil
+}
+
+func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
+	result, execErr, skipExec := r.preToolStep(ctx, sessionKey, name, args, paramsHash)
+
+	if execErr == nil && !skipExec {
+		result, execErr = r.mainToolStep(ctx, sessionKey, userID, name, args, iter, seqLen, paramsHash, hashErr)
+	}
+
+	if execErr != nil {
+		return r.handleToolError(sessionKey, name, paramsHash, result, execErr), nil
+	}
+
+	if r.hooks != nil && !skipExec {
+		result = r.hooks.RunPostTool(ctx, name, result)
+	}
+
+	return result, nil
+}
+
+func (r *geminiRunner) preToolStep(ctx context.Context, sessionKey, name string, args map[string]any, paramsHash string) (string, error, bool) {
+	if r.hooks == nil {
+		return "", nil, false
+	}
+	override, err := r.hooks.RunPreTool(ctx, sessionKey, name, args)
+	if err != nil {
+		return "", err, false
+	}
+	if override != "" {
+		slog.Debug("runner: tool pre-hook override",
+			slog.String("session", sessionKey),
+			slog.String("tool", name),
+			slog.String("params_hash", paramsHash),
+			slog.String("result", override),
+		)
+		return override, nil, true
+	}
+	return "", nil, false
+}
+
+func (r *geminiRunner) mainToolStep(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
+	start := time.Now()
+	var idemKey string
+	if !hashErr {
+		idemKey = fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, seqLen, name, paramsHash)
+	}
+	result, execErr := r.executeTool(ctx, sessionKey, userID, idemKey, name, args, paramsHash)
+	if execErr == nil {
+		slog.Info("runner: tool execution completed",
+			slog.String("session", sessionKey),
+			slog.String("tool", name),
+			slog.String("params_hash", paramsHash),
+			slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+			slog.Int("result_len", len(result)),
+		)
+	}
+	return result, execErr
+}
+
+func (r *geminiRunner) handleToolError(sessionKey, name, paramsHash, result string, err error) string {
+	slog.Error("runner: tool execution failed",
+		slog.String("session", sessionKey),
+		slog.String("tool", name),
+		slog.String("params_hash", paramsHash),
+		slog.Any("err", err),
+	)
+	if result != "" {
+		return fmt.Sprintf("%s\nError: %v", result, err)
+	}
+	return fmt.Sprintf("Error: %v", err)
+}
+
 // executeTool dispatches a tool call to the matching registered Tool.
 // For side-effecting tools, it checks the idempotency store before execution
 // and caches the result to prevent duplicates on retry.
 func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, userID, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
 	// Check if this is a side-effecting tool that needs idempotency protection.
-	if isSideEffectingTool(name) && r.idempStore != nil {
-		// If paramsHash not already computed by caller, compute it now.
-		if paramsHash == "" {
-			var err error
-			paramsHash, err = agentctx.HashParams(args)
-			if err != nil {
-				return "", fmt.Errorf("executeTool: hash params: %w", err)
-			}
-		}
-
-		// Check idempotency store.
-		checkResult, err := r.idempStore.Check(idemKey, name, paramsHash)
-		if err != nil {
-			// Hash mismatch — same key with different params.
-			return "", fmt.Errorf("executeTool: %w", err)
-		}
-
-		if checkResult.Found {
-			// Cache hit — return cached result without executing.
-			slog.Debug("executeTool: idempotency cache hit", "tool", name, "key", idemKey)
-			return checkResult.CachedResult, nil
-		}
-
-		// Cache miss — execute the tool and store result.
-		result, execErr := r.executeToolInner(ctx, sessionKey, userID, name, args)
-		if execErr == nil {
-			// Store result in idempotency cache.
-			if storeErr := r.idempStore.Store(idemKey, name, paramsHash, result, sessionKey); storeErr != nil {
-				slog.Warn("executeTool: failed to store idempotency key", "err", storeErr)
-			}
-		}
-		return result, execErr
+	if !isSideEffectingTool(name) || r.idempStore == nil {
+		return r.executeToolInner(ctx, sessionKey, userID, name, args)
 	}
 
-	// Non-side-effecting tool or no idempotency store — execute normally.
-	return r.executeToolInner(ctx, sessionKey, userID, name, args)
+	// If paramsHash not already computed by caller, compute it now.
+	if paramsHash == "" {
+		var err error
+		paramsHash, err = agentctx.HashParams(args)
+		if err != nil {
+			return "", fmt.Errorf("executeTool: hash params: %w", err)
+		}
+	}
+
+	// Check idempotency store.
+	checkResult, err := r.idempStore.Check(idemKey, name, paramsHash)
+	if err != nil {
+		// Hash mismatch — same key with different params.
+		return "", fmt.Errorf("executeTool: %w", err)
+	}
+
+	if checkResult.Found {
+		// Cache hit — return cached result without executing.
+		slog.Debug("executeTool: idempotency cache hit", "tool", name, "key", idemKey)
+		return checkResult.CachedResult, nil
+	}
+
+	// Cache miss — execute the tool and store result.
+	result, execErr := r.executeToolInner(ctx, sessionKey, userID, name, args)
+	if execErr == nil {
+		// Store result in idempotency cache.
+		if storeErr := r.idempStore.Store(idemKey, name, paramsHash, result, sessionKey); storeErr != nil {
+			slog.Warn("executeTool: failed to store idempotency key", "err", storeErr)
+		}
+	}
+	return result, execErr
 }
 
 // executeToolInner is the inner implementation of executeTool without idempotency checks.
@@ -464,6 +517,17 @@ func generateIdempotencyKey() string {
 		hex.EncodeToString(bytes[10:16]))
 }
 
+func (r *geminiRunner) handleTerminalResponse(ctx context.Context, sessionKey, userText string, rubric map[string]any, respMsg agentctx.StrategicMessage, messages *[]agentctx.StrategicMessage, reflectionRounds *int) (string, bool) {
+	text := extractText(respMsg)
+	if r.enableReflection && rubric != nil && *reflectionRounds < r.maxReflectionRounds {
+		if msg, ok := r.performReflectionAudit(ctx, sessionKey, userText, rubric, text, reflectionRounds); !ok {
+			*messages = append(*messages, msg)
+			return "", true
+		}
+	}
+	return text, false
+}
+
 // retryChat calls prov.Chat with exponential backoff on transient errors.
 func (r *geminiRunner) retryChat(ctx context.Context, sessionKey string, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	const maxGenRetries = 3
@@ -474,57 +538,76 @@ func (r *geminiRunner) retryChat(ctx context.Context, sessionKey string, req pro
 	var lastErr error
 	for attempt := 0; attempt <= maxGenRetries; attempt++ {
 		if attempt > 0 {
-			slog.Warn("runner: transient error, retrying", "attempt", attempt, "delay", delay, "err", lastErr)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
-			delay *= 2
-			if delay > maxDelay {
-				delay = maxDelay
+			if err := r.waitBeforeRetry(ctx, lastErr, attempt, &delay, maxDelay); err != nil {
+				return nil, err
 			}
 		}
 
-		// Rate-limit: acquire a token before each attempt.
-		if waitErr := r.limiter.Wait(ctx); waitErr != nil {
-			return nil, waitErr
-		}
-
-		var resp *provider.ChatResponse
-		fn := func(ctx context.Context) error {
-			return r.breaker.Execute(func() error {
-				var callErr error
-				resp, callErr = r.prov.Chat(ctx, req)
-				return callErr
-			})
-		}
-
-		var err error
-		if r.tracer != nil {
-			err = r.tracer.TraceGeminiCall(ctx, sessionKey, attempt, fn)
-		} else {
-			err = fn(ctx)
-		}
-
+		resp, err := r.attemptChat(ctx, sessionKey, attempt, req)
 		if err == nil {
-			// Record token consumption if tracer is present.
-			if r.tracer != nil && resp != nil && resp.Usage.TotalTokens > 0 {
-				r.tracer.RecordTokens(ctx, int64(resp.Usage.TotalTokens))
-			}
 			return resp, nil
 		}
 
-		// Circuit open: fail immediately without retrying.
-		if errors.Is(err, resilience.ErrCircuitOpen) {
-			return nil, err
-		}
-		if !bot.IsTransientError(err) {
+		if !r.shouldRetry(err) {
 			return nil, err
 		}
 		lastErr = err
 	}
 	return nil, fmt.Errorf("%d retries exhausted: %w", maxGenRetries, lastErr)
+}
+
+func (r *geminiRunner) waitBeforeRetry(ctx context.Context, lastErr error, attempt int, delay *time.Duration, maxDelay time.Duration) error {
+	slog.Warn("runner: transient error, retrying", "attempt", attempt, "delay", *delay, "err", lastErr)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(*delay):
+	}
+	*delay *= 2
+	if *delay > maxDelay {
+		*delay = maxDelay
+	}
+	return nil
+}
+
+func (r *geminiRunner) attemptChat(ctx context.Context, sessionKey string, attempt int, req provider.ChatRequest) (*provider.ChatResponse, error) {
+	// Rate-limit: acquire a token before each attempt.
+	if waitErr := r.limiter.Wait(ctx); waitErr != nil {
+		return nil, waitErr
+	}
+
+	var resp *provider.ChatResponse
+	fn := func(ctx context.Context) error {
+		return r.breaker.Execute(func() error {
+			var callErr error
+			resp, callErr = r.prov.Chat(ctx, req)
+			return callErr
+		})
+	}
+
+	var err error
+	if r.tracer != nil {
+		err = r.tracer.TraceGeminiCall(ctx, sessionKey, attempt, fn)
+	} else {
+		err = fn(ctx)
+	}
+
+	if err == nil {
+		// Record token consumption if tracer is present.
+		if r.tracer != nil && resp != nil && resp.Usage.TotalTokens > 0 {
+			r.tracer.RecordTokens(ctx, int64(resp.Usage.TotalTokens))
+		}
+		return resp, nil
+	}
+	return nil, err
+}
+
+func (r *geminiRunner) shouldRetry(err error) bool {
+	// Circuit open: fail immediately without retrying.
+	if errors.Is(err, resilience.ErrCircuitOpen) {
+		return false
+	}
+	return bot.IsTransientError(err)
 }
 
 // extractText joins all non-empty text parts from a StrategicMessage.
@@ -657,11 +740,8 @@ type dispatchHandler struct {
 }
 
 func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot.InboundMessage) (string, error) {
-	// Handle admin commands first.
-	if strings.TrimSpace(msg.Text) == "/reset_circuits" {
-		resilience.ResetAll()
-		slog.Info("resilience: all circuit breakers reset by user", "session", sessionKey)
-		return "All circuit breakers have been reset.", nil
+	if reply, ok := h.maybeHandleAdminCommand(sessionKey, msg.Text); ok {
+		return reply, nil
 	}
 
 	slog.Debug("handler: dispatching to session manager", "session", sessionKey)
@@ -671,25 +751,37 @@ func (h *dispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot
 		if errors.Is(err, resilience.ErrCircuitOpen) {
 			return "I'm sorry, I'm currently having trouble connecting to one of my services. Please try again in a few moments.", nil
 		}
+		return "", err
 	}
-	if err == nil && h.memory != nil {
-		// F-071: Use session: namespace
-		ns := "session:" + sessionKey
-		// Index user message (if not generic noise)
-		if !memory.ShouldSkipRAG(msg.Text) {
-			_ = h.memory.Index(ns, "USER: "+msg.Text)
-		}
-		// Index assistant reply
-		if reply != "" {
-			if indexErr := h.memory.Index(ns, "ASSISTANT: "+reply); indexErr != nil {
-				slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
-			}
-		}
+	if h.memory != nil {
+		h.indexMemory(sessionKey, msg.Text, reply)
 	}
-	if err == nil && h.consolidator != nil && reply != "" {
+	if h.consolidator != nil && reply != "" {
 		h.consolidator.ConsolidateAsync(sessionKey, reply)
 	}
-	return reply, err
+	return reply, nil
+}
+
+func (h *dispatchHandler) maybeHandleAdminCommand(sessionKey, text string) (string, bool) {
+	if strings.TrimSpace(text) == "/reset_circuits" {
+		resilience.ResetAll()
+		slog.Info("resilience: all circuit breakers reset by user", "session", sessionKey)
+		return "All circuit breakers have been reset.", true
+	}
+	return "", false
+}
+
+func (h *dispatchHandler) indexMemory(sessionKey, userMsg, assistantReply string) {
+	if memory.ShouldSkipRAG(userMsg) {
+		return
+	}
+	ns := "session:" + sessionKey
+	_ = h.memory.Index(ns, "USER: "+userMsg)
+	if assistantReply != "" {
+		if indexErr := h.memory.Index(ns, "ASSISTANT: "+assistantReply); indexErr != nil {
+			slog.Warn("memory: index failed", "session", sessionKey, "err", indexErr)
+		}
+	}
 }
 
 func (h *dispatchHandler) HandleCallback(ctx context.Context, cb bot.InboundCallback) error {

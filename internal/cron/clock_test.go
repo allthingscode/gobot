@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported clock internals for testing
 package cron
 
 import (

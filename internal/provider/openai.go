@@ -43,7 +43,33 @@ func (p *OpenAIProvider) Name() string {
 	return "openai"
 }
 
-// Chat executes a single-turn LLM call via an OpenAI-compatible API.
+func (p *OpenAIProvider) sendRequest(ctx context.Context, url string, jsonData []byte) (*http.Response, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("openai: failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", p.apiKey))
+	}
+
+	return p.client.Do(httpReq)
+}
+
+func (p *OpenAIProvider) parseErrorResponse(body []byte, statusCode int) error {
+	var errResp struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
+		return fmt.Errorf("openai api error (%s): %s", errResp.Error.Type, errResp.Error.Message)
+	}
+	return fmt.Errorf("openai api error: status %d, body: %s", statusCode, string(body))
+}
+
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	oaReq := openAIRequest{
 		Model:       req.Model,
@@ -59,17 +85,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	url := fmt.Sprintf("%s/chat/completions", p.baseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("openai: failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", p.apiKey))
-	}
-
-	resp, err := p.client.Do(httpReq)
+	resp, err := p.sendRequest(ctx, url, jsonData)
 	if err != nil {
 		return nil, fmt.Errorf("openai: request failed: %w", err)
 	}
@@ -81,16 +97,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Error struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
-			return nil, fmt.Errorf("openai api error (%s): %s", errResp.Error.Type, errResp.Error.Message)
-		}
-		return nil, fmt.Errorf("openai api error: status %d, body: %s", resp.StatusCode, string(body))
+		return nil, p.parseErrorResponse(body, resp.StatusCode)
 	}
 
 	var oaResp openAIResponse
@@ -118,7 +125,7 @@ func (p *OpenAIProvider) Models() []ModelInfo {
 }
 
 func (p *OpenAIProvider) mapMessages(messages []agentctx.StrategicMessage, system string) []openAIMessage {
-	var result []openAIMessage
+	result := make([]openAIMessage, 0, len(messages)+1)
 
 	if system != "" {
 		result = append(result, openAIMessage{
@@ -128,52 +135,65 @@ func (p *OpenAIProvider) mapMessages(messages []agentctx.StrategicMessage, syste
 	}
 
 	for _, msg := range messages {
-		oaMsg := openAIMessage{
-			Role: string(msg.Role),
-		}
-
-		if msg.Content != nil {
-			if msg.Content.Str != nil {
-				oaMsg.Content = *msg.Content.Str
-			} else {
-				var parts []string
-				for _, item := range msg.Content.Items {
-					if item.Text != nil {
-						parts = append(parts, item.Text.Text)
-					}
-				}
-				oaMsg.Content = strings.Join(parts, "\n")
-			}
-		}
-
-		if msg.Role == agentctx.RoleAssistant && len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				id, _ := tc["id"].(string)
-				name, _ := tc["name"].(string)
-				argsMap, _ := tc["args"].(map[string]any)
-				argsBytes, _ := json.Marshal(argsMap)
-				oaMsg.ToolCalls = append(oaMsg.ToolCalls, openAIToolCall{
-					ID:   id,
-					Type: "function",
-					Function: struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					}{
-						Name:      name,
-						Arguments: string(argsBytes),
-					},
-				})
-			}
-		}
-
-		if msg.Role == agentctx.RoleTool && msg.ToolCallID != nil {
-			oaMsg.ToolCallID = *msg.ToolCallID
-		}
-
-		result = append(result, oaMsg)
+		result = append(result, mapSingleMessage(msg))
 	}
 
 	return result
+}
+
+func mapSingleMessage(msg agentctx.StrategicMessage) openAIMessage {
+	oaMsg := openAIMessage{
+		Role: string(msg.Role),
+	}
+
+	if msg.Content != nil {
+		oaMsg.Content = mapMessageContent(msg.Content)
+	}
+
+	if msg.Role == agentctx.RoleAssistant && len(msg.ToolCalls) > 0 {
+		oaMsg.ToolCalls = mapToolCalls(msg.ToolCalls)
+	}
+
+	if msg.Role == agentctx.RoleTool && msg.ToolCallID != nil {
+		oaMsg.ToolCallID = *msg.ToolCallID
+	}
+
+	return oaMsg
+}
+
+func mapMessageContent(content *agentctx.MessageContent) string {
+	if content.Str != nil {
+		return *content.Str
+	}
+	var parts []string
+	for _, item := range content.Items {
+		if item.Text != nil {
+			parts = append(parts, item.Text.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func mapToolCalls(toolCalls []map[string]any) []openAIToolCall {
+	oaToolCalls := make([]openAIToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		id, _ := tc["id"].(string)
+		name, _ := tc["name"].(string)
+		argsMap, _ := tc["args"].(map[string]any)
+		argsBytes, _ := json.Marshal(argsMap)
+		oaToolCalls = append(oaToolCalls, openAIToolCall{
+			ID:   id,
+			Type: "function",
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{
+				Name:      name,
+				Arguments: string(argsBytes),
+			},
+		})
+	}
+	return oaToolCalls
 }
 
 func (p *OpenAIProvider) mapTools(tools []ToolDeclaration) []openAITool {
@@ -231,7 +251,7 @@ func (p *OpenAIProvider) mapResponse(oaResp openAIResponse) *ChatResponse {
 	}
 }
 
-// OpenAI API types
+// OpenAI API types.
 type openAIRequest struct {
 	Model       string          `json:"model"`
 	Messages    []openAIMessage `json:"messages"`

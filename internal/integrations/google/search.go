@@ -11,9 +11,11 @@ import (
 	"time"
 )
 
+//nolint:gochecknoglobals // Defaults for search service; intentional package-level singletons
 var DefaultBaseURL = "https://www.googleapis.com/customsearch/v1"
 
 // DefaultSearchClient is the default HTTP client used for Google searches.
+//nolint:gochecknoglobals // Shared HTTP client for search service
 var DefaultSearchClient = &http.Client{Timeout: 30 * time.Second}
 
 // SearchService handles communication with the Google Custom Search API.

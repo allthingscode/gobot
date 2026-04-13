@@ -19,6 +19,7 @@ var defaultCSS string
 //go:embed templates/email.html
 var defaultHTML string
 
+//nolint:gochecknoglobals // Global template manager; thread-safe via sync.RWMutex
 var (
 	tmMu sync.RWMutex
 	tm   *TemplateManager

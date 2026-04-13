@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported mock types for testing
 package agent
 
 import (
@@ -795,18 +796,7 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 
 	// Pre-fill history with 15 messages (more than memoryWindow * threshold = 10 * 0.5 = 5)
 	// This will trigger compaction when we add one more message
-	history := make([]agentctx.StrategicMessage, 15)
-	for i := range history {
-		role := agentctx.RoleUser
-		if i%2 == 1 {
-			role = agentctx.RoleAssistant
-		}
-		content := fmt.Sprintf("message %d", i+1)
-		history[i] = agentctx.StrategicMessage{
-			Role:    role,
-			Content: &agentctx.MessageContent{Str: &content},
-		}
-	}
+	history := generateTestHistory(15)
 	_, _ = store.SaveSnapshot("sess1", 1, history)
 
 	// Dispatch a new message to trigger compaction (16th message)
@@ -832,6 +822,27 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 		t.Fatal("expected snapshot to exist")
 	}
 
+	validateSummarizationFailureState(t, snap)
+}
+
+func generateTestHistory(n int) []agentctx.StrategicMessage {
+	history := make([]agentctx.StrategicMessage, n)
+	for i := range history {
+		role := agentctx.RoleUser
+		if i%2 == 1 {
+			role = agentctx.RoleAssistant
+		}
+		content := fmt.Sprintf("message %d", i+1)
+		history[i] = agentctx.StrategicMessage{
+			Role:    role,
+			Content: &agentctx.MessageContent{Str: &content},
+		}
+	}
+	return history
+}
+
+func validateSummarizationFailureState(t *testing.T, snap *agentctx.ThreadSnapshot) {
+	t.Helper()
 	// With fallback to plain compaction:
 	// 1. Existing 15 messages (1=U, 2=A, ..., 15=U).
 	// 2. Compaction (maxN=10) keeps last 9 messages (Indices 6-14: 7=U, 8=A, 9=U, 10=A, 11=U, 12=A, 13=U, 14=A, 15=U).

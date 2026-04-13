@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported scheduler internals for testing
 package cron
 
 import (

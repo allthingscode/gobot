@@ -14,6 +14,8 @@ const (
 	KindAt    ScheduleKind = "at"
 	KindEvery ScheduleKind = "every"
 	KindCron  ScheduleKind = "cron"
+
+	fallbackChannel = "telegram"
 )
 
 // Schedule defines when a job should run.
@@ -90,7 +92,7 @@ func ResolveRoutableChannel(p Payload, _ string) (channel, to string, silent boo
 	if channel == "" || channel == "cli" {
 		// In a full implementation, we would call strategic_resolve_job_channel here.
 		// For now, we follow the fallback mandate: default to "telegram".
-		return "telegram", "", false
+		return fallbackChannel, "", false
 	}
 
 	return channel, to, false

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported retry internals for integration testing
 package resilience
 
 import (

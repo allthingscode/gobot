@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+//nolint:gochecknoglobals // Global provider registry; thread-safe via sync.RWMutex
 var (
 	providers   = make(map[string]Provider)
 	providersMu sync.RWMutex

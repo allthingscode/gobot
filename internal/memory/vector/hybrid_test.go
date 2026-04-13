@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported vector internals for testing
 package vector
 
 import (
@@ -110,6 +111,7 @@ func TestHybridSearch(t *testing.T) {
 	}
 }
 
+//nolint:cyclop // test complexity justified by isolation verification
 func TestHybridSearch_Isolation(t *testing.T) {
 	t.Parallel()
 	tmpDir, err := os.MkdirTemp("", "hybrid-isolation-*")

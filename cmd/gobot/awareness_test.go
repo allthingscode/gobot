@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (
@@ -68,22 +69,10 @@ func TestLoadPrivateFile(t *testing.T) {
 	})
 
 	t.Run("finds file in ~/.gobot (primary)", func(t *testing.T) {
-		tempHome := t.TempDir()
-		t.Setenv("USERPROFILE", tempHome)
-		t.Setenv("HOME", tempHome)
-
-		dotGobot := filepath.Join(tempHome, ".gobot")
-		if err := os.MkdirAll(dotGobot, 0o755); err != nil {
-			t.Fatal(err)
-		}
-
-		dir := t.TempDir()
-		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
+		setupHome(t, "HOME.md", "home content")
+		cfg := setupWorkspace(t, "", "")
 
 		want := "home content"
-		if err := os.WriteFile(filepath.Join(dotGobot, "HOME.md"), []byte(want), 0o600); err != nil {
-			t.Fatal(err)
-		}
 		got := loadPrivateFile(cfg, "HOME.md")
 		if got != want {
 			t.Errorf("expected %q, got %q", want, got)
@@ -91,17 +80,9 @@ func TestLoadPrivateFile(t *testing.T) {
 	})
 
 	t.Run("finds file in workspace (fallback)", func(t *testing.T) {
-		dir := t.TempDir()
-		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
-		workspaceDir := filepath.Join(dir, "workspace")
-		if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		cfg := setupWorkspace(t, "WORK.md", "workspace content")
 
 		want := "workspace content"
-		if err := os.WriteFile(filepath.Join(workspaceDir, "WORK.md"), []byte(want), 0o600); err != nil {
-			t.Fatal(err)
-		}
 		got := loadPrivateFile(cfg, "WORK.md")
 		if got != want {
 			t.Errorf("expected %q, got %q", want, got)
@@ -109,33 +90,46 @@ func TestLoadPrivateFile(t *testing.T) {
 	})
 
 	t.Run("prioritizes ~/.gobot over workspace", func(t *testing.T) {
-		tempHome := t.TempDir()
-		t.Setenv("USERPROFILE", tempHome)
-		t.Setenv("HOME", tempHome)
-
-		dotGobot := filepath.Join(tempHome, ".gobot")
-		if err := os.MkdirAll(dotGobot, 0o755); err != nil {
-			t.Fatal(err)
-		}
-
-		dir := t.TempDir()
-		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
-		workspaceDir := filepath.Join(dir, "workspace")
-		if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		setupHome(t, "BOTH.md", "home priority")
+		cfg := setupWorkspace(t, "BOTH.md", "workspace content")
 
 		homeWant := "home priority"
-		workWant := "workspace content"
-		if err := os.WriteFile(filepath.Join(dotGobot, "BOTH.md"), []byte(homeWant), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(workspaceDir, "BOTH.md"), []byte(workWant), 0o600); err != nil {
-			t.Fatal(err)
-		}
 		got := loadPrivateFile(cfg, "BOTH.md")
 		if got != homeWant {
 			t.Errorf("expected %q, got %q", homeWant, got)
 		}
 	})
+}
+
+func setupHome(t *testing.T, filename, content string) string {
+	t.Helper()
+	tempHome := t.TempDir()
+	t.Setenv("USERPROFILE", tempHome)
+	t.Setenv("HOME", tempHome)
+	dotGobot := filepath.Join(tempHome, ".gobot")
+	if err := os.MkdirAll(dotGobot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if filename != "" {
+		if err := os.WriteFile(filepath.Join(dotGobot, filename), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tempHome
+}
+
+func setupWorkspace(t *testing.T, filename, content string) *config.Config {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
+	workspaceDir := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if filename != "" {
+		if err := os.WriteFile(filepath.Join(workspaceDir, filename), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cfg
 }

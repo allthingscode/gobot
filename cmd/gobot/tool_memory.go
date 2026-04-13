@@ -20,62 +20,73 @@ func cmdMemory() *cobra.Command {
 		Short: "Manage long-term memory index",
 	}
 
-	rebuildCmd := &cobra.Command{
+	cmd.AddCommand(cmdMemoryRebuild())
+	cmd.AddCommand(cmdMemorySearch())
+	return cmd
+}
+
+func cmdMemoryRebuild() *cobra.Command {
+	return &cobra.Command{
 		Use:   "rebuild",
 		Short: "Re-index all session logs from workspace/sessions into the memory database",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("config: %w", err)
-			}
-			store, err := memory.NewMemoryStore(cfg.StorageRoot())
-			if err != nil {
-				return fmt.Errorf("memory store: %w", err)
-			}
-			defer func() { _ = store.Close() }()
-			sessionDir := cfg.WorkspacePath("", "sessions")
-			n, err := store.Rebuild(sessionDir)
-			if err != nil {
-				return fmt.Errorf("rebuild: %w", err)
-			}
-			fmt.Printf("Memory index rebuilt: %d session files indexed.\n", n)
-			return nil
+			return runMemoryRebuild()
 		},
 	}
+}
 
-	cmd.AddCommand(rebuildCmd)
-
-	searchCmd := &cobra.Command{
+func cmdMemorySearch() *cobra.Command {
+	return &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search the memory index for a query",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			query := args[0]
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-			store, err := memory.NewMemoryStore(cfg.StorageRoot())
-			if err != nil {
-				return err
-			}
-			defer func() { _ = store.Close() }()
-			results, err := store.Search(query, "", 10)
-			if err != nil {
-				return err
-			}
-			if len(results) == 0 {
-				fmt.Println("No results found.")
-				return nil
-			}
-			for i, r := range results {
-				fmt.Printf("[%d] %s (%s)\n", i+1, r["content"], r["timestamp"])
-			}
-			return nil
+			return runMemorySearch(args[0])
 		},
 	}
-	cmd.AddCommand(searchCmd)
-	return cmd
+}
+
+func runMemoryRebuild() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	store, err := memory.NewMemoryStore(cfg.StorageRoot())
+	if err != nil {
+		return fmt.Errorf("memory store: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+	sessionDir := cfg.WorkspacePath("", "sessions")
+	n, err := store.Rebuild(sessionDir)
+	if err != nil {
+		return fmt.Errorf("rebuild: %w", err)
+	}
+	fmt.Printf("Memory index rebuilt: %d session files indexed.\n", n)
+	return nil
+}
+
+func runMemorySearch(query string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	store, err := memory.NewMemoryStore(cfg.StorageRoot())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+	results, err := store.Search(query, "", 10)
+	if err != nil {
+		return err
+	}
+	if len(results) == 0 {
+		fmt.Println("No results found.")
+		return nil
+	}
+	for i, r := range results {
+		fmt.Printf("[%d] %s (%s)\n", i+1, r["content"], r["timestamp"])
+	}
+	return nil
 }
 
 const searchMemoryToolName = "search_memory"
@@ -127,6 +138,26 @@ func (t *SearchMemoryTool) Execute(ctx context.Context, sessionKey, userID strin
 		return "", fmt.Errorf("search_memory: query is required")
 	}
 
+	limit := t.parseLimit(args)
+
+	results, err := t.executeSearch(ctx, query, sessionKey, limit)
+	if err != nil {
+		return "", fmt.Errorf("search_memory: %w", err)
+	}
+
+	count := t.countResults(results)
+	if count == 0 {
+		return "No matching memories found.", nil
+	}
+
+	data, err := json.Marshal(results)
+	if err != nil {
+		return "", fmt.Errorf("search_memory: marshal: %w", err)
+	}
+	return string(data), nil
+}
+
+func (t *SearchMemoryTool) parseLimit(args map[string]any) int {
 	limit := 5
 	if v, ok := args["limit"]; ok {
 		switch n := v.(type) {
@@ -141,40 +172,22 @@ func (t *SearchMemoryTool) Execute(ctx context.Context, sessionKey, userID strin
 	if limit <= 0 {
 		limit = 5
 	}
+	return limit
+}
 
-	var results any
-	var err error
-
-	// F-030: Use hybrid search if enabled and store is available
+func (t *SearchMemoryTool) executeSearch(ctx context.Context, query, sessionKey string, limit int) (any, error) {
 	if t.cfg.VectorSearchEnabled() && t.vecStore != nil && t.embedProv != nil {
-		// F-071: Update HybridSearch if needed, or handle namespace here.
-		// For now, let's update HybridSearch signature too.
-		results, err = vector.HybridSearch(ctx, t.store, t.vecStore, t.embedProv, query, sessionKey, limit)
-	} else {
-		// F-071: Pass sessionKey to Search
-		results, err = t.store.Search(query, sessionKey, limit)
+		return vector.HybridSearch(ctx, t.store, t.vecStore, t.embedProv, query, sessionKey, limit)
 	}
+	return t.store.Search(query, sessionKey, limit)
+}
 
-	if err != nil {
-		return "", fmt.Errorf("search_memory: %w", err)
-	}
-
-	// Handle empty results based on type (slice of maps or slice of HybridResult)
-	count := 0
+func (t *SearchMemoryTool) countResults(results any) int {
 	switch v := results.(type) {
 	case []map[string]any:
-		count = len(v)
+		return len(v)
 	case []vector.HybridResult:
-		count = len(v)
+		return len(v)
 	}
-
-	if count == 0 {
-		return "No matching memories found.", nil
-	}
-
-	data, err := json.Marshal(results)
-	if err != nil {
-		return "", fmt.Errorf("search_memory: marshal: %w", err)
-	}
-	return string(data), nil
+	return 0
 }

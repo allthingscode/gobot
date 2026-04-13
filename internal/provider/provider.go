@@ -14,37 +14,39 @@ func FormatProviderLog(providerName, model string) string {
 	return providerName + " request: model=" + model
 }
 
-// FormatStrategicError converts a raw technical error string into a
-// user-facing Strategic-format message. The function classifies errors by
-// keyword priority before falling back to a generic format.
-func FormatStrategicError(errorText string) string {
-	// 1. Context window overflow (highest priority)
-	for _, kw := range []string{"too many tokens", "context_length", "context window"} {
-		if strings.Contains(errorText, kw) {
-			return "[STRATEGIC] Context Overflow (400): The conversation history has exceeded the model's limits. Try a shorter message."
+func containsAny(text string, substrings []string) bool {
+	for _, s := range substrings {
+		if strings.Contains(text, s) {
+			return true
 		}
+	}
+	return false
+}
+
+func truncateDetail(detail string, maxLen int) string {
+	if len(detail) > maxLen {
+		return detail[:maxLen]
+	}
+	return detail
+}
+
+func FormatStrategicError(errorText string) string {
+	if containsAny(errorText, []string{"too many tokens", "context_length", "context window"}) {
+		return "[STRATEGIC] Context Overflow (400): The conversation history has exceeded the model's limits. Try a shorter message."
 	}
 
-	// 2. Status codes and exception types
-	if strings.Contains(errorText, "InternalServerError") || strings.Contains(errorText, "500") {
+	if containsAny(errorText, []string{"InternalServerError", "500"}) {
 		return "[STRATEGIC] Upstream Service Error (500): The AI provider is currently unstable. Please wait a moment and try again."
 	}
-	if strings.Contains(errorText, "RateLimitError") || strings.Contains(errorText, "429") {
+	if containsAny(errorText, []string{"RateLimitError", "429"}) {
 		return "[STRATEGIC] Capacity Limit Reached (429): You have hit the provider's rate limit. Throttling active."
 	}
-	if strings.Contains(errorText, "InvalidRequestError") || strings.Contains(errorText, "400") {
-		detail := errorText
-		if len(detail) > 100 {
-			detail = detail[:100]
-		}
+	if containsAny(errorText, []string{"InvalidRequestError", "400"}) {
+		detail := truncateDetail(errorText, 100)
 		return "[STRATEGIC] Request Denied (400): The provider rejected the payload formatting. Details: " + detail + "..."
 	}
 
-	// 3. Generic fallback
-	msg := errorText
-	if len(msg) > 150 {
-		msg = msg[:150]
-	}
+	msg := truncateDetail(errorText, 150)
 	return "[STRATEGIC] Provider Communication Failure: " + msg
 }
 

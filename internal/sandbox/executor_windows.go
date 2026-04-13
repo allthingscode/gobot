@@ -27,6 +27,8 @@ type winExecutor struct {
 // Run starts name with args inside a Windows Job Object with the configured limits.
 // The child process runs with SandboxRoot as its working directory.
 // CREATE_SUSPENDED ensures the process is assigned to the Job Object before it executes.
+//
+//nolint:cyclop // security-critical function handles multiple error conditions
 func (e *winExecutor) Run(ctx context.Context, name string, args []string) (string, error) {
 	if e.cfg.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -90,7 +92,7 @@ func (e *winExecutor) Run(ctx context.Context, name string, args []string) (stri
 		_ = cmd.Process.Kill()
 		return "", fmt.Errorf("sandbox: invalid PID: %d", pid)
 	}
-	ph, err := windows.OpenProcess(windows.PROCESS_ALL_ACCESS, false, uint32(pid)) // #nosec G115
+	ph, err := windows.OpenProcess(windows.PROCESS_ALL_ACCESS, false, uint32(pid)) //nolint:gosec // G115: PID is validated above
 	if err != nil {
 		_ = cmd.Process.Kill()
 		return "", fmt.Errorf("sandbox: OpenProcess: %w", err)
@@ -103,8 +105,7 @@ func (e *winExecutor) Run(ctx context.Context, name string, args []string) (stri
 	}
 
 	// Find the main thread of the child process and resume it.
-	// #nosec G115 - PID is checked to be non-negative.
-	if err := resumeMainThread(uint32(pid)); err != nil {
+	if err := resumeMainThread(uint32(pid)); err != nil { //nolint:gosec // G115: PID is validated above
 		_ = cmd.Process.Kill()
 		return "", fmt.Errorf("sandbox: resumeMainThread: %w", err)
 	}
@@ -155,30 +156,44 @@ func resumeMainThread(pid uint32) error {
 	}
 	defer func() { _ = windows.CloseHandle(snap) }()
 
+	threadID, err := findFirstThreadForPID(snap, pid)
+	if err != nil {
+		return err
+	}
+
+	return resumeThread(threadID)
+}
+
+func findFirstThreadForPID(snap windows.Handle, pid uint32) (uint32, error) {
 	var te windows.ThreadEntry32
 	te.Size = uint32(unsafe.Sizeof(te))
 	if err := windows.Thread32First(snap, &te); err != nil {
-		return fmt.Errorf("Thread32First: %w", err)
+		return 0, fmt.Errorf("Thread32First: %w", err)
 	}
+
 	for {
 		if te.OwnerProcessID == pid {
-			th, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, te.ThreadID)
-			if err != nil {
-				return fmt.Errorf("OpenThread: %w", err)
-			}
-			_, resumeErr := windows.ResumeThread(th)
-			_ = windows.CloseHandle(th)
-			if resumeErr != nil {
-				return fmt.Errorf("ResumeThread: %w", resumeErr)
-			}
-			return nil
+			return te.ThreadID, nil
 		}
 		if err := windows.Thread32Next(snap, &te); err != nil {
 			if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
 				break
 			}
-			return fmt.Errorf("Thread32Next: %w", err)
+			return 0, fmt.Errorf("Thread32Next: %w", err)
 		}
 	}
-	return fmt.Errorf("no thread found for PID %d", pid)
+	return 0, fmt.Errorf("no thread found for PID %d", pid)
+}
+
+func resumeThread(threadID uint32) error {
+	th, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, threadID)
+	if err != nil {
+		return fmt.Errorf("OpenThread: %w", err)
+	}
+	defer func() { _ = windows.CloseHandle(th) }()
+
+	if _, err := windows.ResumeThread(th); err != nil {
+		return fmt.Errorf("ResumeThread: %w", err)
+	}
+	return nil
 }

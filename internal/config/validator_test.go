@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported validator internals for testing
 package config
 
 import (
@@ -6,7 +7,7 @@ import (
 	"testing"
 )
 
-// helper to create a base valid config for testing
+// helper to create a base valid config for testing.
 func baseValidConfig(t *testing.T) *Config {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -26,6 +27,43 @@ func baseValidConfig(t *testing.T) *Config {
 		Providers: ProvidersConfig{
 			Gemini: GeminiConfig{APIKey: "AIzaSyA_valid_key_here"},
 		},
+	}
+}
+
+func assertFieldError(t *testing.T, result *ValidationResult, errorField string, wantError bool) {
+	t.Helper()
+	hasError := false
+	for _, e := range result.Errors {
+		if e.Field == errorField {
+			hasError = true
+			break
+		}
+	}
+
+	if wantError && !hasError {
+		t.Errorf("expected error for field %s, got none. Errors: %v", errorField, result.Errors)
+	}
+	if !wantError && hasError {
+		t.Errorf("expected no errors, got error for field %s", errorField)
+	}
+}
+
+func cleanEnv(t *testing.T) {
+	t.Helper()
+	// Isolate test from environment variables that could affect validation
+	vars := []string{
+		"GEMINI_API_KEY",
+		"ANTHROPIC_API_KEY",
+		"OPENAI_API_KEY",
+		"OPENAI_BASE_URL",
+		"GOOGLE_API_KEY",
+		"GOOGLE_CX",
+		"TELEGRAM_BOT_TOKEN",
+	}
+	for _, v := range vars {
+		orig := os.Getenv(v)
+		t.Cleanup(func() { os.Setenv(v, orig) })
+		os.Unsetenv(v)
 	}
 }
 
@@ -66,22 +104,11 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 			validator := NewValidator(cfg)
 			result := validator.Validate()
 
-			hasError := false
-			for _, e := range result.Errors {
-				if e.Field == tt.errorField {
-					hasError = true
-					break
-				}
+			if tt.wantError && tt.storageRoot == "" && cfg.StorageRoot() != "" {
+				t.Logf("Skipping empty storage root test because fallback returned %s", cfg.StorageRoot())
+				return
 			}
-
-			if tt.wantError && !hasError {
-				// Special case: if StorageRoot() fallback kicked in, root is not empty.
-				if tt.storageRoot == "" && cfg.StorageRoot() != "" {
-					t.Logf("Skipping empty storage root test because fallback returned %s", cfg.StorageRoot())
-					return
-				}
-				t.Errorf("expected error for field %s, got none. Errors: %v", tt.errorField, result.Errors)
-			}
+			assertFieldError(t, result, tt.errorField, tt.wantError)
 		})
 	}
 }
@@ -140,31 +167,7 @@ func TestValidator_Validate_APIKeys(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			// Isolate test from environment variables that could affect validation
-			origGemini := os.Getenv("GEMINI_API_KEY")
-			origAnthropic := os.Getenv("ANTHROPIC_API_KEY")
-			origOpenAI := os.Getenv("OPENAI_API_KEY")
-			origOpenAIBaseURL := os.Getenv("OPENAI_BASE_URL")
-			origGoogleKey := os.Getenv("GOOGLE_API_KEY")
-			origGoogleCX := os.Getenv("GOOGLE_CX")
-			origTelegram := os.Getenv("TELEGRAM_BOT_TOKEN")
-			defer func() {
-				os.Setenv("GEMINI_API_KEY", origGemini)
-				os.Setenv("ANTHROPIC_API_KEY", origAnthropic)
-				os.Setenv("OPENAI_API_KEY", origOpenAI)
-				os.Setenv("OPENAI_BASE_URL", origOpenAIBaseURL)
-				os.Setenv("GOOGLE_API_KEY", origGoogleKey)
-				os.Setenv("GOOGLE_CX", origGoogleCX)
-				os.Setenv("TELEGRAM_BOT_TOKEN", origTelegram)
-			}()
-			// Unset all relevant environment variables for clean test
-			os.Unsetenv("GEMINI_API_KEY")
-			os.Unsetenv("ANTHROPIC_API_KEY")
-			os.Unsetenv("OPENAI_API_KEY")
-			os.Unsetenv("OPENAI_BASE_URL")
-			os.Unsetenv("GOOGLE_API_KEY")
-			os.Unsetenv("GOOGLE_CX")
-			os.Unsetenv("TELEGRAM_BOT_TOKEN")
+			cleanEnv(t)
 
 			cfg := baseValidConfig(t)
 			cfg.Providers = ProvidersConfig{
@@ -176,20 +179,7 @@ func TestValidator_Validate_APIKeys(t *testing.T) {
 			validator := NewValidator(cfg)
 			result := validator.Validate()
 
-			hasError := false
-			for _, e := range result.Errors {
-				if e.Field == tt.errorField {
-					hasError = true
-					break
-				}
-			}
-
-			if tt.wantError && !hasError {
-				t.Errorf("expected error for field %s, got none. Errors: %v", tt.errorField, result.Errors)
-			}
-			if !tt.wantError && hasError {
-				t.Errorf("expected no errors, got error for field %s", tt.errorField)
-			}
+			assertFieldError(t, result, tt.errorField, tt.wantError)
 		})
 	}
 }
@@ -255,35 +245,40 @@ func TestValidator_Validate_Telegram(t *testing.T) {
 			validator := NewValidator(cfg)
 			result := validator.Validate()
 
-			hasError := false
-			for _, e := range result.Errors {
-				if e.Field == tt.errorField {
-					hasError = true
-					break
-				}
-			}
-
-			if tt.wantError && !hasError {
-				t.Errorf("expected error for field %s, got none. Errors: %v", tt.errorField, result.Errors)
-			}
-			if !tt.wantError && hasError {
-				t.Errorf("expected no errors, got error for field %s", tt.errorField)
-			}
+			assertFieldError(t, result, tt.errorField, tt.wantError)
 		})
 	}
 }
 
 func TestValidator_Validate_AgentDefaults(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name           string
-		lockTimeout    int
-		pruningTTL     string
-		compactionTTL  string
-		idempotencyTTL string
-		wantError      bool
-		errorField     string
-	}{
+	for _, tt := range getAgentDefaultsTestCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := baseValidConfig(t)
+			applyAgentDefaults(cfg, tt)
+
+			validator := NewValidator(cfg)
+			result := validator.Validate()
+
+			assertFieldError(t, result, tt.errorField, tt.wantError)
+		})
+	}
+}
+
+type agentDefaultsTestCase struct {
+	name           string
+	lockTimeout    int
+	pruningTTL     string
+	compactionTTL  string
+	idempotencyTTL string
+	wantError      bool
+	errorField     string
+}
+
+func getAgentDefaultsTestCases() []agentDefaultsTestCase {
+	return []agentDefaultsTestCase{
 		{
 			name:        "valid lock timeout (60s)",
 			lockTimeout: 60,
@@ -340,36 +335,13 @@ func TestValidator_Validate_AgentDefaults(t *testing.T) {
 			wantError:      false,
 		},
 	}
+}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			cfg := baseValidConfig(t)
-			cfg.Agents.Defaults.LockTimeoutSeconds = tt.lockTimeout
-			cfg.Agents.Defaults.ContextPruning.TTL = tt.pruningTTL
-			cfg.Agents.Defaults.Compaction.MemoryFlush.TTL = tt.compactionTTL
-			cfg.Strategic.IdempotencyTTL = tt.idempotencyTTL
-
-			validator := NewValidator(cfg)
-			result := validator.Validate()
-
-			hasError := false
-			for _, e := range result.Errors {
-				if e.Field == tt.errorField {
-					hasError = true
-					break
-				}
-			}
-
-			if tt.wantError && !hasError {
-				t.Errorf("expected error for field %s, got none. Errors: %v", tt.errorField, result.Errors)
-			}
-			if !tt.wantError && hasError {
-				t.Errorf("expected no errors, got error for field %s", tt.errorField)
-			}
-		})
-	}
+func applyAgentDefaults(cfg *Config, tt agentDefaultsTestCase) {
+	cfg.Agents.Defaults.LockTimeoutSeconds = tt.lockTimeout
+	cfg.Agents.Defaults.ContextPruning.TTL = tt.pruningTTL
+	cfg.Agents.Defaults.Compaction.MemoryFlush.TTL = tt.compactionTTL
+	cfg.Strategic.IdempotencyTTL = tt.idempotencyTTL
 }
 
 func TestValidationResult_CriticalErrors(t *testing.T) {

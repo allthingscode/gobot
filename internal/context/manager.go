@@ -34,6 +34,7 @@ type CheckpointManager struct {
 	db *sql.DB
 }
 
+//nolint:gochecknoglobals // Non-mutable: sync.Mutex protects map, used only for instance tracking
 var (
 	cmInstances = make(map[string]*CheckpointManager)
 	cmMu        sync.Mutex
@@ -148,7 +149,18 @@ func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, message
 	return true, nil
 }
 
-// LoadLatest returns the most recent snapshot for a thread, or nil if none exists.
+func (m *CheckpointManager) parseMetadata(metaJSON string) map[string]any {
+	var metadata map[string]any
+	if metaJSON != "" {
+		if err := json.Unmarshal([]byte(metaJSON), &metadata); err != nil {
+			return map[string]any{}
+		}
+	} else {
+		metadata = map[string]any{}
+	}
+	return metadata
+}
+
 func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error) {
 	row := m.db.QueryRow(
 		`SELECT iteration, state, checksum FROM checkpoints
@@ -189,20 +201,11 @@ func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error)
 		return nil, fmt.Errorf("LoadLatest: scan thread: %w", err)
 	}
 
-	var metadata map[string]any
-	if metaJSON != "" {
-		if err := json.Unmarshal([]byte(metaJSON), &metadata); err != nil {
-			metadata = map[string]any{}
-		}
-	} else {
-		metadata = map[string]any{}
-	}
-
 	return &ThreadSnapshot{
 		Iteration: iteration,
 		Messages:  messages,
 		Model:     model,
-		Metadata:  metadata,
+		Metadata:  m.parseMetadata(metaJSON),
 	}, nil
 }
 

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported mock types for testing
 package agent
 
 import (
@@ -57,6 +58,8 @@ func (s *perUserCheckpointStore) GetSessionTokens(_ string) (int, *time.Time, er
 
 // TestMultiUserCheckpointIsolation verifies that when a CheckpointStoreProvider is
 // configured, each userID receives its own store and thread data does not cross users.
+//
+//nolint:cyclop // test complexity justified by multi-scenario coverage
 func TestMultiUserCheckpointIsolation(t *testing.T) {
 	t.Parallel()
 

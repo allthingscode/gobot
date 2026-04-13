@@ -18,8 +18,9 @@ import (
 const memoryDBFileName = "memory.db"
 const maxRebuildFiles = 10_000
 
+//nolint:gochecknoglobals // sync.Map for instance caching; thread-safe by design
 var (
-	msInstances sync.Map  // map[string]*MemoryStore; keyed by dbDir
+	msInstances sync.Map   // map[string]*MemoryStore; keyed by dbDir
 	msMu        sync.Mutex // serializes new-instance creation
 )
 

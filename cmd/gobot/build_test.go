@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (

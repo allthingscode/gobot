@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (
@@ -343,51 +344,59 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			mock := &mockProvider{
-				responses: []*provider.ChatResponse{
-					{
-						Message: agentctx.StrategicMessage{
-							Role:      agentctx.RoleAssistant,
-							ToolCalls: tt.toolCalls,
-						},
-					},
-					{
-						Message: agentctx.StrategicMessage{
-							Role:    agentctx.RoleAssistant,
-							Content: &agentctx.MessageContent{Str: strPtr("done")},
-						},
-					},
-				},
-			}
-
-			r := &geminiRunner{
-				prov:              mock,
-				model:             "mock-model",
-				maxToolIterations: 10,
-				limiter:           rate.NewLimiter(rate.Inf, 1),
-				breaker:           resilience.New("mock", 5, time.Minute, time.Second),
-				tools: []Tool{
-					&mockTool{name: "test_tool"},
-				},
-			}
-
+			r := setupValidationRunner(tt.toolCalls)
 			got, _, err := r.Run(context.Background(), "test-session", "", nil)
-			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatal("Run() expected error, got nil")
-				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Errorf("Run() error = %q, want error containing %q", err, tt.wantErr)
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("Run() error = %v, want nil", err)
-				}
-				if got != "done" {
-					t.Errorf("Run() got %q, want %q", got, "done")
-				}
-			}
+			checkValidationResult(t, tt.name, got, err, tt.wantErr)
 		})
+	}
+}
+
+func setupValidationRunner(toolCalls []map[string]any) *geminiRunner {
+	mock := &mockProvider{
+		responses: []*provider.ChatResponse{
+			{
+				Message: agentctx.StrategicMessage{
+					Role:      agentctx.RoleAssistant,
+					ToolCalls: toolCalls,
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role:    agentctx.RoleAssistant,
+					Content: &agentctx.MessageContent{Str: strPtr("done")},
+				},
+			},
+		},
+	}
+
+	return &geminiRunner{
+		prov:              mock,
+		model:             "mock-model",
+		maxToolIterations: 10,
+		limiter:           rate.NewLimiter(rate.Inf, 1),
+		breaker:           resilience.New("mock", 5, time.Minute, time.Second),
+		tools: []Tool{
+			&mockTool{name: "test_tool"},
+		},
+	}
+}
+
+func checkValidationResult(t *testing.T, name, got string, err error, wantErr string) {
+	t.Helper()
+	if wantErr != "" {
+		if err == nil {
+			t.Fatalf("[%s] Run() expected error, got nil", name)
+		}
+		if !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("[%s] Run() error = %q, want error containing %q", name, err, wantErr)
+		}
+	} else {
+		if err != nil {
+			t.Fatalf("[%s] Run() error = %v, want nil", name, err)
+		}
+		if got != "done" {
+			t.Errorf("[%s] Run() got %q, want %q", name, got, "done")
+		}
 	}
 }
 

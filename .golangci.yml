@@ -41,6 +41,32 @@ linters:
         loggercheck:
             checks:
                 - "key-value"
+        cyclop:
+            max-complexity: 10
+            skip-tests: false
+        gocognit:
+            min-complexity: 15
+        funlen:
+            lines: 80
+            statements: 50
+            ignore-comments: true
+        dupl:
+            threshold: 150
+        exhaustive:
+            default-signifies-exhaustive: true
+            check:
+                - switch
+                - map
+        gochecknoglobals: {}
+        prealloc:
+            simple: true
+            range-loops: true
+            for-loops: false
+        godot:
+            scope: declarations
+            period: true
+        testpackage:
+            skip-regexp: "export_test\\.go"
     enable:
         - errcheck
         - errorlint
@@ -59,6 +85,15 @@ linters:
         - sloglint
         - dupword
         - errname
+        - cyclop
+        - gocognit
+        - funlen
+        - dupl
+        - exhaustive
+        - gochecknoglobals
+        - prealloc
+        - godot
+        - testpackage
 
 run:
     modules-download-mode: readonly

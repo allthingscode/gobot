@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (
@@ -83,30 +84,48 @@ func TestShellExecTool_Execute(t *testing.T) {
 			tool := &shellExecTool{exec: mock}
 
 			output, err := tool.Execute(ctx, "test-session", "", tc.args)
-
-			if tc.wantErr && err == nil {
-				t.Errorf("expected error, got nil")
-			}
-			if !tc.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if tc.wantOutput != "" && output != tc.wantOutput {
-				t.Errorf("output = %q, want %q", output, tc.wantOutput)
-			}
-			if tc.wantSuffix != "" && !strings.HasSuffix(output, tc.wantSuffix) {
-				t.Errorf("output %q does not end with %q", output, tc.wantSuffix)
-			}
-			if tc.wantArgs != nil {
-				if len(mock.capturedArgs) != len(tc.wantArgs) {
-					t.Errorf("capturedArgs = %v, want %v", mock.capturedArgs, tc.wantArgs)
-				} else {
-					for i, a := range tc.wantArgs {
-						if mock.capturedArgs[i] != a {
-							t.Errorf("capturedArgs[%d] = %q, want %q", i, mock.capturedArgs[i], a)
-						}
-					}
-				}
-			}
+			validateShellExecResult(t, tc, output, err, mock)
 		})
+	}
+}
+
+func validateShellExecResult(t *testing.T, tc struct {
+	name       string
+	args       map[string]any
+	mockOutput string
+	mockErr    error
+	wantErr    bool
+	wantOutput string
+	wantSuffix string
+	wantArgs   []string
+}, output string, err error, mock *mockExecutor) {
+	t.Helper()
+	if tc.wantErr && err == nil {
+		t.Errorf("expected error, got nil")
+	}
+	if !tc.wantErr && err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if tc.wantOutput != "" && output != tc.wantOutput {
+		t.Errorf("output = %q, want %q", output, tc.wantOutput)
+	}
+	if tc.wantSuffix != "" && !strings.HasSuffix(output, tc.wantSuffix) {
+		t.Errorf("output %q does not end with %q", output, tc.wantSuffix)
+	}
+	if tc.wantArgs != nil {
+		validateShellArgs(t, tc.wantArgs, mock.capturedArgs)
+	}
+}
+
+func validateShellArgs(t *testing.T, want, got []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("capturedArgs = %v, want %v", got, want)
+		return
+	}
+	for i, a := range want {
+		if got[i] != a {
+			t.Errorf("capturedArgs[%d] = %q, want %q", i, got[i], a)
+		}
 	}
 }

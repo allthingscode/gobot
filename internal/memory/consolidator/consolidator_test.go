@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported consolidator internals for testing
 package consolidator
 
 import (

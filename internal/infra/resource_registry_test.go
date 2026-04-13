@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported resource registry internals for testing
 package infra
 
 import (

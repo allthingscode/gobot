@@ -16,53 +16,9 @@ import (
 // IndexWorkspaceMarkdown scans the workspace directory for .md files, chunks them,
 // and indexes them into the given store under the "workspace_docs" collection.
 func IndexWorkspaceMarkdown(ctx context.Context, store *Store, workspaceDir string, embeddingFunc chromem.EmbeddingFunc) error {
-	var allDocs []chromem.Document
-
-	err := filepath.WalkDir(workspaceDir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr // continue walk
-		}
-		if d.IsDir() {
-			// Skip .git, vendor, etc.
-			if strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".md") {
-			return nil
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			slog.Warn("vector indexer: unreadable file", "path", path, "err", err)
-			return nil
-		}
-
-		// Calculate relative path for ID
-		rel, err := filepath.Rel(workspaceDir, path)
-		if err != nil {
-			rel = filepath.Base(path)
-		}
-
-		chunks := chunkMarkdown(string(data), 1000)
-		for i, chunk := range chunks {
-			docID := fmt.Sprintf("%s#chunk-%d", rel, i)
-
-			allDocs = append(allDocs, chromem.Document{
-				ID:      docID,
-				Content: chunk,
-				Metadata: map[string]string{
-					"source":    rel,
-					"timestamp": time.Now().UTC().Format(time.RFC3339),
-				},
-			})
-		}
-		return nil
-	})
-
+	allDocs, err := collectMarkdownDocs(workspaceDir)
 	if err != nil {
-		return fmt.Errorf("walk workspace dir: %w", err)
+		return err
 	}
 
 	if len(allDocs) > 0 {
@@ -76,6 +32,64 @@ func IndexWorkspaceMarkdown(ctx context.Context, store *Store, workspaceDir stri
 	}
 
 	return nil
+}
+
+func collectMarkdownDocs(workspaceDir string) ([]chromem.Document, error) {
+	var allDocs []chromem.Document
+	err := filepath.WalkDir(workspaceDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if shouldSkip(d) {
+			return fs.SkipDir
+		}
+		if !strings.HasSuffix(path, ".md") || d.IsDir() {
+			return nil
+		}
+
+		docs := processMarkdownFile(path, workspaceDir)
+		allDocs = append(allDocs, docs...)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk workspace dir: %w", err)
+	}
+	return allDocs, nil
+}
+
+func shouldSkip(d fs.DirEntry) bool {
+	if !d.IsDir() {
+		return false
+	}
+	name := d.Name()
+	return strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules"
+}
+
+func processMarkdownFile(path, workspaceDir string) []chromem.Document {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		slog.Warn("vector indexer: unreadable file", "path", path, "err", err)
+		return nil
+	}
+
+	rel, err := filepath.Rel(workspaceDir, path)
+	if err != nil {
+		rel = filepath.Base(path)
+	}
+
+	chunks := chunkMarkdown(string(data), 1000)
+	docs := make([]chromem.Document, 0, len(chunks))
+	for i, chunk := range chunks {
+		docs = append(docs, chromem.Document{
+			ID:      fmt.Sprintf("%s#chunk-%d", rel, i),
+			Content: chunk,
+			Metadata: map[string]string{
+				"source":    rel,
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			},
+		})
+	}
+	return docs
 }
 
 // chunkMarkdown splits markdown text into paragraph-level chunks of ~targetSize characters.

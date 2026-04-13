@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported infra internals for testing
 package infra
 
 import (

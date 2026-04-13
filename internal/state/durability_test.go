@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported state durability internals for testing
 package state
 
 import (
@@ -46,6 +47,34 @@ func TestCrashRecovery_SimulatesPowerFailure(t *testing.T) {
 	}
 }
 
+func checkpointWorker(n int, manager *Manager, workflowID WorkflowID, wg *sync.WaitGroup, errors chan<- error) {
+	defer wg.Done()
+
+	// Load, update, save.
+	wf, err := manager.LoadWorkflow(workflowID)
+	if err != nil {
+		errors <- err
+		return
+	}
+
+	var data map[string]int
+	if err := json.Unmarshal(wf.Data, &data); err != nil {
+		errors <- err
+		return
+	}
+	data["count"] = n
+	newData, err := json.Marshal(data)
+	if err != nil {
+		errors <- err
+		return
+	}
+	wf.Data = newData
+
+	if err := manager.SaveCheckpoint(wf); err != nil {
+		errors <- err
+	}
+}
+
 // TestConcurrentCheckpoints verifies multiple goroutines can checkpoint safely.
 func TestConcurrentCheckpoints(t *testing.T) {
 	t.Parallel()
@@ -71,33 +100,7 @@ func TestConcurrentCheckpoints(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
-
-			// Load, update, save.
-			wf, err := manager.LoadWorkflow("wf-concurrent")
-			if err != nil {
-				errors <- err
-				return
-			}
-
-			var data map[string]int
-			if err := json.Unmarshal(wf.Data, &data); err != nil {
-				errors <- err
-				return
-			}
-			data["count"] = n
-			var errMarshal error
-			wf.Data, errMarshal = json.Marshal(data)
-			if errMarshal != nil {
-				errors <- errMarshal
-				return
-			}
-
-			if err := manager.SaveCheckpoint(wf); err != nil {
-				errors <- err
-			}
-		}(i)
+		go checkpointWorker(i, manager, "wf-concurrent", &wg, errors)
 	}
 
 	wg.Wait()
@@ -278,6 +281,8 @@ func TestCheckpointIntegrity_VerifiesAtomicity(t *testing.T) {
 }
 
 // TestFullWorkflowLifecycle exercises complete create-update-archive cycle.
+//
+//nolint:cyclop // test complexity justified by full lifecycle coverage
 func TestFullWorkflowLifecycle(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported vector internals for testing
 package vector
 
 import (
@@ -34,7 +35,7 @@ func (d *dummyEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 	return vec, nil
 }
 
-// Test: Cold start latency < 5 seconds for <50k entries
+// Test: Cold start latency < 5 seconds for <50k entries.
 func TestColdStartLatency(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
@@ -86,7 +87,7 @@ func TestColdStartLatency(t *testing.T) {
 	}
 }
 
-// Test: Hybrid F1 >= FTS5-only F1 on 50-query benchmark
+// Test: Hybrid F1 >= FTS5-only F1 on 50-query benchmark.
 func TestHybridF1Score(t *testing.T) {
 	t.Parallel()
 	// Structural mock: we assert the logic merges correctly
@@ -96,7 +97,7 @@ func TestHybridF1Score(t *testing.T) {
 	t.Log("Simulated F1 benchmark passed via structural validation of RRF merge.")
 }
 
-// Test: Semantic queries return relevant facts even without keyword overlap
+// Test: Semantic queries return relevant facts even without keyword overlap.
 func TestSemanticQueriesOverlap(t *testing.T) {
 	t.Parallel()
 	// A semantic query with no keyword overlap will return a result from the vector store
@@ -104,7 +105,7 @@ func TestSemanticQueriesOverlap(t *testing.T) {
 	vec := []chromem.Result{
 		{ID: "vec1", Content: "Project Alpha must ship by May 1st.", Metadata: map[string]string{}},
 	}
-	
+
 	merged := MergeResults(fts, vec, 60)
 	if len(merged) == 0 {
 		t.Fatal("Expected merged results")

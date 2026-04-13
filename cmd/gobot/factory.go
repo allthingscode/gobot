@@ -74,108 +74,128 @@ func cmdFactoryStateMigrate() *cobra.Command {
 		Short: "Migrate legacy session state to the formalized schema",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			data, err := os.ReadFile(args[0])
-			if err != nil {
-				return fmt.Errorf("reading file: %w", err)
-			}
-
-			data = stripBOM(data)
-			// First, try to unmarshal as the legacy structure
-			var legacy map[string]interface{}
-			if err := json.Unmarshal(data, &legacy); err != nil {
-				return fmt.Errorf("reading legacy state: %w", err)
-			}
-
-			newState := factory.SessionState{
-				Version:   "2.0",
-				Timestamp: time.Now().UTC(),
-				Tasks:     make(map[string]*factory.TaskState),
-			}
-
-			// Handle "tasks" key if it exists
-			if tasksRaw, ok := legacy["tasks"]; ok {
-				tasks, ok := tasksRaw.(map[string]interface{})
-				if ok {
-					for taskID, taskDataRaw := range tasks {
-						taskData, ok := taskDataRaw.(map[string]interface{})
-						if !ok {
-							continue
-						}
-
-						tState := &factory.TaskState{
-							TaskID: taskID,
-						}
-
-						// Map specialists
-						for role, roleDataRaw := range taskData {
-							roleData, ok := roleDataRaw.(map[string]interface{})
-							if !ok {
-								continue
-							}
-
-							// Helper to map generic specialist fields
-							mapSpecialist := func(target interface{}) {
-								b, _ := json.Marshal(roleData)
-								_ = json.Unmarshal(b, target)
-							}
-
-							switch role {
-							case "groomer":
-								tState.Specialists.Groomer = &factory.GroomerState{}
-								mapSpecialist(tState.Specialists.Groomer)
-							case "architect":
-								tState.Specialists.Architect = &factory.ArchitectState{}
-								mapSpecialist(tState.Specialists.Architect)
-							case "reviewer":
-								tState.Specialists.Reviewer = &factory.ReviewerState{}
-								mapSpecialist(tState.Specialists.Reviewer)
-							case "operator":
-								tState.Specialists.Operator = &factory.OperatorState{}
-								mapSpecialist(tState.Specialists.Operator)
-							case "researcher":
-								tState.Specialists.Researcher = &factory.ResearcherState{}
-								mapSpecialist(tState.Specialists.Researcher)
-							}
-						}
-						newState.Tasks[taskID] = tState
-					}
-				}
-			}
-
-			// Handle "_legacy" key
-			if legacyRaw, ok := legacy["_legacy"]; ok {
-				legacyMap, ok := legacyRaw.(map[string]interface{})
-				if ok {
-					if specsRaw, ok := legacyMap["specialists"]; ok {
-						specs, ok := specsRaw.(map[string]interface{})
-						if ok {
-							newState.LegacySpecialists = make(map[string]*factory.SpecialistState)
-							for role, roleDataRaw := range specs {
-								roleData, ok := roleDataRaw.(map[string]interface{})
-								if !ok {
-									continue
-								}
-								sState := &factory.SpecialistState{}
-								b, _ := json.Marshal(roleData)
-								_ = json.Unmarshal(b, sState)
-								newState.LegacySpecialists[role] = sState
-							}
-						}
-					}
-				}
-			}
-
-			output, err := json.MarshalIndent(newState, "", "    ")
-			if err != nil {
-				return fmt.Errorf("marshaling new state: %w", err)
-			}
-
-			if err := os.WriteFile(args[0], output, 0o600); err != nil {
-				return fmt.Errorf("writing migrated file: %w", err)
-			}
-
-			fmt.Printf("Successfully migrated %s to version 2.0\n", args[0])
-			return nil
+			return runMigrate(args[0])
 		},
+	}
+}
+
+func runMigrate(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("reading file: %w", err)
+	}
+
+	data = stripBOM(data)
+	var legacy map[string]interface{}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return fmt.Errorf("reading legacy state: %w", err)
+	}
+
+	newState := factory.SessionState{
+		Version:   "2.0",
+		Timestamp: time.Now().UTC(),
+		Tasks:     make(map[string]*factory.TaskState),
+	}
+
+	migrateTasks(legacy, newState.Tasks)
+	migrateLegacySpecialists(legacy, &newState)
+
+	output, err := json.MarshalIndent(newState, "", "    ")
+	if err != nil {
+		return fmt.Errorf("marshaling new state: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, output, 0o600); err != nil {
+		return fmt.Errorf("writing migrated file: %w", err)
+	}
+
+	fmt.Printf("Successfully migrated %s to version 2.0\n", filePath)
+	return nil
+}
+
+func migrateTasks(legacy map[string]interface{}, target map[string]*factory.TaskState) {
+	tasksRaw, ok := legacy["tasks"]
+	if !ok {
+		return
+	}
+	tasks, ok := tasksRaw.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	for taskID, taskDataRaw := range tasks {
+		taskData, ok := taskDataRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		tState := &factory.TaskState{
+			TaskID: taskID,
+		}
+
+		for role, roleDataRaw := range taskData {
+			roleData, ok := roleDataRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			mapSpecialistRole(role, roleData, tState)
+		}
+		target[taskID] = tState
+	}
+}
+
+func mapSpecialistRole(role string, roleData map[string]interface{}, tState *factory.TaskState) {
+	mapFn := func(target interface{}) {
+		b, _ := json.Marshal(roleData)
+		_ = json.Unmarshal(b, target)
+	}
+
+	switch role {
+	case "groomer":
+		tState.Specialists.Groomer = &factory.GroomerState{}
+		mapFn(tState.Specialists.Groomer)
+	case "architect":
+		tState.Specialists.Architect = &factory.ArchitectState{}
+		mapFn(tState.Specialists.Architect)
+	case "reviewer":
+		tState.Specialists.Reviewer = &factory.ReviewerState{}
+		mapFn(tState.Specialists.Reviewer)
+	case "operator":
+		tState.Specialists.Operator = &factory.OperatorState{}
+		mapFn(tState.Specialists.Operator)
+	case "researcher":
+		tState.Specialists.Researcher = &factory.ResearcherState{}
+		mapFn(tState.Specialists.Researcher)
+	}
+}
+
+func migrateLegacySpecialists(legacy map[string]interface{}, newState *factory.SessionState) {
+	legacyRaw, ok := legacy["_legacy"]
+	if !ok {
+		return
+	}
+	legacyMap, ok := legacyRaw.(map[string]interface{})
+	if !ok {
+		return
+	}
+	specsRaw, ok := legacyMap["specialists"]
+	if !ok {
+		return
+	}
+	specs, ok := specsRaw.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	newState.LegacySpecialists = make(map[string]*factory.SpecialistState)
+	for role, roleDataRaw := range specs {
+		roleData, ok := roleDataRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sState := &factory.SpecialistState{}
+		b, _ := json.Marshal(roleData)
+		_ = json.Unmarshal(b, sState)
+		newState.LegacySpecialists[role] = sState
 	}
 }

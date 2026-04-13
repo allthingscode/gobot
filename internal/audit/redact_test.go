@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported redact internals for testing
 package audit
 
 import (

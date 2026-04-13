@@ -220,7 +220,7 @@ func (m *Manager) CleanupStaleLocks() error {
 }
 
 // checkpointPath returns the path for a workflow's checkpoint file.
-// Each workflow gets its own subdirectory: workflows/{id}/checkpoint.json
+// Each workflow gets its own subdirectory: workflows/{id}/checkpoint.json.
 func (m *Manager) checkpointPath(id WorkflowID) string {
 	return filepath.Join(m.config.StateDir, "workflows", string(id), "checkpoint.json")
 }

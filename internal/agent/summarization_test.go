@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported mock types for testing
 package agent
 
 import (
@@ -160,5 +161,3 @@ func TestSessionManager_Summarization_CappedInput(t *testing.T) {
 		t.Error("expected at least one message in prompt")
 	}
 }
-
-

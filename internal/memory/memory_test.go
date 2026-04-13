@@ -384,7 +384,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 		toolArguments any
 		currentMemory string
 		wantError     bool
-		checkResult   func(t *testing.T, result map[string]any)
+		expectedEntry string
 	}{
 		{
 			name:          "valid JSON",
@@ -393,11 +393,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 			toolArguments: nil,
 			currentMemory: "old",
 			wantError:     false,
-			checkResult: func(t *testing.T, result map[string]any) { //nolint:thelper // table-driven test helper
-				if result["history_entry"] != "valid" {
-					t.Errorf("expected history_entry='valid', got %v", result["history_entry"])
-				}
-			},
+			expectedEntry: "valid",
 		},
 		{
 			name:          "invalid JSON with regex match",
@@ -406,11 +402,7 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 			toolArguments: nil,
 			currentMemory: "old",
 			wantError:     false,
-			checkResult: func(t *testing.T, result map[string]any) { //nolint:thelper // test helper closure
-				if result["history_entry"] != "recovered" {
-					t.Errorf("expected history_entry='recovered', got %v", result["history_entry"])
-				}
-			},
+			expectedEntry: "recovered",
 		},
 		{
 			name:          "invalid JSON with no regex match - expect error",
@@ -419,28 +411,35 @@ func TestParseConsolidationResponse_ErrorHandling(t *testing.T) {
 			toolArguments: nil,
 			currentMemory: "old",
 			wantError:     true,
-			checkResult: func(t *testing.T, result map[string]any) { //nolint:thelper // test helper closure
-				if result != nil {
-					t.Errorf("expected nil result on error, got %v", result)
-				}
-			},
+			expectedEntry: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := memory.ParseConsolidationResponse(tt.content, tt.hasToolCalls, tt.toolArguments, tt.currentMemory)
-			if tt.wantError && err == nil {
-				t.Errorf("expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if tt.checkResult != nil {
-				tt.checkResult(t, result)
-			}
+			validateParseConsolidation(t, tt.content, tt.hasToolCalls, tt.toolArguments, tt.currentMemory, tt.wantError, tt.expectedEntry)
 		})
+	}
+}
+
+func validateParseConsolidation(t *testing.T, content any, hasTool bool, args any, mem string, wantErr bool, expEntry string) {
+	t.Helper()
+	result, err := memory.ParseConsolidationResponse(content, hasTool, args, mem)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error but got none")
+		}
+		if result != nil {
+			t.Errorf("expected nil result on error, got %v", result)
+		}
+		return
+	}
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if expEntry != "" && result["history_entry"] != expEntry {
+		t.Errorf("expected history_entry=%q, got %v", expEntry, result["history_entry"])
 	}
 }
 

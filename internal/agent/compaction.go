@@ -44,29 +44,56 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ co
 	}
 
 	// 2. Safety net: keep the last N assistants (and their preceding user turn).
-	if pruning.KeepLastAssistants > 0 {
-		assistantsFound := 0
-		for i := len(messages) - 1; i >= 0; i-- {
-			role := messages[i].Role
-			if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
-				if assistantsFound < pruning.KeepLastAssistants {
-					keep[i] = true
-					if i > 0 && messages[i-1].Role == agentctx.RoleUser {
-						keep[i-1] = true
-					}
-					assistantsFound++
-				}
-			}
+	applyKeepLastAssistants(messages, keep, pruning.KeepLastAssistants)
+
+	// 3. Tool chain consistency pass: ensure tool-call/response pairs are not split.
+	applyToolChainConsistency(messages, keep)
+
+	// Construct the compacted list.
+	for i, k := range keep {
+		if k {
+			compacted = append(compacted, messages[i])
 		}
 	}
 
-	// 3. Tool chain consistency pass: ensure tool-call/response pairs are not split.
-	// Build a map of all tool call IDs in the entire message list.
-	// Then, after tail-slice/keepLastAssistants have set initial keep[] values, fix splits:
-	// 3a: For each kept tool response, if its originating call was dropped, keep the call.
-	// 3b: For each kept model/assistant turn with tool calls, ensure all responses are kept.
+	// Gemini requires conversations to start with a user turn.
+	compacted = stripLeadingAssistantTurns(compacted)
 
+	dropped := len(messages) - len(compacted)
+	return compacted, dropped, keep
+}
+
+func applyKeepLastAssistants(messages []agentctx.StrategicMessage, keep []bool, keepLastAssistants int) {
+	if keepLastAssistants <= 0 {
+		return
+	}
+	assistantsFound := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		role := messages[i].Role
+		if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
+			if assistantsFound < keepLastAssistants {
+				keep[i] = true
+				if i > 0 && messages[i-1].Role == agentctx.RoleUser {
+					keep[i-1] = true
+				}
+				assistantsFound++
+			}
+		}
+	}
+}
+
+func applyToolChainConsistency(messages []agentctx.StrategicMessage, keep []bool) {
 	// Build a map: callID -> message index of originating call
+	allToolCallIDs := buildToolCallMap(messages)
+
+	// 3a: For each kept tool response, if its originating call was dropped, keep the call.
+	completeChainsBackward(messages, keep, allToolCallIDs)
+
+	// 3b: For each kept model/assistant turn with tool calls, ensure all responses are kept.
+	completeChainsForward(messages, keep)
+}
+
+func buildToolCallMap(messages []agentctx.StrategicMessage) map[string]int {
 	allToolCallIDs := make(map[string]int)
 	for i := range messages {
 		role := messages[i].Role
@@ -78,88 +105,91 @@ func CompactMessages(messages []agentctx.StrategicMessage, maxN, keepN int, _ co
 			}
 		}
 	}
+	return allToolCallIDs
+}
 
-	// 3a: For each kept tool response, if its originating call was dropped, keep the call.
+func completeChainsBackward(messages []agentctx.StrategicMessage, keep []bool, allToolCallIDs map[string]int) {
 	for i := range messages {
 		if !keep[i] {
 			continue
 		}
-		role := messages[i].Role
-		if role == agentctx.RoleTool && messages[i].ToolCallID != nil {
+		if messages[i].Role == agentctx.RoleTool && messages[i].ToolCallID != nil {
 			respID := *messages[i].ToolCallID
 			if callIdx, exists := allToolCallIDs[respID]; exists {
-				// Originating call exists - if it was dropped, keep it now
 				if !keep[callIdx] {
 					keep[callIdx] = true // complete the chain backward
 				}
 			}
-			// else: no originating call found - leave orphan for now, will be stripped later
 		}
 	}
+}
 
-	// 3b: For each kept model/assistant turn with tool calls, ensure all responses are kept.
+func completeChainsForward(messages []agentctx.StrategicMessage, keep []bool) {
 	for i := range messages {
 		if !keep[i] {
 			continue
 		}
 		role := messages[i].Role
 		if role == agentctx.RoleModel || role == agentctx.RoleAssistant {
-			for _, tc := range messages[i].ToolCalls {
-				if id, ok := tc["id"].(string); ok && id != "" {
-					// Find all tool responses for this call ID and keep them
-					for j := range messages {
-						if messages[j].Role == agentctx.RoleTool && messages[j].ToolCallID != nil {
-							if *messages[j].ToolCallID == id {
-								keep[j] = true
-							}
-						}
-					}
+			keepResponsesForCall(messages, keep, messages[i].ToolCalls)
+		}
+	}
+}
+
+func keepResponsesForCall(messages []agentctx.StrategicMessage, keep []bool, toolCalls []map[string]any) {
+	for _, tc := range toolCalls {
+		id, ok := tc["id"].(string)
+		if !ok || id == "" {
+			continue
+		}
+		// Find all tool responses for this call ID and keep them
+		for j := range messages {
+			if messages[j].Role == agentctx.RoleTool && messages[j].ToolCallID != nil {
+				if *messages[j].ToolCallID == id {
+					keep[j] = true
 				}
 			}
 		}
 	}
+}
 
-	// Construct the compacted list.
-	for i, k := range keep {
-		if k {
-			compacted = append(compacted, messages[i])
-		}
+
+func stripLeadingAssistantTurns(compacted []agentctx.StrategicMessage) []agentctx.StrategicMessage {
+	if len(compacted) == 0 {
+		return compacted
 	}
 
-	// Gemini requires conversations to start with a user turn.
-	// Drop all leading assistant or model turns, but only if doing so won't break tool chains.
-	// Check if the first message starts a tool chain - if so, don't strip it.
-	if len(compacted) > 0 {
-		role := compacted[0].Role
-		if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
-			// Only strip if this assistant/model turn doesn't have tool calls
-			// that are present in the compacted result.
-			hasKeptToolCalls := false
-			for _, tc := range compacted[0].ToolCalls {
-				if id, ok := tc["id"].(string); ok && id != "" {
-					// Check if any tool response in compacted matches this call ID
-					for _, msg := range compacted[1:] {
-						if msg.Role == agentctx.RoleTool && msg.ToolCallID != nil {
-							if *msg.ToolCallID == id {
-								hasKeptToolCalls = true
-								break
-							}
-						}
-					}
+	role := compacted[0].Role
+	if role != agentctx.RoleAssistant && role != agentctx.RoleModel {
+		return compacted
+	}
+
+	if hasKeptToolCalls(compacted) {
+		return compacted
+	}
+
+	return compacted[1:]
+}
+
+func hasKeptToolCalls(compacted []agentctx.StrategicMessage) bool {
+	if len(compacted) == 0 {
+		return false
+	}
+	for _, tc := range compacted[0].ToolCalls {
+		id, ok := tc["id"].(string)
+		if !ok || id == "" {
+			continue
+		}
+		// Check if any tool response in compacted matches this call ID
+		for _, msg := range compacted[1:] {
+			if msg.Role == agentctx.RoleTool && msg.ToolCallID != nil {
+				if *msg.ToolCallID == id {
+					return true
 				}
-				if hasKeptToolCalls {
-					break
-				}
-			}
-			// Only strip if this turn doesn't have tool calls that are kept
-			if !hasKeptToolCalls {
-				compacted = compacted[1:]
 			}
 		}
 	}
-
-	dropped := len(messages) - len(compacted)
-	return compacted, dropped, keep
+	return false
 }
 
 // PruneMessages removes messages based on TTL and KeepLastAssistants settings.
@@ -168,51 +198,46 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 		return messages, 0
 	}
 
-	var ttl time.Duration
-	if cfg.TTL != "" {
-		var err error
-		ttl, err = time.ParseDuration(cfg.TTL)
-		if err != nil {
-			slog.Warn("agent: invalid context pruning TTL", "ttl", cfg.TTL, "err", err)
-			return messages, 0
-		}
-	}
-
-	// If TTL is not configured (or parses to zero), TTL-based pruning is disabled.
-	// KeepLastAssistants is a safety net during TTL pruning only, not a standalone pruning policy.
-	if ttl <= 0 {
+	ttl, ok := parseTTL(cfg.TTL)
+	if !ok || ttl <= 0 {
 		return messages, 0
 	}
 
-	now := time.Now()
-	cutoff := now.Add(-ttl)
-
-	// Identify messages to keep.
-	// 1. Messages newer than cutoff.
-	// 2. The last N assistant messages (and their preceding user message) as a safety net.
-
+	cutoff := time.Now().Add(-ttl)
 	keep := make([]bool, len(messages))
-	assistantsFound := 0
 
-	// Scan backwards to find the last N assistants.
-	if cfg.KeepLastAssistants > 0 {
-		for i := len(messages) - 1; i >= 0; i-- {
-			role := messages[i].Role
-			if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
-				if assistantsFound < cfg.KeepLastAssistants {
-					keep[i] = true
-					// Keep the preceding message if it's a user turn, to satisfy the
-					// "must start with user" requirement and avoid stripping.
-					if i > 0 && messages[i-1].Role == agentctx.RoleUser {
-						keep[i-1] = true
-					}
-					assistantsFound++
-				}
-			}
+	// 1. Keep the last N assistant messages (and their preceding user message) as a safety net.
+	applyKeepLastAssistants(messages, keep, cfg.KeepLastAssistants)
+
+	// 2. Keep messages newer than cutoff.
+	applyTTLPruning(messages, keep, cutoff)
+
+	for i, k := range keep {
+		if k {
+			pruned = append(pruned, messages[i])
 		}
 	}
 
-	// Scan forwards for TTL.
+	// Gemini requires conversations to start with a user turn.
+	pruned = ensureStartsAndEndsWithUser(pruned) // Simplified name but following logic
+
+	droppedCount = len(messages) - len(pruned)
+	return pruned, droppedCount
+}
+
+func parseTTL(ttlStr string) (time.Duration, bool) {
+	if ttlStr == "" {
+		return 0, true
+	}
+	ttl, err := time.ParseDuration(ttlStr)
+	if err != nil {
+		slog.Warn("agent: invalid context pruning TTL", "ttl", ttlStr, "err", err)
+		return 0, false
+	}
+	return ttl, true
+}
+
+func applyTTLPruning(messages []agentctx.StrategicMessage, keep []bool, cutoff time.Time) {
 	for i, msg := range messages {
 		if msg.CreatedAt == "" {
 			// Legacy messages without a timestamp are kept to avoid silent data loss.
@@ -228,14 +253,9 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 			keep[i] = true
 		}
 	}
+}
 
-	for i, k := range keep {
-		if k {
-			pruned = append(pruned, messages[i])
-		}
-	}
-
-	// Gemini requires conversations to start with a user turn.
+func ensureStartsAndEndsWithUser(pruned []agentctx.StrategicMessage) []agentctx.StrategicMessage {
 	for len(pruned) > 0 {
 		role := pruned[0].Role
 		if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
@@ -244,7 +264,6 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 			break
 		}
 	}
-
-	droppedCount = len(messages) - len(pruned)
-	return pruned, droppedCount
+	return pruned
 }
+

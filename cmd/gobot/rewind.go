@@ -15,64 +15,82 @@ func cmdRewind() *cobra.Command {
 		Use:   "rewind",
 		Short: "Manage session checkpoints and rewind state",
 		Long:  "F-081: Session Checkpoint & Rewind. Allows listing and restoring session snapshots.",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if snapshotName == "" {
 				return cmd.Help()
 			}
-
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("config: %w", err)
-			}
-
-			if err := agent.RestoreSnapshot(cfg.StorageRoot(), snapshotName); err != nil {
-				return err
-			}
-
-			fmt.Printf("Successfully restored session state from snapshot: %s\n", snapshotName)
-			return nil
+			return runRestore(snapshotName)
 		},
 	}
 
 	cmd.Flags().StringVar(&snapshotName, "snapshot", "", "Snapshot name to restore")
+	cmd.AddCommand(cmdRewindList())
+	return cmd
+}
 
-	listCmd := &cobra.Command{
+func cmdRewindList() *cobra.Command {
+	return &cobra.Command{
 		Use:   "list",
 		Short: "List available session snapshots",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("config: %w", err)
-			}
-
-			snapshots, err := agent.ListSnapshots(cfg.StorageRoot())
-			if err != nil {
-				return err
-			}
-
-			if len(snapshots) == 0 {
-				fmt.Println("No snapshots found.")
-				return nil
-			}
-
-			fmt.Printf("%-35s  %-20s  %-10s  %s\n", "NAME", "TIMESTAMP", "TASK ID", "GIT SHA")
-			fmt.Println(strings.Repeat("-", 100))
-
-			// Show last 10 as per spec (though ListSnapshots returns all)
-			limit := len(snapshots)
-			if limit > 10 {
-				limit = 10
-			}
-
-			for i := 0; i < limit; i++ {
-				s := snapshots[i]
-				fmt.Printf("%-35s  %-20s  %-10s  %s\n",
-					s.Name, s.Timestamp[:19], s.TaskID, s.GitSHA[:7])
-			}
-			return nil
+			return runListSnapshots()
 		},
 	}
+}
 
-	cmd.AddCommand(listCmd)
-	return cmd
+func runRestore(snapshotName string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
+	if err := agent.RestoreSnapshot(cfg.StorageRoot(), snapshotName); err != nil {
+		return err
+	}
+
+	fmt.Printf("Successfully restored session state from snapshot: %s\n", snapshotName)
+	return nil
+}
+
+func runListSnapshots() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
+	snapshots, err := agent.ListSnapshots(cfg.StorageRoot())
+	if err != nil {
+		return err
+	}
+
+	if len(snapshots) == 0 {
+		fmt.Println("No snapshots found.")
+		return nil
+	}
+
+	printSnapshots(snapshots)
+	return nil
+}
+
+func printSnapshots(snapshots []agent.SnapshotMetadata) {
+	fmt.Printf("%-35s  %-20s  %-10s  %s\n", "NAME", "TIMESTAMP", "TASK ID", "GIT SHA")
+	fmt.Println(strings.Repeat("-", 100))
+
+	limit := len(snapshots)
+	if limit > 10 {
+		limit = 10
+	}
+
+	for i := 0; i < limit; i++ {
+		s := snapshots[i]
+		ts := s.Timestamp
+		if len(ts) > 19 {
+			ts = ts[:19]
+		}
+		sha := s.GitSHA
+		if len(sha) > 7 {
+			sha = sha[:7]
+		}
+		fmt.Printf("%-35s  %-20s  %-10s  %s\n", s.Name, ts, s.TaskID, sha)
+	}
 }

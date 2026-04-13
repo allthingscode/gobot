@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported telegram internals for testing
 package telegram
 
 import (

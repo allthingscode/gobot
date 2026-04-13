@@ -17,6 +17,7 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
+//nolint:gochecknoglobals // Immutable: tracks process start time for uptime calculation
 var startTime = time.Now()
 
 // Resources provides access to system managers for the dashboard.

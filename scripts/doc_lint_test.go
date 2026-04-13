@@ -10,6 +10,7 @@ import (
 )
 
 // srcDir is the directory containing the scripts under test.
+//nolint:gochecknoglobals // Test helper: set once during init(), not mutable runtime state
 var srcDir string
 
 func init() {

@@ -97,8 +97,70 @@ type Provider struct {
 	factsSkipped            metric.Int64Counter
 }
 
-// NewProvider initializes OpenTelemetry with OTLP exporters.
-// Returns a no-op provider if cfg.OTLPEndpoint is empty.
+func (p *Provider) createCounters(meter metric.Meter) error {
+	tokenCounter, err := meter.Int64Counter(
+		"agent_tokens_consumed_total",
+		metric.WithDescription("Total number of tokens consumed by Gemini API calls"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create token counter: %w", err)
+	}
+	p.tokenCounter = tokenCounter
+
+	toolHistogram, err := meter.Float64Histogram(
+		"tool_execution_duration_seconds",
+		metric.WithDescription("Duration of tool execution in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create tool duration histogram: %w", err)
+	}
+	p.toolHistogram = toolHistogram
+
+	consolidationsTriggered, err := meter.Int64Counter(
+		"consolidations_triggered_total",
+		metric.WithDescription("Total number of memory consolidation operations triggered"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create consolidations counter: %w", err)
+	}
+	p.consolidationsTriggered = consolidationsTriggered
+
+	factsExtracted, err := meter.Int64Counter(
+		"facts_extracted_total",
+		metric.WithDescription("Total number of facts extracted by consolidator"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create facts extracted counter: %w", err)
+	}
+	p.factsExtracted = factsExtracted
+
+	factsIndexed, err := meter.Int64Counter(
+		"facts_indexed_total",
+		metric.WithDescription("Total number of facts indexed to long-term memory"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create facts indexed counter: %w", err)
+	}
+	p.factsIndexed = factsIndexed
+
+	factsSkipped, err := meter.Int64Counter(
+		"facts_skipped_total",
+		metric.WithDescription("Total number of facts skipped during consolidation (duplicates, etc.)"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create facts skipped counter: %w", err)
+	}
+	p.factsSkipped = factsSkipped
+
+	return nil
+}
+
 func NewProvider(cfg Config) (*Provider, error) {
 	if cfg.ServiceName == "" {
 		cfg.ServiceName = "gobot"
@@ -110,7 +172,6 @@ func NewProvider(cfg Config) (*Provider, error) {
 		cfg.SamplingRate = 1.0
 	}
 
-	// No-op provider if no endpoint configured
 	if cfg.OTLPEndpoint == "" {
 		slog.Info("observability: OTLP endpoint not configured, telemetry disabled")
 		return &Provider{
@@ -132,10 +193,9 @@ func NewProvider(cfg Config) (*Provider, error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	// Trace exporter
 	traceExporter, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
-		otlptracegrpc.WithInsecure(), // Local collector, no TLS needed
+		otlptracegrpc.WithInsecure(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trace exporter: %w", err)
@@ -147,7 +207,6 @@ func NewProvider(cfg Config) (*Provider, error) {
 		sdktrace.WithBatcher(traceExporter),
 	)
 
-	// Metric exporter
 	metricExporter, err := otlpmetricgrpc.New(ctx,
 		otlpmetricgrpc.WithEndpoint(cfg.OTLPEndpoint),
 		otlpmetricgrpc.WithInsecure(),
@@ -161,7 +220,6 @@ func NewProvider(cfg Config) (*Provider, error) {
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
 	)
 
-	// Set global providers
 	otel.SetTracerProvider(tp)
 	otel.SetMeterProvider(mp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
@@ -169,73 +227,18 @@ func NewProvider(cfg Config) (*Provider, error) {
 	tracer := tp.Tracer(cfg.ServiceName)
 	meter := mp.Meter(cfg.ServiceName)
 
-	// Create metrics
-	tokenCounter, err := meter.Int64Counter(
-		"agent_tokens_consumed_total",
-		metric.WithDescription("Total number of tokens consumed by Gemini API calls"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create token counter: %w", err)
+	provider := &Provider{
+		tracerProvider: tp,
+		meterProvider:  mp,
+		tracer:         tracer,
+		meter:          meter,
 	}
 
-	toolHistogram, err := meter.Float64Histogram(
-		"tool_execution_duration_seconds",
-		metric.WithDescription("Duration of tool execution in seconds"),
-		metric.WithUnit("s"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tool duration histogram: %w", err)
+	if err := provider.createCounters(meter); err != nil {
+		return nil, err
 	}
 
-	consolidationsTriggered, err := meter.Int64Counter(
-		"consolidations_triggered_total",
-		metric.WithDescription("Total number of memory consolidation operations triggered"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create consolidations counter: %w", err)
-	}
-
-	factsExtracted, err := meter.Int64Counter(
-		"facts_extracted_total",
-		metric.WithDescription("Total number of facts extracted by consolidator"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create facts extracted counter: %w", err)
-	}
-
-	factsIndexed, err := meter.Int64Counter(
-		"facts_indexed_total",
-		metric.WithDescription("Total number of facts indexed to long-term memory"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create facts indexed counter: %w", err)
-	}
-
-	factsSkipped, err := meter.Int64Counter(
-		"facts_skipped_total",
-		metric.WithDescription("Total number of facts skipped during consolidation (duplicates, etc.)"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create facts skipped counter: %w", err)
-	}
-
-	return &Provider{
-		tracerProvider:          tp,
-		meterProvider:           mp,
-		tracer:                  tracer,
-		meter:                   meter,
-		tokenCounter:            tokenCounter,
-		toolHistogram:           toolHistogram,
-		consolidationsTriggered: consolidationsTriggered,
-		factsExtracted:          factsExtracted,
-		factsIndexed:            factsIndexed,
-		factsSkipped:            factsSkipped,
-	}, nil
+	return provider, nil
 }
 
 // Tracer returns the OpenTelemetry tracer.

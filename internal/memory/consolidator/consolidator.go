@@ -122,93 +122,26 @@ func (c *Consolidator) ConsolidateAsync(sessionKey, reply string) {
 // consolidate runs the LLM extraction and indexes facts. Returns the number
 // of facts indexed. Exported for testing via a direct call.
 func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string) (int, error) {
-	prompt := c.prompt + reply
-	if !strings.Contains(c.prompt, "reply") && !strings.HasSuffix(c.prompt, "\n") {
-		prompt = c.prompt + "\n\nAgent reply to consolidate:\n" + reply
-	}
-	response, err := c.runner.RunText(ctx, sessionKey, prompt, "")
+	facts, err := c.extractFacts(ctx, sessionKey, reply)
 	if err != nil {
-		return 0, fmt.Errorf("consolidator: RunText: %w", err)
-	}
-
-	facts, err := parseFacts(response)
-	if err != nil {
-		return 0, fmt.Errorf("consolidator: parseFacts: %w", err)
+		return 0, err
 	}
 	if len(facts) == 0 {
 		return 0, nil
 	}
 
-	// Record facts extracted (F-068)
 	if c.obs != nil {
 		c.obs.RecordFactsExtracted(ctx, int64(len(facts)))
 	}
 
-	indexed := 0
-	skipped := 0
-	for _, fact := range facts {
-		fact = strings.TrimSpace(fact)
-		if fact == "" {
-			continue
-		}
-		// Deduplication: skip if a very similar fact is already in the store.
-		// F-071: Search across both session and global namespaces.
-		if existing, err := c.store.Search(fact, sessionKey, 1); err == nil && len(existing) > 0 {
-			if existingContent, ok := existing[0]["content"].(string); ok {
-				if similarity(fact, existingContent) > 0.8 {
-					slog.Debug("consolidator: skipping duplicate fact", "fact", fact)
-					skipped++
-					continue
-				}
-			}
-		}
+	indexed, skipped := c.indexFacts(ctx, sessionKey, facts)
 
-		// F-071: Route to global if matches patterns, else session-scoped.
-		namespace := "session:" + sessionKey
-		for _, p := range c.patterns {
-			if strings.Contains(strings.ToLower(fact), strings.ToLower(p)) {
-				namespace = "global"
-				break
-			}
-		}
-
-		if indexErr := c.store.Index(namespace, fact); indexErr != nil {
-			slog.Warn("consolidator: index failed", "fact", fact, "err", indexErr)
-			skipped++
-			continue
-		}
-
-		// F-030: Also index in vector store if available (semantic memory)
-		if c.vecStore != nil && c.embedProv != nil {
-			doc := chromem.Document{
-				ID:      fmt.Sprintf("%s-%d", sessionKey, time.Now().UnixNano()),
-				Content: fact,
-				Metadata: map[string]string{
-					"session_key": sessionKey,
-					"namespace":   namespace, // F-071: Support namespacing in vectors
-					"timestamp":   time.Now().UTC().Format(time.RFC3339),
-					"source":      "consolidator",
-				},
-			}
-			embedFunc := func(ctx context.Context, text string) ([]float32, error) {
-				return c.embedProv.Embed(ctx, text)
-			}
-			if err := c.vecStore.AddDocument(ctx, "memory_facts", doc, embedFunc); err != nil {
-				slog.Warn("consolidator: vector index failed", "fact", fact, "err", err)
-			}
-		}
-
-		indexed++
-	}
-
-	// F-030: Save vector store after batch indexing
 	if c.vecStore != nil && indexed > 0 {
 		if err := c.vecStore.Save(); err != nil {
 			slog.Warn("consolidator: failed to save vector db", "err", err)
 		}
 	}
 
-	// Record metrics (F-068)
 	if c.obs != nil {
 		c.obs.RecordFactsIndexed(ctx, int64(indexed))
 		if skipped > 0 {
@@ -216,7 +149,96 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 		}
 	}
 
-	// F-071: Perform per-namespace TTL cleanup.
+	c.cleanupNamespaces(sessionKey)
+	return indexed, nil
+}
+
+func (c *Consolidator) extractFacts(ctx context.Context, sessionKey, reply string) ([]string, error) {
+	prompt := c.prompt + reply
+	if !strings.Contains(c.prompt, "reply") && !strings.HasSuffix(c.prompt, "\n") {
+		prompt = c.prompt + "\n\nAgent reply to consolidate:\n" + reply
+	}
+	response, err := c.runner.RunText(ctx, sessionKey, prompt, "")
+	if err != nil {
+		return nil, fmt.Errorf("consolidator: RunText: %w", err)
+	}
+
+	return parseFacts(response)
+}
+
+func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts []string) (indexed, skipped int) {
+	indexed = 0
+	skipped = 0
+	for _, fact := range facts {
+		fact = strings.TrimSpace(fact)
+		if fact == "" {
+			continue
+		}
+
+		if c.isDuplicate(sessionKey, fact) {
+			skipped++
+			continue
+		}
+
+		namespace := c.resolveNamespace(fact, sessionKey)
+		if err := c.store.Index(namespace, fact); err != nil {
+			slog.Warn("consolidator: index failed", "fact", fact, "err", err)
+			skipped++
+			continue
+		}
+
+		c.indexVectorFact(ctx, sessionKey, fact, namespace)
+		indexed++
+	}
+	return indexed, skipped
+}
+
+func (c *Consolidator) isDuplicate(sessionKey, fact string) bool {
+	existing, err := c.store.Search(fact, sessionKey, 1)
+	if err == nil && len(existing) > 0 {
+		if existingContent, ok := existing[0]["content"].(string); ok {
+			if similarity(fact, existingContent) > 0.8 {
+				slog.Debug("consolidator: skipping duplicate fact", "fact", fact)
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *Consolidator) resolveNamespace(fact, sessionKey string) string {
+	for _, p := range c.patterns {
+		if strings.Contains(strings.ToLower(fact), strings.ToLower(p)) {
+			return "global"
+		}
+	}
+	return "session:" + sessionKey
+}
+
+func (c *Consolidator) indexVectorFact(ctx context.Context, sessionKey, fact, namespace string) {
+	if c.vecStore == nil || c.embedProv == nil {
+		return
+	}
+
+	doc := chromem.Document{
+		ID:      fmt.Sprintf("%s-%d", sessionKey, time.Now().UnixNano()),
+		Content: fact,
+		Metadata: map[string]string{
+			"session_key": sessionKey,
+			"namespace":   namespace,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+			"source":      "consolidator",
+		},
+	}
+	embedFunc := func(ctx context.Context, text string) ([]float32, error) {
+		return c.embedProv.Embed(ctx, text)
+	}
+	if err := c.vecStore.AddDocument(ctx, "memory_facts", doc, embedFunc); err != nil {
+		slog.Warn("consolidator: vector index failed", "fact", fact, "err", err)
+	}
+}
+
+func (c *Consolidator) cleanupNamespaces(sessionKey string) {
 	if c.ttl != "" {
 		if deleted, err := c.store.CleanupNamespace("session:"+sessionKey, c.ttl); err != nil {
 			slog.Warn("consolidator: session cleanup failed", "err", err)
@@ -231,8 +253,6 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 			slog.Debug("consolidator: global cleanup completed", "deleted", deleted)
 		}
 	}
-
-	return indexed, nil
 }
 
 // parseFacts extracts a []string from the LLM's JSON response.

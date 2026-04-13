@@ -26,7 +26,7 @@ const (
 // new geminiRunner with a specialized system prompt. It runs in the same
 // goroutine as the tool call and times out after spawnMaxTimeout.
 //
-// Sub-agent session keys: "agent:<agent_type>:<parent_session_key>"
+// Sub-agent session keys: "agent:<agent_type>:<parent_session_key>".
 type SpawnTool struct {
 	// runnerFactory creates a new Runner for the given model and system prompt.
 	// Using a factory keeps SpawnTool testable without a live LLM provider.

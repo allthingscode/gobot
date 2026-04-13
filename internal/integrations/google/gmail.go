@@ -30,6 +30,7 @@ const (
 	gmailBaseURL = "https://gmail.googleapis.com/gmail/v1/users/me"
 )
 
+//nolint:gochecknoglobals // HTTP client is intentionally shared for connection reuse
 var timeoutClient = &http.Client{Timeout: 30 * time.Second}
 
 // storedToken mirrors the JSON structure written by google-auth-library (Python).
@@ -240,32 +241,50 @@ func (m *Message) ExtractBody() string {
 }
 
 func extractBodyFromParts(parts []Part, body *Body) string {
-	// If there's a body at this level, use it if it's not empty
-	if body != nil && body.Data != "" {
-		data, err := base64.URLEncoding.DecodeString(body.Data)
-		if err == nil {
-			return string(data)
-		}
+	if b := decodeBody(body); b != "" {
+		return b
 	}
 
-	// Prefer text/plain over text/html
+	if b := findPlainTextField(parts); b != "" {
+		return b
+	}
+
+	return findInSubParts(parts)
+}
+
+func decodeBody(body *Body) string {
+	if body == nil || body.Data == "" {
+		return ""
+	}
+	data, err := base64.URLEncoding.DecodeString(body.Data)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func findPlainTextField(parts []Part) string {
 	for _, p := range parts {
-		if p.MimeType == "text/plain" && p.Body != nil && p.Body.Data != "" {
-			data, err := base64.URLEncoding.DecodeString(p.Body.Data)
-			if err == nil {
-				return string(data)
+		if p.MimeType == "text/plain" {
+			if b := decodeBody(p.Body); b != "" {
+				return b
 			}
 		}
 	}
+	return ""
+}
 
-	// Recurse into parts
+func findInSubParts(parts []Part) string {
 	for _, p := range parts {
-		if p.MimeType == "multipart/alternative" || p.MimeType == "multipart/mixed" {
+		if isMultipart(p.MimeType) {
 			if b := extractBodyFromParts(p.Parts, p.Body); b != "" {
 				return b
 			}
 		}
 	}
-
 	return ""
+}
+
+func isMultipart(mimeType string) bool {
+	return mimeType == "multipart/alternative" || mimeType == "multipart/mixed"
 }

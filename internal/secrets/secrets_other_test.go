@@ -1,5 +1,6 @@
 //go:build !windows
 
+//nolint:testpackage
 package secrets
 
 import (

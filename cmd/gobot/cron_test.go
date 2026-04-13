@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported helpers from main package
 package main
 
 import (
@@ -136,26 +137,32 @@ func TestParseSessionKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			gotChatID, gotThreadID, err := parseSessionKey(tc.input)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("parseSessionKey(%q): expected error, got nil (chatID=%d, threadID=%d)",
-						tc.input, gotChatID, gotThreadID)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("parseSessionKey(%q): unexpected error: %v", tc.input, err)
-				return
-			}
-			if gotChatID != tc.wantChatID {
-				t.Errorf("parseSessionKey(%q): chatID = %d, want %d", tc.input, gotChatID, tc.wantChatID)
-			}
-			if gotThreadID != tc.wantThreadID {
-				t.Errorf("parseSessionKey(%q): threadID = %d, want %d", tc.input, gotThreadID, tc.wantThreadID)
-			}
+			checkParseResult(t, tc.input, gotChatID, gotThreadID, err, tc.wantChatID, tc.wantThreadID, tc.wantErr)
 		})
 	}
-}
+	}
+
+	func checkParseResult(t *testing.T, input string, gotChatID, gotThreadID int64, err error, wantChatID, wantThreadID int64, wantErr bool) {
+	t.Helper()
+	if wantErr {
+		if err == nil {
+			t.Errorf("parseSessionKey(%q): expected error, got nil (chatID=%d, threadID=%d)",
+				input, gotChatID, gotThreadID)
+		}
+		return
+	}
+	if err != nil {
+		t.Errorf("parseSessionKey(%q): unexpected error: %v", input, err)
+		return
+	}
+	if gotChatID != wantChatID {
+		t.Errorf("parseSessionKey(%q): chatID = %d, want %d", input, gotChatID, wantChatID)
+	}
+	if gotThreadID != wantThreadID {
+		t.Errorf("parseSessionKey(%q): threadID = %d, want %d", input, gotThreadID, wantThreadID)
+	}
+	}
+
 
 func TestCronSessionKeyIsolation(t *testing.T) {
 	t.Parallel()

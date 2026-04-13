@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported provider internals for testing
 package observability
 
 import (

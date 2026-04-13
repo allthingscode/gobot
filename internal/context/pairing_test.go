@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported pairing internals for testing
 package context
 
 import (

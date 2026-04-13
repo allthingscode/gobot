@@ -36,55 +36,57 @@ func NewHandoffHook(storageRoot string) PostDispatchFn {
 	return func(_ context.Context, sessionKey string, response string) string {
 		handoffPath := filepath.Join(storageRoot, ".private", "session", "handoff.json")
 
-		data, err := os.ReadFile(handoffPath)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				slog.Warn("handoff: failed to read handoff.json", "err", err)
-			}
+		ticket, ok := readHandoffTicket(handoffPath)
+		if !ok {
 			return response
 		}
 
-		var ticket HandoffTicket
-		if err := json.Unmarshal(data, &ticket); err != nil {
-			slog.Warn("handoff: failed to unmarshal handoff.json", "err", err)
-			return response
-		}
-
-		// F-081: Create a session checkpoint before handoff
-		if err := CreateSnapshot(storageRoot, ticket); err != nil {
+		if err := CreateSnapshot(storageRoot, *ticket); err != nil {
 			slog.Warn("handoff: failed to create snapshot", "err", err)
 		}
 
-		// Delete the handoff file so it doesn't trigger again on the next turn
-		// if the agent doesn't write a new one.
-		if err := os.Remove(handoffPath); err != nil {
-			slog.Warn("handoff: failed to delete handoff.json", "err", err)
-		}
+		_ = os.Remove(handoffPath)
 
 		slog.Info("handoff: detected handoff.json, appending prompt",
 			"session", sessionKey,
 			"target", ticket.TargetSpecialist)
 
-		// Format the handoff message
-		title := ticket.TargetSpecialist
-		if title != "" {
-			title = strings.ToUpper(title[:1]) + title[1:]
-		}
-
-		// Support both new schema (prompt) and old schema (AgentPrompt + ResumeCommand)
-		var handoffMsg string
-		if ticket.Prompt != "" {
-			handoffMsg = fmt.Sprintf("\n\n---\n🚀 **HANDOFF DETECTED**\nTarget: %s\nPrompt: %s\n\nCommand:\n`%s`\n",
-				title,
-				ticket.Prompt,
-				ticket.Prompt)
-		} else {
-			handoffMsg = fmt.Sprintf("\n\n---\n🚀 **HANDOFF DETECTED**\nTarget: %s\nPrompt: %s\n\nCommand:\n`%s`\n",
-				title,
-				ticket.AgentPrompt,
-				ticket.ResumeCommand)
-		}
-
-		return response + handoffMsg
+		return response + formatHandoffMessage(ticket)
 	}
+}
+
+func readHandoffTicket(path string) (*HandoffTicket, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("handoff: failed to read handoff.json", "err", err)
+		}
+		return nil, false
+	}
+
+	var ticket HandoffTicket
+	if err := json.Unmarshal(data, &ticket); err != nil {
+		slog.Warn("handoff: failed to unmarshal handoff.json", "err", err)
+		return nil, false
+	}
+	return &ticket, true
+}
+
+func formatHandoffMessage(ticket *HandoffTicket) string {
+	title := ticket.TargetSpecialist
+	if title != "" {
+		title = strings.ToUpper(title[:1]) + title[1:]
+	}
+
+	if ticket.Prompt != "" {
+		return fmt.Sprintf("\n\n---\n🚀 **HANDOFF DETECTED**\nTarget: %s\nPrompt: %s\n\nCommand:\n`%s`\n",
+			title,
+			ticket.Prompt,
+			ticket.Prompt)
+	}
+
+	return fmt.Sprintf("\n\n---\n🚀 **HANDOFF DETECTED**\nTarget: %s\nPrompt: %s\n\nCommand:\n`%s`\n",
+		title,
+		ticket.AgentPrompt,
+		ticket.ResumeCommand)
 }

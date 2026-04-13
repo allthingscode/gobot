@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported factory internals for testing
 package provider
 
 import (

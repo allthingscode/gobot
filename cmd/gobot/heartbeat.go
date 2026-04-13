@@ -64,53 +64,79 @@ func (h *heartbeatRunner) Run(ctx context.Context) {
 	}
 }
 
-// check performs one health-check cycle: probes APIs, writes LIVENESS, sends alert on failure.
+type probeResult struct {
+	name string
+	err  error
+}
+
 func (h *heartbeatRunner) check(ctx context.Context) {
-	type probeResult struct {
-		name string
-		err  error
-	}
-
-	var failures []probeResult
-
-	// Probe Telegram
-	if h.probes != nil && h.probes.ProbeTelegram != nil && h.tgToken != "" {
-		if _, err := h.probes.ProbeTelegram(h.tgToken); err != nil {
-			failures = append(failures, probeResult{"Telegram", err})
-		}
-	}
-
-	// Probe Gemini
-	if h.probes != nil && h.probes.ProbeGemini != nil && h.apiKey != "" {
-		if err := h.probes.ProbeGemini(h.apiKey); err != nil {
-			failures = append(failures, probeResult{"Gemini", err})
-		}
-	}
-
-	// Probe Gmail — skip silently if token file does not exist (not yet configured).
-	if h.probes != nil && h.probes.ProbeGmail != nil && h.gmailSecretsPath != "" {
-		if err := h.probes.ProbeGmail(h.gmailSecretsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			failures = append(failures, probeResult{"Gmail", err})
-		}
-	}
-
-	// Write LIVENESS file to storageRoot.
-	livenessPath := filepath.Join(h.storageRoot, "LIVENESS")
-	livenessContent := fmt.Sprintf("ok %s failures=%d\n", time.Now().UTC().Format(time.RFC3339), len(failures))
-	if err := os.WriteFile(livenessPath, []byte(livenessContent), 0o600); err != nil {
-		slog.Warn("heartbeat: failed to write LIVENESS file", "err", err)
-	}
+	failures := h.runProbes()
+	h.writeLivenessFile(len(failures))
 
 	if len(failures) == 0 {
 		slog.Debug("heartbeat: all probes OK")
 		return
 	}
 
+	h.logFailures(failures)
+	h.sendAlert(ctx, failures)
+}
+
+func (h *heartbeatRunner) runProbes() []probeResult {
+	if h.probes == nil {
+		return nil
+	}
+
+	var failures []probeResult
+	failures = append(failures, h.probeTelegram()...)
+	failures = append(failures, h.probeGemini()...)
+	failures = append(failures, h.probeGmail()...)
+
+	return failures
+}
+
+func (h *heartbeatRunner) probeTelegram() []probeResult {
+	if h.probes.ProbeTelegram != nil && h.tgToken != "" {
+		if _, err := h.probes.ProbeTelegram(h.tgToken); err != nil {
+			return []probeResult{{"Telegram", err}}
+		}
+	}
+	return nil
+}
+
+func (h *heartbeatRunner) probeGemini() []probeResult {
+	if h.probes.ProbeGemini != nil && h.apiKey != "" {
+		if err := h.probes.ProbeGemini(h.apiKey); err != nil {
+			return []probeResult{{"Gemini", err}}
+		}
+	}
+	return nil
+}
+
+func (h *heartbeatRunner) probeGmail() []probeResult {
+	if h.probes.ProbeGmail != nil && h.gmailSecretsPath != "" {
+		if err := h.probes.ProbeGmail(h.gmailSecretsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return []probeResult{{"Gmail", err}}
+		}
+	}
+	return nil
+}
+
+func (h *heartbeatRunner) writeLivenessFile(failureCount int) {
+	livenessPath := filepath.Join(h.storageRoot, "LIVENESS")
+	livenessContent := fmt.Sprintf("ok %s failures=%d\n", time.Now().UTC().Format(time.RFC3339), failureCount)
+	if err := os.WriteFile(livenessPath, []byte(livenessContent), 0o600); err != nil {
+		slog.Warn("heartbeat: failed to write LIVENESS file", "err", err)
+	}
+}
+
+func (h *heartbeatRunner) logFailures(failures []probeResult) {
 	for _, f := range failures {
 		slog.Warn("heartbeat: probe failed", "service", f.name, "err", f.err)
 	}
+}
 
-	// Send Telegram alert if sender and chat ID are configured.
+func (h *heartbeatRunner) sendAlert(ctx context.Context, failures []probeResult) {
 	if h.sender == nil || h.alertChatID == 0 {
 		return
 	}

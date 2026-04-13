@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported journal internals for testing
 package state
 
 import (

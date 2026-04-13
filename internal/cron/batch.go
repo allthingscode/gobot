@@ -17,15 +17,54 @@ func ParseModularJobFile(path string) (*Job, error) {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
-	// Strip UTF-8 BOM if present
-	bom := []byte{0xEF, 0xBB, 0xBF}
-	if len(data) >= 3 && data[0] == bom[0] && data[1] == bom[1] && data[2] == bom[2] {
-		data = data[3:]
+	data = stripBOM(data)
+	frontMatter, body, err := splitModularFile(string(data))
+	if err != nil {
+		return nil, err
 	}
 
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	var frontMatter []string
-	var body []string
+	job := &Job{
+		Enabled: true,
+		Payload: Payload{
+			Channel: "telegram",
+		},
+	}
+
+	base := filepath.Base(path)
+	job.ID = strings.TrimSuffix(base, filepath.Ext(base))
+
+	scheduleStr := parseFrontMatter(frontMatter, job)
+
+	if job.ID == "" {
+		return nil, fmt.Errorf("job id is empty")
+	}
+	if job.Name == "" {
+		job.Name = job.ID
+	}
+	if scheduleStr == "" {
+		return nil, fmt.Errorf("missing schedule field")
+	}
+
+	sched, err := parseScheduleString(scheduleStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse schedule: %w", err)
+	}
+	job.Schedule = sched
+	job.Payload.Message = strings.TrimSpace(strings.Join(body, "\n"))
+
+	return job, nil
+}
+
+func stripBOM(data []byte) []byte {
+	bom := []byte{0xEF, 0xBB, 0xBF}
+	if len(data) >= 3 && data[0] == bom[0] && data[1] == bom[1] && data[2] == bom[2] {
+		return data[3:]
+	}
+	return data
+}
+
+func splitModularFile(content string) (frontMatter, body []string, err error) {
+	scanner := bufio.NewScanner(strings.NewReader(content))
 	inFrontMatter := false
 	frontMatterCount := 0
 
@@ -50,69 +89,54 @@ func ParseModularJobFile(path string) (*Job, error) {
 	}
 
 	if frontMatterCount < 2 {
-		return nil, fmt.Errorf("missing front-matter delimiters")
+		return nil, nil, fmt.Errorf("missing front-matter delimiters")
 	}
+	return frontMatter, body, nil
+}
 
-	job := &Job{
-		Enabled: true,
-		Payload: Payload{
-			Channel: "telegram",
-		},
-	}
-
-	// Default ID from filename
-	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	job.ID = strings.TrimSuffix(base, ext)
-
+func parseFrontMatter(lines []string, job *Job) string {
 	var scheduleStr string
-	for _, line := range frontMatter {
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(parts[0]))
-		val := strings.TrimSpace(parts[1])
-		if val == "" {
+	for _, line := range lines {
+		key, val := parseFrontMatterLine(line)
+		if key == "" || val == "" {
 			continue
 		}
 
-		switch key {
-		case "id":
-			job.ID = val
-		case "name":
-			job.Name = val
-		case "schedule":
+		if key == "schedule" {
 			scheduleStr = val
-		case "specialist":
-			job.Payload.Channel = val
-		case "to":
-			job.Payload.To = val
-		case "subject":
-			job.Payload.Subject = val
-		case "enabled":
-			job.Enabled = (strings.ToLower(val) == "true")
+			continue
 		}
-	}
 
-	if job.ID == "" {
-		return nil, fmt.Errorf("job id is empty")
+		applyFrontMatterField(job, key, val)
 	}
-	if job.Name == "" {
-		job.Name = job.ID
-	}
-	if scheduleStr == "" {
-		return nil, fmt.Errorf("missing schedule field")
-	}
+	return scheduleStr
+}
 
-	sched, err := parseScheduleString(scheduleStr)
-	if err != nil {
-		return nil, fmt.Errorf("parse schedule: %w", err)
+func parseFrontMatterLine(line string) (key, val string) {
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) < 2 {
+		return "", ""
 	}
-	job.Schedule = sched
-	job.Payload.Message = strings.TrimSpace(strings.Join(body, "\n"))
+	key = strings.ToLower(strings.TrimSpace(parts[0]))
+	val = strings.TrimSpace(parts[1])
+	return key, val
+}
 
-	return job, nil
+func applyFrontMatterField(job *Job, key, val string) {
+	switch key {
+	case "id":
+		job.ID = val
+	case "name":
+		job.Name = val
+	case "specialist":
+		job.Payload.Channel = val
+	case "to":
+		job.Payload.To = val
+	case "subject":
+		job.Payload.Subject = val
+	case "enabled":
+		job.Enabled = (strings.ToLower(val) == "true")
+	}
 }
 
 func parseScheduleString(s string) (Schedule, error) {
@@ -190,7 +214,7 @@ func LoadModularJobs(itemsDir string) ([]Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read items dir: %w", err)
 	}
-	var jobs []Job
+	jobs := make([]Job, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
 			continue

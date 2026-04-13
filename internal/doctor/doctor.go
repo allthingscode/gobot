@@ -225,6 +225,36 @@ func checkGmailToken(secretsRoot string) Result {
 }
 
 // checkTokenFile reads a token JSON file and reports its expiry.
+func buildExpiredTokenDetail(expiry time.Time, hasRefresh bool) string {
+	if time.Now().After(expiry) {
+		if hasRefresh {
+			return "access token timed out — will refresh automatically"
+		}
+		diff := time.Since(expiry)
+		if diff < 24*time.Hour {
+			return fmt.Sprintf("EXPIRED %d hour(s) ago (no refresh token)", int(diff.Hours()))
+		}
+		return fmt.Sprintf("EXPIRED %d day(s) ago (no refresh token)", int(diff.Hours()/24))
+	}
+
+	remaining := time.Until(expiry)
+	detail := ""
+	switch {
+	case remaining < 1*time.Hour:
+		detail = fmt.Sprintf("expires in %d minute(s)", int(remaining.Minutes()))
+	case remaining < 24*time.Hour:
+		detail = fmt.Sprintf("expires in %d hour(s)", int(remaining.Hours()))
+	default:
+		detail = fmt.Sprintf("valid, expires in %d day(s)", int(remaining.Hours()/24))
+	}
+
+	if hasRefresh {
+		detail += " — will refresh automatically"
+	}
+
+	return detail
+}
+
 func checkTokenFile(name, path string) Result {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -248,33 +278,8 @@ func checkTokenFile(name, path string) Result {
 		return Result{Name: name, OK: true, Detail: detail}
 	}
 
-	if time.Now().After(tok.Expiry) {
-		if hasRefresh {
-			return Result{Name: name, OK: true, Detail: "access token timed out — will refresh automatically"}
-		}
-		diff := time.Since(tok.Expiry)
-		if diff < 24*time.Hour {
-			return Result{Name: name, OK: false, Detail: fmt.Sprintf("EXPIRED %d hour(s) ago (no refresh token)", int(diff.Hours()))}
-		}
-		return Result{Name: name, OK: false, Detail: fmt.Sprintf("EXPIRED %d day(s) ago (no refresh token)", int(diff.Hours()/24))}
-	}
-
-	remaining := time.Until(tok.Expiry)
-	detail := ""
-	switch {
-	case remaining < 1*time.Hour:
-		detail = fmt.Sprintf("expires in %d minute(s)", int(remaining.Minutes()))
-	case remaining < 24*time.Hour:
-		detail = fmt.Sprintf("expires in %d hour(s)", int(remaining.Hours()))
-	default:
-		detail = fmt.Sprintf("valid, expires in %d day(s)", int(remaining.Hours()/24))
-	}
-
-	if hasRefresh {
-		detail += " — will refresh automatically"
-	}
-
-	return Result{Name: name, OK: true, Detail: detail}
+	ok := !time.Now().After(tok.Expiry) || hasRefresh
+	return Result{Name: name, OK: ok, Detail: buildExpiredTokenDetail(tok.Expiry, hasRefresh)}
 }
 
 // checkJobsDir verifies the cron jobs directory exists and has .md job files.
@@ -303,7 +308,7 @@ func checkResilience() []Result {
 		return []Result{{Name: "resilience", OK: true, Detail: "no circuit breakers registered"}}
 	}
 
-	var results []Result
+	results := make([]Result, 0, len(breakers))
 	for name, b := range breakers {
 		state := b.State()
 		stats := resilience.GetStats(name)
@@ -330,7 +335,7 @@ func checkConcurrency() []Result {
 		return []Result{{Name: "concurrency", OK: true, Detail: "no active session locks"}}
 	}
 
-	var results []Result
+	results := make([]Result, 0, len(metrics))
 	for name, m := range metrics {
 		detail := fmt.Sprintf("contention: %d, max_wait: %s, total_hold: %s",
 			m.ContentionCount,

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Regex for .gobot/media or .gobot\media (case-insensitive)
+// Regex for .gobot/media or .gobot\media (case-insensitive).
 var mediaPathRegex = regexp.MustCompile(`(?i)\.gobot[\\/]media`)
 
 // GetMediaPath calculates the strategic redirection path for Telegram media.

@@ -1,3 +1,4 @@
+//nolint:testpackage // intentionally uses unexported types from main package
 package main
 
 import (
@@ -141,34 +142,42 @@ func RunScenario(t *testing.T, s Scenario, tools []Tool) {
 		t.Fatalf("[%s] Dispatch error: %v", s.Name, err)
 	}
 
-	// Assert final reply contains the expected substring.
-	if s.WantReply != "" && !strings.Contains(reply, s.WantReply) {
-		t.Errorf("[%s] reply %q does not contain %q", s.Name, reply, s.WantReply)
-	}
+	validateReply(t, s.Name, reply, s.WantReply)
+	validateToolCalls(t, s.Name, runner.recorded, s.WantCalls)
+}
 
-	// Assert each wanted tool call was recorded.
-	for _, want := range s.WantCalls {
-		found := false
-		for _, rec := range runner.recorded {
-			if rec.Name != want.ToolName {
-				continue
-			}
-			if want.ArgKey == "" {
-				found = true
-				break
-			}
-			if v, ok := rec.Args[want.ArgKey]; ok {
-				if strings.Contains(fmt.Sprint(v), want.ArgValue) {
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
+func validateReply(t *testing.T, name, reply, wantReply string) {
+	t.Helper()
+	if wantReply != "" && !strings.Contains(reply, wantReply) {
+		t.Errorf("[%s] reply %q does not contain %q", name, reply, wantReply)
+	}
+}
+
+func validateToolCalls(t *testing.T, name string, recorded []ToolCallRecord, wantCalls []WantCall) {
+	t.Helper()
+	for _, want := range wantCalls {
+		if !findRecordedCall(recorded, want) {
 			t.Errorf("[%s] expected tool call %q with arg %q=%q not found; recorded: %+v",
-				s.Name, want.ToolName, want.ArgKey, want.ArgValue, runner.recorded)
+				name, want.ToolName, want.ArgKey, want.ArgValue, recorded)
 		}
 	}
+}
+
+func findRecordedCall(recorded []ToolCallRecord, want WantCall) bool {
+	for _, rec := range recorded {
+		if rec.Name != want.ToolName {
+			continue
+		}
+		if want.ArgKey == "" {
+			return true
+		}
+		if v, ok := rec.Args[want.ArgKey]; ok {
+			if strings.Contains(fmt.Sprint(v), want.ArgValue) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestE2ESimulation_DirectResponse(t *testing.T) {

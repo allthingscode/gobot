@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported reporter internals for testing
 package reporter
 
 import (
@@ -7,117 +8,25 @@ import (
 	"testing"
 )
 
+func verifyNotificationContent(t *testing.T, content, subject, body, recipient, reason string) {
+	t.Helper()
+	if !strings.Contains(content, "### [") || !strings.Contains(content, "] "+subject) {
+		t.Errorf("entry missing subject or timestamp format")
+	}
+	if recipient != "" && !strings.Contains(content, "**To:** "+recipient) {
+		t.Errorf("entry missing recipient")
+	}
+	if reason != "" && !strings.Contains(content, "**Fallback Reason:** "+reason) {
+		t.Errorf("entry missing reason")
+	}
+	if body != "" && !strings.Contains(content, body) {
+		t.Errorf("entry missing body")
+	}
+}
+
 func TestFallbackNotify(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name      string
-		subject   string
-		body      string
-		recipient string
-		reason    string
-		setup     func(storageRoot string)
-		wantRet   string
-		checkFile func(t *testing.T, storageRoot string)
-	}{
-		{
-			name:      "New file created with header",
-			subject:   "Alert",
-			body:      "Test body",
-			recipient: "user@example.com",
-			reason:    "quota_exceeded",
-			wantRet:   "Gmail unavailable (quota_exceeded). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // table-driven test helper
-				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
-				data, err := os.ReadFile(notifFile)
-				if err != nil {
-					t.Fatalf("failed to read notifications file: %v", err)
-				}
-				content := string(data)
-				if !strings.HasPrefix(content, "# Strategic Notifications (Fallback)\n") {
-					t.Errorf("missing header in new file")
-				}
-				if !strings.Contains(content, "### [") || !strings.Contains(content, "] Alert") {
-					t.Errorf("entry missing subject or timestamp format")
-				}
-				if !strings.Contains(content, "**To:** user@example.com") {
-					t.Errorf("entry missing recipient")
-				}
-				if !strings.Contains(content, "**Fallback Reason:** quota_exceeded") {
-					t.Errorf("entry missing reason")
-				}
-				if !strings.Contains(content, "Test body") {
-					t.Errorf("entry missing body")
-				}
-			},
-		},
-		{
-			name:      "Append to existing file",
-			subject:   "Second",
-			body:      "Another one",
-			recipient: "user@example.com",
-			reason:    "network_error",
-			setup: func(storageRoot string) {
-				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
-				_ = os.MkdirAll(filepath.Dir(notifFile), 0o755)
-				_ = os.WriteFile(notifFile, []byte("# Strategic Notifications (Fallback)\n"), 0o600)
-			},
-			wantRet: "Gmail unavailable (network_error). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // test helper closure
-				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
-				data, err := os.ReadFile(notifFile)
-				if err != nil {
-					t.Fatalf("failed to read notifications file: %v", err)
-				}
-				content := string(data)
-				if strings.Count(content, "# Strategic Notifications") != 1 {
-					t.Errorf("header should only appear once")
-				}
-				if !strings.Contains(content, "### [") || !strings.Contains(content, "] Second") {
-					t.Errorf("entry missing subject or timestamp format")
-				}
-			},
-		},
-		{
-			name:      "Auth expired substitution - invalid_grant",
-			subject:   "Auth Test",
-			body:      "Body",
-			recipient: "user@example.com",
-			reason:    "Error: invalid_grant",
-			wantRet:   "Gmail unavailable (AUTH EXPIRED. Run: gobot reauth). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // table-driven test helper
-				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
-				data, err := os.ReadFile(notifFile)
-				if err != nil {
-					t.Fatalf("failed to read notifications file: %v", err)
-				}
-				content := string(data)
-				if !strings.Contains(content, "**Fallback Reason:** AUTH EXPIRED. Run: gobot reauth") {
-					t.Errorf("reason substitution failed")
-				}
-			},
-		},
-		{
-			name:      "Auth expired substitution - token expired",
-			subject:   "Auth Test 2",
-			body:      "Body",
-			recipient: "user@example.com",
-			reason:    "some token expired error",
-			wantRet:   "Gmail unavailable (AUTH EXPIRED. Run: gobot reauth). Report saved to:",
-			checkFile: func(t *testing.T, storageRoot string) { //nolint:thelper // table-driven test helper
-				notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
-				data, err := os.ReadFile(notifFile)
-				if err != nil {
-					t.Fatalf("failed to read notifications file: %v", err)
-				}
-				content := string(data)
-				if !strings.Contains(content, "**Fallback Reason:** AUTH EXPIRED. Run: gobot reauth") {
-					t.Errorf("reason substitution failed")
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range getFallbackNotifyTestCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			storageRoot := t.TempDir()
@@ -134,6 +43,112 @@ func TestFallbackNotify(t *testing.T) {
 				tt.checkFile(t, storageRoot)
 			}
 		})
+	}
+}
+
+type fallbackNotifyCase struct {
+	name      string
+	subject   string
+	body      string
+	recipient string
+	reason    string
+	setup     func(storageRoot string)
+	wantRet   string
+	checkFile func(t *testing.T, storageRoot string)
+}
+
+func getFallbackNotifyTestCases() []fallbackNotifyCase {
+	return []fallbackNotifyCase{
+		{
+			name:      "New file created with header",
+			subject:   "Alert",
+			body:      "Test body",
+			recipient: "user@example.com",
+			reason:    "quota_exceeded",
+			wantRet:   "Gmail unavailable (quota_exceeded). Report saved to:",
+			checkFile: validateNewFile,
+		},
+		{
+			name:      "Append to existing file",
+			subject:   "Second",
+			body:      "Another one",
+			recipient: "user@example.com",
+			reason:    "network_error",
+			setup:     setupExistingFile,
+			wantRet:   "Gmail unavailable (network_error). Report saved to:",
+			checkFile: validateAppend,
+		},
+		{
+			name:      "Auth expired substitution - invalid_grant",
+			subject:   "Auth Test",
+			body:      "Body",
+			recipient: "user@example.com",
+			reason:    "Error: invalid_grant",
+			wantRet:   "Gmail unavailable (AUTH EXPIRED. Run: gobot reauth). Report saved to:",
+			checkFile: validateAuthExpired,
+		},
+		{
+			name:      "Auth expired substitution - token expired",
+			subject:   "Auth Test 2",
+			body:      "Body",
+			recipient: "user@example.com",
+			reason:    "some token expired error",
+			wantRet:   "Gmail unavailable (AUTH EXPIRED. Run: gobot reauth). Report saved to:",
+			checkFile: validateAuthExpired2,
+		},
+	}
+}
+
+func validateNewFile(t *testing.T, storageRoot string) {
+	t.Helper()
+	notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
+	data, _ := os.ReadFile(notifFile)
+	content := string(data)
+	if !strings.HasPrefix(content, "# Strategic Notifications (Fallback)\n") {
+		t.Errorf("missing header in new file")
+	}
+	verifyNotificationContent(t, content, "Alert", "Test body", "user@example.com", "quota_exceeded")
+}
+
+func setupExistingFile(storageRoot string) {
+	notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
+	_ = os.MkdirAll(filepath.Dir(notifFile), 0o755)
+	_ = os.WriteFile(notifFile, []byte("# Strategic Notifications (Fallback)\n"), 0o600)
+}
+
+func validateAppend(t *testing.T, storageRoot string) {
+	t.Helper()
+	notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
+	data, _ := os.ReadFile(notifFile)
+	content := string(data)
+	if strings.Count(content, "# Strategic Notifications") != 1 {
+		t.Errorf("header should only appear once")
+	}
+	verifyNotificationContent(t, content, "Second", "", "", "")
+}
+
+func validateAuthExpired(t *testing.T, storageRoot string) {
+	t.Helper()
+	notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
+	data, _ := os.ReadFile(notifFile)
+	content := string(data)
+	verifyNotificationContent(t, content, "Auth Test", "", "", "AUTH EXPIRED. Run: gobot reauth")
+}
+
+func validateAuthExpired2(t *testing.T, storageRoot string) {
+	t.Helper()
+	notifFile := filepath.Join(storageRoot, "workspace", "NOTIFICATIONS.md")
+	data, _ := os.ReadFile(notifFile)
+	content := string(data)
+	verifyNotificationContent(t, content, "Auth Test 2", "", "", "AUTH EXPIRED. Run: gobot reauth")
+}
+
+func validateHTMLMatch(t *testing.T, got string, matches []string) {
+	t.Helper()
+	for _, m := range matches {
+		if !strings.Contains(got, m) {
+			t.Errorf("WrapHTML() missing expected content: %v", m)
+		}
 	}
 }
 
@@ -202,17 +217,10 @@ func TestWrapHTML(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := WrapHTML(tt.body)
-			if tt.want != "" {
-				if got != tt.want {
-					t.Errorf("WrapHTML() = %v, want %v", got, tt.want)
-				}
-			} else if len(tt.match) > 0 {
-				for _, m := range tt.match {
-					if !strings.Contains(got, m) {
-						t.Errorf("WrapHTML() missing expected content: %v", m)
-					}
-				}
+			if tt.want != "" && got != tt.want {
+				t.Errorf("WrapHTML() = %v, want %v", got, tt.want)
 			}
+			validateHTMLMatch(t, got, tt.match)
 		})
 	}
 }

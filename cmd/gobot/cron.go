@@ -42,76 +42,101 @@ type cronDispatcher struct {
 //  3. If silent == false and response != "": parse sessionKey into chatID + threadID
 //     and call b.Send() with the response.
 func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
-        if p.Message == "[SYSTEM] INDEX_WORKSPACE" {
-                if d.vecStore != nil && d.embedProv != nil && d.workspaceDir != "" {
-                        slog.Info("cron: starting workspace vector indexing")
-                        err := vector.IndexWorkspaceMarkdown(ctx, d.vecStore, d.workspaceDir, func(c context.Context, text string) ([]float32, error) {
-                                return d.embedProv.Embed(c, text)
-                        })
-                        if err != nil {
-                                slog.Error("cron: vector index error", "err", err)
-                                return err
-                        }
-                        slog.Info("cron: workspace vector indexing complete")
-                        return nil
-                }
-                slog.Warn("cron: vector store not initialized, skipping INDEX_WORKSPACE")
-                return nil
-        }
+	if d.handleSystemJob(ctx, p) {
+		return nil
+	}
 
-        channel, to, silent := cron.ResolveRoutableChannel(p, d.storageRoot)
+	channel, to, silent := cron.ResolveRoutableChannel(p, d.storageRoot)
 	if silent {
-		if p.To == "" {
-			slog.Warn("unroutable cron job", "channel", channel, "to", to)
-			return nil
+		return d.dispatchSilent(ctx, p, to)
+	}
+
+	switch channel {
+	case "email":
+		return d.dispatchEmail(ctx, p, to)
+	case "telegram":
+		if to != "" {
+			return d.dispatchTelegram(ctx, p, to)
 		}
-		sessionKey := "cron:" + p.To
-		slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", true)
-		_, err := d.mgr.Dispatch(ctx, sessionKey, "", "[SILENT] [AUTONOMOUS] "+p.Message)
+	}
+
+	slog.Warn("unroutable cron job", "channel", channel, "to", to)
+	return nil
+}
+
+func (d *cronDispatcher) handleSystemJob(ctx context.Context, p cron.Payload) bool {
+	if p.Message != "[SYSTEM] INDEX_WORKSPACE" {
+		return false
+	}
+
+	if d.vecStore != nil && d.embedProv != nil && d.workspaceDir != "" {
+		slog.Info("cron: starting workspace vector indexing")
+		err := vector.IndexWorkspaceMarkdown(ctx, d.vecStore, d.workspaceDir, func(c context.Context, text string) ([]float32, error) {
+			return d.embedProv.Embed(c, text)
+		})
+		if err != nil {
+			slog.Error("cron: vector index error", "err", err)
+		} else {
+			slog.Info("cron: workspace vector indexing complete")
+		}
+	} else {
+		slog.Warn("cron: vector store not initialized, skipping INDEX_WORKSPACE")
+	}
+	return true
+}
+
+func (d *cronDispatcher) dispatchSilent(ctx context.Context, p cron.Payload, to string) error {
+	if to == "" {
+		slog.Warn("unroutable silent cron job", "to", to)
+		return nil
+	}
+	sessionKey := "cron:" + to
+	slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", true)
+	_, err := d.mgr.Dispatch(ctx, sessionKey, "", "[SILENT] [AUTONOMOUS] "+p.Message)
+	return err
+}
+
+func (d *cronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to string) error {
+	recipient := to
+	if recipient == "" {
+		recipient = d.userEmail
+	}
+	if recipient == "" {
+		slog.Warn("unroutable cron job: email recipient not set", "job", p.Message)
+		return nil
+	}
+
+	jobID := p.ID
+	if jobID == "" {
+		jobID = "unknown"
+	}
+	sessionKey := "cron:" + jobID + ":email:" + recipient
+	slog.Info("dispatching cron job", "sessionKey", sessionKey, "channel", "email")
+	response, err := d.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
+	if err != nil {
 		return err
 	}
 
-	if channel == "email" {
-		recipient := to
-		if recipient == "" {
-			recipient = d.userEmail
-		}
-		if recipient == "" {
-			slog.Warn("unroutable cron job: email recipient not set", "job", p.Message)
-			return nil
-		}
-
-		jobID := p.ID
-		if jobID == "" {
-			jobID = "unknown"
-		}
-		sessionKey := "cron:" + jobID + ":email:" + recipient
-		slog.Info("dispatching cron job", "sessionKey", sessionKey, "channel", "email")
-		response, err := d.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
-		if err != nil {
-			return err
-		}
-
-		if response != "" {
-			gmailSecrets := filepath.Join(d.secretsRoot, "gmail")
-			svc, err := google.NewService(gmailSecrets)
-			if err != nil {
-				slog.Error("failed to initialize gmail service for cron", "err", err)
-				return fmt.Errorf("init gmail service: %w", err)
-			}
-			subject := resolveEmailSubject(p)
-			if err := svc.Send(ctx, recipient, subject, response); err != nil {
-				slog.Error("failed to send cron response via email", "err", err, "to", recipient)
-			}
-		}
-		return nil
+	if response != "" {
+		d.sendEmailResponse(ctx, p, recipient, response)
 	}
+	return nil
+}
 
-	if channel != "telegram" || to == "" {
-		slog.Warn("unroutable cron job", "channel", channel, "to", to)
-		return nil
+func (d *cronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, recipient, response string) {
+	gmailSecrets := filepath.Join(d.secretsRoot, "gmail")
+	svc, err := google.NewService(gmailSecrets)
+	if err != nil {
+		slog.Error("failed to initialize gmail service for cron", "err", err)
+		return
 	}
+	subject := resolveEmailSubject(p)
+	if err := svc.Send(ctx, recipient, subject, response); err != nil {
+		slog.Error("failed to send cron response via email", "err", err, "to", recipient)
+	}
+}
 
+func (d *cronDispatcher) dispatchTelegram(ctx context.Context, p cron.Payload, to string) error {
 	sessionKey := "cron:" + to
 	slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", false)
 	response, err := d.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
@@ -120,22 +145,25 @@ func (d *cronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 	}
 
 	if response != "" {
-		chatID, threadID, err := parseSessionKey(to)
-		if err != nil {
-			slog.Error("failed to parse session key for reply", "sessionKey", to, "err", err)
-			return nil
-		}
-		out := bot.OutboundMessage{
-			ChatID:   chatID,
-			ThreadID: threadID,
-			Text:     response,
-		}
-		if err := d.b.Send(ctx, out); err != nil {
-			slog.Error("failed to send cron response", "err", err, "sessionKey", to)
-		}
+		d.sendTelegramResponse(ctx, to, response)
 	}
-
 	return nil
+}
+
+func (d *cronDispatcher) sendTelegramResponse(ctx context.Context, to, response string) {
+	chatID, threadID, err := parseSessionKey(to)
+	if err != nil {
+		slog.Error("failed to parse session key for reply", "sessionKey", to, "err", err)
+		return
+	}
+	out := bot.OutboundMessage{
+		ChatID:   chatID,
+		ThreadID: threadID,
+		Text:     response,
+	}
+	if err := d.b.Send(ctx, out); err != nil {
+		slog.Error("failed to send cron response", "err", err, "sessionKey", to)
+	}
 }
 
 // Alert sends a failure notification directly via Telegram, bypassing the agent

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported lock internals for testing
 package state
 
 import (

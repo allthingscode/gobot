@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported internals for testing
 package resilience
 
 import (
@@ -10,6 +11,29 @@ import (
 
 	"github.com/allthingscode/gobot/internal/testutil"
 )
+
+func chaosWorker(start time.Time, duration time.Duration, cb *Breaker, cfg RetryConfig, fsURL string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for time.Since(start) < duration {
+		_ = cb.Execute(func() error {
+			return Do(context.Background(), cfg, IsRetryable, func() error {
+				req, _ := http.NewRequestWithContext(context.Background(), "GET", fsURL, http.NoBody)
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = resp.Body.Close() }()
+				if resp.StatusCode >= 500 {
+					return &HTTPStatusError{StatusCode: resp.StatusCode}
+				}
+				return nil
+			})
+		})
+		// Small sleep to prevent tight loop
+		// #nosec G404
+		time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
+	}
+}
 
 func TestChaos_RandomFailures(t *testing.T) {
 	t.Parallel()
@@ -42,35 +66,10 @@ func TestChaos_RandomFailures(t *testing.T) {
 
 	var wg sync.WaitGroup
 	concurrency := 5
+	wg.Add(concurrency)
 
 	for i := 0; i < concurrency; i++ {
-		go func(_ int) {
-			defer wg.Done()
-			for time.Since(start) < duration {
-				err := cb.Execute(func() error {
-					return Do(context.Background(), cfg, IsRetryable, func() error {
-						req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, http.NoBody)
-						resp, err := http.DefaultClient.Do(req)
-						if err != nil {
-							return err
-						}
-						defer func() { _ = resp.Body.Close() }()
-						if resp.StatusCode >= 500 {
-							return &HTTPStatusError{StatusCode: resp.StatusCode}
-						}
-						return nil
-					})
-				})
-
-				// We don't care if it fails (it will, due to chaos),
-				// we just want to ensure it doesn't panic or leak goroutines.
-				_ = err
-
-				// Small sleep to prevent tight loop
-				// #nosec G404
-				time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
-			}
-		}(i)
+		go chaosWorker(start, duration, cb, cfg, fs.URL, &wg)
 	}
 
 	wg.Wait()

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported gateway internals for testing
 package gateway
 
 import (
@@ -5,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -41,100 +43,106 @@ func TestGateway(t *testing.T) {
 
 	t.Run("Health", func(t *testing.T) {
 		t.Parallel()
-		req := httptest.NewRequest("GET", "/health", http.NoBody)
-		w := httptest.NewRecorder()
-		srv.handleHealth(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", w.Code)
-		}
-		if w.Body.String() != "OK" {
-			t.Errorf("expected OK, got %q", w.Body.String())
-		}
+		validateHealth(t, srv)
 	})
 
 	t.Run("Chat", func(t *testing.T) {
 		t.Parallel()
 		localH := &mockHandler{}
 		localSrv := NewServer(cfg, localH, dash.Resources{})
-		in := InboundRequest{
-			SessionKey: "test-session",
-			Text:       "hello gateway",
-		}
-		body, _ := json.Marshal(in)
-		req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-		localSrv.handleChat(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", w.Code)
-		}
-
-		var resp OutboundResponse
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-
-		if resp.Reply != "Reply: hello gateway" {
-			t.Errorf("unexpected reply: %q", resp.Reply)
-		}
-		if localH.lastMsg != "hello gateway" {
-			t.Errorf("handler did not receive correct message: %q", localH.lastMsg)
-		}
+		validateChat(t, localSrv, localH, "test-session", "hello gateway", "Reply: hello gateway")
 	})
 	t.Run("Chat_DefaultSession", func(t *testing.T) {
 		t.Parallel()
-		in := InboundRequest{
-			Text: "no session",
-		}
-		body, _ := json.Marshal(in)
-		req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-		srv.handleChat(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", w.Code)
-		}
+		validateChat(t, srv, h, "", "no session", "")
 	})
 
 	t.Run("InvalidMethod", func(t *testing.T) {
 		t.Parallel()
-		req := httptest.NewRequest("GET", "/chat", http.NoBody)
-		w := httptest.NewRecorder()
-		srv.handleChat(w, req)
-
-		if w.Code != http.StatusMethodNotAllowed {
-			t.Errorf("expected 405, got %d", w.Code)
-		}
+		validateChatError(t, srv, "GET", "/chat", http.NoBody, http.StatusMethodNotAllowed)
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
 		t.Parallel()
-		req := httptest.NewRequest("POST", "/chat", bytes.NewReader([]byte("not json")))
-		w := httptest.NewRecorder()
-		srv.handleChat(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %d", w.Code)
-		}
+		validateChatError(t, srv, "POST", "/chat", bytes.NewReader([]byte("not json")), http.StatusBadRequest)
 	})
 
 	t.Run("HandlerError", func(t *testing.T) {
 		t.Parallel()
 		hErr := &mockHandler{err: true}
 		srvErr := NewServer(cfg, hErr, dash.Resources{})
-		in := InboundRequest{Text: "fail"}
-		body, _ := json.Marshal(in)
-		req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-		srvErr.handleChat(w, req)
-
-		var resp OutboundResponse
-		_ = json.NewDecoder(w.Body).Decode(&resp)
-		if resp.Error != "mock error" {
-			t.Errorf("expected mock error, got %q", resp.Error)
-		}
+		validateChatHandlerError(t, srvErr, "fail", "mock error")
 	})
+}
+
+func validateHealth(t *testing.T, srv *Server) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/health", http.NoBody)
+	w := httptest.NewRecorder()
+	srv.handleHealth(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if w.Body.String() != "OK" {
+		t.Errorf("expected OK, got %q", w.Body.String())
+	}
+}
+
+func validateChat(t *testing.T, srv *Server, h *mockHandler, session, text, expectedReply string) {
+	t.Helper()
+	in := InboundRequest{
+		SessionKey: session,
+		Text:       text,
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleChat(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	if expectedReply != "" {
+		var resp OutboundResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if resp.Reply != expectedReply {
+			t.Errorf("unexpected reply: %q", resp.Reply)
+		}
+		if h.lastMsg != text {
+			t.Errorf("handler did not receive correct message: %q", h.lastMsg)
+		}
+	}
+}
+
+func validateChatError(t *testing.T, srv *Server, method, path string, body io.Reader, expectedStatus int) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, body)
+	w := httptest.NewRecorder()
+	srv.handleChat(w, req)
+
+	if w.Code != expectedStatus {
+		t.Errorf("expected %d, got %d", expectedStatus, w.Code)
+	}
+}
+
+func validateChatHandlerError(t *testing.T, srv *Server, text, expectedError string) {
+	t.Helper()
+	in := InboundRequest{Text: text}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleChat(w, req)
+
+	var resp OutboundResponse
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Error != expectedError {
+		t.Errorf("expected %s, got %q", expectedError, resp.Error)
+	}
 }
 
 func TestGateway_ListenAndServe(t *testing.T) {

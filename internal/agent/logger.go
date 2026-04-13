@@ -34,7 +34,7 @@ type MarkdownLogger struct {
 }
 
 // NewMarkdownLogger creates a MarkdownLogger that writes under
-// {storageRoot}/workspace/sessions/
+// {storageRoot}/workspace/sessions/.
 func NewMarkdownLogger(storageRoot string) *MarkdownLogger {
 	return &MarkdownLogger{
 		sessionsDir: filepath.Join(storageRoot, "workspace", "sessions"),

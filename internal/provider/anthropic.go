@@ -153,29 +153,45 @@ func (p *AnthropicProvider) mapMessages(messages []agentctx.StrategicMessage) []
 }
 
 func (p *AnthropicProvider) mapContentBlocks(msg agentctx.StrategicMessage) []anthropicContentBlock {
-	var blocks []anthropicContentBlock
+	blocks := make([]anthropicContentBlock, 0, 4)
 
-	// Text content
-	if msg.Content != nil {
-		if msg.Content.Str != nil {
-			blocks = append(blocks, anthropicContentBlock{
-				Type: "text",
-				Text: *msg.Content.Str,
-			})
-		} else {
-			for _, item := range msg.Content.Items {
-				if item.Text != nil {
-					blocks = append(blocks, anthropicContentBlock{
-						Type: "text",
-						Text: item.Text.Text,
-					})
-				}
-			}
-		}
+	blocks = append(blocks, mapTextBlocks(msg.Content)...)
+	blocks = append(blocks, mapToolCallBlocks(msg.ToolCalls)...)
+
+	if resultBlock, ok := mapToolResultBlock(msg); ok {
+		blocks = append(blocks, resultBlock)
 	}
 
-	// Tool calls (assistant role)
-	for _, tc := range msg.ToolCalls {
+	return blocks
+}
+
+func mapTextBlocks(content *agentctx.MessageContent) []anthropicContentBlock {
+	if content == nil {
+		return nil
+	}
+
+	if content.Str != nil {
+		return []anthropicContentBlock{{
+			Type: "text",
+			Text: *content.Str,
+		}}
+	}
+
+	var blocks []anthropicContentBlock
+	for _, item := range content.Items {
+		if item.Text != nil {
+			blocks = append(blocks, anthropicContentBlock{
+				Type: "text",
+				Text: item.Text.Text,
+			})
+		}
+	}
+	return blocks
+}
+
+func mapToolCallBlocks(toolCalls []map[string]any) []anthropicContentBlock {
+	blocks := make([]anthropicContentBlock, 0, len(toolCalls))
+	for _, tc := range toolCalls {
 		id, _ := tc["id"].(string)
 		name, _ := tc["name"].(string)
 		args, _ := tc["args"].(map[string]any)
@@ -186,23 +202,28 @@ func (p *AnthropicProvider) mapContentBlocks(msg agentctx.StrategicMessage) []an
 			Input: args,
 		})
 	}
+	return blocks
+}
 
-	// Tool result (user role)
-	if msg.Role == agentctx.RoleTool || (msg.Role == agentctx.RoleUser && msg.ToolCallID != nil) {
-		if msg.ToolCallID != nil {
-			content := ""
-			if msg.Content != nil && msg.Content.Str != nil {
-				content = *msg.Content.Str
-			}
-			blocks = append(blocks, anthropicContentBlock{
-				Type:      "tool_result",
-				ToolUseID: *msg.ToolCallID,
-				Content:   content,
-			})
-		}
+func mapToolResultBlock(msg agentctx.StrategicMessage) (anthropicContentBlock, bool) {
+	if msg.Role != agentctx.RoleTool && (msg.Role != agentctx.RoleUser || msg.ToolCallID == nil) {
+		return anthropicContentBlock{}, false
 	}
 
-	return blocks
+	if msg.ToolCallID == nil {
+		return anthropicContentBlock{}, false
+	}
+
+	content := ""
+	if msg.Content != nil && msg.Content.Str != nil {
+		content = *msg.Content.Str
+	}
+
+	return anthropicContentBlock{
+		Type:      "tool_result",
+		ToolUseID: *msg.ToolCallID,
+		Content:   content,
+	}, true
 }
 
 func (p *AnthropicProvider) mapTools(tools []ToolDeclaration) []anthropicTool {
@@ -256,7 +277,7 @@ func (p *AnthropicProvider) mapResponse(antResp anthropicResponse) *ChatResponse
 	}
 }
 
-// Anthropic API types
+// Anthropic API types.
 type anthropicRequest struct {
 	Model       string             `json:"model"`
 	Messages    []anthropicMessage `json:"messages"`

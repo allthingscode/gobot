@@ -12,6 +12,7 @@ type BreakerStats struct {
 	Rejections uint64 // rejected due to open circuit
 }
 
+//nolint:gochecknoglobals // Global stats registry; thread-safe via sync.RWMutex
 var (
 	globalStats = make(map[string]*BreakerStats)
 	statsMu     sync.RWMutex

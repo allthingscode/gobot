@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported provider internals for testing
 package provider
 
 import (
@@ -41,6 +42,7 @@ func TestAnthropicProvider_Models(t *testing.T) {
 	}
 }
 
+//nolint:cyclop // test complexity justified by multi-step verification
 func TestAnthropicProvider_Chat_Success(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

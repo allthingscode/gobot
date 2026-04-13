@@ -1,5 +1,6 @@
 //go:build windows
 
+//nolint:testpackage // requires unexported internals for testing
 package secrets
 
 import (

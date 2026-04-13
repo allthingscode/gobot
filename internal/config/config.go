@@ -15,6 +15,8 @@ import (
 )
 
 // bomPrefix is the UTF-8 byte order mark written by some Windows editors.
+//
+//nolint:gochecknoglobals // Immutable constant for BOM detection
 var bomPrefix = []byte{0xEF, 0xBB, 0xBF}
 
 // Config mirrors the relevant fields of ~/.gobot/config.json.
@@ -308,7 +310,7 @@ type MCPServerConfig struct {
 // Priority:
 // 1. config.json (strategic_edition.storage_root)
 // 2. GOBOT_STORAGE environment variable
-// 3. ~/gobot_data (portable default)
+// 3. ~/gobot_data (portable default).
 func (c *Config) StorageRoot() string {
 	if c.Strategic.StorageRoot != "" {
 		return c.Strategic.StorageRoot
@@ -417,7 +419,7 @@ func (c *Config) WorkspacePath(userID string, subpath ...string) string {
 // GeminiAPIKey returns the Gemini API key. Priority order:
 // 1. config.json field
 // 2. DPAPI secrets store (gemini_api_key)
-// 3. GEMINI_API_KEY environment variable (for CI / DPAPI-free environments)
+// 3. GEMINI_API_KEY environment variable (for CI / DPAPI-free environments).
 func (c *Config) GeminiAPIKey() string {
 	if c.Providers.Gemini.APIKey != "" {
 		return c.Providers.Gemini.APIKey
@@ -436,7 +438,7 @@ func (c *Config) GeminiAPIKey() string {
 // AnthropicAPIKey returns the Anthropic API key. Priority order:
 // 1. config.json field
 // 2. DPAPI secrets store (anthropic_api_key)
-// 3. ANTHROPIC_API_KEY environment variable
+// 3. ANTHROPIC_API_KEY environment variable.
 func (c *Config) AnthropicAPIKey() string {
 	if c.Providers.Anthropic.APIKey != "" {
 		return c.Providers.Anthropic.APIKey
@@ -455,7 +457,7 @@ func (c *Config) AnthropicAPIKey() string {
 // OpenAIAPIKey returns the OpenAI API key. Priority order:
 // 1. config.json field
 // 2. DPAPI secrets store (openai_api_key)
-// 3. OPENAI_API_KEY environment variable
+// 3. OPENAI_API_KEY environment variable.
 func (c *Config) OpenAIAPIKey() string {
 	if c.Providers.OpenAI.APIKey != "" {
 		return c.Providers.OpenAI.APIKey
@@ -474,7 +476,7 @@ func (c *Config) OpenAIAPIKey() string {
 // OpenAIBaseURL returns the OpenAI base URL. Priority order:
 // 1. config.json field
 // 2. DPAPI secrets store (openai_base_url)
-// 3. OPENAI_BASE_URL environment variable
+// 3. OPENAI_BASE_URL environment variable.
 func (c *Config) OpenAIBaseURL() string {
 	if c.Providers.OpenAI.BaseURL != "" {
 		return c.Providers.OpenAI.BaseURL
@@ -493,7 +495,7 @@ func (c *Config) OpenAIBaseURL() string {
 // GoogleAPIKey returns the Google Custom Search API key. Priority order:
 // 1. config.json field
 // 2. DPAPI secrets store (google_api_key)
-// 3. GOOGLE_API_KEY environment variable
+// 3. GOOGLE_API_KEY environment variable.
 func (c *Config) GoogleAPIKey() string {
 	if c.Providers.Google.APIKey != "" {
 		return c.Providers.Google.APIKey
@@ -512,7 +514,7 @@ func (c *Config) GoogleAPIKey() string {
 // GoogleCX returns the Google Custom Search Engine ID (CX). Priority order:
 // 1. config.json field
 // 2. DPAPI secrets store (google_cx)
-// 3. GOOGLE_CX environment variable
+// 3. GOOGLE_CX environment variable.
 func (c *Config) GoogleCX() string {
 	if c.Providers.Google.CustomCX != "" {
 		return c.Providers.Google.CustomCX
@@ -601,6 +603,9 @@ func (c *Config) PolicyFilePath() string {
 
 // DefaultConfigPath returns ~/.gobot/config.json.
 func DefaultConfigPath() string {
+	if h := os.Getenv("GOBOT_HOME"); h != "" {
+		return filepath.Join(h, ".gobot", "config.json")
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".gobot", "config.json")
 }

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported DB internals for testing
 package context
 
 import (

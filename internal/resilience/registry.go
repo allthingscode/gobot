@@ -4,6 +4,7 @@ import (
 	"sync"
 )
 
+//nolint:gochecknoglobals // Global breaker registry; thread-safe via sync.RWMutex
 var (
 	registryMu sync.RWMutex
 	registry   = make(map[string]*Breaker)

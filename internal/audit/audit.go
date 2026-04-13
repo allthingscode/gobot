@@ -19,6 +19,8 @@ type ModelInfo struct {
 
 // tierPattern maps a tier name to the substrings that identify it.
 // Order matters — most specific patterns must come first.
+//
+//nolint:gochecknoglobals // Immutable lookup table for model classification
 var tierPatterns = []struct {
 	tier     string
 	keywords []string
@@ -29,6 +31,8 @@ var tierPatterns = []struct {
 }
 
 // specialKeywords identifies models that are not conversational agents.
+//
+//nolint:gochecknoglobals // Immutable lookup table for model classification
 var specialKeywords = []string{
 	"embed", "aqa", "text-bison", "chat-bison", "vision",
 	"imagen", "veo", "lyria", "gemma", "robotics",
@@ -60,61 +64,12 @@ func ClassifyModel(modelName string) string {
 // current must have keys "default", "researcher", "architect" mapping to
 // the currently configured model name for each role.
 func BuildReport(models []ModelInfo, current map[string]string) string {
-	today := time.Now().Format("2006-01-02")
-
-	byTier := map[string][]ModelInfo{
-		"researcher": {},
-		"default":    {},
-		"architect":  {},
-		"special":    {},
-		"other":      {},
-	}
-	for _, m := range models {
-		tier := ClassifyModel(m.Name)
-		byTier[tier] = append(byTier[tier], m)
-	}
-
-	bare := func(name string) string {
-		return strings.ReplaceAll(name, "models/", "")
-	}
-
-	modelRow := func(m ModelInfo, currentName string) string {
-		b := bare(m.Name)
-		display := m.DisplayName
-		if display == "" {
-			display = b
-		}
-		desc := m.Description
-		if len(desc) > 90 {
-			desc = desc[:90]
-		}
-		desc = strings.ReplaceAll(desc, "|", `\|`)
-		flag := ""
-		if b == bare(currentName) {
-			flag = " **[CURRENT]**"
-		}
-		return "| `" + b + "` | " + display + flag + " | " + desc + " |"
-	}
-
+	byTier := groupByTier(models)
+	suggestions := map[string]string{}
 	var lines []string
-	add := func(s string) { lines = append(lines, s) }
 
-	add("# F-043: Model Tier Audit Report")
-	add("**Date:** " + today + "  ")
-	add("**Available models:** " + strconv.Itoa(len(models)))
-	add("")
-	add("---")
-	add("")
-	add("## Current Configuration")
-	add("")
-	add("| Role | Model |")
-	add("|------|-------|")
-	add("| Default (Balanced) | `" + current["default"] + "` |")
-	add("| Researcher (Budget) | `" + current["researcher"] + "` |")
-	add("| Architect (Premium) | `" + current["architect"] + "` |")
-	add("")
-	add("---")
-	add("")
+	addReportHeader(&lines, len(models))
+	addCurrentConfig(&lines, current)
 
 	tierSections := []struct {
 		key       string
@@ -126,73 +81,138 @@ func BuildReport(models []ModelInfo, current map[string]string) string {
 		{"architect", "Architect Tier — Premium (`pro` / `ultra` candidates)", "architect"},
 	}
 
-	suggestions := map[string]string{}
 	for _, ts := range tierSections {
-		tierModels := byTier[ts.key]
-		add("## " + ts.heading)
-		add("")
-		if len(tierModels) == 0 {
-			add("*No models classified for this tier.*")
-			add("")
-			continue
-		}
-		add("| Model | Display Name | Notes |")
-		add("|-------|-------------|-------|")
-		for _, m := range tierModels {
-			add(modelRow(m, current[ts.configKey]))
-		}
-		// Suggest replacement only if current model is absent (retirement awareness).
-		tierBareNames := make([]string, len(tierModels))
-		for i, m := range tierModels {
-			tierBareNames[i] = bare(m.Name)
-		}
-		currentBare := bare(current[ts.configKey])
-		if !contains(tierBareNames, currentBare) {
-			suggestions[ts.configKey] = tierBareNames[0]
-		}
-		add("")
+		addTierSection(&lines, ts.heading, byTier[ts.key], current[ts.configKey], ts.configKey, suggestions)
 	}
 
-	// Special / embedding / other
-	specialModels := append(byTier["special"], byTier["other"]...) //nolint:gocritic // intentional: merge two slices into new slice
-	add("## Special-Purpose & Embedding Models")
-	add("")
+	addSpecialModels(&lines, byTier)
+	addSuggestions(&lines, suggestions, current)
+
+	return strings.Join(lines, "\n")
+}
+
+func groupByTier(models []ModelInfo) map[string][]ModelInfo {
+	byTier := map[string][]ModelInfo{
+		"researcher": {},
+		"default":    {},
+		"architect":  {},
+		"special":    {},
+		"other":      {},
+	}
+	for _, m := range models {
+		tier := ClassifyModel(m.Name)
+		byTier[tier] = append(byTier[tier], m)
+	}
+	return byTier
+}
+
+func addReportHeader(lines *[]string, modelCount int) {
+	today := time.Now().Format("2006-01-02")
+	*lines = append(*lines, "# F-043: Model Tier Audit Report")
+	*lines = append(*lines, "**Date:** "+today+"  ")
+	*lines = append(*lines, "**Available models:** "+strconv.Itoa(modelCount))
+	*lines = append(*lines, "")
+	*lines = append(*lines, "---")
+	*lines = append(*lines, "")
+}
+
+func addCurrentConfig(lines *[]string, current map[string]string) {
+	*lines = append(*lines, "## Current Configuration")
+	*lines = append(*lines, "")
+	*lines = append(*lines, "| Role | Model |")
+	*lines = append(*lines, "|------|-------|")
+	*lines = append(*lines, "| Default (Balanced) | `"+current["default"]+"` |")
+	*lines = append(*lines, "| Researcher (Budget) | `"+current["researcher"]+"` |")
+	*lines = append(*lines, "| Architect (Premium) | `"+current["architect"]+"` |")
+	*lines = append(*lines, "")
+	*lines = append(*lines, "---")
+	*lines = append(*lines, "")
+}
+
+func addTierSection(lines *[]string, heading string, tierModels []ModelInfo, currentName, configKey string, suggestions map[string]string) {
+	*lines = append(*lines, "## "+heading)
+	*lines = append(*lines, "")
+	if len(tierModels) == 0 {
+		*lines = append(*lines, "*No models classified for this tier.*")
+		*lines = append(*lines, "")
+		return
+	}
+
+	*lines = append(*lines, "| Model | Display Name | Notes |")
+	*lines = append(*lines, "|-------|-------------|-------|")
+	tierBareNames := make([]string, len(tierModels))
+	for i, m := range tierModels {
+		*lines = append(*lines, modelRow(m, currentName))
+		tierBareNames[i] = bare(m.Name)
+	}
+
+	currentBare := bare(currentName)
+	if !contains(tierBareNames, currentBare) && len(tierBareNames) > 0 {
+		suggestions[configKey] = tierBareNames[0]
+	}
+	*lines = append(*lines, "")
+}
+
+func addSpecialModels(lines *[]string, byTier map[string][]ModelInfo) {
+	specialModels := append(byTier["special"], byTier["other"]...) //nolint:gocritic // intentional merge
+	*lines = append(*lines, "## Special-Purpose & Embedding Models")
+	*lines = append(*lines, "")
 	if len(specialModels) > 0 {
-		add("| Model | Display Name |")
-		add("|-------|-------------|")
+		*lines = append(*lines, "| Model | Display Name |")
+		*lines = append(*lines, "|-------|-------------|")
 		for _, m := range specialModels {
 			b := bare(m.Name)
 			display := m.DisplayName
 			if display == "" {
 				display = b
 			}
-			add("| `" + b + "` | " + display + " |")
+			*lines = append(*lines, "| `"+b+"` | "+display+" |")
 		}
 	} else {
-		add("*None found.*")
+		*lines = append(*lines, "*None found.*")
 	}
-	add("")
+	*lines = append(*lines, "")
+}
 
-	// Suggestions summary
-	add("---")
-	add("")
-	add("## Suggested Updates")
-	add("")
+func addSuggestions(lines *[]string, suggestions, current map[string]string) {
+	*lines = append(*lines, "---")
+	*lines = append(*lines, "")
+	*lines = append(*lines, "## Suggested Updates")
+	*lines = append(*lines, "")
 	if len(suggestions) > 0 {
-		add("| Role | Current | Candidate |")
-		add("|------|---------|-----------|")
+		*lines = append(*lines, "| Role | Current | Candidate |")
+		*lines = append(*lines, "|------|---------|-----------|")
 		for role, candidate := range suggestions {
-			add("| `" + role + "` | `" + current[role] + "` | `" + candidate + "` |")
+			*lines = append(*lines, "| `"+role+"` | `"+current[role]+"` | `"+candidate+"` |")
 		}
-		add("")
-		add("> **No changes are applied automatically.**")
-		add("> Edit `~/.gobot/config.json` to apply updates.")
+		*lines = append(*lines, "")
+		*lines = append(*lines, "> **No changes are applied automatically.**")
+		*lines = append(*lines, "> Edit `~/.gobot/config.json` to apply updates.")
 	} else {
-		add("Current configuration already matches the best available candidates." +
-			" No changes suggested.")
+		*lines = append(*lines, "Current configuration already matches the best available candidates. No changes suggested.")
 	}
+}
 
-	return strings.Join(lines, "\n")
+func bare(name string) string {
+	return strings.ReplaceAll(name, "models/", "")
+}
+
+func modelRow(m ModelInfo, currentName string) string {
+	b := bare(m.Name)
+	display := m.DisplayName
+	if display == "" {
+		display = b
+	}
+	desc := m.Description
+	if len(desc) > 90 {
+		desc = desc[:90]
+	}
+	desc = strings.ReplaceAll(desc, "|", `\|`)
+	flag := ""
+	if b == bare(currentName) {
+		flag = " **[CURRENT]**"
+	}
+	return "| `" + b + "` | " + display + flag + " | " + desc + " |"
 }
 
 func contains(slice []string, s string) bool {

@@ -1,3 +1,4 @@
+//nolint:testpackage // requires unexported state internals for testing
 package state
 
 import (
