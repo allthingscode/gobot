@@ -69,7 +69,7 @@ func setupGmailService(t *testing.T, baseURL string) *Service {
 	t.Helper()
 	tmp := t.TempDir()
 	tok := storedToken{Token: "fake-token", Expiry: time.Now().Add(1 * time.Hour)}
-	tokData, _ := json.Marshal(tok)
+	tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
 	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
 	svc, err := NewService(tmp)
@@ -129,7 +129,7 @@ func TestNewService_Refresh(t *testing.T) {
 		TokenURI:     server.URL + "/token",
 		Expiry:       time.Now().Add(-1 * time.Hour),
 	}
-	tokData, _ := json.Marshal(tok)
+	tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
 	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
 	svc, err := NewService(tmp)
@@ -174,7 +174,7 @@ func TestNewService_RefreshError(t *testing.T) {
 			TokenURI:     server.URL + "/token",
 			Expiry:       time.Now().Add(-1 * time.Hour),
 		}
-		tokData, _ := json.Marshal(tok)
+		tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
 		_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
 		_, err := NewService(tmp)
@@ -198,7 +198,7 @@ func TestNewService_RefreshError(t *testing.T) {
 			TokenURI:     server.URL + "/token",
 			Expiry:       time.Now().Add(-1 * time.Hour),
 		}
-		tokData, _ := json.Marshal(tok)
+		tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
 		_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
 		_, err := NewService(tmp)

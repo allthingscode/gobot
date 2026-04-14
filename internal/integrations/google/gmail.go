@@ -104,7 +104,7 @@ func NewService(secretsRoot string) (*Service, error) {
 			}
 			return nil, fmt.Errorf("token refresh failed: %w", err)
 		}
-		if updated, err := json.Marshal(tok); err == nil {
+		if updated, err := json.Marshal(tok); err == nil { //nolint:gosec // G117: RefreshToken must be marshaled to persist the token
 			_ = os.WriteFile(tokenPath, updated, 0o600)
 		}
 	}

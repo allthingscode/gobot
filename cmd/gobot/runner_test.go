@@ -218,7 +218,7 @@ func TestLastUserText(t *testing.T) {
 	t.Parallel()
 	s1 := "msg 1"
 	s2 := "msg 2"
-	messages := []agentctx.StrategicMessage{
+	messages := []agentctx.StrategicMessage{ //nolint:prealloc // literal with subsequent single append; preallocating reduces readability
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &s1}},
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: &s2}},
 	}

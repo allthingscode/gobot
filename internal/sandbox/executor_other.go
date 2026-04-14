@@ -43,7 +43,7 @@ func (e *unixExecutor) Run(ctx context.Context, name string, args []string) (str
 		return "", fmt.Errorf("sandbox: mkdir %s: %w", sandboxDir, err)
 	}
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: sandbox executor intentionally runs variable commands
 	cmd.Dir = sandboxDir
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf

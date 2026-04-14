@@ -83,12 +83,11 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 		},
 	}
 
-	messages := []agentctx.StrategicMessage{
-		{
-			Role:    agentctx.RoleSystem,
-			Content: &agentctx.MessageContent{Str: &initialSummary},
-		},
-	}
+	messages := make([]agentctx.StrategicMessage, 0, 8) // 1 system + 7 loop iterations
+	messages = append(messages, agentctx.StrategicMessage{
+		Role:    agentctx.RoleSystem,
+		Content: &agentctx.MessageContent{Str: &initialSummary},
+	})
 	for i := range 7 {
 		content := fmt.Sprintf("message %d", i)
 		messages = append(messages, agentctx.StrategicMessage{

@@ -5,7 +5,10 @@ import (
 	"strings"
 )
 
-const jsonTypeString = "string"
+const (
+	jsonTypeString = "string"
+	jsonTypeObject = "object"
+)
 
 // DeriveSchema uses reflection to generate a JSON Schema (type: object) from a Go struct.
 // It respects 'json' tags for field names and 'schema' tags for descriptions.
@@ -16,7 +19,7 @@ func DeriveSchema(v any) map[string]any {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return map[string]any{"type": "object"}
+		return map[string]any{"type": jsonTypeObject}
 	}
 
 	properties := make(map[string]any)
@@ -40,7 +43,7 @@ func DeriveSchema(v any) map[string]any {
 	}
 
 	schema := map[string]any{
-		"type":       "object",
+		"type":       jsonTypeObject,
 		"properties": properties,
 		"required":   required,
 	}
@@ -103,7 +106,7 @@ func goTypeToJSONType(t reflect.Type) string {
 	case reflect.Slice, reflect.Array:
 		return "array"
 	case reflect.Map, reflect.Struct:
-		return "object"
+		return jsonTypeObject
 	default:
 		return jsonTypeString
 	}

@@ -240,7 +240,7 @@ func AuthMiddleware(token string, next http.Handler) http.Handler {
 		}
 
 		if provided != token {
-			slog.Warn("dash: unauthorized access attempt", "remote_addr", r.RemoteAddr)
+			slog.Warn("dash: unauthorized access attempt", "remote_addr", r.RemoteAddr) //nolint:gosec // G706: remote_addr is safe to log
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}

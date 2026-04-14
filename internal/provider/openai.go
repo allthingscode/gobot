@@ -14,6 +14,7 @@ import (
 
 const (
 	defaultOpenAIBaseURL = "https://api.openai.com/v1"
+	providerNameOpenAI   = "openai"
 )
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs.
@@ -40,7 +41,7 @@ func NewOpenAIProvider(apiKey, baseURL string) *OpenAIProvider {
 
 // Name returns the provider name.
 func (p *OpenAIProvider) Name() string {
-	return "openai"
+	return providerNameOpenAI
 }
 
 func (p *OpenAIProvider) sendRequest(ctx context.Context, url string, jsonData []byte) (*http.Response, error) {

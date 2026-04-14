@@ -403,7 +403,7 @@ func (m *SessionManager) summarizeHistoryIfNeeded(ctx context.Context, sessionKe
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 
-	newMsgs := []agentctx.StrategicMessage{summaryMsg}
+	newMsgs := []agentctx.StrategicMessage{summaryMsg} //nolint:prealloc // capacity is a complex expression involving keepN
 	return append(newMsgs, messages[len(messages)-keepN:]...)
 }
 

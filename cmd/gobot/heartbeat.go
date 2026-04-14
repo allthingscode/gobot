@@ -87,7 +87,7 @@ func (h *heartbeatRunner) runProbes() []probeResult {
 		return nil
 	}
 
-	var failures []probeResult
+	var failures []probeResult //nolint:prealloc // capacity requires calling all probe functions twice
 	failures = append(failures, h.probeTelegram()...)
 	failures = append(failures, h.probeGemini()...)
 	failures = append(failures, h.probeGmail()...)

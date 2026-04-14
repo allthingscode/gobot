@@ -107,8 +107,8 @@ func FormatSearchMarkdown(results []SearchResult) string {
 	var sb strings.Builder
 	sb.WriteString("### Google Search Results\n\n")
 	for i, res := range results {
-		sb.WriteString(fmt.Sprintf("%d. **[%s](%s)**\n", i+1, res.Title, res.Link))
-		sb.WriteString(fmt.Sprintf("   %s\n\n", strings.ReplaceAll(res.Snippet, "\n", " ")))
+		fmt.Fprintf(&sb, "%d. **[%s](%s)**\n", i+1, res.Title, res.Link)
+		fmt.Fprintf(&sb, "   %s\n\n", strings.ReplaceAll(res.Snippet, "\n", " "))
 	}
 	return sb.String()
 }

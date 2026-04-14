@@ -117,7 +117,7 @@ func TestReadLogFile(t *testing.T) {
 
 	// Create a log file with BOM
 	logPath := filepath.Join(tmpDir, "test.log")
-	bom := []byte{0xEF, 0xBB, 0xBF}
+	bom := []byte{0xEF, 0xBB, 0xBF} //nolint:prealloc // BOM literal; preallocating would obscure intent
 	content := "log content"
 	_ = os.WriteFile(logPath, append(bom, []byte(content)...), 0o600)
 

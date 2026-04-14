@@ -193,9 +193,9 @@ func FormatEventsMarkdown(events []CalendarEvent) string {
 			calLabel = fmt.Sprintf(" _[%s]_", ev.CalendarName)
 		}
 		if ev.Location != "" {
-			sb.WriteString(fmt.Sprintf("- **%s** — %s _(@ %s)_%s\n", start, label, ev.Location, calLabel))
+			fmt.Fprintf(&sb, "- **%s** — %s _(@ %s)_%s\n", start, label, ev.Location, calLabel)
 		} else {
-			sb.WriteString(fmt.Sprintf("- **%s** — %s%s\n", start, label, calLabel))
+			fmt.Fprintf(&sb, "- **%s** — %s%s\n", start, label, calLabel)
 		}
 	}
 	return sb.String()

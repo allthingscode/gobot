@@ -219,7 +219,7 @@ func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
 		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
 			return walkErr
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G122: path comes from WalkDir callback which is already root-scoped
 		if err != nil {
 			slog.Warn("memory rebuild: skipping unreadable file", "path", path, "err", err)
 			return nil

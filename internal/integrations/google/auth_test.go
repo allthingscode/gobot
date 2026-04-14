@@ -15,9 +15,9 @@ import (
 func TestBearerToken_ValidNotExpired(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	tok := storedToken{
-		Token:        "valid-access-token", // nolint:gosec // test key
-		RefreshToken: "refresh",            // nolint:gosec // test key
+	tok := storedToken{ //nolint:gosec // G101: test credentials, not real secrets
+		Token:        "valid-access-token",
+		RefreshToken: "refresh",
 		TokenURI:     "https://oauth2.googleapis.com/token",
 		ClientID:     "cid",
 		ClientSecret: "csec",
@@ -181,7 +181,7 @@ func (r *prefixRewriter) RoundTrip(req *http.Request) (*http.Response, error) {
 // writeToken marshals tok and writes to dir/google_token.json.
 func writeToken(t *testing.T, dir string, tok storedToken) {
 	t.Helper()
-	data, err := json.Marshal(tok)
+	data, err := json.Marshal(tok) //nolint:gosec // G117: RefreshToken must be marshaled to persist the token
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,7 +31,7 @@ func TestDecode_NoBOM(t *testing.T) {
 
 func TestDecode_WithBOM(t *testing.T) {
 	t.Parallel()
-	bom := []byte{0xEF, 0xBB, 0xBF}
+	bom := []byte{0xEF, 0xBB, 0xBF} //nolint:prealloc // BOM literal; preallocating would obscure intent
 	json := []byte(`{"providers":{"gemini":{"apiKey":"test-key"}}}`)
 	input := append(bom, json...) //nolint:gocritic // intentional: prepend BOM to original json bytes
 
@@ -322,7 +322,7 @@ func TestDecode_ReadError(t *testing.T) {
 
 func TestDecode_OnlyBOM(t *testing.T) {
 	t.Parallel()
-	bom := []byte{0xEF, 0xBB, 0xBF}
+	bom := []byte{0xEF, 0xBB, 0xBF} //nolint:prealloc // BOM literal; preallocating would obscure intent
 	_, err := decode(bytes.NewReader(bom))
 	if err == nil {
 		t.Fatal("expected parse error for BOM-only input, got nil")

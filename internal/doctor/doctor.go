@@ -98,7 +98,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 	// Advisory checks print [WARN] but never block the bot from starting.
 	r := func(c Result, crit bool) Result { c.Critical = crit; return c }
 
-	checks := []Result{
+	checks := []Result{ //nolint:prealloc // capacity depends on resResults and conResults which require iteration to compute
 		r(checkStorageRoot(cfg), true),
 		r(checkWorkspace(cfg), true),
 		r(checkLogs(cfg), false),
@@ -178,7 +178,7 @@ func checkAPIKey(cfg *config.Config) Result {
 	} else {
 		masked = key[:4] + "..." + key[len(key)-4:]
 	}
-	slog.Debug("api key found", "masked", masked)
+	slog.Debug("api key found", "masked", masked) //nolint:gosec // G706: masked value is safe for logging
 	return Result{Name: "gemini api key", OK: true, Detail: masked}
 }
 

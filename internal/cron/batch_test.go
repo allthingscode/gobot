@@ -136,7 +136,7 @@ func defaultsContent() string {
 
 func validateDefaults(t *testing.T, j *Job) {
 	t.Helper()
-	if j.Payload.Channel != "telegram" {
+	if j.Payload.Channel != fallbackChannel {
 		t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
 	}
 	if !j.Enabled {
@@ -166,7 +166,7 @@ func validateStemTest(t *testing.T, j *Job) {
 	if j.Schedule.Kind != KindEvery {
 		t.Errorf("expected KindEvery, got %v", j.Schedule.Kind)
 	}
-	if j.Payload.Channel != "telegram" {
+	if j.Payload.Channel != fallbackChannel {
 		t.Errorf("expected default channel telegram, got %s", j.Payload.Channel)
 	}
 	if j.Payload.To != "" {

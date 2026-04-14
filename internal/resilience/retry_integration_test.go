@@ -196,7 +196,7 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 		t.Fatal("expected error from second execution, got nil")
 	}
 
-	if cb.State() != "open" {
+	if cb.State() != "open" { //nolint:goconst // test fixture
 		t.Errorf("expected circuit breaker to be open, got %s", cb.State())
 	}
 
@@ -232,7 +232,7 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 		})
 	}
 
-	if cb.State() != "open" {
+	if cb.State() != "open" { //nolint:goconst // test fixture
 		t.Fatalf("expected CB to be open, got %s", cb.State())
 	}
 
@@ -260,7 +260,7 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 		t.Fatalf("expected success on recovery, got %v", err)
 	}
 
-	if cb.State() != "closed" {
+	if cb.State() != "closed" { //nolint:goconst // test fixture
 		t.Errorf("expected CB to be closed after successful recovery call, got %s", cb.State())
 	}
 }
