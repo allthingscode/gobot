@@ -426,23 +426,30 @@ func (c *Config) WorkspacePath(userID string, subpath ...string) string {
 	return filepath.Join(parts...)
 }
 
+// resolveSecret returns the first non-empty value from: configVal -> secrets store
+// (looked up by storeKey) -> environment variable (envKey).
+// store is passed in so callers can share a single SecretsStore instance.
+func (c *Config) resolveSecret(store *secrets.SecretsStore, configVal, storeKey, envKey string) string {
+	if configVal != "" {
+		return configVal
+	}
+	val, err := store.Get(storeKey)
+	if err != nil {
+		slog.Warn("secrets store lookup failed, falling back to env", "key", storeKey, "err", err)
+	}
+	if val != "" {
+		return val
+	}
+	return os.Getenv(envKey)
+}
+
 // GeminiAPIKey returns the Gemini API key. Priority order:
 // 1. config.json field
 // 2. DPAPI secrets store (gemini_api_key)
 // 3. GEMINI_API_KEY environment variable (for CI / DPAPI-free environments).
 func (c *Config) GeminiAPIKey() string {
-	if c.Providers.Gemini.APIKey != "" {
-		return c.Providers.Gemini.APIKey
-	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	val, err := store.Get("gemini_api_key")
-	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", "gemini_api_key", "err", err)
-	}
-	if val != "" {
-		return val
-	}
-	return os.Getenv("GEMINI_API_KEY")
+	return c.resolveSecret(store, c.Providers.Gemini.APIKey, "gemini_api_key", "GEMINI_API_KEY")
 }
 
 // AnthropicAPIKey returns the Anthropic API key. Priority order:
@@ -450,18 +457,8 @@ func (c *Config) GeminiAPIKey() string {
 // 2. DPAPI secrets store (anthropic_api_key)
 // 3. ANTHROPIC_API_KEY environment variable.
 func (c *Config) AnthropicAPIKey() string {
-	if c.Providers.Anthropic.APIKey != "" {
-		return c.Providers.Anthropic.APIKey
-	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	val, err := store.Get("anthropic_api_key")
-	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", "anthropic_api_key", "err", err)
-	}
-	if val != "" {
-		return val
-	}
-	return os.Getenv("ANTHROPIC_API_KEY")
+	return c.resolveSecret(store, c.Providers.Anthropic.APIKey, "anthropic_api_key", "ANTHROPIC_API_KEY")
 }
 
 // OpenAIAPIKey returns the OpenAI API key. Priority order:
@@ -469,18 +466,8 @@ func (c *Config) AnthropicAPIKey() string {
 // 2. DPAPI secrets store (openai_api_key)
 // 3. OPENAI_API_KEY environment variable.
 func (c *Config) OpenAIAPIKey() string {
-	if c.Providers.OpenAI.APIKey != "" {
-		return c.Providers.OpenAI.APIKey
-	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	val, err := store.Get("openai_api_key")
-	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", "openai_api_key", "err", err)
-	}
-	if val != "" {
-		return val
-	}
-	return os.Getenv("OPENAI_API_KEY")
+	return c.resolveSecret(store, c.Providers.OpenAI.APIKey, "openai_api_key", "OPENAI_API_KEY")
 }
 
 // OpenAIBaseURL returns the OpenAI base URL. Priority order:
@@ -488,18 +475,8 @@ func (c *Config) OpenAIAPIKey() string {
 // 2. DPAPI secrets store (openai_base_url)
 // 3. OPENAI_BASE_URL environment variable.
 func (c *Config) OpenAIBaseURL() string {
-	if c.Providers.OpenAI.BaseURL != "" {
-		return c.Providers.OpenAI.BaseURL
-	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	val, err := store.Get("openai_base_url")
-	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", "openai_base_url", "err", err)
-	}
-	if val != "" {
-		return val
-	}
-	return os.Getenv("OPENAI_BASE_URL")
+	return c.resolveSecret(store, c.Providers.OpenAI.BaseURL, "openai_base_url", "OPENAI_BASE_URL")
 }
 
 // GoogleAPIKey returns the Google Custom Search API key. Priority order:
@@ -507,18 +484,8 @@ func (c *Config) OpenAIBaseURL() string {
 // 2. DPAPI secrets store (google_api_key)
 // 3. GOOGLE_API_KEY environment variable.
 func (c *Config) GoogleAPIKey() string {
-	if c.Providers.Google.APIKey != "" {
-		return c.Providers.Google.APIKey
-	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	val, err := store.Get("google_api_key")
-	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", "google_api_key", "err", err)
-	}
-	if val != "" {
-		return val
-	}
-	return os.Getenv("GOOGLE_API_KEY")
+	return c.resolveSecret(store, c.Providers.Google.APIKey, "google_api_key", "GOOGLE_API_KEY")
 }
 
 // GoogleCX returns the Google Custom Search Engine ID (CX). Priority order:
@@ -526,35 +493,15 @@ func (c *Config) GoogleAPIKey() string {
 // 2. DPAPI secrets store (google_cx)
 // 3. GOOGLE_CX environment variable.
 func (c *Config) GoogleCX() string {
-	if c.Providers.Google.CustomCX != "" {
-		return c.Providers.Google.CustomCX
-	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	val, err := store.Get("google_cx")
-	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", "google_cx", "err", err)
-	}
-	if val != "" {
-		return val
-	}
-	return os.Getenv("GOOGLE_CX")
+	return c.resolveSecret(store, c.Providers.Google.CustomCX, "google_cx", "GOOGLE_CX")
 }
 
 // TelegramToken returns the Telegram bot token from config,
 // falling back to the DPAPI secrets store or TELEGRAM_BOT_TOKEN environment variable.
 func (c *Config) TelegramToken() string {
-	if t := c.Channels.Telegram.Token; t != "" {
-		return t
-	}
 	store := secrets.NewSecretsStore(c.StorageRoot())
-	val, err := store.Get("telegram_token")
-	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", "telegram_token", "err", err)
-	}
-	if val != "" {
-		return val
-	}
-	return os.Getenv("TELEGRAM_BOT_TOKEN")
+	return c.resolveSecret(store, c.Channels.Telegram.Token, "telegram_token", "TELEGRAM_BOT_TOKEN")
 }
 
 // MCPEnvFor returns the resolved environment variables for the named MCP server.
