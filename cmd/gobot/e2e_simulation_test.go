@@ -55,10 +55,10 @@ type ToolCallRecord struct {
 // It executes scripted tool calls against registered tools and returns
 // a scripted final text, recording every tool invocation.
 type simRunner struct {
-	steps    []SimStep
-	tools    []Tool
-	recorded []ToolCallRecord
-	stepIdx  int
+	steps       []SimStep
+	toolsByName map[string]Tool
+	recorded    []ToolCallRecord
+	stepIdx     int
 }
 
 func (r *simRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
@@ -97,10 +97,8 @@ func (r *simRunner) Run(ctx context.Context, sessionKey, _ string, messages []ag
 // dispatchTool finds the registered tool by name and executes it.
 // If no tool matches, returns a placeholder string (not an error).
 func (r *simRunner) dispatchTool(ctx context.Context, sessionKey string, fc SimToolCall) (string, error) {
-	for _, t := range r.tools {
-		if t.Name() == fc.Name {
-			return t.Execute(ctx, sessionKey, "", fc.Args)
-		}
+	if t, ok := r.toolsByName[fc.Name]; ok {
+		return t.Execute(ctx, sessionKey, "", fc.Args)
 	}
 	return fmt.Sprintf("[tool %q not registered in scenario]", fc.Name), nil
 }
@@ -131,7 +129,7 @@ func (t *simTool) Execute(_ context.Context, _, _ string, _ map[string]any) (str
 func RunScenario(t *testing.T, s Scenario, tools []Tool) {
 	t.Helper()
 
-	runner := &simRunner{steps: s.Steps, tools: tools}
+	runner := &simRunner{steps: s.Steps, toolsByName: buildSimToolMap(tools)}
 	mgr := agent.NewSessionManager(runner, nil, "sim-model")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -282,7 +280,7 @@ func TestE2ESimulation_ToolError(t *testing.T) {
 
 func TestE2ESimulation_NoSteps(t *testing.T) {
 	t.Parallel()
-	runner := &simRunner{steps: nil, tools: nil}
+	runner := &simRunner{steps: nil, toolsByName: nil}
 	mgr := agent.NewSessionManager(runner, nil, "sim-model")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -292,4 +290,15 @@ func TestE2ESimulation_NoSteps(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when scenario has no steps, got nil")
 	}
+}
+
+func buildSimToolMap(tools []Tool) map[string]Tool {
+	if tools == nil {
+		return nil
+	}
+	m := make(map[string]Tool, len(tools))
+	for _, t := range tools {
+		m[t.Name()] = t
+	}
+	return m
 }

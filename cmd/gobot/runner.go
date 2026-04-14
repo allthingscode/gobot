@@ -38,7 +38,7 @@ type geminiRunner struct {
 	vecStore            *vector.Store                           // F-030: Semantic memory
 	embedProv           vector.EmbeddingProvider                // F-030: Semantic memory
 	cfg                 *config.Config                          // F-030: Configuration
-	tools               []Tool                                  // registered tools exposed to the provider
+	toolsByName         map[string]Tool                         // registered tools exposed to the provider
 	breaker             *resilience.Breaker                     // circuit breaker for API calls
 	limiter             *rate.Limiter                           // token-bucket rate limiter
 	hooks               *agent.Hooks                            // may be nil; set via SetHooks
@@ -115,6 +115,20 @@ func (r *geminiRunner) SetMaxToolIterations(n int) {
 	r.maxToolIterations = n
 }
 
+// SetTools registers a list of tools with the runner, building an O(1) lookup map.
+// If multiple tools have the same name, the last one registered wins and a warning is logged.
+func (r *geminiRunner) SetTools(tools []Tool) {
+	m := make(map[string]Tool, len(tools))
+	for _, t := range tools {
+		name := t.Name()
+		if _, dup := m[name]; dup {
+			slog.Warn("runner: duplicate tool name registered, later registration wins", "tool", name)
+		}
+		m[name] = t
+	}
+	r.toolsByName = m
+}
+
 // Run executes the tool-call/response loop until the provider returns a terminal text response.
 //
 // Each iteration:
@@ -139,8 +153,8 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messa
 	rubric := r.generateReflectionRubric(ctx, sessionKey, userText)
 
 	// 2. Prepare Tool Declarations
-	toolDecls := make([]provider.ToolDeclaration, 0, len(r.tools))
-	for _, t := range r.tools {
+	toolDecls := make([]provider.ToolDeclaration, 0, len(r.toolsByName))
+	for _, t := range r.toolsByName {
 		toolDecls = append(toolDecls, t.Declaration())
 	}
 
@@ -495,17 +509,17 @@ func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey, userID,
 		}
 	}()
 
-	for _, t := range r.tools {
-		if t.Name() == name {
-			if r.tracer != nil {
-				return r.tracer.TraceToolExecution(ctx, sessionKey, name, func(ctx context.Context) (string, error) {
-					return t.Execute(ctx, sessionKey, userID, args)
-				})
-			}
-			return t.Execute(ctx, sessionKey, userID, args)
-		}
+	t, ok := r.toolsByName[name]
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", name)
 	}
-	return "", fmt.Errorf("unknown tool: %s", name)
+
+	if r.tracer != nil {
+		return r.tracer.TraceToolExecution(ctx, sessionKey, name, func(ctx context.Context) (string, error) {
+			return t.Execute(ctx, sessionKey, userID, args)
+		})
+	}
+	return t.Execute(ctx, sessionKey, userID, args)
 }
 
 // generateIdempotencyKey generates a random UUID v4 for use as an idempotency key.

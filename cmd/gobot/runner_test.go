@@ -63,7 +63,7 @@ func TestRunner_EnforcesToolIterationLimit(t *testing.T) {
 	cfg := &config.Config{}
 	runner := newGeminiRunner(mock, "model", "sys", cfg)
 	runner.maxToolIterations = 3 // Set a low limit for testing
-	runner.tools = []Tool{&iterLimitMockTool{name: name}}
+	runner.SetTools([]Tool{&iterLimitMockTool{name: name}})
 
 	_, _, err := runner.Run(context.Background(), "session", "user", nil)
 	if err == nil {
@@ -440,16 +440,17 @@ func setupValidationRunner(toolCalls []map[string]any) *geminiRunner {
 		},
 	}
 
-	return &geminiRunner{
+	r := &geminiRunner{
 		prov:              mock,
 		model:             "mock-model",
 		maxToolIterations: 10,
 		limiter:           rate.NewLimiter(rate.Inf, 1),
 		breaker:           resilience.New("mock", 5, time.Minute, time.Second),
-		tools: []Tool{
-			&mockTool{name: "test_tool"},
-		},
 	}
+	r.SetTools([]Tool{
+		&mockTool{name: "test_tool"},
+	})
+	return r
 }
 
 func checkValidationResult(t *testing.T, name, got string, err error, wantErr string) {
@@ -499,9 +500,8 @@ func (p *panicTool) Execute(_ context.Context, _, _ string, _ map[string]any) (s
 
 func TestRunner_ToolPanicRecovery(t *testing.T) {
 	t.Parallel()
-	r := &geminiRunner{
-		tools: []Tool{&panicTool{}},
-	}
+	r := &geminiRunner{}
+	r.SetTools([]Tool{&panicTool{}})
 	ctx := context.Background()
 	result, err := r.executeToolInner(ctx, "session-123", "", "panic_tool", nil)
 
@@ -559,10 +559,10 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 		maxToolResultBytes: 100,
 		limiter:            rate.NewLimiter(rate.Inf, 1),
 		breaker:            resilience.New("mock", 5, time.Minute, time.Second),
-		tools: []Tool{
-			&largeTool{size: 200},
-		},
 	}
+	r.SetTools([]Tool{
+		&largeTool{size: 200},
+	})
 
 	_, messages, err := r.Run(context.Background(), "test-session", "", nil)
 	if err != nil {
@@ -629,10 +629,10 @@ func TestRunner_StructuredLogging(t *testing.T) { //nolint:paralleltest // mutat
 		maxToolIterations: 10,
 		limiter:           rate.NewLimiter(rate.Inf, 1),
 		breaker:           resilience.New("mock", 5, time.Minute, time.Second),
-		tools: []Tool{
-			&failTool{name: "fail_tool"},
-		},
 	}
+	r.SetTools([]Tool{
+		&failTool{name: "fail_tool"},
+	})
 
 	_, _, _ = r.Run(context.Background(), "test-session", "", nil)
 
@@ -704,10 +704,10 @@ func TestRunner_PreservesOutputOnError(t *testing.T) {
 		maxToolIterations: 10,
 		limiter:           rate.NewLimiter(rate.Inf, 1),
 		breaker:           resilience.New("mock", 5, time.Minute, time.Second),
-		tools: []Tool{
-			&failWithOutputTool{},
-		},
 	}
+	r.SetTools([]Tool{
+		&failWithOutputTool{},
+	})
 
 	_, messages, err := r.Run(context.Background(), "test-session", "", nil)
 	if err != nil {

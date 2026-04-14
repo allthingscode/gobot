@@ -44,7 +44,7 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 	memStore, cleanup := initMemory(cfg, runner)
 	vecStore, embedProv, vecCleanup := initVectorStore(cfg, prov, runner)
 
-	runner.tools = registerTools(cfg, prov, model, memStore, vecStore, embedProv)
+	runner.SetTools(registerTools(cfg, prov, model, memStore, vecStore, embedProv))
 
 	finalCleanup := func() {
 		cleanup()
