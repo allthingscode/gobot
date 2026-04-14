@@ -1,6 +1,7 @@
 package context
 
 import (
+	stdctx "context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -25,7 +26,7 @@ func openDB(dbDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("openDB: open %s: %w", dbPath, err)
 	}
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if _, err := db.ExecContext(stdctx.Background(), "PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("openDB: set WAL mode: %w", err)
 	}
@@ -40,7 +41,7 @@ func openDB(dbDir string) (*sql.DB, error) {
 // table if it does not already exist. It is idempotent and safe to call on
 // both fresh and existing databases.
 func addChecksumColumnIfMissing(db *sql.DB) error {
-	rows, err := db.Query("PRAGMA table_info(checkpoints)")
+	rows, err := db.QueryContext(stdctx.Background(), "PRAGMA table_info(checkpoints)")
 	if err != nil {
 		return err
 	}
@@ -64,7 +65,7 @@ func addChecksumColumnIfMissing(db *sql.DB) error {
 		return err
 	}
 
-	_, err = db.Exec("ALTER TABLE checkpoints ADD COLUMN checksum TEXT")
+	_, err = db.ExecContext(stdctx.Background(), "ALTER TABLE checkpoints ADD COLUMN checksum TEXT")
 	return err
 }
 
@@ -90,7 +91,7 @@ func checkColumnExists(rows *sql.Rows, colName string) (exists bool, err error) 
 }
 
 func hasColumn(db *sql.DB, colName string) (bool, error) {
-	rows, err := db.Query("PRAGMA table_info(threads)")
+	rows, err := db.QueryContext(stdctx.Background(), "PRAGMA table_info(threads)")
 	if err != nil {
 		return false, err
 	}
@@ -104,7 +105,7 @@ func addTokenColumnsIfMissing(db *sql.DB) error {
 		return err
 	}
 	if !hasTokens {
-		if _, err := db.Exec("ALTER TABLE threads ADD COLUMN estimated_tokens INTEGER DEFAULT 0"); err != nil {
+		if _, err := db.ExecContext(stdctx.Background(), "ALTER TABLE threads ADD COLUMN estimated_tokens INTEGER DEFAULT 0"); err != nil {
 			return fmt.Errorf("addTokenColumnsIfMissing: estimated_tokens: %w", err)
 		}
 	}
@@ -113,7 +114,7 @@ func addTokenColumnsIfMissing(db *sql.DB) error {
 		return err
 	}
 	if !hasCompactedAt {
-		if _, err := db.Exec("ALTER TABLE threads ADD COLUMN last_compacted_at DATETIME"); err != nil {
+		if _, err := db.ExecContext(stdctx.Background(), "ALTER TABLE threads ADD COLUMN last_compacted_at DATETIME"); err != nil {
 			return fmt.Errorf("addTokenColumnsIfMissing: last_compacted_at: %w", err)
 		}
 	}
@@ -122,7 +123,7 @@ func addTokenColumnsIfMissing(db *sql.DB) error {
 
 // initSchema creates the threads, checkpoints, and idempotency_keys tables if they do not exist.
 func initSchema(db *sql.DB) error {
-	_, err := db.Exec(`
+	_, err := db.ExecContext(stdctx.Background(), `
 		CREATE TABLE IF NOT EXISTS threads (
 			thread_id         TEXT PRIMARY KEY,
 			status            TEXT    DEFAULT 'active',
@@ -137,7 +138,7 @@ func initSchema(db *sql.DB) error {
 		return fmt.Errorf("initSchema: create threads: %w", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE TABLE IF NOT EXISTS checkpoints (
 			checkpoint_id INTEGER PRIMARY KEY AUTOINCREMENT,
 			thread_id     TEXT,
@@ -151,7 +152,7 @@ func initSchema(db *sql.DB) error {
 		return fmt.Errorf("initSchema: create checkpoints: %w", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_iteration 
 		ON checkpoints(thread_id, iteration DESC)
 	`)
@@ -167,7 +168,7 @@ func initSchema(db *sql.DB) error {
 		return fmt.Errorf("initSchema: add token columns: %w", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE TABLE IF NOT EXISTS idempotency_keys (
 			key         TEXT PRIMARY KEY,
 			tool_name   TEXT NOT NULL,
@@ -181,7 +182,7 @@ func initSchema(db *sql.DB) error {
 		return fmt.Errorf("initSchema: create idempotency_keys: %w", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE INDEX IF NOT EXISTS idx_idempotency_session
 		ON idempotency_keys(session_key)
 	`)
@@ -189,7 +190,7 @@ func initSchema(db *sql.DB) error {
 		return fmt.Errorf("initSchema: create idx_idempotency_session: %w", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE INDEX IF NOT EXISTS idx_idempotency_created
 		ON idempotency_keys(created_at)
 	`)

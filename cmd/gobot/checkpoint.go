@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -22,7 +23,7 @@ func cmdCheckpoints() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("checkpoint store: %w", err)
 			}
-			threads, err := store.ListResumable()
+			threads, err := store.ListResumable(context.Background())
 			if err != nil {
 				return fmt.Errorf("list checkpoints: %w", err)
 			}
@@ -63,7 +64,7 @@ func cmdResume() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("checkpoint store: %w", err)
 			}
-			snap, err := store.LoadLatest(threadID)
+			snap, err := store.LoadLatest(context.Background(), threadID)
 			if err != nil {
 				return fmt.Errorf("load checkpoint: %w", err)
 			}

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
@@ -57,7 +58,7 @@ func NewAuditLedger(storageRoot string) (*AuditLedger, error) {
 	if err != nil {
 		return nil, fmt.Errorf("audit ledger: open db: %w", err)
 	}
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("audit ledger: WAL mode: %w", err)
 	}
@@ -71,7 +72,7 @@ func NewAuditLedger(storageRoot string) (*AuditLedger, error) {
 }
 
 func initAuditSchema(db *sql.DB) error {
-	_, err := db.Exec(`
+	_, err := db.ExecContext(context.Background(), `
 		CREATE TABLE IF NOT EXISTS audit_log (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp  TEXT    NOT NULL,
@@ -95,13 +96,14 @@ func (l *AuditLedger) Close() error { return l.db.Close() }
 // Append records a new audit entry, chaining it to the previous record's hash.
 func (l *AuditLedger) Append(entry AuditEntry) error {
 	var prevHash string
-	row := l.db.QueryRow(`SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1`)
+	row := l.db.QueryRowContext(context.Background(), `SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1`)
 	_ = row.Scan(&prevHash) // ignore sql.ErrNoRows — prevHash stays ""
 
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
 	hash := auditHash(prevHash, ts, entry.SessionID, entry.Actor, entry.Action, entry.Result)
 
-	_, err := l.db.Exec(
+	_, err := l.db.ExecContext(
+		context.Background(),
 		`INSERT INTO audit_log (timestamp, session_id, actor, action, result, prev_hash, hash)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		ts, entry.SessionID, entry.Actor, entry.Action, entry.Result, prevHash, hash,
@@ -114,7 +116,8 @@ func (l *AuditLedger) Append(entry AuditEntry) error {
 
 // GetAll returns all audit records in ascending insertion order.
 func (l *AuditLedger) GetAll() ([]AuditRecord, error) {
-	rows, err := l.db.Query(
+	rows, err := l.db.QueryContext(
+		context.Background(),
 		`SELECT id, timestamp, session_id, actor, action, result, prev_hash, hash
 		 FROM audit_log ORDER BY id ASC`)
 	if err != nil {

@@ -3,6 +3,7 @@ package context
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
 	"strings"
@@ -75,11 +76,11 @@ func TestCreateThread(t *testing.T) { //nolint:paralleltest // modifies global e
 			t.Parallel()
 
 			m := newTestManager(t)
-			if err := m.CreateThread(tt.threadID, tt.model, tt.metadata); (err != nil) != tt.wantErr {
+			if err := m.CreateThread(context.Background(), tt.threadID, tt.model, tt.metadata); (err != nil) != tt.wantErr {
 				t.Errorf("CreateThread() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			// Re-inserting the same thread_id must not error (INSERT OR REPLACE).
-			if err := m.CreateThread(tt.threadID, tt.model+"v2", nil); err != nil {
+			if err := m.CreateThread(context.Background(), tt.threadID, tt.model+"v2", nil); err != nil {
 				t.Errorf("re-insert: %v", err)
 			}
 		})
@@ -130,10 +131,10 @@ func TestSaveSnapshot(t *testing.T) { //nolint:paralleltest // modifies global e
 			t.Parallel()
 
 			m := newTestManager(t)
-			if err := m.CreateThread(tt.threadID, "model", nil); err != nil {
+			if err := m.CreateThread(context.Background(), tt.threadID, "model", nil); err != nil {
 				t.Fatalf("CreateThread: %v", err)
 			}
-			ok, err := m.SaveSnapshot(tt.threadID, tt.iteration, tt.messages)
+			ok, err := m.SaveSnapshot(context.Background(), tt.threadID, tt.iteration, tt.messages)
 			if err != nil {
 				t.Errorf("SaveSnapshot() unexpected error: %v", err)
 			}
@@ -152,13 +153,13 @@ func setupThreadWithSnapshots(t *testing.T, m *CheckpointManager, threadID strin
 		content := MessageContent{Str: strPtr(text)}
 		return StrategicMessage{Role: role, Content: &content}
 	}
-	if err := m.CreateThread(threadID, "gemini-3-flash", map[string]any{"k": "v"}); err != nil {
+	if err := m.CreateThread(context.Background(), threadID, "gemini-3-flash", map[string]any{"k": "v"}); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	var lastMsgs []StrategicMessage
 	for i := 1; i <= iterations; i++ {
 		lastMsgs = append(lastMsgs, msg(RoleUser, "msg"))
-		if _, err := m.SaveSnapshot(threadID, i, lastMsgs); err != nil {
+		if _, err := m.SaveSnapshot(context.Background(), threadID, i, lastMsgs); err != nil {
 			t.Fatalf("SaveSnapshot iter%d: %v", i, err)
 		}
 	}
@@ -168,7 +169,7 @@ func setupThreadWithSnapshots(t *testing.T, m *CheckpointManager, threadID strin
 func TestLoadLatest_UnknownThread(t *testing.T) { //nolint:paralleltest // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
-	snap, err := m.LoadLatest("no-such-thread")
+	snap, err := m.LoadLatest(context.Background(), "no-such-thread")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestLoadLatest_MultipleSnapshots(t *testing.T) { //nolint:paralleltest // m
 	m := newTestManager(t)
 	setupThreadWithSnapshots(t, m, "t1", 2)
 
-	snap, err := m.LoadLatest("t1")
+	snap, err := m.LoadLatest(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("LoadLatest: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestLoadLatest_RoundTrip(t *testing.T) { //nolint:paralleltest // modifies 
 	m := newTestManager(t)
 	original := setupThreadWithSnapshots(t, m, "t1", 1)
 
-	snap, err := m.LoadLatest("t1")
+	snap, err := m.LoadLatest(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("LoadLatest: %v", err)
 	}
@@ -231,14 +232,14 @@ func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global
 		t.Parallel()
 
 		m := newTestManager(t)
-		if err := m.CreateThread("t1", "model", nil); err != nil {
+		if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 			t.Fatalf("CreateThread: %v", err)
 		}
-		if err := m.CompleteThread("t1"); err != nil {
+		if err := m.CompleteThread(context.Background(), "t1"); err != nil {
 			t.Fatalf("CompleteThread: %v", err)
 		}
 		var status string
-		if err := m.db.QueryRow("SELECT status FROM threads WHERE thread_id = ?", "t1").Scan(&status); err != nil {
+		if err := m.db.QueryRowContext(context.Background(), "SELECT status FROM threads WHERE thread_id = ?", "t1").Scan(&status); err != nil {
 			t.Fatalf("query status: %v", err)
 		}
 		if status != "completed" {
@@ -251,10 +252,10 @@ func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global
 
 		m := newTestManager(t)
 		setupThreadWithSnapshots(t, m, "t1", 1)
-		if err := m.CompleteThread("t1"); err != nil {
+		if err := m.CompleteThread(context.Background(), "t1"); err != nil {
 			t.Fatalf("CompleteThread: %v", err)
 		}
-		resumable, err := m.ListResumable()
+		resumable, err := m.ListResumable(context.Background())
 		if err != nil {
 			t.Fatalf("ListResumable: %v", err)
 		}
@@ -269,7 +270,7 @@ func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global
 func TestListResumable_Empty(t *testing.T) { //nolint:paralleltest // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
-	result, err := m.ListResumable()
+	result, err := m.ListResumable(context.Background())
 	if err != nil {
 		t.Fatalf("ListResumable: %v", err)
 	}
@@ -285,7 +286,7 @@ func TestListResumable_Ordered(t *testing.T) { //nolint:paralleltest // modifies
 		setupThreadWithSnapshots(t, m, id, 1)
 	}
 
-	result, err := m.ListResumable()
+	result, err := m.ListResumable(context.Background())
 	if err != nil {
 		t.Fatalf("ListResumable: %v", err)
 	}
@@ -302,10 +303,10 @@ func TestListResumable_Ordered(t *testing.T) { //nolint:paralleltest // modifies
 func TestListResumable_NoSnapshotExcluded(t *testing.T) { //nolint:paralleltest // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
-	if err := m.CreateThread("no-snap", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "no-snap", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
-	result, err := m.ListResumable()
+	result, err := m.ListResumable(context.Background())
 	if err != nil {
 		t.Fatalf("ListResumable: %v", err)
 	}
@@ -319,14 +320,14 @@ func TestListResumable_NoSnapshotExcluded(t *testing.T) { //nolint:paralleltest 
 func TestSaveSnapshot_TxBeginError(t *testing.T) { //nolint:paralleltest // modifies global environment
 
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	_ = m.db.Close() // force all subsequent DB operations to fail
 
 	content := MessageContent{Str: strPtr("hi")}
 	msgs := []StrategicMessage{{Role: RoleUser, Content: &content}}
-	_, err := m.SaveSnapshot("t1", 1, msgs)
+	_, err := m.SaveSnapshot(context.Background(), "t1", 1, msgs)
 	if err == nil {
 		t.Error("expected error after DB close, got nil")
 	}
@@ -337,7 +338,7 @@ func TestListResumable_QueryError(t *testing.T) { //nolint:paralleltest // modif
 	m := newTestManager(t)
 	_ = m.db.Close() // force query to fail
 
-	_, err := m.ListResumable()
+	_, err := m.ListResumable(context.Background())
 	if err == nil {
 		t.Error("expected error after DB close, got nil")
 	}
@@ -348,7 +349,7 @@ func TestCreateThread_ExecError(t *testing.T) { //nolint:paralleltest // modifie
 	m := newTestManager(t)
 	_ = m.db.Close()
 
-	err := m.CreateThread("t1", "model", nil)
+	err := m.CreateThread(context.Background(), "t1", "model", nil)
 	if err == nil {
 		t.Error("expected error after DB close, got nil")
 	}
@@ -363,7 +364,7 @@ func TestCompleteThread_ExecError(t *testing.T) { //nolint:paralleltest // modif
 	m := newTestManager(t)
 	_ = m.db.Close()
 
-	err := m.CompleteThread("t1")
+	err := m.CompleteThread(context.Background(), "t1")
 	if err == nil {
 		t.Error("expected error after DB close, got nil")
 	}
@@ -380,17 +381,17 @@ func TestLoadLatest_CorruptState(t *testing.T) { //nolint:paralleltest // modifi
 	t.Run("returns error when state JSON is corrupt", func(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t)
-		if err := m.CreateThread("t1", "model", nil); err != nil {
+		if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 			t.Fatalf("CreateThread: %v", err)
 		}
 		// Insert a checkpoint with invalid JSON in the state column.
-		if _, err := m.db.Exec(
+		if _, err := m.db.ExecContext(context.Background(), 
 			`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
 			"t1", 1, "NOT_VALID_JSON",
 		); err != nil {
 			t.Fatalf("insert corrupt row: %v", err)
 		}
-		_, err := m.LoadLatest("t1")
+		_, err := m.LoadLatest(context.Background(), "t1")
 		if err == nil {
 			t.Error("expected error for corrupt state JSON, got nil")
 		}
@@ -403,20 +404,20 @@ func TestLoadLatest_CorruptMetadata(t *testing.T) { //nolint:paralleltest // mod
 		t.Parallel()
 		m := newTestManager(t)
 		// Insert a thread with invalid metadata JSON directly.
-		if _, err := m.db.Exec(
+		if _, err := m.db.ExecContext(context.Background(), 
 			`INSERT INTO threads (thread_id, model, status, metadata) VALUES (?, ?, 'active', ?)`,
 			"t1", "model", "NOT_JSON",
 		); err != nil {
 			t.Fatalf("insert corrupt thread: %v", err)
 		}
 		content := MessageContent{Str: strPtr("hi")}
-		if _, err := m.db.Exec(
+		if _, err := m.db.ExecContext(context.Background(), 
 			`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
 			"t1", 1, `[{"role":"user","content":"hi"}]`,
 		); err != nil {
 			t.Fatalf("insert checkpoint: %v", err)
 		}
-		snap, err := m.LoadLatest("t1")
+		snap, err := m.LoadLatest(context.Background(), "t1")
 		_ = content
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -440,7 +441,7 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest
 	// a message whose Content is set to an item whose MarshalJSON returns an error.
 	// We use a ContentItem with all-nil fields to trigger that error path.
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
@@ -456,7 +457,7 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest
 	msgs := []StrategicMessage{
 		{Role: RoleUser, Content: &MessageContent{Items: []ContentItem{badItem}}},
 	}
-	ok, err := m.SaveSnapshot("t1", 1, msgs)
+	ok, err := m.SaveSnapshot(context.Background(), "t1", 1, msgs)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -535,12 +536,12 @@ func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest //
 func TestSaveSnapshot_StoresChecksum(t *testing.T) { //nolint:paralleltest // modifies global environment
 
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	content := MessageContent{Str: strPtr("hello")}
 	msgs := []StrategicMessage{{Role: RoleUser, Content: &content}}
-	ok, err := m.SaveSnapshot("t1", 1, msgs)
+	ok, err := m.SaveSnapshot(context.Background(), "t1", 1, msgs)
 	if err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
@@ -549,7 +550,7 @@ func TestSaveSnapshot_StoresChecksum(t *testing.T) { //nolint:paralleltest // mo
 	}
 
 	var checksum string
-	if err := m.db.QueryRow(`SELECT checksum FROM checkpoints WHERE thread_id = 't1'`).Scan(&checksum); err != nil {
+	if err := m.db.QueryRowContext(context.Background(), `SELECT checksum FROM checkpoints WHERE thread_id = 't1'`).Scan(&checksum); err != nil {
 		t.Fatalf("query checksum: %v", err)
 	}
 	if checksum == "" {
@@ -563,21 +564,21 @@ func TestSaveSnapshot_StoresChecksum(t *testing.T) { //nolint:paralleltest // mo
 func TestLoadLatest_ChecksumMismatch(t *testing.T) { //nolint:paralleltest // modifies global environment
 
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	content := MessageContent{Str: strPtr("hello")}
 	msgs := []StrategicMessage{{Role: RoleUser, Content: &content}}
-	if _, err := m.SaveSnapshot("t1", 1, msgs); err != nil {
+	if _, err := m.SaveSnapshot(context.Background(), "t1", 1, msgs); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
 
 	// Corrupt the stored checksum.
-	if _, err := m.db.Exec(`UPDATE checkpoints SET checksum = ? WHERE thread_id = ?`, "deadbeef", "t1"); err != nil {
+	if _, err := m.db.ExecContext(context.Background(), `UPDATE checkpoints SET checksum = ? WHERE thread_id = ?`, "deadbeef", "t1"); err != nil {
 		t.Fatalf("UPDATE failed: %v", err)
 	}
 
-	_, err := m.LoadLatest("t1")
+	_, err := m.LoadLatest(context.Background(), "t1")
 	if err == nil {
 		t.Error("expected error due to checksum mismatch, got nil")
 	}
@@ -586,16 +587,16 @@ func TestLoadLatest_ChecksumMismatch(t *testing.T) { //nolint:paralleltest // mo
 func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) { //nolint:paralleltest // modifies global environment
 
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	// Insert a legacy checkpoint row without the checksum column (defaults to NULL).
-	if _, err := m.db.Exec(`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
+	if _, err := m.db.ExecContext(context.Background(), `INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
 		"t1", 1, `[{"role":"user","content":"hi"}]`); err != nil {
 		t.Fatalf("INSERT failed: %v", err)
 	}
 
-	snap, err := m.LoadLatest("t1")
+	snap, err := m.LoadLatest(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("expected nil error for legacy row, got: %v", err)
 	}
@@ -606,13 +607,13 @@ func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) { //nolint:parallelt
 
 func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated by newTestManager, but sticking to convention
 	m := newTestManager(t)
-	if err := m.CreateThread("tidx", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "tidx", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
 	// Insert some checkpoints
 	for i := 1; i <= 5; i++ {
-		if _, err := m.SaveSnapshot("tidx", i, []StrategicMessage{
+		if _, err := m.SaveSnapshot(context.Background(), "tidx", i, []StrategicMessage{
 			{Role: RoleUser, Content: &MessageContent{Str: strPtr("test")}},
 		}); err != nil {
 			t.Fatalf("SaveSnapshot: %v", err)
@@ -625,7 +626,7 @@ func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated
 		 ORDER BY iteration DESC, checkpoint_id DESC
 		 LIMIT 1`
 
-	rows, err := m.db.Query(query)
+	rows, err := m.db.QueryContext(context.Background(), query)
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
 	}
@@ -654,17 +655,17 @@ func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated
 
 func TestUpdateSessionTokens(t *testing.T) { //nolint:paralleltest // uses newTestManager isolation
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
 	// Update tokens for session.
-	if err := m.UpdateSessionTokens("t1", 5000, nil); err != nil {
+	if err := m.UpdateSessionTokens(context.Background(), "t1", 5000, nil); err != nil {
 		t.Fatalf("UpdateSessionTokens: %v", err)
 	}
 
 	// Verify tokens were stored.
-	tokens, compactedAt, err := m.GetSessionTokens("t1")
+	tokens, compactedAt, err := m.GetSessionTokens(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("GetSessionTokens: %v", err)
 	}
@@ -678,16 +679,16 @@ func TestUpdateSessionTokens(t *testing.T) { //nolint:paralleltest // uses newTe
 
 func TestUpdateSessionTokens_WithCompactedAt(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
 	compactTime := time.Date(2026, 4, 11, 20, 0, 0, 0, time.UTC)
-	if err := m.UpdateSessionTokens("t1", 10000, &compactTime); err != nil {
+	if err := m.UpdateSessionTokens(context.Background(), "t1", 10000, &compactTime); err != nil {
 		t.Fatalf("UpdateSessionTokens: %v", err)
 	}
 
-	tokens, compactedAt, err := m.GetSessionTokens("t1")
+	tokens, compactedAt, err := m.GetSessionTokens(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("GetSessionTokens: %v", err)
 	}
@@ -704,7 +705,7 @@ func TestUpdateSessionTokens_WithCompactedAt(t *testing.T) { //nolint:parallelte
 
 func TestGetSessionTokens_UnknownSession(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
 	m := newTestManager(t)
-	tokens, compactedAt, err := m.GetSessionTokens("unknown-session")
+	tokens, compactedAt, err := m.GetSessionTokens(context.Background(), "unknown-session")
 	if err != nil {
 		t.Fatalf("GetSessionTokens: unexpected error: %v", err)
 	}
@@ -718,20 +719,20 @@ func TestGetSessionTokens_UnknownSession(t *testing.T) { //nolint:paralleltest /
 
 func TestUpdateSessionTokens_UpdatesExistingRow(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
 	// First update.
-	if err := m.UpdateSessionTokens("t1", 1000, nil); err != nil {
+	if err := m.UpdateSessionTokens(context.Background(), "t1", 1000, nil); err != nil {
 		t.Fatalf("UpdateSessionTokens: %v", err)
 	}
 	// Second update (should overwrite).
-	if err := m.UpdateSessionTokens("t1", 2000, nil); err != nil {
+	if err := m.UpdateSessionTokens(context.Background(), "t1", 2000, nil); err != nil {
 		t.Fatalf("UpdateSessionTokens: %v", err)
 	}
 
-	tokens, _, err := m.GetSessionTokens("t1")
+	tokens, _, err := m.GetSessionTokens(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("GetSessionTokens: %v", err)
 	}

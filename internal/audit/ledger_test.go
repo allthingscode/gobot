@@ -2,6 +2,7 @@
 package audit
 
 import (
+	"context"
 	"testing"
 )
 
@@ -128,7 +129,7 @@ func TestAuditLedger_Verify_DetectsTampering(t *testing.T) {
 	}
 
 	// Tamper: overwrite result without updating hash.
-	if _, err := l.db.Exec(
+	if _, err := l.db.ExecContext(context.Background(),
 		`UPDATE audit_log SET result = ? WHERE id = 1`,
 		"not delivered",
 	); err != nil {

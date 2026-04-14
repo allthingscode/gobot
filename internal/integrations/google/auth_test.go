@@ -16,8 +16,8 @@ func TestBearerToken_ValidNotExpired(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	tok := storedToken{
-		Token:        "valid-access-token",
-		RefreshToken: "refresh",
+		Token:        "valid-access-token", // nolint:gosec // test key
+		RefreshToken: "refresh",            // nolint:gosec // test key
 		TokenURI:     "https://oauth2.googleapis.com/token",
 		ClientID:     "cid",
 		ClientSecret: "csec",

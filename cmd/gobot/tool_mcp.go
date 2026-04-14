@@ -43,7 +43,7 @@ func (s *MCPServer) start(ctx context.Context) error {
 	}
 
 	// #nosec G204
-	cmd := exec.Command(s.cfg.Command, s.cfg.Args...)
+	cmd := exec.CommandContext(ctx, s.cfg.Command, s.cfg.Args...)
 	cmd.Env = os.Environ()
 	for k, v := range s.env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))

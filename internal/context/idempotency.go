@@ -1,6 +1,7 @@
 package context
 
 import (
+	stdctx "context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -66,11 +67,11 @@ type CheckResult struct {
 // allowing the caller to return the cached result.
 // Returns CheckResult with HashMismatch=true if the key exists but params don't match
 // (caller should return an error).
-func (s *IdempotencyStore) Check(key, _, paramsHash string) (CheckResult, error) {
+func (s *IdempotencyStore) Check(ctx stdctx.Context, key, _, paramsHash string) (CheckResult, error) {
 	var storedHash, storedResult string
 	var createdAt string
 
-	err := s.db.QueryRow(`
+	err := s.db.QueryRowContext(ctx, `
 		SELECT params_hash, result, created_at
 		FROM idempotency_keys
 		WHERE key = ?
@@ -105,7 +106,7 @@ func (s *IdempotencyStore) Check(key, _, paramsHash string) (CheckResult, error)
 	// Check if record has expired.
 	if time.Since(createdTime) > s.ttl {
 		// Expired — delete it and treat as not found.
-		_, _ = s.db.Exec("DELETE FROM idempotency_keys WHERE key = ?", key)
+		_, _ = s.db.ExecContext(ctx, "DELETE FROM idempotency_keys WHERE key = ?", key)
 		return CheckResult{Found: false}, nil
 	}
 
@@ -119,8 +120,8 @@ func (s *IdempotencyStore) Check(key, _, paramsHash string) (CheckResult, error)
 // Store saves an idempotency key with the associated tool name, params hash, and result.
 // Future calls to Check() with the same key will return this cached result
 // (as long as the params hash matches and TTL hasn't expired).
-func (s *IdempotencyStore) Store(key, toolName, paramsHash, result, sessionKey string) error {
-	_, err := s.db.Exec(`
+func (s *IdempotencyStore) Store(ctx stdctx.Context, key, toolName, paramsHash, result, sessionKey string) error {
+	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO idempotency_keys (key, tool_name, params_hash, result, session_key, created_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`, key, toolName, paramsHash, result, sessionKey)
@@ -133,11 +134,11 @@ func (s *IdempotencyStore) Store(key, toolName, paramsHash, result, sessionKey s
 // CleanupExpired deletes all idempotency records older than the TTL.
 // This should be called periodically (e.g., on startup or via a background goroutine)
 // to prevent the table from growing unbounded.
-func (s *IdempotencyStore) CleanupExpired() (int64, error) {
+func (s *IdempotencyStore) CleanupExpired(ctx stdctx.Context) (int64, error) {
 	cutoff := time.Now().Add(-s.ttl)
 	cutoffStr := cutoff.Format("2006-01-02 15:04:05")
 
-	res, err := s.db.Exec(`
+	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM idempotency_keys
 		WHERE created_at < ?
 	`, cutoffStr)

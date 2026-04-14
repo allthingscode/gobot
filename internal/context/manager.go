@@ -1,6 +1,7 @@
 package context
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -75,7 +76,7 @@ func GetCheckpointManager(dbDir string) (*CheckpointManager, error) {
 
 // CreateThread initialises a new durable thread, replacing any existing row
 // with the same thread_id (mirrors Python's INSERT OR REPLACE).
-func (m *CheckpointManager) CreateThread(threadID, model string, metadata map[string]any) error {
+func (m *CheckpointManager) CreateThread(ctx context.Context, threadID, model string, metadata map[string]any) error {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
@@ -83,7 +84,8 @@ func (m *CheckpointManager) CreateThread(threadID, model string, metadata map[st
 	if err != nil {
 		return fmt.Errorf("CreateThread: marshal metadata: %w", err)
 	}
-	_, err = m.db.Exec(
+	_, err = m.db.ExecContext(
+		ctx,
 		`INSERT OR REPLACE INTO threads (thread_id, model, status, metadata, updated_at)
 		 VALUES (?, ?, 'active', ?, CURRENT_TIMESTAMP)`,
 		threadID, model, string(metaJSON),
@@ -98,7 +100,7 @@ func (m *CheckpointManager) CreateThread(threadID, model string, metadata map[st
 // Messages are validated by round-tripping through JSON before being stored.
 // Returns false (and a nil error) if validation fails, matching Python's
 // silent-false behaviour on validation error.
-func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, messages []StrategicMessage) (bool, error) {
+func (m *CheckpointManager) SaveSnapshot(ctx context.Context, threadID string, iteration int, messages []StrategicMessage) (bool, error) {
 	stateJSON, err := json.Marshal(messages)
 	if err != nil {
 		var preview string
@@ -124,19 +126,21 @@ func (m *CheckpointManager) SaveSnapshot(threadID string, iteration int, message
 	sum := sha256.Sum256(stateJSON)
 	checksum := hex.EncodeToString(sum[:])
 
-	tx, err := m.db.Begin()
+	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("SaveSnapshot: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // Rollback is a no-op if tx is committed
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(
+		ctx,
 		`INSERT INTO checkpoints (thread_id, iteration, state, checksum) VALUES (?, ?, ?, ?)`,
 		threadID, iteration, string(stateJSON), checksum,
 	); err != nil {
 		return false, fmt.Errorf("SaveSnapshot: insert checkpoint: %w", err)
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(
+		ctx,
 		`UPDATE threads SET updated_at = CURRENT_TIMESTAMP WHERE thread_id = ?`,
 		threadID,
 	); err != nil {
@@ -161,8 +165,9 @@ func (m *CheckpointManager) parseMetadata(metaJSON string) map[string]any {
 	return metadata
 }
 
-func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error) {
-	row := m.db.QueryRow(
+func (m *CheckpointManager) LoadLatest(ctx context.Context, threadID string) (*ThreadSnapshot, error) {
+	row := m.db.QueryRowContext(
+		ctx,
 		`SELECT iteration, state, checksum FROM checkpoints
 		 WHERE thread_id = ?
 		 ORDER BY iteration DESC, checkpoint_id DESC
@@ -193,7 +198,8 @@ func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error)
 		return nil, fmt.Errorf("LoadLatest: unmarshal state: %w", err)
 	}
 
-	trow := m.db.QueryRow(
+	trow := m.db.QueryRowContext(
+		ctx,
 		`SELECT model, metadata FROM threads WHERE thread_id = ?`, threadID,
 	)
 	var model, metaJSON string
@@ -210,8 +216,9 @@ func (m *CheckpointManager) LoadLatest(threadID string) (*ThreadSnapshot, error)
 }
 
 // CompleteThread marks a thread as completed, preventing further resumes.
-func (m *CheckpointManager) CompleteThread(threadID string) error {
-	_, err := m.db.Exec(
+func (m *CheckpointManager) CompleteThread(ctx context.Context, threadID string) error {
+	_, err := m.db.ExecContext(
+		ctx,
 		`UPDATE threads SET status = 'completed', updated_at = CURRENT_TIMESTAMP
                  WHERE thread_id = ?`,
 		threadID,
@@ -230,12 +237,13 @@ func (m *CheckpointManager) DB() *sql.DB {
 
 // UpdateSessionTokens updates the estimated_tokens and last_compacted_at for a
 // thread. Called by the agent after each turn to maintain per-session budgets.
-func (m *CheckpointManager) UpdateSessionTokens(threadID string, tokens int, compactedAt *time.Time) error {
+func (m *CheckpointManager) UpdateSessionTokens(ctx context.Context, threadID string, tokens int, compactedAt *time.Time) error {
 	var compactArg interface{}
 	if compactedAt != nil {
 		compactArg = compactedAt.Format("2006-01-02T15:04:05Z")
 	}
-	_, err := m.db.Exec(
+	_, err := m.db.ExecContext(
+		ctx,
 		`UPDATE threads SET estimated_tokens = ?, last_compacted_at = ? WHERE thread_id = ?`,
 		tokens, compactArg, threadID,
 	)
@@ -246,8 +254,9 @@ func (m *CheckpointManager) UpdateSessionTokens(threadID string, tokens int, com
 }
 
 // GetSessionTokens reads estimated_tokens and last_compacted_at for a thread.
-func (m *CheckpointManager) GetSessionTokens(threadID string) (tokens int, compactedAt *time.Time, err error) {
-	row := m.db.QueryRow(
+func (m *CheckpointManager) GetSessionTokens(ctx context.Context, threadID string) (tokens int, compactedAt *time.Time, err error) {
+	row := m.db.QueryRowContext(
+		ctx,
 		`SELECT estimated_tokens, last_compacted_at FROM threads WHERE thread_id = ?`,
 		threadID,
 	)
@@ -273,8 +282,8 @@ func (m *CheckpointManager) GetSessionTokens(threadID string) (tokens int, compa
 
 // ListResumable returns all active threads that have at least one checkpoint,
 // ordered by most-recently-updated first.
-func (m *CheckpointManager) ListResumable() ([]ResumableThread, error) {
-	rows, err := m.db.Query(`
+func (m *CheckpointManager) ListResumable(ctx context.Context) ([]ResumableThread, error) {
+	rows, err := m.db.QueryContext(ctx, `
 		SELECT t.thread_id, t.model, t.updated_at, MAX(c.iteration) AS latest_iteration
 		FROM threads t
 		JOIN checkpoints c ON t.thread_id = c.thread_id

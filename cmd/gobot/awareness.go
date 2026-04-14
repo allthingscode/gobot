@@ -13,6 +13,11 @@ import (
 
 const awarenessMaxJournalChars = 4000
 
+// userHomeDir is a package-level variable to allow mocking in tests.
+//
+//nolint:gochecknoglobals // Hook for testability (F-133 hardening)
+var userHomeDir = os.UserHomeDir
+
 // loadSystemPrompt builds the combined system prompt from:
 //  1. .private/SOUL.md     — behavior rules (how to respond)
 //  2. .private/IDENTITY.md — who Matthew is (personal context)
@@ -51,7 +56,7 @@ func loadPrivateFile(cfg *config.Config, filename string) string {
 	var candidates []string
 
 	// Primary: ~/.gobot/{filename} — canonical user config dir (next to config.json)
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := userHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".gobot", filename))
 	}
 

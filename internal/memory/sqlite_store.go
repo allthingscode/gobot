@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -68,7 +69,7 @@ func NewMemoryStore(dbDir string) (*MemoryStore, error) {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("memory: WAL mode: %w", err)
 	}
@@ -84,14 +85,14 @@ func NewMemoryStore(dbDir string) (*MemoryStore, error) {
 
 func initMemorySchema(db *sql.DB) error {
 	var version int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+	if err := db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("initMemorySchema: get version: %w", err)
 	}
 
 	if version == 0 {
 		// Check if table exists with old schema
 		var name string
-		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'").Scan(&name)
+		err := db.QueryRowContext(context.Background(), "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'").Scan(&name)
 		if err == nil {
 			// Migrate: rename old, create new, copy data, drop old
 			migration := []string{
@@ -107,14 +108,14 @@ func initMemorySchema(db *sql.DB) error {
 				`PRAGMA user_version = 1`,
 			}
 			for _, stmt := range migration {
-				if _, err := db.Exec(stmt); err != nil {
+				if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 					return fmt.Errorf("migration failed: %s: %w", stmt, err)
 				}
 			}
 			slog.Info("memory: schema migrated to V1 (namespaces)")
 		} else {
 			// Fresh install
-			_, err := db.Exec(`
+			_, err := db.ExecContext(context.Background(), `
 				CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
 					namespace UNINDEXED,
 					content,
@@ -137,7 +138,7 @@ func (m *MemoryStore) Index(namespace, content string) error {
 		return nil
 	}
 	ts := time.Now().UTC().Format(time.RFC3339)
-	_, err := m.db.Exec(
+	_, err := m.db.ExecContext(context.Background(),
 		`INSERT INTO memory_fts(namespace, content, timestamp) VALUES (?, ?, ?)`,
 		namespace, content, ts,
 	)
@@ -161,7 +162,7 @@ func (m *MemoryStore) Search(query, sessionKey string, limit int) ([]map[string]
 	}
 
 	sessionNamespace := "session:" + sessionKey
-	rows, err := m.db.Query(
+	rows, err := m.db.QueryContext(context.Background(),
 		`SELECT namespace, content, timestamp
 		 FROM memory_fts
 		 WHERE memory_fts MATCH ? AND namespace IN (?, 'global')
@@ -259,12 +260,12 @@ func (m *MemoryStore) CleanupNamespace(namespace, ttl string) (int64, error) {
 
 	var result sql.Result
 	if namespace == "" {
-		result, err = m.db.Exec(
+		result, err = m.db.ExecContext(context.Background(),
 			`DELETE FROM memory_fts WHERE timestamp < ?`,
 			cutoff.Format(time.RFC3339),
 		)
 	} else {
-		result, err = m.db.Exec(
+		result, err = m.db.ExecContext(context.Background(),
 			`DELETE FROM memory_fts WHERE namespace = ? AND timestamp < ?`,
 			namespace, cutoff.Format(time.RFC3339),
 		)
@@ -296,7 +297,7 @@ func (m *MemoryStore) Close() error {
 // Stats returns the total count of memory entries.
 func (m *MemoryStore) Stats() (int, error) {
 	var count int
-	err := m.db.QueryRow("SELECT count(*) FROM memory_fts").Scan(&count)
+	err := m.db.QueryRowContext(context.Background(), "SELECT count(*) FROM memory_fts").Scan(&count)
 	return count, err
 }
 

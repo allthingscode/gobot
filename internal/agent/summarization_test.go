@@ -37,7 +37,7 @@ func TestSessionManager_Dispatch_Summarization(t *testing.T) {
 			Content: &agentctx.MessageContent{Str: &content},
 		}
 	}
-	_, _ = store.SaveSnapshot("test-session", 1, messages)
+	_, _ = store.SaveSnapshot(context.Background(), "test-session", 1, messages)
 
 	ctx := context.Background()
 	_, err := sm.Dispatch(ctx, "test-session", "", "new message")
@@ -96,7 +96,7 @@ func TestSessionManager_Dispatch_HierarchicalSummarization(t *testing.T) {
 			Content: &agentctx.MessageContent{Str: &content},
 		})
 	}
-	_, _ = store.SaveSnapshot("test-session", 1, messages)
+	_, _ = store.SaveSnapshot(context.Background(), "test-session", 1, messages)
 
 	ctx := context.Background()
 	_, err := sm.Dispatch(ctx, "test-session", "", "new message")
@@ -136,7 +136,7 @@ func TestSessionManager_Summarization_CappedInput(t *testing.T) {
 			Content: &agentctx.MessageContent{Str: &largeContent},
 		}
 	}
-	_, _ = store.SaveSnapshot("test-session", 1, messages)
+	_, _ = store.SaveSnapshot(context.Background(), "test-session", 1, messages)
 
 	ctx := context.Background()
 	_, err := sm.Dispatch(ctx, "test-session", "", "new message")

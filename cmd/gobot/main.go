@@ -330,7 +330,7 @@ func initIdempotency(ctx context.Context, cfg *config.Config, runner AgentRunner
 	idempStore := agentctx.NewIdempotencyStore(store.DB(), cfg.EffectiveIdempotencyTTL())
 	runner.SetIdempotencyStore(idempStore)
 
-	if cleaned, err := idempStore.CleanupExpired(); err == nil && cleaned > 0 {
+	if cleaned, err := idempStore.CleanupExpired(ctx); err == nil && cleaned > 0 {
 		slog.Info("run: cleaned up expired idempotency keys", "count", cleaned)
 	}
 

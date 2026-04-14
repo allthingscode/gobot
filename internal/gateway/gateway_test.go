@@ -77,7 +77,7 @@ func TestGateway(t *testing.T) {
 
 func validateHealth(t *testing.T, srv *Server) {
 	t.Helper()
-	req := httptest.NewRequest("GET", "/health", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/health", http.NoBody)
 	w := httptest.NewRecorder()
 	srv.handleHealth(w, req)
 
@@ -95,8 +95,8 @@ func validateChat(t *testing.T, srv *Server, h *mockHandler, session, text, expe
 		SessionKey: session,
 		Text:       text,
 	}
-	body, _ := json.Marshal(in)
-	req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
+	body, _ := json.Marshal(in) // nolint:gosec // SessionKey is not a secret
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/chat", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.handleChat(w, req)
 
@@ -121,7 +121,7 @@ func validateChat(t *testing.T, srv *Server, h *mockHandler, session, text, expe
 
 func validateChatError(t *testing.T, srv *Server, method, path string, body io.Reader, expectedStatus int) {
 	t.Helper()
-	req := httptest.NewRequest(method, path, body)
+	req := httptest.NewRequestWithContext(context.Background(), method, path, body)
 	w := httptest.NewRecorder()
 	srv.handleChat(w, req)
 
@@ -133,8 +133,8 @@ func validateChatError(t *testing.T, srv *Server, method, path string, body io.R
 func validateChatHandlerError(t *testing.T, srv *Server, text, expectedError string) {
 	t.Helper()
 	in := InboundRequest{Text: text}
-	body, _ := json.Marshal(in)
-	req := httptest.NewRequest("POST", "/chat", bytes.NewReader(body))
+	body, _ := json.Marshal(in) // nolint:gosec // SessionKey is not a secret
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/chat", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.handleChat(w, req)
 

@@ -458,7 +458,7 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, userID, idem
 	}
 
 	// Check idempotency store.
-	checkResult, err := r.idempStore.Check(idemKey, name, paramsHash)
+	checkResult, err := r.idempStore.Check(ctx, idemKey, name, paramsHash)
 	if err != nil {
 		// Hash mismatch — same key with different params.
 		return "", fmt.Errorf("executeTool: %w", err)
@@ -474,7 +474,7 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, userID, idem
 	result, execErr := r.executeToolInner(ctx, sessionKey, userID, name, args)
 	if execErr == nil {
 		// Store result in idempotency cache.
-		if storeErr := r.idempStore.Store(idemKey, name, paramsHash, result, sessionKey); storeErr != nil {
+		if storeErr := r.idempStore.Store(ctx, idemKey, name, paramsHash, result, sessionKey); storeErr != nil {
 			slog.Warn("executeTool: failed to store idempotency key", "err", storeErr)
 		}
 	}
@@ -658,7 +658,7 @@ func buildCorrectionMessage(report map[string]any) string {
 		sb.WriteString("Required corrections:\n")
 		for i, c := range corrections {
 			if s, ok := c.(string); ok {
-				sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, s))
+				fmt.Fprintf(&sb, "%d. %s\n", i+1, s)
 			}
 		}
 	}
@@ -806,7 +806,7 @@ func runIdempotencyCleanup(ctx context.Context, store *agentctx.IdempotencyStore
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cleaned, err := store.CleanupExpired()
+			cleaned, err := store.CleanupExpired(ctx)
 			if err != nil {
 				slog.Error("run: idempotency cleanup failed", "err", err)
 				continue

@@ -43,15 +43,15 @@ type Runner interface {
 // Pass nil to SessionManager to run statelessly (no history loaded or saved).
 type CheckpointStore interface {
 	// LoadLatest retrieves the most recent thread snapshot for the given threadID.
-	LoadLatest(threadID string) (*agentctx.ThreadSnapshot, error)
+	LoadLatest(ctx context.Context, threadID string) (*agentctx.ThreadSnapshot, error)
 	// SaveSnapshot persists a conversation snapshot for a specific iteration.
-	SaveSnapshot(threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error)
+	SaveSnapshot(ctx context.Context, threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error)
 	// CreateThread initializes a new durable thread record.
-	CreateThread(threadID, model string, metadata map[string]any) error
+	CreateThread(ctx context.Context, threadID, model string, metadata map[string]any) error
 	// UpdateSessionTokens updates the estimated_tokens and last_compacted_at for a thread.
-	UpdateSessionTokens(threadID string, tokens int, compactedAt *time.Time) error
+	UpdateSessionTokens(ctx context.Context, threadID string, tokens int, compactedAt *time.Time) error
 	// GetSessionTokens reads estimated_tokens and last_compacted_at for a thread.
-	GetSessionTokens(threadID string) (tokens int, compactedAt *time.Time, err error)
+	GetSessionTokens(ctx context.Context, threadID string) (tokens int, compactedAt *time.Time, err error)
 }
 
 // Consolidator abstracts the memory consolidation/fact extraction layer (F-028, F-047).
@@ -245,7 +245,7 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userM
 
 	if tracer != nil {
 		// Load history first so we can report message count to tracer.
-		messages, iteration, stateless, err := m.loadHistory(sessionKey, store)
+		messages, iteration, stateless, err := m.loadHistory(ctx, sessionKey, store)
 		if err != nil {
 			return "", err
 		}
@@ -254,7 +254,7 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userM
 		})
 	}
 
-	messages, iteration, stateless, err := m.loadHistory(sessionKey, store)
+	messages, iteration, stateless, err := m.loadHistory(ctx, sessionKey, store)
 	if err != nil {
 		return "", err
 	}
@@ -262,9 +262,9 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userM
 }
 
 // loadHistory loads conversation history from the provided checkpoint store.
-func (m *SessionManager) loadHistory(sessionKey string, store CheckpointStore) (messages []agentctx.StrategicMessage, iteration int, stateless bool, err error) {
+func (m *SessionManager) loadHistory(ctx context.Context, sessionKey string, store CheckpointStore) (messages []agentctx.StrategicMessage, iteration int, stateless bool, err error) {
 	if store != nil {
-		snap, loadErr := store.LoadLatest(sessionKey)
+		snap, loadErr := store.LoadLatest(ctx, sessionKey)
 		if loadErr == nil && snap != nil {
 			messages = snap.Messages
 			iteration = snap.Iteration
@@ -273,7 +273,7 @@ func (m *SessionManager) loadHistory(sessionKey string, store CheckpointStore) (
 			m.mu.RLock()
 			model := m.model
 			m.mu.RUnlock()
-			if createErr := store.CreateThread(sessionKey, model, nil); createErr != nil {
+			if createErr := store.CreateThread(ctx, sessionKey, model, nil); createErr != nil {
 				slog.Error("agent: CreateThread failed (continuing statelessly)", "session_id", sessionKey, "err", createErr)
 				stateless = true
 			}
@@ -329,8 +329,8 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userM
 	m.addMissingTimestamps(updated)
 
 	// 4. Update budget and persist
-	m.updateTokenBudget(sessionKey, updated, store)
-	m.persistResult(sessionKey, iteration, updated, stateless, store)
+	m.updateTokenBudget(ctx, sessionKey, updated, store)
+	m.persistResult(ctx, sessionKey, iteration, updated, stateless, store)
 
 	// 5. Post-dispatch hooks
 	if m.hooks != nil {
@@ -478,31 +478,31 @@ func (m *SessionManager) addMissingTimestamps(updated []agentctx.StrategicMessag
 	}
 }
 
-func (m *SessionManager) updateTokenBudget(sessionKey string, updated []agentctx.StrategicMessage, store CheckpointStore) {
+func (m *SessionManager) updateTokenBudget(ctx context.Context, sessionKey string, updated []agentctx.StrategicMessage, store CheckpointStore) {
 	if m.tokenBudget <= 0 || store == nil {
 		return
 	}
 
-	tokens, _, _ := store.GetSessionTokens(sessionKey)
+	tokens, _, _ := store.GetSessionTokens(ctx, sessionKey)
 	newTokens := tokens + estimateTokensForMessages(updated)
-	if err := store.UpdateSessionTokens(sessionKey, newTokens, nil); err != nil {
+	if err := store.UpdateSessionTokens(ctx, sessionKey, newTokens, nil); err != nil {
 		slog.Warn("agent: UpdateSessionTokens failed", "session", sessionKey, "err", err)
 	} else {
 		slog.Debug("agent: session token budget", "session", sessionKey, "tokens", newTokens, "budget", m.tokenBudget)
 		if newTokens > m.tokenBudget && m.summaryTurns > 0 {
 			slog.Info("agent: session token budget exceeded, triggering compaction", "session", sessionKey)
-			go m.compactSessionAsync(sessionKey, store)
+			go m.compactSessionAsync(ctx, sessionKey, store)
 		}
 	}
 }
 
-func (m *SessionManager) persistResult(sessionKey string, iteration int, updated []agentctx.StrategicMessage, stateless bool, store CheckpointStore) {
+func (m *SessionManager) persistResult(ctx context.Context, sessionKey string, iteration int, updated []agentctx.StrategicMessage, stateless bool, store CheckpointStore) {
 	if stateless || store == nil || len(updated) == 0 {
 		return
 	}
 
 	it := iteration + 1
-	if _, err := store.SaveSnapshot(sessionKey, it, updated); err != nil {
+	if _, err := store.SaveSnapshot(ctx, sessionKey, it, updated); err != nil {
 		slog.Warn("agent: SaveSnapshot failed", "session", sessionKey, "err", err)
 	}
 
@@ -535,7 +535,7 @@ func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
 // summarizing them into a single system message, and persists the result.
 // store is the resolved per-user (or shared) CheckpointStore for this session.
 // Errors are logged but not returned since compaction runs in a background goroutine.
-func (m *SessionManager) buildCompactionSummary(sessionKey string, toSummarize []agentctx.StrategicMessage) (string, error) {
+func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey string, toSummarize []agentctx.StrategicMessage) (string, error) {
 	model := m.model
 	if m.compactionPolicy.Summarization.Model(m.model) != "" {
 		model = m.compactionPolicy.Summarization.Model(m.model)
@@ -545,14 +545,17 @@ func (m *SessionManager) buildCompactionSummary(sessionKey string, toSummarize [
 		fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
 	}
 	inputText := sb.String()
-	return m.runner.RunText(context.Background(), sessionKey,
+	// Use WithoutCancel to ensure background compaction continues even if
+	// the triggering request is cancelled.
+	bgCtx := context.WithoutCancel(ctx)
+	return m.runner.RunText(bgCtx, sessionKey,
 		"You are a context summarization assistant. Summarize the following conversation history into a concise summary that preserves key decisions, active items, user preferences, and current task state. Format as bullet points.\n\n"+inputText,
 		model)
 }
 
-func (m *SessionManager) compactSessionAsync(sessionKey string, store CheckpointStore) {
+func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey string, store CheckpointStore) {
 	slog.Info("agent: starting per-session compaction", "session", sessionKey)
-	snap, err := store.LoadLatest(sessionKey)
+	snap, err := store.LoadLatest(ctx, sessionKey)
 	if err != nil {
 		slog.Warn("agent: compactSessionAsync LoadLatest failed", "session", sessionKey, "err", err)
 		return
@@ -571,7 +574,7 @@ func (m *SessionManager) compactSessionAsync(sessionKey string, store Checkpoint
 	}
 	toSummarize := snap.Messages[:len(snap.Messages)-summaryTurns]
 	kept := snap.Messages[len(snap.Messages)-summaryTurns:]
-	summary, err := m.buildCompactionSummary(sessionKey, toSummarize)
+	summary, err := m.buildCompactionSummary(ctx, sessionKey, toSummarize)
 	if err != nil {
 		slog.Warn("agent: compactSessionAsync summarization failed", "session", sessionKey, "err", err)
 		return
@@ -584,10 +587,10 @@ func (m *SessionManager) compactSessionAsync(sessionKey string, store Checkpoint
 	compacted := append([]agentctx.StrategicMessage{summaryMsg}, kept...)
 	now := time.Now()
 	tokens := estimateTokensForMessages(compacted)
-	if err := store.UpdateSessionTokens(sessionKey, tokens, &now); err != nil {
+	if err := store.UpdateSessionTokens(ctx, sessionKey, tokens, &now); err != nil {
 		slog.Warn("agent: UpdateSessionTokens after compaction failed", "session", sessionKey, "err", err)
 	}
-	_, err = store.SaveSnapshot(sessionKey, snap.Iteration, compacted)
+	_, err = store.SaveSnapshot(ctx, sessionKey, snap.Iteration, compacted)
 	if err != nil {
 		slog.Warn("agent: SaveSnapshot after compaction failed", "session", sessionKey, "err", err)
 		return

@@ -138,12 +138,12 @@ func (h *Handler) handleDoctor(w http.ResponseWriter, r *http.Request) {
 	h.render(w, "layout.html", "doctor.html", data)
 }
 
-func (h *Handler) handleSessions(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	var sessions []context.ResumableThread
 	var err error
 
 	if h.res.Checkpoints != nil {
-		sessions, err = h.res.Checkpoints.ListResumable()
+		sessions, err = h.res.Checkpoints.ListResumable(r.Context())
 		if err != nil {
 			slog.Error("dash: failed to list sessions", "err", err)
 		}

@@ -2,6 +2,7 @@
 package context
 
 import (
+	"context"
 	"sync"
 	"testing"
 )
@@ -27,14 +28,14 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 	}
 	m1 := &CheckpointManager{db: db1}
 
-	if err := m1.CreateThread("t1", "gemini-2.5-flash", map[string]any{"key": "value"}); err != nil {
+	if err := m1.CreateThread(context.Background(), "t1", "gemini-2.5-flash", map[string]any{"key": "value"}); err != nil {
 		t.Fatalf("phase1 CreateThread: %v", err)
 	}
 	msgs := []StrategicMessage{
 		{Role: RoleUser, Content: &MessageContent{Str: strPtr("hello")}},
 		{Role: RoleAssistant, Content: &MessageContent{Str: strPtr("world")}},
 	}
-	ok, err := m1.SaveSnapshot("t1", 1, msgs)
+	ok, err := m1.SaveSnapshot(context.Background(), "t1", 1, msgs)
 	if err != nil || !ok {
 		t.Fatalf("phase1 SaveSnapshot: ok=%v err=%v", ok, err)
 	}
@@ -51,7 +52,7 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 	}
 	m2 := &CheckpointManager{db: db2}
 
-	snap, err := m2.LoadLatest("t1")
+	snap, err := m2.LoadLatest(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("phase2 LoadLatest: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestCheckpointManager_CrashAndRecover(t *testing.T) {
 
 	// Verify checksum integrity survived the round-trip.
 	var checksum string
-	if err := db2.QueryRow(`SELECT checksum FROM checkpoints WHERE thread_id = 't1'`).Scan(&checksum); err != nil {
+	if err := db2.QueryRowContext(context.Background(), `SELECT checksum FROM checkpoints WHERE thread_id = 't1'`).Scan(&checksum); err != nil {
 		t.Fatalf("phase2: query checksum: %v", err)
 	}
 	if len(checksum) != 64 {
@@ -99,7 +100,7 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 	}
 	m1 := &CheckpointManager{db: db1}
 
-	if err := m1.CreateThread("t1", "model", nil); err != nil {
+	if err := m1.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	for i := 1; i <= 5; i++ {
@@ -107,7 +108,7 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 		for j := 0; j < i; j++ {
 			msgs[j] = StrategicMessage{Role: RoleUser, Content: &MessageContent{Str: strPtr("msg")}}
 		}
-		if _, err := m1.SaveSnapshot("t1", i, msgs); err != nil {
+		if _, err := m1.SaveSnapshot(context.Background(), "t1", i, msgs); err != nil {
 			t.Fatalf("SaveSnapshot iter %d: %v", i, err)
 		}
 	}
@@ -123,7 +124,7 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 	}
 	m2 := &CheckpointManager{db: db2}
 
-	snap, err := m2.LoadLatest("t1")
+	snap, err := m2.LoadLatest(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("LoadLatest: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestCheckpointManager_CrashAndRecover_MultipleIterations(t *testing.T) {
 func TestCheckpointManager_ConcurrentSaveSnapshot(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
@@ -160,7 +161,7 @@ func TestCheckpointManager_ConcurrentSaveSnapshot(t *testing.T) {
 			msgs := []StrategicMessage{
 				{Role: RoleUser, Content: &MessageContent{Str: strPtr("msg")}},
 			}
-			_, errs[idx] = m.SaveSnapshot("t1", idx+1, msgs)
+			_, errs[idx] = m.SaveSnapshot(context.Background(), "t1", idx+1, msgs)
 		}(i)
 	}
 	wg.Wait()
@@ -172,7 +173,7 @@ func TestCheckpointManager_ConcurrentSaveSnapshot(t *testing.T) {
 	}
 
 	// Verify the DB is still healthy: LoadLatest should succeed.
-	snap, err := m.LoadLatest("t1")
+	snap, err := m.LoadLatest(context.Background(), "t1")
 	if err != nil {
 		t.Fatalf("LoadLatest after concurrent saves: %v", err)
 	}
@@ -187,25 +188,25 @@ func TestCheckpointManager_ConcurrentSaveSnapshot(t *testing.T) {
 func TestCheckpointManager_ChecksumProtectsAgainstBitrot(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	if err := m.CreateThread("t1", "model", nil); err != nil {
+	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	msgs := []StrategicMessage{
 		{Role: RoleUser, Content: &MessageContent{Str: strPtr("sensitive data")}},
 	}
-	if _, err := m.SaveSnapshot("t1", 1, msgs); err != nil {
+	if _, err := m.SaveSnapshot(context.Background(), "t1", 1, msgs); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
 
 	// Simulate bit-rot: overwrite state JSON without updating the checksum.
-	if _, err := m.db.Exec(
+	if _, err := m.db.ExecContext(context.Background(),
 		`UPDATE checkpoints SET state = ? WHERE thread_id = ?`,
 		`[{"role":"user","content":"tampered"}]`, "t1",
 	); err != nil {
 		t.Fatalf("tamper state: %v", err)
 	}
 
-	_, err := m.LoadLatest("t1")
+	_, err := m.LoadLatest(context.Background(), "t1")
 	if err == nil {
 		t.Error("expected checksum mismatch error for tampered state, got nil")
 	}

@@ -51,7 +51,7 @@ func setupTestStore(t *testing.T) (store *agentctx.IdempotencyStore, db *sql.DB,
 	}
 
 	// Create idempotency_keys table.
-	_, err = db.Exec(`
+	_, err = db.ExecContext(context.Background(), `
 		CREATE TABLE IF NOT EXISTS idempotency_keys (
 			key         TEXT PRIMARY KEY,
 			tool_name   TEXT NOT NULL,
@@ -86,13 +86,13 @@ func TestIdempotency_Success(t *testing.T) {
 	session := "session-abc"
 
 	// 1. Initial Store
-	err := store.Store(key, tool, hash, result, session)
+	err := store.Store(context.Background(), key, tool, hash, result, session)
 	if err != nil {
 		t.Fatalf("Store failed: %v", err)
 	}
 
 	// 2. Check (Match)
-	check, err := store.Check(key, tool, hash)
+	check, err := store.Check(context.Background(), key, tool, hash)
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
 	}
@@ -115,10 +115,10 @@ func TestIdempotency_HashMismatch(t *testing.T) {
 	hash2 := "hash-2"
 	result := "output"
 
-	_ = store.Store(key, tool, hash1, result, "session-1")
+	_ = store.Store(context.Background(), key, tool, hash1, result, "session-1")
 
 	// Check with different hash should fail
-	_, err := store.Check(key, tool, hash2)
+	_, err := store.Check(context.Background(), key, tool, hash2)
 	if err == nil {
 		t.Fatal("Expected error for hash mismatch, got nil")
 	}
@@ -135,18 +135,20 @@ func TestIdempotency_Expired(t *testing.T) {
 	// 1. Test that Check() handles expired keys by deleting them.
 	key1 := "expired-check-key"
 	expiredAt := time.Now().Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
-	_, _ = db.Exec(`INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`, key1, expiredAt)
+	_, _ = db.ExecContext(context.Background(), `INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`,
+ key1, expiredAt)
 
-	check, _ := store.Check(key1, "tool", "hash")
+	check, _ := store.Check(context.Background(), key1, "tool", "hash")
 	if check.Found {
 		t.Error("expected expired key to be NOT found by Check()")
 	}
 
 	// 2. Test manual CleanupExpired()
 	key2 := "expired-manual-key"
-	_, _ = db.Exec(`INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`, key2, expiredAt)
+	_, _ = db.ExecContext(context.Background(), `INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`,
+ key2, expiredAt)
 
-	n, err := store.CleanupExpired()
+	n, err := store.CleanupExpired(context.Background())
 	if err != nil {
 		t.Fatalf("Cleanup failed: %v", err)
 	}
@@ -162,7 +164,8 @@ func TestIdempotency_BackgroundCleanup(t *testing.T) {
 
 	// 1. Insert an expired key.
 	expiredAt := time.Now().Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
-	_, _ = db.Exec(`INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`, "expired-bg", expiredAt)
+	_, _ = db.ExecContext(context.Background(), `INSERT INTO idempotency_keys (key, tool_name, params_hash, result, created_at) VALUES (?, 'tool', 'hash', 'res', ?)`,
+ "expired-bg", expiredAt)
 
 	// 2. Start background cleanup with a short interval.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -184,7 +187,7 @@ func TestIdempotency_BackgroundCleanup(t *testing.T) {
 			t.Fatal("timeout waiting for background cleanup")
 		case <-ticker.C:
 			var count int
-			_ = db.QueryRow("SELECT COUNT(*) FROM idempotency_keys WHERE key = 'expired-bg'").Scan(&count)
+			_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM idempotency_keys WHERE key = 'expired-bg'").Scan(&count)
 			if count == 0 {
 				found = false
 			}

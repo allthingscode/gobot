@@ -2,6 +2,7 @@
 package dash
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,7 +55,7 @@ func setupDashboardHandler() *Handler {
 
 func validateDashboardResponse(t *testing.T, h *Handler, path string, expectedStatus int, expectedBody []string) {
 	t.Helper()
-	req := httptest.NewRequest("GET", path, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", path, http.NoBody)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != expectedStatus {
@@ -104,7 +105,7 @@ func TestAuthMiddleware(t *testing.T) {
 			if tt.query != "" {
 				path += "?token=" + tt.query
 			}
-			req := httptest.NewRequest("GET", path, http.NoBody)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", path, http.NoBody)
 
 			if tt.header != "" {
 				req.Header.Set("Authorization", tt.header)
@@ -132,7 +133,7 @@ func TestRenderError(t *testing.T) {
 	// Create handler without templates to force error
 	h := &Handler{res: res, pages: nil}
 
-	req := httptest.NewRequest("GET", "/dash/", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/", http.NoBody)
 	w := httptest.NewRecorder()
 
 	h.ServeHTTP(w, req)

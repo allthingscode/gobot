@@ -1,6 +1,7 @@
 package scripts_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,8 @@ func init() {
 // combined stdout+stderr output and any error.
 func runDocLint(t *testing.T, dir string) (string, error) {
 	t.Helper()
-	cmd := exec.Command("go", "run", filepath.Join(srcDir, "doc_lint.go")) // #nosec G204 - test tool, not a security risk
+	// #nosec G204 - test tool, not a security risk
+	cmd := exec.CommandContext(context.Background(), "go", "run", filepath.Join(srcDir, "doc_lint.go"))
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err

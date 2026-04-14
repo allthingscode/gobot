@@ -159,19 +159,25 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d messages:\n\n", len(summaries)))
+	fmt.Fprintf(&sb, 
+"Found %d messages:\n\n", len(summaries))
 	for _, sum := range summaries {
 		msg, err := svc.GetMessage(ctx, sum.ID)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("- ID: %s (Error loading details)\n", sum.ID))
+			fmt.Fprintf(&sb, 
+"- ID: %s (Error loading details)\n", sum.ID)
 			continue
 		}
 		subject := msg.GetHeader("Subject")
 		from := msg.GetHeader("From")
-		sb.WriteString(fmt.Sprintf("- **ID**: %s\n", msg.ID))
-		sb.WriteString(fmt.Sprintf("  **From**: %s\n", from))
-		sb.WriteString(fmt.Sprintf("  **Subject**: %s\n", subject))
-		sb.WriteString(fmt.Sprintf("  **Snippet**: %s\n\n", msg.Snippet))
+		fmt.Fprintf(&sb, 
+"- **ID**: %s\n", msg.ID)
+		fmt.Fprintf(&sb, 
+"  **From**: %s\n", from)
+		fmt.Fprintf(&sb, 
+"  **Subject**: %s\n", subject)
+		fmt.Fprintf(&sb, 
+"  **Snippet**: %s\n\n", msg.Snippet)
 	}
 
 	return sb.String(), nil
@@ -220,11 +226,16 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[strin
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("### Email Details (ID: %s)\n\n", msg.ID))
-	sb.WriteString(fmt.Sprintf("**From**: %s\n", msg.GetHeader("From")))
-	sb.WriteString(fmt.Sprintf("**To**: %s\n", msg.GetHeader("To")))
-	sb.WriteString(fmt.Sprintf("**Date**: %s\n", msg.GetHeader("Date")))
-	sb.WriteString(fmt.Sprintf("**Subject**: %s\n\n", msg.GetHeader("Subject")))
+	fmt.Fprintf(&sb, 
+"### Email Details (ID: %s)\n\n", msg.ID)
+	fmt.Fprintf(&sb, 
+"**From**: %s\n", msg.GetHeader("From"))
+	fmt.Fprintf(&sb, 
+"**To**: %s\n", msg.GetHeader("To"))
+	fmt.Fprintf(&sb, 
+"**Date**: %s\n", msg.GetHeader("Date"))
+	fmt.Fprintf(&sb, 
+"**Subject**: %s\n\n", msg.GetHeader("Subject"))
 	sb.WriteString("---\n\n")
 	sb.WriteString(msg.ExtractBody())
 	sb.WriteString("\n\n---")

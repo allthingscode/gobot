@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -227,7 +228,8 @@ func copyFile(src, dst string) error {
 }
 
 func getGitSHA() string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	// Use background context for git call as this is a non-critical metadata fetch.
+	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
 		return unknownSpecialist

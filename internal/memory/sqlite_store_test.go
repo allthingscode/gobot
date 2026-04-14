@@ -2,6 +2,7 @@
 package memory
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -33,7 +34,7 @@ func TestNewMemoryStore_CreatesDB(t *testing.T) {
 
 	// Verify WAL mode is set.
 	var mode string
-	if err := store.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+	if err := store.db.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&mode); err != nil {
 		t.Fatalf("PRAGMA journal_mode: %v", err)
 	}
 	if mode != "wal" {
@@ -69,7 +70,7 @@ func TestMigrationV0ToV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open raw db: %v", err)
 	}
-	_, err = db.Exec(`
+	_, err = db.ExecContext(context.Background(), `
 		CREATE VIRTUAL TABLE memory_fts USING fts5(
 			session_key UNINDEXED,
 			content,
@@ -79,7 +80,7 @@ func TestMigrationV0ToV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create V0 table: %v", err)
 	}
-	_, err = db.Exec(`INSERT INTO memory_fts(session_key, content, timestamp) VALUES (?, ?, ?)`,
+	_, err = db.ExecContext(context.Background(), `INSERT INTO memory_fts(session_key, content, timestamp) VALUES (?, ?, ?)`,
 		"sess123", "legacy content", "2026-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("failed to insert legacy data: %v", err)
@@ -95,7 +96,7 @@ func TestMigrationV0ToV1(t *testing.T) {
 
 	// 3. Verify PRAGMA user_version is 1
 	var version int
-	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+	if err := store.db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("failed to query version: %v", err)
 	}
 	if version != 1 {
@@ -156,7 +157,7 @@ func TestIndex(t *testing.T) {
 			}
 
 			var count int
-			if err := store.db.QueryRow(`SELECT count(*) FROM memory_fts`).Scan(&count); err != nil {
+			if err := store.db.QueryRowContext(context.Background(), `SELECT count(*) FROM memory_fts`).Scan(&count); err != nil {
 				t.Fatalf("failed to scan count: %v", err)
 			}
 			if tc.wantStored && count != 1 {

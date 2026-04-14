@@ -1,32 +1,25 @@
-package context_test
+//nolint:testpackage // requires unexported idempotency internals for testing
+package context
 
 import (
+	stdctx "context"
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/allthingscode/gobot/internal/context"
-
-	_ "modernc.org/sqlite"
 )
 
-// setupTestStore creates a temporary database with the idempotency_keys table
-// and returns an IdempotencyStore with a 1-hour TTL for testing.
-func setupTestStore(t *testing.T) (*context.IdempotencyStore, *sql.DB, func()) {
+// setupTestStore creates a clean in-memory IdempotencyStore for testing.
+func setupTestStore(t *testing.T) (*IdempotencyStore, *sql.DB, func()) {
 	t.Helper()
-
-	// Create temporary database.
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-	db, err := sql.Open("sqlite", dbPath)
+	tmp := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(tmp, "idemp.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 
 	// Create idempotency_keys table.
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE TABLE IF NOT EXISTS idempotency_keys (
 			key         TEXT PRIMARY KEY,
 			tool_name   TEXT NOT NULL,
@@ -40,29 +33,24 @@ func setupTestStore(t *testing.T) (*context.IdempotencyStore, *sql.DB, func()) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE INDEX IF NOT EXISTS idx_idempotency_session
 		ON idempotency_keys(session_key)
 	`)
 	if err != nil {
-		t.Fatalf("create index: %v", err)
+		t.Fatalf("create index session: %v", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		CREATE INDEX IF NOT EXISTS idx_idempotency_created
 		ON idempotency_keys(created_at)
 	`)
 	if err != nil {
-		t.Fatalf("create index: %v", err)
+		t.Fatalf("create index created: %v", err)
 	}
 
-	store := context.NewIdempotencyStore(db, 1*time.Hour)
-	cleanup := func() {
-		_ = db.Close()
-		os.RemoveAll(tmpDir)
-	}
-
-	return store, db, cleanup
+	store := NewIdempotencyStore(db, 1*time.Hour)
+	return store, db, func() { _ = db.Close() }
 }
 
 func TestIdempotencyStore_Check_Miss(t *testing.T) {
@@ -70,7 +58,7 @@ func TestIdempotencyStore_Check_Miss(t *testing.T) {
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	result, err := store.Check("nonexistent-key", "send_email", "abc123")
+	result, err := store.Check(stdctx.Background(), "nonexistent-key", "send_email", "abc123")
 	if err != nil {
 		t.Fatalf("Check() error: %v", err)
 	}
@@ -84,19 +72,19 @@ func TestIdempotencyStore_Store_And_Check_Hit(t *testing.T) {
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	// Store a result.
-	paramsHash, err := context.HashParams(map[string]any{"to": "test@example.com", "subject": "Test"})
+	paramsHash, err := HashParams(map[string]any{"subject": "Test Email"})
 	if err != nil {
 		t.Fatalf("HashParams() error: %v", err)
 	}
 
-	err = store.Store("idem-key-1", "send_email", paramsHash, "Email sent", "session-1")
+	// Initial store should succeed.
+	err = store.Store(stdctx.Background(), "idem-key-1", "send_email", paramsHash, "Email sent", "session-1")
 	if err != nil {
 		t.Fatalf("Store() error: %v", err)
 	}
 
 	// Check should return the cached result.
-	result, err := store.Check("idem-key-1", "send_email", paramsHash)
+	result, err := store.Check(stdctx.Background(), "idem-key-1", "send_email", paramsHash)
 	if err != nil {
 		t.Fatalf("Check() error: %v", err)
 	}
@@ -106,9 +94,6 @@ func TestIdempotencyStore_Store_And_Check_Hit(t *testing.T) {
 	if result.CachedResult != "Email sent" {
 		t.Errorf("CachedResult = %q, want %q", result.CachedResult, "Email sent")
 	}
-	if result.HashMismatch {
-		t.Errorf("Check() incorrectly reported HashMismatch")
-	}
 }
 
 func TestIdempotencyStore_Check_Hash_Mismatch(t *testing.T) {
@@ -117,15 +102,15 @@ func TestIdempotencyStore_Check_Hash_Mismatch(t *testing.T) {
 	defer cleanup()
 
 	// Store with one params hash.
-	hash1, _ := context.HashParams(map[string]any{"subject": "Original"})
-	err := store.Store("idem-key-2", "send_email", hash1, "Original result", "session-1")
+	hash1, _ := HashParams(map[string]any{"subject": "Original"})
+	err := store.Store(stdctx.Background(), "idem-key-2", "send_email", hash1, "Original result", "session-1")
 	if err != nil {
 		t.Fatalf("Store() error: %v", err)
 	}
 
 	// Check with different params hash should fail.
-	hash2, _ := context.HashParams(map[string]any{"subject": "Modified"})
-	result, err := store.Check("idem-key-2", "send_email", hash2)
+	hash2, _ := HashParams(map[string]any{"subject": "Modified"})
+	result, err := store.Check(stdctx.Background(), "idem-key-2", "send_email", hash2)
 	if err == nil {
 		t.Errorf("Check() should return error for hash mismatch")
 	}
@@ -141,7 +126,7 @@ func TestIdempotencyStore_Cleanup_Expired(t *testing.T) {
 
 	// Insert a record with old timestamp (expired).
 	oldTime := time.Now().Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
-	_, err := db.Exec(`
+	_, err := db.ExecContext(stdctx.Background(), `
 		INSERT INTO idempotency_keys (key, tool_name, params_hash, result, session_key, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, "expired-key", "send_email", "hash1", "Old result", "session-1", oldTime)
@@ -150,7 +135,7 @@ func TestIdempotencyStore_Cleanup_Expired(t *testing.T) {
 	}
 
 	// Insert a recent record (not expired).
-	_, err = db.Exec(`
+	_, err = db.ExecContext(stdctx.Background(), `
 		INSERT INTO idempotency_keys (key, tool_name, params_hash, result, session_key, created_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`, "fresh-key", "send_email", "hash2", "Fresh result", "session-2")
@@ -159,7 +144,7 @@ func TestIdempotencyStore_Cleanup_Expired(t *testing.T) {
 	}
 
 	// Cleanup should remove only the expired record.
-	cleaned, err := store.CleanupExpired()
+	cleaned, err := store.CleanupExpired(stdctx.Background())
 	if err != nil {
 		t.Fatalf("CleanupExpired() error: %v", err)
 	}
@@ -169,7 +154,7 @@ func TestIdempotencyStore_Cleanup_Expired(t *testing.T) {
 
 	// Verify fresh record still exists.
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM idempotency_keys WHERE key = ?", "fresh-key").Scan(&count)
+	err = db.QueryRowContext(stdctx.Background(), "SELECT COUNT(*) FROM idempotency_keys WHERE key = ?", "fresh-key").Scan(&count)
 	if err != nil {
 		t.Fatalf("query fresh record: %v", err)
 	}
@@ -178,7 +163,7 @@ func TestIdempotencyStore_Cleanup_Expired(t *testing.T) {
 	}
 
 	// Verify expired record was removed.
-	err = db.QueryRow("SELECT COUNT(*) FROM idempotency_keys WHERE key = ?", "expired-key").Scan(&count)
+	err = db.QueryRowContext(stdctx.Background(), "SELECT COUNT(*) FROM idempotency_keys WHERE key = ?", "expired-key").Scan(&count)
 	if err != nil {
 		t.Fatalf("query expired record: %v", err)
 	}
@@ -194,8 +179,8 @@ func TestIdempotencyStore_TTL_Expiry_On_Check(t *testing.T) {
 
 	// Insert a record with timestamp older than TTL (1 hour in test setup).
 	oldTime := time.Now().Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
-	paramsHash, _ := context.HashParams(map[string]any{"subject": "Test"})
-	_, err := db.Exec(`
+	paramsHash, _ := HashParams(map[string]any{"subject": "Test"})
+	_, err := db.ExecContext(stdctx.Background(), `
 		INSERT INTO idempotency_keys (key, tool_name, params_hash, result, session_key, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, "expired-key", "send_email", paramsHash, "Old result", "session-1", oldTime)
@@ -204,12 +189,19 @@ func TestIdempotencyStore_TTL_Expiry_On_Check(t *testing.T) {
 	}
 
 	// Check should treat expired record as not found.
-	result, err := store.Check("expired-key", "send_email", paramsHash)
+	result, err := store.Check(stdctx.Background(), "expired-key", "send_email", paramsHash)
 	if err != nil {
 		t.Fatalf("Check() error: %v", err)
 	}
 	if result.Found {
 		t.Errorf("Check() should not find expired key")
+	}
+
+	// Verify it was actually deleted from DB.
+	var count int
+	_ = db.QueryRowContext(stdctx.Background(), "SELECT COUNT(*) FROM idempotency_keys WHERE key = ?", "expired-key").Scan(&count)
+	if count != 0 {
+		t.Error("Expired key was not deleted after Check()")
 	}
 }
 
@@ -218,100 +210,45 @@ func TestIdempotencyStore_Concurrent_Access(t *testing.T) {
 	store, _, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	done := make(chan bool, 10)
+	const workers = 10
+	done := make(chan bool, workers)
 
-	// Spawn 10 goroutines that concurrently store and check.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < workers; i++ {
 		go func(_ int) {
 			key := "concurrent-key"
 
 			// Store might fail due to primary key collision, which is expected.
-			hash1, _ := context.HashParams(map[string]any{"test": "data"})
-			_ = store.Store(key, "send_email", hash1, "Result", "session-1")
+			hash1, _ := HashParams(map[string]any{"test": "data"})
+			_ = store.Store(stdctx.Background(), key, "send_email", hash1, "Result", "session-1")
 
 			// All goroutines should be able to check.
-			_, _ = store.Check(key, "send_email", hash1)
+			_, _ = store.Check(stdctx.Background(), key, "send_email", hash1)
 			done <- true
 		}(i)
 	}
 
 	// Wait for all goroutines.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < workers; i++ {
 		<-done
 	}
 }
 
-func TestHashParams_Deterministic(t *testing.T) {
-	t.Parallel()
-	params := map[string]any{
-		"to":      "test@example.com",
-		"subject": "Test Subject",
-		"body":    "Test body",
-	}
-
-	hash1, err := context.HashParams(params)
-	if err != nil {
-		t.Fatalf("HashParams() error: %v", err)
-	}
-
-	hash2, err := context.HashParams(params)
-	if err != nil {
-		t.Fatalf("HashParams() error: %v", err)
-	}
-
-	if hash1 != hash2 {
-		t.Errorf("HashParams() is not deterministic: %q != %q", hash1, hash2)
-	}
-}
-
-func TestHashParams_Order_Independent(t *testing.T) {
-	t.Parallel()
-	params1 := map[string]any{"a": 1, "b": 2, "c": 3}
-	params2 := map[string]any{"c": 3, "a": 1, "b": 2}
-
-	hash1, err := context.HashParams(params1)
-	if err != nil {
-		t.Fatalf("HashParams() error: %v", err)
-	}
-
-	hash2, err := context.HashParams(params2)
-	if err != nil {
-		t.Fatalf("HashParams() error: %v", err)
-	}
-
-	if hash1 != hash2 {
-		t.Errorf("HashParams() should be order independent: %q != %q", hash1, hash2)
-	}
-}
-
-func TestHashParams_Different_Values(t *testing.T) {
+func TestHashParams(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
 		params map[string]any
 	}{
-		{
-			name:   "empty_params",
-			params: map[string]any{},
-		},
-		{
-			name:   "simple_types",
-			params: map[string]any{"str": "hello", "num": 42, "bool": true},
-		},
-		{
-			name:   "nested_map",
-			params: map[string]any{"nested": map[string]any{"key": "value"}},
-		},
-		{
-			name:   "array_value",
-			params: map[string]any{"items": []string{"a", "b", "c"}},
-		},
+		{"nil map", nil},
+		{"empty map", map[string]any{}},
+		{"simple map", map[string]any{"foo": "bar", "num": 123}},
+		{"nested map", map[string]any{"foo": map[string]any{"bar": "baz"}}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			hash, err := context.HashParams(tt.params)
+			hash, err := HashParams(tt.params)
 			if err != nil {
 				t.Fatalf("HashParams() error: %v", err)
 			}

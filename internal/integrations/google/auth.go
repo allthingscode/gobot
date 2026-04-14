@@ -114,7 +114,10 @@ func waitForAuthCode(port int) (string, error) {
 	codeChan := make(chan string)
 	errChan := make(chan error)
 
-	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	// Use ListenConfig to satisfy noctx linter, although this is a short-lived
+	// local listener for the OAuth flow.
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
 		return "", fmt.Errorf("failed to listen on localhost:%d: %w", port, err)
 	}
@@ -152,6 +155,7 @@ func waitForAuthCode(port int) (string, error) {
 
 func persistToken(secretsRoot string, token *storedToken) error {
 	store := tokenStore(secretsRoot)
+	// nolint:gosec // RefreshToken is a secret, but we must marshal it to persist it.
 	tokenJSON, err := json.MarshalIndent(token, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal token: %w", err)
@@ -286,6 +290,7 @@ func tryLoadTokenFromDPAPI(secretsRoot string, client *http.Client) (string, boo
 		if err := refreshToken(&tok, client); err != nil {
 			return "", false
 		}
+		// nolint:gosec // RefreshToken is a secret, but we must marshal it to persist it.
 		if updated, err := json.Marshal(tok); err == nil {
 			_ = store.Set("google_oauth_token", string(updated))
 		}
@@ -314,6 +319,7 @@ func refreshAndSaveToken(tok *storedToken, path string, client *http.Client) err
 	if err := refreshToken(tok, client); err != nil {
 		return fmt.Errorf("google token refresh: %w", err)
 	}
+	// nolint:gosec // RefreshToken is a secret
 	if updated, err := json.Marshal(tok); err == nil {
 		_ = os.WriteFile(path, updated, 0o600)
 	}

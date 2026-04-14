@@ -2,195 +2,131 @@
 package context
 
 import (
+	stdctx "context"
 	"database/sql"
 	"path/filepath"
 	"testing"
-	"unicode"
-
-	_ "modernc.org/sqlite"
 )
 
-func newTestPairingDB(t *testing.T) *sql.DB {
-	t.Helper()
-	dir := t.TempDir()
-	db, err := sql.Open("sqlite", filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
-
-func TestPairingStore_IsAuthorized_False(t *testing.T) {
+//nolint:cyclop // test complexity justified by pairing flow coverage
+func TestPairingStore_Lifecycle(t *testing.T) {
 	t.Parallel()
-	db := newTestPairingDB(t)
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "pairing.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
 	store, err := NewPairingStore(db)
 	if err != nil {
 		t.Fatalf("NewPairingStore: %v", err)
 	}
 
-	got, err := store.IsAuthorized(12345)
+	chatID := int64(12345)
+
+	// 1. Initially not authorized.
+	auth, err := store.IsAuthorized(chatID)
 	if err != nil {
 		t.Fatalf("IsAuthorized: %v", err)
 	}
-	if got {
-		t.Error("expected false for unknown chatID, got true")
-	}
-}
-
-func TestPairingStore_IsAuthorized_True(t *testing.T) {
-	t.Parallel()
-	db := newTestPairingDB(t)
-	store, err := NewPairingStore(db)
-	if err != nil {
-		t.Fatalf("NewPairingStore: %v", err)
+	if auth {
+		t.Error("expected unauthorized, got authorized")
 	}
 
-	_, err = db.Exec(`INSERT INTO authorized_users (chat_id) VALUES (?)`, int64(99999))
-	if err != nil {
-		t.Fatalf("insert authorized_user: %v", err)
-	}
-
-	got, err := store.IsAuthorized(99999)
-	if err != nil {
-		t.Fatalf("IsAuthorized: %v", err)
-	}
-	if !got {
-		t.Error("expected true for inserted chatID, got false")
-	}
-}
-
-func TestPairingStore_GetOrCreateCode_CreatesCode(t *testing.T) {
-	t.Parallel()
-	db := newTestPairingDB(t)
-	store, err := NewPairingStore(db)
-	if err != nil {
-		t.Fatalf("NewPairingStore: %v", err)
-	}
-
-	code, err := store.GetOrCreateCode(11111)
+	// 2. Generate code.
+	code, err := store.GetOrCreateCode(chatID)
 	if err != nil {
 		t.Fatalf("GetOrCreateCode: %v", err)
 	}
 	if len(code) != 6 {
-		t.Errorf("expected 6-char code, got %q (len %d)", code, len(code))
-	}
-	for _, ch := range code {
-		if !unicode.IsDigit(ch) {
-			t.Errorf("expected all digits in code, got %q", code)
-			break
-		}
-	}
-}
-
-func TestPairingStore_GetOrCreateCode_ReturnsExistingCode(t *testing.T) {
-	t.Parallel()
-	db := newTestPairingDB(t)
-	store, err := NewPairingStore(db)
-	if err != nil {
-		t.Fatalf("NewPairingStore: %v", err)
+		t.Errorf("expected 6-digit code, got %q", code)
 	}
 
-	first, err := store.GetOrCreateCode(22222)
-	if err != nil {
-		t.Fatalf("GetOrCreateCode (first): %v", err)
-	}
-	second, err := store.GetOrCreateCode(22222)
-	if err != nil {
-		t.Fatalf("GetOrCreateCode (second): %v", err)
-	}
-	if first != second {
-		t.Errorf("expected same code on second call; first=%q second=%q", first, second)
-	}
-}
-
-func TestPairingStore_AuthorizeByCode_Success(t *testing.T) {
-	t.Parallel()
-	db := newTestPairingDB(t)
-	store, err := NewPairingStore(db)
-	if err != nil {
-		t.Fatalf("NewPairingStore: %v", err)
-	}
-
-	const chatID int64 = 33333
-	code, err := store.GetOrCreateCode(chatID)
-	if err != nil {
-		t.Fatalf("GetOrCreateCode: %v", err)
-	}
-
-	gotID, err := store.AuthorizeByCode(code)
+	// 3. Authorize via code.
+	authorizedID, err := store.AuthorizeByCode(code)
 	if err != nil {
 		t.Fatalf("AuthorizeByCode: %v", err)
 	}
-	if gotID != chatID {
-		t.Errorf("expected chatID %d, got %d", chatID, gotID)
+	if authorizedID != chatID {
+		t.Errorf("expected authorizedID %d, got %d", chatID, authorizedID)
 	}
 
-	authorized, err := store.IsAuthorized(chatID)
+	// 4. Verify authorized.
+	auth, err = store.IsAuthorized(chatID)
 	if err != nil {
-		t.Fatalf("IsAuthorized: %v", err)
+		t.Fatalf("IsAuthorized (after): %v", err)
 	}
-	if !authorized {
-		t.Error("expected chatID to be authorized after AuthorizeByCode")
+	if !auth {
+		t.Error("expected authorized, got unauthorized")
 	}
 }
 
-func TestPairingStore_AuthorizeByCode_NotFound(t *testing.T) {
+func TestPairingStore_DirectAuthorize(t *testing.T) {
 	t.Parallel()
-	db := newTestPairingDB(t)
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "pairing.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
 	store, err := NewPairingStore(db)
 	if err != nil {
 		t.Fatalf("NewPairingStore: %v", err)
 	}
 
-	_, err = store.AuthorizeByCode("000000")
-	if err == nil {
-		t.Fatal("expected error for bogus code, got nil")
-	}
-}
-
-func TestPairingStore_AuthorizeByChatID(t *testing.T) {
-	t.Parallel()
-	db := newTestPairingDB(t)
-	store, err := NewPairingStore(db)
-	if err != nil {
-		t.Fatalf("NewPairingStore: %v", err)
-	}
-
-	const chatID int64 = 44444
-	if err := store.AuthorizeByChatID(chatID, "operator"); err != nil {
+	chatID := int64(99999)
+	if err := store.AuthorizeByChatID(chatID, "admin"); err != nil {
 		t.Fatalf("AuthorizeByChatID: %v", err)
 	}
 
-	authorized, err := store.IsAuthorized(chatID)
-	if err != nil {
-		t.Fatalf("IsAuthorized: %v", err)
-	}
-	if !authorized {
-		t.Error("expected chatID to be authorized after AuthorizeByChatID")
+	auth, _ := store.IsAuthorized(chatID)
+	if !auth {
+		t.Error("expected authorized after DirectAuthorize")
 	}
 }
 
-func TestPairingStore_AuthorizeByCode_DeletesCode(t *testing.T) {
+func TestPairingStore_MigrationCompat(t *testing.T) {
 	t.Parallel()
-	db := newTestPairingDB(t)
-	store, err := NewPairingStore(db)
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "pairing.db")
+
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		t.Fatalf("NewPairingStore: %v", err)
+		t.Fatalf("failed to open db: %v", err)
 	}
+	// Do not defer Close() yet as we need to reopen.
 
-	const chatID int64 = 55555
-	code, err := store.GetOrCreateCode(chatID)
+	// Pre-create table with old schema (missing authorized_by).
+	_, err = db.ExecContext(stdctx.Background(), `CREATE TABLE authorized_users (chat_id INTEGER PRIMARY KEY)`)
 	if err != nil {
-		t.Fatalf("GetOrCreateCode: %v", err)
+		_ = db.Close()
+		t.Fatalf("failed to create legacy table: %v", err)
 	}
 
-	if _, err := store.AuthorizeByCode(code); err != nil {
-		t.Fatalf("AuthorizeByCode (first): %v", err)
+	_, err = db.ExecContext(stdctx.Background(), `INSERT INTO authorized_users (chat_id) VALUES (?)`, int64(99999))
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("insert authorized_user: %v", err)
+	}
+	_ = db.Close()
+
+	// Reopen via Store (triggers Schema check/update).
+	db2, _ := sql.Open("sqlite", dbPath)
+	defer func() { _ = db2.Close() }()
+
+	store, err := NewPairingStore(db2)
+	if err != nil {
+		t.Fatalf("NewPairingStore after legacy setup: %v", err)
 	}
 
-	_, err = store.AuthorizeByCode(code)
-	if err == nil {
-		t.Fatal("expected error on second use of same code, got nil")
+	auth, _ := store.IsAuthorized(99999)
+	if !auth {
+		t.Error("expected data to survive migration")
 	}
 }

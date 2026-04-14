@@ -104,6 +104,12 @@ func TestLoadPrivateFile(t *testing.T) {
 func setupHome(t *testing.T, filename, content string) string {
 	t.Helper()
 	tempHome := t.TempDir()
+
+	// Mock userHomeDir for testability (F-133 hardening).
+	origUserHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return tempHome, nil }
+	t.Cleanup(func() { userHomeDir = origUserHomeDir })
+
 	t.Setenv("USERPROFILE", tempHome)
 	t.Setenv("HOME", tempHome)
 	dotGobot := filepath.Join(tempHome, ".gobot")

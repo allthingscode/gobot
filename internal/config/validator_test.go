@@ -25,7 +25,7 @@ func baseValidConfig(t *testing.T) *Config {
 			StorageRoot: tmpDir,
 		},
 		Providers: ProvidersConfig{
-			Gemini: GeminiConfig{APIKey: "AIzaSyA_valid_key_here"},
+			Gemini: GeminiConfig{APIKey: "AIzaSyA_valid_key_here"}, // nolint:gosec // test key
 		},
 	}
 }

@@ -95,7 +95,7 @@ func newMockStore() *mockStore {
 	return &mockStore{snapshots: make(map[string]*agentctx.ThreadSnapshot)}
 }
 
-func (s *mockStore) LoadLatest(threadID string) (*agentctx.ThreadSnapshot, error) {
+func (s *mockStore) LoadLatest(_ context.Context, threadID string) (*agentctx.ThreadSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.loadErr != nil {
@@ -108,7 +108,7 @@ func (s *mockStore) LoadLatest(threadID string) (*agentctx.ThreadSnapshot, error
 	return snap, nil
 }
 
-func (s *mockStore) SaveSnapshot(threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error) {
+func (s *mockStore) SaveSnapshot(_ context.Context, threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.saveCalls++
@@ -123,7 +123,7 @@ func (s *mockStore) SaveSnapshot(threadID string, iteration int, messages []agen
 	return true, nil
 }
 
-func (s *mockStore) CreateThread(threadID, _ string, _ map[string]any) error {
+func (s *mockStore) CreateThread(_ context.Context, threadID, _ string, _ map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createCalls = append(s.createCalls, threadID)
@@ -133,16 +133,19 @@ func (s *mockStore) CreateThread(threadID, _ string, _ map[string]any) error {
 	return nil
 }
 
-func (s *mockStore) UpdateSessionTokens(threadID string, tokens int, _ *time.Time) error {
+func (s *mockStore) UpdateSessionTokens(_ context.Context, threadID string, tokens int, _ *time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.snapshots[threadID] != nil {
+		if s.snapshots[threadID].Metadata == nil {
+			s.snapshots[threadID].Metadata = make(map[string]any)
+		}
 		s.snapshots[threadID].Metadata["estimated_tokens"] = tokens
 	}
 	return nil
 }
 
-func (s *mockStore) GetSessionTokens(threadID string) (int, *time.Time, error) {
+func (s *mockStore) GetSessionTokens(_ context.Context, threadID string) (int, *time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if snap, ok := s.snapshots[threadID]; ok {
@@ -224,7 +227,8 @@ func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
 			Content: &agentctx.MessageContent{Str: &content},
 		}
 	}
-	_, _ = store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot(context.Background(),
+"sess1", 1, history)
 
 	// Set compaction policy.
 	mgr.SetMemoryWindow(5)
@@ -484,7 +488,8 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 				{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("prior message")}},
 			}
 			store := newMockStore()
-			_, _ = store.SaveSnapshot("s1", 1, history)
+			_, _ = store.SaveSnapshot(context.Background(),
+"s1", 1, history)
 			mgr.store = store
 
 			hooks := &Hooks{}
@@ -531,7 +536,8 @@ func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("ok.")}},
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("hello")}},
 	}
-	_, _ = store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot(context.Background(),
+"sess1", 1, history)
 
 	mgr.SetMemoryWindow(2)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -578,7 +584,8 @@ func TestSessionManager_CompactionWithNilConsolidator(t *testing.T) {
 			Content: &agentctx.MessageContent{Str: &content},
 		}
 	}
-	_, _ = store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot(context.Background(),
+"sess1", 1, history)
 
 	mgr.SetMemoryWindow(5)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -608,7 +615,8 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("Budget approved: $50k")}},
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("confirmed")}},
 	}
-	_, _ = store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot(context.Background(),
+"sess1", 1, history)
 
 	mgr.SetMemoryWindow(2)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -668,7 +676,8 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("response 1")}},
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("message 2")}},
 	}
-	_, _ = store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot(context.Background(),
+"sess1", 1, history)
 
 	// Dispatch a new message.
 	_, err := mgr.Dispatch(ctx, "sess1", "", "new message")
@@ -677,7 +686,7 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 	}
 
 	// Verify the history in the store after dispatch.
-	snap, _ := store.LoadLatest("sess1")
+	snap, _ := store.LoadLatest(context.Background(), "sess1")
 	if snap == nil {
 		t.Fatal("expected snapshot to exist")
 	}
@@ -797,7 +806,8 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 	// Pre-fill history with 15 messages (more than memoryWindow * threshold = 10 * 0.5 = 5)
 	// This will trigger compaction when we add one more message
 	history := generateTestHistory(15)
-	_, _ = store.SaveSnapshot("sess1", 1, history)
+	_, _ = store.SaveSnapshot(context.Background(),
+"sess1", 1, history)
 
 	// Dispatch a new message to trigger compaction (16th message)
 	// This should trigger summarization, which will fail due to our mock,
@@ -814,7 +824,7 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 	}
 
 	// Check the final state in the store
-	snap, err := store.LoadLatest("sess1")
+	snap, err := store.LoadLatest(context.Background(), "sess1")
 	if err != nil {
 		t.Fatalf("Failed to load snapshot: %v", err)
 	}

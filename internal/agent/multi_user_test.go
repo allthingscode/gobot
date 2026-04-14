@@ -19,7 +19,7 @@ type perUserCheckpointStore struct {
 	recorded []string // threadIDs touched on this store
 }
 
-func (s *perUserCheckpointStore) LoadLatest(threadID string) (*agentctx.ThreadSnapshot, error) {
+func (s *perUserCheckpointStore) LoadLatest(_ context.Context, threadID string) (*agentctx.ThreadSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recorded = append(s.recorded, threadID)
@@ -30,7 +30,7 @@ func (s *perUserCheckpointStore) LoadLatest(threadID string) (*agentctx.ThreadSn
 	return snap, nil
 }
 
-func (s *perUserCheckpointStore) SaveSnapshot(threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error) {
+func (s *perUserCheckpointStore) SaveSnapshot(_ context.Context, threadID string, iteration int, messages []agentctx.StrategicMessage) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recorded = append(s.recorded, threadID)
@@ -41,18 +41,18 @@ func (s *perUserCheckpointStore) SaveSnapshot(threadID string, iteration int, me
 	return true, nil
 }
 
-func (s *perUserCheckpointStore) CreateThread(threadID, _ string, _ map[string]any) error {
+func (s *perUserCheckpointStore) CreateThread(_ context.Context, threadID, _ string, _ map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recorded = append(s.recorded, threadID)
 	return nil
 }
 
-func (s *perUserCheckpointStore) UpdateSessionTokens(_ string, _ int, _ *time.Time) error {
+func (s *perUserCheckpointStore) UpdateSessionTokens(_ context.Context, _ string, _ int, _ *time.Time) error {
 	return nil
 }
 
-func (s *perUserCheckpointStore) GetSessionTokens(_ string) (int, *time.Time, error) {
+func (s *perUserCheckpointStore) GetSessionTokens(_ context.Context, _ string) (int, *time.Time, error) {
 	return 0, nil, nil
 }
 
