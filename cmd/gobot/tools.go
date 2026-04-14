@@ -79,11 +79,36 @@ func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, sp
 	}
 }
 
+//nolint:gochecknoglobals // mockable function for testing
+var enumerateMCPToolsFunc = enumerateMCPTools
+
 func appendMCPtools(cfg *config.Config, tools []Tool) []Tool {
+	existingNames := make(map[string]bool)
+	for _, t := range tools {
+		existingNames[t.Name()] = true
+	}
+
 	for name, srvCfg := range cfg.Tools.MCPServers {
 		env := cfg.MCPEnvFor(name)
-		tools = append(tools, newMCPTool(name, srvCfg, env))
-		slog.Info("run: registered MCP tool", "server", name)
+		srv := &MCPServer{name: name, cfg: srvCfg, env: env}
+
+		proxies, err := enumerateMCPToolsFunc(context.Background(), srv)
+		if err != nil {
+			slog.Warn("mcp: failed to enumerate tools, registering passthrough", "server", name, "err", err)
+			tools = append(tools, newMCPTool(name, srvCfg, env))
+			continue
+		}
+		for _, p := range proxies {
+			finalName := sanitizeMCPToolName(p.toolName)
+			if existingNames[finalName] {
+				finalName = sanitizeMCPToolName(srv.serverName()) + "__" + finalName
+			}
+			existingNames[finalName] = true
+			p.decl.Name = finalName
+
+			tools = append(tools, p)
+			slog.Info("run: registered MCP proxy tool", "server", name, "tool", p.toolName)
+		}
 	}
 	return tools
 }
