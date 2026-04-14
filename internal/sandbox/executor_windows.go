@@ -57,6 +57,7 @@ func (e *winExecutor) Run(ctx context.Context, name string, args []string) (stri
 
 	// Start the process SUSPENDED so we can assign it to the Job Object
 	// before it executes any user code.
+	//nolint:gosec // intentional for sandbox executor
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = sandboxDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{

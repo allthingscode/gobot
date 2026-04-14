@@ -61,7 +61,14 @@ fi
 # Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
 REQUIRED_LINT_VERSION="v2.11.4"
 if command -v golangci-lint > /dev/null 2>&1; then
-    INSTALLED_LINT_VERSION=$(golangci-lint version --format short 2>/dev/null || echo "unknown")
+    INSTALLED_LINT_VERSION=$(golangci-lint version --short 2>/dev/null || echo "unknown")
+    # Prefix with 'v' if missing to match REQUIRED_LINT_VERSION
+    case "$INSTALLED_LINT_VERSION" in
+        v*) ;;
+        unknown) ;;
+        *) INSTALLED_LINT_VERSION="v$INSTALLED_LINT_VERSION" ;;
+    esac
+
     if [ "$INSTALLED_LINT_VERSION" != "$REQUIRED_LINT_VERSION" ]; then
         echo "ERROR: golangci-lint version mismatch."
         echo "  Installed: $INSTALLED_LINT_VERSION"

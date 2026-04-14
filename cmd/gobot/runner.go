@@ -172,11 +172,11 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messa
 
 		// 6. Check for Tool Calls
 		if len(resp.Message.ToolCalls) == 0 {
-			text, shouldContinue := r.handleTerminalResponse(ctx, sessionKey, userText, rubric, resp.Message, &messages, &reflectionRounds)
-			if shouldContinue {
-				continue
+			text, done := r.handleTerminalResponse(ctx, sessionKey, userText, rubric, resp.Message, &messages, &reflectionRounds)
+			if done {
+				return text, messages, nil
 			}
-			return text, messages, nil
+			continue
 		}
 
 		// 7. Execute Tools
@@ -369,9 +369,9 @@ func (r *geminiRunner) executeSingleToolCall(ctx context.Context, sessionKey, us
 }
 
 func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
-	result, execErr, skipExec := r.preToolStep(ctx, sessionKey, name, args, paramsHash)
+	result, execErr := r.preToolStep(ctx, sessionKey, name, args, paramsHash)
 
-	if execErr == nil && !skipExec {
+	if execErr == nil && result == "" {
 		result, execErr = r.mainToolStep(ctx, sessionKey, userID, name, args, iter, seqLen, paramsHash, hashErr)
 	}
 
@@ -379,7 +379,7 @@ func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID,
 		return r.handleToolError(sessionKey, name, paramsHash, result, execErr), nil
 	}
 
-	if r.hooks != nil && !skipExec {
+	if r.hooks != nil && result == "" {
 		anyResult := r.hooks.RunPostTool(ctx, name, result)
 		if s, ok := anyResult.(string); ok {
 			result = s
@@ -392,13 +392,13 @@ func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID,
 	return result, nil
 }
 
-func (r *geminiRunner) preToolStep(ctx context.Context, sessionKey, name string, args map[string]any, paramsHash string) (string, error, bool) {
+func (r *geminiRunner) preToolStep(ctx context.Context, sessionKey, name string, args map[string]any, paramsHash string) (string, error) {
 	if r.hooks == nil {
-		return "", nil, false
+		return "", nil
 	}
 	override, err := r.hooks.RunPreTool(ctx, sessionKey, name, args)
 	if err != nil {
-		return "", err, false
+		return "", err
 	}
 	if override != "" {
 		slog.Debug("runner: tool pre-hook override",
@@ -407,9 +407,9 @@ func (r *geminiRunner) preToolStep(ctx context.Context, sessionKey, name string,
 			slog.String("params_hash", paramsHash),
 			slog.String("result", override),
 		)
-		return override, nil, true
+		return override, nil
 	}
-	return "", nil, false
+	return "", nil
 }
 
 func (r *geminiRunner) mainToolStep(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
@@ -531,10 +531,10 @@ func (r *geminiRunner) handleTerminalResponse(ctx context.Context, sessionKey, u
 	if r.enableReflection && rubric != nil && *reflectionRounds < r.maxReflectionRounds {
 		if msg, ok := r.performReflectionAudit(ctx, sessionKey, userText, rubric, text, reflectionRounds); !ok {
 			*messages = append(*messages, msg)
-			return "", true
+			return "", false
 		}
 	}
-	return text, false
+	return text, true
 }
 
 // retryChat calls prov.Chat with exponential backoff on transient errors.
