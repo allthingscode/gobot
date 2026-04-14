@@ -175,12 +175,12 @@ func mapMessageContent(content *agentctx.MessageContent) string {
 	return strings.Join(parts, "\n")
 }
 
-func mapToolCalls(toolCalls []map[string]any) []openAIToolCall {
+func mapToolCalls(toolCalls []agentctx.ToolCall) []openAIToolCall {
 	oaToolCalls := make([]openAIToolCall, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		id, _ := tc["id"].(string)
-		name, _ := tc["name"].(string)
-		argsMap, _ := tc["args"].(map[string]any)
+		id := tc.ID
+		name := tc.Name
+		argsMap := tc.Args
 		argsBytes, _ := json.Marshal(argsMap)
 		oaToolCalls = append(oaToolCalls, openAIToolCall{
 			ID:   id,
@@ -233,10 +233,10 @@ func (p *OpenAIProvider) mapResponse(oaResp openAIResponse) *ChatResponse {
 		var args map[string]any
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 
-		msg.ToolCalls = append(msg.ToolCalls, map[string]any{
-			"id":   tc.ID,
-			"name": tc.Function.Name,
-			"args": args,
+		msg.ToolCalls = append(msg.ToolCalls, agentctx.ToolCall{
+			ID:   tc.ID,
+			Name: tc.Function.Name,
+			Args: args,
 		})
 	}
 

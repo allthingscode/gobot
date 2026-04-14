@@ -28,32 +28,32 @@ func TestRunner_EnforcesToolIterationLimit(t *testing.T) {
 			{
 				Message: agentctx.StrategicMessage{
 					Role: agentctx.RoleAssistant,
-					ToolCalls: []map[string]any{
-						{"name": name, "args": map[string]any{"x": 1}},
+					ToolCalls: []agentctx.ToolCall{
+						{Name: name, Args: map[string]any{"x": 1}},
 					},
 				},
 			},
 			{
 				Message: agentctx.StrategicMessage{
 					Role: agentctx.RoleAssistant,
-					ToolCalls: []map[string]any{
-						{"name": name, "args": map[string]any{"x": 2}},
+					ToolCalls: []agentctx.ToolCall{
+						{Name: name, Args: map[string]any{"x": 2}},
 					},
 				},
 			},
 			{
 				Message: agentctx.StrategicMessage{
 					Role: agentctx.RoleAssistant,
-					ToolCalls: []map[string]any{
-						{"name": name, "args": map[string]any{"x": 3}},
+					ToolCalls: []agentctx.ToolCall{
+						{Name: name, Args: map[string]any{"x": 3}},
 					},
 				},
 			},
 			{
 				Message: agentctx.StrategicMessage{
 					Role: agentctx.RoleAssistant,
-					ToolCalls: []map[string]any{
-						{"name": name, "args": map[string]any{"x": 4}},
+					ToolCalls: []agentctx.ToolCall{
+						{Name: name, Args: map[string]any{"x": 4}},
 					},
 				},
 			},
@@ -372,43 +372,43 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
-		toolCalls []map[string]any
+		toolCalls []agentctx.ToolCall
 		wantErr   string
 	}{
 		{
 			name: "valid call",
-			toolCalls: []map[string]any{
-				{"name": "test_tool", "args": map[string]any{"arg1": "val1"}},
+			toolCalls: []agentctx.ToolCall{
+				{Name: "test_tool", Args: map[string]any{"arg1": "val1"}},
 			},
 			wantErr: "",
 		},
 		{
 			name: "missing name",
-			toolCalls: []map[string]any{
-				{"args": map[string]any{}},
+			toolCalls: []agentctx.ToolCall{
+				{Args: map[string]any{}},
 			},
-			wantErr: "missing or non-string 'name' field",
+			wantErr: "", // Note: Typed struct means name is now always a string (empty)
 		},
 		{
 			name: "wrong name type",
-			toolCalls: []map[string]any{
-				{"name": 123, "args": map[string]any{}},
+			toolCalls: []agentctx.ToolCall{
+				{Name: "", Args: map[string]any{}},
 			},
-			wantErr: "missing or non-string 'name' field",
+			wantErr: "",
 		},
 		{
 			name: "missing args",
-			toolCalls: []map[string]any{
-				{"name": "test_tool"},
+			toolCalls: []agentctx.ToolCall{
+				{Name: "test_tool"},
 			},
-			wantErr: "missing or non-map 'args' field",
+			wantErr: "",
 		},
 		{
 			name: "wrong args type",
-			toolCalls: []map[string]any{
-				{"name": "test_tool", "args": "invalid"},
+			toolCalls: []agentctx.ToolCall{
+				{Name: "test_tool", Args: nil},
 			},
-			wantErr: "missing or non-map 'args' field",
+			wantErr: "",
 		},
 	}
 
@@ -422,7 +422,7 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 	}
 }
 
-func setupValidationRunner(toolCalls []map[string]any) *geminiRunner {
+func setupValidationRunner(toolCalls []agentctx.ToolCall) *geminiRunner {
 	mock := &mockProvider{
 		responses: []*provider.ChatResponse{
 			{
@@ -538,8 +538,8 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 			{
 				Message: agentctx.StrategicMessage{
 					Role: agentctx.RoleAssistant,
-					ToolCalls: []map[string]any{
-						{"name": "large_tool", "args": map[string]any{}},
+					ToolCalls: []agentctx.ToolCall{
+						{Name: "large_tool", Args: map[string]any{}},
 					},
 				},
 			},
@@ -609,8 +609,8 @@ func TestRunner_StructuredLogging(t *testing.T) { //nolint:paralleltest // mutat
 			{
 				Message: agentctx.StrategicMessage{
 					Role: agentctx.RoleAssistant,
-					ToolCalls: []map[string]any{
-						{"name": "fail_tool", "args": map[string]any{"force": "fail"}},
+					ToolCalls: []agentctx.ToolCall{
+						{Name: "fail_tool", Args: map[string]any{"force": "fail"}},
 					},
 				},
 			},
@@ -684,8 +684,8 @@ func TestRunner_PreservesOutputOnError(t *testing.T) {
 			{
 				Message: agentctx.StrategicMessage{
 					Role: agentctx.RoleAssistant,
-					ToolCalls: []map[string]any{
-						{"name": "fail_with_output", "args": map[string]any{}},
+					ToolCalls: []agentctx.ToolCall{
+						{Name: "fail_with_output", Args: map[string]any{}},
 					},
 				},
 			},

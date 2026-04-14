@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -106,16 +105,16 @@ func (p *GeminiProvider) mapThoughtPart(part *genai.Part, msg *agentctx.Strategi
 }
 
 func (p *GeminiProvider) mapFunctionCallPart(part *genai.Part, msg *agentctx.StrategicMessage, lastThoughtSig []byte) {
-	tc := map[string]any{
-		"name": part.FunctionCall.Name,
-		"args": part.FunctionCall.Args,
+	tc := agentctx.ToolCall{
+		Name: part.FunctionCall.Name,
+		Args: part.FunctionCall.Args,
 	}
 	sig := part.ThoughtSignature
 	if len(sig) == 0 {
 		sig = lastThoughtSig
 	}
 	if len(sig) > 0 {
-		tc["thought_signature"] = sig
+		tc.ThoughtSignature = sig
 	}
 	msg.ToolCalls = append(msg.ToolCalls, tc)
 }
@@ -209,20 +208,11 @@ func appendContentParts(c *genai.Content, content *agentctx.MessageContent) {
 	}
 }
 
-func appendToolCallParts(c *genai.Content, toolCalls []map[string]any) {
+func appendToolCallParts(c *genai.Content, toolCalls []agentctx.ToolCall) {
 	for _, tc := range toolCalls {
-		name, _ := tc["name"].(string)
-		args, _ := tc["args"].(map[string]any)
-
-		var sig []byte
-		if rawSig, ok := tc["thought_signature"]; ok {
-			switch v := rawSig.(type) {
-			case []byte:
-				sig = v
-			case string:
-				sig, _ = base64.StdEncoding.DecodeString(v)
-			}
-		}
+		name := tc.Name
+		args := tc.Args
+		sig := tc.ThoughtSignature
 
 		if name != "" {
 			c.Parts = append(c.Parts, &genai.Part{

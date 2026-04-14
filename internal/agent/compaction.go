@@ -103,8 +103,8 @@ func buildToolCallMap(messages []agentctx.StrategicMessage) map[string]int {
 		role := messages[i].Role
 		if role == agentctx.RoleModel || role == agentctx.RoleAssistant {
 			for _, tc := range messages[i].ToolCalls {
-				if id, ok := tc["id"].(string); ok && id != "" {
-					allToolCallIDs[id] = i
+				if tc.ID != "" {
+					allToolCallIDs[tc.ID] = i
 				}
 			}
 		}
@@ -140,10 +140,10 @@ func completeChainsForward(messages []agentctx.StrategicMessage, keep []bool) {
 	}
 }
 
-func keepResponsesForCall(messages []agentctx.StrategicMessage, keep []bool, toolCalls []map[string]any) {
+func keepResponsesForCall(messages []agentctx.StrategicMessage, keep []bool, toolCalls []agentctx.ToolCall) {
 	for _, tc := range toolCalls {
-		id, ok := tc["id"].(string)
-		if !ok || id == "" {
+		id := tc.ID
+		if id == "" {
 			continue
 		}
 		// Find all tool responses for this call ID and keep them
@@ -180,8 +180,8 @@ func hasKeptToolCalls(compacted []agentctx.StrategicMessage) bool {
 		return false
 	}
 	for _, tc := range compacted[0].ToolCalls {
-		id, ok := tc["id"].(string)
-		if !ok || id == "" {
+		id := tc.ID
+		if id == "" {
 			continue
 		}
 		// Check if any tool response in compacted matches this call ID

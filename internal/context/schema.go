@@ -183,15 +183,23 @@ func (m *MessageContent) String() string {
 	return sb.String()
 }
 
+// ToolCall represents a single tool invocation requested by the model.
+type ToolCall struct {
+	ID               string         `json:"id,omitempty"`               // Optional; used by OpenAI/Anthropic for response correlation
+	Name             string         `json:"name"`                       // Tool name as declared in ToolDeclaration
+	Args             map[string]any `json:"args"`                       // Arguments decoded from the model's response
+	ThoughtSignature []byte         `json:"thought_signature,omitempty"` // Gemini-specific: cryptographic signature of the thought block
+}
+
 // StrategicMessage is a single entry in the agent conversation history.
 // It mirrors the Pydantic StrategicMessage in checkpoint_logic.py.
 type StrategicMessage struct {
-	Role             MessageRole      `json:"role"`                        // Role (user, assistant, system, etc.).
-	Content          *MessageContent  `json:"content,omitempty"`           // Text or structured content.
-	Name             *string          `json:"name,omitempty"`              // Optional author name (for multi-user/multi-agent).
-	ToolCallID       *string          `json:"tool_call_id,omitempty"`      // ID of the tool call this message responds to.
-	ToolCalls        []map[string]any `json:"tool_calls,omitempty"`        // List of tool calls generated (assistant role).
-	ReasoningContent *string          `json:"reasoning_content,omitempty"` // Raw internal reasoning from the model.
+	Role             MessageRole     `json:"role"`                        // Role (user, assistant, system, etc.).
+	Content          *MessageContent `json:"content,omitempty"`           // Text or structured content.
+	Name             *string         `json:"name,omitempty"`              // Optional author name (for multi-user/multi-agent).
+	ToolCallID       *string         `json:"tool_call_id,omitempty"`      // ID of the tool call this message responds to.
+	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`        // List of tool calls generated (assistant role).
+	ReasoningContent *string         `json:"reasoning_content,omitempty"` // Raw internal reasoning from the model.
 	ThinkingBlocks   []map[string]any `json:"thinking_blocks,omitempty"`   // Structured internal thinking steps.
-	CreatedAt        string           `json:"created_at,omitempty"`        // Timestamp (RFC3339).
+	CreatedAt        string          `json:"created_at,omitempty"`        // Timestamp (RFC3339).
 }

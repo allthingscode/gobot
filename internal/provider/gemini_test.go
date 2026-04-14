@@ -109,7 +109,7 @@ func verifyChatSuccess(t *testing.T, resp *ChatResponse, tt chatTestCase) {
 	}
 
 	if tt.wantTool != "" {
-		if len(resp.Message.ToolCalls) == 0 || resp.Message.ToolCalls[0]["name"] != tt.wantTool {
+		if len(resp.Message.ToolCalls) == 0 || resp.Message.ToolCalls[0].Name != tt.wantTool {
 			t.Errorf("expected tool %q, got: %v", tt.wantTool, resp.Message.ToolCalls)
 		}
 	}

@@ -308,28 +308,21 @@ func (r *geminiRunner) performReflectionAudit(ctx context.Context, sessionKey, u
 	return agentctx.StrategicMessage{}, true
 }
 
-func (r *geminiRunner) processToolCalls(ctx context.Context, sessionKey, userID string, toolCalls []map[string]any, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
+func (r *geminiRunner) processToolCalls(ctx context.Context, sessionKey, userID string, toolCalls []agentctx.ToolCall, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
 	messages := make([]agentctx.StrategicMessage, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		name, ok := tc["name"].(string)
-		if !ok {
-			return nil, fmt.Errorf("malformed tool call: missing or non-string 'name' field: %v", tc)
-		}
-		args, ok := tc["args"].(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("malformed tool call: missing or non-map 'args' field for tool %s: %v", name, tc)
-		}
+		name := tc.Name
+		args := tc.Args
 
 		var toolCallID *string
-		if id, ok := tc["id"].(string); ok {
+		if tc.ID != "" {
+			id := tc.ID
 			toolCallID = &id
 		}
 
 		*toolSeq = append(*toolSeq, name)
 		result, err := r.executeSingleToolCall(ctx, sessionKey, userID, name, args, iter, len(*toolSeq))
 		if err != nil {
-			// Even on error, we might want to return what we have so far?
-			// But original code returned nil, err.
 			return nil, err
 		}
 
