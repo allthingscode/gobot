@@ -282,19 +282,20 @@ func (m *SessionManager) loadHistory(ctx context.Context, sessionKey string, sto
 	return messages, iteration, stateless, nil
 }
 
-// summarizationPrompt is the system prompt for context summarization.
+// summarizationPrompt is the shared system prompt for all context compaction operations.
+// Used by both threshold-based (runSummarization) and token-budget-triggered (buildCompactionSummary) paths.
 const (
-	summarizationPrompt = `You are a context summarization assistant. Your task is to condense the provided conversation history into a concise <context_summary> block.
-
-Preserve the following:
+	summarizationPrompt = `You are a context summarization assistant. Condense the provided
+conversation history into a concise summary. Preserve:
 1. Key decisions made and agreed upon.
 2. Active action items and their status.
 3. User preferences and stylistic mandates.
 4. Current task state and progress.
 
-Format the summary as a clear, bulleted list within <context_summary> tags. If an existing summary is provided, integrate it into the new one (hierarchical summarization).
+Format as a clear, bulleted list. If an existing <context_summary> block is provided,
+integrate it hierarchically (do not discard prior summaries).
 
-Conversation history to summarize:
+Conversation history:
 `
 
 	// DefaultMaxContextMessages is the message count above which compaction triggers.
@@ -548,9 +549,7 @@ func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey 
 	// Use WithoutCancel to ensure background compaction continues even if
 	// the triggering request is cancelled.
 	bgCtx := context.WithoutCancel(ctx)
-	return m.runner.RunText(bgCtx, sessionKey,
-		"You are a context summarization assistant. Summarize the following conversation history into a concise summary that preserves key decisions, active items, user preferences, and current task state. Format as bullet points.\n\n"+inputText,
-		model)
+	return m.runner.RunText(bgCtx, sessionKey, summarizationPrompt+inputText, model)
 }
 
 func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey string, store CheckpointStore) {
