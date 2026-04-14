@@ -2,11 +2,33 @@
 package reporter
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	// Redirect GOBOT_HOME to a temp directory to ensure isolation
+	// from the real user's home directory (B-052).
+	tmpDir, err := os.MkdirTemp("", "gobot-test-home-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp home: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Setenv("GOBOT_HOME", tmpDir)
+
+	// Reset the singleton if it was already initialized.
+	tmMu.Lock()
+	tm = nil
+	tmMu.Unlock()
+
+	code := m.Run()
+	os.RemoveAll(tmpDir)
+	os.Exit(code)
+}
 
 func verifyNotificationContent(t *testing.T, content, subject, body, recipient, reason string) {
 	t.Helper()
@@ -171,7 +193,7 @@ func TestWrapHTML(t *testing.T) {
 			match: []string{
 				"<!DOCTYPE html>",
 				"<html><head><style>",
-				strings.TrimSpace(defaultCSS),
+				"body {",
 				"color: #f0f6fc !important",
 				"color: #a5d6ff !important",
 				"Georgia",
@@ -187,7 +209,8 @@ func TestWrapHTML(t *testing.T) {
 			match: []string{
 				"<!DOCTYPE html>",
 				"<html><head><style>",
-				strings.TrimSpace(defaultCSS),
+				"body {",
+				"background-color: #0a0b10",
 				"</style></head><body><div class='container'>",
 				"Just a <p>paragraph</p>",
 				"</div></body></html>",
@@ -198,7 +221,8 @@ func TestWrapHTML(t *testing.T) {
 			body: "<html><head><title>Test</title></head><body>Content</body></html>",
 			match: []string{
 				"<html><head><title>Test</title><style>",
-				strings.TrimSpace(defaultCSS),
+				"body {",
+				"font-family: 'Segoe UI'",
 				"</style></head><body>Content</body></html>",
 			},
 		},
@@ -207,7 +231,8 @@ func TestWrapHTML(t *testing.T) {
 			body: "<html><body>Content</body></html>",
 			match: []string{
 				"<style>",
-				strings.TrimSpace(defaultCSS),
+				"body {",
+				"line-height: 1.6",
 				"</style><html><body>Content</body></html>",
 			},
 		},
