@@ -181,6 +181,7 @@ type StrategicConfig struct {
 	MultiUserEnabled    bool                `json:"multi_user_enabled"`       // F-073
 	Observability       ObservabilityConfig `json:"observability"`
 	TemplatesPath       string              `json:"templates_path,omitempty"`   // Custom directory for email templates
+	CustomCSSPath       string              `json:"custom_css_path,omitempty"`  // Custom CSS file for email styling override
 	Routing             RoutingConfig       `json:"routing"`                    // F-102
 	PolicyFilePath      string              `json:"policy_file_path,omitempty"` // F-103
 	EmbeddingModel      string              `json:"embedding_model,omitempty"`  // B-049

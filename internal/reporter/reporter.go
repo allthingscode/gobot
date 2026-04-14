@@ -13,7 +13,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 )
 
-//go:embed templates/email.css
+//go:embed templates/default_email.css
 var defaultCSS string
 
 //go:embed templates/email.html
@@ -44,6 +44,35 @@ func NewTemplateManager(dir string) *TemplateManager {
 			mgr.css = strings.TrimSpace(string(b))
 		}
 
+		htmlPath := filepath.Join(dir, "email.html")
+		if b, err := os.ReadFile(htmlPath); err == nil {
+			mgr.html = strings.TrimSpace(string(b))
+		}
+	}
+
+	return mgr
+}
+
+// NewTemplateManagerWithCSS initializes a TemplateManager, loading from dir if provided,
+// and optionally overriding CSS with customCSSPath.
+func NewTemplateManagerWithCSS(dir, customCSSPath string) *TemplateManager {
+	mgr := &TemplateManager{
+		css:  strings.TrimSpace(defaultCSS),
+		html: strings.TrimSpace(defaultHTML),
+	}
+
+	if customCSSPath != "" {
+		if b, err := os.ReadFile(customCSSPath); err == nil {
+			mgr.css = strings.TrimSpace(string(b))
+		}
+	} else if dir != "" {
+		cssPath := filepath.Join(dir, "email.css")
+		if b, err := os.ReadFile(cssPath); err == nil {
+			mgr.css = strings.TrimSpace(string(b))
+		}
+	}
+
+	if dir != "" {
 		htmlPath := filepath.Join(dir, "email.html")
 		if b, err := os.ReadFile(htmlPath); err == nil {
 			mgr.html = strings.TrimSpace(string(b))
@@ -140,10 +169,14 @@ func WrapHTML(body string) string {
 		tmMu.Lock()
 		if tm == nil {
 			dir := ""
+			cssPath := ""
 			if cfg, err := config.Load(); err == nil && cfg != nil {
 				dir = cfg.TemplatesPath()
+				if cfg.Strategic.CustomCSSPath != "" {
+					cssPath = cfg.Strategic.CustomCSSPath
+				}
 			}
-			tm = NewTemplateManager(dir)
+			tm = NewTemplateManagerWithCSS(dir, cssPath)
 		}
 		localTM = tm
 		tmMu.Unlock()
