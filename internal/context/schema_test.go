@@ -452,8 +452,8 @@ func TestStrategicMessage_ToolCalls_RoundTrip(t *testing.T) {
 	t.Parallel()
 	msg := ctx.StrategicMessage{
 		Role: ctx.RoleAssistant,
-		ToolCalls: []map[string]any{
-			{"id": "c1", "type": "function", "function": map[string]any{"name": "spawn", "arguments": "{}"}},
+		ToolCalls: []ctx.ToolCall{
+			{ID: "c1", Name: "spawn", Args: map[string]any{}},
 		},
 	}
 	data, err := json.Marshal(msg)

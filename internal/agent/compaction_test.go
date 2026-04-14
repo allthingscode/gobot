@@ -473,8 +473,8 @@ func assertNoUnresolvedToolCalls(t *testing.T, msgs []agentctx.StrategicMessage)
 	for i, m := range msgs {
 		if m.Role == agentctx.RoleModel || m.Role == agentctx.RoleAssistant {
 			for _, tc := range m.ToolCalls {
-				if id, ok := tc["id"].(string); ok && id != "" && !respondedIDs[id] {
-					t.Errorf("msg[%d]: unresolved tool call id=%q", i, id)
+				if tc.ID != "" && !respondedIDs[tc.ID] {
+					t.Errorf("msg[%d]: unresolved tool call id=%q", i, tc.ID)
 				}
 			}
 		}
@@ -486,8 +486,8 @@ func collectCalledIDs(msgs []agentctx.StrategicMessage) map[string]bool {
 	for _, m := range msgs {
 		if m.Role == agentctx.RoleModel || m.Role == agentctx.RoleAssistant {
 			for _, tc := range m.ToolCalls {
-				if id, ok := tc["id"].(string); ok && id != "" {
-					ids[id] = true
+				if tc.ID != "" {
+					ids[tc.ID] = true
 				}
 			}
 		}
@@ -533,9 +533,9 @@ func buildMessages(n int, scenarios []toolScenario) []agentctx.StrategicMessage 
 		if s, ok := scenarioMap[i]; ok {
 			msg.Role = s.role
 			if len(s.toolCallIDs) > 0 {
-				msg.ToolCalls = make([]map[string]any, len(s.toolCallIDs))
+				msg.ToolCalls = make([]agentctx.ToolCall, len(s.toolCallIDs))
 				for j, id := range s.toolCallIDs {
-					msg.ToolCalls[j] = map[string]any{"id": id}
+					msg.ToolCalls[j] = agentctx.ToolCall{ID: id}
 				}
 			}
 			if s.toolCallID != "" {

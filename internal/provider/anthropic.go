@@ -189,12 +189,12 @@ func mapTextBlocks(content *agentctx.MessageContent) []anthropicContentBlock {
 	return blocks
 }
 
-func mapToolCallBlocks(toolCalls []map[string]any) []anthropicContentBlock {
+func mapToolCallBlocks(toolCalls []agentctx.ToolCall) []anthropicContentBlock {
 	blocks := make([]anthropicContentBlock, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		id, _ := tc["id"].(string)
-		name, _ := tc["name"].(string)
-		args, _ := tc["args"].(map[string]any)
+		id := tc.ID
+		name := tc.Name
+		args := tc.Args
 		blocks = append(blocks, anthropicContentBlock{
 			Type:  "tool_use",
 			ID:    id,
@@ -252,10 +252,10 @@ func (p *AnthropicProvider) mapResponse(antResp anthropicResponse) *ChatResponse
 		case "text":
 			textParts = append(textParts, block.Text)
 		case "tool_use":
-			msg.ToolCalls = append(msg.ToolCalls, map[string]any{
-				"id":   block.ID,
-				"name": block.Name,
-				"args": block.Input,
+			msg.ToolCalls = append(msg.ToolCalls, agentctx.ToolCall{
+				ID:   block.ID,
+				Name: block.Name,
+				Args: block.Input,
 			})
 		}
 	}
