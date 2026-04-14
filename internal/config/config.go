@@ -72,11 +72,10 @@ type ContextConfig struct {
 const DefaultSummarizationThreshold = 0.7
 
 // SummarizationConfig controls automatic context summarization before pruning.
-// Fields use prefixed names to avoid conflicts with the accessor methods below.
 type SummarizationConfig struct {
-	IsEnabled        bool    `json:"enabled"`
-	ModelName        string  `json:"model"`
-	ThresholdPercent float64 `json:"thresholdPercent"`
+	Enabled   bool    `json:"enabled"`
+	Model     string  `json:"model"`
+	Threshold float64 `json:"threshold"`
 }
 
 type CompactionPolicyConfig struct {
@@ -85,23 +84,23 @@ type CompactionPolicyConfig struct {
 	Summarization SummarizationConfig `json:"summarization"`
 }
 
-// Enabled returns true if summarization is enabled.
-func (s SummarizationConfig) Enabled() bool {
-	return s.IsEnabled
+// IsSummarizationEnabled returns true if summarization is enabled.
+func (s SummarizationConfig) IsSummarizationEnabled() bool {
+	return s.Enabled
 }
 
-// Threshold returns the configured threshold, or the default (70%) if unset.
-func (s SummarizationConfig) Threshold() float64 {
-	if s.ThresholdPercent > 0 {
-		return s.ThresholdPercent
+// SummarizationThreshold returns the configured threshold, or the default (70%) if unset.
+func (s SummarizationConfig) SummarizationThreshold() float64 {
+	if s.Threshold > 0 {
+		return s.Threshold
 	}
 	return DefaultSummarizationThreshold
 }
 
-// Model returns the configured model, falling back to the provided default if empty.
-func (s SummarizationConfig) Model(defaultModel string) string {
-	if s.ModelName != "" {
-		return s.ModelName
+// SummarizationModel returns the configured model, falling back to the provided default if empty.
+func (s SummarizationConfig) SummarizationModel(defaultModel string) string {
+	if s.Model != "" {
+		return s.Model
 	}
 	return defaultModel
 }

@@ -254,7 +254,6 @@ func (r *geminiRunner) ftsSearch(userText, sessionKey string, memStore *memory.M
 	return nil
 }
 
-
 func (r *geminiRunner) generateReflectionRubric(ctx context.Context, sessionKey, userText string) map[string]any {
 	if !r.enableReflection || userText == "" {
 		return nil

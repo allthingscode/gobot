@@ -374,11 +374,11 @@ func (m *SessionManager) runPreHistoryHooks(ctx context.Context, sessionKey stri
 
 func (m *SessionManager) summarizeHistoryIfNeeded(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage {
 	summarization := m.compactionPolicy.Summarization
-	if !summarization.Enabled() || len(messages) <= int(float64(m.memoryWindow)*summarization.Threshold()) {
+	if !summarization.IsSummarizationEnabled() || len(messages) <= int(float64(m.memoryWindow)*summarization.SummarizationThreshold()) {
 		return messages
 	}
 
-	model := summarization.Model(m.model)
+	model := summarization.SummarizationModel(m.model)
 	if model == "" {
 		slog.Warn("agent: summarization enabled but no model configured, skipping summarization", "session", sessionKey)
 		return messages
@@ -517,7 +517,9 @@ func (m *SessionManager) persistResult(ctx context.Context, sessionKey string, i
 // Uses a simple word-based heuristic: ~1.3 tokens per word, with per-message overhead.
 // This avoids adding a tokenizer dependency.
 func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
-	const wordsPerToken = 0.77
+	// avgTokensPerWord is the estimated number of LLM tokens per English word (~1.3).
+	// Derivation: 1 / 0.77 ≈ 1.3 tokens/word (based on GPT-family tokenizer data).
+	const avgTokensPerWord = 1.3
 	const overheadPerMsg = 4
 	total := 0
 	for _, msg := range messages {
@@ -526,9 +528,9 @@ func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
 			content = msg.Content.String()
 		}
 		words := len(strings.Fields(content))
-		total += words + overheadPerMsg
+		total += int(float64(words)*avgTokensPerWord) + overheadPerMsg
 	}
-	return int(float64(total) / wordsPerToken)
+	return total
 }
 
 // compactSessionAsync loads the session history, compacts the oldest N turns by
@@ -537,8 +539,8 @@ func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
 // Errors are logged but not returned since compaction runs in a background goroutine.
 func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey string, toSummarize []agentctx.StrategicMessage) (string, error) {
 	model := m.model
-	if m.compactionPolicy.Summarization.Model(m.model) != "" {
-		model = m.compactionPolicy.Summarization.Model(m.model)
+	if m.compactionPolicy.Summarization.SummarizationModel(m.model) != "" {
+		model = m.compactionPolicy.Summarization.SummarizationModel(m.model)
 	}
 	var sb strings.Builder
 	for _, msg := range toSummarize {

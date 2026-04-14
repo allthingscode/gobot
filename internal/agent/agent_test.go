@@ -665,8 +665,8 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 	mgr.SetMemoryWindow(1)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
 		Summarization: config.SummarizationConfig{
-			IsEnabled:        true,
-			ThresholdPercent: 0.1, // Trigger easily
+			Enabled:   true,
+			Threshold: 0.1, // Trigger easily
 		},
 	})
 
@@ -798,8 +798,8 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 	mgr.SetMemoryWindow(10) // Keep last 10 messages after compaction
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
 		Summarization: config.SummarizationConfig{
-			IsEnabled:        true,
-			ThresholdPercent: 0.5, // Trigger when >50% of window used
+			Enabled:   true,
+			Threshold: 0.5, // Trigger when >50% of window used
 		},
 	})
 

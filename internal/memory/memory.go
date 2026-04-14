@@ -133,7 +133,6 @@ func buildPrunedResult(messages []map[string]any, keepSet map[int]bool, neededTo
 	return result
 }
 
-
 func parseTimestamp(s string) time.Time {
 	for _, f := range timestampFormats {
 		if t, err := time.Parse(f, s); err == nil {
