@@ -222,3 +222,86 @@ func (t *mcpTool) Execute(ctx context.Context, _, _ string, args map[string]any)
 	}
 	return t.server.Call(ctx, method, args["params"])
 }
+
+func (s *MCPServer) serverName() string { return s.name }
+
+type mcpCaller interface {
+	start(ctx context.Context) error
+	Call(ctx context.Context, method string, params any) (string, error)
+	serverName() string
+}
+
+type mcpProxyTool struct {
+	server   mcpCaller
+	toolName string
+	decl     provider.ToolDeclaration
+}
+
+func (t *mcpProxyTool) Name() string { return t.decl.Name }
+
+func (t *mcpProxyTool) Declaration() provider.ToolDeclaration { return t.decl }
+
+func (t *mcpProxyTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
+	return t.server.Call(ctx, "tools/call", map[string]any{
+		"name":      t.toolName,
+		"arguments": args,
+	})
+}
+
+func sanitizeMCPToolName(name string) string {
+	var sb strings.Builder
+	for _, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			sb.WriteRune(c)
+		} else {
+			sb.WriteRune('_')
+		}
+	}
+	return sb.String()
+}
+
+func enumerateMCPTools(ctx context.Context, srv mcpCaller) ([]*mcpProxyTool, error) {
+	if err := srv.start(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start server: %w", err)
+	}
+
+	respStr, err := srv.Call(ctx, "tools/list", nil)
+	if err != nil {
+		return nil, fmt.Errorf("tools/list call failed: %w", err)
+	}
+
+	var resp struct {
+		Result struct {
+			Tools []struct {
+				Name        string         `json:"name"`
+				Description string         `json:"description"`
+				InputSchema map[string]any `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(respStr), &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse tools/list response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("tools/list returned error: code %d, message %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var proxies []*mcpProxyTool
+	for _, t := range resp.Result.Tools {
+		proxies = append(proxies, &mcpProxyTool{
+			server:   srv,
+			toolName: t.Name,
+			decl: provider.ToolDeclaration{
+				Name:        t.Name, // will be sanitized and disambiguated in tools.go
+				Description: t.Description,
+				Parameters:  t.InputSchema,
+			},
+		})
+	}
+	return proxies, nil
+}
