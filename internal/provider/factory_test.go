@@ -35,11 +35,11 @@ func TestRegistry_RegisterGetList(t *testing.T) {
 		t.Error("expected error when registering duplicate provider")
 	}
 
-	p2, err := Get("openai")
+	p2, err := Get(providerNameOpenAI)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if p2.Name() != "openai" {
+	if p2.Name() != providerNameOpenAI {
 		t.Errorf("got name %q", p2.Name())
 	}
 
@@ -49,7 +49,7 @@ func TestRegistry_RegisterGetList(t *testing.T) {
 	}
 
 	list := List()
-	if len(list) != 1 || list[0] != "openai" {
+	if len(list) != 1 || list[0] != providerNameOpenAI {
 		t.Errorf("unexpected list: %v", list)
 	}
 }

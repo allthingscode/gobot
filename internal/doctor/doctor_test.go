@@ -27,7 +27,7 @@ func writeTokenJSON(t *testing.T, dir, filename string, expiry time.Time, refres
 		Expiry       time.Time `json:"expiry,omitempty"`
 		RefreshToken string    `json:"refresh_token,omitempty"`
 	}
-	data, err := json.Marshal(tok{Token: "access_token", Expiry: expiry, RefreshToken: refreshToken})
+	data, err := json.Marshal(tok{Token: "access_token", Expiry: expiry, RefreshToken: refreshToken}) //nolint:gosec // G117: test token, RefreshToken must be marshaled to write test fixture
 	if err != nil {
 		t.Fatal(err)
 	}

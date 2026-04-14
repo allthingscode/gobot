@@ -112,9 +112,9 @@ func FormatTasksMarkdown(tasks []Task) string {
 			title = "(untitled)"
 		}
 		if task.Due != "" {
-			sb.WriteString(fmt.Sprintf("- [ ] %s _(due %s)_ [id:%s]\n", title, formatDueDate(task.Due), task.ID))
+			fmt.Fprintf(&sb, "- [ ] %s _(due %s)_ [id:%s]\n", title, formatDueDate(task.Due), task.ID)
 		} else {
-			sb.WriteString(fmt.Sprintf("- [ ] %s [id:%s]\n", title, task.ID))
+			fmt.Fprintf(&sb, "- [ ] %s [id:%s]\n", title, task.ID)
 		}
 	}
 	return sb.String()
