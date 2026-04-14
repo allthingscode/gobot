@@ -37,8 +37,8 @@ type ResilienceConfig struct {
 
 type BreakerConfig struct {
 	MaxFailures uint32 `json:"max_failures"`
-	Window      int    `json:"window_seconds"`  // countWindow
-	Timeout     int    `json:"timeout_seconds"` // openTimeout
+	Window      string `json:"window"`  // Go duration string, e.g. "60s"
+	Timeout     string `json:"timeout"` // Go duration string, e.g. "30s"
 }
 
 type AgentsConfig struct {
@@ -330,19 +330,22 @@ func (c *Config) StorageRoot() string {
 func (c *Config) Breaker(name string) (maxFail uint32, window, timeout time.Duration) {
 	if bc, ok := c.Resilience.CircuitBreakers[name]; ok {
 		maxFail = bc.MaxFailures
-		if bc.Window > 0 {
-			window = time.Duration(bc.Window) * time.Second
-		} else {
-			window = 60 * time.Second
-		}
-		if bc.Timeout > 0 {
-			timeout = time.Duration(bc.Timeout) * time.Second
-		} else {
-			timeout = 30 * time.Second
-		}
+		window = parseDurationOrDefault(bc.Window, 60*time.Second)
+		timeout = parseDurationOrDefault(bc.Timeout, 30*time.Second)
 		return maxFail, window, timeout
 	}
 	return 5, 60 * time.Second, 30 * time.Second
+}
+
+func parseDurationOrDefault(s string, defaultVal time.Duration) time.Duration {
+	if s == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return defaultVal
+	}
+	return d
 }
 
 // Save marshals the config to JSON and writes it to the specified path.

@@ -726,3 +726,30 @@ func TestEmbeddingModel(t *testing.T) {
 }
 
 var _ io.Reader = errReader{}
+
+func TestBreaker_Parsing(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{}
+	cfg.Resilience.CircuitBreakers = map[string]BreakerConfig{
+		"valid":   {MaxFailures: 10, Window: "2m", Timeout: "45s"},
+		"invalid": {MaxFailures: 5, Window: "not-a-duration", Timeout: ""},
+	}
+
+	// Test valid parsing
+	maxFail, window, timeout := cfg.Breaker("valid")
+	if maxFail != 10 || window != 2*time.Minute || timeout != 45*time.Second {
+		t.Errorf("valid breaker: got (%d, %v, %v), want (10, 2m, 45s)", maxFail, window, timeout)
+	}
+
+	// Test fallback for invalid/empty
+	maxFail, window, timeout = cfg.Breaker("invalid")
+	if maxFail != 5 || window != 60*time.Second || timeout != 30*time.Second {
+		t.Errorf("invalid breaker: got (%d, %v, %v), want (5, 60s, 30s)", maxFail, window, timeout)
+	}
+
+	// Test fallback for missing
+	maxFail, window, timeout = cfg.Breaker("missing")
+	if maxFail != 5 || window != 60*time.Second || timeout != 30*time.Second {
+		t.Errorf("missing breaker: got (%d, %v, %v), want (5, 60s, 30s)", maxFail, window, timeout)
+	}
+}

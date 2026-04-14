@@ -90,8 +90,16 @@ func (v *Validator) Validate() *ValidationResult {
 	v.validateDiskSpace(result)
 	v.validateAgentDefaults(result)
 	v.validateStrategic(result)
+	v.validateResilience(result)
 
 	return result
+}
+
+func (v *Validator) validateResilience(result *ValidationResult) {
+	for name, bc := range v.cfg.Resilience.CircuitBreakers {
+		v.validateTTL(fmt.Sprintf("resilience.circuit_breakers.%s.window", name), bc.Window, result)
+		v.validateTTL(fmt.Sprintf("resilience.circuit_breakers.%s.timeout", name), bc.Timeout, result)
+	}
 }
 
 func (v *Validator) validateAgentDefaults(result *ValidationResult) {

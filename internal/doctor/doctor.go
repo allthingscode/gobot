@@ -124,6 +124,18 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		checks = append(checks, r(res, false))
 	}
 
+	// Check for old-format circuit breaker durations (C-138)
+	for name, bc := range cfg.Resilience.CircuitBreakers {
+		if bc.Window == "" || bc.Timeout == "" {
+			checks = append(checks, Result{
+				Name:     "breaker migration: " + name,
+				OK:       false,
+				Detail:   "duration fields are empty; migrate to string format (e.g. \"60s\")",
+				Critical: false,
+			})
+		}
+	}
+
 	// Add Concurrency checks (F-056)
 	conResults := checkConcurrency()
 	for _, res := range conResults {

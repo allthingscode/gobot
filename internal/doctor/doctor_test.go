@@ -424,3 +424,33 @@ func TestRun_FailsOnBadStorageRoot(t *testing.T) {
 		t.Error("expected Run to return error for missing storage root")
 	}
 }
+
+func TestDoctor_BreakerWarning(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Resilience.CircuitBreakers = map[string]config.BreakerConfig{
+		"old": {MaxFailures: 5, Window: "", Timeout: ""},
+		"new": {MaxFailures: 5, Window: "1m", Timeout: "30s"},
+	}
+
+	results := GetResults(cfg, nil)
+	foundWarning := false
+	for _, r := range results {
+		if r.Name == "breaker migration: old" {
+			foundWarning = true
+			if r.OK {
+				t.Errorf("expected OK=false for old-format breaker warning")
+			}
+			if r.Critical {
+				t.Errorf("expected Critical=false for old-format breaker warning")
+			}
+		}
+		if r.Name == "breaker migration: new" {
+			t.Errorf("did not expect warning for new-format breaker")
+		}
+	}
+
+	if !foundWarning {
+		t.Errorf("expected to find breaker migration warning for 'old'")
+	}
+}

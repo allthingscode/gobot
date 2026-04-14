@@ -115,6 +115,12 @@ func runInit(rootFlag string) error {
 		cfg.Agents.Defaults.MaxTokens = 8192
 		cfg.Agents.Defaults.MaxToolIterations = 25
 		cfg.Agents.Defaults.MemoryWindow = 50
+
+		// Baseline circuit breakers (C-138: normalize to string durations)
+		cfg.Resilience.CircuitBreakers = map[string]config.BreakerConfig{
+			"gemini":   {MaxFailures: 5, Window: "60s", Timeout: "30s"},
+			"telegram": {MaxFailures: 3, Window: "1m", Timeout: "15s"},
+		}
 	}
 
 	// Override root if flag is provided
