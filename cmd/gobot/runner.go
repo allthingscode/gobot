@@ -381,7 +381,13 @@ func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID,
 	}
 
 	if r.hooks != nil && !skipExec {
-		result = r.hooks.RunPostTool(ctx, name, result)
+		anyResult := r.hooks.RunPostTool(ctx, name, result)
+		if s, ok := anyResult.(string); ok {
+			result = s
+		} else {
+			// Convert non-string results back to string for the agent.
+			result = fmt.Sprintf("%v", anyResult)
+		}
 	}
 
 	return result, nil

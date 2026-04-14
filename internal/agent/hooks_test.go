@@ -170,8 +170,9 @@ func TestHooks_PostTool_NoHooks(t *testing.T) {
 func TestHooks_PostTool_SingleHook(t *testing.T) {
 	t.Parallel()
 	h := &Hooks{}
-	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
-		return result + " [SANITIZED]"
+	h.RegisterPostTool(func(ctx context.Context, toolName string, result any) any {
+		s := result.(string)
+		return s + " [SANITIZED]"
 	})
 	got := h.RunPostTool(context.Background(), "tool", "raw")
 	if got != "raw [SANITIZED]" {
@@ -182,8 +183,8 @@ func TestHooks_PostTool_SingleHook(t *testing.T) {
 func TestHooks_PostTool_ChainOrder(t *testing.T) {
 	t.Parallel()
 	h := &Hooks{}
-	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string { return result + "_A" })
-	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string { return result + "_B" })
+	h.RegisterPostTool(func(ctx context.Context, toolName string, result any) any { return result.(string) + "_A" })
+	h.RegisterPostTool(func(ctx context.Context, toolName string, result any) any { return result.(string) + "_B" })
 	got := h.RunPostTool(context.Background(), "tool", "X")
 	if got != "X_A_B" {
 		t.Errorf("got %q, want %q", got, "X_A_B")
@@ -194,7 +195,7 @@ func TestHooks_PostTool_ToolNamePassed(t *testing.T) {
 	t.Parallel()
 	h := &Hooks{}
 	var capturedName string
-	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
+	h.RegisterPostTool(func(ctx context.Context, toolName string, result any) any {
 		capturedName = toolName
 		return result
 	})
@@ -208,15 +209,28 @@ func TestHooks_PostTool_ChainTransforms(t *testing.T) {
 	t.Parallel()
 	// Each hook receives the output of the previous, not the original.
 	h := &Hooks{}
-	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
-		return strings.ToUpper(result)
+	h.RegisterPostTool(func(ctx context.Context, toolName string, result any) any {
+		return strings.ToUpper(result.(string))
 	})
-	h.RegisterPostTool(func(ctx context.Context, toolName, result string) string {
-		return "[" + result + "]"
+	h.RegisterPostTool(func(ctx context.Context, toolName string, result any) any {
+		return "[" + result.(string) + "]"
 	})
 	got := h.RunPostTool(context.Background(), "tool", "hello")
 	if got != "[HELLO]" {
 		t.Errorf("got %q, want %q", got, "[HELLO]")
+	}
+}
+
+func TestHooks_PostTool_NonStringResult(t *testing.T) {
+	t.Parallel()
+	h := &Hooks{}
+	// Hook returns an int instead of a string.
+	h.RegisterPostTool(func(ctx context.Context, toolName string, result any) any {
+		return 42
+	})
+	got := h.RunPostTool(context.Background(), "tool", "input")
+	if got != 42 {
+		t.Errorf("got %v, want 42", got)
 	}
 }
 

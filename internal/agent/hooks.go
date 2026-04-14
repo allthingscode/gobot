@@ -6,10 +6,10 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
-// PostToolFn transforms a tool's string result after execution but before it
+// PostToolFn transforms a tool's result after execution but before it
 // is returned to the agent. Hooks run in registration order; each receives
 // the output of the previous.
-type PostToolFn func(ctx context.Context, toolName string, result string) string
+type PostToolFn func(ctx context.Context, toolName string, result any) any
 
 // PreToolFn allows a hook to intercept tool execution. If it returns a non-empty
 // string, that string is used as the tool result and the execution is skipped.
@@ -118,7 +118,7 @@ func (h *Hooks) RegisterPostTool(fn PostToolFn) {
 
 // RunPostTool runs all registered PostTool hooks in order.
 // Returns result unchanged if no hooks are registered.
-func (h *Hooks) RunPostTool(ctx context.Context, toolName, result string) string {
+func (h *Hooks) RunPostTool(ctx context.Context, toolName string, result any) any {
 	for _, fn := range h.postTool {
 		result = fn(ctx, toolName, result)
 	}
