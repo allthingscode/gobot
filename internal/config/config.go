@@ -29,6 +29,21 @@ type Config struct {
 	Gateway    GatewayConfig    `json:"gateway"`
 	Resilience ResilienceConfig `json:"resilience"`
 	Context    ContextConfig    `json:"context"`
+	Cron       CronConfig       `json:"cron"`
+	Heartbeat  HeartbeatConfig  `json:"heartbeat"`
+}
+
+type CronConfig struct {
+	Enabled bool `json:"enabled"`
+	Tasks   []struct {
+		Name     string `json:"name"`
+		Schedule string `json:"schedule"`
+	} `json:"tasks,omitempty"`
+}
+
+type HeartbeatConfig struct {
+	Enabled  bool          `json:"enabled"`
+	Interval time.Duration `json:"interval"`
 }
 
 type ResilienceConfig struct {
@@ -170,10 +185,12 @@ type ExecConfig struct {
 type ToolsConfig struct {
 	Exec       ExecConfig                 `json:"exec"`
 	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+	HighRisk   []string                   `json:"high_risk"`
 }
 
 type StrategicConfig struct {
 	UserEmail           string              `json:"user_email"`
+	UserChatID          int64               `json:"user_chat_id"`
 	StorageRoot         string              `json:"storage_root"`
 	MaxToolIterations   int                 `json:"max_tool_iterations,omitempty"`
 	IdempotencyTTL      string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
@@ -507,6 +524,11 @@ func (c *Config) TelegramToken() string {
 	return c.resolveSecret(store, c.Channels.Telegram.Token, "telegram_token", "TELEGRAM_BOT_TOKEN")
 }
 
+// TelegramAllowedFrom returns the list of allowed Telegram chat IDs.
+func (c *Config) TelegramAllowedFrom() []string {
+	return c.Channels.Telegram.AllowFrom
+}
+
 // MCPEnvFor returns the resolved environment variables for the named MCP server.
 // For each env var, if the config value is empty, it is fetched from DPAPI under
 // the key "mcp_env_{serverName}_{varName}" (both lowercased).
@@ -554,6 +576,31 @@ func (c *Config) ExecTimeout() time.Duration {
 // HumanInTheLoop returns true if the human-in-the-loop approval framework is enabled.
 func (c *Config) HumanInTheLoop() bool {
 	return c.Channels.Telegram.HITL
+}
+
+// LogLevel returns the configured logging level.
+func (c *Config) LogLevel() slog.Level {
+	return slog.LevelInfo // Default; you might want to parse from config if added there
+}
+
+// LogFormat returns the configured logging format ("text" or "json").
+func (c *Config) LogFormat() string {
+	return "text" // Default
+}
+
+// TelemetryEnabled returns true if OTel is enabled.
+func (c *Config) TelemetryEnabled() bool {
+	return c.Strategic.Observability.OTLPEndpoint != ""
+}
+
+// OTelEndpoint returns the OTel collector endpoint.
+func (c *Config) OTelEndpoint() string {
+	return c.Strategic.Observability.OTLPEndpoint
+}
+
+// HighRiskTools returns the list of tools that require human approval.
+func (c *Config) HighRiskTools() []string {
+	return c.Tools.HighRisk
 }
 
 // PolicyFilePath returns the configured tool policy file path.

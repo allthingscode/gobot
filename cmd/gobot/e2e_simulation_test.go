@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/app"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
 )
@@ -56,7 +57,7 @@ type ToolCallRecord struct {
 // a scripted final text, recording every tool invocation.
 type simRunner struct {
 	steps       []SimStep
-	toolsByName map[string]Tool
+	toolsByName map[string]app.Tool
 	recorded    []ToolCallRecord
 	stepIdx     int
 }
@@ -103,7 +104,7 @@ func (r *simRunner) dispatchTool(ctx context.Context, sessionKey string, fc SimT
 	return fmt.Sprintf("[tool %q not registered in scenario]", fc.Name), nil
 }
 
-// simTool is a lightweight mock implementation of Tool for use in scenarios.
+// simTool is a lightweight mock implementation of app.Tool for use in scenarios.
 type simTool struct {
 	name     string
 	response string
@@ -126,10 +127,10 @@ func (t *simTool) Execute(_ context.Context, _, _ string, _ map[string]any) (str
 // RunScenario wires up a SessionManager with the scenario's scripted runner and
 // registered tools, dispatches the user prompt, and asserts all WantCalls and
 // WantReply constraints. Fails the test immediately on dispatch error.
-func RunScenario(t *testing.T, s Scenario, tools []Tool) {
+func RunScenario(t *testing.T, s Scenario, tools []app.Tool) {
 	t.Helper()
 
-	runner := &simRunner{steps: s.Steps, toolsByName: buildSimToolMap(tools)}
+	runner := &simRunner{steps: s.Steps, toolsByName: buildToolMap(tools)}
 	mgr := agent.NewSessionManager(runner, nil, "sim-model")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -212,7 +213,7 @@ func TestE2ESimulation_SingleToolCall(t *testing.T) {
 			{ToolName: "list_calendar_events"},
 		},
 		WantReply: "standup",
-	}, []Tool{calendarTool})
+	}, []app.Tool{calendarTool})
 }
 
 func TestE2ESimulation_MultiStep(t *testing.T) {
@@ -250,7 +251,7 @@ func TestE2ESimulation_MultiStep(t *testing.T) {
 			{ToolName: "send_email", ArgKey: "subject", ArgValue: "Schedule"},
 		},
 		WantReply: "summary",
-	}, []Tool{calendarTool, emailTool})
+	}, []app.Tool{calendarTool, emailTool})
 }
 
 func TestE2ESimulation_ToolError(t *testing.T) {
@@ -275,7 +276,7 @@ func TestE2ESimulation_ToolError(t *testing.T) {
 			{ToolName: "list_calendar_events"},
 		},
 		WantReply: "couldn't reach",
-	}, []Tool{failingTool})
+	}, []app.Tool{failingTool})
 }
 
 func TestE2ESimulation_NoSteps(t *testing.T) {
@@ -292,11 +293,11 @@ func TestE2ESimulation_NoSteps(t *testing.T) {
 	}
 }
 
-func buildSimToolMap(tools []Tool) map[string]Tool {
+func buildToolMap(tools []app.Tool) map[string]app.Tool {
 	if tools == nil {
 		return nil
 	}
-	m := make(map[string]Tool, len(tools))
+	m := make(map[string]app.Tool, len(tools))
 	for _, t := range tools {
 		m[t.Name()] = t
 	}

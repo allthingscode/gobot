@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -102,12 +101,4 @@ Can be used in CI/CD pipelines to verify configuration before deployment.`,
 		},
 	}
 	return cmd
-}
-
-// reportConfigValidation is a helper for cmdRun to keep it clean.
-func reportConfigValidation(cfg *config.Config, _ io.Writer) error {
-	if err := config.ReportValidation(cfg); err != nil {
-		return err
-	}
-	return nil
 }

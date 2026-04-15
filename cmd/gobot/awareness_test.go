@@ -3,139 +3,49 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/allthingscode/gobot/internal/app"
 	"github.com/allthingscode/gobot/internal/config"
 )
 
-func TestBuildAwarenessContent(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: "/storage/root"}}
-	content := buildAwarenessContent(cfg)
-	checks := []string{
-		"STRATEGIC AWARENESS",
-		"/storage/root",
-		"jobs",
-		"YAML front-matter",
-		"Daily Journal",
-		"OPERATOR MANDATES",
-	}
-	for _, want := range checks {
-		if !strings.Contains(content, want) {
-			t.Errorf("buildAwarenessContent: missing %q", want)
-		}
-	}
-}
-
 func TestEnsureAwarenessFile(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
+	// t.Parallel() disabled because of t.Setenv
+	tmpDir := t.TempDir()
+	// Override storage root via environment so WorkspacePath follows it.
+	t.Setenv("GOBOT_STORAGE_ROOT", tmpDir)
 
-	// First call: should create the file.
-	ensureAwarenessFile(cfg)
-	path := filepath.Join(dir, "workspace", "AWARENESS.md")
-	data, err := os.ReadFile(path)
+	// Explicitly reload config to ensure it sees the env var
+	cfg, _ := config.Load()
+	awarenessPath := cfg.WorkspacePath("", "AWARENESS.md")
+
+	// Ensure no file exists from previous run (though TempDir should be clean)
+	_ = os.Remove(awarenessPath)
+
+	// 1. Initial creation
+	app.EnsureAwarenessFile(cfg)
+	if _, err := os.Stat(awarenessPath); os.IsNotExist(err) {
+		t.Fatalf("EnsureAwarenessFile did not create AWARENESS.md at %s", awarenessPath)
+	}
+
+	data, err := os.ReadFile(awarenessPath)
 	if err != nil {
-		t.Fatalf("file not created: %v", err)
-	}
-	if !strings.Contains(string(data), "STRATEGIC AWARENESS") {
-		t.Error("file missing expected header")
-	}
-
-	// Second call: should not overwrite existing content.
-	if err := os.WriteFile(path, []byte("custom content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ensureAwarenessFile(cfg)
-	data2, _ := os.ReadFile(path)
-	if string(data2) != "custom content" {
-		t.Error("ensureAwarenessFile overwrote existing file")
+	if !strings.Contains(string(data), "# STRATEGIC AWARENESS") {
+		t.Errorf("AWARENESS.md missing header, got:\n%s", string(data))
 	}
-}
 
-// nolint:paralleltest // USERPROFILE is process-wide
-func TestLoadPrivateFile(t *testing.T) {
-	// Not t.Parallel() because we are messing with USERPROFILE
-
-	t.Run("returns empty when file missing", func(t *testing.T) {
-		cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: t.TempDir()}}
-		got := loadPrivateFile(cfg, "NON_EXISTENT.md")
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
-
-	t.Run("finds file in ~/.gobot (primary)", func(t *testing.T) {
-		setupHome(t, "HOME.md", "home content")
-		cfg := setupWorkspace(t, "", "")
-
-		want := "home content"
-		got := loadPrivateFile(cfg, "HOME.md")
-		if got != want {
-			t.Errorf("expected %q, got %q", want, got)
-		}
-	})
-
-	t.Run("finds file in workspace (fallback)", func(t *testing.T) {
-		cfg := setupWorkspace(t, "WORK.md", "workspace content")
-
-		want := "workspace content"
-		got := loadPrivateFile(cfg, "WORK.md")
-		if got != want {
-			t.Errorf("expected %q, got %q", want, got)
-		}
-	})
-
-	t.Run("prioritizes ~/.gobot over workspace", func(t *testing.T) {
-		setupHome(t, "BOTH.md", "home priority")
-		cfg := setupWorkspace(t, "BOTH.md", "workspace content")
-
-		homeWant := "home priority"
-		got := loadPrivateFile(cfg, "BOTH.md")
-		if got != homeWant {
-			t.Errorf("expected %q, got %q", homeWant, got)
-		}
-	})
-}
-
-func setupHome(t *testing.T, filename, content string) string {
-	t.Helper()
-	tempHome := t.TempDir()
-
-	// Mock userHomeDir for testability (F-133 hardening).
-	origUserHomeDir := userHomeDir
-	userHomeDir = func() (string, error) { return tempHome, nil }
-	t.Cleanup(func() { userHomeDir = origUserHomeDir })
-
-	t.Setenv("USERPROFILE", tempHome)
-	t.Setenv("HOME", tempHome)
-	dotGobot := filepath.Join(tempHome, ".gobot")
-	if err := os.MkdirAll(dotGobot, 0o755); err != nil {
+	// 2. No-op when exists (don't overwrite custom content)
+	custom := "custom content"
+	if err := os.WriteFile(awarenessPath, []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if filename != "" {
-		if err := os.WriteFile(filepath.Join(dotGobot, filename), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	// Call it again - it should NOT overwrite
+	app.EnsureAwarenessFile(cfg)
+	data, _ = os.ReadFile(awarenessPath)
+	if string(data) != custom {
+		t.Errorf("EnsureAwarenessFile should NOT have overwritten existing file, but it did. Got:\n%s", string(data))
 	}
-	return tempHome
-}
-
-func setupWorkspace(t *testing.T, filename, content string) *config.Config {
-	t.Helper()
-	dir := t.TempDir()
-	cfg := &config.Config{Strategic: config.StrategicConfig{StorageRoot: dir}}
-	workspaceDir := filepath.Join(dir, "workspace")
-	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if filename != "" {
-		if err := os.WriteFile(filepath.Join(workspaceDir, filename), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return cfg
 }
