@@ -87,11 +87,10 @@ func (t *tgAPI) Updates(ctx context.Context, _ int) (<-chan bot.InboundMessage, 
 	}
 
 	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
-	// Always initialize both to avoid nil-channel panics in startPoller.
+	// Always reinit both — cbChan may be closed (not nil) from a prior poller
+	// session, and writing to a closed channel panics.
 	t.msgChan = make(chan bot.InboundMessage, 100)
-	if t.cbChan == nil {
-		t.cbChan = make(chan bot.InboundCallback, 100)
-	}
+	t.cbChan = make(chan bot.InboundCallback, 100)
 	go t.startPoller(ctx)
 	return t.msgChan, nil
 }
@@ -119,7 +118,13 @@ func (t *tgAPI) startPoller(ctx context.Context) {
 
 		updates, err := t.fetchUpdates(ctx, offset)
 		if err != nil {
-			return // Return to allow Bot.Run to handle retry delay
+			// Brief pause before closing channels so the reconnect loop
+			// in Bot.Run doesn't spin immediately on transient failures.
+			select {
+			case <-ctx.Done():
+			case <-time.After(2 * time.Second):
+			}
+			return
 		}
 
 		for _, update := range updates {
@@ -150,9 +155,12 @@ func (t *tgAPI) fetchUpdates(ctx context.Context, offset int) ([]telego.Update, 
 	})
 
 	if err != nil {
-		if errors.Is(err, resilience.ErrCircuitOpen) {
+		switch {
+		case errors.Is(err, resilience.ErrCircuitOpen):
 			slog.Warn("telegram: circuit breaker is open, stopping poller session")
-		} else {
+		case bot.IsTransientError(err):
+			slog.Warn("telegram: GetUpdates transient error", "err", err)
+		default:
 			slog.Error("telegram: GetUpdates failed", "err", err)
 		}
 		return nil, err

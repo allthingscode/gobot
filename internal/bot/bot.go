@@ -158,6 +158,7 @@ func IsTransientError(err error) bool {
 	for _, p := range []string{
 		"readerror", "remoteprotocolerror", "timed out",
 		"connecterror", "connection reset by peer", "connection reset", "network",
+		"closed connection", "server closed",
 	} {
 		if strings.Contains(msg, p) {
 			return true

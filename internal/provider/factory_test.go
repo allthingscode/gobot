@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestFactory_InitAll_Empty(t *testing.T) {
+func TestFactory_InitAll_Empty(t *testing.T) { //nolint:paralleltest // mutates global registry; must not run in parallel
 	t.Cleanup(ResetForTest)
 	f := &Factory{}
 	err := f.InitAll(context.Background())
@@ -15,7 +15,7 @@ func TestFactory_InitAll_Empty(t *testing.T) {
 	}
 }
 
-func TestRegistry_RegisterGetList(t *testing.T) {
+func TestRegistry_RegisterGetList(t *testing.T) { //nolint:paralleltest // mutates global registry; must not run in parallel
 	t.Cleanup(ResetForTest)
 
 	p1 := NewOpenAIProvider("key1", "url1")
