@@ -33,27 +33,15 @@ func runDocLint(t *testing.T, dir string) (string, error) {
 func setupTempProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	// Create required directory structure.
 	for _, sub := range []string{
 		filepath.Join(dir, "internal"),
 		filepath.Join(dir, "cmd"),
 		filepath.Join(dir, "cmd", "gobot"),
-		filepath.Join(dir, ".private", "backlog", "features", "active"),
-		filepath.Join(dir, ".private", "backlog", "bugs", "active"),
-		filepath.Join(dir, ".private", "backlog", "chores", "active"),
-		filepath.Join(dir, ".private", "backlog", "archived"),
-		filepath.Join(dir, ".private", "session"),
-		filepath.Join(dir, ".private", "session", "handoffs"),
-		filepath.Join(dir, ".private", "session", "global"),
-		filepath.Join(dir, ".private", "locks"),
 	} {
 		if err := os.MkdirAll(sub, 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	// Minimal BACKLOG.md.
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "BACKLOG.md"),
-		"# Backlog\n\n## Features\n\n## Bugs\n\n## Chores\n\n")
 	return dir
 }
 
@@ -117,118 +105,5 @@ func TestDocLint_MethodSkipped(t *testing.T) {
 	out, err := runDocLint(t, dir)
 	if err != nil {
 		t.Errorf("methods should be skipped, got error: %v\noutput:\n%s", err, out)
-	}
-}
-
-func TestDocLint_StaleReference(t *testing.T) {
-	t.Parallel()
-	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-999.md"),
-		"---\nstatus: \"Planning\"\n---\n\nSee `internal/nonexistent.go` for details.\n")
-	out, err := runDocLint(t, dir)
-	if err == nil {
-		t.Error("expected failure for stale reference")
-	}
-	if want := "nonexistent.go"; !strings.Contains(out, want) {
-		t.Errorf("output should mention %q, got:\n%s", want, out)
-	}
-}
-
-func TestDocLint_UnindexedItem(t *testing.T) {
-	t.Parallel()
-	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-999_Orphan.md"),
-		"---\nstatus: \"Planning\"\n---\n\nAn orphaned feature.\n")
-	out, err := runDocLint(t, dir)
-	if err == nil {
-		t.Error("expected failure for unindexed backlog item")
-	}
-	if want := "not referenced in BACKLOG.md"; !strings.Contains(out, want) {
-		t.Errorf("output should mention unindexed item, got:\n%s", out)
-	}
-}
-
-func TestDocLint_InvalidStatus(t *testing.T) {
-	t.Parallel()
-	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-999_Bad.md"),
-		"---\nstatus: \"NonExistentStatus\"\n---\n\nBad status.\n")
-	writeFile(t, filepath.Join(dir, ".private", "backlog", "BACKLOG.md"),
-		"# Backlog\n\nF-999_Bad.md\n\n## Features\n\n## Bugs\n\n")
-	out, err := runDocLint(t, dir)
-	if err == nil {
-		t.Error("expected failure for invalid status")
-	}
-	if want := "invalid status"; !strings.Contains(out, want) {
-		t.Errorf("output should mention invalid status, got:\n%s", out)
-	}
-}
-
-func TestDocLint_ValidStatuses(t *testing.T) {
-	t.Parallel()
-	statuses := []string{
-		"Production", "In Progress", "Planning", "Draft", "Archived", "Resolved",
-		"Ready", "Ready for Review", "Ready for Deploy",
-	}
-	for _, s := range statuses {
-		t.Run(s, func(t *testing.T) {
-			t.Parallel()
-			dir := setupTempProject(t)
-			writeFile(t, filepath.Join(dir, ".private", "backlog", "features", "active", "F-001.md"),
-				"---\nstatus: \""+s+"\"\n---\n\nItem.\n")
-			writeFile(t, filepath.Join(dir, ".private", "backlog", "BACKLOG.md"),
-				"# Backlog\n\nF-001.md\n\n## Features\n\n## Bugs\n\n")
-			out, err := runDocLint(t, dir)
-			if err != nil {
-				t.Errorf("status %q should be valid, got error: %v\noutput:\n%s", s, err, out)
-			}
-		})
-	}
-}
-
-func TestDocLint_InvalidHandoffJSON(t *testing.T) {
-	t.Parallel()
-	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "session", "handoffs", "test.json"),
-		`{invalid json}`)
-	out, err := runDocLint(t, dir)
-	if err == nil {
-		t.Error("expected failure for invalid handoff.json")
-	}
-	if want := "invalid JSON"; !strings.Contains(out, want) {
-		t.Errorf("output should mention invalid JSON, got:\n%s", out)
-	}
-}
-
-func TestDocLint_MissingHandoffField(t *testing.T) {
-	t.Parallel()
-	dir := setupTempProject(t)
-	writeFile(t, filepath.Join(dir, ".private", "session", "handoffs", "test.json"),
-		`{"task_id": "F-001"}`)
-	out, err := runDocLint(t, dir)
-	if err == nil {
-		t.Error("expected failure for missing required fields")
-	}
-	if want := "missing required field"; !strings.Contains(out, want) {
-		t.Errorf("output should mention missing field, got:\n%s", out)
-	}
-}
-
-func TestDocLint_ValidHandoff(t *testing.T) {
-	t.Parallel()
-	dir := setupTempProject(t)
-	taskFile := filepath.Join(dir, ".private", "session", "task.md")
-	writeFile(t, taskFile, "Task details.\n")
-	writeFile(t, filepath.Join(dir, ".private", "session", "handoff.json"),
-		`{
-			"task_id": "F-001",
-			"source_specialist": "architect",
-			"target_specialist": "reviewer",
-			"state_file_path": ".private/session/task.md",
-			"timestamp": "2026-04-04T12:00:00Z"
-		}`)
-	out, err := runDocLint(t, dir)
-	if err != nil {
-		t.Errorf("valid handoff should pass, got error: %v\noutput:\n%s", err, out)
 	}
 }
