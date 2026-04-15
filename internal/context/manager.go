@@ -98,8 +98,7 @@ func (m *CheckpointManager) CreateThread(ctx context.Context, threadID, model st
 
 // SaveSnapshot atomically persists the agent state for a given iteration.
 // Messages are validated by round-tripping through JSON before being stored.
-// Returns false (and a nil error) if validation fails, matching Python's
-// silent-false behaviour on validation error.
+// Returns (false, error) if validation fails.
 func (m *CheckpointManager) SaveSnapshot(ctx context.Context, threadID string, iteration int, messages []StrategicMessage) (bool, error) {
 	stateJSON, err := json.Marshal(messages)
 	if err != nil {
@@ -109,18 +108,18 @@ func (m *CheckpointManager) SaveSnapshot(ctx context.Context, threadID string, i
 		}
 		slog.Warn("context: SaveSnapshot skipped — message failed validation (marshal)",
 			"session", threadID,
-			"reason", err,
+			"err", err,
 			"preview", preview)
-		return false, nil //nolint:nilerr // mirrors Python: log and return false
+		return false, fmt.Errorf("SaveSnapshot: marshal messages: %w", err)
 	}
 	// Validate round-trip.
 	var check []StrategicMessage
 	if err := json.Unmarshal(stateJSON, &check); err != nil {
 		slog.Warn("context: SaveSnapshot skipped — message failed validation (unmarshal)",
 			"session", threadID,
-			"reason", err,
+			"err", err,
 			"preview", truncate(string(stateJSON), 200))
-		return false, nil
+		return false, fmt.Errorf("SaveSnapshot: validate round-trip: %w", err)
 	}
 
 	sum := sha256.Sum256(stateJSON)

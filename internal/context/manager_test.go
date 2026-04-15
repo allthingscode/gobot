@@ -458,8 +458,8 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest
 		{Role: RoleUser, Content: &MessageContent{Items: []ContentItem{badItem}}},
 	}
 	ok, err := m.SaveSnapshot(context.Background(), "t1", 1, msgs)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	if err == nil {
+		t.Error("expected error for un-marshalable messages, got nil")
 	}
 	if ok {
 		t.Error("expected ok=false for un-marshalable messages, got true")
@@ -467,11 +467,14 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest
 
 	// Verify log contains the warning and our session ID.
 	output := buf.String()
-	if !bytes.Contains(buf.Bytes(), []byte("level=WARN")) {
+	if !strings.Contains(output, "level=WARN") {
 		t.Errorf("expected level=WARN log, got: %q", output)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("session=t1")) {
+	if !strings.Contains(output, "session=t1") {
 		t.Errorf("expected session=t1 in log, got: %q", output)
+	}
+	if !strings.Contains(output, "err=") {
+		t.Errorf("expected err= in log, got: %q", output)
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("ContentItem: all fields are nil")) {
 		t.Errorf("expected reason in log, got: %q", output)
