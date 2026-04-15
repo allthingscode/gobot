@@ -76,7 +76,6 @@ jobs:
                     go-version-file: go.mod
                     cache: true
             -   name: Coverage check
-                # Current coverage is ~60.4%. Goal is 80%. Ratchet up 2% per sprint.
                 run: |
                     go test -mod=readonly -coverprofile=coverage.out ./internal/... ./cmd/...
                     go tool cover -func=coverage.out | tail -1
