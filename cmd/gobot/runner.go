@@ -52,8 +52,8 @@ type agentRunner struct {
 	maxReflectionRounds int  // default 1 → ≤2x token overhead
 }
 
-// newagentRunner creates a new agentRunner for the given provider and model.
-func newagentRunner(prov provider.Provider, model, systemPrompt string, cfg *config.Config) *agentRunner {
+// newAgentRunner creates a new agentRunner for the given provider and model.
+func newAgentRunner(prov provider.Provider, model, systemPrompt string, cfg *config.Config) *agentRunner {
 	maxFail, window, timeout := cfg.Breaker(prov.Name())
 	return &agentRunner{
 		prov:         prov,

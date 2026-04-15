@@ -40,7 +40,7 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 		slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 	}
 
-	runner := newagentRunner(prov, model, systemPrompt, cfg)
+	runner := newAgentRunner(prov, model, systemPrompt, cfg)
 	memStore, cleanup := initMemory(cfg, runner)
 	vecStore, embedProv, vecCleanup := initVectorStore(cfg, prov, runner)
 

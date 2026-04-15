@@ -113,7 +113,7 @@ func (l *sessionLock) Lock(ctx context.Context) error {
 			buf := make([]byte, 1024)
 			n := runtime.Stack(buf, false)
 			l.metrics.HolderStack = string(buf[:n])
-			slog.Warn("LOCK CONTENTION", "session", l.sessionKey, "wait_time", elapsed)
+			slog.Warn("agent: lock contention", "session", l.sessionKey, "wait_time", elapsed)
 		} else {
 			l.metrics.HolderStack = ""
 		}

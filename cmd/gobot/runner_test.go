@@ -61,7 +61,7 @@ func TestRunner_EnforcesToolIterationLimit(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	runner := newagentRunner(mock, "model", "sys", cfg)
+	runner := newAgentRunner(mock, "model", "sys", cfg)
 	runner.maxToolIterations = 3 // Set a low limit for testing
 	runner.SetTools([]Tool{&iterLimitMockTool{name: name}})
 

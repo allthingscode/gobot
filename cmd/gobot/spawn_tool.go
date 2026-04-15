@@ -88,7 +88,7 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, me
 func newSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
-			runner := newagentRunner(prov, m, systemPrompt, cfg)
+			runner := newAgentRunner(prov, m, systemPrompt, cfg)
 			runner.memStore = memStore
 			return runner
 		},
