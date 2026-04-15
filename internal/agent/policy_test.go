@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -337,14 +338,14 @@ func TestPolicyHook_PreToolHook_Deny(t *testing.T) {
 
 	ctx := context.Background()
 	result, err := hook.PreToolHook(ctx, "session", "denied_tool", nil)
-	if err != nil {
-		t.Fatalf("PreToolHook() error = %v", err)
+	if err == nil {
+		t.Fatal("PreToolHook() expected error for denied tool, got nil")
 	}
-	if result == "" {
-		t.Error("expected non-empty result for denied tool")
+	if !errors.Is(err, ErrToolDenied) {
+		t.Errorf("expected error agent.ErrToolDenied, got %v", err)
 	}
-	if result != "Policy denied: tool is not permitted." {
-		t.Errorf("unexpected result: %q", result)
+	if result != "" {
+		t.Errorf("expected empty result for denied tool, got %q", result)
 	}
 }
 
@@ -398,10 +399,13 @@ func TestPolicyHook_PreToolHook_RequireHITL_NoHITLManager(t *testing.T) {
 
 	ctx := context.Background()
 	result, err := hook.PreToolHook(ctx, "session", "gmail.send", nil)
-	if err != nil {
-		t.Fatalf("PreToolHook() error = %v", err)
+	if err == nil {
+		t.Fatal("PreToolHook() expected error, got nil")
 	}
-	if result != "Policy denied: HITL not configured." {
-		t.Errorf("unexpected result: %q", result)
+	if !errors.Is(err, ErrToolDenied) {
+		t.Errorf("expected error agent.ErrToolDenied, got %v", err)
+	}
+	if result != "" {
+		t.Errorf("expected empty result, got %q", result)
 	}
 }

@@ -51,7 +51,7 @@ func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName stri
 		return "", err
 	}
 	if !approved {
-		return "Permission denied by user.", nil
+		return "", fmt.Errorf("%w: permission denied by user", ErrToolDenied)
 	}
 	return "", nil
 }

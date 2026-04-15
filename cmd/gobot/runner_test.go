@@ -387,14 +387,14 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 			toolCalls: []agentctx.ToolCall{
 				{Args: map[string]any{}},
 			},
-			wantErr: "", // Note: Typed struct means name is now always a string (empty)
+			wantErr: "unknown tool",
 		},
 		{
 			name: "wrong name type",
 			toolCalls: []agentctx.ToolCall{
 				{Name: "", Args: map[string]any{}},
 			},
-			wantErr: "",
+			wantErr: "unknown tool",
 		},
 		{
 			name: "missing args",

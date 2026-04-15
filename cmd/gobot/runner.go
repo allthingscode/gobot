@@ -376,27 +376,64 @@ func (r *geminiRunner) executeSingleToolCall(ctx context.Context, sessionKey, us
 }
 
 func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
-	result, execErr := r.preToolStep(ctx, sessionKey, name, args, paramsHash)
-
-	if execErr == nil && result == "" {
-		result, execErr = r.mainToolStep(ctx, sessionKey, userID, name, args, iter, seqLen, paramsHash, hashErr)
+	override, err := r.preToolStep(ctx, sessionKey, name, args, paramsHash)
+	if err != nil {
+		// Pre-tool hook error (HITL denial, policy block) = Category B.
+		return "", fmt.Errorf("pre-tool hook: %w", err)
 	}
+	if override != "" {
+		// Hook provided an override result — use it directly.
+		return override, nil
+	}
+
+	result, execErr := r.mainToolStep(ctx, sessionKey, userID, name, args, iter, seqLen, paramsHash, hashErr)
 
 	if execErr != nil {
-		return r.handleToolError(sessionKey, name, paramsHash, result, execErr), nil
+		// Category B errors (infrastructure or authorization failures) = abort loop.
+		if errors.Is(execErr, context.Canceled) ||
+			errors.Is(execErr, context.DeadlineExceeded) ||
+			errors.Is(execErr, agent.ErrToolDenied) ||
+			errors.Is(execErr, agent.ErrUnknownTool) {
+			return "", execErr
+		}
+
+		// All other tool execution failures = Category A.
+		// Return error text as tool result so the agent can see it and recover.
+		return r.handleCategoryAError(sessionKey, name, paramsHash, result, execErr), nil
 	}
 
+	// Post-tool hooks.
 	if r.hooks != nil && result == "" {
-		anyResult := r.hooks.RunPostTool(ctx, name, result)
-		if s, ok := anyResult.(string); ok {
-			result = s
-		} else {
-			// Convert non-string results back to string for the agent.
-			result = fmt.Sprintf("%v", anyResult)
-		}
+		result = r.runPostToolHooks(ctx, name, result)
 	}
 
 	return result, nil
+}
+
+func (r *geminiRunner) handleCategoryAError(sessionKey, name, paramsHash, result string, err error) string {
+	slog.Error("runner: tool execution failed",
+		slog.String("session", sessionKey),
+		slog.String("tool", name),
+		slog.String("params_hash", paramsHash),
+		slog.Any("err", err),
+	)
+
+	if result != "" {
+		return fmt.Sprintf("%s\nError: %v", result, err)
+	}
+	return fmt.Sprintf("Error: %v", err)
+}
+
+func (r *geminiRunner) runPostToolHooks(ctx context.Context, name, result string) string {
+	if r.hooks == nil {
+		return result
+	}
+	anyResult := r.hooks.RunPostTool(ctx, name, result)
+	if s, ok := anyResult.(string); ok {
+		return s
+	}
+	// Convert non-string results back to string for the agent.
+	return fmt.Sprintf("%v", anyResult)
 }
 
 func (r *geminiRunner) preToolStep(ctx context.Context, sessionKey, name string, args map[string]any, paramsHash string) (string, error) {
@@ -436,19 +473,6 @@ func (r *geminiRunner) mainToolStep(ctx context.Context, sessionKey, userID, nam
 		)
 	}
 	return result, execErr
-}
-
-func (r *geminiRunner) handleToolError(sessionKey, name, paramsHash, result string, err error) string {
-	slog.Error("runner: tool execution failed",
-		slog.String("session", sessionKey),
-		slog.String("tool", name),
-		slog.String("params_hash", paramsHash),
-		slog.Any("err", err),
-	)
-	if result != "" {
-		return fmt.Sprintf("%s\nError: %v", result, err)
-	}
-	return fmt.Sprintf("Error: %v", err)
 }
 
 // executeTool dispatches a tool call to the matching registered Tool.
@@ -504,7 +528,7 @@ func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey, userID,
 
 	t, ok := r.toolsByName[name]
 	if !ok {
-		return "", fmt.Errorf("unknown tool: %s", name)
+		return "", fmt.Errorf("%w: %s", agent.ErrUnknownTool, name)
 	}
 
 	if r.tracer != nil {

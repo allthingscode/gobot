@@ -19,11 +19,21 @@ import (
 	"sync"
 	"time"
 
+	"errors"
+
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/observability"
 )
+
+// ErrToolDenied is returned by pre-tool hooks when a tool execution is denied
+// by policy or HITL. This is a Category B failure that aborts the tool loop.
+var ErrToolDenied = errors.New("tool execution denied")
+
+// ErrUnknownTool is returned when an agent attempts to call a tool that
+// has not been registered with the runner. Category B.
+var ErrUnknownTool = errors.New("unknown tool")
 
 // Runner executes one agentic turn.
 // It receives the full conversation history and returns the model's response

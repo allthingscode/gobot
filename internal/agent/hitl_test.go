@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -154,10 +155,13 @@ func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 
 	<-done
 
-	if err != nil {
-		t.Fatalf("PreToolHook failed: %v", err)
+	if err == nil {
+		t.Fatal("PreToolHook expected error (rejected), got nil")
 	}
-	if got != "Permission denied by user." {
-		t.Errorf("got %q, want %q", got, "Permission denied by user.")
+	if !errors.Is(err, ErrToolDenied) {
+		t.Errorf("expected ErrToolDenied, got %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string (rejected)", got)
 	}
 }
