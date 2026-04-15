@@ -284,7 +284,7 @@ func (m *SessionManager) loadHistory(ctx context.Context, sessionKey string, sto
 			model := m.model
 			m.mu.RUnlock()
 			if createErr := store.CreateThread(ctx, sessionKey, model, nil); createErr != nil {
-				slog.Error("agent: CreateThread failed (continuing statelessly)", "session_id", sessionKey, "err", createErr)
+				slog.Error("agent: CreateThread failed (continuing statelessly)", "session", sessionKey, "err", createErr)
 				stateless = true
 			}
 		}

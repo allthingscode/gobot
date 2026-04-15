@@ -128,7 +128,7 @@ func computeNextRunCron(s Schedule, nowMS int64) int64 {
 
 // Run starts the polling loop.
 func (s *Scheduler) Run(ctx context.Context) error {
-	slog.Info("Starting cron scheduler", "poll_interval", s.pollInterval)
+	slog.Info("cron: starting scheduler", "poll_interval", s.pollInterval)
 
 	for {
 		select {
@@ -136,7 +136,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-s.clock.After(s.pollInterval):
 			if err := s.poll(ctx); err != nil {
-				slog.Error("Cron poll error", "error", err)
+				slog.Error("cron: poll error", "err", err)
 			}
 		}
 	}
@@ -180,7 +180,7 @@ func (s *Scheduler) reloadJobsJSON() {
 		return
 	}
 
-	slog.Debug("Cron: jobs.json modified externally, reloading")
+	slog.Debug("cron: jobs.json modified externally, reloading")
 	data, err := os.ReadFile(s.storePath)
 	if err != nil {
 		s.recordReloadError(fmt.Errorf("read jobs.json: %w", err))
@@ -200,7 +200,7 @@ func (s *Scheduler) reloadJobsJSON() {
 
 func (s *Scheduler) checkPersistentReloadFailure() {
 	if s.lastReloadErr != nil && s.clock.Now().Sub(s.lastReloadErrAt) >= 5*time.Minute {
-		slog.Warn("Cron: persistent jobs.json reload failure",
+		slog.Warn("cron: persistent jobs.json reload failure",
 			"err", s.lastReloadErr,
 			"failed_at", s.lastReloadErrAt)
 		s.lastReloadErrAt = s.clock.Now()
@@ -219,7 +219,7 @@ func (s *Scheduler) reloadModularJobs() {
 
 	modularJobs, err := LoadModularJobs(s.itemsDir)
 	if err != nil {
-		slog.Warn("Cron: failed to load modular jobs", "err", err)
+		slog.Warn("cron: failed to load modular jobs", "err", err)
 		return
 	}
 
@@ -234,7 +234,7 @@ func (s *Scheduler) reloadModularJobs() {
 	}
 	s.store.Jobs = MergeModularJobs(s.store.Jobs, modularJobs, stateCache)
 	s.lastModularMtime = newMtime
-	slog.Info("Cron: loaded modular jobs", "count", len(modularJobs))
+	slog.Info("cron: loaded modular jobs", "count", len(modularJobs))
 }
 
 // dueJob captures the state needed to dispatch a single job concurrently.
@@ -257,13 +257,13 @@ func (s *Scheduler) identifyDueJobs(nowMS int64) ([]dueJob, bool) {
 
 		if job.State.NextRunAtMS == 0 {
 			s.store.Jobs[i].State.NextRunAtMS = ComputeNextRun(job.Schedule, nowMS)
-			slog.Info("Cron: scheduled new job", "id", job.ID, "nextRunAt", time.UnixMilli(s.store.Jobs[i].State.NextRunAtMS))
+			slog.Info("cron: scheduled new job", "id", job.ID, "nextRunAt", time.UnixMilli(s.store.Jobs[i].State.NextRunAtMS))
 			changed = true
 			continue
 		}
 
 		if job.State.NextRunAtMS > 0 && nowMS >= job.State.NextRunAtMS {
-			slog.Info("Triggering job", "id", job.ID, "name", job.Name)
+			slog.Info("cron: triggering job", "id", job.ID, "name", job.Name)
 			s.store.Jobs[i].State.RunCount++
 			s.store.Jobs[i].State.LastRunAtMS = nowMS
 			due = append(due, dueJob{
@@ -326,7 +326,7 @@ func (s *Scheduler) executeJob(ctx context.Context, dj dueJob) error {
 	p.ID = dj.id
 	err := s.dispatcher.Dispatch(jobCtx, p)
 	if err != nil {
-		slog.Error("Job dispatch failed", "id", dj.id, "error", err)
+		slog.Error("cron: job dispatch failed", "id", dj.id, "err", err)
 		s.sendFailureAlert(ctx, dj, err)
 	}
 	return err
@@ -340,11 +340,11 @@ func (s *Scheduler) sendFailureAlert(ctx context.Context, dj dueJob, err error) 
 	}
 	if a, ok := s.dispatcher.(Alerter); ok {
 		if alertErr := a.Alert(ctx, alert); alertErr != nil {
-			slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
+			slog.Error("cron: job failure alert could not be sent", "id", dj.id, "err", alertErr)
 		}
 	} else {
 		if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
-			slog.Error("Job failure alert could not be sent", "id", dj.id, "err", alertErr)
+			slog.Error("cron: job failure alert could not be sent", "id", dj.id, "err", alertErr)
 		}
 	}
 }
@@ -363,7 +363,7 @@ func (s *Scheduler) saveStore() {
 
 func (s *Scheduler) recordReloadError(err error) {
 	if s.lastReloadErr == nil {
-		slog.Error("Cron: jobs.json reload failed", "err", err)
+		slog.Error("cron: jobs.json reload failed", "err", err)
 		s.lastReloadErr = err
 		s.lastReloadErrAt = s.clock.Now()
 	} else {
@@ -374,7 +374,7 @@ func (s *Scheduler) recordReloadError(err error) {
 
 func (s *Scheduler) clearReloadError() {
 	if s.lastReloadErr != nil {
-		slog.Info("Cron: jobs.json reload recovered")
+		slog.Info("cron: jobs.json reload recovered")
 		s.lastReloadErr = nil
 		s.lastReloadErrAt = time.Time{}
 	}

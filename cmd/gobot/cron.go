@@ -91,7 +91,7 @@ func (d *cronDispatcher) dispatchSilent(ctx context.Context, p cron.Payload, to 
 		return nil
 	}
 	sessionKey := "cron:" + to
-	slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", true)
+	slog.Info("dispatching cron job", "session", sessionKey, "silent", true)
 	_, err := d.mgr.Dispatch(ctx, sessionKey, "", "[SILENT] [AUTONOMOUS] "+p.Message)
 	return err
 }
@@ -111,7 +111,7 @@ func (d *cronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to s
 		jobID = "unknown"
 	}
 	sessionKey := "cron:" + jobID + ":email:" + recipient
-	slog.Info("dispatching cron job", "sessionKey", sessionKey, "channel", "email")
+	slog.Info("dispatching cron job", "session", sessionKey, "channel", "email")
 	response, err := d.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
 		return err
@@ -138,7 +138,7 @@ func (d *cronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, 
 
 func (d *cronDispatcher) dispatchTelegram(ctx context.Context, p cron.Payload, to string) error {
 	sessionKey := "cron:" + to
-	slog.Info("dispatching cron job", "sessionKey", sessionKey, "silent", false)
+	slog.Info("dispatching cron job", "session", sessionKey, "silent", false)
 	response, err := d.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
 		return err
@@ -153,7 +153,7 @@ func (d *cronDispatcher) dispatchTelegram(ctx context.Context, p cron.Payload, t
 func (d *cronDispatcher) sendTelegramResponse(ctx context.Context, to, response string) {
 	chatID, threadID, err := parseSessionKey(to)
 	if err != nil {
-		slog.Error("failed to parse session key for reply", "sessionKey", to, "err", err)
+		slog.Error("failed to parse session key for reply", "session", to, "err", err)
 		return
 	}
 	out := bot.OutboundMessage{
@@ -162,7 +162,7 @@ func (d *cronDispatcher) sendTelegramResponse(ctx context.Context, to, response 
 		Text:     response,
 	}
 	if err := d.b.Send(ctx, out); err != nil {
-		slog.Error("failed to send cron response", "err", err, "sessionKey", to)
+		slog.Error("failed to send cron response", "err", err, "session", to)
 	}
 }
 
