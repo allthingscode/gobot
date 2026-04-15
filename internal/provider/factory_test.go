@@ -7,7 +7,7 @@ import (
 )
 
 func TestFactory_InitAll_Empty(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(ResetForTest)
 	f := &Factory{}
 	err := f.InitAll(context.Background())
 	if err != nil {
@@ -16,11 +16,7 @@ func TestFactory_InitAll_Empty(t *testing.T) {
 }
 
 func TestRegistry_RegisterGetList(t *testing.T) {
-	t.Parallel()
-	// Clear registry for test
-	providersMu.Lock()
-	providers = make(map[string]Provider)
-	providersMu.Unlock()
+	t.Cleanup(ResetForTest)
 
 	p1 := NewOpenAIProvider("key1", "url1")
 

@@ -47,3 +47,11 @@ func List() []string {
 	sort.Strings(names)
 	return names
 }
+
+// ResetForTest clears all registered providers. Must only be called from tests.
+// Use t.Cleanup(provider.ResetForTest) to ensure cleanup on test exit.
+func ResetForTest() {
+	providersMu.Lock()
+	defer providersMu.Unlock()
+	providers = make(map[string]Provider)
+}
