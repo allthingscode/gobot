@@ -138,9 +138,10 @@ type createTaskArgs struct {
 
 func (t *CreateTaskTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
-		Name:        createTaskToolName,
-		Description: "Create a new task in Google Tasks. Returns a confirmation with the task title and its assigned ID.",
-		Parameters:  agent.DeriveSchema(createTaskArgs{}),
+		Name:          createTaskToolName,
+		Description:   "Create a new task in Google Tasks. Returns a confirmation with the task title and its assigned ID.",
+		SideEffecting: true,
+		Parameters:    agent.DeriveSchema(createTaskArgs{}),
 	}
 }
 
@@ -185,9 +186,10 @@ type completeTaskArgs struct {
 
 func (t *CompleteTaskTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
-		Name:        completeTaskToolName,
-		Description: "Mark a Google Task as completed. Use the task ID returned by list_tasks.",
-		Parameters:  agent.DeriveSchema(completeTaskArgs{}),
+		Name:          completeTaskToolName,
+		Description:   "Mark a Google Task as completed. Use the task ID returned by list_tasks.",
+		SideEffecting: true,
+		Parameters:    agent.DeriveSchema(completeTaskArgs{}),
 	}
 }
 
@@ -225,9 +227,10 @@ type updateTaskArgs struct {
 
 func (t *UpdateTaskTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
-		Name:        updateTaskToolName,
-		Description: "Update an existing Google Task's title, notes, or due date. Use the task ID returned by list_tasks. Only provide the fields you want to change.",
-		Parameters:  agent.DeriveSchema(updateTaskArgs{}),
+		Name:          updateTaskToolName,
+		Description:   "Update an existing Google Task's title, notes, or due date. Use the task ID returned by list_tasks. Only provide the fields you want to change.",
+		SideEffecting: true,
+		Parameters:    agent.DeriveSchema(updateTaskArgs{}),
 	}
 }
 
@@ -273,9 +276,10 @@ type createCalendarEventArgs struct {
 
 func (t *CreateCalendarEventTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
-		Name:        createCalendarEventToolName,
-		Description: "Create a new event in a Google Calendar.",
-		Parameters:  agent.DeriveSchema(createCalendarEventArgs{}),
+		Name:          createCalendarEventToolName,
+		Description:   "Create a new event in a Google Calendar.",
+		SideEffecting: true,
+		Parameters:    agent.DeriveSchema(createCalendarEventArgs{}),
 	}
 }
 

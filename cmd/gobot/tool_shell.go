@@ -25,22 +25,6 @@ type shellExecArgs struct {
 	Args    []string `json:"args,omitempty" schema:"Arguments to pass to the command."`
 }
 
-// isSideEffectingTool returns true for tools that modify external state
-// and should be protected by idempotency keys.
-func isSideEffectingTool(name string) bool {
-	switch name {
-	case "send_email",
-		"create_calendar_event",
-		"create_task",
-		"complete_task",
-		"update_task",
-		shellExecToolName:
-		return true
-	default:
-		return false
-	}
-}
-
 // shellExecTool exposes sandboxed shell command execution to the agent.
 // Commands run inside a Windows Job Object with memory and CPU limits.
 type shellExecTool struct {
@@ -72,9 +56,10 @@ func (t *shellExecTool) Name() string { return shellExecToolName }
 
 func (t *shellExecTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
-		Name:        shellExecToolName,
-		Description: "Execute a shell command in a sandboxed environment. Working directory is the bot workspace. Output is capped at 4096 characters.",
-		Parameters:  agent.DeriveSchema(shellExecArgs{}),
+		Name:          shellExecToolName,
+		Description:   "Execute a shell command in a sandboxed environment. Working directory is the bot workspace. Output is capped at 4096 characters.",
+		SideEffecting: true,
+		Parameters:    agent.DeriveSchema(shellExecArgs{}),
 	}
 }
 

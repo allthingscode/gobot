@@ -37,9 +37,10 @@ type ChatResponse struct {
 // ToolDeclaration matches the structure expected by most LLMs for function definitions.
 // It uses a generic Parameters field (JSON Schema) to remain provider-agnostic.
 type ToolDeclaration struct {
-	Name        string
-	Description string
-	Parameters  map[string]any // JSON Schema (type: object)
+	Name          string
+	Description   string
+	Parameters    map[string]any // JSON Schema (type: object)
+	SideEffecting bool           // true = tool modifies external state; enable idempotency protection
 }
 
 // TokenUsage tracks the cost of a request.

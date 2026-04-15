@@ -44,6 +44,7 @@ type geminiRunner struct {
 	hooks               *agent.Hooks                            // may be nil; set via SetHooks
 	tracer              *observability.DispatchTracer
 	idempStore          *agentctx.IdempotencyStore // may be nil; idempotency for side-effecting tools
+	sideEffectingTools  map[string]bool            // C-142: lookup for tools that modify external state
 	maxToolIterations   int
 	maxTokens           int
 	maxToolResultBytes  int
@@ -119,14 +120,20 @@ func (r *geminiRunner) SetMaxToolIterations(n int) {
 // If multiple tools have the same name, the last one registered wins and a warning is logged.
 func (r *geminiRunner) SetTools(tools []Tool) {
 	m := make(map[string]Tool, len(tools))
+	se := make(map[string]bool)
 	for _, t := range tools {
-		name := t.Name()
+		decl := t.Declaration()
+		name := decl.Name
 		if _, dup := m[name]; dup {
 			slog.Warn("runner: duplicate tool name registered, later registration wins", "tool", name)
 		}
 		m[name] = t
+		if decl.SideEffecting {
+			se[name] = true
+		}
 	}
 	r.toolsByName = m
+	r.sideEffectingTools = se
 }
 
 // Run executes the tool-call/response loop until the provider returns a terminal text response.
@@ -456,7 +463,7 @@ func (r *geminiRunner) handleToolError(sessionKey, name, paramsHash, result stri
 // and caches the result to prevent duplicates on retry.
 func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, userID, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
 	// Check if this is a side-effecting tool that needs idempotency protection.
-	if !isSideEffectingTool(name) || r.idempStore == nil {
+	if !r.sideEffectingTools[name] || r.idempStore == nil {
 		return r.executeToolInner(ctx, sessionKey, userID, name, args)
 	}
 
