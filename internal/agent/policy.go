@@ -154,7 +154,7 @@ func (h *PolicyHook) PreToolHook(ctx context.Context, sessionKey, toolName strin
 
 	switch decision {
 	case PolicyDeny:
-		return "Policy denied: tool is not permitted.", nil
+		return "", fmt.Errorf("%w: tool is not permitted", ErrToolDenied)
 	case PolicyRequireHITL:
 		if h.hitl != nil {
 			approved, err := h.hitl.RequestApproval(ctx, sessionKey, toolName, args)
@@ -162,11 +162,11 @@ func (h *PolicyHook) PreToolHook(ctx context.Context, sessionKey, toolName strin
 				return "", err
 			}
 			if !approved {
-				return "Policy denied: approval not granted.", nil
+				return "", fmt.Errorf("%w: approval not granted", ErrToolDenied)
 			}
 			return "", nil
 		}
-		return "Policy denied: HITL not configured.", nil
+		return "", fmt.Errorf("%w: HITL not configured", ErrToolDenied)
 	case PolicyAllow:
 		return "", nil
 	default:
