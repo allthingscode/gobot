@@ -42,6 +42,10 @@ opencode.json
 .claude/
 .claudeignore.txt
 
+# Dev-only scripts (live locally, not published)
+scripts/profile.ps1
+scripts/profile.sh
+
 # Temporary/Generated Files
 c
 c.out

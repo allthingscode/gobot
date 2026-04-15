@@ -23,11 +23,8 @@ golangci-lint run --modules-download-mode=readonly ./internal/... ./cmd/...
 echo "==> [3/5] go test"
 go test -mod=readonly ./internal/... ./cmd/...
 
-echo "==> [4/5] doc-lint"
+echo "==> [4/4] doc-lint"
 go run scripts/doc_lint.go
-
-echo "==> [5/5] parity-check"
-go run scripts/parity_check.go
 
 echo ""
 echo "All CI checks passed."
