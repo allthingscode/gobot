@@ -71,9 +71,10 @@ func (s *SendEmailTool) Name() string { return sendEmailToolName }
 
 func (s *SendEmailTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
-		Name:        sendEmailToolName,
-		Description: "Send an email via google. The recipient is fixed to the configured user address; only subject and body are required.",
-		Parameters:  agent.DeriveSchema(sendEmailArgs{}),
+		Name:          sendEmailToolName,
+		Description:   "Send an email via google. The recipient is fixed to the configured user address; only subject and body are required.",
+		SideEffecting: true,
+		Parameters:    agent.DeriveSchema(sendEmailArgs{}),
 	}
 }
 
