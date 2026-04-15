@@ -33,7 +33,7 @@ func TestRunner_CategoryB_ContextCanceled(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	runner := newGeminiRunner(mock, "model", "sys", cfg)
+	runner := newAgentRunner(mock, "model", "sys", cfg)
 	runner.SetTools([]Tool{&categoryBMockTool{name: name}})
 
 	_, _, err := runner.Run(ctx, "session", "user", nil)
@@ -63,7 +63,7 @@ func TestRunner_CategoryB_UnknownTool(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	runner := newGeminiRunner(mock, "model", "sys", cfg)
+	runner := newAgentRunner(mock, "model", "sys", cfg)
 	// No tools registered
 
 	_, _, err := runner.Run(context.Background(), "session", "user", nil)
@@ -93,7 +93,7 @@ func TestRunner_CategoryB_PolicyDenied(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	runner := newGeminiRunner(mock, "model", "sys", cfg)
+	runner := newAgentRunner(mock, "model", "sys", cfg)
 	runner.SetTools([]Tool{&categoryBMockTool{name: name}})
 	
 	// Add a hook that returns ErrToolDenied

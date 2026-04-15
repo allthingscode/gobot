@@ -61,7 +61,7 @@ func TestRunner_EnforcesToolIterationLimit(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	runner := newGeminiRunner(mock, "model", "sys", cfg)
+	runner := newAgentRunner(mock, "model", "sys", cfg)
 	runner.maxToolIterations = 3 // Set a low limit for testing
 	runner.SetTools([]Tool{&iterLimitMockTool{name: name}})
 
@@ -206,7 +206,7 @@ func TestTruncateToolResult(t *testing.T) {
 
 func TestRunner_SetHooks(t *testing.T) {
 	t.Parallel()
-	r := &geminiRunner{}
+	r := &agentRunner{}
 	h := &agent.Hooks{}
 	r.SetHooks(h)
 	if r.hooks != h {
@@ -289,7 +289,7 @@ func TestBuildCorrectionMessage(t *testing.T) {
 
 func TestRunner_ReflectionDefaults(t *testing.T) {
 	t.Parallel()
-	r := &geminiRunner{
+	r := &agentRunner{
 		maxReflectionRounds: 1,
 		enableReflection:    false,
 	}
@@ -344,7 +344,7 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 		},
 	}
 
-	r := &geminiRunner{
+	r := &agentRunner{
 		prov:                mock,
 		model:               "mock-model",
 		maxToolIterations:   10,
@@ -422,7 +422,7 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 	}
 }
 
-func setupValidationRunner(toolCalls []agentctx.ToolCall) *geminiRunner {
+func setupValidationRunner(toolCalls []agentctx.ToolCall) *agentRunner {
 	mock := &mockProvider{
 		responses: []*provider.ChatResponse{
 			{
@@ -440,7 +440,7 @@ func setupValidationRunner(toolCalls []agentctx.ToolCall) *geminiRunner {
 		},
 	}
 
-	r := &geminiRunner{
+	r := &agentRunner{
 		prov:              mock,
 		model:             "mock-model",
 		maxToolIterations: 10,
@@ -500,7 +500,7 @@ func (p *panicTool) Execute(_ context.Context, _, _ string, _ map[string]any) (s
 
 func TestRunner_ToolPanicRecovery(t *testing.T) {
 	t.Parallel()
-	r := &geminiRunner{}
+	r := &agentRunner{}
 	r.SetTools([]Tool{&panicTool{}})
 	ctx := context.Background()
 	result, err := r.executeToolInner(ctx, "session-123", "", "panic_tool", nil)
@@ -552,7 +552,7 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 		},
 	}
 
-	r := &geminiRunner{
+	r := &agentRunner{
 		prov:               mock,
 		model:              "mock-model",
 		maxToolIterations:  10,
@@ -623,7 +623,7 @@ func TestRunner_StructuredLogging(t *testing.T) { //nolint:paralleltest // mutat
 		},
 	}
 
-	r := &geminiRunner{
+	r := &agentRunner{
 		prov:              mock,
 		model:             "mock-model",
 		maxToolIterations: 10,
@@ -698,7 +698,7 @@ func TestRunner_PreservesOutputOnError(t *testing.T) {
 		},
 	}
 
-	r := &geminiRunner{
+	r := &agentRunner{
 		prov:              mock,
 		model:             "mock-model",
 		maxToolIterations: 10,
