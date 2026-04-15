@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
@@ -24,14 +26,14 @@ type ReadTextFileTool struct {
 }
 
 type readTextFileArgs struct {
-	Path string `json:"path" schema:"The absolute or relative path to the file."`
+	Path string `json:"path" schema:"The absolute or relative path to the file within the workspace."`
 }
 
 func (t *ReadTextFileTool) Name() string { return readTextFileToolName }
 func (t *ReadTextFileTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        readTextFileToolName,
-		Description: "Read the complete contents of a text file from the workspace.",
+		Description: "Read the complete contents of a text file from the agent workspace.",
 		Parameters:  agent.DeriveSchema(readTextFileArgs{}),
 	}
 }
@@ -41,7 +43,21 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 	if path == "" {
 		return "", fmt.Errorf("read_text_file: path is required")
 	}
-	data, err := os.ReadFile(path)
+
+	// Resolve to absolute path relative to workspace if not already absolute.
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(t.workspace, path)
+	}
+
+	// Enforce sandbox: path must be within the workspace directory.
+	cleanPath := filepath.Clean(path)
+	cleanWorkspace := filepath.Clean(t.workspace)
+	rel, err := filepath.Rel(cleanWorkspace, cleanPath)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("read_text_file: path %q is outside workspace", path)
+	}
+
+	data, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return "", fmt.Errorf("read_text_file: %w", err)
 	}
