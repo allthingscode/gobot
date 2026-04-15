@@ -19,7 +19,7 @@ import (
 type agentStack struct {
 	prov      provider.Provider
 	model     string
-	runner    *geminiRunner
+	runner    *agentRunner
 	memStore  *memory.MemoryStore // may be nil; caller must defer cleanup() if non-nil
 	vecStore  *vector.Store
 	embedProv vector.EmbeddingProvider
@@ -40,7 +40,7 @@ func buildAgentStack(ctx context.Context, cfg *config.Config) (*agentStack, func
 		slog.Info("gobot: system prompt loaded", "bytes", len(systemPrompt))
 	}
 
-	runner := newGeminiRunner(prov, model, systemPrompt, cfg)
+	runner := newagentRunner(prov, model, systemPrompt, cfg)
 	memStore, cleanup := initMemory(cfg, runner)
 	vecStore, embedProv, vecCleanup := initVectorStore(cfg, prov, runner)
 
@@ -99,7 +99,7 @@ func wrapRoutingProvider(base provider.Provider, provName string, cfg *config.Co
 	return provider.NewRoutingProvider(base, mgrProv, cfg.Strategic.Routing)
 }
 
-func initMemory(cfg *config.Config, runner *geminiRunner) (memStore *memory.MemoryStore, cleanup func()) {
+func initMemory(cfg *config.Config, runner *agentRunner) (memStore *memory.MemoryStore, cleanup func()) {
 	cleanup = func() {}
 	memStore, err := memory.NewMemoryStore(cfg.StorageRoot())
 	if err != nil {
@@ -124,7 +124,7 @@ func initMemory(cfg *config.Config, runner *geminiRunner) (memStore *memory.Memo
 	return memStore, cleanup
 }
 
-func initVectorStore(cfg *config.Config, prov provider.Provider, runner *geminiRunner) (*vector.Store, vector.EmbeddingProvider, func()) {
+func initVectorStore(cfg *config.Config, prov provider.Provider, runner *agentRunner) (*vector.Store, vector.EmbeddingProvider, func()) {
 	cleanup := func() {}
 	var vecStore *vector.Store
 	var embedProv vector.EmbeddingProvider

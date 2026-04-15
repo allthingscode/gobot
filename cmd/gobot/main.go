@@ -320,7 +320,7 @@ func setupOTel(ctx context.Context, cfg *config.Config) *observability.Provider 
 	return otelProvider
 }
 
-// AgentRunner is the subset of geminiRunner used by setup functions.
+// AgentRunner is the subset of agentRunner used by setup functions.
 type AgentRunner interface {
 	SetTracer(t *observability.DispatchTracer)
 	SetIdempotencyStore(s *agentctx.IdempotencyStore)

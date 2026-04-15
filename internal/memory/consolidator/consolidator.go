@@ -31,7 +31,7 @@ Agent reply to consolidate:
 `
 
 // TextRunner is the interface used by Consolidator to make a single LLM call.
-// geminiRunner in cmd/gobot/runner.go implements this via RunText.
+// agentRunner in cmd/gobot/runner.go implements this via RunText.
 type TextRunner interface {
 	RunText(ctx context.Context, sessionKey, prompt string, modelOverride string) (string, error)
 }

@@ -28,8 +28,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// geminiRunner implements the agent.Runner interface using a provider.Provider.
-type geminiRunner struct {
+// agentRunner implements the agent.Runner interface using a provider.Provider.
+type agentRunner struct {
 	prov                provider.Provider
 	model               string
 	systemPrompt        string
@@ -52,10 +52,10 @@ type geminiRunner struct {
 	maxReflectionRounds int  // default 1 → ≤2x token overhead
 }
 
-// newGeminiRunner creates a new geminiRunner for the given provider and model.
-func newGeminiRunner(prov provider.Provider, model, systemPrompt string, cfg *config.Config) *geminiRunner {
+// newagentRunner creates a new agentRunner for the given provider and model.
+func newagentRunner(prov provider.Provider, model, systemPrompt string, cfg *config.Config) *agentRunner {
 	maxFail, window, timeout := cfg.Breaker(prov.Name())
-	return &geminiRunner{
+	return &agentRunner{
 		prov:         prov,
 		model:        model,
 		systemPrompt: systemPrompt,
@@ -73,7 +73,7 @@ func newGeminiRunner(prov provider.Provider, model, systemPrompt string, cfg *co
 }
 
 // RunText performs a single-turn, text-only LLM call without tool use.
-func (r *geminiRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
+func (r *agentRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
 	model := r.model
 	if modelOverride != "" {
 		model = modelOverride
@@ -91,34 +91,34 @@ func (r *geminiRunner) RunText(ctx context.Context, sessionKey, prompt, modelOve
 
 // SetHooks configures lifecycle hooks for this runner.
 // PrePrompt hooks are applied before each Chat call.
-func (r *geminiRunner) SetHooks(h *agent.Hooks) {
+func (r *agentRunner) SetHooks(h *agent.Hooks) {
 	r.hooks = h
 }
 
 // SetTracer configures the observability tracer for this runner.
-func (r *geminiRunner) SetTracer(t *observability.DispatchTracer) {
+func (r *agentRunner) SetTracer(t *observability.DispatchTracer) {
 	r.tracer = t
 }
 
 // SetIdempotencyStore configures the idempotency store for side-effecting tools.
-func (r *geminiRunner) SetIdempotencyStore(store *agentctx.IdempotencyStore) {
+func (r *agentRunner) SetIdempotencyStore(store *agentctx.IdempotencyStore) {
 	r.idempStore = store
 }
 
 // SetMemoryStoreProvider configures a factory that returns a per-user MemoryStore
 // when multi-user workspace isolation is enabled (F-105). When set and userID is
 // non-empty, Run will call this factory instead of using the shared r.memStore.
-func (r *geminiRunner) SetMemoryStoreProvider(fn func(userID string) *memory.MemoryStore) {
+func (r *agentRunner) SetMemoryStoreProvider(fn func(userID string) *memory.MemoryStore) {
 	r.memStoreProvider = fn
 }
 
-func (r *geminiRunner) SetMaxToolIterations(n int) {
+func (r *agentRunner) SetMaxToolIterations(n int) {
 	r.maxToolIterations = n
 }
 
 // SetTools registers a list of tools with the runner, building an O(1) lookup map.
 // If multiple tools have the same name, the last one registered wins and a warning is logged.
-func (r *geminiRunner) SetTools(tools []Tool) {
+func (r *agentRunner) SetTools(tools []Tool) {
 	m := make(map[string]Tool, len(tools))
 	se := make(map[string]bool)
 	for _, t := range tools {
@@ -145,7 +145,7 @@ func (r *geminiRunner) SetTools(tools []Tool) {
 //  3. If the response contains no tool calls, extracts the text and returns.
 //
 // Returns an error if maxToolIterations is exceeded or prov.Chat fails.
-func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+func (r *agentRunner) Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
 	// F-105: Resolve per-user memory store when multi-user isolation is enabled.
 	memStore := r.memStore
 	if r.memStoreProvider != nil && userID != "" {
@@ -216,7 +216,7 @@ func (r *geminiRunner) Run(ctx context.Context, sessionKey, userID string, messa
 	return "", nil, fmt.Errorf("runner: tool dispatch loop exceeded %d iterations", r.maxToolIterations)
 }
 
-func (r *geminiRunner) buildSystemPrompt(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage, memStore *memory.MemoryStore) string {
+func (r *agentRunner) buildSystemPrompt(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage, memStore *memory.MemoryStore) string {
 	sysPrompt := r.systemPrompt
 	if memStore != nil {
 		if userText := lastUserText(messages); !memory.ShouldSkipRAG(userText) {
@@ -237,7 +237,7 @@ func (r *geminiRunner) buildSystemPrompt(ctx context.Context, sessionKey string,
 	return sysPrompt
 }
 
-func (r *geminiRunner) getRagBlock(ctx context.Context, sessionKey, userText string, memStore *memory.MemoryStore) string {
+func (r *agentRunner) getRagBlock(ctx context.Context, sessionKey, userText string, memStore *memory.MemoryStore) string {
 	var filtered []map[string]any
 
 	// F-030: Use hybrid search for RAG if enabled
@@ -267,7 +267,7 @@ func (r *geminiRunner) getRagBlock(ctx context.Context, sessionKey, userText str
 	return ""
 }
 
-func (r *geminiRunner) ftsSearch(userText, sessionKey string, memStore *memory.MemoryStore) []map[string]any {
+func (r *agentRunner) ftsSearch(userText, sessionKey string, memStore *memory.MemoryStore) []map[string]any {
 	// F-071: Pass sessionKey to Search
 	if results, _ := memStore.Search(userText, sessionKey, 5); len(results) > 0 {
 		return memory.FilterRAGResults(results, 0.0)
@@ -275,7 +275,7 @@ func (r *geminiRunner) ftsSearch(userText, sessionKey string, memStore *memory.M
 	return nil
 }
 
-func (r *geminiRunner) generateReflectionRubric(ctx context.Context, sessionKey, userText string) map[string]any {
+func (r *agentRunner) generateReflectionRubric(ctx context.Context, sessionKey, userText string) map[string]any {
 	if !r.enableReflection || userText == "" {
 		return nil
 	}
@@ -292,7 +292,7 @@ func (r *geminiRunner) generateReflectionRubric(ctx context.Context, sessionKey,
 	return parsed
 }
 
-func (r *geminiRunner) performReflectionAudit(ctx context.Context, sessionKey, userText string, rubric map[string]any, text string, reflectionRounds *int) (agentctx.StrategicMessage, bool) {
+func (r *agentRunner) performReflectionAudit(ctx context.Context, sessionKey, userText string, rubric map[string]any, text string, reflectionRounds *int) (agentctx.StrategicMessage, bool) {
 	criticPrompt := reflection.GenerateCriticPrompt(userText, rubric, text)
 	criticStr, criticErr := r.RunText(ctx, sessionKey, criticPrompt, "")
 	if criticErr != nil {
@@ -329,7 +329,7 @@ func (r *geminiRunner) performReflectionAudit(ctx context.Context, sessionKey, u
 	return agentctx.StrategicMessage{}, true
 }
 
-func (r *geminiRunner) processToolCalls(ctx context.Context, sessionKey, userID string, toolCalls []agentctx.ToolCall, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
+func (r *agentRunner) processToolCalls(ctx context.Context, sessionKey, userID string, toolCalls []agentctx.ToolCall, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
 	messages := make([]agentctx.StrategicMessage, 0, len(toolCalls))
 	for _, tc := range toolCalls {
 		name := tc.Name
@@ -357,7 +357,7 @@ func (r *geminiRunner) processToolCalls(ctx context.Context, sessionKey, userID 
 	return messages, nil
 }
 
-func (r *geminiRunner) executeSingleToolCall(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int) (string, error) {
+func (r *agentRunner) executeSingleToolCall(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int) (string, error) {
 	paramsHash, hashErr := agentctx.HashParams(args)
 	if hashErr != nil {
 		slog.Warn("runner: failed to hash tool params, skipping idempotency check",
@@ -382,7 +382,7 @@ func (r *geminiRunner) executeSingleToolCall(ctx context.Context, sessionKey, us
 	return truncateToolResult(result, r.maxToolResultBytes), nil
 }
 
-func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
+func (r *agentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
 	override, err := r.preToolStep(ctx, sessionKey, name, args, paramsHash)
 	if err != nil {
 		// Pre-tool hook error (HITL denial, policy block) = Category B.
@@ -417,7 +417,7 @@ func (r *geminiRunner) runToolWithHooks(ctx context.Context, sessionKey, userID,
 	return result, nil
 }
 
-func (r *geminiRunner) handleCategoryAError(sessionKey, name, paramsHash, result string, err error) string {
+func (r *agentRunner) handleCategoryAError(sessionKey, name, paramsHash, result string, err error) string {
 	slog.Error("runner: tool execution failed",
 		slog.String("session", sessionKey),
 		slog.String("tool", name),
@@ -431,7 +431,7 @@ func (r *geminiRunner) handleCategoryAError(sessionKey, name, paramsHash, result
 	return fmt.Sprintf("Error: %v", err)
 }
 
-func (r *geminiRunner) runPostToolHooks(ctx context.Context, name, result string) string {
+func (r *agentRunner) runPostToolHooks(ctx context.Context, name, result string) string {
 	if r.hooks == nil {
 		return result
 	}
@@ -443,7 +443,7 @@ func (r *geminiRunner) runPostToolHooks(ctx context.Context, name, result string
 	return fmt.Sprintf("%v", anyResult)
 }
 
-func (r *geminiRunner) preToolStep(ctx context.Context, sessionKey, name string, args map[string]any, paramsHash string) (string, error) {
+func (r *agentRunner) preToolStep(ctx context.Context, sessionKey, name string, args map[string]any, paramsHash string) (string, error) {
 	if r.hooks == nil {
 		return "", nil
 	}
@@ -463,7 +463,7 @@ func (r *geminiRunner) preToolStep(ctx context.Context, sessionKey, name string,
 	return "", nil
 }
 
-func (r *geminiRunner) mainToolStep(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
+func (r *agentRunner) mainToolStep(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
 	start := time.Now()
 	var idemKey string
 	if !hashErr {
@@ -485,7 +485,7 @@ func (r *geminiRunner) mainToolStep(ctx context.Context, sessionKey, userID, nam
 // executeTool dispatches a tool call to the matching registered Tool.
 // For side-effecting tools, it checks the idempotency store before execution
 // and caches the result to prevent duplicates on retry.
-func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, userID, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
+func (r *agentRunner) executeTool(ctx context.Context, sessionKey, userID, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
 	// Check if this is a side-effecting tool that needs idempotency protection.
 	if !r.sideEffectingTools[name] || r.idempStore == nil {
 		return r.executeToolInner(ctx, sessionKey, userID, name, args)
@@ -525,7 +525,7 @@ func (r *geminiRunner) executeTool(ctx context.Context, sessionKey, userID, idem
 }
 
 // executeToolInner is the inner implementation of executeTool without idempotency checks.
-func (r *geminiRunner) executeToolInner(ctx context.Context, sessionKey, userID, name string, args map[string]any) (result string, err error) {
+func (r *agentRunner) executeToolInner(ctx context.Context, sessionKey, userID, name string, args map[string]any) (result string, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.Error("runner: tool panic recovered", "session", sessionKey, "tool", name, "panic", rec)
@@ -564,7 +564,7 @@ func generateIdempotencyKey() string {
 		hex.EncodeToString(bytes[10:16]))
 }
 
-func (r *geminiRunner) handleTerminalResponse(ctx context.Context, sessionKey, userText string, rubric map[string]any, respMsg agentctx.StrategicMessage, messages *[]agentctx.StrategicMessage, reflectionRounds *int) (string, bool) {
+func (r *agentRunner) handleTerminalResponse(ctx context.Context, sessionKey, userText string, rubric map[string]any, respMsg agentctx.StrategicMessage, messages *[]agentctx.StrategicMessage, reflectionRounds *int) (string, bool) {
 	text := extractText(respMsg)
 	if r.enableReflection && rubric != nil && *reflectionRounds < r.maxReflectionRounds {
 		if msg, ok := r.performReflectionAudit(ctx, sessionKey, userText, rubric, text, reflectionRounds); !ok {
@@ -576,7 +576,7 @@ func (r *geminiRunner) handleTerminalResponse(ctx context.Context, sessionKey, u
 }
 
 // retryChat calls prov.Chat with exponential backoff on transient errors.
-func (r *geminiRunner) retryChat(ctx context.Context, sessionKey string, req provider.ChatRequest) (*provider.ChatResponse, error) {
+func (r *agentRunner) retryChat(ctx context.Context, sessionKey string, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	const maxGenRetries = 3
 	const initialDelay = 1 * time.Second
 	const maxDelay = 30 * time.Second
@@ -603,7 +603,7 @@ func (r *geminiRunner) retryChat(ctx context.Context, sessionKey string, req pro
 	return nil, fmt.Errorf("%d retries exhausted: %w", maxGenRetries, lastErr)
 }
 
-func (r *geminiRunner) waitBeforeRetry(ctx context.Context, lastErr error, attempt int, delay *time.Duration, maxDelay time.Duration) error {
+func (r *agentRunner) waitBeforeRetry(ctx context.Context, lastErr error, attempt int, delay *time.Duration, maxDelay time.Duration) error {
 	slog.Warn("runner: transient error, retrying", "attempt", attempt, "delay", *delay, "err", lastErr)
 	select {
 	case <-ctx.Done():
@@ -617,7 +617,7 @@ func (r *geminiRunner) waitBeforeRetry(ctx context.Context, lastErr error, attem
 	return nil
 }
 
-func (r *geminiRunner) attemptChat(ctx context.Context, sessionKey string, attempt int, req provider.ChatRequest) (*provider.ChatResponse, error) {
+func (r *agentRunner) attemptChat(ctx context.Context, sessionKey string, attempt int, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	// Rate-limit: acquire a token before each attempt.
 	if waitErr := r.limiter.Wait(ctx); waitErr != nil {
 		return nil, waitErr
@@ -649,7 +649,7 @@ func (r *geminiRunner) attemptChat(ctx context.Context, sessionKey string, attem
 	return nil, err
 }
 
-func (r *geminiRunner) shouldRetry(err error) bool {
+func (r *agentRunner) shouldRetry(err error) bool {
 	// Circuit open: fail immediately without retrying.
 	if errors.Is(err, resilience.ErrCircuitOpen) {
 		return false

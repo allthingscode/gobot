@@ -23,7 +23,7 @@ const (
 // tasks to ephemeral, specialized sub-agents (F-001).
 //
 // A sub-agent is a fresh SessionManager (no checkpoint store) backed by a
-// new geminiRunner with a specialized system prompt. It runs in the same
+// new agentRunner with a specialized system prompt. It runs in the same
 // goroutine as the tool call and times out after spawnMaxTimeout.
 //
 // Sub-agent session keys: "agent:<agent_type>:<parent_session_key>".
@@ -88,7 +88,7 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, me
 func newSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
 	return &SpawnTool{
 		runnerFactory: func(m, systemPrompt string) agent.Runner {
-			runner := newGeminiRunner(prov, m, systemPrompt, cfg)
+			runner := newagentRunner(prov, m, systemPrompt, cfg)
 			runner.memStore = memStore
 			return runner
 		},
