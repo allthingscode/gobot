@@ -11,7 +11,7 @@ import (
 func (v *Validator) checkDiskSpace(root string, result *ValidationResult) error {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(root, &stat); err != nil {
-		return err
+		return fmt.Errorf("statfs %s: %w", root, err)
 	}
 
 	// Calculate available space in bytes
@@ -37,7 +37,7 @@ func (v *Validator) checkPathPermissions(path string, result *ValidationResult) 
 		if os.IsNotExist(err) {
 			return nil // Directory doesn't exist yet, skip
 		}
-		return err
+		return fmt.Errorf("stat %s: %w", path, err)
 	}
 
 	mode := info.Mode().Perm()
