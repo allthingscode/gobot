@@ -113,6 +113,12 @@ gobot's design principle is **stability for one user over scale for many**. Ever
 5. **Authorize** (for Google tools): `./gobot reauth`
 6. **Run**: `./gobot run`
 
+## Documentation
+
+- [Architecture](docs/architecture.md) — data flow, package responsibilities, key design decisions
+- [Configuration Reference](docs/configuration.md) — all config fields with defaults and examples
+- [Locking Strategy](docs/locking-strategy.md) — session-scoped locking design and rationale
+
 ## What You Can Do With gobot
 
 - Ask about your schedule: "What's on my calendar today?"
