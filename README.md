@@ -6,6 +6,8 @@
 
 **⚡ Built 100% by AI Agents** — gobot was designed, coded, and tested entirely by autonomous AI systems through the Dev Factory recursive improvement system. No human wrote a line of production code.
 
+**👨‍💻 Architect: Matthew Hayes** — See [AUTHORS.md](AUTHORS.md) for professional background and expertise in agentic systems.
+
 ## What Is This Space?
 
 [OpenClaw](https://github.com/openclaw/openclaw) is the canonical self-hosted AI personal assistant — a TypeScript bot that connects your messaging app to LLMs, tools, and memory. It has 347k+ stars and inspired a wave of Go and Rust reimplementations that trade OpenClaw's extensibility for a smaller binary, simpler deployment, or a tighter feature focus.
