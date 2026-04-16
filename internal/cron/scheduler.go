@@ -133,7 +133,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("scheduler run: %w", ctx.Err())
 		case <-s.clock.After(s.pollInterval):
 			if err := s.poll(ctx); err != nil {
 				slog.Error("cron: poll error", "err", err)
@@ -328,8 +328,9 @@ func (s *Scheduler) executeJob(ctx context.Context, dj dueJob) error {
 	if err != nil {
 		slog.Error("cron: job dispatch failed", "id", dj.id, "err", err)
 		s.sendFailureAlert(ctx, dj, err)
+		return fmt.Errorf("dispatch job: %w", err)
 	}
-	return err
+	return nil
 }
 
 func (s *Scheduler) sendFailureAlert(ctx context.Context, dj dueJob, err error) {

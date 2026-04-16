@@ -27,17 +27,21 @@ func (h *PairingHandler) Handle(ctx context.Context, sessionKey string, msg Inbo
 	authorized, err := h.store.IsAuthorized(msg.ChatID)
 	if err != nil {
 		slog.Warn("pairing: auth check failed", "chat_id", msg.ChatID, "err", err)
-		return "", err
+		return "", fmt.Errorf("is authorized: %w", err)
 	}
 
 	if authorized {
-		return h.inner.Handle(ctx, sessionKey, msg)
+		resp, err := h.inner.Handle(ctx, sessionKey, msg)
+		if err != nil {
+			return "", fmt.Errorf("inner handle: %w", err)
+		}
+		return resp, nil
 	}
 
 	code, err := h.store.GetOrCreateCode(msg.ChatID)
 	if err != nil {
 		slog.Warn("pairing: get or create code failed", "chat_id", msg.ChatID, "err", err)
-		return "", err
+		return "", fmt.Errorf("get or create code: %w", err)
 	}
 
 	return fmt.Sprintf(
@@ -50,10 +54,13 @@ func (h *PairingHandler) Handle(ctx context.Context, sessionKey string, msg Inbo
 func (h *PairingHandler) HandleCallback(ctx context.Context, cb InboundCallback) error {
 	authorized, err := h.store.IsAuthorized(cb.ChatID)
 	if err != nil {
-		return err
+		return fmt.Errorf("check authorization: %w", err)
 	}
 	if !authorized {
 		return fmt.Errorf("unauthorized callback from %d", cb.ChatID)
 	}
-	return h.inner.HandleCallback(ctx, cb)
+	if err := h.inner.HandleCallback(ctx, cb); err != nil {
+		return fmt.Errorf("inner callback: %w", err)
+	}
+	return nil
 }

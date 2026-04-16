@@ -115,7 +115,7 @@ func nextDelay(current time.Duration, cfg RetryConfig) time.Duration {
 func wait(ctx context.Context, sleep time.Duration) error {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("wait: %w", ctx.Err())
 	case <-time.After(sleep):
 		return nil
 	}

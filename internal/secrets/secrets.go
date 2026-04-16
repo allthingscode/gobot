@@ -117,5 +117,8 @@ func (s *SecretsStore) save(m map[string]string) error {
 	if err != nil {
 		return fmt.Errorf("secrets: marshal: %w", err)
 	}
-	return os.WriteFile(s.path, data, 0o600)
+	if err := os.WriteFile(s.path, data, 0o600); err != nil {
+		return fmt.Errorf("secrets: write file: %w", err)
+	}
+	return nil
 }

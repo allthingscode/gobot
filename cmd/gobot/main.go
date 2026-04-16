@@ -86,20 +86,20 @@ func cmdInit() *cobra.Command {
 func runInit(root string) error {
 	if root != "" {
 		if err := os.Setenv("GOBOT_STORAGE_ROOT", root); err != nil {
-			return err
+			return fmt.Errorf("set env: %w", err)
 		}
 	}
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	if err := os.MkdirAll(cfg.StorageRoot(), 0o755); err != nil {
-		return err
+		return fmt.Errorf("mkdir storage root: %w", err)
 	}
 	dirs := []string{"sessions", "secrets", "memory", "logs"}
 	for _, d := range dirs {
 		if err := os.MkdirAll(cfg.WorkspacePath("", d), 0o755); err != nil {
-			return err
+			return fmt.Errorf("mkdir %s: %w", d, err)
 		}
 	}
 	fmt.Printf("Initialized gobot workspace at %s\n", cfg.StorageRoot())
@@ -113,7 +113,7 @@ func cmdDoctor() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			return doctor.Run(cfg, app.LiveProbes())
 		},
@@ -127,7 +127,7 @@ func cmdRun() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			return app.RunAgent(cmd.Context(), cfg)
 		},

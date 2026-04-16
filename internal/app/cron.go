@@ -113,7 +113,10 @@ func (cd *CronDispatcher) dispatchSilent(ctx context.Context, p cron.Payload, to
 	sessionKey := "cron:" + to
 	slog.Info("dispatching cron job", "session", sessionKey, "silent", true)
 	_, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[SILENT] [AUTONOMOUS] "+p.Message)
-	return err
+	if err != nil {
+		return fmt.Errorf("dispatch silent: %w", err)
+	}
+	return nil
 }
 
 func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to string) error {
@@ -134,7 +137,7 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	slog.Info("dispatching cron job", "session", sessionKey, "channel", "email")
 	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
-		return err
+		return fmt.Errorf("dispatch email: %w", err)
 	}
 
 	if response != "" {
@@ -161,7 +164,7 @@ func (cd *CronDispatcher) dispatchTelegram(ctx context.Context, p cron.Payload, 
 	slog.Info("dispatching cron job", "session", sessionKey, "silent", false)
 	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
-		return err
+		return fmt.Errorf("dispatch telegram: %w", err)
 	}
 
 	if response != "" {
@@ -198,11 +201,14 @@ func (cd *CronDispatcher) Alert(ctx context.Context, p cron.Payload) error {
 	if err != nil {
 		return fmt.Errorf("CronDispatcher.Alert: %w", err)
 	}
-	return cd.b.Send(ctx, bot.OutboundMessage{
+	if err := cd.b.Send(ctx, bot.OutboundMessage{
 		ChatID:   chatID,
 		ThreadID: threadID,
 		Text:     p.Message,
-	})
+	}); err != nil {
+		return fmt.Errorf("alert send: %w", err)
+	}
+	return nil
 }
 
 // parseSessionKey parses "telegram:12345" or "telegram:12345:7"

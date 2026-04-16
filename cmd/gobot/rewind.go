@@ -45,7 +45,7 @@ func runRestore(snapshotName string) error {
 	}
 
 	if err := agent.RestoreSnapshot(cfg.StorageRoot(), snapshotName); err != nil {
-		return err
+		return fmt.Errorf("restore snapshot: %w", err)
 	}
 
 	fmt.Printf("Successfully restored session state from snapshot: %s\n", snapshotName)
@@ -60,7 +60,7 @@ func runListSnapshots() error {
 
 	snapshots, err := agent.ListSnapshots(cfg.StorageRoot())
 	if err != nil {
-		return err
+		return fmt.Errorf("list snapshots: %w", err)
 	}
 
 	if len(snapshots) == 0 {

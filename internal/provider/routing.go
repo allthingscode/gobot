@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -40,7 +41,11 @@ func (p *RoutingProvider) Models() []ModelInfo {
 // Chat implements the routing logic.
 func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	if !p.cfg.Enabled {
-		return p.executor.Chat(ctx, req)
+		resp, err := p.executor.Chat(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("executor chat: %w", err)
+		}
+		return resp, nil
 	}
 
 	// 1. Heuristic: If no tools and short message, use manager directly.
@@ -87,16 +92,24 @@ func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespo
 
 func (p *RoutingProvider) managerChat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	slog.Info("routing: turn handled by manager", "model", p.cfg.ManagerModel)
-	
+
 	// Create a copy of the request but use the manager model and NO tools.
 	mReq := req
 	mReq.Model = p.cfg.ManagerModel
 	mReq.Tools = nil
 
-	return p.manager.Chat(ctx, mReq)
+	resp, err := p.manager.Chat(ctx, mReq)
+	if err != nil {
+		return nil, fmt.Errorf("manager chat: %w", err)
+	}
+	return resp, nil
 }
 
 func (p *RoutingProvider) executorChat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	slog.Info("routing: turn handled by executor", "model", req.Model)
-	return p.executor.Chat(ctx, req)
+	resp, err := p.executor.Chat(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("executor chat: %w", err)
+	}
+	return resp, nil
 }

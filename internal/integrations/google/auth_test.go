@@ -3,6 +3,7 @@ package google
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -170,12 +171,16 @@ func (r *prefixRewriter) RoundTrip(req *http.Request) (*http.Response, error) {
 	rawURL := strings.Replace(req.URL.String(), r.from, r.to, 1)
 	newURL, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse url: %w", err)
 	}
 	r2 := req.Clone(req.Context())
 	r2.URL = newURL
 	r2.Host = newURL.Host
-	return http.DefaultTransport.RoundTrip(r2)
+	resp, err := http.DefaultTransport.RoundTrip(r2)
+	if err != nil {
+		return nil, fmt.Errorf("roundtrip: %w", err)
+	}
+	return resp, nil
 }
 
 // writeToken marshals tok and writes to dir/google_token.json.

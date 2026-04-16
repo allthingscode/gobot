@@ -415,7 +415,7 @@ func (r *AgentRunner) preToolStep(ctx context.Context, sessionKey, name string, 
 	}
 	override, err := r.Hooks.RunPreTool(ctx, sessionKey, name, args)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("pre tool hook: %w", err)
 	}
 	if override != "" {
 		slog.Debug("runner: tool pre-hook override",
@@ -494,11 +494,19 @@ func (r *AgentRunner) executeToolInner(ctx context.Context, sessionKey, userID, 
 	}
 
 	if r.Tracer != nil {
-		return r.Tracer.TraceToolExecution(ctx, sessionKey, name, func(ctx context.Context) (string, error) {
+		resp, err := r.Tracer.TraceToolExecution(ctx, sessionKey, name, func(ctx context.Context) (string, error) {
 			return t.Execute(ctx, sessionKey, userID, args)
 		})
+		if err != nil {
+			return resp, fmt.Errorf("trace tool execution: %w", err)
+		}
+		return resp, nil
 	}
-	return t.Execute(ctx, sessionKey, userID, args)
+	resp, err := t.Execute(ctx, sessionKey, userID, args)
+	if err != nil {
+		return resp, fmt.Errorf("execute tool: %w", err)
+	}
+	return resp, nil
 }
 
 func (r *AgentRunner) handleTerminalResponse(ctx context.Context, sessionKey, userText string, rubric map[string]any, respMsg agentctx.StrategicMessage, messages *[]agentctx.StrategicMessage, reflectionRounds *int) (string, bool) {
@@ -544,7 +552,7 @@ func (r *AgentRunner) waitBeforeRetry(ctx context.Context, lastErr error, attemp
 	slog.Warn("runner: transient error, retrying", "attempt", attempt, "delay", *delay, "err", lastErr)
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("context: %w", ctx.Err())
 	case <-time.After(*delay):
 	}
 	*delay *= 2
@@ -556,7 +564,7 @@ func (r *AgentRunner) waitBeforeRetry(ctx context.Context, lastErr error, attemp
 
 func (r *AgentRunner) attemptChat(ctx context.Context, sessionKey string, attempt int, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	if waitErr := r.Limiter.Wait(ctx); waitErr != nil {
-		return nil, waitErr
+		return nil, fmt.Errorf("rate limit wait: %w", waitErr)
 	}
 
 	var resp *provider.ChatResponse
@@ -564,7 +572,10 @@ func (r *AgentRunner) attemptChat(ctx context.Context, sessionKey string, attemp
 		return r.Breaker.Execute(func() error {
 			var callErr error
 			resp, callErr = r.Prov.Chat(ctx, req)
-			return callErr
+			if callErr != nil {
+				return fmt.Errorf("provider chat: %w", callErr)
+			}
+			return nil
 		})
 	}
 

@@ -192,7 +192,7 @@ func followLogs(cmd *cobra.Command, reader *bufio.Reader, pending string, filter
 	for {
 		select {
 		case <-cmd.Context().Done():
-			return cmd.Context().Err()
+			return fmt.Errorf("context done: %w", cmd.Context().Err())
 		default:
 		}
 
@@ -202,7 +202,7 @@ func followLogs(cmd *cobra.Command, reader *bufio.Reader, pending string, filter
 				pending += line
 				select {
 				case <-cmd.Context().Done():
-					return cmd.Context().Err()
+					return fmt.Errorf("context done: %w", cmd.Context().Err())
 				case <-time.After(500 * time.Millisecond):
 				}
 				continue

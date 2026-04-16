@@ -291,14 +291,20 @@ func (m *MemoryStore) CleanupExpired(ttl string) (int64, error) {
 
 // Close releases the database connection.
 func (m *MemoryStore) Close() error {
-	return m.db.Close()
+	if err := m.db.Close(); err != nil {
+		return fmt.Errorf("close db: %w", err)
+	}
+	return nil
 }
 
 // Stats returns the total count of memory entries.
 func (m *MemoryStore) Stats() (int, error) {
 	var count int
 	err := m.db.QueryRowContext(context.Background(), "SELECT count(*) FROM memory_fts").Scan(&count)
-	return count, err
+	if err != nil {
+		return 0, fmt.Errorf("query memory count: %w", err)
+	}
+	return count, nil
 }
 
 // sanitizeFTSQuery removes FTS5 operator characters that could cause parse

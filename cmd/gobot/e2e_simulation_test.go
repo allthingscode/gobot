@@ -99,7 +99,11 @@ func (r *simRunner) Run(ctx context.Context, sessionKey, _ string, messages []ag
 // If no tool matches, returns a placeholder string (not an error).
 func (r *simRunner) dispatchTool(ctx context.Context, sessionKey string, fc SimToolCall) (string, error) {
 	if t, ok := r.toolsByName[fc.Name]; ok {
-		return t.Execute(ctx, sessionKey, "", fc.Args)
+		resp, err := t.Execute(ctx, sessionKey, "", fc.Args)
+		if err != nil {
+			return "", fmt.Errorf("execute tool %q: %w", fc.Name, err)
+		}
+		return resp, nil
 	}
 	return fmt.Sprintf("[tool %q not registered in scenario]", fc.Name), nil
 }

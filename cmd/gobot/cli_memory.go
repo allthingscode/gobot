@@ -62,16 +62,16 @@ func runMemoryRebuild() error {
 func runMemorySearch(query string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	store, err := memory.NewMemoryStore(cfg.StorageRoot())
 	if err != nil {
-		return err
+		return fmt.Errorf("new memory store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 	results, err := store.Search(query, "", 10)
 	if err != nil {
-		return err
+		return fmt.Errorf("search memory: %w", err)
 	}
 	if len(results) == 0 {
 		fmt.Println("No results found.")

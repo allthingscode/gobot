@@ -91,7 +91,12 @@ func initAuditSchema(db *sql.DB) error {
 }
 
 // Close closes the underlying database connection.
-func (l *AuditLedger) Close() error { return l.db.Close() }
+func (l *AuditLedger) Close() error {
+	if err := l.db.Close(); err != nil {
+		return fmt.Errorf("close db: %w", err)
+	}
+	return nil
+}
 
 // Append records a new audit entry, chaining it to the previous record's hash.
 func (l *AuditLedger) Append(entry AuditEntry) error {
@@ -134,7 +139,10 @@ func (l *AuditLedger) GetAll() ([]AuditRecord, error) {
 		}
 		records = append(records, r)
 	}
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit rows: %w", err)
+	}
+	return records, nil
 }
 
 // Verify walks the entire chain and returns a non-nil error if any record's

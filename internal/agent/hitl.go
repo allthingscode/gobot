@@ -100,7 +100,7 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName 
 
 	select {
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return false, fmt.Errorf("context done: %w", ctx.Err())
 	case approved := <-ch:
 		return approved, nil
 	case <-time.After(10 * time.Minute): // Timeout for human response

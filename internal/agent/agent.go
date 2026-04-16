@@ -259,9 +259,13 @@ func (m *SessionManager) Dispatch(ctx context.Context, sessionKey, userID, userM
 		if err != nil {
 			return "", err
 		}
-		return tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
+		resp, err := tracer.TraceAgentDispatch(ctx, sessionKey, len(messages), func(ctx context.Context) (string, error) {
 			return m.dispatch(ctx, sessionKey, userID, userMessage, messages, iteration, stateless, store)
 		})
+		if err != nil {
+			return "", fmt.Errorf("trace dispatch: %w", err)
+		}
+		return resp, nil
 	}
 
 	messages, iteration, stateless, err := m.loadHistory(ctx, sessionKey, store)
@@ -439,7 +443,11 @@ func (m *SessionManager) runSummarization(ctx context.Context, sessionKey string
 		}
 		fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
 	}
-	return m.runner.RunText(ctx, sessionKey, sb.String(), model)
+	result, err := m.runner.RunText(ctx, sessionKey, sb.String(), model)
+	if err != nil {
+		return "", fmt.Errorf("run text: %w", err)
+	}
+	return result, nil
 }
 
 func (m *SessionManager) compactHistoryIfNeeded(sessionKey string, messages []agentctx.StrategicMessage) []agentctx.StrategicMessage {
@@ -561,7 +569,11 @@ func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey 
 	// Use WithoutCancel to ensure background compaction continues even if
 	// the triggering request is cancelled.
 	bgCtx := context.WithoutCancel(ctx)
-	return m.runner.RunText(bgCtx, sessionKey, summarizationPrompt+inputText, model)
+	result, err := m.runner.RunText(bgCtx, sessionKey, summarizationPrompt+inputText, model)
+	if err != nil {
+		return "", fmt.Errorf("summarize: %w", err)
+	}
+	return result, nil
 }
 
 func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey string, store CheckpointStore) {
