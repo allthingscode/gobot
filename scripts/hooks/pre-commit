@@ -86,6 +86,15 @@ if command -v golangci-lint > /dev/null 2>&1; then
         cat "$TEMP_LOG"
         exit 1
     fi
+    # On Windows the default GOOS skips files tagged //go:build !windows.
+    # Run a second pass targeting Linux so platform-specific code is also linted.
+    if [ "$(go env GOOS)" = "windows" ] && git diff --cached --name-only | grep -qE '(_unix|_linux|_darwin)\.go$'; then
+        if ! GOOS=linux golangci-lint run --modules-download-mode=readonly > "$TEMP_LOG" 2>&1; then
+            echo "ERROR: golangci-lint (GOOS=linux) failed on unix-tagged files"
+            cat "$TEMP_LOG"
+            exit 1
+        fi
+    fi
 else
     echo "WARN: golangci-lint not found locally; CI will enforce lint"
 fi
