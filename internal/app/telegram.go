@@ -29,7 +29,7 @@ type TgAPI struct {
 
 // NewTgAPI initializes a new Telegram API adapter using the telego library.
 func NewTgAPI(token string, allowFrom []string, cfg *config.Config) (*TgAPI, error) {
-	client, err := telego.NewBot(token)
+	client, err := telego.NewBot(token, telego.WithDiscardLogger())
 	if err != nil {
 		return nil, fmt.Errorf("telego: %w", err)
 	}
