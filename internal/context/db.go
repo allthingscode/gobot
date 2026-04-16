@@ -43,7 +43,7 @@ func openDB(dbDir string) (*sql.DB, error) {
 func addChecksumColumnIfMissing(db *sql.DB) error {
 	rows, err := db.QueryContext(stdctx.Background(), "PRAGMA table_info(checkpoints)")
 	if err != nil {
-		return err
+		return fmt.Errorf("query checkpoints table info: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -55,18 +55,21 @@ func addChecksumColumnIfMissing(db *sql.DB) error {
 		var dfltValue sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typeStr, &notNull, &dfltValue, &pk); err != nil {
-			return err
+			return fmt.Errorf("scan table info: %w", err)
 		}
 		if name == "checksum" {
 			return nil
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return fmt.Errorf("iterate table info rows: %w", err)
 	}
 
 	_, err = db.ExecContext(stdctx.Background(), "ALTER TABLE checkpoints ADD COLUMN checksum TEXT")
-	return err
+	if err != nil {
+		return fmt.Errorf("alter checkpoints table: %w", err)
+	}
+	return nil
 }
 
 // addTokenColumnsIfMissing adds estimated_tokens and last_compacted_at columns
@@ -81,19 +84,22 @@ func checkColumnExists(rows *sql.Rows, colName string) (exists bool, err error) 
 		var dfltValue sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typeStr, &notNull, &dfltValue, &pk); err != nil {
-			return false, err
+			return false, fmt.Errorf("scan threads table info: %w", err)
 		}
 		if name == colName {
 			return true, nil
 		}
 	}
-	return false, rows.Err()
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("iterate threads table info rows: %w", err)
+	}
+	return false, nil
 }
 
 func hasColumn(db *sql.DB, colName string) (bool, error) {
 	rows, err := db.QueryContext(stdctx.Background(), "PRAGMA table_info(threads)")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("query threads table info: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return checkColumnExists(rows, colName)

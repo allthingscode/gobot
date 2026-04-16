@@ -225,7 +225,7 @@ func (c *ClosableResource) Shutdown(ctx context.Context) error {
 		c.closed = true
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("shutdown %s: %w", c.name, ctx.Err())
 	}
 }
 

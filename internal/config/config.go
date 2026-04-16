@@ -380,7 +380,10 @@ func (c *Config) Save(path string) error {
 	finalData := make([]byte, 0, len(bomPrefix)+len(data))
 	finalData = append(finalData, bomPrefix...)
 	finalData = append(finalData, data...)
-	return os.WriteFile(path, finalData, 0o600)
+	if err := os.WriteFile(path, finalData, 0o600); err != nil {
+		return fmt.Errorf("write config file: %w", err)
+	}
+	return nil
 }
 
 // SecretsRoot returns the path to the secrets directory under StorageRoot.

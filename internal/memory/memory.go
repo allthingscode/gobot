@@ -201,7 +201,7 @@ func tryParseFromTool(hasToolCalls bool, toolArguments any) (map[string]any, err
 			slog.Error("consolidation: failed to unmarshal tool arguments",
 				"error", err,
 				"raw_content", truncateString(v, 500))
-			return nil, err
+			return nil, fmt.Errorf("unmarshal tool arguments: %w", err)
 		}
 		return args, nil
 	}

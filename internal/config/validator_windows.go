@@ -12,11 +12,11 @@ func (v *Validator) checkDiskSpace(root string, result *ValidationResult) error 
 	var freeBytes, totalBytes, totalFreeBytes uint64
 	ptr, err := windows.UTF16PtrFromString(root)
 	if err != nil {
-		return err
+		return fmt.Errorf("UTF16PtrFromString: %w", err)
 	}
 	err = windows.GetDiskFreeSpaceEx(ptr, &freeBytes, &totalBytes, &totalFreeBytes)
 	if err != nil {
-		return err
+		return fmt.Errorf("GetDiskFreeSpaceEx: %w", err)
 	}
 
 	available := freeBytes

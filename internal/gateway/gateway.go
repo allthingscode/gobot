@@ -73,7 +73,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	slog.Info("gateway: starting server", "addr", addr)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		return err
+		return fmt.Errorf("listen and serve: %w", err)
 	}
 	return nil
 }

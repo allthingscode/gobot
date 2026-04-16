@@ -107,7 +107,11 @@ func (t *SearchDocsTool) searchVectors(ctx context.Context, query string, limit 
 	embedFunc := func(c context.Context, text string) ([]float32, error) {
 		return t.embedProv.Embed(c, text)
 	}
-	return t.vecStore.Search(ctx, "workspace_docs", query, limit*2, nil, embedFunc)
+	res, err := t.vecStore.Search(ctx, "workspace_docs", query, limit*2, nil, embedFunc)
+	if err != nil {
+		return nil, fmt.Errorf("search vectors: %w", err)
+	}
+	return res, nil
 }
 
 func formatResults(merged []vector.HybridResult, limit int) (string, error) {

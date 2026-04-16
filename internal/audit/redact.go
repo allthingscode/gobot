@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"regexp"
@@ -90,14 +91,20 @@ func (h *RedactingHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 func (h *RedactingHandler) Handle(ctx context.Context, r slog.Record) error {
 	if !h.enabled {
-		return h.inner.Handle(ctx, r)
+		if err := h.inner.Handle(ctx, r); err != nil {
+			return fmt.Errorf("handle inner: %w", err)
+		}
+		return nil
 	}
 	newR := slog.NewRecord(r.Time, r.Level, redactString(r.Message), r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		newR.AddAttrs(redactAttr(a))
 		return true
 	})
-	return h.inner.Handle(ctx, newR)
+	if err := h.inner.Handle(ctx, newR); err != nil {
+		return fmt.Errorf("handle inner redacted: %w", err)
+	}
+	return nil
 }
 
 func (h *RedactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

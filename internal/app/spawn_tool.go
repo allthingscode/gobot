@@ -43,7 +43,11 @@ func (r *iterLimitRunner) SetMaxToolIterations(n int) {
 }
 
 func (r *iterLimitRunner) RunText(ctx context.Context, sessionKey, prompt, modelOverride string) (string, error) {
-	return r.Inner.RunText(ctx, sessionKey, prompt, modelOverride)
+	resp, err := r.Inner.RunText(ctx, sessionKey, prompt, modelOverride)
+	if err != nil {
+		return "", fmt.Errorf("run text: %w", err)
+	}
+	return resp, nil
 }
 
 func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
@@ -51,7 +55,11 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, me
 	if r.Count > r.Max {
 		return "", nil, fmt.Errorf("spawn: sub-agent exceeded maximum iterations (%d)", r.Max)
 	}
-	return r.Inner.Run(ctx, sessionKey, userID, messages)
+	resp, msgs, err := r.Inner.Run(ctx, sessionKey, userID, messages)
+	if err != nil {
+		return "", nil, fmt.Errorf("run: %w", err)
+	}
+	return resp, msgs, nil
 }
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from a provider.

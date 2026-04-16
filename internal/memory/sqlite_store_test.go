@@ -369,7 +369,10 @@ func TestSanitizeFTSQuery(t *testing.T) {
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 func writeFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o600)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("write helper file: %w", err)
+	}
+	return nil
 }
 
 // ── CleanupExpired (F-068) ─────────────────────────────────────────────────

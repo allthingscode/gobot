@@ -41,7 +41,10 @@ func NewStore(dbPath string) (*Store, error) {
 func (s *Store) Save() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.db.ExportToFile(s.dbPath, true, "") // compress=true
+	if err := s.db.ExportToFile(s.dbPath, true, ""); err != nil {
+		return fmt.Errorf("export vector db: %w", err)
+	}
+	return nil
 }
 
 // AddDocuments adds multiple documents to a collection concurrently.

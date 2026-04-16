@@ -70,25 +70,25 @@ func (c *ContentItem) unmarshalByType(data []byte, typeName string) error {
 	case "text":
 		var v TextContent
 		if err := json.Unmarshal(data, &v); err != nil {
-			return err
+			return fmt.Errorf("unmarshal text content: %w", err)
 		}
 		c.Text = &v
 	case "thinking":
 		var v ThinkingContent
 		if err := json.Unmarshal(data, &v); err != nil {
-			return err
+			return fmt.Errorf("unmarshal thinking content: %w", err)
 		}
 		c.Thinking = &v
 	case "image_url":
 		var v ImageContent
 		if err := json.Unmarshal(data, &v); err != nil {
-			return err
+			return fmt.Errorf("unmarshal image content: %w", err)
 		}
 		c.Image = &v
 	case "tool_call":
 		var v ToolCallContent
 		if err := json.Unmarshal(data, &v); err != nil {
-			return err
+			return fmt.Errorf("unmarshal tool call content: %w", err)
 		}
 		c.Tool = &v
 	default:
@@ -109,13 +109,29 @@ func (c *ContentItem) UnmarshalJSON(data []byte) error {
 func (c ContentItem) MarshalJSON() ([]byte, error) {
 	switch {
 	case c.Text != nil:
-		return json.Marshal(c.Text)
+		b, err := json.Marshal(c.Text)
+		if err != nil {
+			return nil, fmt.Errorf("marshal text content: %w", err)
+		}
+		return b, nil
 	case c.Thinking != nil:
-		return json.Marshal(c.Thinking)
+		b, err := json.Marshal(c.Thinking)
+		if err != nil {
+			return nil, fmt.Errorf("marshal thinking content: %w", err)
+		}
+		return b, nil
 	case c.Image != nil:
-		return json.Marshal(c.Image)
+		b, err := json.Marshal(c.Image)
+		if err != nil {
+			return nil, fmt.Errorf("marshal image content: %w", err)
+		}
+		return b, nil
 	case c.Tool != nil:
-		return json.Marshal(c.Tool)
+		b, err := json.Marshal(c.Tool)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tool content: %w", err)
+		}
+		return b, nil
 	default:
 		return nil, fmt.Errorf("ContentItem: all fields are nil")
 	}
@@ -161,9 +177,17 @@ func (m *MessageContent) UnmarshalJSON(data []byte) error {
 // MarshalJSON encodes either the string or the items array.
 func (m MessageContent) MarshalJSON() ([]byte, error) {
 	if m.Str != nil {
-		return json.Marshal(*m.Str)
+		b, err := json.Marshal(*m.Str)
+		if err != nil {
+			return nil, fmt.Errorf("marshal message content str: %w", err)
+		}
+		return b, nil
 	}
-	return json.Marshal(m.Items)
+	b, err := json.Marshal(m.Items)
+	if err != nil {
+		return nil, fmt.Errorf("marshal message content items: %w", err)
+	}
+	return b, nil
 }
 
 // String returns the text representation of the content.
