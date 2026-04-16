@@ -128,12 +128,9 @@ func TestScheduler_DispatchesDueJob(t *testing.T) {
 
 // TestScheduler_ConcurrentDispatch_MultipleDueJobs verifies that when
 // multiple jobs are due at the same tick they are dispatched concurrently,
-// not sequentially.  Each dispatch has a 20 ms artificial delay; sequential
-// dispatch of 5 jobs would take >= 100 ms.  The test requires completion
-// within 80 ms, which is only achievable with concurrent dispatch.
-//
-// NOTE: This is a forward-looking acceptance test for F-027.  It will fail
-// until scheduler.go is updated to fan-out due jobs with sync.WaitGroup.
+// not sequentially.  Each dispatch has a 100 ms artificial delay; sequential
+// dispatch of 5 jobs would take >= 500 ms.  The test requires completion
+// within 400 ms, which is only achievable with concurrent dispatch.
 func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -151,7 +148,7 @@ func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 		}
 	}
 	storePath := writeJobsJSON(t, dir, jobs)
-	disp := &concDispatcher{delay: 20 * time.Millisecond}
+	disp := &concDispatcher{delay: 100 * time.Millisecond}
 	s := NewScheduler(storePath, "", disp)
 	s.pollInterval = 1 * time.Millisecond
 	s.store = loadStore(t, storePath)
@@ -162,11 +159,11 @@ func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	// Sequential would take >= 100 ms; concurrent should finish in ~20 ms.
-	// Allow up to 80 ms to accommodate slow CI runners while still rejecting
+	// Sequential would take >= 500 ms; concurrent should finish in ~100 ms.
+	// Allow up to 400 ms to accommodate slow CI runners while still rejecting
 	// sequential implementations.
-	if elapsed >= 80*time.Millisecond {
-		t.Errorf("poll took %v — jobs may not be running concurrently (sequential would take ~100ms)", elapsed)
+	if elapsed >= 400*time.Millisecond {
+		t.Errorf("poll took %v — jobs may not be running concurrently (sequential would take ~500ms)", elapsed)
 	}
 
 	disp.mu.Lock()

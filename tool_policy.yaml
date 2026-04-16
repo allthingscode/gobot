@@ -1,4 +1,8 @@
 # tool_policy.yaml
+# DEFAULT POLICY — copy this file to your gobot storage root to customize.
+# Runtime location: $GOBOT_STORAGE/tool_policy.yaml (or ~/gobot_data/tool_policy.yaml)
+# This file in the repo is a reference default only.
+#
 # Policy-driven tool execution configuration for GoBot (F-103)
 #
 # Rules are evaluated top-to-bottom; first match wins.

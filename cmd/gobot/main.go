@@ -1,4 +1,5 @@
 // gobot - Strategic Edition agent runtime (Go)
+//go:generate go-winres make --in ../../versioninfo.json
 package main
 
 import (

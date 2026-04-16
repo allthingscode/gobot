@@ -565,8 +565,9 @@ func (h *blockingHandler) Handle(ctx context.Context, sessionKey string, msg Inb
 	return "", nil
 }
 
+//nolint:paralleltest // relies on runtime.NumGoroutine() (process-wide); running alongside
+// long-lived parallel bot tests causes spurious goroutine count increases.
 func TestBot_CallbackLeakPrevention(t *testing.T) {
-	t.Parallel()
 	// Custom API to feed exactly one callback and then block indefinitely
 	api := &mockAPI{
 		updates:   make(chan InboundMessage),
