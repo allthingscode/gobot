@@ -5,11 +5,17 @@
 
 ---
 
-## The Pitch
+## The "Failing At AI Costs Far More Than Getting It Right" Section
 
-Most AI tooling deployments fail because teams blur the boundary between where AI excels (judgment, synthesis) and where deterministic logic must handle the work (precision, reliability).
+Let's skip the corporate dance. 
 
-I architect and build **hybrid agentic systems** that get this boundary right — autonomous pipelines that deliver real features while maintaining production-grade quality.
+Chatting with an LLM isn't software engineering; it's typing. Building autonomous, agentic systems that actually multiply velocity and guarantee production-quality code is a completely different discipline. 
+
+Achieving those results requires architecting strict deterministic boundaries around non-deterministic models. 
+
+If your engineering org hasn't mastered that specific discipline, you are leaving massive ROI on the table. 
+
+I don't build chat interfaces; I build the hybrid pipelines that turn raw AI capability into unstoppable development velocity.
 
 ---
 
