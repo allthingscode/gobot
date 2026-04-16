@@ -324,3 +324,67 @@ func TestConsolidator_GlobalRouting(t *testing.T) {
 		t.Error("expected to find session fact from its own session (sess1)")
 	}
 }
+
+func TestConsolidator_Setters(t *testing.T) {
+	t.Parallel()
+
+	t.Run("SetPrompt", func(t *testing.T) {
+		t.Parallel()
+		c := New(&mockTextRunner{}, nil, nil, nil)
+		custom := "custom prompt"
+		c.SetPrompt(custom)
+		if c.prompt != custom {
+			t.Errorf("expected prompt %q, got %q", custom, c.prompt)
+		}
+	})
+
+	t.Run("SetPrompt_Empty", func(t *testing.T) {
+		t.Parallel()
+		c := New(&mockTextRunner{}, nil, nil, nil)
+		original := c.prompt
+		c.SetPrompt("")
+		if c.prompt != original {
+			t.Errorf("expected prompt to remain %q, got %q", original, c.prompt)
+		}
+	})
+
+	t.Run("SetTTL", func(t *testing.T) {
+		t.Parallel()
+		c := New(&mockTextRunner{}, nil, nil, nil)
+		ttl := "100h"
+		c.SetTTL(ttl)
+		if c.ttl != ttl {
+			t.Errorf("expected ttl %q, got %q", ttl, c.ttl)
+		}
+	})
+
+	t.Run("SetGlobalTTL", func(t *testing.T) {
+		t.Parallel()
+		c := New(&mockTextRunner{}, nil, nil, nil)
+		ttl := "200h"
+		c.SetGlobalTTL(ttl)
+		if c.globalTTL != ttl {
+			t.Errorf("expected globalTTL %q, got %q", ttl, c.globalTTL)
+		}
+	})
+
+	t.Run("SetGlobalPatterns", func(t *testing.T) {
+		t.Parallel()
+		c := New(&mockTextRunner{}, nil, nil, nil)
+		patterns := []string{"p1", "p2"}
+		c.SetGlobalPatterns(patterns)
+		if len(c.patterns) != 2 || c.patterns[0] != "p1" {
+			t.Errorf("expected patterns %v, got %v", patterns, c.patterns)
+		}
+	})
+
+	t.Run("SetObservability", func(t *testing.T) {
+		t.Parallel()
+		c := New(&mockTextRunner{}, nil, nil, nil)
+		// Just verify it doesn't panic and assigns the pointer.
+		c.SetObservability(nil)
+		if c.obs != nil {
+			t.Error("expected nil observability")
+		}
+	})
+}
