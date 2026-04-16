@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -35,7 +36,7 @@ func (h *DispatchHandler) Handle(ctx context.Context, sessionKey string, msg bot
 		if errors.Is(err, resilience.ErrCircuitOpen) {
 			return "I'm sorry, I'm currently having trouble connecting to one of my services. Please try again in a few moments.", nil
 		}
-		return "", err
+		return "", fmt.Errorf("dispatch session: %w", err)
 	}
 	if h.Memory != nil {
 		h.indexMemory(sessionKey, msg.Text, reply)
@@ -70,7 +71,9 @@ func (h *DispatchHandler) indexMemory(sessionKey, userMsg, assistantReply string
 
 func (h *DispatchHandler) HandleCallback(ctx context.Context, cb bot.InboundCallback) error {
 	if h.Hitl != nil {
-		return h.Hitl.HandleCallback(ctx, cb)
+		if err := h.Hitl.HandleCallback(ctx, cb); err != nil {
+			return fmt.Errorf("hitl callback: %w", err)
+		}
 	}
 	return nil
 }

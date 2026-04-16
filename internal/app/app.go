@@ -140,7 +140,7 @@ func SetupOTel(ctx context.Context, cfg *config.Config) (*observability.Provider
 		ServiceName:  "gobot-strategic",
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new provider: %w", err)
 	}
 	return p, nil
 }

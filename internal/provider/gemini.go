@@ -38,7 +38,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	resp, err := p.client.Models.GenerateContent(ctx, req.Model, contents, config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gemini generate: %w", err)
 	}
 
 	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {

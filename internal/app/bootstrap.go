@@ -70,7 +70,7 @@ func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, 
 		OpenAIBaseURL:   cfg.OpenAIBaseURL(),
 	}
 	if err := factory.InitAll(ctx); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("init providers: %w", err)
 	}
 
 	provName := cfg.DefaultProvider()

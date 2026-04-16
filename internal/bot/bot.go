@@ -174,7 +174,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	if b.api == nil {
 		slog.Info("bot: no Telegram API configured, skipping polling loop")
 		<-ctx.Done()
-		return ctx.Err()
+		return fmt.Errorf("bot context: %w", ctx.Err())
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -187,7 +187,10 @@ func (b *Bot) Run(ctx context.Context) error {
 		return b.runUpdateLoop(ctx)
 	})
 
-	return g.Wait()
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("errgroup wait: %w", err)
+	}
+	return nil
 }
 
 // runCallbackLoop manages the lifecycle of the callback polling channel.
@@ -218,7 +221,7 @@ func (b *Bot) drainCallbacks(ctx context.Context, callbacks <-chan InboundCallba
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("drain callbacks: %w", ctx.Err())
 		case cb, ok := <-callbacks:
 			if !ok {
 				return nil // reconnect
@@ -265,7 +268,7 @@ func (b *Bot) drainUpdates(ctx context.Context, updates <-chan InboundMessage) e
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("drain updates: %w", ctx.Err())
 		case msg, ok := <-updates:
 			if !ok {
 				return nil // reconnect
@@ -279,7 +282,7 @@ func (b *Bot) waitRetry(ctx context.Context, op string, err error, delay *time.D
 	slog.Error("bot: "+op+" failed", "err", err, "retry_in", *delay)
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("wait retry: %w", ctx.Err())
 	case <-time.After(*delay):
 	}
 	*delay *= 2
@@ -319,7 +322,7 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 func (b *Bot) handleAndSend(ctx context.Context, sessionKey string, msg InboundMessage) error {
 	reply, err := b.handler.Handle(ctx, sessionKey, msg)
 	if err != nil {
-		return err
+		return fmt.Errorf("handle: %w", err)
 	}
 	if reply == "" {
 		return nil
@@ -338,10 +341,16 @@ func (b *Bot) handleAndSend(ctx context.Context, sessionKey string, msg InboundM
 
 // Send delivers a message via the underlying API.
 func (b *Bot) Send(ctx context.Context, msg OutboundMessage) error {
-	return b.api.Send(ctx, msg)
+	if err := b.api.Send(ctx, msg); err != nil {
+		return fmt.Errorf("api send: %w", err)
+	}
+	return nil
 }
 
 // SendWithButtons delivers a message with buttons via the underlying API.
 func (b *Bot) SendWithButtons(ctx context.Context, msg OutboundMessage, buttons [][]Button) error {
-	return b.api.SendWithButtons(ctx, msg, buttons)
+	if err := b.api.SendWithButtons(ctx, msg, buttons); err != nil {
+		return fmt.Errorf("api send with buttons: %w", err)
+	}
+	return nil
 }

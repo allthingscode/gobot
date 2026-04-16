@@ -124,7 +124,7 @@ func ListSnapshots(storageRoot string) ([]SnapshotMetadata, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("list snapshots dir: %w", err)
 	}
 
 	snapshots := make([]SnapshotMetadata, 0, len(entries))
@@ -156,7 +156,7 @@ func ListSnapshots(storageRoot string) ([]SnapshotMetadata, error) {
 func deleteSessionFilesForRestore(sessionDir string) error {
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("read dir: %w", err)
 	}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -173,7 +173,7 @@ func deleteSessionFilesForRestore(sessionDir string) error {
 func copySnapshotContents(snapshotDir, sessionDir string) error {
 	snapEntries, err := os.ReadDir(snapshotDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("read snapshot dir: %w", err)
 	}
 	for _, entry := range snapEntries {
 		if entry.Name() == "snapshot_metadata.json" {
@@ -213,18 +213,20 @@ func RestoreSnapshot(storageRoot, snapshotName string) error {
 func copyFile(src, dst string) error {
 	sourceFile, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("open source file: %w", err)
 	}
 	defer func() { _ = sourceFile.Close() }()
 
 	destFile, err := os.Create(dst)
 	if err != nil {
-		return err
+		return fmt.Errorf("create dest file: %w", err)
 	}
 	defer func() { _ = destFile.Close() }()
 
-	_, err = io.Copy(destFile, sourceFile)
-	return err
+	if _, err = io.Copy(destFile, sourceFile); err != nil {
+		return fmt.Errorf("copy file: %w", err)
+	}
+	return nil
 }
 
 func getGitSHA() string {

@@ -37,7 +37,7 @@ func cmdEmail() *cobra.Command {
 
 			fmt.Printf("Sending test email to %s...\n", userEmail)
 			if err := svc.Send(context.Background(), userEmail, subject, body); err != nil {
-				return err
+				return fmt.Errorf("send email: %w", err)
 			}
 			fmt.Println("Success! Email sent.")
 			return nil

@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -72,7 +73,10 @@ func (b *Breaker) Execute(fn func() error) error {
 		RecordRejection(name)
 		return ErrCircuitOpen
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("circuit breaker execute: %w", err)
+	}
+	return nil
 }
 
 // State returns the current circuit state as a string ("closed", "half-open", "open").

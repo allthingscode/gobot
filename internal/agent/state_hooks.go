@@ -94,5 +94,9 @@ func (h *StateHook) RecoverWorkflow(ctx context.Context, id state.WorkflowID) (*
 
 // ListActiveWorkflows returns all active workflow IDs.
 func (h *StateHook) ListActiveWorkflows() ([]state.WorkflowID, error) {
-	return h.manager.ListActive()
+	ids, err := h.manager.ListActive()
+	if err != nil {
+		return nil, fmt.Errorf("list active: %w", err)
+	}
+	return ids, nil
 }

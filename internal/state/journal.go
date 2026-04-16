@@ -46,13 +46,18 @@ func (j *Journal) Append(entry JournalEntry) error {
 	}
 
 	// Sync to disk for durability.
-	return j.file.Sync()
+	if err := j.file.Sync(); err != nil {
+		return fmt.Errorf("syncing journal: %w", err)
+	}
+	return nil
 }
 
 // Close closes the journal file.
 func (j *Journal) Close() error {
 	if j.file != nil {
-		return j.file.Close()
+		if err := j.file.Close(); err != nil {
+			return fmt.Errorf("closing journal: %w", err)
+		}
 	}
 	return nil
 }
@@ -78,12 +83,18 @@ func Replay(journalPath string) ([]JournalEntry, error) {
 		entries = append(entries, entry)
 	}
 
-	return entries, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scanning journal: %w", err)
+	}
+	return entries, nil
 }
 
 // Truncate removes the journal file after successful checkpoint.
 func Truncate(journalPath string) error {
-	return os.Remove(journalPath)
+	if err := os.Remove(journalPath); err != nil {
+		return fmt.Errorf("removing journal: %w", err)
+	}
+	return nil
 }
 
 // RecoverWorkflow replays journal entries to reconstruct workflow state.
@@ -112,7 +123,7 @@ func applyEntry(state *WorkflowState, entry JournalEntry) error {
 			Status WorkflowStatus `json:"status"`
 		}
 		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
-			return err
+			return fmt.Errorf("unmarshal status_change payload: %w", err)
 		}
 		state.Status = payload.Status
 		state.UpdatedAt = entry.Timestamp

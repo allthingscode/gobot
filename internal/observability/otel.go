@@ -48,7 +48,10 @@ func (h *otelSlogHandler) Handle(ctx context.Context, r slog.Record) error {
 		r = r.Clone()
 		r.AddAttrs(attrs...)
 	}
-	return h.inner.Handle(ctx, r)
+	if err := h.inner.Handle(ctx, r); err != nil {
+		return fmt.Errorf("slog handle: %w", err)
+	}
+	return nil
 }
 
 func (h *otelSlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

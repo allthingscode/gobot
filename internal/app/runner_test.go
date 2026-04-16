@@ -731,7 +731,7 @@ func TestRunner_PreservesOutputOnError(t *testing.T) {
 	if !strings.Contains(content, "important diagnostic output") {
 		t.Errorf("Tool result lost diagnostic output, got: %q", content)
 	}
-	if !strings.Contains(content, "Error: exit status 1") {
+	if !strings.Contains(content, "exit status 1") {
 		t.Errorf("Tool result missing error message, got: %q", content)
 	}
 }

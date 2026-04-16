@@ -55,7 +55,10 @@ func (l *FileLock) Release() error {
 	if l.file != nil {
 		_ = l.file.Close()
 	}
-	return os.Remove(l.path)
+	if err := os.Remove(l.path); err != nil {
+		return fmt.Errorf("releasing lock: %w", err)
+	}
+	return nil
 }
 
 // CleanupStaleLocks removes lock files older than maxAge.

@@ -32,7 +32,7 @@ func cmdSimulate() *cobra.Command {
 			ctx := cmd.Context()
 			stack, cleanup, err := app.BuildAgentStack(ctx, cfg)
 			if err != nil {
-				return err
+				return fmt.Errorf("build agent stack: %w", err)
 			}
 			defer cleanup()
 

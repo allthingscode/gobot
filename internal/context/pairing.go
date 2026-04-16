@@ -39,7 +39,10 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
     expires_at DATETIME NOT NULL
 );
 `)
-	return err
+	if err != nil {
+		return fmt.Errorf("init pairing schema: %w", err)
+	}
+	return nil
 }
 
 // IsAuthorized returns true if chatID exists in authorized_users.
@@ -50,7 +53,7 @@ func (s *PairingStore) IsAuthorized(chatID int64) (bool, error) {
 		`SELECT COUNT(*) FROM authorized_users WHERE chat_id = ?`, chatID,
 	).Scan(&count)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("query authorized users: %w", err)
 	}
 	return count > 0, nil
 }
@@ -67,7 +70,7 @@ func (s *PairingStore) GetOrCreateCode(chatID int64) (string, error) {
 		return code, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
+		return "", fmt.Errorf("query pairing code: %w", err)
 	}
 
 	// Delete expired codes for this chatID.
@@ -76,7 +79,7 @@ func (s *PairingStore) GetOrCreateCode(chatID int64) (string, error) {
 		`DELETE FROM pairing_codes WHERE chat_id = ? AND expires_at <= datetime('now')`,
 		chatID,
 	); err != nil {
-		return "", err
+		return "", fmt.Errorf("delete expired codes: %w", err)
 	}
 
 	nBig, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
@@ -90,7 +93,7 @@ func (s *PairingStore) GetOrCreateCode(chatID int64) (string, error) {
 		`INSERT INTO pairing_codes (code, chat_id, expires_at) VALUES (?, ?, datetime('now', '+24 hours'))`,
 		newCode, chatID,
 	); err != nil {
-		return "", err
+		return "", fmt.Errorf("insert pairing code: %w", err)
 	}
 
 	return newCode, nil
@@ -109,7 +112,7 @@ func (s *PairingStore) AuthorizeByCode(code string) (int64, error) {
 		return 0, fmt.Errorf("pairing: code %q not found or expired", code)
 	}
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("query chat id by code: %w", err)
 	}
 
 	if _, err := s.db.ExecContext(
@@ -117,7 +120,7 @@ func (s *PairingStore) AuthorizeByCode(code string) (int64, error) {
 		`INSERT OR REPLACE INTO authorized_users (chat_id) VALUES (?)`,
 		chatID,
 	); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("insert authorized user: %w", err)
 	}
 
 	if _, err := s.db.ExecContext(
@@ -138,5 +141,8 @@ func (s *PairingStore) AuthorizeByChatID(chatID int64, by string) error {
 		`INSERT OR REPLACE INTO authorized_users (chat_id, authorized_by) VALUES (?, ?)`,
 		chatID, by,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("authorize by chat id: %w", err)
+	}
+	return nil
 }

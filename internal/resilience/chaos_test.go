@@ -3,6 +3,7 @@ package resilience
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"sync"
@@ -20,7 +21,7 @@ func chaosWorker(start time.Time, duration time.Duration, cb *Breaker, cfg Retry
 				req, _ := http.NewRequestWithContext(context.Background(), "GET", fsURL, http.NoBody)
 				resp, err := http.DefaultClient.Do(req)
 				if err != nil {
-					return err
+					return fmt.Errorf("chaos http do: %w", err)
 				}
 				defer func() { _ = resp.Body.Close() }()
 				if resp.StatusCode >= 500 {

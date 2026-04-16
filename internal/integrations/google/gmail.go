@@ -147,13 +147,13 @@ func (s *Service) Send(ctx context.Context, to, subject, body string) error {
 	payload, _ := json.Marshal(map[string]string{"raw": raw})
 
 	endpoint := s.baseURL + "/messages/send"
-	return resilience.Do(ctx, resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
+	if err := resilience.Do(ctx, resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
 		req.Header.Set("Authorization", "Bearer "+s.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
-			return err
+			return fmt.Errorf("http send: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
@@ -161,7 +161,10 @@ func (s *Service) Send(ctx context.Context, to, subject, body string) error {
 			return &resilience.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(b)}
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("send email: %w", err)
+	}
+	return nil
 }
 
 // SearchMessages searches for messages matching the query.
@@ -183,7 +186,7 @@ func (s *Service) SearchMessages(ctx context.Context, query string, maxResults i
 		req.Header.Set("Authorization", "Bearer "+s.accessToken)
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
-			return err
+			return fmt.Errorf("http search: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
@@ -192,8 +195,10 @@ func (s *Service) SearchMessages(ctx context.Context, query string, maxResults i
 		}
 		return json.NewDecoder(resp.Body).Decode(&result)
 	})
-
-	return result.Messages, err
+	if err != nil {
+		return nil, fmt.Errorf("search messages: %w", err)
+	}
+	return result.Messages, nil
 }
 
 // GetMessage retrieves a full message by ID.
@@ -206,7 +211,7 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*Message, error) {
 		req.Header.Set("Authorization", "Bearer "+s.accessToken)
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
-			return err
+			return fmt.Errorf("http get: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
@@ -215,8 +220,11 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*Message, error) {
 		}
 		return json.NewDecoder(resp.Body).Decode(&msg)
 	})
+	if err != nil {
+		return nil, fmt.Errorf("get message: %w", err)
+	}
 
-	return &msg, err
+	return &msg, nil
 }
 
 // GetHeader returns the value of the named header.

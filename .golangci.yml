@@ -38,6 +38,11 @@ linters:
             min-len: 3
             min-occurrences: 3
         loggercheck: {}
+        godox:
+            keywords:
+                - TODO
+                - FIXME
+                - BUG
         cyclop:
             max-complexity: 10
         gocognit:
@@ -62,6 +67,12 @@ linters:
             period: true
         testpackage:
             skip-regexp: "export_test\\.go"
+
+    exclusions:
+        rules:
+            - path: ".*_test\\.go$"
+              linters:
+                  - wrapcheck
 
     enable:
         - errcheck
@@ -90,6 +101,8 @@ linters:
         - prealloc
         - godot
         - testpackage
+        - wrapcheck
+        - godox
 
 run:
     modules-download-mode: readonly

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -20,7 +21,7 @@ func LiveProbesList() *doctor.Probes {
 		ProbeTelegram: func(token string) (string, error) {
 			client, err := telego.NewBot(token)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("new bot: %w", err)
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -28,7 +29,7 @@ func LiveProbesList() *doctor.Probes {
 
 			self, err := client.GetMe(ctx)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("get bot info: %w", err)
 			}
 			return "@" + self.Username, nil
 		},
@@ -41,7 +42,7 @@ func LiveProbesList() *doctor.Probes {
 				Backend: genai.BackendGeminiAPI,
 			})
 			if err != nil {
-				return err
+				return fmt.Errorf("new genai client: %w", err)
 			}
 
 			// Register for cleanup
@@ -55,14 +56,20 @@ func LiveProbesList() *doctor.Probes {
 				[]*genai.Content{{Parts: []*genai.Part{{Text: "ping"}}}},
 				nil,
 			)
-			return err
+			if err != nil {
+				return fmt.Errorf("generate content: %w", err)
+			}
+			return nil
 		},
 		ProbeGmail: func(gmailSecretsPath string) error {
 			// gmailSecretsPath is the directory containing token.json.
 			// google.NewService expects the directory path directly.
 			tokenDir := filepath.Dir(filepath.Join(gmailSecretsPath, "token.json"))
 			_, err := google.NewService(tokenDir)
-			return err
+			if err != nil {
+				return fmt.Errorf("new google service: %w", err)
+			}
+			return nil
 		},
 	}
 }

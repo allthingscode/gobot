@@ -51,11 +51,11 @@ func (s *MCPServer) start(ctx context.Context) error {
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return err
+		return fmt.Errorf("stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return fmt.Errorf("stdout pipe: %w", err)
 	}
 	s.stderr.Reset()
 	cmd.Stderr = &s.stderr
@@ -152,7 +152,7 @@ func (s *MCPServer) callLocked(id int, req any) (string, error) {
 	b, _ := json.Marshal(req)
 	slog.Debug("mcp: sending request", "server", s.name, "req", string(b))
 	if _, err := s.stdin.Write(append(b, '\n')); err != nil {
-		return "", err
+		return "", fmt.Errorf("mcp write request: %w", err)
 	}
 
 	// Read from stdout until we get a response with the matching ID
@@ -178,7 +178,7 @@ func (s *MCPServer) callLocked(id int, req any) (string, error) {
 		// If it's a notification or different ID, keep scanning.
 	}
 	if err := scanner.Err(); err != nil {
-		return "", err
+		return "", fmt.Errorf("mcp scan error: %w", err)
 	}
 	return "", fmt.Errorf("mcp: EOF before response id %d", id)
 }
@@ -242,10 +242,14 @@ func (t *mcpProxyTool) Name() string { return t.decl.Name }
 func (t *mcpProxyTool) Declaration() provider.ToolDeclaration { return t.decl }
 
 func (t *mcpProxyTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
-	return t.server.Call(ctx, "tools/call", map[string]any{
+	resp, err := t.server.Call(ctx, "tools/call", map[string]any{
 		"name":      t.toolName,
 		"arguments": args,
 	})
+	if err != nil {
+		return "", fmt.Errorf("tools/call: %w", err)
+	}
+	return resp, nil
 }
 
 func sanitizeMCPToolName(name string) string {

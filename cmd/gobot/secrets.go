@@ -35,7 +35,7 @@ func cmdSecretsSet() *cobra.Command {
 			}
 			store := secrets.NewSecretsStore(cfg.StorageRoot())
 			if err := store.Set(args[0], args[1]); err != nil {
-				return err
+				return fmt.Errorf("set secret: %w", err)
 			}
 			fmt.Printf("Secret %q stored.\n", args[0])
 			return nil
@@ -56,7 +56,7 @@ func cmdSecretsGet() *cobra.Command {
 			store := secrets.NewSecretsStore(cfg.StorageRoot())
 			val, err := store.Get(args[0])
 			if err != nil {
-				return err
+				return fmt.Errorf("get secret: %w", err)
 			}
 			if val == "" {
 				fmt.Printf("Secret %q not found.\n", args[0])
@@ -80,7 +80,7 @@ func cmdSecretsList() *cobra.Command {
 			store := secrets.NewSecretsStore(cfg.StorageRoot())
 			keys, err := store.List()
 			if err != nil {
-				return err
+				return fmt.Errorf("list secrets: %w", err)
 			}
 			if len(keys) == 0 {
 				fmt.Println("No secrets stored.")
@@ -106,7 +106,7 @@ func cmdSecretsDelete() *cobra.Command {
 			}
 			store := secrets.NewSecretsStore(cfg.StorageRoot())
 			if err := store.Delete(args[0]); err != nil {
-				return err
+				return fmt.Errorf("delete secret: %w", err)
 			}
 			fmt.Printf("Secret %q deleted.\n", args[0])
 			return nil

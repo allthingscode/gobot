@@ -191,13 +191,13 @@ func exchangeCode(code, clientID, clientSecret, redirectURI string) (*storedToke
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenRefreshURL, strings.NewReader(data.Encode()))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("do token request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
@@ -402,7 +402,10 @@ func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
 		}
 		return fmt.Errorf("google API %d: %s", resp.StatusCode, string(body))
 	}
-	return json.Unmarshal(body, dest)
+	if err := json.Unmarshal(body, dest); err != nil {
+		return fmt.Errorf("unmarshal response: %w", err)
+	}
+	return nil
 }
 
 // doGoogleRequest performs an authenticated HTTP request with a JSON body
@@ -430,7 +433,10 @@ func doGoogleRequest(method, accessToken, apiURL string, body any, client *http.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("google API %d: %s", resp.StatusCode, string(respBody))
 	}
-	return json.Unmarshal(respBody, dest)
+	if err := json.Unmarshal(respBody, dest); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
 }
 
 // apiPost performs an authenticated POST with a JSON body and decodes the

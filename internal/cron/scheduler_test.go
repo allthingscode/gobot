@@ -4,6 +4,7 @@ package cron
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -513,7 +514,7 @@ func (m *blockingDispatcher) Dispatch(ctx context.Context, p Payload) error {
 		m.mu.Lock()
 		m.lastErr = ctx.Err()
 		m.mu.Unlock()
-		return ctx.Err()
+		return fmt.Errorf("context canceled: %w", ctx.Err())
 	}
 }
 

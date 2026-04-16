@@ -149,7 +149,10 @@ func (api *TgAPI) fetchUpdates(ctx context.Context, offset int) ([]telego.Update
 			Timeout:        30,
 			AllowedUpdates: []string{"message", "callback_query"},
 		})
-		return pollErr
+		if pollErr != nil {
+			return fmt.Errorf("get updates: %w", pollErr)
+		}
+		return nil
 	})
 
 	if err != nil {
@@ -161,7 +164,7 @@ func (api *TgAPI) fetchUpdates(ctx context.Context, offset int) ([]telego.Update
 		default:
 			slog.Error("telegram: GetUpdates failed", "err", err)
 		}
-		return nil, err
+		return nil, fmt.Errorf("breaker execute: %w", err)
 	}
 	return updates, nil
 }
@@ -297,14 +300,20 @@ func (api *TgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	}
 	err := api.breaker.Execute(func() error {
 		_, err := api.client.SendMessage(ctx, params)
-		return err
+		if err != nil {
+			return fmt.Errorf("telegram send message: %w", err)
+		}
+		return nil
 	})
 	if err != nil && strings.Contains(err.Error(), "can't parse entities") {
 		params.ParseMode = ""
 		params.Text = msg.Text
 		err = api.breaker.Execute(func() error {
 			_, err := api.client.SendMessage(ctx, params)
-			return err
+			if err != nil {
+				return fmt.Errorf("telegram send message: %w", err)
+			}
+			return nil
 		})
 	}
 	if err != nil {
@@ -337,7 +346,10 @@ func (api *TgAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, 
 	}
 	err := api.breaker.Execute(func() error {
 		_, err := api.client.SendMessage(ctx, params)
-		return err
+		if err != nil {
+			return fmt.Errorf("telegram send with buttons: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("telego SendWithButtons: %w", err)

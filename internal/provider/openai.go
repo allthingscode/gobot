@@ -55,7 +55,11 @@ func (p *OpenAIProvider) sendRequest(ctx context.Context, url string, jsonData [
 		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", p.apiKey))
 	}
 
-	return p.client.Do(httpReq)
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("openai: http request: %w", err)
+	}
+	return resp, nil
 }
 
 func (p *OpenAIProvider) parseErrorResponse(body []byte, statusCode int) error {

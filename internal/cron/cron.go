@@ -3,6 +3,7 @@ package cron
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -62,12 +63,19 @@ type Store struct {
 
 // EncodeJSON marshals the Store into JSON bytes.
 func (s *Store) EncodeJSON() ([]byte, error) {
-	return json.MarshalIndent(s, "", "    ")
+	b, err := json.MarshalIndent(s, "", "    ")
+	if err != nil {
+		return nil, fmt.Errorf("encode jobs json: %w", err)
+	}
+	return b, nil
 }
 
 // DecodeJSON unmarshals JSON bytes into the Store.
 func (s *Store) DecodeJSON(data []byte) error {
-	return json.Unmarshal(data, s)
+	if err := json.Unmarshal(data, s); err != nil {
+		return fmt.Errorf("decode jobs json: %w", err)
+	}
+	return nil
 }
 
 // ── Logic Ported from cron_logic.py ──────────────────────────────────────────

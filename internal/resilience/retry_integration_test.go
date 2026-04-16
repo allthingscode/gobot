@@ -4,6 +4,7 @@ package resilience
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestRetryIntegration_5xxFailures(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, http.NoBody)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return err
+			return fmt.Errorf("http do: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
@@ -69,7 +70,7 @@ func TestRetryIntegration_NoRetryOn4xx(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, http.NoBody)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return err
+			return fmt.Errorf("http do: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
@@ -115,7 +116,7 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, http.NoBody)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return err
+			return fmt.Errorf("http do: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
@@ -166,7 +167,7 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, http.NoBody)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
-				return err
+				return fmt.Errorf("http do: %w", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode >= 400 {
@@ -182,7 +183,7 @@ func TestRetryIntegration_CircuitBreakerTripping(t *testing.T) {
 			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, http.NoBody)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
-				return err
+				return fmt.Errorf("http do: %w", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode >= 400 {
@@ -228,7 +229,10 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 		_ = cb.Execute(func() error {
 			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, http.NoBody)
 			_, err := http.DefaultClient.Do(req)
-			return err
+			if err != nil {
+				return fmt.Errorf("http do: %w", err)
+			}
+			return nil
 		})
 	}
 
@@ -251,7 +255,7 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, fs.URL, http.NoBody)
 		resp, innerErr := http.DefaultClient.Do(req)
 		if innerErr != nil {
-			return innerErr
+			return fmt.Errorf("http do: %w", innerErr)
 		}
 		_ = resp.Body.Close()
 		return nil

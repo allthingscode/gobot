@@ -36,7 +36,7 @@ func cmdStateList() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			mCfg := state.DefaultManagerConfig()
 			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
@@ -80,7 +80,7 @@ func cmdStateInspect() *cobra.Command {
 			id := state.WorkflowID(args[0])
 			cfg, err := config.Load()
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			mCfg := state.DefaultManagerConfig()
 			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
@@ -122,7 +122,7 @@ func cmdStateRecover() *cobra.Command {
 			id := state.WorkflowID(args[0])
 			cfg, err := config.Load()
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			mCfg := state.DefaultManagerConfig()
 			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
@@ -156,7 +156,7 @@ func cmdStateArchive() *cobra.Command {
 			id := state.WorkflowID(args[0])
 			cfg, err := config.Load()
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			mCfg := state.DefaultManagerConfig()
 			mCfg.StateDir = filepath.Join(cfg.StorageRoot(), "state")
