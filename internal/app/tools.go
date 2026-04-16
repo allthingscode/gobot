@@ -24,6 +24,7 @@ type ReadTextFileTool struct {
 	workspace string
 }
 
+// NewReadTextFileTool creates a new ReadTextFileTool instance.
 func NewReadTextFileTool(workspace string) *ReadTextFileTool {
 	return &ReadTextFileTool{workspace: workspace}
 }
@@ -32,7 +33,10 @@ type readTextFileArgs struct {
 	Path string `json:"path" schema:"The absolute or relative path to the file within the workspace."`
 }
 
+// Name returns the tool name.
 func (t *ReadTextFileTool) Name() string { return readTextFileToolName }
+
+// Declaration returns the tool declaration for the provider.
 func (t *ReadTextFileTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        readTextFileToolName,
@@ -41,6 +45,7 @@ func (t *ReadTextFileTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
+// Execute reads the file from the workspace.
 func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	path, _ := args["file_path"].(string)
 	if path == "" {

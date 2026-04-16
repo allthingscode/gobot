@@ -26,6 +26,7 @@ type MemoryTool struct {
 	store MemoryStore
 }
 
+// NewSearchMemoryTool creates a new MemoryTool instance.
 func NewSearchMemoryTool(store MemoryStore) *MemoryTool {
 	return &MemoryTool{store: store}
 }
@@ -34,8 +35,10 @@ type memoryArgs struct {
 	Query string `json:"query" schema:"The search query to look for in long-term memory."`
 }
 
+// Name returns the tool name.
 func (t *MemoryTool) Name() string { return memoryToolName }
 
+// Declaration returns the tool declaration for the provider.
 func (t *MemoryTool) Declaration() provider.ToolDeclaration {
 	return provider.ToolDeclaration{
 		Name:        memoryToolName,
@@ -44,6 +47,7 @@ func (t *MemoryTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
+// Execute runs the memory search.
 func (t *MemoryTool) Execute(_ context.Context, sessionKey, _ string, args map[string]any) (string, error) {
 	if t.store == nil {
 		return "Long-term memory is currently unavailable.", nil

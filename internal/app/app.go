@@ -118,6 +118,7 @@ func waitForShutdown(ctx context.Context, wg *sync.WaitGroup) {
 	DrainGoroutines(wg, drainTimeout)
 }
 
+// SetupLogging initializes the global structured logger based on configuration.
 func SetupLogging(cfg *config.Config) {
 	opts := &slog.HandlerOptions{
 		Level: cfg.LogLevel(),
@@ -129,6 +130,7 @@ func SetupLogging(cfg *config.Config) {
 	slog.SetDefault(slog.New(handler))
 }
 
+// SetupOTel initializes OpenTelemetry tracing and metrics if enabled in config.
 func SetupOTel(ctx context.Context, cfg *config.Config) (*observability.Provider, error) {
 	if !cfg.TelemetryEnabled() {
 		return nil, nil
@@ -143,10 +145,12 @@ func SetupOTel(ctx context.Context, cfg *config.Config) (*observability.Provider
 	return p, nil
 }
 
+// InitIdempotency configures the idempotency store for side-effecting tools.
 func InitIdempotency(ctx context.Context, cfg *config.Config, runner *AgentRunner, store agent.CheckpointStore, wg *sync.WaitGroup) {
 	if store == nil {
 		return
 	}
+	// We need to access the underlying DB from the CheckpointStore.
 	mgr, ok := store.(*agentctx.CheckpointManager)
 	if !ok {
 		slog.Warn("run: idempotency store unavailable, store is not CheckpointManager")
@@ -163,6 +167,7 @@ func InitIdempotency(ctx context.Context, cfg *config.Config, runner *AgentRunne
 	}()
 }
 
+// SetupHooks initializes and registers lifecycle hooks for the agent and runner.
 func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManager, api bot.API) (*agent.Hooks, *agent.HITLManager) {
 	hooks := &agent.Hooks{}
 	hitl := agent.NewHITLManager(api, cfg.TelegramAllowedFrom())
@@ -182,6 +187,7 @@ func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManag
 	return hooks, hitl
 }
 
+// SetupConsolidator initializes the memory consolidation engine if a memory store is available.
 func SetupConsolidator(cfg *config.Config, stack *AgentStack, mgr *agent.SessionManager, handler *DispatchHandler, otelProvider *observability.Provider) {
 	if stack.MemStore == nil {
 		return
@@ -201,6 +207,7 @@ func SetupConsolidator(cfg *config.Config, stack *AgentStack, mgr *agent.Session
 	slog.Info("run: memory consolidation enabled")
 }
 
+// SetupGateHandler initializes the pairing handler for DM-based authentication.
 func SetupGateHandler(store agent.CheckpointStore, handler *DispatchHandler) bot.Handler {
 	if store == nil {
 		return handler
@@ -218,6 +225,7 @@ func SetupGateHandler(store agent.CheckpointStore, handler *DispatchHandler) bot
 	return bot.NewPairingHandler(pairingStore, handler)
 }
 
+// StartGateway starts the HTTP gateway server in a separate goroutine.
 func StartGateway(ctx context.Context, cfg *config.Config, store agent.CheckpointStore, memStore *memory.MemoryStore, gateHandler bot.Handler, wg *sync.WaitGroup) {
 	mgr, _ := store.(*agentctx.CheckpointManager)
 	res := dash.Resources{
@@ -235,6 +243,7 @@ func StartGateway(ctx context.Context, cfg *config.Config, store agent.Checkpoin
 	}()
 }
 
+// RunIdempotencyCleanup runs periodic background cleanup of expired idempotency keys.
 func RunIdempotencyCleanup(ctx context.Context, store *agentctx.IdempotencyStore, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -256,6 +265,7 @@ func RunIdempotencyCleanup(ctx context.Context, store *agentctx.IdempotencyStore
 	}
 }
 
+// StartTelegramBot initializes and starts the Telegram polling bot.
 func StartTelegramBot(ctx context.Context, cfg *config.Config, token string, gateHandler bot.Handler, tracer *observability.DispatchTracer, wg *sync.WaitGroup) *bot.Bot {
 	api, err := NewTgAPI(token, cfg.TelegramAllowedFrom(), cfg)
 	if err != nil {
@@ -277,6 +287,7 @@ func StartTelegramBot(ctx context.Context, cfg *config.Config, token string, gat
 	return b
 }
 
+// StartCron starts the modular cron scheduler in a separate goroutine.
 func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bot.Bot, tracer *observability.DispatchTracer, wg *sync.WaitGroup) {
 	if !cfg.Cron.Enabled {
 		return
@@ -290,6 +301,7 @@ func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bo
 	slog.Info("gobot: cron dispatcher started")
 }
 
+// StartHeartbeat starts the periodic health check runner.
 func StartHeartbeat(ctx context.Context, cfg *config.Config, token string, wg *sync.WaitGroup) {
 	if !cfg.Heartbeat.Enabled {
 		return
@@ -303,6 +315,7 @@ func StartHeartbeat(ctx context.Context, cfg *config.Config, token string, wg *s
 	slog.Info("gobot: heartbeat runner started")
 }
 
+// DrainGoroutines waits for all registered background tasks to complete or times out.
 func DrainGoroutines(wg *sync.WaitGroup, timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
@@ -317,6 +330,7 @@ func DrainGoroutines(wg *sync.WaitGroup, timeout time.Duration) {
 	}
 }
 
+// LiveProbes returns health check probes that interact with live APIs.
 func LiveProbes() *doctor.Probes {
 	return LiveProbesList()
 }

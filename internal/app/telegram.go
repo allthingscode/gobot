@@ -17,6 +17,7 @@ import (
 	telego "github.com/mymmrac/telego"
 )
 
+// TgAPI implements bot.API using the telego library.
 type TgAPI struct {
 	client    *telego.Bot
 	breaker   *resilience.Breaker
@@ -26,6 +27,7 @@ type TgAPI struct {
 	cbChan    chan bot.InboundCallback
 }
 
+// NewTgAPI initializes a new Telegram API adapter using the telego library.
 func NewTgAPI(token string, allowFrom []string, cfg *config.Config) (*TgAPI, error) {
 	client, err := telego.NewBot(token)
 	if err != nil {
@@ -81,13 +83,14 @@ func (api *TgAPI) isDuplicate(key string) bool {
 	return false
 }
 
+// Updates starts the Telegram update poller and returns a channel for inbound messages.
 func (api *TgAPI) Updates(ctx context.Context, _ int) (<-chan bot.InboundMessage, error) {
 	if api.breaker.State() == "open" {
 		return nil, resilience.ErrCircuitOpen
 	}
 
 	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
-	// Always reinit both — cbChan may be closed (not nil) from a prior poller
+	// Always reinit both â€” cbChan may be closed (not nil) from a prior poller
 	// session, and writing to a closed channel panics.
 	api.msgChan = make(chan bot.InboundMessage, 100)
 	api.cbChan = make(chan bot.InboundCallback, 100)
@@ -95,6 +98,7 @@ func (api *TgAPI) Updates(ctx context.Context, _ int) (<-chan bot.InboundMessage
 	return api.msgChan, nil
 }
 
+// Callbacks returns a channel for inbound Telegram callback queries.
 func (api *TgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, error) {
 	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
 	if api.cbChan == nil {
@@ -118,13 +122,7 @@ func (api *TgAPI) startPoller(ctx context.Context) {
 
 		updates, err := api.fetchUpdates(ctx, offset)
 		if err != nil {
-			// Brief pause before closing channels so the reconnect loop
-			// in Bot.Run doesn't spin immediately on transient failures.
-			select {
-			case <-ctx.Done():
-			case <-time.After(2 * time.Second):
-			}
-			return
+			return // Return to allow Bot.Run to handle retry delay
 		}
 
 		for _, update := range updates {
@@ -244,6 +242,7 @@ func (api *TgAPI) handleCallbackQuery(ctx context.Context, cb *telego.CallbackQu
 	}
 }
 
+// Typing sends a "typing" action to the Telegram chat.
 func (api *TgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {
 	stop := make(chan struct{})
 
@@ -283,6 +282,7 @@ func (api *TgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {
 	return func() { close(stop) }
 }
 
+// Send delivers a text message via the Telegram API.
 func (api *TgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	params := &telego.SendMessageParams{
 		ChatID:    telego.ChatID{ID: msg.ChatID},
@@ -313,6 +313,7 @@ func (api *TgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	return nil
 }
 
+// SendWithButtons delivers a message with an inline keyboard markup.
 func (api *TgAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, buttons [][]bot.Button) error {
 	rows := make([][]telego.InlineKeyboardButton, len(buttons))
 	for i, row := range buttons {
@@ -344,4 +345,5 @@ func (api *TgAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, 
 	return nil
 }
 
+// Stop performs a graceful shutdown of the Telegram API adapter.
 func (api *TgAPI) Stop() {}

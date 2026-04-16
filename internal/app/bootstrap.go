@@ -61,6 +61,7 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config) (*AgentStack, func
 	}, finalCleanup, nil
 }
 
+// InitProviders initializes all configured LLM providers and returns the default provider and model.
 func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, string, error) {
 	factory := &provider.Factory{
 		GeminiAPIKey:    cfg.GeminiAPIKey(),
@@ -99,6 +100,7 @@ func wrapRoutingProvider(base provider.Provider, provName string, cfg *config.Co
 	return provider.NewRoutingProvider(base, mgrProv, cfg.Strategic.Routing)
 }
 
+// InitMemory initializes the long-term memory store and configures multi-user isolation if enabled.
 func InitMemory(cfg *config.Config, runner *AgentRunner) (memStore *memory.MemoryStore, cleanup func()) {
 	cleanup = func() {}
 	memStore, err := memory.NewMemoryStore(cfg.StorageRoot())
@@ -124,6 +126,7 @@ func InitMemory(cfg *config.Config, runner *AgentRunner) (memStore *memory.Memor
 	return memStore, cleanup
 }
 
+// InitVectorStore initializes the semantic vector store and embedding provider.
 func InitVectorStore(cfg *config.Config, prov provider.Provider, runner *AgentRunner) (*vector.Store, vector.EmbeddingProvider, func()) {
 	cleanup := func() {}
 	var vecStore *vector.Store

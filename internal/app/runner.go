@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-
 	"log/slog"
 	"strings"
 	"time"
@@ -52,7 +51,7 @@ type AgentRunner struct {
 	MaxTokens           int
 	MaxToolResultBytes  int
 	EnableReflection    bool // opt-in; off by default for cost control
-	MaxReflectionRounds int  // default 1 → ≤2x token overhead
+	MaxReflectionRounds int  // default 1 â†’ â‰¤2x token overhead
 }
 
 // NewAgentRunner creates a new AgentRunner for the given provider and model.
@@ -110,6 +109,7 @@ func (r *AgentRunner) SetMemoryStoreProvider(fn func(userID string) *memory.Memo
 	r.MemStoreProvider = fn
 }
 
+// SetMaxToolIterations sets the maximum number of tool call turns allowed in a single Run.
 func (r *AgentRunner) SetMaxToolIterations(n int) {
 	r.MaxToolIterations = n
 }
@@ -608,6 +608,7 @@ func ExtractText(msg agentctx.StrategicMessage) string {
 	return sb.String()
 }
 
+// LastUserText returns the content of the most recent user message in the history.
 func LastUserText(messages []agentctx.StrategicMessage) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == agentctx.RoleUser && messages[i].Content != nil && messages[i].Content.Str != nil {
@@ -617,6 +618,7 @@ func LastUserText(messages []agentctx.StrategicMessage) string {
 	return ""
 }
 
+// BuildCorrectionMessage formats a critic report into a prompt for the agent to revise its response.
 func BuildCorrectionMessage(report map[string]any) string {
 	feedback, _ := report["feedback"].(string)
 	corrections, _ := report["required_corrections"].([]any)
@@ -640,6 +642,7 @@ func BuildCorrectionMessage(report map[string]any) string {
 	return sb.String()
 }
 
+// TruncateToolResult shortens a tool result string to maxBytes if it exceeds the limit.
 func TruncateToolResult(result string, maxBytes int) string {
 	if maxBytes <= 0 || len(result) <= maxBytes {
 		return result
