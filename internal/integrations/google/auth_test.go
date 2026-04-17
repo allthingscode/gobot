@@ -194,3 +194,40 @@ func writeToken(t *testing.T, dir string, tok storedToken) {
 		t.Fatal(err)
 	}
 }
+
+func TestPersistToken(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	tok := &storedToken{Token: "test"}
+	err := persistToken(dir, tok)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(GoogleTokenPath(dir)); err != nil {
+		t.Error("persistToken failed to create file")
+	}
+}
+
+func TestResolveClientCredentials_Success(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store := tokenStore(dir)
+	_ = store.Set("google_client_id", "cid")
+	_ = store.Set("google_client_secret", "csec")
+	
+	cid, csec, err := resolveClientCredentials(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cid != "cid" || csec != "csec" {
+		t.Errorf("got (%q, %q), want (cid, csec)", cid, csec)
+	}
+}
+
+func TestResolveClientCredentials_Missing(t *testing.T) {
+	t.Parallel()
+	_, _, err := resolveClientCredentials(t.TempDir())
+	if err == nil {
+		t.Error("expected error for missing credentials file")
+	}
+}

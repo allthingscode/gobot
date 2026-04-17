@@ -2,6 +2,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -264,4 +265,12 @@ func TestCronEmailSessionKeyIncludesJobID(t *testing.T) {
 		t.Errorf("morning_briefing and nightly_batch must have different session keys, both got %q",
 			keys["morning_briefing"])
 	}
+}
+
+func TestCronDispatcher_Alert(t *testing.T) {
+	t.Parallel()
+	cd := &CronDispatcher{}
+	
+	// Case 1: nil bot
+	_ = cd.Alert(context.Background(), cron.Payload{Message: "test alert"})
 }
