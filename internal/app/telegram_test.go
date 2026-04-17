@@ -59,10 +59,11 @@ func TestIsDuplicate_CrossChatNoFalsePositive(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // uses global breaker registry which races with ResetAll
 func TestUpdates_CircuitOpen(t *testing.T) {
-	t.Parallel()
 	// Initialize a breaker that is already open.
 	breaker := resilience.New("test_telegram_circuit", 1, time.Minute, time.Hour)
+	t.Cleanup(breaker.Stop)
 	_ = breaker.Execute(func() error { return errors.New("fail") })
 
 	api := &TgAPI{
