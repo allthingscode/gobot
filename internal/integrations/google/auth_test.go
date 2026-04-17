@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -209,7 +210,8 @@ func TestPersistToken(t *testing.T) {
 }
 
 func TestResolveClientCredentials_Success(t *testing.T) {
-	t.Parallel()
+	// Not parallel: uses t.Setenv to isolate the encryption key file (incompatible with t.Parallel).
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(t.TempDir(), "encryption.key"))
 	dir := t.TempDir()
 	store := tokenStore(dir)
 	_ = store.Set("google_client_id", "cid")
