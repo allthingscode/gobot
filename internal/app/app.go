@@ -162,6 +162,7 @@ func InitIdempotency(ctx context.Context, cfg *config.Config, runner *AgentRunne
 
 	wg.Add(1)
 	go func() {
+		defer RecoverWithStack("idempotency-cleanup")
 		defer wg.Done()
 		RunIdempotencyCleanup(ctx, idempStore, 1*time.Hour)
 	}()
@@ -236,6 +237,7 @@ func StartGateway(ctx context.Context, cfg *config.Config, store agent.Checkpoin
 	srv := gateway.NewServer(cfg.Gateway, gateHandler, res)
 	wg.Add(1)
 	go func() {
+		defer RecoverWithStack("gateway")
 		defer wg.Done()
 		if err := srv.ListenAndServe(ctx); err != nil {
 			slog.Error("gateway: failure", "err", err)
@@ -278,6 +280,7 @@ func StartTelegramBot(ctx context.Context, cfg *config.Config, token string, gat
 	}
 	wg.Add(1)
 	go func() {
+		defer RecoverWithStack("telegram-bot")
 		defer wg.Done()
 		if err := b.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("telegram: bot runtime failure", "err", err)
@@ -295,6 +298,7 @@ func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bo
 	cd := NewCronDispatcher(cfg, stack, b, tracer)
 	wg.Add(1)
 	go func() {
+		defer RecoverWithStack("cron-dispatcher")
 		defer wg.Done()
 		cd.Run(ctx)
 	}()
@@ -309,6 +313,7 @@ func StartHeartbeat(ctx context.Context, cfg *config.Config, token string, wg *s
 	hb := NewHeartbeatRunner(cfg, token)
 	wg.Add(1)
 	go func() {
+		defer RecoverWithStack("heartbeat-runner")
 		defer wg.Done()
 		hb.Run(ctx)
 	}()

@@ -110,7 +110,7 @@ func (api *TgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, er
 func (api *TgAPI) startPoller(ctx context.Context) {
 	defer close(api.msgChan)
 	defer close(api.cbChan)
-	defer api.recoverFromPollerPanic()
+	defer RecoverWithStack("telegram-poller")
 
 	offset := 0
 	for {
@@ -131,12 +131,6 @@ func (api *TgAPI) startPoller(ctx context.Context) {
 			}
 			api.handleUpdate(ctx, update)
 		}
-	}
-}
-
-func (api *TgAPI) recoverFromPollerPanic() {
-	if r := recover(); r != nil {
-		slog.Error("PANIC IN STARTPOLLER", "err", r)
 	}
 }
 
@@ -268,6 +262,7 @@ func (api *TgAPI) Typing(ctx context.Context, chatID, threadID int64) func() {
 	sendTyping()
 
 	go func() {
+		defer RecoverWithStack("telegram-typing")
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
