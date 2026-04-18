@@ -121,6 +121,10 @@ gobot's design principle is **stability for one user over scale for many**. Ever
 - [Configuration Reference](docs/configuration.md) — all config fields with defaults and examples
 - [Locking Strategy](docs/locking-strategy.md) — session-scoped locking design and rationale
 
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on our coding standards, build process, and how to submit pull requests.
+
 ## What You Can Do With gobot
 
 - Ask about your schedule: "What's on my calendar today?"
