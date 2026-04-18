@@ -30,7 +30,7 @@ func NewReadTextFileTool(workspace string) *ReadTextFileTool {
 }
 
 type readTextFileArgs struct {
-	Path string `json:"path" schema:"The absolute or relative path to the file within the workspace."`
+	Path string `json:"file_path" schema:"The absolute or relative path to the file within the workspace."`
 }
 
 // Name returns the tool name.
