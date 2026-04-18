@@ -735,3 +735,74 @@ func TestRunner_PreservesOutputOnError(t *testing.T) {
 		t.Errorf("Tool result missing error message, got: %q", content)
 	}
 }
+
+func TestRunner_PostToolHooksRunOnNonEmptyResult(t *testing.T) {
+	t.Parallel()
+	mock := &MockProvider{
+		Responses: []*provider.ChatResponse{
+			{
+				Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant,
+					ToolCalls: []agentctx.ToolCall{
+						{Name: "test_tool", Args: map[string]any{}},
+					},
+				},
+			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role:    agentctx.RoleAssistant,
+					Content: &agentctx.MessageContent{Str: strPtr("done")},
+				},
+			},
+		},
+	}
+
+	r := &AgentRunner{
+		Prov:              mock,
+		Model:             "mock-model",
+		MaxToolIterations: 10,
+		Limiter:           rate.NewLimiter(rate.Inf, 1),
+		Breaker:           resilience.New("mock", 5, time.Minute, time.Second),
+	}
+
+	r.SetTools([]Tool{
+		&mockTool{name: "test_tool"},
+	})
+
+	hooks := &agent.Hooks{}
+	hookCalled := false
+	hooks.RegisterPostTool(func(ctx context.Context, toolName string, result any) any {
+		hookCalled = true
+		if strResult, ok := result.(string); ok {
+			return strResult + " with hook"
+		}
+		return result
+	})
+	r.SetHooks(hooks)
+
+	_, messages, err := r.Run(context.Background(), "test-session", "", nil)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if !hookCalled {
+		t.Error("PostToolFn was not called for non-empty tool result")
+	}
+
+	var toolMsg *agentctx.StrategicMessage
+	for _, m := range messages {
+		if m.Role == agentctx.RoleTool {
+			toolMsg = &m
+			break
+		}
+	}
+
+	if toolMsg == nil {
+		t.Fatal("Tool message not found in history")
+	}
+
+	content := *toolMsg.Content.Str
+	if content != "result with hook" {
+		t.Errorf("Hook did not modify result correctly, got: %q", content)
+	}
+}

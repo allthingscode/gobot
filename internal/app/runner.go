@@ -377,7 +377,7 @@ func (r *AgentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, 
 		return r.handleCategoryAError(sessionKey, name, paramsHash, result, execErr), nil
 	}
 
-	if r.Hooks != nil && result == "" {
+	if r.Hooks != nil {
 		result = r.runPostToolHooks(ctx, name, result)
 	}
 
