@@ -47,8 +47,13 @@ scripts/profile.ps1
 scripts/profile.sh
 
 # Temporary/Generated Files
-c
+bin/
+artifacts/
+bench.txt
+coverage-windows*
 c.out
+s.out
+v.out
 *.out
 coverage
 coverage/

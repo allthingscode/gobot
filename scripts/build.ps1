@@ -12,8 +12,9 @@ if (Get-Command goversioninfo -ErrorAction SilentlyContinue) {
     goversioninfo -platform-specific -o resource.syso versioninfo.json
 }
 
+if (-not (Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }
 Write-Host "Building gobot $VERSION ($COMMIT)..."
-go build -mod=vendor -ldflags $LDFLAGS -o gobot.exe ./cmd/gobot
+go build -mod=vendor -ldflags $LDFLAGS -o bin/gobot.exe ./cmd/gobot
 $EXIT_CODE = $LASTEXITCODE
 
 if (Test-Path resource.syso) {
@@ -21,7 +22,7 @@ if (Test-Path resource.syso) {
 }
 
 if ($EXIT_CODE -eq 0) {
-    Write-Host "Build successful: gobot.exe"
+    Write-Host "Build successful: bin/gobot.exe"
 } else {
     Write-Error "Build failed"
     exit 1

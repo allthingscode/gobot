@@ -77,9 +77,10 @@ jobs:
                     cache: true
             -   name: Coverage check
                 run: |
-                    go test -mod=readonly -coverprofile=coverage.out ./internal/... ./cmd/...
-                    go tool cover -func=coverage.out | tail -1
-                    COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+                    mkdir -p artifacts
+                    go test -mod=readonly -coverprofile=artifacts/coverage.out ./internal/... ./cmd/...
+                    go tool cover -func=artifacts/coverage.out | tail -1
+                    COVERAGE=$(go tool cover -func=artifacts/coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
                     echo "Total coverage: ${COVERAGE}%"
                     awk "BEGIN { if (${COVERAGE} < 65.0) { print \"Coverage ${COVERAGE}% is below 65.0% threshold\"; exit 1 } }"
 
@@ -96,13 +97,14 @@ jobs:
                     cache: true
             -   name: Windows Coverage run
                 run: |
-                    go test -mod=readonly -coverprofile=coverage-windows.out ./internal/... ./cmd/...
-                    go tool cover -func=coverage-windows.out | tail -1
+                    mkdir -p artifacts
+                    go test -mod=readonly -coverprofile=artifacts/coverage-windows.out ./internal/... ./cmd/...
+                    go tool cover -func=artifacts/coverage-windows.out | tail -1
             -   name: Upload Windows Coverage Artifact
                 uses: actions/upload-artifact@v4
                 with:
                     name: coverage-windows
-                    path: coverage-windows.out
+                    path: artifacts/coverage-windows.out
 
     doc-lint:
         runs-on: ubuntu-latest
@@ -124,9 +126,11 @@ jobs:
                     go-version-file: go.mod
                     cache: true
             -   name: Run benchmarks
-                run: go test -mod=readonly -bench=. -benchmem -run='^$' ./internal/... ./cmd/... | tee bench.txt
+                run: |
+                    mkdir -p artifacts
+                    go test -mod=readonly -bench=. -benchmem -run='^$' ./internal/... ./cmd/... | tee artifacts/bench.txt
             -   name: Upload benchmark results
                 uses: actions/upload-artifact@v4
                 with:
                     name: bench-${{ github.sha }}
-                    path: bench.txt
+                    path: artifacts/bench.txt

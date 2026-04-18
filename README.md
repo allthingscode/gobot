@@ -110,10 +110,10 @@ gobot's design principle is **stability for one user over scale for many**. Ever
    .\scripts\build.ps1  # Windows
    # OR ./scripts/build.sh  # Linux/macOS
    ```
-3. **Initialize**: `./gobot init`
+3. **Initialize**: `./bin/gobot init`
 4. **Configure**: Add your API keys to config.json
-5. **Authorize** (for Google tools): `./gobot reauth`
-6. **Run**: `./gobot run`
+5. **Authorize** (for Google tools): `./bin/gobot reauth`
+6. **Run**: `./bin/gobot run`
 
 ## Documentation
 

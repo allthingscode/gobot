@@ -10,10 +10,15 @@ LDFLAGS  := -X main.version=$(VERSION) -X main.commitHash=$(COMMIT) -X main.buil
 .PHONY: build test lint doc-lint cover clean help
 
 build: ## Build the gobot binary
-	go build -mod=vendor -ldflags "$(LDFLAGS)" -o gobot ./cmd/gobot
+	@mkdir -p bin
+	go build -mod=vendor -ldflags "$(LDFLAGS)" -o bin/gobot ./cmd/gobot
 
 test: ## Run tests with race detection
 	go test -race -mod=readonly ./internal/... ./cmd/...
+
+bench: ## Run benchmarks
+	@mkdir -p artifacts
+	go test -mod=readonly -bench=. -benchmem -run='^$' ./internal/... ./cmd/... | tee artifacts/bench.txt
 
 lint: ## Run golangci-lint
 	golangci-lint run --modules-download-mode=readonly
@@ -22,11 +27,12 @@ doc-lint: ## Run project-specific documentation lint
 	go run scripts/doc_lint.go
 
 cover: ## Generate coverage report
-	go test -mod=readonly -coverprofile=coverage.out ./internal/... ./cmd/...
-	go tool cover -html=coverage.out
+	@mkdir -p artifacts
+	go test -mod=readonly -coverprofile=artifacts/coverage.out ./internal/... ./cmd/...
+	go tool cover -html=artifacts/coverage.out
 
 clean: ## Remove build artifacts
-	rm -f gobot gobot.exe coverage.out
+	rm -rf bin artifacts *.out gobot gobot.exe coverage.out
 
 help: ## Show this help
 	@echo "Usage: make [target]"

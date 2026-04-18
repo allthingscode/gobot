@@ -12,7 +12,7 @@ make build
 ```
 Or directly via Go:
 ```bash
-go build -mod=vendor -ldflags "-X main.version=v0.1.0-dev" -o gobot ./cmd/gobot
+go build -mod=vendor -ldflags "-X main.version=v0.1.0-dev" -o bin/gobot ./cmd/gobot
 ```
 
 ## Testing
