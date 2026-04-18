@@ -1,3 +1,0 @@
-./dpapi_windows.go
-./secrets.go
-./secrets_test.go

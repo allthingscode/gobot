@@ -1,7 +1,0 @@
-./hybrid.go
-./indexer.go
-./provider.go
-./store.go
-./benchmark_test.go
-./hybrid_test.go
-./provider_test.go
