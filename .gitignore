@@ -63,4 +63,6 @@ package-lock.json
 # GitHub API research artifacts
 oc_go.json
 oc_main.json
-`n# Per-worktree Go and Lint caches`n.go-build-cache/`n.golangci-lint-cache/
+# Per-worktree Go and Lint caches
+.go-build-cache/
+.golangci-lint-cache/
