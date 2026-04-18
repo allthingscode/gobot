@@ -1,0 +1,4 @@
+./infra.go
+./resource_registry.go
+./infra_test.go
+./resource_registry_test.go

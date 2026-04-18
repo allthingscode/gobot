@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+# Isolate Go and Lint caches per worktree
+export GOCACHE="$(git rev-parse --show-toplevel)/.go-build-cache"
+export GOLANGCI_LINT_CACHE="$(git rev-parse --show-toplevel)/.golangci-lint-cache"
+
 # Check for golangci-lint prerequisite
 if ! command -v golangci-lint &> /dev/null; then
     echo "Error: golangci-lint is not installed."

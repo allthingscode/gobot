@@ -1,0 +1,10 @@
+./db.go
+./idempotency.go
+./manager.go
+./pairing.go
+./schema.go
+./db_test.go
+./durability_test.go
+./idempotency_test.go
+./manager_test.go
+./pairing_test.go

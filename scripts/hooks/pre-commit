@@ -9,6 +9,10 @@ set -e
 
 cd "$(git rev-parse --show-toplevel)"
 
+# Isolate Go and Lint caches per worktree to prevent lock contention
+export GOCACHE="$(git rev-parse --show-toplevel)/.go-build-cache"
+export GOLANGCI_LINT_CACHE="$(git rev-parse --show-toplevel)/.golangci-lint-cache"
+
 # 0. Block accidental .private/ leakage
 PRIVATE_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(.private/|.gemini/|.agent-workspaces/)' || true)
 if [ -n "$PRIVATE_FILES" ]; then

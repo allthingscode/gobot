@@ -1,0 +1,550 @@
+# test log
+getenv GOTMPDIR
+getenv GOTMPDIR
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor4044225103
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor_WorkingDirectory1184590436\001
+getenv PATHEXT
+getenv NoDefaultCurrentDirectoryInExePath
+stat cmd.com
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor4044225103
+stat cmd.exe
+stat cmd.bat
+stat cmd.cmd
+stat cmd.vbs
+stat cmd.vbe
+stat cmd.js
+stat cmd.jse
+stat cmd.wsf
+stat cmd.wsh
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor4044225103
+stat cmd.msc
+stat cmd.cpl
+getenv path
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.com
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.exe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.bat
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbs
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.js
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.jse
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsf
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsh
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.msc
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cpl
+stat C:\Program Files\Git\mingw64\bin\cmd.com
+stat C:\Program Files\Git\mingw64\bin\cmd.exe
+stat C:\Program Files\Git\mingw64\bin\cmd.bat
+stat C:\Program Files\Git\mingw64\bin\cmd.cmd
+stat C:\Program Files\Git\mingw64\bin\cmd.vbs
+stat C:\Program Files\Git\mingw64\bin\cmd.vbe
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor4044225103\001
+stat C:\Program Files\Git\mingw64\bin\cmd.js
+stat C:\Program Files\Git\mingw64\bin\cmd.jse
+stat C:\Program Files\Git\mingw64\bin\cmd.wsf
+getenv PATHEXT
+getenv NoDefaultCurrentDirectoryInExePath
+stat cmd.com
+stat C:\Program Files\Git\mingw64\bin\cmd.wsh
+stat C:\Program Files\Git\mingw64\bin\cmd.msc
+stat cmd.exe
+stat C:\Program Files\Git\mingw64\bin\cmd.cpl
+stat cmd.bat
+stat C:\Program Files\Git\usr\bin\cmd.com
+stat cmd.cmd
+stat C:\Program Files\Git\usr\bin\cmd.exe
+stat cmd.vbs
+stat cmd.vbe
+stat cmd.js
+stat cmd.jse
+stat cmd.wsf
+stat cmd.wsh
+stat cmd.msc
+stat cmd.cpl
+getenv path
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.com
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.exe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.bat
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbs
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.js
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.jse
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsf
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsh
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.msc
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cpl
+stat C:\Program Files\Git\mingw64\bin\cmd.com
+stat C:\Program Files\Git\mingw64\bin\cmd.exe
+stat C:\Program Files\Git\mingw64\bin\cmd.bat
+stat C:\Program Files\Git\mingw64\bin\cmd.cmd
+stat C:\Program Files\Git\mingw64\bin\cmd.vbs
+stat C:\Program Files\Git\mingw64\bin\cmd.vbe
+stat C:\Program Files\Git\mingw64\bin\cmd.js
+stat C:\Program Files\Git\mingw64\bin\cmd.jse
+stat C:\Program Files\Git\mingw64\bin\cmd.wsf
+stat C:\Program Files\Git\mingw64\bin\cmd.wsh
+stat C:\Program Files\Git\mingw64\bin\cmd.msc
+stat C:\Program Files\Git\mingw64\bin\cmd.cpl
+stat C:\Program Files\Git\usr\bin\cmd.com
+stat C:\Program Files\Git\usr\bin\cmd.exe
+stat C:\Program Files\Git\usr\bin\cmd.bat
+stat C:\Program Files\Git\usr\bin\cmd.cmd
+stat C:\Program Files\Git\usr\bin\cmd.vbs
+stat C:\Program Files\Git\usr\bin\cmd.vbe
+stat C:\Program Files\Git\usr\bin\cmd.js
+stat C:\Program Files\Git\usr\bin\cmd.jse
+stat C:\Program Files\Git\usr\bin\cmd.wsf
+stat C:\Program Files\Git\usr\bin\cmd.wsh
+stat C:\Program Files\Git\usr\bin\cmd.msc
+stat C:\Program Files\Git\usr\bin\cmd.cpl
+stat C:\Users\HayesChiefOfStaff\bin\cmd.com
+stat C:\Users\HayesChiefOfStaff\bin\cmd.exe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.bat
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbs
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.js
+stat C:\Users\HayesChiefOfStaff\bin\cmd.jse
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsf
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsh
+stat C:\Users\HayesChiefOfStaff\bin\cmd.msc
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cpl
+stat C:\WINDOWS\system32\cmd.com
+stat C:\WINDOWS\system32\cmd.exe
+getenv PATHEXT
+open NUL
+open C:\WINDOWS\system32\cmd.exe
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor4044225103\003
+stat C:\Program Files\Git\usr\bin\cmd.bat
+stat C:\Program Files\Git\usr\bin\cmd.cmd
+stat C:\Program Files\Git\usr\bin\cmd.vbs
+stat C:\Program Files\Git\usr\bin\cmd.vbe
+getenv PATHEXT
+stat C:\Program Files\Git\usr\bin\cmd.js
+getenv NoDefaultCurrentDirectoryInExePath
+stat C:\Program Files\Git\usr\bin\cmd.jse
+stat cmd.com
+stat C:\Program Files\Git\usr\bin\cmd.wsf
+stat C:\Program Files\Git\usr\bin\cmd.wsh
+stat cmd.exe
+stat C:\Program Files\Git\usr\bin\cmd.msc
+stat cmd.bat
+stat C:\Program Files\Git\usr\bin\cmd.cpl
+stat cmd.cmd
+stat C:\Users\HayesChiefOfStaff\bin\cmd.com
+stat cmd.vbs
+stat cmd.vbe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.exe
+stat cmd.js
+stat C:\Users\HayesChiefOfStaff\bin\cmd.bat
+stat cmd.jse
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cmd
+stat cmd.wsf
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbs
+stat cmd.wsh
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbe
+stat cmd.msc
+stat C:\Users\HayesChiefOfStaff\bin\cmd.js
+stat cmd.cpl
+stat C:\Users\HayesChiefOfStaff\bin\cmd.jse
+getenv path
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsf
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsh
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.com
+stat C:\Users\HayesChiefOfStaff\bin\cmd.msc
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.exe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cpl
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.bat
+stat C:\WINDOWS\system32\cmd.com
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbs
+stat C:\WINDOWS\system32\cmd.exe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.js
+getenv PATHEXT
+open NUL
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.jse
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsf
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsh
+open C:\WINDOWS\system32\cmd.exe
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor4044225103\004
+getenv PATHEXT
+getenv NoDefaultCurrentDirectoryInExePath
+stat cmd.com
+stat cmd.exe
+stat cmd.bat
+stat cmd.cmd
+stat cmd.vbs
+stat cmd.vbe
+stat cmd.js
+stat cmd.jse
+stat cmd.wsf
+stat cmd.wsh
+stat cmd.msc
+stat cmd.cpl
+getenv path
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.com
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.exe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.msc
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.bat
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cpl
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbs
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.vbe
+stat C:\Program Files\Git\mingw64\bin\cmd.com
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.js
+stat C:\Program Files\Git\mingw64\bin\cmd.exe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.jse
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsf
+stat C:\Program Files\Git\mingw64\bin\cmd.bat
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.wsh
+stat C:\Program Files\Git\mingw64\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.msc
+stat C:\Program Files\Git\mingw64\bin\cmd.vbs
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\cmd.cpl
+stat C:\Program Files\Git\mingw64\bin\cmd.vbe
+stat C:\Program Files\Git\mingw64\bin\cmd.com
+stat C:\Program Files\Git\mingw64\bin\cmd.js
+stat C:\Program Files\Git\mingw64\bin\cmd.exe
+stat C:\Program Files\Git\mingw64\bin\cmd.jse
+stat C:\Program Files\Git\mingw64\bin\cmd.bat
+stat C:\Program Files\Git\mingw64\bin\cmd.wsf
+stat C:\Program Files\Git\mingw64\bin\cmd.cmd
+stat C:\Program Files\Git\mingw64\bin\cmd.wsh
+stat C:\Program Files\Git\mingw64\bin\cmd.vbs
+stat C:\Program Files\Git\mingw64\bin\cmd.msc
+stat C:\Program Files\Git\mingw64\bin\cmd.vbe
+stat C:\Program Files\Git\mingw64\bin\cmd.cpl
+stat C:\Program Files\Git\mingw64\bin\cmd.js
+stat C:\Program Files\Git\usr\bin\cmd.com
+stat C:\Program Files\Git\mingw64\bin\cmd.jse
+stat C:\Program Files\Git\usr\bin\cmd.exe
+stat C:\Program Files\Git\mingw64\bin\cmd.wsf
+stat C:\Program Files\Git\usr\bin\cmd.bat
+stat C:\Program Files\Git\mingw64\bin\cmd.wsh
+stat C:\Program Files\Git\usr\bin\cmd.cmd
+stat C:\Program Files\Git\mingw64\bin\cmd.msc
+stat C:\Program Files\Git\usr\bin\cmd.vbs
+stat C:\Program Files\Git\mingw64\bin\cmd.cpl
+stat C:\Program Files\Git\usr\bin\cmd.vbe
+stat C:\Program Files\Git\usr\bin\cmd.com
+stat C:\Program Files\Git\usr\bin\cmd.js
+stat C:\Program Files\Git\usr\bin\cmd.exe
+stat C:\Program Files\Git\usr\bin\cmd.jse
+stat C:\Program Files\Git\usr\bin\cmd.bat
+stat C:\Program Files\Git\usr\bin\cmd.wsf
+stat C:\Program Files\Git\usr\bin\cmd.cmd
+stat C:\Program Files\Git\usr\bin\cmd.wsh
+stat C:\Program Files\Git\usr\bin\cmd.vbs
+stat C:\Program Files\Git\usr\bin\cmd.msc
+stat C:\Program Files\Git\usr\bin\cmd.vbe
+stat C:\Program Files\Git\usr\bin\cmd.cpl
+stat C:\Program Files\Git\usr\bin\cmd.js
+stat C:\Users\HayesChiefOfStaff\bin\cmd.com
+stat C:\Program Files\Git\usr\bin\cmd.jse
+stat C:\Users\HayesChiefOfStaff\bin\cmd.exe
+stat C:\Program Files\Git\usr\bin\cmd.wsf
+stat C:\Users\HayesChiefOfStaff\bin\cmd.bat
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbs
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.js
+stat C:\Users\HayesChiefOfStaff\bin\cmd.jse
+stat C:\Users\HAYESC~1\AppData\Local\Temp\TestExecutor4044225103\002
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsf
+getenv PATHEXT
+getenv NoDefaultCurrentDirectoryInExePath
+stat nonexistent_cmd_xyz_abc.com
+stat nonexistent_cmd_xyz_abc.exe
+stat C:\Program Files\Git\usr\bin\cmd.wsh
+stat nonexistent_cmd_xyz_abc.bat
+stat nonexistent_cmd_xyz_abc.cmd
+stat C:\Program Files\Git\usr\bin\cmd.msc
+stat nonexistent_cmd_xyz_abc.vbs
+stat C:\Program Files\Git\usr\bin\cmd.cpl
+stat nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.com
+stat nonexistent_cmd_xyz_abc.js
+stat nonexistent_cmd_xyz_abc.jse
+stat nonexistent_cmd_xyz_abc.wsf
+stat nonexistent_cmd_xyz_abc.wsh
+stat nonexistent_cmd_xyz_abc.msc
+stat nonexistent_cmd_xyz_abc.cpl
+getenv path
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.26.2.windows-amd64\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Program Files\Git\mingw64\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Program Files\Git\usr\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsh
+stat C:\Users\HayesChiefOfStaff\bin\cmd.exe
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.msc
+stat C:\Users\HayesChiefOfStaff\bin\cmd.bat
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cpl
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cmd
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\WINDOWS\system32\cmd.com
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbs
+stat C:\WINDOWS\system32\cmd.exe
+getenv PATHEXT
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\bin\cmd.vbe
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\bin\cmd.js
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\bin\cmd.jse
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsf
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\bin\cmd.wsh
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\bin\cmd.msc
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\bin\cmd.cpl
+stat C:\Users\HayesChiefOfStaff\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\WINDOWS\system32\cmd.com
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.com
+stat C:\WINDOWS\system32\cmd.exe
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.exe
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.bat
+getenv PATHEXT
+open NUL
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.cmd
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.vbs
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.vbe
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.js
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.jse
+open C:\WINDOWS\system32\cmd.exe
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.wsf
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.wsh
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.msc
+stat C:\WINDOWS\system32\nonexistent_cmd_xyz_abc.cpl
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.com
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.exe
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.bat
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.cmd
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.vbs
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.vbe
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.js
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.jse
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.wsf
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.wsh
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.msc
+stat C:\WINDOWS\nonexistent_cmd_xyz_abc.cpl
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.com
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.exe
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.bat
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.cmd
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.vbs
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.vbe
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.js
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.jse
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.wsf
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.wsh
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.msc
+stat C:\WINDOWS\System32\Wbem\nonexistent_cmd_xyz_abc.cpl
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.com
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.exe
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.bat
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.cmd
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.vbs
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.vbe
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.js
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.jse
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.wsf
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.wsh
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.msc
+stat C:\WINDOWS\System32\WindowsPowerShell\v1.0\nonexistent_cmd_xyz_abc.cpl
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.com
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.exe
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.bat
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.cmd
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.vbs
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.vbe
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.js
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.jse
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.wsf
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.wsh
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.msc
+stat C:\WINDOWS\System32\OpenSSH\nonexistent_cmd_xyz_abc.cpl
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Program Files\Microsoft VS Code\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.com
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.exe
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.bat
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.cmd
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.vbs
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.vbe
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.js
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.jse
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.wsf
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.wsh
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.msc
+stat C:\Program Files\Git\cmd\nonexistent_cmd_xyz_abc.cpl
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Program Files\Go\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\scoop\shims\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\.local\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Microsoft\WindowsApps\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\Documents\nodejs\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Ollama\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\.bun\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\AppData\Local\Programs\Antigravity\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.com
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.exe
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.bat
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.cmd
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.vbs
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.vbe
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.js
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.jse
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.wsf
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.wsh
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.msc
+stat C:\Users\HayesChiefOfStaff\go\bin\nonexistent_cmd_xyz_abc.cpl
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.com
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.exe
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.bat
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.cmd
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.vbs
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.vbe
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.js
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.jse
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.wsf
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.wsh
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.msc
+stat C:\users\hayeschiefofstaff\appdata\roaming\python\python313\scripts\nonexistent_cmd_xyz_abc.cpl
+open C:\Users\HAYESC~1\AppData\Local\Temp
+open C:\Users\HAYESC~1\AppData\Local\Temp

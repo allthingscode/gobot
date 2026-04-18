@@ -1,0 +1,10 @@
+./auth.go
+./calendar.go
+./gmail.go
+./search.go
+./tasks.go
+./auth_test.go
+./calendar_test.go
+./gmail_test.go
+./search_test.go
+./tasks_test.go

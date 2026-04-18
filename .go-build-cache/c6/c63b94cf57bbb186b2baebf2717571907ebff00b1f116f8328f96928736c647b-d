@@ -1,0 +1,13 @@
+./auth.go
+./checkpoint.go
+./cli_email.go
+./cli_factory.go
+./cli_google.go
+./cli_memory.go
+./cli_simulate.go
+./config.go
+./logs.go
+./main.go
+./rewind.go
+./secrets.go
+./state.go
