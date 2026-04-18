@@ -725,6 +725,37 @@ func TestEmbeddingModel(t *testing.T) {
 	}
 }
 
+func TestLoggingSettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		level      string
+		format     string
+		wantLevel  slog.Level
+		wantFormat string
+	}{
+		{"default", "", "", slog.LevelInfo, "text"},
+		{"debug", "DEBUG", "", slog.LevelDebug, "text"},
+		{"warn", "warn", "", slog.LevelWarn, "text"},
+		{"error", "Error", "", slog.LevelError, "text"},
+		{"json", "", "json", slog.LevelInfo, "json"},
+		{"json_caps", "", "JSON", slog.LevelInfo, "json"},
+		{"mixed", "DEBUG", "json", slog.LevelDebug, "json"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &Config{Logging: LoggingConfig{Level: tc.level, Format: tc.format}}
+			if got := cfg.LogLevel(); got != tc.wantLevel {
+				t.Errorf("LogLevel() = %v, want %v", got, tc.wantLevel)
+			}
+			if got := cfg.LogFormat(); got != tc.wantFormat {
+				t.Errorf("LogFormat() = %v, want %v", got, tc.wantFormat)
+			}
+		})
+	}
+}
+
 var _ io.Reader = errReader{}
 
 func TestBreaker_Parsing(t *testing.T) {

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/observability"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // RunAgent is the high-level entry point for the strategic agent.
@@ -123,9 +126,40 @@ func SetupLogging(cfg *config.Config) {
 	opts := &slog.HandlerOptions{
 		Level: cfg.LogLevel(),
 	}
-	var handler slog.Handler = slog.NewTextHandler(os.Stderr, opts)
+
+	logPath := cfg.LogPath("gobot.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		slog.Warn("failed to create logs directory", "path", filepath.Dir(logPath), "err", err)
+	}
+
+	rotator := &lumberjack.Logger{
+		Filename:   logPath,
+		MaxSize:    cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAge:     cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
+	}
+
+	// Apply defaults
+	if rotator.MaxSize == 0 {
+		rotator.MaxSize = 50
+	}
+	if rotator.MaxBackups == 0 {
+		rotator.MaxBackups = 5
+	}
+	if rotator.MaxAge == 0 {
+		rotator.MaxAge = 30
+	}
+	// Default compress to true unless explicitly false in config (approximate check)
+	if !cfg.Logging.Compress && cfg.Logging.MaxSizeMB == 0 {
+		rotator.Compress = true
+	}
+
+	multi := io.MultiWriter(os.Stderr, rotator)
+
+	var handler slog.Handler = slog.NewTextHandler(multi, opts)
 	if cfg.LogFormat() == "json" {
-		handler = slog.NewJSONHandler(os.Stderr, opts)
+		handler = slog.NewJSONHandler(multi, opts)
 	}
 	slog.SetDefault(slog.New(handler))
 }

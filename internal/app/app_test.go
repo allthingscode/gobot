@@ -4,6 +4,9 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -16,22 +19,40 @@ func TestSetupLogging(t *testing.T) {
 	oldLogger := slog.Default()
 	defer slog.SetDefault(oldLogger)
 
+	tempDir, err := os.MkdirTemp("", "gobot-log-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir) // ignore error as file may be locked
+	}()
+
 	cfg := &config.Config{}
-	
+	cfg.Strategic.StorageRoot = tempDir
+
 	// Case 1: Text format
-	cfg.Agents.Defaults.MaxTokens = 1 // dummy to avoid empty struct
 	SetupLogging(cfg)
-	slog.Info("test message")
+	slog.Info("test text log message")
+
+	logFile := filepath.Join(tempDir, "logs", "gobot.log")
+	if _, err := os.Stat(logFile); os.IsNotExist(err) {
+		t.Errorf("expected log file %s to be created", logFile)
+	}
+
+	content, _ := os.ReadFile(logFile)
+	if !strings.Contains(string(content), "test text log message") {
+		t.Errorf("expected text log message in file, got: %s", string(content))
+	}
 
 	// Case 2: JSON format
-	cfg.Gateway.DashboardEnabled = true // dummy
-	
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("SetupLogging panicked: %v", r)
-		}
-	}()
+	cfg.Logging.Format = "json"
 	SetupLogging(cfg)
+	slog.Info("test json log message")
+
+	content, _ = os.ReadFile(logFile)
+	if !strings.Contains(string(content), "\"msg\":\"test json log message\"") {
+		t.Errorf("expected json log message in file, got: %s", string(content))
+	}
 }
 
 func TestValidateRunPrerequisites(t *testing.T) {

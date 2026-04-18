@@ -95,7 +95,7 @@ func findLatestLogFile(logsDir string) (string, error) {
 
 	var logFiles []os.DirEntry
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "gobot_") && strings.HasSuffix(entry.Name(), ".log") {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "gobot") && strings.HasSuffix(entry.Name(), ".log") {
 			logFiles = append(logFiles, entry)
 		}
 	}

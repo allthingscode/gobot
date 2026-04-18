@@ -25,6 +25,7 @@ require (
 	golang.org/x/time v0.15.0
 	golang.org/x/vuln v1.2.0
 	google.golang.org/genai v1.54.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools/gotestsum v1.13.0
 	modernc.org/sqlite v1.48.2

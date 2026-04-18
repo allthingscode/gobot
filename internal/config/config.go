@@ -19,6 +19,16 @@ import (
 //nolint:gochecknoglobals // Immutable constant for BOM detection
 var bomPrefix = []byte{0xEF, 0xBB, 0xBF}
 
+// LoggingConfig controls log persistence, rotation, and formatting.
+type LoggingConfig struct {
+	Level      string `json:"level"`       // "DEBUG", "INFO", "WARN", "ERROR"
+	Format     string `json:"format"`      // "text", "json"
+	MaxSizeMB  int    `json:"max_size_mb"`  // default: 50
+	MaxBackups int    `json:"max_backups"`  // default: 5
+	MaxAgeDays int    `json:"max_age_days"` // default: 30
+	Compress   bool   `json:"compress"`    // default: true
+}
+
 // Config mirrors the relevant fields of ~/.gobot/config.json.
 type Config struct {
 	Agents     AgentsConfig     `json:"agents"`
@@ -31,6 +41,7 @@ type Config struct {
 	Context    ContextConfig    `json:"context"`
 	Cron       CronConfig       `json:"cron"`
 	Heartbeat  HeartbeatConfig  `json:"heartbeat"`
+	Logging    LoggingConfig    `json:"logging"`
 }
 
 type CronConfig struct {
@@ -583,12 +594,25 @@ func (c *Config) HumanInTheLoop() bool {
 
 // LogLevel returns the configured logging level.
 func (c *Config) LogLevel() slog.Level {
-	return slog.LevelInfo // Default; you might want to parse from config if added there
+	lvl := strings.ToUpper(c.Logging.Level)
+	switch lvl {
+	case "DEBUG":
+		return slog.LevelDebug
+	case "WARN":
+		return slog.LevelWarn
+	case "ERROR":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // LogFormat returns the configured logging format ("text" or "json").
 func (c *Config) LogFormat() string {
-	return "text" // Default
+	if strings.ToLower(c.Logging.Format) == "json" {
+		return "json"
+	}
+	return "text"
 }
 
 // TelemetryEnabled returns true if OTel is enabled.
