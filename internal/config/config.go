@@ -148,10 +148,11 @@ type ChannelsConfig struct {
 }
 
 type ProvidersConfig struct {
-	Gemini    GeminiConfig    `json:"gemini"`
-	Anthropic AnthropicConfig `json:"anthropic"`
-	OpenAI    OpenAIConfig    `json:"openai"`
-	Google    GoogleConfig    `json:"google"`
+	Gemini     GeminiConfig    `json:"gemini"`
+	Anthropic  AnthropicConfig `json:"anthropic"`
+	OpenAI     OpenAIConfig    `json:"openai"`
+	OpenRouter OpenAIConfig    `json:"openrouter"`
+	Google     GoogleConfig    `json:"google"`
 }
 
 type GeminiConfig struct {
@@ -511,6 +512,24 @@ func (c *Config) OpenAIAPIKey() string {
 func (c *Config) OpenAIBaseURL() string {
 	store := secrets.NewSecretsStore(c.StorageRoot())
 	return c.resolveSecret(store, c.Providers.OpenAI.BaseURL, "openai_base_url", "OPENAI_BASE_URL")
+}
+
+// OpenRouterAPIKey returns the OpenRouter API key. Priority order:
+// 1. config.json field
+// 2. DPAPI secrets store (openrouter_api_key)
+// 3. OPENROUTER_API_KEY environment variable.
+func (c *Config) OpenRouterAPIKey() string {
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	return c.resolveSecret(store, c.Providers.OpenRouter.APIKey, "openrouter_api_key", "OPENROUTER_API_KEY")
+}
+
+// OpenRouterBaseURL returns the OpenRouter base URL. Priority order:
+// 1. config.json field
+// 2. DPAPI secrets store (openrouter_base_url)
+// 3. OPENROUTER_BASE_URL environment variable.
+func (c *Config) OpenRouterBaseURL() string {
+	store := secrets.NewSecretsStore(c.StorageRoot())
+	return c.resolveSecret(store, c.Providers.OpenRouter.BaseURL, "openrouter_base_url", "OPENROUTER_BASE_URL")
 }
 
 // GoogleAPIKey returns the Google Custom Search API key. Priority order:

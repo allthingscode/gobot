@@ -219,3 +219,40 @@ func TestRoutingProvider_FallbackOnError(t *testing.T) {
 		t.Errorf("got %q, want %q", resp.Message.Content.String(), "exec fallback response")
 	}
 }
+
+//nolint:paralleltest // touches global provider registry
+func TestRoutingProvider_OpenRouterPrefix(t *testing.T) {
+	// Not parallel because it touches the global provider registry.
+	provider.ResetForTest()
+	t.Cleanup(provider.ResetForTest)
+	
+	openRouterCalled := false
+	op := &MockProvider{
+		name: "openrouter",
+		chatFunc: func(req provider.ChatRequest) (*provider.ChatResponse, error) {
+			openRouterCalled = true
+			return &provider.ChatResponse{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: strPtr("openrouter response")}}}, nil
+		},
+	}
+	_ = provider.Register(op)
+	
+	exec := &MockProvider{name: "exec"}
+	manager := &MockProvider{name: "mgr"}
+	cfg := config.RoutingConfig{Enabled: true}
+	p := provider.NewRoutingProvider(exec, manager, cfg)
+	
+	req := provider.ChatRequest{
+		Model: "openrouter/mistral-7b",
+	}
+	resp, err := p.Chat(context.Background(), req)
+	
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !openRouterCalled {
+		t.Error("openrouter provider was not called for openrouter/ prefix")
+	}
+	if resp.Message.Content.String() != "openrouter response" {
+		t.Errorf("got %q, want %q", resp.Message.Content.String(), "openrouter response")
+	}
+}

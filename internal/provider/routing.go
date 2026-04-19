@@ -39,7 +39,21 @@ func (p *RoutingProvider) Models() []ModelInfo {
 }
 
 // Chat implements the routing logic.
+//nolint:cyclop // Complex routing logic with classification and escalation
 func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	// If the model is explicitly prefixed with "openrouter/", route to that
+	// provider directly if it exists.
+	if strings.HasPrefix(req.Model, "openrouter/") {
+		if op, err := Get("openrouter"); err == nil {
+			slog.Info("routing: model prefix forced openrouter", "model", req.Model)
+			resp, err := op.Chat(ctx, req)
+			if err != nil {
+				return nil, fmt.Errorf("openrouter prefix chat: %w", err)
+			}
+			return resp, nil
+		}
+	}
+
 	if !p.cfg.Enabled {
 		resp, err := p.executor.Chat(ctx, req)
 		if err != nil {

@@ -6,7 +6,34 @@ import (
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/provider"
 )
+
+//nolint:paralleltest // touches global provider registry
+func TestInitProviders_OpenRouterRouting(t *testing.T) {
+	// Not parallel because it touches the global provider registry.
+	t.Cleanup(provider.ResetForTest)
+	
+	// Register a mock openrouter provider.
+	_ = provider.Register(&MockProvider{name: "openrouter"})
+	
+	ctx := context.Background()
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Provider = "gemini"
+	cfg.Agents.Defaults.Model = "openrouter/mistralai/mistral-7b-instruct"
+	
+	prov, model, err := InitProviders(ctx, cfg)
+	if err != nil {
+		t.Fatalf("InitProviders failed: %v", err)
+	}
+	
+	if prov.Name() != "openrouter" {
+		t.Errorf("got provider %q, want %q", prov.Name(), "openrouter")
+	}
+	if model != "openrouter/mistralai/mistral-7b-instruct" {
+		t.Errorf("got model %q, want %q", model, "openrouter/mistralai/mistral-7b-instruct")
+	}
+}
 
 func TestInitProviders_ManagerModel(t *testing.T) {
 	t.Parallel()

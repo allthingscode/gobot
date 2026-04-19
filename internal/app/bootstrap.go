@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
@@ -64,21 +65,29 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config) (*AgentStack, func
 // InitProviders initializes all configured LLM providers and returns the default provider and model.
 func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, string, error) {
 	factory := &provider.Factory{
-		GeminiAPIKey:    cfg.GeminiAPIKey(),
-		AnthropicAPIKey: cfg.AnthropicAPIKey(),
-		OpenAIAPIKey:    cfg.OpenAIAPIKey(),
-		OpenAIBaseURL:   cfg.OpenAIBaseURL(),
+		GeminiAPIKey:      cfg.GeminiAPIKey(),
+		AnthropicAPIKey:   cfg.AnthropicAPIKey(),
+		OpenAIAPIKey:      cfg.OpenAIAPIKey(),
+		OpenAIBaseURL:     cfg.OpenAIBaseURL(),
+		OpenRouterAPIKey:  cfg.OpenRouterAPIKey(),
+		OpenRouterBaseURL: cfg.OpenRouterBaseURL(),
 	}
 	if err := factory.InitAll(ctx); err != nil {
 		return nil, "", fmt.Errorf("init providers: %w", err)
 	}
 
 	provName := cfg.DefaultProvider()
+	model := cfg.DefaultModel()
+
+	// Automatic routing for OpenRouter models.
+	if strings.HasPrefix(model, "openrouter/") {
+		provName = "openrouter"
+	}
+
 	prov, err := provider.Get(provName)
 	if err != nil {
 		return nil, "", fmt.Errorf("provider: %w", err)
 	}
-	model := cfg.DefaultModel()
 
 	if cfg.Strategic.Routing.Enabled {
 		prov = wrapRoutingProvider(prov, provName, cfg)

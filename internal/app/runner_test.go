@@ -302,11 +302,17 @@ func TestRunner_ReflectionDefaults(t *testing.T) {
 }
 
 type MockProvider struct {
+	name      string
 	Responses []*provider.ChatResponse
 	Idx       int
 }
 
-func (m *MockProvider) Name() string                 { return "mock" }
+func (m *MockProvider) Name() string {
+	if m.name != "" {
+		return m.name
+	}
+	return "mock"
+}
 func (m *MockProvider) Models() []provider.ModelInfo { return nil }
 func (m *MockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.ChatResponse, error) {
 	if m.Idx >= len(m.Responses) {

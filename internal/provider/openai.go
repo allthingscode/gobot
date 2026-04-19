@@ -13,12 +13,15 @@ import (
 )
 
 const (
-	defaultOpenAIBaseURL = "https://api.openai.com/v1"
-	providerNameOpenAI   = "openai"
+	defaultOpenAIBaseURL    = "https://api.openai.com/v1"
+	defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+	providerNameOpenAI      = "openai"
+	providerNameOpenRouter  = "openrouter"
 )
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs.
 type OpenAIProvider struct {
+	name    string
 	apiKey  string
 	baseURL string
 	client  *http.Client
@@ -33,6 +36,23 @@ func NewOpenAIProvider(apiKey, baseURL string) *OpenAIProvider {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	return &OpenAIProvider{
+		name:    providerNameOpenAI,
+		apiKey:  apiKey,
+		baseURL: baseURL,
+		client:  &http.Client{},
+	}
+}
+
+// NewOpenRouterProvider creates a new OpenAIProvider configured for OpenRouter.
+func NewOpenRouterProvider(apiKey, baseURL string) *OpenAIProvider {
+	if baseURL == "" {
+		baseURL = defaultOpenRouterBaseURL
+	}
+	// Ensure no trailing slash
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	return &OpenAIProvider{
+		name:    providerNameOpenRouter,
 		apiKey:  apiKey,
 		baseURL: baseURL,
 		client:  &http.Client{},
@@ -41,13 +61,13 @@ func NewOpenAIProvider(apiKey, baseURL string) *OpenAIProvider {
 
 // Name returns the provider name.
 func (p *OpenAIProvider) Name() string {
-	return providerNameOpenAI
+	return p.name
 }
 
 func (p *OpenAIProvider) sendRequest(ctx context.Context, url string, jsonData []byte) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("openai: failed to create request: %w", err)
+		return nil, fmt.Errorf("%s: failed to create request: %w", p.name, err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -55,9 +75,15 @@ func (p *OpenAIProvider) sendRequest(ctx context.Context, url string, jsonData [
 		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", p.apiKey))
 	}
 
+	// OpenRouter specific headers for identification (optional but recommended)
+	if p.name == providerNameOpenRouter {
+		httpReq.Header.Set("HTTP-Referer", "https://github.com/allthingscode/gobot")
+		httpReq.Header.Set("X-Title", "Gobot Strategic Edition")
+	}
+
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai: http request: %w", err)
+		return nil, fmt.Errorf("%s: http request: %w", p.name, err)
 	}
 	return resp, nil
 }
@@ -70,14 +96,19 @@ func (p *OpenAIProvider) parseErrorResponse(body []byte, statusCode int) error {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
-		return fmt.Errorf("openai api error (%s): %s", errResp.Error.Type, errResp.Error.Message)
+		return fmt.Errorf("%s api error (%s): %s", p.name, errResp.Error.Type, errResp.Error.Message)
 	}
-	return fmt.Errorf("openai api error: status %d, body: %s", statusCode, string(body))
+	return fmt.Errorf("%s api error: status %d, body: %s", p.name, statusCode, string(body))
 }
 
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	model := req.Model
+	if p.name == providerNameOpenRouter {
+		model = strings.TrimPrefix(model, "openrouter/")
+	}
+
 	oaReq := openAIRequest{
-		Model:       req.Model,
+		Model:       model,
 		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
 		Messages:    p.mapMessages(req.Messages, req.SystemInstruction),
@@ -86,19 +117,19 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	jsonData, err := json.Marshal(oaReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai: failed to marshal request: %w", err)
+		return nil, fmt.Errorf("%s: failed to marshal request: %w", p.name, err)
 	}
 
 	url := fmt.Sprintf("%s/chat/completions", p.baseURL)
 	resp, err := p.sendRequest(ctx, url, jsonData)
 	if err != nil {
-		return nil, fmt.Errorf("openai: request failed: %w", err)
+		return nil, fmt.Errorf("%s: request failed: %w", p.name, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("openai: failed to read response: %w", err)
+		return nil, fmt.Errorf("%s: failed to read response: %w", p.name, err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -107,11 +138,11 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	var oaResp openAIResponse
 	if err := json.Unmarshal(body, &oaResp); err != nil {
-		return nil, fmt.Errorf("openai: failed to unmarshal response: %w", err)
+		return nil, fmt.Errorf("%s: failed to unmarshal response: %w", p.name, err)
 	}
 
 	if len(oaResp.Choices) == 0 {
-		return nil, fmt.Errorf("openai: no choices returned")
+		return nil, fmt.Errorf("%s: no choices returned", p.name)
 	}
 
 	return p.mapResponse(oaResp), nil

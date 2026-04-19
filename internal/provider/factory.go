@@ -13,9 +13,12 @@ type Factory struct {
 	AnthropicAPIKey string
 	OpenAIAPIKey    string
 	OpenAIBaseURL   string
+	OpenRouterAPIKey string
+	OpenRouterBaseURL string
 }
 
 // InitAll initializes and registers all providers for which an API key is present.
+//nolint:gocognit,cyclop // Provider registration is inherently linear
 func (f *Factory) InitAll(ctx context.Context) error {
 	// Gemini
 	if f.GeminiAPIKey != "" {
@@ -42,6 +45,13 @@ func (f *Factory) InitAll(ctx context.Context) error {
 	if f.OpenAIAPIKey != "" || f.OpenAIBaseURL != "" {
 		if err := Register(NewOpenAIProvider(f.OpenAIAPIKey, f.OpenAIBaseURL)); err != nil {
 			return fmt.Errorf("register openai: %w", err)
+		}
+	}
+
+	// OpenRouter
+	if f.OpenRouterAPIKey != "" || f.OpenRouterBaseURL != "" {
+		if err := Register(NewOpenRouterProvider(f.OpenRouterAPIKey, f.OpenRouterBaseURL)); err != nil {
+			return fmt.Errorf("register openrouter: %w", err)
 		}
 	}
 

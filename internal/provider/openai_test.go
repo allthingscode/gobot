@@ -102,7 +102,7 @@ func TestOpenAIProvider_Chat_Success(t *testing.T) {
 	defer ts.Close()
 
 	p := NewOpenAIProvider("test-key", ts.URL)
-	str := "hello"
+	str := "hello" //nolint:goconst // test fixture
 	req := ChatRequest{
 		Model:             "gpt-4o",
 		SystemInstruction: "system prompt",

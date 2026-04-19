@@ -29,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - Generates a measurable validation rubric before task execution.
   - Performs a "Critic" turn to audit model output against the rubric.
   - Triggers a backtrack and correction if the reflection score is below threshold.
+- **OpenRouter Provider Support** (F-109): Native integration for OpenRouter-compatible endpoints.
+  - Adds automatic routing for `openrouter/` prefixed models.
+  - Implements header injection for application identification (HTTP-Referer, X-Title).
+  - Integrates OpenRouter configuration into the global provider factory.
 - Support for additional MCP server integrations
 - Enhanced telemetry for distributed tracing
 - Support for per-specialist model routing in sub-agents
