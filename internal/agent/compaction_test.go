@@ -256,12 +256,12 @@ func TestPruneMessages(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, dropped := PruneMessages(tt.msgs, tt.cfg)
+			got, droppedMsgs := PruneMessages(tt.msgs, tt.cfg)
 			if len(got) != tt.wantLen {
 				t.Errorf("len(got) = %d, want %d", len(got), tt.wantLen)
 			}
-			if dropped != tt.wantDropped {
-				t.Errorf("dropped = %d, want %d", dropped, tt.wantDropped)
+			if len(droppedMsgs) != tt.wantDropped {
+				t.Errorf("len(droppedMsgs) = %d, want %d", len(droppedMsgs), tt.wantDropped)
 			}
 			if len(got) > 0 && (got[0].Role == agentctx.RoleAssistant || got[0].Role == agentctx.RoleModel) {
 				t.Errorf("result starts with assistant/model")
@@ -380,10 +380,10 @@ func TestPruneMessages_NoTTLKeepLastAssistants(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := config.ContextPruningConfig{KeepLastAssistants: tt.keepLastAssistants}
-			got, dropped := PruneMessages(tt.msgs, cfg)
+			got, droppedMsgs := PruneMessages(tt.msgs, cfg)
 
-			if dropped != 0 {
-				t.Errorf("dropped = %d, want 0: PruneMessages must be a no-op when TTL is empty", dropped)
+			if len(droppedMsgs) != 0 {
+				t.Errorf("len(droppedMsgs) = %d, want 0: PruneMessages must be a no-op when TTL is empty", len(droppedMsgs))
 			}
 			if len(got) != len(tt.msgs) {
 				t.Errorf("len(got) = %d, want %d: all messages must be preserved when TTL is empty", len(got), len(tt.msgs))

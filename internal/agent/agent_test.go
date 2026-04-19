@@ -648,6 +648,47 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 	}
 }
 
+func TestSessionManager_ConsolidateDropped(t *testing.T) {
+	t.Parallel()
+	mgr := &SessionManager{
+		model: "mock",
+	}
+
+	cons := &mockConsolidator{}
+	mgr.SetConsolidator(cons)
+
+	dropped := []agentctx.StrategicMessage{
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("meaningful fact: the user likes blue")}},
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("ok")}}, // Trivial
+		{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: ptrStr("I will remember you like blue.")}},
+	}
+
+	mgr.consolidateDropped("session-1", dropped)
+
+	// Verify consolidator was called.
+	cons.mu.Lock()
+	defer cons.mu.Unlock()
+	if len(cons.calls) != 1 {
+		t.Fatalf("expected 1 consolidator call, got %d", len(cons.calls))
+	}
+
+	call := cons.calls[0]
+	if call.sessionKey != "session-1" {
+		t.Errorf("expected session-1, got %q", call.sessionKey)
+	}
+
+	// "ok" should be filtered out because it's trivial.
+	if strings.Contains(call.text, "assistant: ok") {
+		t.Error("trivial message was not filtered out")
+	}
+	if !strings.Contains(call.text, "user: meaningful fact: the user likes blue") {
+		t.Error("meaningful user message was missing")
+	}
+	if !strings.Contains(call.text, "assistant: I will remember you like blue.") {
+		t.Error("meaningful assistant message was missing")
+	}
+}
+
 // Helper function to create string pointer.
 func ptrStr(s string) *string {
 	return &s

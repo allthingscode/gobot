@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [0.2.0] - 2026-04-18
 
 ### Added
+- **F-113 Consolidate Dropped Messages**: Updates the context pruner to return dropped messages and asynchronously sends meaningful dropped messages to the semantic memory consolidator.
 - **F-111 Web Dashboard**: Implements a real-time web dashboard and SSE server for telemetry monitoring.
 - **Default Config Generation**: `gobot init` now automatically creates a default `config.json` file.
 - **Cross-Session Shared Memory Namespace** (F-071): Implements a namespaced memory model for long-term storage.

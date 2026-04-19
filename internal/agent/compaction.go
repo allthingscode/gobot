@@ -197,18 +197,18 @@ func hasKeptToolCalls(compacted []agentctx.StrategicMessage) bool {
 }
 
 // PruneMessages removes messages based on TTL and KeepLastAssistants settings.
-func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruningConfig) (pruned []agentctx.StrategicMessage, droppedCount int) {
+func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruningConfig) (pruned, dropped []agentctx.StrategicMessage) {
 	// Work on a copy of the slice to avoid races if input is shared
 	msgs := make([]agentctx.StrategicMessage, len(messages))
 	copy(msgs, messages)
 
 	if cfg.TTL == "" && cfg.KeepLastAssistants <= 0 {
-		return msgs, 0
+		return msgs, nil
 	}
 
 	ttl, ok := parseTTL(cfg.TTL)
 	if !ok || ttl <= 0 {
-		return msgs, 0
+		return msgs, nil
 	}
 
 	cutoff := time.Now().Add(-ttl)
@@ -220,17 +220,42 @@ func PruneMessages(messages []agentctx.StrategicMessage, cfg config.ContextPruni
 	// 2. Keep messages newer than cutoff.
 	applyTTLPruning(msgs, keep, cutoff)
 
+	// Gemini requires conversations to start with a user turn.
+	// Prune any leading assistant or model messages from the surviving set.
+	markLeadingAssistantsDropped(msgs, keep)
+
 	for i, k := range keep {
 		if k {
 			pruned = append(pruned, msgs[i])
+		} else {
+			dropped = append(dropped, msgs[i])
 		}
 	}
 
-	// Gemini requires conversations to start with a user turn.
-	pruned = ensureStartsAndEndsWithUser(pruned) // Simplified name but following logic
+	return pruned, dropped
+}
 
-	droppedCount = len(msgs) - len(pruned)
-	return pruned, droppedCount
+func markLeadingAssistantsDropped(msgs []agentctx.StrategicMessage, keep []bool) {
+	var tempIndices []int
+	for i, k := range keep {
+		if k {
+			tempIndices = append(tempIndices, i)
+		}
+	}
+
+	removedFromFront := 0
+	for i := 0; i < len(tempIndices); i++ {
+		role := msgs[tempIndices[i]].Role
+		if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
+			removedFromFront++
+		} else {
+			break
+		}
+	}
+
+	for i := 0; i < removedFromFront; i++ {
+		keep[tempIndices[i]] = false
+	}
 }
 
 func parseTTL(ttlStr string) (time.Duration, bool) {
@@ -261,17 +286,5 @@ func applyTTLPruning(messages []agentctx.StrategicMessage, keep []bool, cutoff t
 			keep[i] = true
 		}
 	}
-}
-
-func ensureStartsAndEndsWithUser(pruned []agentctx.StrategicMessage) []agentctx.StrategicMessage {
-	for len(pruned) > 0 {
-		role := pruned[0].Role
-		if role == agentctx.RoleAssistant || role == agentctx.RoleModel {
-			pruned = pruned[1:]
-		} else {
-			break
-		}
-	}
-	return pruned
 }
 

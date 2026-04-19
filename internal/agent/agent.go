@@ -363,9 +363,12 @@ func (m *SessionManager) prepareHistory(ctx context.Context, sessionKey string, 
 		messages = m.runPreHistoryHooks(ctx, sessionKey, messages)
 	}
 
-	if pruned, dropped := PruneMessages(messages, m.pruningPolicy); dropped > 0 {
-		slog.Info("agent: pruned context", "session", sessionKey, "dropped", dropped, "remaining", len(pruned))
+	if pruned, droppedMsgs := PruneMessages(messages, m.pruningPolicy); len(droppedMsgs) > 0 {
+		slog.Info("agent: pruned context", "session", sessionKey, "dropped", len(droppedMsgs), "remaining", len(pruned))
 		messages = pruned
+		if m.consolidator != nil {
+			m.consolidateDropped(sessionKey, droppedMsgs)
+		}
 	}
 
 	messages = m.summarizeHistoryIfNeeded(ctx, sessionKey, messages)
@@ -479,6 +482,21 @@ func (m *SessionManager) runConsolidation(sessionKey string, messages []agentctx
 			}
 			fmt.Fprintf(&sb, "%s: %s\n", messages[i].Role, content)
 		}
+	}
+	droppedContent := strings.TrimSpace(sb.String())
+	if droppedContent != "" {
+		m.consolidator.ConsolidateAsync(sessionKey, droppedContent)
+	}
+}
+
+func (m *SessionManager) consolidateDropped(sessionKey string, dropped []agentctx.StrategicMessage) {
+	var sb strings.Builder
+	for _, msg := range dropped {
+		content := msg.Content.String()
+		if memory.IsTrivialMessageForConsolidation(content) {
+			continue
+		}
+		fmt.Fprintf(&sb, "%s: %s\n", msg.Role, content)
 	}
 	droppedContent := strings.TrimSpace(sb.String())
 	if droppedContent != "" {
