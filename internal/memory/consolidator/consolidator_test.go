@@ -33,45 +33,96 @@ func newTestStore(t *testing.T) *memory.MemoryStore {
 	return store
 }
 
-func TestParseFacts_ValidArray(t *testing.T) {
-	t.Parallel()
-	facts, err := parseFacts(`["Fact one", "Fact two", "Fact three"]`)
-	if err != nil {
-		t.Fatalf("parseFacts: %v", err)
+type parseScoredFactsTC struct {
+	name      string
+	input     string
+	wantLen   int
+	wantErr   bool
+	wantImp   []int
+	wantFact0 string
+}
+
+func assertParseScoredFacts(t *testing.T, tc parseScoredFactsTC) {
+	t.Helper()
+	facts, err := parseScoredFacts(tc.input)
+	if tc.wantErr {
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		return
 	}
-	if len(facts) != 3 {
-		t.Errorf("expected 3 facts, got %d", len(facts))
+	if err != nil {
+		t.Fatalf("parseScoredFacts: %v", err)
+	}
+	if len(facts) != tc.wantLen {
+		t.Errorf("expected %d facts, got %d", tc.wantLen, len(facts))
+	}
+	checkParsedFacts(t, facts, tc)
+}
+
+func checkParsedFacts(t *testing.T, facts []ScoredFact, tc parseScoredFactsTC) {
+	t.Helper()
+	if tc.wantFact0 != "" && len(facts) > 0 && facts[0].Fact != tc.wantFact0 {
+		t.Errorf("fact[0] = %q, want %q", facts[0].Fact, tc.wantFact0)
+	}
+	for i, wantImp := range tc.wantImp {
+		if i >= len(facts) {
+			break
+		}
+		if facts[i].Importance != wantImp {
+			t.Errorf("facts[%d].Importance = %d, want %d", i, facts[i].Importance, wantImp)
+		}
 	}
 }
 
-func TestParseFacts_EmptyArray(t *testing.T) {
+func TestParseScoredFacts(t *testing.T) {
 	t.Parallel()
-	facts, err := parseFacts(`[]`)
-	if err != nil {
-		t.Fatalf("parseFacts: %v", err)
+	tests := []parseScoredFactsTC{
+		{
+			name:      "scored format",
+			input:     `[{"fact":"Project Alpha deadline May 2026","importance":5},{"fact":"User likes Fridays","importance":2}]`,
+			wantLen:   2,
+			wantImp:   []int{5, 2},
+			wantFact0: "Project Alpha deadline May 2026",
+		},
+		{
+			name:    "plain string fallback",
+			input:   `["Fact one", "Fact two", "Fact three"]`,
+			wantLen: 3,
+			wantImp: []int{3, 3, 3},
+		},
+		{name: "empty array", input: `[]`, wantLen: 0},
+		{
+			name:    "markdown fences scored",
+			input:   "```json\n[{\"fact\":\"Deadline May 1\",\"importance\":5}]\n```",
+			wantLen: 1,
+			wantImp: []int{5},
+		},
+		{
+			name:    "markdown fences plain",
+			input:   "```json\n[\"Fact A\", \"Fact B\"]\n```",
+			wantLen: 2,
+			wantImp: []int{3, 3},
+		},
+		{name: "malformed JSON", input: "not json at all", wantErr: true},
+		{
+			name:    "out-of-range importance clamped to 3",
+			input:   `[{"fact":"Bad score","importance":99}]`,
+			wantLen: 1,
+			wantImp: []int{3},
+		},
+		{
+			name:    "zero importance clamped to 3",
+			input:   `[{"fact":"Zero score","importance":0}]`,
+			wantLen: 1,
+			wantImp: []int{3},
+		},
 	}
-	if len(facts) != 0 {
-		t.Errorf("expected 0 facts, got %d", len(facts))
-	}
-}
-
-func TestParseFacts_MarkdownFences(t *testing.T) {
-	t.Parallel()
-	input := "```json\n[\"Fact A\", \"Fact B\"]\n```"
-	facts, err := parseFacts(input)
-	if err != nil {
-		t.Fatalf("parseFacts: %v", err)
-	}
-	if len(facts) != 2 {
-		t.Errorf("expected 2 facts, got %d", len(facts))
-	}
-}
-
-func TestParseFacts_InvalidJSON(t *testing.T) {
-	t.Parallel()
-	_, err := parseFacts("not json at all")
-	if err == nil {
-		t.Error("expected error for invalid JSON, got nil")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertParseScoredFacts(t, tc)
+		})
 	}
 }
 

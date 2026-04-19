@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/philippgille/chromem-go"
@@ -89,7 +90,27 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 	return merged, nil
 }
 
-// MergeResults applies Reciprocal Rank Fusion (RRF) to combine keyword and semantic search results.
+// Importance blend constants. rrfBlendWeight + importanceBlendWeight must equal 1.0.
+// A 50/50 split means importance can suppress low-signal facts by up to 40% (importance=1 → 0.6×)
+// without over-riding strong RRF rank signal from high-importance facts (importance=5 → 1.0×).
+const (
+	rrfBlendWeight        = 0.5 // weight given to RRF rank score
+	importanceBlendWeight = 0.5 // weight given to normalised importance score
+	defaultImportance     = 3   // assigned to FTS results which do not carry importance metadata
+)
+
+// importanceFromMetadata extracts importance from document metadata, defaulting to defaultImportance.
+func importanceFromMetadata(meta map[string]string) int {
+	if s, ok := meta["importance"]; ok {
+		if v, err := strconv.Atoi(s); err == nil && v >= 1 && v <= 5 {
+			return v
+		}
+	}
+	return defaultImportance
+}
+
+// MergeResults applies Reciprocal Rank Fusion (RRF) to combine keyword and semantic search results,
+// then adjusts final scores by importance metadata so high-signal facts rank above equal-RRF peers.
 // k is a constant typically set to 60.
 func MergeResults(ftsResults []FTSResult, vecResults []chromem.Result, k int) []HybridResult {
 	if k <= 0 {
@@ -99,38 +120,42 @@ func MergeResults(ftsResults []FTSResult, vecResults []chromem.Result, k int) []
 	scores := make(map[string]float64)
 	contentMap := make(map[string]string)
 	timestampMap := make(map[string]string)
+	importanceMap := make(map[string]int)
 
-	// Process FTS results
+	// Process FTS results — importance defaults to 3 (no metadata available).
 	for rank, res := range ftsResults {
-		score := 1.0 / float64(k+rank+1) // rank is 0-indexed
-		scores[res.ID] += score
+		scores[res.ID] += 1.0 / float64(k+rank+1)
 		contentMap[res.ID] = res.Content
 		timestampMap[res.ID] = res.Timestamp
+		if _, seen := importanceMap[res.ID]; !seen {
+			importanceMap[res.ID] = defaultImportance
+		}
 	}
 
-	// Process Vector results
+	// Process Vector results — parse importance from document metadata.
+	// Vector importance wins over FTS default when the same ID appears in both.
 	for rank, res := range vecResults {
-		score := 1.0 / float64(k+rank+1)
-		scores[res.ID] += score
+		scores[res.ID] += 1.0 / float64(k+rank+1)
 		contentMap[res.ID] = res.Content
 		if ts, ok := res.Metadata["timestamp"]; ok {
 			timestampMap[res.ID] = ts
 		} else if timestampMap[res.ID] == "" {
-			timestampMap[res.ID] = time.Now().UTC().Format(time.RFC3339) // fallback
+			timestampMap[res.ID] = time.Now().UTC().Format(time.RFC3339)
 		}
+		importanceMap[res.ID] = importanceFromMetadata(res.Metadata)
 	}
 
 	merged := make([]HybridResult, 0, len(scores))
-	for id, score := range scores {
+	for id, rrfScore := range scores {
+		normImp := float64(importanceMap[id]) / 5.0 // normalise to [0.2, 1.0]
 		merged = append(merged, HybridResult{
 			ID:        id,
 			Content:   contentMap[id],
 			Timestamp: timestampMap[id],
-			Score:     score,
+			Score:     rrfScore * (rrfBlendWeight + importanceBlendWeight*normImp),
 		})
 	}
 
-	// Sort by score descending
 	sort.Slice(merged, func(i, j int) bool {
 		return merged[i].Score > merged[j].Score
 	})
