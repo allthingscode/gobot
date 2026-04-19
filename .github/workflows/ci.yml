@@ -6,20 +6,17 @@ on:
     pull_request:
         branches: ["**"]
 
-env:
-    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
     lint:
         runs-on: ubuntu-latest
         steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
             -   name: golangci-lint
-                uses: golangci/golangci-lint-action@v7
+                uses: golangci/golangci-lint-action@v9
                 with:
                     version: v2.11.4
                     args: --modules-download-mode=readonly
@@ -27,8 +24,8 @@ jobs:
     vuln-check:
         runs-on: ubuntu-latest
         steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
@@ -43,10 +40,10 @@ jobs:
                 os: [ubuntu-latest, windows-latest]
         runs-on: ${{ matrix.os }}
         steps:
-            -   uses: actions/checkout@v4
+            -   uses: actions/checkout@v6
 
             -   name: Set up Go
-                uses: actions/setup-go@v5
+                uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
@@ -60,8 +57,8 @@ jobs:
     mod-tidy:
         runs-on: ubuntu-latest
         steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
@@ -73,8 +70,8 @@ jobs:
     coverage:
         runs-on: ubuntu-latest
         steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
@@ -93,8 +90,8 @@ jobs:
             run:
                 shell: bash
         steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
@@ -104,7 +101,7 @@ jobs:
                     go test -mod=readonly -coverprofile=artifacts/coverage-windows.out ./internal/... ./cmd/...
                     go tool cover -func=artifacts/coverage-windows.out | tail -1
             -   name: Upload Windows Coverage Artifact
-                uses: actions/upload-artifact@v4
+                uses: actions/upload-artifact@v7
                 with:
                     name: coverage-windows
                     path: artifacts/coverage-windows.out
@@ -112,8 +109,8 @@ jobs:
     doc-lint:
         runs-on: ubuntu-latest
         steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
@@ -123,8 +120,8 @@ jobs:
     bench:
         runs-on: ubuntu-latest
         steps:
-            -   uses: actions/checkout@v4
-            -   uses: actions/setup-go@v5
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
                 with:
                     go-version-file: go.mod
                     cache: true
@@ -133,7 +130,7 @@ jobs:
                     mkdir -p artifacts
                     go test -mod=readonly -bench=. -benchmem -run='^$' ./internal/... ./cmd/... | tee artifacts/bench.txt
             -   name: Upload benchmark results
-                uses: actions/upload-artifact@v4
+                uses: actions/upload-artifact@v7
                 with:
                     name: bench-${{ github.sha }}
                     path: artifacts/bench.txt
