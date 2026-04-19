@@ -94,13 +94,13 @@ func TestMigrationV0ToV1(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
-	// 3. Verify PRAGMA user_version is 1
+	// 3. Verify PRAGMA user_version is 2 (V0 legacy → V1 → V2 in one pass)
 	var version int
 	if err := store.db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("failed to query version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("user_version = %d, want 1", version)
+	if version != 2 {
+		t.Errorf("user_version = %d, want 2", version)
 	}
 
 	// 4. Verify data is migrated with session: prefix
@@ -376,6 +376,128 @@ func writeFile(path, content string) error {
 }
 
 // ── CleanupExpired (F-068) ─────────────────────────────────────────────────
+
+// ── F-114: Importance scoring ──────────────────────────────────────────────────
+
+func TestIndexWithImportance_StoresAndRetrieves(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+
+	if err := store.IndexWithImportance("session:s1", "Project deadline May 2026", 5); err != nil {
+		t.Fatalf("IndexWithImportance: %v", err)
+	}
+	results, err := store.Search("deadline", "s1", 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result, got none")
+	}
+}
+
+func TestIndexWithImportance_ClampedOutOfRange(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	// Out-of-range values should be stored without error (clamped internally).
+	if err := store.IndexWithImportance("session:s1", "fact with bad score", 99); err != nil {
+		t.Fatalf("IndexWithImportance with bad score: %v", err)
+	}
+}
+
+func TestIndex_UsesDefaultImportance(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	if err := store.Index("session:s1", "default importance fact"); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	// Verify we can query it (importance=3 default is stored, not tested directly here
+	// since Search doesn't return importance — the schema migration test covers that).
+	results, err := store.Search("default importance", "s1", 5)
+	if err != nil || len(results) == 0 {
+		t.Fatalf("Search after Index: err=%v results=%d", err, len(results))
+	}
+}
+
+func openV1DB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
+		_ = db.Close()
+		t.Fatalf("WAL: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	for _, stmt := range []string{
+		`CREATE VIRTUAL TABLE memory_fts USING fts5(namespace UNINDEXED, content, timestamp UNINDEXED)`,
+		`INSERT INTO memory_fts(namespace, content, timestamp) VALUES ('session:test', 'original fact', '2026-01-01T00:00:00Z')`,
+		`PRAGMA user_version = 1`,
+	} {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			_ = db.Close()
+			t.Fatalf("V1 setup: %s: %v", stmt, err)
+		}
+	}
+	return db
+}
+
+//nolint:paralleltest // subtests share a single in-memory DB; parallel execution would close it prematurely
+func TestInitMemorySchema_V1ToV2Migration(t *testing.T) {
+	t.Parallel()
+	db := openV1DB(t)
+	defer func() { _ = db.Close() }()
+
+	if err := initMemorySchema(db); err != nil {
+		t.Fatalf("initMemorySchema: %v", err)
+	}
+
+	var version int
+	if err := db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("PRAGMA user_version: %v", err)
+	}
+	if version != 2 {
+		t.Errorf("expected user_version=2, got %d", version)
+	}
+
+	var content string
+	var importance int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT content, importance FROM memory_fts WHERE memory_fts MATCH 'original'`).
+		Scan(&content, &importance); err != nil {
+		t.Fatalf("query migrated row: %v", err)
+	}
+	if content != "original fact" {
+		t.Errorf("content = %q, want %q", content, "original fact")
+	}
+	if importance != 3 {
+		t.Errorf("importance = %d, want 3", importance)
+	}
+
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO memory_fts(namespace, content, timestamp, importance) VALUES ('session:test', 'new fact', '2026-01-02T00:00:00Z', 5)`); err != nil {
+		t.Fatalf("insert V2 row: %v", err)
+	}
+}
+
+func TestInitMemorySchema_FreshDBCreatesV2(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+
+	// Fresh DB should have user_version=2.
+	var version int
+	if err := store.db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("PRAGMA user_version: %v", err)
+	}
+	if version != 2 {
+		t.Errorf("fresh DB user_version = %d, want 2", version)
+	}
+
+	// Should be able to insert with importance.
+	if err := store.IndexWithImportance("session:s1", "test fact", 4); err != nil {
+		t.Fatalf("IndexWithImportance on fresh V2 DB: %v", err)
+	}
+}
 
 func TestCleanupExpired(t *testing.T) {
 	t.Parallel()

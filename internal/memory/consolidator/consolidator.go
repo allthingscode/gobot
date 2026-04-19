@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,13 +23,22 @@ const minConsolidateLength = 80
 // consolidationPrompt is the system prompt for the fact-extraction LLM call.
 const consolidationPrompt = `You are a memory consolidation assistant. Extract key facts from the following agent reply that are worth remembering long-term — decisions made, deadlines, preferences, project details, or any specific factual information.
 
-Return ONLY a JSON array of concise factual strings. Return an empty array [] if there are no notable facts. Do not include conversational filler, acknowledgements, or generic statements.
+Return ONLY a JSON array of objects with "fact" (string) and "importance" (integer 1-5) keys.
+1 = trivial/conversational, 3 = useful context, 5 = critical decision/deadline/preference.
+Return [] if no notable facts. Do not include filler.
 
 Example output:
-["Project Alpha deadline is May 1 2026", "User prefers async status updates on Fridays", "Budget approved for Q2 at $50k"]
+[{"fact": "Project Alpha deadline is May 1 2026", "importance": 5},
+ {"fact": "User prefers async updates on Fridays", "importance": 4}]
 
 Agent reply to consolidate:
 `
+
+// ScoredFact is a fact extracted by the consolidation LLM with an importance score.
+type ScoredFact struct {
+	Fact       string
+	Importance int // 1–5; 0 means unscored (treated as default 3)
+}
 
 // TextRunner is the interface used by Consolidator to make a single LLM call.
 // agentRunner in cmd/gobot/runner.go implements this via RunText.
@@ -42,7 +52,7 @@ type TextRunner interface {
 type Consolidator struct {
 	runner                 TextRunner
 	store                  *memory.MemoryStore
-	vecStore               *vector.Store             // F-030: Semantic memory
+	vecStore               *vector.Store            // F-030: Semantic memory
 	embedProv              vector.EmbeddingProvider // F-030: Semantic memory
 	semanticDedupThreshold float64                  // F-112: Semantic deduplication threshold (0 to disable)
 	prompt                 string
@@ -161,7 +171,7 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 	return indexed, nil
 }
 
-func (c *Consolidator) extractFacts(ctx context.Context, sessionKey, reply string) ([]string, error) {
+func (c *Consolidator) extractFacts(ctx context.Context, sessionKey, reply string) ([]ScoredFact, error) {
 	prompt := c.prompt + reply
 	if !strings.Contains(c.prompt, "reply") && !strings.HasSuffix(c.prompt, "\n") {
 		prompt = c.prompt + "\n\nAgent reply to consolidate:\n" + reply
@@ -171,14 +181,14 @@ func (c *Consolidator) extractFacts(ctx context.Context, sessionKey, reply strin
 		return nil, fmt.Errorf("consolidator: RunText: %w", err)
 	}
 
-	return parseFacts(response)
+	return parseScoredFacts(response)
 }
 
-func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts []string) (indexed, skipped int) {
+func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts []ScoredFact) (indexed, skipped int) {
 	indexed = 0
 	skipped = 0
-	for _, fact := range facts {
-		fact = strings.TrimSpace(fact)
+	for _, sf := range facts {
+		fact := strings.TrimSpace(sf.Fact)
 		if fact == "" {
 			continue
 		}
@@ -189,13 +199,13 @@ func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts 
 		}
 
 		namespace := c.resolveNamespace(fact, sessionKey)
-		if err := c.store.Index(namespace, fact); err != nil {
+		if err := c.store.IndexWithImportance(namespace, fact, sf.Importance); err != nil {
 			slog.Warn("consolidator: index failed", "fact", fact, "err", err)
 			skipped++
 			continue
 		}
 
-		c.indexVectorFact(ctx, sessionKey, fact, namespace)
+		c.indexVectorFact(ctx, sessionKey, fact, namespace, sf.Importance)
 		indexed++
 	}
 	return indexed, skipped
@@ -265,7 +275,7 @@ func (c *Consolidator) resolveNamespace(fact, sessionKey string) string {
 	return "session:" + sessionKey
 }
 
-func (c *Consolidator) indexVectorFact(ctx context.Context, sessionKey, fact, namespace string) {
+func (c *Consolidator) indexVectorFact(ctx context.Context, sessionKey, fact, namespace string, importance int) {
 	if c.vecStore == nil || c.embedProv == nil {
 		return
 	}
@@ -278,6 +288,7 @@ func (c *Consolidator) indexVectorFact(ctx context.Context, sessionKey, fact, na
 			"namespace":   namespace,
 			"timestamp":   time.Now().UTC().Format(time.RFC3339),
 			"source":      "consolidator",
+			"importance":  strconv.Itoa(importance),
 		},
 	}
 	embedFunc := func(ctx context.Context, text string) ([]float32, error) {
@@ -305,27 +316,52 @@ func (c *Consolidator) cleanupNamespaces(sessionKey string) {
 	}
 }
 
-// parseFacts extracts a []string from the LLM's JSON response.
-// Handles responses that wrap the array in markdown code fences.
-func parseFacts(response string) ([]string, error) {
-	// Strip markdown code fences if present.
+// scoredFactJSON is the wire format returned by the consolidation LLM.
+type scoredFactJSON struct {
+	Fact       string `json:"fact"`
+	Importance int    `json:"importance"`
+}
+
+// parseScoredFacts extracts []ScoredFact from the LLM's JSON response.
+// Handles markdown code fences and two response formats:
+//   - scored: [{"fact":"...", "importance":N}, ...]
+//   - legacy plain-string: ["...", "..."] — wrapped with importance=3
+func parseScoredFacts(response string) ([]ScoredFact, error) {
 	s := strings.TrimSpace(response)
 	s = strings.TrimPrefix(s, "```json")
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
 	s = strings.TrimSpace(s)
 
-	// Find the JSON array.
 	start := strings.Index(s, "[")
 	end := strings.LastIndex(s, "]")
 	if start == -1 || end == -1 || end < start {
-		return nil, fmt.Errorf("parseFacts: no JSON array found in response")
+		return nil, fmt.Errorf("parseScoredFacts: no JSON array found in response")
 	}
 	s = s[start : end+1]
 
-	var facts []string
-	if err := json.Unmarshal([]byte(s), &facts); err != nil {
-		return nil, fmt.Errorf("parseFacts: unmarshal: %w", err)
+	// Try scored object format first.
+	var scored []scoredFactJSON
+	if err := json.Unmarshal([]byte(s), &scored); err == nil {
+		facts := make([]ScoredFact, 0, len(scored))
+		for _, sf := range scored {
+			imp := sf.Importance
+			if imp < 1 || imp > 5 {
+				imp = 3
+			}
+			facts = append(facts, ScoredFact{Fact: sf.Fact, Importance: imp})
+		}
+		return facts, nil
+	}
+
+	// Fall back to plain-string array (legacy LLM responses).
+	var plain []string
+	if err := json.Unmarshal([]byte(s), &plain); err != nil {
+		return nil, fmt.Errorf("parseScoredFacts: unmarshal: %w", err)
+	}
+	facts := make([]ScoredFact, 0, len(plain))
+	for _, f := range plain {
+		facts = append(facts, ScoredFact{Fact: f, Importance: 3})
 	}
 	return facts, nil
 }

@@ -88,64 +88,109 @@ func initMemorySchema(db *sql.DB) error {
 	if err := db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("initMemorySchema: get version: %w", err)
 	}
-
 	if version == 0 {
-		// Check if table exists with old schema
-		var name string
-		err := db.QueryRowContext(context.Background(), "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'").Scan(&name)
-		if err == nil {
-			// Migrate: rename old, create new, copy data, drop old
-			migration := []string{
-				`ALTER TABLE memory_fts RENAME TO memory_fts_old`,
-				`CREATE VIRTUAL TABLE memory_fts USING fts5(
-					namespace UNINDEXED,
-					content,
-					timestamp UNINDEXED
-				)`,
-				`INSERT INTO memory_fts(namespace, content, timestamp)
-				 SELECT 'session:' || session_key, content, timestamp FROM memory_fts_old`,
-				`DROP TABLE memory_fts_old`,
-				`PRAGMA user_version = 1`,
-			}
-			for _, stmt := range migration {
-				if _, err := db.ExecContext(context.Background(), stmt); err != nil {
-					return fmt.Errorf("migration failed: %s: %w", stmt, err)
-				}
-			}
-			slog.Info("memory: schema migrated to V1 (namespaces)")
-		} else {
-			// Fresh install
-			_, err := db.ExecContext(context.Background(), `
-				CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-					namespace UNINDEXED,
-					content,
-					timestamp UNINDEXED
-				);
-				PRAGMA user_version = 1;
-			`)
-			if err != nil {
-				return fmt.Errorf("initMemorySchema: create V1: %w", err)
-			}
-		}
+		return migrateV0(db)
+	}
+	if version == 1 {
+		return migrateV1toV2(db)
 	}
 	return nil
 }
 
-// Index adds content to the memory index under the specified namespace.
-// Empty or whitespace-only content is silently ignored.
-func (m *MemoryStore) Index(namespace, content string) error {
+// migrateV0 handles a version-0 database: either a pre-namespace legacy schema (upgrades to V1
+// and falls through to V2), or a truly fresh install (creates V2 directly).
+func migrateV0(db *sql.DB) error {
+	var name string
+	err := db.QueryRowContext(context.Background(), "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'").Scan(&name)
+	if err != nil {
+		// No table exists — fresh install, create V2 schema directly.
+		stmts := []string{
+			`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+				namespace UNINDEXED,
+				content,
+				timestamp UNINDEXED,
+				importance UNINDEXED
+			)`,
+			`PRAGMA user_version = 2`,
+		}
+		for _, stmt := range stmts {
+			if _, execErr := db.ExecContext(context.Background(), stmt); execErr != nil {
+				return fmt.Errorf("initMemorySchema: create V2: %w", execErr)
+			}
+		}
+		return nil
+	}
+	// Legacy table exists — migrate to V1 then fall through to V1→V2.
+	migration := []string{
+		`ALTER TABLE memory_fts RENAME TO memory_fts_old`,
+		`CREATE VIRTUAL TABLE memory_fts USING fts5(
+			namespace UNINDEXED,
+			content,
+			timestamp UNINDEXED
+		)`,
+		`INSERT INTO memory_fts(namespace, content, timestamp)
+		 SELECT 'session:' || session_key, content, timestamp FROM memory_fts_old`,
+		`DROP TABLE memory_fts_old`,
+		`PRAGMA user_version = 1`,
+	}
+	for _, stmt := range migration {
+		if _, execErr := db.ExecContext(context.Background(), stmt); execErr != nil {
+			return fmt.Errorf("migration V0→V1: %s: %w", stmt, execErr)
+		}
+	}
+	slog.Info("memory: schema migrated to V1 (namespaces)")
+	return migrateV1toV2(db)
+}
+
+// migrateV1toV2 adds the importance column. FTS5 does not support ALTER TABLE ADD COLUMN,
+// so we rename, recreate, copy existing rows with importance=3, and drop the old table.
+func migrateV1toV2(db *sql.DB) error {
+	migration := []string{
+		`ALTER TABLE memory_fts RENAME TO memory_fts_v1`,
+		`CREATE VIRTUAL TABLE memory_fts USING fts5(
+			namespace UNINDEXED,
+			content,
+			timestamp UNINDEXED,
+			importance UNINDEXED
+		)`,
+		`INSERT INTO memory_fts(namespace, content, timestamp, importance)
+		 SELECT namespace, content, timestamp, 3 FROM memory_fts_v1`,
+		`DROP TABLE memory_fts_v1`,
+		`PRAGMA user_version = 2`,
+	}
+	for _, stmt := range migration {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			return fmt.Errorf("initMemorySchema: V1→V2: %s: %w", stmt, err)
+		}
+	}
+	slog.Info("memory: schema migrated to V2 (importance scoring)")
+	return nil
+}
+
+// IndexWithImportance adds content to the memory index with an importance score (1–5).
+// Empty or whitespace-only content is silently ignored. importance is clamped to [1,5].
+func (m *MemoryStore) IndexWithImportance(namespace, content string, importance int) error {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
+	if importance < 1 || importance > 5 {
+		importance = 3
+	}
 	ts := time.Now().UTC().Format(time.RFC3339)
 	_, err := m.db.ExecContext(context.Background(),
-		`INSERT INTO memory_fts(namespace, content, timestamp) VALUES (?, ?, ?)`,
-		namespace, content, ts,
+		`INSERT INTO memory_fts(namespace, content, timestamp, importance) VALUES (?, ?, ?, ?)`,
+		namespace, content, ts, importance,
 	)
 	if err != nil {
 		return fmt.Errorf("memory: index: %w", err)
 	}
 	return nil
+}
+
+// Index adds content to the memory index with default importance (3).
+// Empty or whitespace-only content is silently ignored.
+func (m *MemoryStore) Index(namespace, content string) error {
+	return m.IndexWithImportance(namespace, content, 3)
 }
 
 // Search performs a full-text search and returns up to limit results as

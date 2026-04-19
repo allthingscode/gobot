@@ -111,6 +111,61 @@ func TestHybridSearch(t *testing.T) {
 	}
 }
 
+func TestMergeResults_ImportanceRanking(t *testing.T) {
+	t.Parallel()
+	// Two vector results at the same rank (rank 0 each, no FTS results).
+	// highImp has importance=5, lowImp has importance=1.
+	// After importance blending, highImp must score higher.
+	fts := []FTSResult{}
+	vec := []chromem.Result{
+		{ID: "lowImp", Content: "low importance fact", Metadata: map[string]string{
+			"timestamp":  "2026-04-10T10:00:00Z",
+			"importance": "1",
+			"namespace":  "session:s",
+		}},
+		{ID: "highImp", Content: "high importance fact", Metadata: map[string]string{
+			"timestamp":  "2026-04-10T10:00:00Z",
+			"importance": "5",
+			"namespace":  "session:s",
+		}},
+	}
+
+	merged := MergeResults(fts, vec, 60)
+
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(merged))
+	}
+	if merged[0].ID != "highImp" {
+		t.Errorf("expected highImp first (importance=5), got %s (score=%.4f); lowImp score=%.4f",
+			merged[0].ID, merged[0].Score, merged[1].Score)
+	}
+}
+
+func TestMergeResults_MissingImportanceDefaultsTo3(t *testing.T) {
+	t.Parallel()
+	fts := []FTSResult{}
+	vec := []chromem.Result{
+		{ID: "noMeta", Content: "no metadata", Metadata: map[string]string{}},
+	}
+	merged := MergeResults(fts, vec, 60)
+	if len(merged) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(merged))
+	}
+	// Score should be rrfScore * (0.5 + 0.5*(3/5)) = rrfScore * 0.8
+	rrfScore := 1.0 / float64(60+0+1)
+	wantScore := rrfScore * (rrfBlendWeight + importanceBlendWeight*(float64(defaultImportance)/5.0))
+	if abs(merged[0].Score-wantScore) > 1e-9 {
+		t.Errorf("score = %.9f, want %.9f", merged[0].Score, wantScore)
+	}
+}
+
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 //nolint:cyclop // test complexity justified by isolation verification
 func TestHybridSearch_Isolation(t *testing.T) {
 	t.Parallel()
