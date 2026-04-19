@@ -15,8 +15,6 @@ import (
 	"github.com/allthingscode/gobot/internal/doctor"
 )
 
-const heartbeatInterval = 15 * time.Minute
-
 // AlertSender is the minimal interface needed by HeartbeatRunner to send Telegram alerts.
 type AlertSender interface {
 	Send(ctx context.Context, msg bot.OutboundMessage) error
@@ -31,6 +29,7 @@ type HeartbeatRunner struct {
 	apiKey           string
 	tgToken          string
 	gmailSecretsPath string // directory containing token.json; empty = skip Gmail probe
+	interval         time.Duration
 }
 
 // NewHeartbeatRunner constructs a HeartbeatRunner using config and token.
@@ -42,12 +41,13 @@ func NewHeartbeatRunner(cfg *config.Config, token string) *HeartbeatRunner {
 		apiKey:           cfg.GeminiAPIKey(),
 		tgToken:          token,
 		gmailSecretsPath: filepath.Join(cfg.SecretsRoot(), "gmail"),
+		interval:         cfg.HeartbeatInterval(),
 	}
 }
 
 // Run starts the heartbeat ticker loop. Blocks until ctx is cancelled.
 func (hb *HeartbeatRunner) Run(ctx context.Context) {
-	ticker := time.NewTicker(heartbeatInterval)
+	ticker := time.NewTicker(hb.interval)
 	defer ticker.Stop()
 	for {
 		select {
