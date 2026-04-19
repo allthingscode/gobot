@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/memory"
+	"golang.org/x/sync/errgroup"
 )
 
 const awarenessMaxJournalChars = 4000
@@ -76,21 +78,47 @@ func loadPrivateFile(cfg *config.Config, filename string) string {
 // returns a Markdown block for injection into the system prompt.
 // Best-effort — never blocks startup on failure.
 func loadScheduleContext(secretsRoot string) string {
-	var parts []string
-	ctx := context.Background()
-
-	events, err := google.ListUpcomingEvents(ctx, secretsRoot, 10)
-	if err != nil {
-		slog.Debug("schedule context: calendar unavailable", "err", err)
-	} else if md := google.FormatEventsMarkdown(events); md != "" {
-		parts = append(parts, md)
+	if secretsRoot == "" {
+		return ""
 	}
 
-	tasks, err := google.ListTasks(ctx, secretsRoot, "@default")
-	if err != nil {
-		slog.Debug("schedule context: tasks unavailable", "err", err)
-	} else if md := google.FormatTasksMarkdown(tasks); md != "" {
-		parts = append(parts, md)
+	// Turn-time schedule loading must be extremely fast and responsive to context.
+	// We use a 5s hard cap to ensure turn start is not delayed indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	g, gctx := errgroup.WithContext(ctx)
+	var calendarMD, tasksMD string
+
+	g.Go(func() error {
+		events, err := google.ListUpcomingEvents(gctx, secretsRoot, 10)
+		if err != nil {
+			slog.Debug("schedule context: calendar unavailable", "err", err)
+			return nil
+		}
+		calendarMD = google.FormatEventsMarkdown(events)
+		return nil
+	})
+
+	g.Go(func() error {
+		tasks, err := google.ListTasks(gctx, secretsRoot, "@default")
+		if err != nil {
+			slog.Debug("schedule context: tasks unavailable", "err", err)
+			return nil
+		}
+		tasksMD = google.FormatTasksMarkdown(tasks)
+		return nil
+	})
+
+	// We ignore errgroup errors because tasks are best-effort.
+	_ = g.Wait()
+
+	var parts []string
+	if calendarMD != "" {
+		parts = append(parts, calendarMD)
+	}
+	if tasksMD != "" {
+		parts = append(parts, tasksMD)
 	}
 
 	if len(parts) == 0 {

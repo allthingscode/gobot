@@ -71,7 +71,7 @@ func (s *MCPServer) start(ctx context.Context) error {
 	s.lastID = 0
 
 	// Handshake
-	if err := s.handshake(); err != nil {
+	if err := s.handshake(ctx); err != nil {
 		_ = s.stop()
 		return err
 	}
@@ -92,7 +92,7 @@ func (s *MCPServer) stop() error {
 	return nil
 }
 
-func (s *MCPServer) handshake() error {
+func (s *MCPServer) handshake(ctx context.Context) error {
 	// 1. initialize
 	s.lastID++
 	id := s.lastID
@@ -109,7 +109,7 @@ func (s *MCPServer) handshake() error {
 			},
 		},
 	}
-	if _, err := s.callLocked(id, initReq); err != nil {
+	if _, err := s.callLocked(ctx, id, initReq); err != nil {
 		return fmt.Errorf("initialize failed: %w, stderr: %s", err, s.stderr.String())
 	}
 
@@ -145,42 +145,60 @@ func (s *MCPServer) Call(ctx context.Context, method string, params any) (string
 		req["params"] = params
 	}
 
-	return s.callLocked(id, req)
+	return s.callLocked(ctx, id, req)
 }
 
-func (s *MCPServer) callLocked(id int, req any) (string, error) {
+func (s *MCPServer) callLocked(ctx context.Context, id int, req any) (string, error) {
 	b, _ := json.Marshal(req)
 	slog.Debug("mcp: sending request", "server", s.name, "req", string(b))
 	if _, err := s.stdin.Write(append(b, '\n')); err != nil {
 		return "", fmt.Errorf("mcp write request: %w", err)
 	}
 
-	// Read from stdout until we get a response with the matching ID
-	scanner := bufio.NewScanner(s.stdout)
-	const maxTokenSize = 10 * 1024 * 1024 // 10MB buffer for large git/filesystem outputs
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxTokenSize)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		slog.Debug("mcp: received line", "server", s.name, "len", len(line))
-
-		var resp struct {
-			ID int `json:"id"`
-		}
-		// Attempt to peek at the ID. Skip if not a valid JSON object or missing ID.
-		if err := json.Unmarshal(line, &resp); err == nil && resp.ID == id {
-			return string(line), nil
-		}
-		// If it's a notification or different ID, keep scanning.
+	// Read from stdout until we get a response with the matching ID.
+	// We use a separate goroutine and a channel to support context cancellation.
+	type scanResult struct {
+		line string
+		err  error
 	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("mcp scan error: %w", err)
+	resChan := make(chan scanResult, 1)
+
+	go func() {
+		scanner := bufio.NewScanner(s.stdout)
+		const maxTokenSize = 10 * 1024 * 1024 // 10MB buffer for large git/filesystem outputs
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, maxTokenSize)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+
+			var resp struct {
+				ID int `json:"id"`
+			}
+			// Attempt to peek at the ID. Skip if not a valid JSON object or missing ID.
+			if err := json.Unmarshal([]byte(line), &resp); err == nil && resp.ID == id {
+				resChan <- scanResult{line: line}
+				return
+			}
+			// If it's a notification or different ID, keep scanning.
+			slog.Debug("mcp: ignoring line", "server", s.name, "id", resp.ID, "expected", id)
+		}
+		if err := scanner.Err(); err != nil {
+			resChan <- scanResult{err: fmt.Errorf("mcp scan error: %w", err)}
+		} else {
+			resChan <- scanResult{err: fmt.Errorf("mcp: EOF before response id %d", id)}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", fmt.Errorf("mcp call: %w", ctx.Err())
+	case res := <-resChan:
+		return res.line, res.err
 	}
-	return "", fmt.Errorf("mcp: EOF before response id %d", id)
 }
 
 // mcpTool now uses a shared server instance.
