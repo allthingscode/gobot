@@ -114,19 +114,19 @@ func TestDispatchTracer_TraceAgentDispatch(t *testing.T) {
 	}
 }
 
-// TestDispatchTracer_TraceGeminiCall traces Gemini API calls.
-func TestDispatchTracer_TraceGeminiCall(t *testing.T) {
+// TestDispatchTracer_TraceProviderCall traces Gemini API calls.
+func TestDispatchTracer_TraceProviderCall(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
 	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 
-	err := dt.TraceGeminiCall(context.Background(), "session-789", 2, func(_ context.Context) error {
+	err := dt.TraceProviderCall(context.Background(), "session-789", 2, func(_ context.Context) error {
 		return nil
 	})
 	if err != nil {
-		t.Errorf("TraceGeminiCall() error = %v", err)
+		t.Errorf("TraceProviderCall() error = %v", err)
 	}
 }
 
@@ -339,19 +339,19 @@ func TestDispatchTracer_TraceAgentDispatch_Error(t *testing.T) {
 	}
 }
 
-// TestDispatchTracer_TraceGeminiCall_Error records Gemini call errors.
-func TestDispatchTracer_TraceGeminiCall_Error(t *testing.T) {
+// TestDispatchTracer_TraceProviderCall_Error records Gemini call errors.
+func TestDispatchTracer_TraceProviderCall_Error(t *testing.T) {
 	t.Parallel()
 	p, _ := NewProvider(Config{})
 	defer func() { _ = p.Shutdown(context.Background()) }()
 
 	dt := NewDispatchTracer(p)
 	wantErr := errors.New("gemini failed")
-	err := dt.TraceGeminiCall(context.Background(), "session-err", 1, func(_ context.Context) error {
+	err := dt.TraceProviderCall(context.Background(), "session-err", 1, func(_ context.Context) error {
 		return wantErr
 	})
 	if !errors.Is(err, wantErr) {
-		t.Errorf("TraceGeminiCall() error = %v, want %v", err, wantErr)
+		t.Errorf("TraceProviderCall() error = %v, want %v", err, wantErr)
 	}
 }
 

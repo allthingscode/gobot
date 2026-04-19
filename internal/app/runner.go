@@ -581,7 +581,7 @@ func (r *AgentRunner) attemptChat(ctx context.Context, sessionKey string, attemp
 
 	var err error
 	if r.Tracer != nil {
-		err = r.Tracer.TraceGeminiCall(ctx, sessionKey, attempt, fn)
+		err = r.Tracer.TraceProviderCall(ctx, sessionKey, attempt, fn)
 	} else {
 		err = fn(ctx)
 	}

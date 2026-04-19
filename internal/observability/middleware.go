@@ -57,8 +57,8 @@ func (d *DispatchTracer) TraceAgentDispatch(ctx context.Context, sessionKey stri
 	return response, err
 }
 
-// TraceGeminiCall traces a Gemini API call.
-func (d *DispatchTracer) TraceGeminiCall(ctx context.Context, sessionKey string, iter int, fn func(context.Context) error) error {
+// TraceProviderCall traces a provider API call.
+func (d *DispatchTracer) TraceProviderCall(ctx context.Context, sessionKey string, iter int, fn func(context.Context) error) error {
 	if d.provider == nil {
 		return fn(ctx)
 	}
