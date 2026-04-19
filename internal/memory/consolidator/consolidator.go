@@ -40,31 +40,39 @@ type TextRunner interface {
 // long-term memory store. All operations are best-effort — errors are logged
 // and never propagated to the caller.
 type Consolidator struct {
-	runner    TextRunner
-	store     *memory.MemoryStore
-	vecStore  *vector.Store             // F-030: Semantic memory
-	embedProv vector.EmbeddingProvider // F-030: Semantic memory
-	prompt    string
-	ttl       string                  // e.g., "2160h" for 90 days; empty means no cleanup
-	globalTTL string                  // F-071: TTL for global namespace
-	patterns  []string                // F-071: Patterns for global routing
-	obs       *observability.Provider // optional observability provider
+	runner                 TextRunner
+	store                  *memory.MemoryStore
+	vecStore               *vector.Store             // F-030: Semantic memory
+	embedProv              vector.EmbeddingProvider // F-030: Semantic memory
+	semanticDedupThreshold float64                  // F-112: Semantic deduplication threshold (0 to disable)
+	prompt                 string
+	ttl                    string                  // e.g., "2160h" for 90 days; empty means no cleanup
+	globalTTL              string                  // F-071: TTL for global namespace
+	patterns               []string                // F-071: Patterns for global routing
+	obs                    *observability.Provider // optional observability provider
 }
 
 // New creates a Consolidator. Both runner and store must be non-nil.
 // vecStore and embedProv may be nil (semantic memory disabled).
 func New(runner TextRunner, store *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider) *Consolidator {
 	return &Consolidator{
-		runner:    runner,
-		store:     store,
-		vecStore:  vecStore,
-		embedProv: embedProv,
-		prompt:    consolidationPrompt,
-		ttl:       "",
-		globalTTL: "",
-		patterns:  nil,
-		obs:       nil,
+		runner:                 runner,
+		store:                  store,
+		vecStore:               vecStore,
+		embedProv:              embedProv,
+		semanticDedupThreshold: 0.92, // default threshold
+		prompt:                 consolidationPrompt,
+		ttl:                    "",
+		globalTTL:              "",
+		patterns:               nil,
+		obs:                    nil,
 	}
+}
+
+// SetSemanticDedupThreshold sets the threshold for semantic deduplication (0-1).
+// If set to 0 or less, semantic deduplication is disabled.
+func (c *Consolidator) SetSemanticDedupThreshold(t float64) {
+	c.semanticDedupThreshold = t
 }
 
 // SetPrompt overrides the default consolidation system prompt.
@@ -175,7 +183,7 @@ func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts 
 			continue
 		}
 
-		if c.isDuplicate(sessionKey, fact) {
+		if c.isDuplicate(ctx, sessionKey, fact) {
 			skipped++
 			continue
 		}
@@ -193,14 +201,56 @@ func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts 
 	return indexed, skipped
 }
 
-func (c *Consolidator) isDuplicate(sessionKey, fact string) bool {
+func (c *Consolidator) isDuplicate(ctx context.Context, sessionKey, fact string) bool {
+	// F-112: Use semantic deduplication if vector store is available.
+	if c.vecStore != nil && c.embedProv != nil && c.semanticDedupThreshold > 0 {
+		return c.isSemanticDuplicate(ctx, sessionKey, fact)
+	}
+
+	// Fallback to lexical word-overlap (existing logic).
+	return c.isLexicalDuplicate(sessionKey, fact)
+}
+
+func (c *Consolidator) isSemanticDuplicate(ctx context.Context, sessionKey, fact string) bool {
+	embedFunc := func(ctx context.Context, text string) ([]float32, error) {
+		return c.embedProv.Embed(ctx, text)
+	}
+	// Search for nearest existing fact. Fetch top 5 to check for session/global matches.
+	results, err := c.vecStore.Search(ctx, "memory_facts", fact, 5, nil, embedFunc)
+	if err != nil {
+		return false
+	}
+
+	for _, res := range results {
+		// Only deduplicate against facts in the same session or global namespace.
+		isGlobal := res.Metadata["namespace"] == "global"
+		isSameSession := res.Metadata["session_key"] == sessionKey
+
+		if (isGlobal || isSameSession) && float64(res.Similarity) >= c.semanticDedupThreshold {
+			slog.Debug("consolidator: skipping semantic duplicate fact",
+				"fact", fact,
+				"existing", res.Content,
+				"similarity", res.Similarity,
+				"namespace", res.Metadata["namespace"])
+			return true
+		}
+	}
+
+	// If semantic check is enabled but no match found, we skip lexical check to avoid
+	// inconsistent behavior (semantic is the upgrade).
+	return false
+}
+
+func (c *Consolidator) isLexicalDuplicate(sessionKey, fact string) bool {
 	existing, err := c.store.Search(fact, sessionKey, 1)
-	if err == nil && len(existing) > 0 {
-		if existingContent, ok := existing[0]["content"].(string); ok {
-			if similarity(fact, existingContent) > 0.8 {
-				slog.Debug("consolidator: skipping duplicate fact", "fact", fact)
-				return true
-			}
+	if err != nil || len(existing) == 0 {
+		return false
+	}
+
+	if existingContent, ok := existing[0]["content"].(string); ok {
+		if similarity(fact, existingContent) > 0.8 {
+			slog.Debug("consolidator: skipping lexical duplicate fact", "fact", fact)
+			return true
 		}
 	}
 	return false

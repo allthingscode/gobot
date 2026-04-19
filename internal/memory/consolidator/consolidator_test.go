@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	_ "modernc.org/sqlite"
 )
 
@@ -322,6 +323,117 @@ func TestConsolidator_GlobalRouting(t *testing.T) {
 	results, _ = store.Search("specific", "sess1", 5)
 	if len(results) == 0 {
 		t.Error("expected to find session fact from its own session (sess1)")
+	}
+}
+
+// mockEmbeddingProvider returns fixed embeddings for testing.
+type mockEmbeddingProvider struct {
+	val []float32
+	err error
+}
+
+func (m *mockEmbeddingProvider) Embed(_ context.Context, _ string) ([]float32, error) {
+	return m.val, m.err
+}
+
+func TestConsolidator_SemanticDeduplication(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	vecStore, _ := vector.NewStore(filepath.Join(t.TempDir(), "test_vec.db"))
+	// Use non-zero vector to avoid NaN similarity
+	embedProv := &mockEmbeddingProvider{val: []float32{1, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
+
+	c := New(&mockTextRunner{response: `["deadline is May 1"]`}, store, vecStore, embedProv)
+	c.SetSemanticDedupThreshold(0.9)
+
+	// 1. Index first fact.
+	n, err := c.consolidate(context.Background(), "sess1", strings.Repeat("x", 100))
+	if err != nil || n != 1 {
+		t.Fatalf("first consolidate failed: n=%d, err=%v", n, err)
+	}
+
+	// 2. Try to index a semantic duplicate (same meaning, different words).
+	// Since we mock the embedding to always be the same, chromem-go will see them as identical (Similarity=1.0).
+	runner := &mockTextRunner{response: `["The cutoff is May 1st"]`}
+	c = New(runner, store, vecStore, embedProv)
+	c.SetSemanticDedupThreshold(0.9)
+
+	n, err = c.consolidate(context.Background(), "sess1", strings.Repeat("x", 100))
+	if err != nil {
+		t.Fatalf("second consolidate failed: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 new facts (semantic duplicate), got %d", n)
+	}
+
+	// 3. Verify threshold works.
+	// We can't easily control chromem-go's similarity scores with just one mock vector
+	// without more complex mocking, but we can disable it via threshold=0.
+	c.SetSemanticDedupThreshold(0)
+	n, err = c.consolidate(context.Background(), "sess1", strings.Repeat("x", 100))
+	if err != nil {
+		t.Fatalf("third consolidate failed: %v", err)
+	}
+	// With threshold=0, it falls back to lexical. "The cutoff is May 1st" vs "deadline is May 1"
+	// should have low lexical similarity.
+	if n != 1 {
+		t.Errorf("expected 1 fact indexed when semantic dedup is disabled, got %d", n)
+	}
+}
+
+func TestConsolidator_SemanticDedup_NamespaceIsolation(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	vecStore, _ := vector.NewStore(filepath.Join(t.TempDir(), "test_vec_iso.db"))
+	embedProv := &mockEmbeddingProvider{val: []float32{0, 1, 0, 0, 0, 0, 0, 0, 0, 0}}
+
+	c := New(&mockTextRunner{response: `["Shared secret is 42"]`}, store, vecStore, embedProv)
+	c.SetSemanticDedupThreshold(0.9)
+
+	// 1. Index fact for sess1.
+	_, _ = c.consolidate(context.Background(), "sess1", strings.Repeat("x", 100))
+
+	// 2. Try to index same fact for sess2.
+	// It should NOT be deduplicated because it's a different session.
+	runner := &mockTextRunner{response: `["Shared secret is 42"]`}
+	c = New(runner, store, vecStore, embedProv)
+	c.SetSemanticDedupThreshold(0.9)
+
+	n, err := c.consolidate(context.Background(), "sess2", strings.Repeat("x", 100))
+	if err != nil {
+		t.Fatalf("consolidate for sess2 failed: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected fact to be indexed for sess2 (isolation), got %d", n)
+	}
+
+	// 3. Index a global fact for sess1.
+	c.SetGlobalPatterns([]string{"global"})
+	runner = &mockTextRunner{response: `["This is a global fact"]`}
+	c = New(runner, store, vecStore, embedProv)
+	c.SetGlobalPatterns([]string{"global"})
+	_, _ = c.consolidate(context.Background(), "sess1", strings.Repeat("x", 100))
+
+	// 4. Try to index same global fact for sess2.
+	// It SHOULD be deduplicated because the existing one is global.
+	runner = &mockTextRunner{response: `["This is a global fact"]`}
+	c = New(runner, store, vecStore, embedProv)
+	c.SetSemanticDedupThreshold(0.9)
+	n, err = c.consolidate(context.Background(), "sess2", strings.Repeat("x", 100))
+	if err != nil {
+		t.Fatalf("consolidate global failed: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected global fact to be deduplicated, got %d", n)
+	}
+}
+
+func TestConsolidator_SetSemanticDedupThreshold(t *testing.T) {
+	t.Parallel()
+	c := New(&mockTextRunner{}, nil, nil, nil)
+	c.SetSemanticDedupThreshold(0.85)
+	if c.semanticDedupThreshold != 0.85 {
+		t.Errorf("expected threshold 0.85, got %.2f", c.semanticDedupThreshold)
 	}
 }
 
