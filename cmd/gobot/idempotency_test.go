@@ -36,6 +36,11 @@ func setupTestStore(t *testing.T) (store *agentctx.IdempotencyStore, db *sql.DB,
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err = db.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
+		t.Fatalf("set WAL mode: %v", err)
+	}
 
 	// Create idempotency_keys table with correct schema from internal/context/idempotency.go
 	_, err = db.ExecContext(context.Background(), `
@@ -110,9 +115,15 @@ func TestIdempotencyCleanup(t *testing.T) {
 	_ = store.Store(ctx, "expired-key-2", "test-tool", "hash3", "result", "session")
 	_, _ = db.ExecContext(ctx, "UPDATE idempotency_keys SET created_at = ? WHERE key = 'expired-key-2'", past)
 
-	time.Sleep(300 * time.Millisecond) // Wait for next tick
-
-	_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM idempotency_keys").Scan(&count)
+	// Poll until cleanup fires (up to 5s to tolerate loaded CI runners under -race).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM idempotency_keys").Scan(&count)
+		if count == 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if count != 1 {
 		t.Errorf("DB count after periodic loop = %d, want 1 (expired key should be gone)", count)
 	}

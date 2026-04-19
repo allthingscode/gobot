@@ -370,8 +370,7 @@ func (r *AgentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, 
 	if execErr != nil {
 		if errors.Is(execErr, context.Canceled) ||
 			errors.Is(execErr, context.DeadlineExceeded) ||
-			errors.Is(execErr, agent.ErrToolDenied) ||
-			errors.Is(execErr, agent.ErrUnknownTool) {
+			errors.Is(execErr, agent.ErrToolDenied) {
 			return "", execErr
 		}
 		return r.handleCategoryAError(sessionKey, name, paramsHash, result, execErr), nil

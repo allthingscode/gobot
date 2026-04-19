@@ -46,6 +46,30 @@ func cmdCheckpoints() *cobra.Command {
 	}
 }
 
+func cmdClearCheckpoint() *cobra.Command {
+	return &cobra.Command{
+		Use:   "clear-checkpoint <thread-id>",
+		Short: "Mark a session as completed so it cannot be resumed",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			threadID := args[0]
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			store, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
+			if err != nil {
+				return fmt.Errorf("checkpoint store: %w", err)
+			}
+			if err := store.CompleteThread(context.Background(), threadID); err != nil {
+				return fmt.Errorf("clear checkpoint: %w", err)
+			}
+			fmt.Printf("Successfully marked session %s as completed.\n", threadID)
+			return nil
+		},
+	}
+}
+
 // resumePreviewLines is the maximum number of messages to print in resume preview.
 const resumePreviewLines = 6
 

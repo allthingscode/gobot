@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -12,6 +13,8 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
 )
+
+func strPtr(s string) *string { return &s }
 
 func TestRunner_CategoryB_ContextCanceled(t *testing.T) {
 	t.Parallel()
@@ -60,6 +63,12 @@ func TestRunner_CategoryB_UnknownTool(t *testing.T) {
 					},
 				},
 			},
+			{
+				Message: agentctx.StrategicMessage{
+					Role:    agentctx.RoleAssistant,
+					Content: &agentctx.MessageContent{Str: strPtr("done")},
+				},
+			},
 		},
 	}
 
@@ -67,12 +76,24 @@ func TestRunner_CategoryB_UnknownTool(t *testing.T) {
 	runner := app.NewAgentRunner(mock, "model", "sys", cfg)
 	// No tools registered
 
-	_, _, err := runner.Run(context.Background(), "session", "user", nil)
-	if err == nil {
-		t.Fatal("expected error from unknown tool, got nil")
+	_, messages, err := runner.Run(context.Background(), "session", "user", nil)
+	if err != nil {
+		t.Fatalf("expected Category A handling (no error), got %v", err)
 	}
-	if !errors.Is(err, agent.ErrUnknownTool) {
-		t.Errorf("expected error agent.ErrUnknownTool, got %v", err)
+
+	// messages should contain:
+	// 1. Assistant tool call
+	// 2. Tool response (Category A error)
+	// 3. Assistant "done"
+	if len(messages) < 2 {
+		t.Fatalf("expected at least 2 messages in history, got %d", len(messages))
+	}
+	toolResp := messages[1]
+	if toolResp.Role != agentctx.RoleTool {
+		t.Errorf("expected RoleTool for message 1, got %v", toolResp.Role)
+	}
+	if toolResp.Content == nil || toolResp.Content.Str == nil || !strings.Contains(*toolResp.Content.Str, "unknown tool") {
+		t.Errorf("expected 'unknown tool' in tool response content, got %v", toolResp.Content)
 	}
 }
 

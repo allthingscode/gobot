@@ -379,7 +379,7 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 	tests := []struct {
 		name      string
 		toolCalls []agentctx.ToolCall
-		wantErr   string
+		wantErr   string // now refers to text in history, not Go error
 	}{
 		{
 			name: "valid call",
@@ -422,8 +422,11 @@ func TestRunner_ToolCallValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			r := setupValidationRunner(tt.toolCalls)
-			got, _, err := r.Run(context.Background(), "test-session", "", nil)
-			checkValidationResult(t, tt.name, got, err, tt.wantErr)
+			_, messages, err := r.Run(context.Background(), "test-session", "", nil)
+			if err != nil {
+				t.Fatalf("[%s] Run() unexpected error: %v", tt.name, err)
+			}
+			checkValidationHistory(t, tt.name, messages, tt.wantErr)
 		})
 	}
 }
@@ -459,21 +462,28 @@ func setupValidationRunner(toolCalls []agentctx.ToolCall) *AgentRunner {
 	return r
 }
 
-func checkValidationResult(t *testing.T, name, got string, err error, wantErr string) {
+func checkValidationHistory(t *testing.T, name string, messages []agentctx.StrategicMessage, wantErr string) {
 	t.Helper()
 	if wantErr != "" {
-		if err == nil {
-			t.Fatalf("[%s] Run() expected error, got nil", name)
+		// Find the tool response message
+		var toolResp *agentctx.StrategicMessage
+		for _, m := range messages {
+			if m.Role == agentctx.RoleTool {
+				toolResp = &m
+				break
+			}
 		}
-		if !strings.Contains(err.Error(), wantErr) {
-			t.Errorf("[%s] Run() error = %q, want error containing %q", name, err, wantErr)
+		if toolResp == nil {
+			t.Fatalf("[%s] Tool response message not found in history", name)
+		}
+		if toolResp.Content == nil || toolResp.Content.Str == nil || !strings.Contains(*toolResp.Content.Str, wantErr) {
+			t.Errorf("[%s] history missing %q, got content: %v", name, wantErr, toolResp.Content)
 		}
 	} else {
-		if err != nil {
-			t.Fatalf("[%s] Run() error = %v, want nil", name, err)
-		}
-		if got != "done" {
-			t.Errorf("[%s] Run() got %q, want %q", name, got, "done")
+		// Should have succeeded
+		last := messages[len(messages)-1]
+		if ExtractText(last) != "done" {
+			t.Errorf("[%s] expected last message content 'done', got %q", name, ExtractText(last))
 		}
 	}
 }

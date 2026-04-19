@@ -41,6 +41,7 @@ func main() {
 		cmdLogs(),
 		cmdConfig(),
 		cmdCheckpoints(),
+		cmdClearCheckpoint(),
 		cmdResume(),
 		cmdAuthorize(),
 		cmdReauth(),
