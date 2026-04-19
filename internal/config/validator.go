@@ -220,12 +220,13 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 	hasGemini := v.cfg.GeminiAPIKey() != ""
 	hasAnthropic := v.cfg.AnthropicAPIKey() != ""
 	hasOpenAI := v.cfg.OpenAIAPIKey() != ""
+	hasOpenRouter := v.cfg.OpenRouterAPIKey() != ""
 
-	if !hasGemini && !hasAnthropic && !hasOpenAI {
+	if !hasGemini && !hasAnthropic && !hasOpenAI && !hasOpenRouter {
 		result.Errors = append(result.Errors, ValidationError{
 			Field:    "providers.api_key",
 			Message:  "no API key configured for any provider",
-			Remedy:   "set providers.gemini.apiKey, providers.anthropic.apiKey, or providers.openai.apiKey in config",
+			Remedy:   "set providers.gemini.apiKey, providers.anthropic.apiKey, providers.openai.apiKey, or providers.openrouter.apiKey in config",
 			Severity: SeverityCritical,
 		})
 		return
@@ -239,6 +240,9 @@ func (v *Validator) validateAPIKeys(result *ValidationResult) {
 	})
 	v.validateProviderKeyFormat(result, "openai", hasOpenAI, v.cfg.OpenAIAPIKey(), func(key string) bool {
 		return !strings.HasPrefix(key, "sk-")
+	})
+	v.validateProviderKeyFormat(result, "openrouter", hasOpenRouter, v.cfg.OpenRouterAPIKey(), func(key string) bool {
+		return !strings.HasPrefix(key, "sk-or-")
 	})
 
 	v.validateGoogleSearch(result)

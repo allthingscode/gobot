@@ -208,6 +208,7 @@ type StrategicConfig struct {
 	IdempotencyTTL      string              `json:"idempotencyTTL,omitempty"` // e.g., "24h", "72h"
 	VectorSearchEnabled bool                `json:"vector_search_enabled"`    // F-030
 	MultiUserEnabled    bool                `json:"multi_user_enabled"`       // F-073
+	GmailReadonly       bool                `json:"gmail_readonly"`           // when false, search_gmail and read_gmail tools are not registered
 	Observability       ObservabilityConfig `json:"observability"`
 	TemplatesPath       string              `json:"templates_path,omitempty"`   // Custom directory for email templates
 	CustomCSSPath       string              `json:"custom_css_path,omitempty"`  // Custom CSS file for email styling override

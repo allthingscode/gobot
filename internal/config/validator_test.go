@@ -56,6 +56,8 @@ func cleanEnv(t *testing.T) {
 		"ANTHROPIC_API_KEY",
 		"OPENAI_API_KEY",
 		"OPENAI_BASE_URL",
+		"OPENROUTER_API_KEY",
+		"OPENROUTER_BASE_URL",
 		"GOOGLE_API_KEY",
 		"GOOGLE_CX",
 		"TELEGRAM_BOT_TOKEN",
@@ -115,14 +117,40 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 
 func TestValidator_Validate_APIKeys(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name         string
-		geminiKey    string
-		anthropicKey string
-		openAIKey    string
-		wantError    bool
-		errorField   string
-	}{
+	for _, tt := range getAPIKeyTestCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cleanEnv(t)
+
+			cfg := baseValidConfig(t)
+			cfg.Providers = ProvidersConfig{
+				Gemini:     GeminiConfig{APIKey: tt.geminiKey},
+				Anthropic:  AnthropicConfig{APIKey: tt.anthropicKey},
+				OpenAI:     OpenAIConfig{APIKey: tt.openAIKey},
+				OpenRouter: OpenAIConfig{APIKey: tt.openRouterKey},
+			}
+
+			validator := NewValidator(cfg)
+			result := validator.Validate()
+
+			assertFieldError(t, result, tt.errorField, tt.wantError)
+		})
+	}
+}
+
+type apiKeyTestCase struct {
+	name          string
+	geminiKey     string
+	anthropicKey  string
+	openAIKey     string
+	openRouterKey string
+	wantError     bool
+	errorField    string
+}
+
+func getAPIKeyTestCases() []apiKeyTestCase {
+	return []apiKeyTestCase{
 		{
 			name:       "no API keys configured",
 			wantError:  true,
@@ -161,26 +189,17 @@ func TestValidator_Validate_APIKeys(t *testing.T) {
 			wantError:  true,
 			errorField: "providers.openai.apiKey",
 		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			cleanEnv(t)
-
-			cfg := baseValidConfig(t)
-			cfg.Providers = ProvidersConfig{
-				Gemini:    GeminiConfig{APIKey: tt.geminiKey},
-				Anthropic: AnthropicConfig{APIKey: tt.anthropicKey},
-				OpenAI:    OpenAIConfig{APIKey: tt.openAIKey},
-			}
-
-			validator := NewValidator(cfg)
-			result := validator.Validate()
-
-			assertFieldError(t, result, tt.errorField, tt.wantError)
-		})
+		{
+			name:          "valid OpenRouter key",
+			openRouterKey: "sk-or-v1-valid-key",
+			wantError:     false,
+		},
+		{
+			name:          "invalid OpenRouter key format",
+			openRouterKey: "not-starting-with-sk-or-",
+			wantError:     true,
+			errorField:    "providers.openrouter.apiKey",
+		},
 	}
 }
 

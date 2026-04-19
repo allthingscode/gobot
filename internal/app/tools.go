@@ -173,9 +173,13 @@ func appendGoogleTools(cfg *config.Config, tools []Tool) []Tool {
 func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool) []Tool {
 	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
 		tools = append(tools, newSendEmailTool(secretsRoot, cfg.StorageRoot(), userEmail))
-		tools = append(tools, newSearchGmailTool(secretsRoot))
-		tools = append(tools, newReadGmailTool(secretsRoot))
-		slog.Info("run: registered gmail tools (send, search, read)")
+		if cfg.Strategic.GmailReadonly {
+			tools = append(tools, newSearchGmailTool(secretsRoot))
+			tools = append(tools, newReadGmailTool(secretsRoot))
+			slog.Info("run: registered gmail tools (send, search, read)")
+		} else {
+			slog.Info("run: registered gmail tools (send only; gmail_readonly=false)")
+		}
 	} else {
 		slog.Warn("run: send_email tool disabled -- strategic_edition.user_email not set in config")
 	}
