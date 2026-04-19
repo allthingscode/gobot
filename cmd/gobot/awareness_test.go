@@ -14,7 +14,7 @@ func TestEnsureAwarenessFile(t *testing.T) {
 	// t.Parallel() disabled because of t.Setenv
 	tmpDir := t.TempDir()
 	// Override storage root via environment so WorkspacePath follows it.
-	t.Setenv("GOBOT_STORAGE_ROOT", tmpDir)
+	t.Setenv("GOBOT_STORAGE", tmpDir)
 
 	// Explicitly reload config to ensure it sees the env var
 	cfg, _ := config.Load()

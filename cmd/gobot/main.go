@@ -85,7 +85,7 @@ func cmdInit() *cobra.Command {
 
 func runInit(root string) error {
 	if root != "" {
-		if err := os.Setenv("GOBOT_STORAGE_ROOT", root); err != nil {
+		if err := os.Setenv("GOBOT_STORAGE", root); err != nil {
 			return fmt.Errorf("set env: %w", err)
 		}
 	}
