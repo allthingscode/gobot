@@ -89,7 +89,7 @@ func TestAnthropicProvider_Chat_Success(t *testing.T) {
 	defer ts.Close()
 
 	p := NewAnthropicProvider("test-key", ts.URL)
-	str := "hello"
+	str := "hello" //nolint:goconst // test fixture
 	req := ChatRequest{
 		Model:             "claude-3-5-sonnet",
 		SystemInstruction: "system prompt",
