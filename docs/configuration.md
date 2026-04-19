@@ -21,7 +21,7 @@ Controls default model parameters and specialist overrides.
 | Field | Type | Description |
 |-------|------|-------------|
 | `defaults.model` | string | The default LLM model (e.g., `gemini-1.5-flash`). |
-| `defaults.provider` | string | The default provider (`gemini`, `anthropic`, `openai`). |
+| `defaults.provider` | string | The default provider (`gemini`, `anthropic`, `openai`, `openrouter`). |
 | `defaults.maxTokens` | int | Maximum output tokens per turn (0 = model default). |
 | `defaults.maxToolIterations` | int | Maximum consecutive tool calls allowed in one turn. |
 | `defaults.maxToolResultBytes` | int | Maximum size of a tool result in bytes (default 32KB). |
@@ -72,6 +72,8 @@ Credentials and endpoints for LLM providers.
 | `anthropic` | `apiKey` | Anthropic API Key. |
 | `openai` | `apiKey` | OpenAI API Key. |
 | `openai` | `baseUrl` | Custom endpoint for OpenAI-compatible APIs (e.g., LM Studio). |
+| `openrouter` | `apiKey` | OpenRouter API Key. |
+| `openrouter` | `baseUrl` | Custom endpoint for OpenRouter (defaults to `https://openrouter.ai/api/v1`). |
 | `google` | `apiKey` | Google Custom Search API Key. |
 | `google` | `customCx` | Google Custom Search Engine ID (CX). |
 

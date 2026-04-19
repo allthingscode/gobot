@@ -30,7 +30,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 - **🧠 In-process memory** — Vector search via chromem-go runs inside the binary. No separate vector database to operate or back up.
 - **⏰ Always on** — Cron scheduler for background jobs (morning briefings, calendar digests) built in.
 - **📊 Production-grade observability** — OpenTelemetry tracing, structured logging (slog), circuit breakers, and health checks.
-- **🤖 Multi-model** — Switch between Gemini, Claude, and OpenAI per specialist role.
+- **🤖 Multi-model** — Switch between Gemini, Claude, OpenAI, and OpenRouter per specialist role.
 
 ---
 
@@ -43,7 +43,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 | **Stars (Apr 2026)** | — | ~115 | — | ~1,500 |
 | **Storage** | SQLite + chromem-go | In-process notes | SQLite | PostgreSQL + pgvector |
 | **CGO** | None | None | None | Yes (pg drivers) |
-| **LLM providers** | 3 | 6+ | 4 | 20+ |
+| **LLM providers** | 4 | 6+ | 4 | 20+ |
 | **Channels** | Telegram | Telegram | Telegram + CLI | 7 (Telegram, Discord, Slack…) |
 | **Google Workspace** | Yes (Gmail, Cal, Tasks) | No | No | No |
 | **HITL approvals** | Yes | No | No | No |
@@ -53,7 +53,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 | **OTel tracing** | Yes | No | No | Yes |
 | **Cron / background jobs** | Yes | No | No | Yes |
 
-**[GoGogot](https://github.com/aspasskiy/GoGogot)** is the most similar project in spirit — lightweight, simple agent loop, Telegram-only, no external dependencies. It edges out gobot on provider count (6 vs 3) and has a smaller reported footprint (15MB binary, 10MB RAM idle). gobot edges out GoGogot on Google Workspace depth, HITL, Windows security, and observability.
+**[GoGogot](https://github.com/aspasskiy/GoGogot)** is the most similar project in spirit — lightweight, simple agent loop, Telegram-only, no external dependencies. It edges out gobot on provider count (6 vs 4) and has a smaller reported footprint (15MB binary, 10MB RAM idle). gobot edges out GoGogot on Google Workspace depth, HITL, Windows security, and observability.
 
 **[NeoClaw](https://github.com/jigarvarma2k20/neoclaw)** covers similar ground (SQLite, Telegram, multi-LLM) and adds a CLI mode and SMTP email. gobot's advantage is Google OAuth depth vs. NeoClaw's SMTP-only email, plus HITL and Windows-native secrets.
 
@@ -89,7 +89,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 | Users | Single-user / personal | Multi-tenant SaaS |
 | Google Workspace | Deep (Gmail, Calendar, Tasks) | Not supported |
 | HITL approvals | Yes | No |
-| LLM providers | 3 (Gemini, Claude, OpenAI) | 20+ |
+| LLM providers | 4 (Gemini, Claude, OpenAI, OpenRouter) | 20+ |
 | Agent teams | No | Yes |
 | Pipeline complexity | Simple loop | 8-stage, up to 20 iterations |
 | Memory backend | SQLite + chromem-go (in-process) | pgvector (external service) |
