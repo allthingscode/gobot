@@ -78,9 +78,9 @@ jobs:
             -   name: Coverage check
                 run: |
                     mkdir -p artifacts
-                    go test -mod=readonly -coverprofile=artifacts/coverage.out ./internal/... ./cmd/...
-                    go tool cover -func=artifacts/coverage.out | tail -1
-                    COVERAGE=$(go tool cover -func=artifacts/coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+                    go test -mod=readonly -coverprofile artifacts/coverage.out ./internal/... ./cmd/...
+                    go tool cover -func artifacts/coverage.out
+                    COVERAGE=$(go tool cover -func artifacts/coverage.out | grep total | awk '{print $3}' | tr -d '%')
                     echo "Total coverage: ${COVERAGE}%"
                     awk "BEGIN { if (${COVERAGE} < 65.0) { print \"Coverage ${COVERAGE}% is below 65.0% threshold\"; exit 1 } }"
 
@@ -98,8 +98,8 @@ jobs:
             -   name: Windows Coverage run
                 run: |
                     mkdir -p artifacts
-                    go test -mod=readonly -coverprofile=artifacts/coverage-windows.out ./internal/... ./cmd/...
-                    go tool cover -func=artifacts/coverage-windows.out | tail -1
+                    go test -mod=readonly -coverprofile artifacts/coverage-windows.out ./internal/... ./cmd/...
+                    go tool cover -func artifacts/coverage-windows.out
             -   name: Upload Windows Coverage Artifact
                 uses: actions/upload-artifact@v7
                 with:
