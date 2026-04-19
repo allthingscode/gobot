@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -76,15 +77,16 @@ func loadPrivateFile(cfg *config.Config, filename string) string {
 // Best-effort — never blocks startup on failure.
 func loadScheduleContext(secretsRoot string) string {
 	var parts []string
+	ctx := context.Background()
 
-	events, err := google.ListUpcomingEvents(secretsRoot, 10)
+	events, err := google.ListUpcomingEvents(ctx, secretsRoot, 10)
 	if err != nil {
 		slog.Debug("schedule context: calendar unavailable", "err", err)
 	} else if md := google.FormatEventsMarkdown(events); md != "" {
 		parts = append(parts, md)
 	}
 
-	tasks, err := google.ListTasks(secretsRoot, "@default")
+	tasks, err := google.ListTasks(ctx, secretsRoot, "@default")
 	if err != nil {
 		slog.Debug("schedule context: tasks unavailable", "err", err)
 	} else if md := google.FormatTasksMarkdown(tasks); md != "" {

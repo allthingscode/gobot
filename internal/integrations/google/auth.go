@@ -50,6 +50,10 @@ type storedToken struct {
 	Expiry       time.Time `json:"expiry"`
 }
 
+// TimeoutClient is the shared HTTP client with a 30s timeout used for all Google API calls.
+// nolint:gochecknoglobals // HTTP client is intentionally shared for connection reuse
+var TimeoutClient = &http.Client{Timeout: 30 * time.Second}
+
 // AuthorizeInteractive starts a local server to handle the OAuth2 callback,
 // prints the auth URL, and returns the exchanged token.
 func AuthorizeInteractive(secretsRoot string, scopes []string) error {
@@ -70,7 +74,7 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 		return err
 	}
 
-	token, err := exchangeCode(code, clientID, clientSecret, redirectURI)
+	token, err := exchangeCode(context.Background(), code, clientID, clientSecret, redirectURI)
 	if err != nil {
 		return fmt.Errorf("token exchange: %w", err)
 	}
@@ -181,7 +185,7 @@ func persistToken(secretsRoot string, token *storedToken) error {
 	return nil
 }
 
-func exchangeCode(code, clientID, clientSecret, redirectURI string) (*storedToken, error) {
+func exchangeCode(ctx context.Context, code, clientID, clientSecret, redirectURI string) (*storedToken, error) {
 	data := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -189,13 +193,13 @@ func exchangeCode(code, clientID, clientSecret, redirectURI string) (*storedToke
 		"client_secret": {clientSecret},
 		"redirect_uri":  {redirectURI},
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenRefreshURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenRefreshURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := TimeoutClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do token request: %w", err)
 	}
@@ -248,13 +252,13 @@ func GoogleTokenPath(secretsRoot string) string {
 // BearerToken loads the token from secretsRoot/google_token.json, refreshes if
 // expired, persists the refreshed token, and returns a valid access token string.
 // Returns an error if the file is missing or refresh fails.
-func BearerToken(secretsRoot string) (string, error) {
-	return bearerTokenWithClient(secretsRoot, http.DefaultClient)
+func BearerToken(ctx context.Context, secretsRoot string) (string, error) {
+	return bearerTokenWithClient(ctx, secretsRoot, TimeoutClient)
 }
 
 // bearerTokenWithClient is the testable inner implementation.
-func bearerTokenWithClient(secretsRoot string, client *http.Client) (string, error) {
-	if token, ok := tryLoadTokenFromDPAPI(secretsRoot, client); ok {
+func bearerTokenWithClient(ctx context.Context, secretsRoot string, client *http.Client) (string, error) {
+	if token, ok := tryLoadTokenFromDPAPI(ctx, secretsRoot, client); ok {
 		return token, nil
 	}
 
@@ -264,14 +268,14 @@ func bearerTokenWithClient(secretsRoot string, client *http.Client) (string, err
 	}
 
 	if tok.expired() {
-		if err := refreshAndSaveToken(tok, path, client); err != nil {
+		if err := refreshAndSaveToken(ctx, tok, path, client); err != nil {
 			return "", err
 		}
 	}
 	return tok.Token, nil
 }
 
-func tryLoadTokenFromDPAPI(secretsRoot string, client *http.Client) (string, bool) {
+func tryLoadTokenFromDPAPI(ctx context.Context, secretsRoot string, client *http.Client) (string, bool) {
 	store := tokenStore(secretsRoot)
 	tokenJSON, err := store.Get("google_oauth_token")
 	if err != nil || tokenJSON == "" {
@@ -287,7 +291,7 @@ func tryLoadTokenFromDPAPI(secretsRoot string, client *http.Client) (string, boo
 		if tok.RefreshToken == "" {
 			return "", false
 		}
-		if err := refreshToken(&tok, client); err != nil {
+		if err := refreshToken(ctx, &tok, client); err != nil {
 			return "", false
 		}
 		// nolint:gosec // RefreshToken is a secret, but we must marshal it to persist it.
@@ -312,11 +316,11 @@ func loadTokenFromFile(secretsRoot string) (*storedToken, string, error) {
 	return &tok, path, nil
 }
 
-func refreshAndSaveToken(tok *storedToken, path string, client *http.Client) error {
+func refreshAndSaveToken(ctx context.Context, tok *storedToken, path string, client *http.Client) error {
 	if tok.RefreshToken == "" {
 		return fmt.Errorf("google token expired and no refresh_token present")
 	}
-	if err := refreshToken(tok, client); err != nil {
+	if err := refreshToken(ctx, tok, client); err != nil {
 		return fmt.Errorf("google token refresh: %w", err)
 	}
 	// nolint:gosec // RefreshToken is a secret
@@ -327,7 +331,7 @@ func refreshAndSaveToken(tok *storedToken, path string, client *http.Client) err
 }
 
 // refreshToken exchanges a refresh_token for a new access token, updating tok in place.
-func refreshToken(tok *storedToken, client *http.Client) error {
+func refreshToken(ctx context.Context, tok *storedToken, client *http.Client) error {
 	tokenURI := tok.TokenURI
 	if tokenURI == "" {
 		tokenURI = tokenRefreshURL
@@ -338,7 +342,7 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 		"client_id":     {tok.ClientID},
 		"client_secret": {tok.ClientSecret},
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenURI, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURI, strings.NewReader(data.Encode()))
 	if err != nil {
 		return fmt.Errorf("build refresh request: %w", err)
 	}
@@ -373,8 +377,8 @@ func refreshToken(tok *storedToken, client *http.Client) error {
 
 // apiGet performs an authenticated GET to the given URL and decodes the JSON
 // response body into dest.
-func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, apiURL, http.NoBody)
+func apiGet(ctx context.Context, accessToken, apiURL string, client *http.Client, dest any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -410,12 +414,12 @@ func apiGet(accessToken, apiURL string, client *http.Client, dest any) error {
 
 // doGoogleRequest performs an authenticated HTTP request with a JSON body
 // and decodes the JSON response into dest.
-func doGoogleRequest(method, accessToken, apiURL string, body any, client *http.Client, dest any) error {
+func doGoogleRequest(ctx context.Context, method, accessToken, apiURL string, body any, client *http.Client, dest any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, apiURL, strings.NewReader(string(payload)))
+	req, err := http.NewRequestWithContext(ctx, method, apiURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -441,12 +445,12 @@ func doGoogleRequest(method, accessToken, apiURL string, body any, client *http.
 
 // apiPost performs an authenticated POST with a JSON body and decodes the
 // JSON response into dest.
-func apiPost(accessToken, apiURL string, body any, client *http.Client, dest any) error {
-	return doGoogleRequest(http.MethodPost, accessToken, apiURL, body, client, dest)
+func apiPost(ctx context.Context, accessToken, apiURL string, body any, client *http.Client, dest any) error {
+	return doGoogleRequest(ctx, http.MethodPost, accessToken, apiURL, body, client, dest)
 }
 
 // apiPatch performs an authenticated PATCH with a JSON body and decodes the
 // JSON response into dest.
-func apiPatch(accessToken, apiURL string, body any, client *http.Client, dest any) error {
-	return doGoogleRequest(http.MethodPatch, accessToken, apiURL, body, client, dest)
+func apiPatch(ctx context.Context, accessToken, apiURL string, body any, client *http.Client, dest any) error {
+	return doGoogleRequest(ctx, http.MethodPatch, accessToken, apiURL, body, client, dest)
 }

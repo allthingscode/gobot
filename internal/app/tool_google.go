@@ -41,7 +41,7 @@ func (t *ListCalendarTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *ListCalendarTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
+func (t *ListCalendarTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	maxResults := 10
 	if v, ok := args["max_results"]; ok {
 		switch n := v.(type) {
@@ -57,7 +57,7 @@ func (t *ListCalendarTool) Execute(_ context.Context, _, _ string, args map[stri
 		maxResults = 10
 	}
 
-	events, err := google.ListUpcomingEvents(t.secretsRoot, maxResults)
+	events, err := google.ListUpcomingEvents(ctx, t.secretsRoot, maxResults)
 	if err != nil {
 		return "", fmt.Errorf("list_calendar_events: %w", err)
 	}
@@ -94,7 +94,7 @@ func (t *ListTasksTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *ListTasksTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
+func (t *ListTasksTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	tasklistID := "@default"
 	if v, ok := args["tasklist_id"]; ok {
 		if s, _ := v.(string); s != "" {
@@ -102,7 +102,7 @@ func (t *ListTasksTool) Execute(_ context.Context, _, _ string, args map[string]
 		}
 	}
 
-	tasks, err := google.ListTasks(t.secretsRoot, tasklistID)
+	tasks, err := google.ListTasks(ctx, t.secretsRoot, tasklistID)
 	if err != nil {
 		return "", fmt.Errorf("list_tasks: %w", err)
 	}
@@ -142,7 +142,7 @@ func (t *CreateTaskTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *CreateTaskTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
+func (t *CreateTaskTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	title, _ := args["title"].(string)
 	if strings.TrimSpace(title) == "" {
 		return "", fmt.Errorf("create_task: title is required")
@@ -157,7 +157,7 @@ func (t *CreateTaskTool) Execute(_ context.Context, _, _ string, args map[string
 		}
 	}
 
-	id, err := google.CreateTask(t.secretsRoot, tasklistID, title, notes)
+	id, err := google.CreateTask(ctx, t.secretsRoot, tasklistID, title, notes)
 	if err != nil {
 		return "", fmt.Errorf("create_task: %w", err)
 	}
@@ -190,13 +190,13 @@ func (t *CompleteTaskTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *CompleteTaskTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
+func (t *CompleteTaskTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	taskID, _ := args["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
 		return "", fmt.Errorf("complete_task: task_id is required")
 	}
 	tasklistID, _ := args["tasklist_id"].(string)
-	if err := google.CompleteTask(t.secretsRoot, tasklistID, taskID); err != nil {
+	if err := google.CompleteTask(ctx, t.secretsRoot, tasklistID, taskID); err != nil {
 		return "", fmt.Errorf("complete_task: %w", err)
 	}
 	return fmt.Sprintf("Task %s marked as completed.", taskID), nil
@@ -231,7 +231,7 @@ func (t *UpdateTaskTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *UpdateTaskTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
+func (t *UpdateTaskTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	taskID, _ := args["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
 		return "", fmt.Errorf("update_task: task_id is required")
@@ -241,7 +241,7 @@ func (t *UpdateTaskTool) Execute(_ context.Context, _, _ string, args map[string
 	notes, _ := args["notes"].(string)
 	due, _ := args["due"].(string)
 
-	if err := google.UpdateTask(t.secretsRoot, tasklistID, taskID, title, notes, due); err != nil {
+	if err := google.UpdateTask(ctx, t.secretsRoot, tasklistID, taskID, title, notes, due); err != nil {
 		return "", fmt.Errorf("update_task: %w", err)
 	}
 	return fmt.Sprintf("Task %s updated.", taskID), nil
@@ -280,7 +280,7 @@ func (t *CreateCalendarEventTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *CreateCalendarEventTool) Execute(_ context.Context, _, _ string, args map[string]any) (string, error) {
+func (t *CreateCalendarEventTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
 	summary, _ := args["summary"].(string)
 	if strings.TrimSpace(summary) == "" {
 		return "", fmt.Errorf("create_calendar_event: summary is required")
@@ -298,7 +298,7 @@ func (t *CreateCalendarEventTool) Execute(_ context.Context, _, _ string, args m
 	description, _ := args["description"].(string)
 	location, _ := args["location"].(string)
 
-	id, err := google.CreateEvent(t.secretsRoot, calendarID, summary, description, startTime, endTime, location)
+	id, err := google.CreateEvent(ctx, t.secretsRoot, calendarID, summary, description, startTime, endTime, location)
 	if err != nil {
 		return "", fmt.Errorf("create_calendar_event: %w", err)
 	}

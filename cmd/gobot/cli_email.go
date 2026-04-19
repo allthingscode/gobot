@@ -30,7 +30,7 @@ func cmdEmail() *cobra.Command {
 
 			// Gmail service uses secretsRoot/gmail/token.json
 			gmailSecrets := filepath.Join(secretsRoot, "gmail")
-			svc, err := google.NewService(gmailSecrets)
+			svc, err := google.NewService(context.Background(), gmailSecrets)
 			if err != nil {
 				return fmt.Errorf("auth: %w", err)
 			}

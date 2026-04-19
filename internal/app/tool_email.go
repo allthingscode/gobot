@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/reporter"
+	"golang.org/x/sync/errgroup"
 )
 
 type SendEmailTool struct {
@@ -55,7 +57,7 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 		return "", fmt.Errorf("send_email: body is required")
 	}
 
-	svc, err := google.NewService(s.secretsRoot)
+	svc, err := google.NewService(ctx, s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("send_email: auth: %w", err)
 	}
@@ -108,7 +110,7 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 		}
 	}
 
-	svc, err := google.NewService(s.secretsRoot)
+	svc, err := google.NewService(ctx, s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("search_gmail: auth: %w", err)
 	}
@@ -122,29 +124,54 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 		return "No messages found matching the query.", nil
 	}
 
+	messages, err := s.fetchDetails(ctx, svc, summaries)
+	if err != nil {
+		return "", err
+	}
+
 	var sb strings.Builder
-	fmt.Fprintf(&sb, 
-"Found %d messages:\n\n", len(summaries))
-	for _, sum := range summaries {
-		msg, err := svc.GetMessage(ctx, sum.ID)
-		if err != nil {
-			fmt.Fprintf(&sb, 
-"- ID: %s (Error loading details)\n", sum.ID)
+	fmt.Fprintf(&sb, "Found %d messages:\n\n", len(summaries))
+	for i, msg := range messages {
+		if msg == nil {
+			fmt.Fprintf(&sb, "- ID: %s (Error loading details)\n", summaries[i].ID)
 			continue
 		}
 		subject := msg.GetHeader("Subject")
 		from := msg.GetHeader("From")
-		fmt.Fprintf(&sb, 
-"- **ID**: %s\n", msg.ID)
-		fmt.Fprintf(&sb, 
-"  **From**: %s\n", from)
-		fmt.Fprintf(&sb, 
-"  **Subject**: %s\n", subject)
-		fmt.Fprintf(&sb, 
-"  **Snippet**: %s\n\n", msg.Snippet)
+		fmt.Fprintf(&sb, "- **ID**: %s\n", msg.ID)
+		fmt.Fprintf(&sb, "  **From**: %s\n", from)
+		fmt.Fprintf(&sb, "  **Subject**: %s\n", subject)
+		fmt.Fprintf(&sb, "  **Snippet**: %s\n\n", msg.Snippet)
 	}
 
 	return sb.String(), nil
+}
+
+func (s *SearchGmailTool) fetchDetails(ctx context.Context, svc *google.Service, summaries []google.MessageSummary) ([]*google.Message, error) {
+	messages := make([]*google.Message, len(summaries))
+	g, gctx := errgroup.WithContext(ctx)
+	var mu sync.Mutex
+
+	for i, sum := range summaries {
+		i, sum := i, sum // capture
+		g.Go(func() error {
+			msg, err := svc.GetMessage(gctx, sum.ID)
+			if err != nil {
+				// We intentionally ignore errors for individual messages to ensure
+				// the tool returns what it *did* find rather than failing completely.
+				return nil //nolint:nilerr // explanation: skip individual message fetch errors
+			}
+			mu.Lock()
+			messages[i] = msg
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, fmt.Errorf("search_gmail: fetch details: %w", err)
+	}
+	return messages, nil
 }
 
 // -- ReadGmailTool ------------------------------------------------------------
@@ -179,7 +206,7 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[strin
 		return "", fmt.Errorf("read_gmail: message_id is required")
 	}
 
-	svc, err := google.NewService(s.secretsRoot)
+	svc, err := google.NewService(ctx, s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("read_gmail: auth: %w", err)
 	}
@@ -190,16 +217,11 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[strin
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, 
-"### Email Details (ID: %s)\n\n", msg.ID)
-	fmt.Fprintf(&sb, 
-"**From**: %s\n", msg.GetHeader("From"))
-	fmt.Fprintf(&sb, 
-"**To**: %s\n", msg.GetHeader("To"))
-	fmt.Fprintf(&sb, 
-"**Date**: %s\n", msg.GetHeader("Date"))
-	fmt.Fprintf(&sb, 
-"**Subject**: %s\n\n", msg.GetHeader("Subject"))
+	fmt.Fprintf(&sb, "### Email Details (ID: %s)\n\n", msg.ID)
+	fmt.Fprintf(&sb, "**From**: %s\n", msg.GetHeader("From"))
+	fmt.Fprintf(&sb, "**To**: %s\n", msg.GetHeader("To"))
+	fmt.Fprintf(&sb, "**Date**: %s\n", msg.GetHeader("Date"))
+	fmt.Fprintf(&sb, "**Subject**: %s\n\n", msg.GetHeader("Subject"))
 	sb.WriteString("---\n\n")
 	sb.WriteString(msg.ExtractBody())
 	sb.WriteString("\n\n---")

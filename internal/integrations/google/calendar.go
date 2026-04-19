@@ -1,6 +1,7 @@
 package google
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,12 +32,12 @@ type calendarListEntry struct {
 }
 
 // listCalendarsWithClient returns all calendars the user has reader access to.
-func listCalendarsWithClient(token string, client *http.Client) ([]calendarListEntry, error) {
+func listCalendarsWithClient(ctx context.Context, token string, client *http.Client) ([]calendarListEntry, error) {
 	apiURL := calendarBaseURL + "/users/me/calendarList?minAccessRole=reader"
 	var resp struct {
 		Items []calendarListEntry `json:"items"`
 	}
-	if err := apiGet(token, apiURL, client, &resp); err != nil {
+	if err := apiGet(ctx, token, apiURL, client, &resp); err != nil {
 		return nil, fmt.Errorf("calendar list: %w", err)
 	}
 	return resp.Items, nil
@@ -45,17 +46,17 @@ func listCalendarsWithClient(token string, client *http.Client) ([]calendarListE
 // ListUpcomingEvents returns up to maxResults upcoming events from the
 // primary calendar, ordered by start time. Returns nil slice (not error)
 // when the calendar is empty.
-func ListUpcomingEvents(secretsRoot string, maxResults int) ([]CalendarEvent, error) {
-	return listUpcomingEventsWithClient(secretsRoot, maxResults, http.DefaultClient)
+func ListUpcomingEvents(ctx context.Context, secretsRoot string, maxResults int) ([]CalendarEvent, error) {
+	return listUpcomingEventsWithClient(ctx, secretsRoot, maxResults, TimeoutClient)
 }
 
-func listUpcomingEventsWithClient(secretsRoot string, maxResults int, client *http.Client) ([]CalendarEvent, error) {
-	token, err := bearerTokenWithClient(secretsRoot, client)
+func listUpcomingEventsWithClient(ctx context.Context, secretsRoot string, maxResults int, client *http.Client) ([]CalendarEvent, error) {
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
 	if err != nil {
 		return nil, fmt.Errorf("calendar auth: %w", err)
 	}
 
-	calendars, err := listCalendarsWithClient(token, client)
+	calendars, err := listCalendarsWithClient(ctx, token, client)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +90,7 @@ func listUpcomingEventsWithClient(secretsRoot string, maxResults int, client *ht
 				} `json:"end"`
 			} `json:"items"`
 		}
-		if err := apiGet(token, apiURL, client, &resp); err != nil {
+		if err := apiGet(ctx, token, apiURL, client, &resp); err != nil {
 			// Log and skip — a shared calendar with expired permissions should
 			// not block everything else.
 			slog.Warn("calendar: skipping calendar due to fetch error",
@@ -128,11 +129,11 @@ func listUpcomingEventsWithClient(secretsRoot string, maxResults int, client *ht
 // CreateEvent creates a new event in the specified Google Calendar and returns
 // the created event's ID. calendarID defaults to "primary" when empty.
 // start and end must be valid RFC3339 (ISO 8601) strings.
-func CreateEvent(secretsRoot, calendarID, summary, description, start, end, location string) (string, error) {
-	return createEventWithClient(secretsRoot, calendarID, summary, description, start, end, location, http.DefaultClient)
+func CreateEvent(ctx context.Context, secretsRoot, calendarID, summary, description, start, end, location string) (string, error) {
+	return createEventWithClient(ctx, secretsRoot, calendarID, summary, description, start, end, location, TimeoutClient)
 }
 
-func createEventWithClient(secretsRoot, calendarID, summary, description, start, end, location string, client *http.Client) (string, error) {
+func createEventWithClient(ctx context.Context, secretsRoot, calendarID, summary, description, start, end, location string, client *http.Client) (string, error) {
 	if _, err := time.Parse(time.RFC3339, start); err != nil {
 		return "", fmt.Errorf("invalid start time (want RFC3339): %w", err)
 	}
@@ -140,7 +141,7 @@ func createEventWithClient(secretsRoot, calendarID, summary, description, start,
 		return "", fmt.Errorf("invalid end time (want RFC3339): %w", err)
 	}
 
-	token, err := bearerTokenWithClient(secretsRoot, client)
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
 	if err != nil {
 		return "", fmt.Errorf("calendar auth: %w", err)
 	}
@@ -168,7 +169,7 @@ func createEventWithClient(secretsRoot, calendarID, summary, description, start,
 	var created struct {
 		ID string `json:"id"`
 	}
-	if err := apiPost(token, apiURL, body, client, &created); err != nil {
+	if err := apiPost(ctx, token, apiURL, body, client, &created); err != nil {
 		return "", fmt.Errorf("calendar create event: %w", err)
 	}
 	return created.ID, nil

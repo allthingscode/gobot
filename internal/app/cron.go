@@ -148,7 +148,7 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 
 func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, recipient, response string) {
 	gmailSecrets := filepath.Join(cd.secretsRoot, "gmail")
-	svc, err := google.NewService(gmailSecrets)
+	svc, err := google.NewService(ctx, gmailSecrets)
 	if err != nil {
 		slog.Error("failed to initialize gmail service for cron", "err", err)
 		return

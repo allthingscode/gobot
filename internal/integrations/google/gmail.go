@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/allthingscode/gobot/internal/reporter"
 	"github.com/allthingscode/gobot/internal/resilience"
@@ -29,11 +28,6 @@ var ErrNeedsReauth = errors.New("AUTH_EXPIRED: run gobot reauth")
 const (
 	gmailBaseURL = "https://gmail.googleapis.com/gmail/v1/users/me"
 )
-
-//nolint:gochecknoglobals // HTTP client is intentionally shared for connection reuse
-var timeoutClient = &http.Client{Timeout: 30 * time.Second}
-
-// storedToken mirrors the JSON structure written by google-auth-library (Python).
 
 // MessageSummary represents a minimal message object from a list/search result.
 type MessageSummary struct {
@@ -82,7 +76,7 @@ type Service struct {
 }
 
 // NewService loads OAuth2 credentials from {secretsRoot}/token.json and returns a Service.
-func NewService(secretsRoot string) (*Service, error) {
+func NewService(ctx context.Context, secretsRoot string) (*Service, error) {
 	tokenPath := filepath.Join(secretsRoot, "token.json")
 	data, err := os.ReadFile(tokenPath)
 	if err != nil {
@@ -98,7 +92,7 @@ func NewService(secretsRoot string) (*Service, error) {
 		if tok.RefreshToken == "" {
 			return nil, ErrNeedsReauth
 		}
-		if err := refreshToken(&tok, timeoutClient); err != nil {
+		if err := refreshToken(ctx, &tok, TimeoutClient); err != nil {
 			if strings.Contains(err.Error(), "invalid_grant") {
 				return nil, ErrNeedsReauth
 			}
@@ -112,7 +106,7 @@ func NewService(secretsRoot string) (*Service, error) {
 	return &Service{
 		accessToken: tok.Token,
 		baseURL:     gmailBaseURL,
-		httpClient:  timeoutClient,
+		httpClient:  TimeoutClient,
 	}, nil
 }
 

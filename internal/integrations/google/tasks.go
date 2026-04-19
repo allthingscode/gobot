@@ -1,6 +1,7 @@
 package google
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -19,12 +20,12 @@ type Task struct {
 
 // ListTasks returns incomplete tasks from the given task list.
 // Pass "@default" for tasklistID to use the default list.
-func ListTasks(secretsRoot, tasklistID string) ([]Task, error) {
-	return listTasksWithClient(secretsRoot, tasklistID, http.DefaultClient)
+func ListTasks(ctx context.Context, secretsRoot, tasklistID string) ([]Task, error) {
+	return listTasksWithClient(ctx, secretsRoot, tasklistID, TimeoutClient)
 }
 
-func listTasksWithClient(secretsRoot, tasklistID string, client *http.Client) ([]Task, error) {
-	token, err := bearerTokenWithClient(secretsRoot, client)
+func listTasksWithClient(ctx context.Context, secretsRoot, tasklistID string, client *http.Client) ([]Task, error) {
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
 	if err != nil {
 		return nil, fmt.Errorf("tasks auth: %w", err)
 	}
@@ -46,7 +47,7 @@ func listTasksWithClient(secretsRoot, tasklistID string, client *http.Client) ([
 		} `json:"items"`
 	}
 
-	if err := apiGet(token, apiURL, client, &resp); err != nil {
+	if err := apiGet(ctx, token, apiURL, client, &resp); err != nil {
 		return nil, fmt.Errorf("tasks list: %w", err)
 	}
 
@@ -68,12 +69,12 @@ func listTasksWithClient(secretsRoot, tasklistID string, client *http.Client) ([
 
 // CreateTask creates a new task in the specified task list and returns the
 // created task's ID.
-func CreateTask(secretsRoot, tasklistID, title, notes string) (string, error) {
-	return createTaskWithClient(secretsRoot, tasklistID, title, notes, http.DefaultClient)
+func CreateTask(ctx context.Context, secretsRoot, tasklistID, title, notes string) (string, error) {
+	return createTaskWithClient(ctx, secretsRoot, tasklistID, title, notes, TimeoutClient)
 }
 
-func createTaskWithClient(secretsRoot, tasklistID, title, notes string, client *http.Client) (string, error) {
-	token, err := bearerTokenWithClient(secretsRoot, client)
+func createTaskWithClient(ctx context.Context, secretsRoot, tasklistID, title, notes string, client *http.Client) (string, error) {
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
 	if err != nil {
 		return "", fmt.Errorf("tasks auth: %w", err)
 	}
@@ -91,7 +92,7 @@ func createTaskWithClient(secretsRoot, tasklistID, title, notes string, client *
 	var created struct {
 		ID string `json:"id"`
 	}
-	if err := apiPost(token, apiURL, body, client, &created); err != nil {
+	if err := apiPost(ctx, token, apiURL, body, client, &created); err != nil {
 		return "", fmt.Errorf("tasks create: %w", err)
 	}
 	return created.ID, nil
@@ -105,7 +106,7 @@ func FormatTasksMarkdown(tasks []Task) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("### \u2705 Open Tasks\n")
+	sb.WriteString("### ✅ Open Tasks\n")
 	for _, task := range tasks {
 		title := task.Title
 		if title == "" {
@@ -122,12 +123,12 @@ func FormatTasksMarkdown(tasks []Task) string {
 
 // CompleteTask marks a task as completed.
 // tasklistID defaults to "@default" if empty.
-func CompleteTask(secretsRoot, tasklistID, taskID string) error {
-	return completeTaskWithClient(secretsRoot, tasklistID, taskID, http.DefaultClient)
+func CompleteTask(ctx context.Context, secretsRoot, tasklistID, taskID string) error {
+	return completeTaskWithClient(ctx, secretsRoot, tasklistID, taskID, TimeoutClient)
 }
 
-func completeTaskWithClient(secretsRoot, tasklistID, taskID string, client *http.Client) error {
-	token, err := bearerTokenWithClient(secretsRoot, client)
+func completeTaskWithClient(ctx context.Context, secretsRoot, tasklistID, taskID string, client *http.Client) error {
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
 	if err != nil {
 		return fmt.Errorf("tasks auth: %w", err)
 	}
@@ -136,19 +137,19 @@ func completeTaskWithClient(secretsRoot, tasklistID, taskID string, client *http
 	}
 	apiURL := fmt.Sprintf("%s/lists/%s/tasks/%s", tasksBaseURL, tasklistID, taskID)
 	var updated struct{}
-	return apiPatch(token, apiURL, map[string]string{"status": "completed"}, client, &updated)
+	return apiPatch(ctx, token, apiURL, map[string]string{"status": "completed"}, client, &updated)
 }
 
 // UpdateTask modifies the title, notes, and/or due date of an existing task.
 // Pass empty string for any field you do not want to change.
 // tasklistID defaults to "@default" if empty.
 // Returns an error if no fields are provided.
-func UpdateTask(secretsRoot, tasklistID, taskID, title, notes, due string) error {
-	return updateTaskWithClient(secretsRoot, tasklistID, taskID, title, notes, due, http.DefaultClient)
+func UpdateTask(ctx context.Context, secretsRoot, tasklistID, taskID, title, notes, due string) error {
+	return updateTaskWithClient(ctx, secretsRoot, tasklistID, taskID, title, notes, due, TimeoutClient)
 }
 
-func updateTaskWithClient(secretsRoot, tasklistID, taskID, title, notes, due string, client *http.Client) error {
-	token, err := bearerTokenWithClient(secretsRoot, client)
+func updateTaskWithClient(ctx context.Context, secretsRoot, tasklistID, taskID, title, notes, due string, client *http.Client) error {
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
 	if err != nil {
 		return fmt.Errorf("tasks auth: %w", err)
 	}
@@ -170,7 +171,7 @@ func updateTaskWithClient(secretsRoot, tasklistID, taskID, title, notes, due str
 	}
 	apiURL := fmt.Sprintf("%s/lists/%s/tasks/%s", tasksBaseURL, tasklistID, taskID)
 	var updated struct{}
-	return apiPatch(token, apiURL, body, client, &updated)
+	return apiPatch(ctx, token, apiURL, body, client, &updated)
 }
 
 // formatDueDate trims a Google Tasks due date (RFC3339) to a short date string.

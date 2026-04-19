@@ -2,6 +2,7 @@
 package google
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +50,7 @@ func TestCompleteTask_Success(t *testing.T) {
 	// completeTaskWithClient needs a real bearer token — we bypass auth by
 	// calling apiPatch directly with a fake token against our mock server.
 	var dest struct{}
-	err := apiPatch("fake-token", srv.URL+"/lists/@default/tasks/task-1",
+	err := apiPatch(context.Background(), "fake-token", srv.URL+"/lists/@default/tasks/task-1",
 		map[string]string{"status": "completed"}, srv.Client(), &dest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -63,7 +64,7 @@ func TestCompleteTask_Success(t *testing.T) {
 func TestUpdateTask_NoFields(t *testing.T) {
 	t.Parallel()
 	// Use the simple version from the plan: assert non-nil error from UpdateTask with a tempdir.
-	err := UpdateTask(t.TempDir(), "@default", "task-1", "", "", "")
+	err := UpdateTask(context.Background(), t.TempDir(), "@default", "task-1", "", "", "")
 	if err == nil {
 		t.Fatal("expected error when no fields provided, got nil")
 	}
@@ -85,7 +86,7 @@ func TestUpdateTask_TitleOnly(t *testing.T) {
 	defer srv.Close()
 
 	var dest struct{}
-	err := apiPatch("fake-token", srv.URL+"/lists/@default/tasks/task-1",
+	err := apiPatch(context.Background(), "fake-token", srv.URL+"/lists/@default/tasks/task-1",
 		map[string]string{"title": "New title"}, srv.Client(), &dest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

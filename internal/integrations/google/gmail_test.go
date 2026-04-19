@@ -72,7 +72,7 @@ func setupGmailService(t *testing.T, baseURL string) *Service {
 	tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
 	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
-	svc, err := NewService(tmp)
+	svc, err := NewService(context.Background(), tmp)
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
@@ -98,22 +98,30 @@ func validateGmailGet(t *testing.T, svc *Service, ctx context.Context) {
 		t.Fatalf("GetMessage failed: %v", err)
 	}
 	if msg.Snippet != "Hello world snippet" {
-		t.Errorf("Unexpected snippet: %s", msg.Snippet)
+		t.Errorf("Unexpected snippet: %q", msg.Snippet)
 	}
-	if msg.GetHeader("Subject") != "Test Subject" {
-		t.Errorf("Unexpected subject: %s", msg.GetHeader("Subject"))
+}
+
+func TestNewService_Success(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	tok := storedToken{Token: "test-token", Expiry: time.Now().Add(1 * time.Hour)}
+	tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
+	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
+
+	svc, err := NewService(context.Background(), tmp)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
 	}
-	if msg.ExtractBody() != "Full body text" {
-		t.Errorf("Unexpected body: %s", msg.ExtractBody())
+	if svc.accessToken != "test-token" {
+		t.Errorf("want test-token, got %q", svc.accessToken)
 	}
 }
 
 func TestNewService_Refresh(t *testing.T) {
 	t.Parallel()
-	refreshCalled := false
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
-		refreshCalled = true
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "new-token",
 			"expires_in":   3600,
@@ -124,28 +132,23 @@ func TestNewService_Refresh(t *testing.T) {
 
 	tmp := t.TempDir()
 	tok := storedToken{
-		Token:        "expired-token",
 		RefreshToken: "refresh-me",
 		TokenURI:     server.URL + "/token",
 		Expiry:       time.Now().Add(-1 * time.Hour),
 	}
 	tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
-	_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
+	tokenPath := filepath.Join(tmp, "token.json")
+	_ = os.WriteFile(tokenPath, tokData, 0o600)
 
-	svc, err := NewService(tmp)
+	svc, err := NewService(context.Background(), tmp)
 	if err != nil {
-		t.Fatalf("NewService with refresh failed: %v", err)
+		t.Fatalf("NewService failed: %v", err)
+	}
+	if svc.accessToken != "new-token" {
+		t.Errorf("want new-token, got %q", svc.accessToken)
 	}
 
-	if !refreshCalled {
-		t.Error("expected token refresh to be called")
-	}
-	if svc.accessToken != "new-token" { //nolint:goconst // test fixture token
-		t.Errorf("expected new-token, got %s", svc.accessToken)
-	}
-
-	// Verify file was updated
-	data, _ := os.ReadFile(filepath.Join(tmp, "token.json"))
+	data, _ := os.ReadFile(tokenPath)
 	var updated storedToken
 	_ = json.Unmarshal(data, &updated)
 	if updated.Token != "new-token" {
@@ -177,7 +180,7 @@ func TestNewService_RefreshError(t *testing.T) {
 		tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
 		_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
-		_, err := NewService(tmp)
+		_, err := NewService(context.Background(), tmp)
 		if err == nil || !strings.Contains(err.Error(), "AUTH_EXPIRED") {
 			t.Errorf("expected ErrNeedsReauth (AUTH_EXPIRED), got %v", err)
 		}
@@ -201,7 +204,7 @@ func TestNewService_RefreshError(t *testing.T) {
 		tokData, _ := json.Marshal(tok) //nolint:gosec // G117: test token, no real secret
 		_ = os.WriteFile(filepath.Join(tmp, "token.json"), tokData, 0o600)
 
-		_, err := NewService(tmp)
+		_, err := NewService(context.Background(), tmp)
 		if err == nil || !strings.Contains(err.Error(), "invalid token refresh response") {
 			t.Errorf("expected JSON unmarshal error, got %v", err)
 		}

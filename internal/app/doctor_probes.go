@@ -65,7 +65,7 @@ func LiveProbesList() *doctor.Probes {
 			// gmailSecretsPath is the directory containing token.json.
 			// google.NewService expects the directory path directly.
 			tokenDir := filepath.Dir(filepath.Join(gmailSecretsPath, "token.json"))
-			_, err := google.NewService(tokenDir)
+			_, err := google.NewService(context.Background(), tokenDir)
 			if err != nil {
 				return fmt.Errorf("new google service: %w", err)
 			}

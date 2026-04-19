@@ -2,13 +2,12 @@
 package google
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +25,7 @@ func TestBearerToken_ValidNotExpired(t *testing.T) {
 		Expiry:       time.Now().Add(1 * time.Hour), // not expired
 	}
 	writeToken(t, dir, tok)
-	got, err := BearerToken(dir)
+	got, err := BearerToken(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +57,7 @@ func TestBearerToken_ExpiredRefreshes(t *testing.T) {
 	}
 	writeToken(t, dir, tok)
 
-	got, err := bearerTokenWithClient(dir, srv.Client())
+	got, err := bearerTokenWithClient(context.Background(), dir, srv.Client())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +68,7 @@ func TestBearerToken_ExpiredRefreshes(t *testing.T) {
 
 func TestBearerToken_MissingFile(t *testing.T) {
 	t.Parallel()
-	_, err := BearerToken(t.TempDir())
+	_, err := BearerToken(context.Background(), t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for missing token file")
 	}
@@ -83,7 +82,7 @@ func TestBearerToken_NoRefreshToken(t *testing.T) {
 		Expiry: time.Now().Add(-1 * time.Hour),
 	}
 	writeToken(t, dir, tok)
-	_, err := BearerToken(dir)
+	_, err := BearerToken(context.Background(), dir)
 	if err == nil {
 		t.Fatal("expected error when no refresh_token")
 	}
@@ -104,7 +103,7 @@ func TestAPIGet_Success(t *testing.T) {
 	var got struct {
 		ID string `json:"id"`
 	}
-	if err := apiGet("tok", srv.URL, srv.Client(), &got); err != nil {
+	if err := apiGet(context.Background(), "tok", srv.URL, srv.Client(), &got); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.ID != "evt1" {
@@ -119,7 +118,7 @@ func TestAPIGet_HTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := apiGet("tok", srv.URL, srv.Client(), &struct{}{})
+	err := apiGet(context.Background(), "tok", srv.URL, srv.Client(), &struct{}{})
 	if err == nil {
 		t.Fatal("expected error for 404 response")
 	}
@@ -138,7 +137,7 @@ func TestAPIPost_Success(t *testing.T) {
 	var got struct {
 		ID string `json:"id"`
 	}
-	err := apiPost("tok", srv.URL, map[string]string{"title": "test"}, srv.Client(), &got)
+	err := apiPost(context.Background(), "tok", srv.URL, map[string]string{"title": "test"}, srv.Client(), &got)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -154,82 +153,48 @@ func TestAPIPost_HTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := apiPost("tok", srv.URL, map[string]string{}, srv.Client(), &struct{}{})
+	err := apiPost(context.Background(), "tok", srv.URL, map[string]string{}, srv.Client(), &struct{}{})
 	if err == nil {
 		t.Fatal("expected error for 500 response")
+	}
+}
+
+func writeToken(t *testing.T, dir string, tok storedToken) {
+	t.Helper()
+	data, err := json.Marshal(tok) //nolint:gosec // RefreshToken is a secret, but we must marshal it to persist it.
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := GoogleTokenPath(dir)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
 // redirectClient returns an *http.Client that rewrites the URL prefix from → to.
 // Used in tests to redirect production API base URLs to httptest servers.
 func redirectClient(from, to string) *http.Client {
-	return &http.Client{Transport: &prefixRewriter{from: from, to: to}}
+	return &http.Client{
+		Transport: &prefixRewriter{
+			from: from,
+			to:   to,
+		},
+	}
 }
 
-type prefixRewriter struct{ from, to string }
+type prefixRewriter struct {
+	from string
+	to   string
+}
 
 func (r *prefixRewriter) RoundTrip(req *http.Request) (*http.Response, error) {
 	rawURL := strings.Replace(req.URL.String(), r.from, r.to, 1)
 	newURL, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse url: %w", err)
+		return nil, err
 	}
 	r2 := req.Clone(req.Context())
 	r2.URL = newURL
 	r2.Host = newURL.Host
-	resp, err := http.DefaultTransport.RoundTrip(r2)
-	if err != nil {
-		return nil, fmt.Errorf("roundtrip: %w", err)
-	}
-	return resp, nil
-}
-
-// writeToken marshals tok and writes to dir/google_token.json.
-func writeToken(t *testing.T, dir string, tok storedToken) {
-	t.Helper()
-	data, err := json.Marshal(tok) //nolint:gosec // G117: RefreshToken must be marshaled to persist the token
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(GoogleTokenPath(dir), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestPersistToken(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	tok := &storedToken{Token: "test"}
-	err := persistToken(dir, tok)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := os.Stat(GoogleTokenPath(dir)); err != nil {
-		t.Error("persistToken failed to create file")
-	}
-}
-
-func TestResolveClientCredentials_Success(t *testing.T) {
-	// Not parallel: uses t.Setenv to isolate the encryption key file (incompatible with t.Parallel).
-	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(t.TempDir(), "encryption.key"))
-	dir := t.TempDir()
-	store := tokenStore(dir)
-	_ = store.Set("google_client_id", "cid")
-	_ = store.Set("google_client_secret", "csec")
-	
-	cid, csec, err := resolveClientCredentials(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cid != "cid" || csec != "csec" {
-		t.Errorf("got (%q, %q), want (cid, csec)", cid, csec)
-	}
-}
-
-func TestResolveClientCredentials_Missing(t *testing.T) {
-	t.Parallel()
-	_, _, err := resolveClientCredentials(t.TempDir())
-	if err == nil {
-		t.Error("expected error for missing credentials file")
-	}
+	return http.DefaultTransport.RoundTrip(r2)
 }

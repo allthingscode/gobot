@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -20,7 +21,8 @@ func cmdCalendar() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 			secretsRoot := cfg.SecretsRoot()
-			events, err := google.ListUpcomingEvents(secretsRoot, maxResults)
+			ctx := context.Background()
+			events, err := google.ListUpcomingEvents(ctx, secretsRoot, maxResults)
 			if err != nil {
 				return fmt.Errorf("calendar: %w", err)
 			}
@@ -61,7 +63,8 @@ func cmdTasks() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 			secretsRoot := cfg.SecretsRoot()
-			tasks, err := google.ListTasks(secretsRoot, "@default")
+			ctx := context.Background()
+			tasks, err := google.ListTasks(ctx, secretsRoot, "@default")
 			if err != nil {
 				return fmt.Errorf("tasks: %w", err)
 			}
@@ -90,8 +93,9 @@ func cmdTasks() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 			secretsRoot := cfg.SecretsRoot()
+			ctx := context.Background()
 			title := strings.Join(args, " ")
-			id, err := google.CreateTask(secretsRoot, "@default", title, "")
+			id, err := google.CreateTask(ctx, secretsRoot, "@default", title, "")
 			if err != nil {
 				return fmt.Errorf("create task: %w", err)
 			}
