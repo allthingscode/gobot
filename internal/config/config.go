@@ -53,8 +53,8 @@ type CronConfig struct {
 }
 
 type HeartbeatConfig struct {
-	Enabled  bool          `json:"enabled"`
-	Interval time.Duration `json:"interval"`
+	Enabled  bool   `json:"enabled"`
+	Interval string `json:"interval"` // Go duration string, e.g. "30s"
 }
 
 type ResilienceConfig struct {
@@ -577,6 +577,11 @@ func (c *Config) mcpEnvFor(serverName string, store *secrets.SecretsStore) map[s
 		}
 	}
 	return env
+}
+
+// HeartbeatInterval returns the configured heartbeat interval, defaulting to 15 minutes.
+func (c *Config) HeartbeatInterval() time.Duration {
+	return parseDurationOrDefault(c.Heartbeat.Interval, 15*time.Minute)
 }
 
 // ExecTimeout returns the shell tool execution timeout, defaulting to 2 minutes.
