@@ -389,6 +389,7 @@ func (r *AgentRunner) handleCategoryAError(sessionKey, name, paramsHash, result 
 		slog.String("tool", name),
 		slog.String("params_hash", paramsHash),
 		slog.Any("err", err),
+		slog.String("output", result),
 	)
 
 	if result != "" {
