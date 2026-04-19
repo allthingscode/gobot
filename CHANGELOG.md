@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ---
 
-## [Unreleased]
+## [0.2.0] - 2026-04-18
 
 ### Added
+- **F-111 Web Dashboard**: Implements a real-time web dashboard and SSE server for telemetry monitoring.
+- **Default Config Generation**: `gobot init` now automatically creates a default `config.json` file.
 - **Cross-Session Shared Memory Namespace** (F-071): Implements a namespaced memory model for long-term storage.
   - Adds `session:{key}` and `global` namespaces to the memory store.
   - Implements schema migration to transition from legacy session-only model to namespaced model.

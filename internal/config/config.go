@@ -186,6 +186,7 @@ type GatewayConfig struct {
 	AuthToken        string `json:"auth_token"`
 	Host             string `json:"host"`
 	Port             int    `json:"port"`
+	WebAddr          string `json:"web_addr"` // F-111
 }
 
 // ExecConfig holds settings for the shell_exec tool.

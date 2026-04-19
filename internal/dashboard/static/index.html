@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoBot Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --text-color: #d4d4d4;
+            --header-bg: #252526;
+            --border-color: #333;
+            --info-color: #3794ff;
+            --warn-color: #cca700;
+            --error-color: #f48771;
+            --debug-color: #6a9955;
+            --sidebar-bg: #252526;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        header {
+            background-color: var(--header-bg);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .logo {
+            font-weight: bold;
+            font-size: 1.2em;
+            color: var(--info-color);
+        }
+        .stats {
+            display: flex;
+            gap: 20px;
+            font-size: 0.9em;
+        }
+        .stat-item span {
+            color: #888;
+            margin-right: 5px;
+        }
+        main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        #sidebar {
+            width: 250px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            flex-shrink: 0;
+        }
+        .panel-title {
+            font-size: 0.8em;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+        .status-card {
+            background-color: #2d2d2d;
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .status-row {
+            margin-bottom: 8px;
+        }
+        .status-row:last-child {
+            margin-bottom: 0;
+        }
+        .status-label {
+            color: #888;
+            display: block;
+            font-size: 0.8em;
+        }
+        .status-value {
+            display: block;
+            word-break: break-all;
+        }
+        #log-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #controls {
+            padding: 10px 20px;
+            background-color: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-shrink: 0;
+        }
+        #log-output {
+            flex: 1;
+            padding: 10px 20px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.4;
+        }
+        .log-line {
+            margin-bottom: 2px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .log-time { color: #888; margin-right: 10px; }
+        .log-level { font-weight: bold; margin-right: 10px; display: inline-block; width: 50px; }
+        .level-INFO { color: var(--info-color); }
+        .level-WARN { color: var(--warn-color); }
+        .level-ERROR { color: var(--error-color); }
+        .level-DEBUG { color: var(--debug-color); }
+        
+        input[type="text"] {
+            background-color: #3c3c3c;
+            border: 1px solid var(--border-color);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 2px;
+            outline: none;
+        }
+        input[type="text"]:focus {
+            border-color: var(--info-color);
+        }
+        .btn {
+            background-color: #3c3c3c;
+            border: 1px solid var(--border-color);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 2px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .btn:hover { background-color: #4a4a4a; }
+        .btn.active { background-color: var(--info-color); border-color: var(--info-color); }
+
+        ::-webkit-scrollbar { width: 10px; }
+        ::-webkit-scrollbar-track { background: var(--bg-color); }
+        ::-webkit-scrollbar-thumb { background: #444; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">GoBot Dashboard</div>
+            <div class="stats">
+                <div class="stat-item"><span id="agent-name-label">Agent:</span> <b id="agent-name">gobot-strategic</b></div>
+                <div class="stat-item"><span>Model:</span> <b id="agent-model">-</b></div>
+                <div class="stat-item"><span>Uptime:</span> <b id="uptime">0s</b></div>
+            </div>
+        </header>
+        <main>
+            <div id="sidebar">
+                <div>
+                    <div class="panel-title">Runtime Status</div>
+                    <div class="status-card">
+                        <div class="status-row">
+                            <span class="status-label">Active Session</span>
+                            <span class="status-value" id="session-id">-</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Current Tool</span>
+                            <span class="status-value" id="current-tool">Idle</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Last Heartbeat</span>
+                            <span class="status-value" id="last-heartbeat">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="log-container">
+                <div id="controls">
+                    <input type="text" id="filter" placeholder="Filter logs..." style="flex: 1;">
+                    <button id="toggle-autoscroll" class="btn active">Auto-scroll</button>
+                    <button id="clear-logs" class="btn">Clear</button>
+                </div>
+                <div id="log-output"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const logOutput = document.getElementById('log-output');
+        const filterInput = document.getElementById('filter');
+        const toggleAutoscroll = document.getElementById('toggle-autoscroll');
+        const clearLogs = document.getElementById('clear-logs');
+        const uptimeEl = document.getElementById('uptime');
+        const startTime = Date.now();
+
+        let autoscroll = true;
+        let filterText = '';
+
+        function updateUptime() {
+            const diff = Math.floor((Date.now() - startTime) / 1000);
+            const h = Math.floor(diff / 3600);
+            const m = Math.floor((diff % 3600) / 60);
+            const s = diff % 60;
+            uptimeEl.textContent = `${h}h ${m}m ${s}s`;
+        }
+        setInterval(updateUptime, 1000);
+
+        toggleAutoscroll.onclick = () => {
+            autoscroll = !autoscroll;
+            toggleAutoscroll.classList.toggle('active', autoscroll);
+        };
+
+        clearLogs.onclick = () => {
+            logOutput.innerHTML = '';
+        };
+
+        filterInput.oninput = (e) => {
+            filterText = e.target.value.toLowerCase();
+            const lines = logOutput.getElementsByClassName('log-line');
+            for (let line of lines) {
+                const text = line.textContent.toLowerCase();
+                line.style.display = text.includes(filterText) ? 'block' : 'none';
+            }
+        };
+
+        function addLog(entry) {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            
+            const time = new Date(entry.timestamp).toLocaleTimeString();
+            const level = entry.level || 'INFO';
+            
+            line.innerHTML = `<span class="log-time">${time}</span><span class="log-level level-${level}">${level}</span><span class="log-msg">${escapeHtml(entry.message)}</span>`;
+            
+            if (entry.fields && Object.keys(entry.fields).length > 0) {
+                const fieldsSpan = document.createElement('span');
+                fieldsSpan.style.color = '#888';
+                fieldsSpan.style.marginLeft = '10px';
+                fieldsSpan.textContent = JSON.stringify(entry.fields);
+                line.appendChild(fieldsSpan);
+
+                // Update status info if present in fields
+                if (entry.fields.session_id) document.getElementById('session-id').textContent = entry.fields.session_id;
+                if (entry.fields.model) document.getElementById('agent-model').textContent = entry.fields.model;
+                if (entry.fields.tool) document.getElementById('current-tool').textContent = entry.fields.tool;
+            }
+
+            if (filterText && !line.textContent.toLowerCase().includes(filterText)) {
+                line.style.display = 'none';
+            }
+
+            logOutput.appendChild(line);
+            
+            if (autoscroll) {
+                logOutput.scrollTop = logOutput.scrollHeight;
+            }
+
+            // Keep only last 2000 lines in DOM for performance
+            if (logOutput.childNodes.length > 2000) {
+                logOutput.removeChild(logOutput.firstChild);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        const evtSource = new EventSource("/events");
+        evtSource.onmessage = (event) => {
+            try {
+                const entry = JSON.parse(event.data);
+                addLog(entry);
+            } catch (e) {
+                console.error("Failed to parse log entry", e);
+            }
+        };
+        evtSource.onerror = (err) => {
+            console.error("EventSource failed:", err);
+        };
+    </script>
+</body>
+</html>

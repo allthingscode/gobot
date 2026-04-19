@@ -31,7 +31,7 @@ func TestSetupLogging(t *testing.T) {
 	cfg.Strategic.StorageRoot = tempDir
 
 	// Case 1: Text format
-	SetupLogging(cfg)
+	SetupLogging(cfg, nil)
 	slog.Info("test text log message")
 
 	logFile := filepath.Join(tempDir, "logs", "gobot.log")
@@ -46,7 +46,7 @@ func TestSetupLogging(t *testing.T) {
 
 	// Case 2: JSON format
 	cfg.Logging.Format = "json"
-	SetupLogging(cfg)
+	SetupLogging(cfg, nil)
 	slog.Info("test json log message")
 
 	content, _ = os.ReadFile(logFile)
@@ -139,7 +139,7 @@ func TestRunAgentLoop(t *testing.T) {
 	cfg := &config.Config{}
 	stack := &AgentStack{Runner: &AgentRunner{}}
 	
-	_ = runAgentLoop(ctx, cfg, stack, nil)
+	_ = runAgentLoop(ctx, cfg, stack, nil, nil)
 }
 
 func TestRunPreFlightDiagnostics(t *testing.T) {

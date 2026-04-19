@@ -17,6 +17,7 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/dashboard"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/gateway"
 	"github.com/allthingscode/gobot/internal/gateway/dash"
@@ -32,7 +33,13 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	SetupLogging(cfg)
+	var hub *dashboard.Hub
+	if cfg.Gateway.WebAddr != "" {
+		hub = dashboard.NewHub(1000)
+		defer hub.Close()
+	}
+
+	SetupLogging(cfg, hub)
 	runPreFlightDiagnostics(cfg)
 
 	if err := config.ReportValidation(cfg); err != nil {
@@ -50,7 +57,7 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	return runAgentLoop(ctx, cfg, stack, otelProvider)
+	return runAgentLoop(ctx, cfg, stack, otelProvider, hub)
 }
 
 func validateRunPrerequisites(cfg *config.Config) error {
@@ -74,7 +81,7 @@ func shutdownOTel(p *observability.Provider) {
 	}
 }
 
-func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider) error {
+func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub) error {
 	tracer := observability.NewDispatchTracer(otelProvider)
 	stack.Runner.SetTracer(tracer)
 
@@ -94,6 +101,10 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, &wg)
 	}
 
+	if cfg.Gateway.WebAddr != "" && hub != nil {
+		StartDashboard(ctx, cfg.Gateway.WebAddr, hub, &wg)
+	}
+
 	var b *bot.Bot
 	if cfg.Channels.Telegram.Enabled {
 		b = StartTelegramBot(ctx, cfg, cfg.TelegramToken(), gateHandler, tracer, &wg)
@@ -104,6 +115,19 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 
 	waitForShutdown(ctx, &wg)
 	return nil
+}
+
+// StartDashboard starts the F-111 SSE dashboard server in a separate goroutine.
+func StartDashboard(ctx context.Context, addr string, hub *dashboard.Hub, wg *sync.WaitGroup) {
+	srv := dashboard.NewServer(hub, addr)
+	wg.Add(1)
+	go func() {
+		defer RecoverWithStack("dashboard")
+		defer wg.Done()
+		if err := srv.ListenAndServe(ctx); err != nil {
+			slog.Error("dashboard: failure", "err", err)
+		}
+	}()
 }
 
 func waitForShutdown(ctx context.Context, wg *sync.WaitGroup) {
@@ -122,7 +146,7 @@ func waitForShutdown(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 // SetupLogging initializes the global structured logger based on configuration.
-func SetupLogging(cfg *config.Config) {
+func SetupLogging(cfg *config.Config, hub *dashboard.Hub) {
 	opts := &slog.HandlerOptions{
 		Level: cfg.LogLevel(),
 	}
@@ -161,6 +185,11 @@ func SetupLogging(cfg *config.Config) {
 	if cfg.LogFormat() == "json" {
 		handler = slog.NewJSONHandler(multi, opts)
 	}
+
+	if hub != nil {
+		handler = dashboard.NewSlogHandler(hub, handler)
+	}
+
 	slog.SetDefault(slog.New(handler))
 }
 

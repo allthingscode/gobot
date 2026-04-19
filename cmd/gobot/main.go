@@ -102,6 +102,15 @@ func runInit(root string) error {
 			return fmt.Errorf("mkdir %s: %w", d, err)
 		}
 	}
+
+	configPath := config.DefaultConfigPath()
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if err := cfg.Save(configPath); err != nil {
+			return fmt.Errorf("save default config: %w", err)
+		}
+		fmt.Printf("Created default config file at %s\n", configPath)
+	}
+
 	fmt.Printf("Initialized gobot workspace at %s\n", cfg.StorageRoot())
 	return nil
 }
@@ -121,7 +130,8 @@ func cmdDoctor() *cobra.Command {
 }
 
 func cmdRun() *cobra.Command {
-	return &cobra.Command{
+	var webAddr string
+	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start the strategic agent (Gateway + Telegram)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -129,7 +139,12 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
+			if webAddr != "" {
+				cfg.Gateway.WebAddr = webAddr
+			}
 			return app.RunAgent(cmd.Context(), cfg)
 		},
 	}
+	cmd.Flags().StringVar(&webAddr, "web-addr", "", "Address for the F-111 web dashboard (e.g. 127.0.0.1:7331)")
+	return cmd
 }

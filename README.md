@@ -104,14 +104,16 @@ gobot's design principle is **stability for one user over scale for many**. Ever
 
 1. **Prerequisites**: Telegram bot token + Gemini/Anthropic/OpenAI API key
 2. **Install**:
-   ```powershell
+   ```bash
    git clone https://github.com/allthingscode/gobot.git
    cd gobot
-   .\scripts\build.ps1  # Windows
-   # OR ./scripts/build.sh  # Linux/macOS
+   # Windows (PowerShell):
+   .\scripts\build.ps1
+   # Linux/macOS:
+   ./scripts/build.sh
    ```
-3. **Initialize**: `./bin/gobot init`
-4. **Configure**: Add your API keys to config.json
+3. **Initialize**: `./bin/gobot init` (This creates a default config file)
+4. **Configure**: Add your API keys to the newly created `config.json` (typically at `~/.gobot/config.json`)
 5. **Authorize** (for Google tools): `./bin/gobot reauth`
 6. **Run**: `./bin/gobot run`
 
