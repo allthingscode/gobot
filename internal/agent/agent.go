@@ -556,10 +556,7 @@ func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
 // store is the resolved per-user (or shared) CheckpointStore for this session.
 // Errors are logged but not returned since compaction runs in a background goroutine.
 func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey string, toSummarize []agentctx.StrategicMessage) (string, error) {
-	model := m.model
-	if m.compactionPolicy.Summarization.SummarizationModel(m.model) != "" {
-		model = m.compactionPolicy.Summarization.SummarizationModel(m.model)
-	}
+	model := m.compactionPolicy.Summarization.SummarizationModel(m.model)
 	var sb strings.Builder
 	for _, msg := range toSummarize {
 		fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
