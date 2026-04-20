@@ -48,20 +48,30 @@ func TestInitProviders_ManagerModel(t *testing.T) {
 	}
 }
 
-func TestWrapRoutingProvider(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{}
-	base := &MockProvider{}
+func TestInitProviders_CostRouting(t *testing.T) { //nolint:paralleltest // touches global provider registry
+	t.Cleanup(provider.ResetForTest)
 	
-	// Case 1: Routing disabled
-	got := wrapRoutingProvider(base, "mock", cfg)
-	if got != base {
-		t.Error("expected base provider when routing is disabled")
+	// Register mock providers.
+	_ = provider.Register(&MockProvider{name: "gemini"})
+	_ = provider.Register(&MockProvider{name: "anthropic"})
+	
+	ctx := context.Background()
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Provider = "gemini"
+	cfg.Strategic.Routing.Enabled = true
+	cfg.Strategic.Routing.ManagerProvider = "anthropic"
+	cfg.Strategic.Routing.ManagerModel = "claude-3-haiku"
+	
+	prov, _, err := InitProviders(ctx, cfg)
+	if err != nil {
+		t.Fatalf("InitProviders failed: %v", err)
 	}
-
-	// Case 2: Routing enabled, manager provider exists (we use "mock" which is registered via side-effect or we use Get)
-	// Wait, "mock" is not a real provider registered in the factory.
-	// But InitProviders uses provider.Get(provName).
+	
+	// Check if it's a RoutingProvider.
+	// Since we changed Name() to return a fixed string "routing".
+	if prov.Name() != "routing" {
+		t.Errorf("got provider %q, want %q", prov.Name(), "routing")
+	}
 }
 
 func TestInitMemory_Failures(t *testing.T) {

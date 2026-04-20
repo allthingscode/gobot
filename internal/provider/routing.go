@@ -28,9 +28,9 @@ func NewRoutingProvider(executor, manager Provider, cfg config.RoutingConfig) *R
 	}
 }
 
-// Name returns "routing" followed by the underlying provider names.
+// Name returns "routing".
 func (p *RoutingProvider) Name() string {
-	return "routing(" + p.manager.Name() + "->" + p.executor.Name() + ")"
+	return "routing"
 }
 
 // Models returns the union of models supported by both providers.

@@ -100,20 +100,6 @@ func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, 
 	return prov, model, nil
 }
 
-func wrapRoutingProvider(base provider.Provider, provName string, cfg *config.Config) provider.Provider {
-	mgrProvName := cfg.Strategic.Routing.ManagerProvider
-	if mgrProvName == "" {
-		mgrProvName = provName
-	}
-	mgrProv, err := provider.Get(mgrProvName)
-	if err != nil {
-		slog.Warn("bootstrap: manager provider not found, disabling cost routing", "provider", mgrProvName)
-		return base
-	}
-	slog.Info("bootstrap: cost routing enabled", "manager_model", cfg.Strategic.Routing.ManagerModel, "manager_provider", mgrProvName)
-	return provider.NewRoutingProvider(base, mgrProv, cfg.Strategic.Routing)
-}
-
 // InitMemory initializes the long-term memory store and configures multi-user isolation if enabled.
 func InitMemory(cfg *config.Config, runner *AgentRunner) (memStore *memory.MemoryStore, cleanup func()) {
 	cleanup = func() {}

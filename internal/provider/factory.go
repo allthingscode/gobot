@@ -69,6 +69,7 @@ func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
 
 func (f *Factory) setupRouting(cfg *config.Config) error {
 	rCfg := cfg.Strategic.Routing
+
 	// Default provider is the 'executor' for routing.
 	execProvName := cfg.DefaultProvider()
 	execProv, err := Get(execProvName)
@@ -86,17 +87,9 @@ func (f *Factory) setupRouting(cfg *config.Config) error {
 	}
 
 	routingProv := NewRoutingProvider(execProv, mgrProv, rCfg)
-	// We don't register it by name because it wraps the default logic.
-	// Instead, we could replace the default provider in the registry or
-	// let the app layer handle the wrapping as it currently does.
-	// RE-EVALUATING: The app layer already calls wrapRoutingProvider in bootstrap.go.
-	// The F-116 spec says "Extend internal/provider/factory.go with routing logic".
-	// If we move it here, we should remove it from bootstrap.go to avoid double wrapping.
 	slog.Info("factory: cost routing initialized", "manager", rCfg.ManagerModel)
 
-	// To effectively "route" all calls through the RoutingProvider, we can
-	// register it as a special provider or wrap the Get calls.
-	// For F-116, let's keep it simple and register it under a "routing" name
-	// and then update bootstrap to use it if enabled.
+	// Register the routing provider centrally. App layer can now retrieve
+	// it via provider.Get("routing") if enabled.
 	return Register(routingProv)
 }
