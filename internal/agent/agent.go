@@ -106,6 +106,13 @@ func NewSessionManager(runner Runner, store CheckpointStore, model string) *Sess
 	}
 }
 
+// GetRunner returns the underlying Runner used by this SessionManager.
+func (m *SessionManager) GetRunner() Runner {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.runner
+}
+
 // SetTracer configures the observability tracer for the session manager.
 func (m *SessionManager) SetTracer(t *observability.DispatchTracer) {
 	m.mu.Lock()

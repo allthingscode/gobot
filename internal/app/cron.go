@@ -16,6 +16,12 @@ import (
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
+	"github.com/allthingscode/gobot/internal/provider"
+)
+
+const (
+	chanTelegram = "telegram"
+	chanEmail    = "email"
 )
 
 // CronDispatcher implements cron.Dispatcher.
@@ -31,6 +37,9 @@ type CronDispatcher struct {
 	vecStore     *vector.Store
 	embedProv    vector.EmbeddingProvider
 	workspaceDir string
+
+	cfg           *config.Config
+	runnerFactory func(prov provider.Provider, model, systemPrompt string) *AgentRunner
 }
 
 // NewCronDispatcher initializes a new CronDispatcher using the given stack and bot.
@@ -45,6 +54,10 @@ func NewCronDispatcher(cfg *config.Config, stack *AgentStack, b *bot.Bot, tracer
 		vecStore:     stack.VecStore,
 		embedProv:    stack.EmbedProv,
 		workspaceDir: cfg.WorkspacePath(""),
+		cfg:          cfg,
+		runnerFactory: func(prov provider.Provider, model, systemPrompt string) *AgentRunner {
+			return NewAgentRunner(prov, model, systemPrompt, cfg)
+		},
 	}
 }
 
@@ -67,14 +80,20 @@ func (cd *CronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 	}
 
 	channel, to, silent := cron.ResolveRoutableChannel(p, cd.storageRoot)
+
+	// F-121: Handle specialist dispatch if Agent is specified
+	if p.Agent != "" {
+		return cd.dispatchSpecialist(ctx, p, channel, to, silent)
+	}
+
 	if silent {
 		return cd.dispatchSilent(ctx, p, to)
 	}
 
 	switch channel {
-	case "email":
+	case chanEmail:
 		return cd.dispatchEmail(ctx, p, to)
-	case "telegram":
+	case chanTelegram:
 		if to != "" {
 			return cd.dispatchTelegram(ctx, p, to)
 		}
@@ -82,6 +101,72 @@ func (cd *CronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 
 	slog.Warn("unroutable cron job", "channel", channel, "to", to)
 	return nil
+}
+
+func (cd *CronDispatcher) prepareSpecialistRunner(agentName string, spec config.SpecialistConfig) (*AgentRunner, error) {
+	prov, err := provider.Get(cd.cfg.SpecialistProvider(agentName))
+	if err != nil {
+		return nil, fmt.Errorf("specialist provider: %w", err)
+	}
+
+	systemPrompt := DefaultSpecialistPrompt(agentName)
+	runner := cd.runnerFactory(prov, spec.Model, systemPrompt)
+
+	if cd.mgr != nil {
+		if ar, ok := cd.mgr.GetRunner().(*AgentRunner); ok {
+			runner.MemStore = ar.MemStore
+		}
+	}
+	return runner, nil
+}
+
+func (cd *CronDispatcher) dispatchSpecialist(ctx context.Context, p cron.Payload, channel, to string, silent bool) error {
+	spec, ok := cd.cfg.Agents.Specialists[p.Agent]
+	if !ok {
+		err := fmt.Errorf("unknown specialist: %s", p.Agent)
+		slog.Error("cron: specialist dispatch failed", "agent", p.Agent, "err", err)
+		return err
+	}
+
+	runner, err := cd.prepareSpecialistRunner(p.Agent, spec)
+	if err != nil {
+		return err
+	}
+
+	sessionKey := "cron:" + p.Agent + ":" + p.ID
+	if to != "" {
+		sessionKey += ":" + to
+	}
+
+	slog.Info("dispatching specialist cron job", "agent", p.Agent, "session", sessionKey, "channel", channel)
+	response, err := runner.RunText(ctx, sessionKey, "[AUTONOMOUS] "+p.Message, "")
+	if err != nil {
+		return fmt.Errorf("specialist run: %w", err)
+	}
+
+	if silent || response == "" {
+		return nil
+	}
+
+	cd.sendSpecialistResponse(ctx, p, channel, to, response)
+	return nil
+}
+
+func (cd *CronDispatcher) sendSpecialistResponse(ctx context.Context, p cron.Payload, channel, to, response string) {
+	switch channel {
+	case chanEmail:
+		recipient := to
+		if recipient == "" {
+			recipient = cd.userEmail
+		}
+		if recipient != "" {
+			cd.sendEmailResponse(ctx, p, recipient, response)
+		}
+	case chanTelegram:
+		if to != "" {
+			cd.sendTelegramResponse(ctx, to, response)
+		}
+	}
 }
 
 func (cd *CronDispatcher) handleSystemJob(ctx context.Context, p cron.Payload) bool {
@@ -133,8 +218,8 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	if jobID == "" {
 		jobID = "unknown"
 	}
-	sessionKey := "cron:" + jobID + ":email:" + recipient
-	slog.Info("dispatching cron job", "session", sessionKey, "channel", "email")
+	sessionKey := "cron:" + jobID + ":" + chanEmail + ":" + recipient
+	slog.Info("dispatching cron job", "session", sessionKey, "channel", chanEmail)
 	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
 		return fmt.Errorf("dispatch email: %w", err)
@@ -218,7 +303,7 @@ func parseSessionKey(sessionKey string) (chatID, threadID int64, err error) {
 	if len(parts) < 2 || len(parts) > 3 {
 		return 0, 0, fmt.Errorf("invalid session key format: %s", sessionKey)
 	}
-	if parts[0] != "telegram" {
+	if parts[0] != chanTelegram {
 		return 0, 0, fmt.Errorf("unsupported channel in session key: %s", parts[0])
 	}
 

@@ -106,7 +106,7 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 
 	systemPrompt := t.SpecialistPrompts[agentType]
 	if systemPrompt == "" {
-		systemPrompt = defaultSpecialistPrompt(agentType)
+		systemPrompt = DefaultSpecialistPrompt(agentType)
 	}
 
 	model := t.SpecialistModels[agentType]
@@ -140,7 +140,7 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 	return reply, nil
 }
 
-func defaultSpecialistPrompt(agentType string) string {
+func DefaultSpecialistPrompt(agentType string) string {
 	switch agentType {
 	case RoleResearcher:
 		return "You are a focused research specialist. Research the given topic thoroughly using available search tools and return a concise, factual, well-structured report. Do not ask clarifying questions -- work with what you have and deliver your best findings."

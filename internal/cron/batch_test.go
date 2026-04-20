@@ -225,3 +225,72 @@ func validateSchedule(t *testing.T, got, want Schedule) {
 		}
 	}
 }
+
+func TestParseModularJobFile_AgentField(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test_job.md")
+
+	content := `---
+id: test-job
+name: Test Job
+schedule: every(1h)
+agent: researcher
+specialist: email
+to: user@example.com
+---
+Research the latest Go news.`
+
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := ParseModularJobFile(path)
+	if err != nil {
+		t.Fatalf("ParseModularJobFile failed: %v", err)
+	}
+
+	if job.Payload.Agent != "researcher" {
+		t.Errorf("expected Agent 'researcher', got %q", job.Payload.Agent)
+	}
+	if job.Payload.Channel != "email" {
+		t.Errorf("expected Channel 'email', got %q", job.Payload.Channel)
+	}
+	if job.Payload.To != "user@example.com" {
+		t.Errorf("expected To 'user@example.com', got %q", job.Payload.To)
+	}
+	if job.Payload.Message != "Research the latest Go news." {
+		t.Errorf("expected Message content mismatch, got %q", job.Payload.Message)
+	}
+}
+
+func TestParseModularJobFile_LegacySpecialist(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "legacy_job.md")
+
+	// In legacy behavior, 'specialist' maps to Channel
+	content := `---
+schedule: every(1h)
+specialist: telegram
+to: 12345
+---
+Hello`
+
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := ParseModularJobFile(path)
+	if err != nil {
+		t.Fatalf("ParseModularJobFile failed: %v", err)
+	}
+
+	if job.Payload.Channel != "telegram" {
+		t.Errorf("expected Channel 'telegram', got %q", job.Payload.Channel)
+	}
+	if job.Payload.Agent != "" {
+		t.Errorf("expected empty Agent, got %q", job.Payload.Agent)
+	}
+}
+

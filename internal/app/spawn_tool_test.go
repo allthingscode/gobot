@@ -75,10 +75,10 @@ func TestSpawnTool_Execute_Error(t *testing.T) {
 func TestDefaultSpecialistPrompt(t *testing.T) {
 	t.Parallel()
 	tests := []string{RoleResearcher, RoleAnalyst, RoleWriter, "unknown"}
-	for _, role := range tests {
-		got := defaultSpecialistPrompt(role)
+	for _, tt := range tests {
+		got := DefaultSpecialistPrompt(tt)
 		if got == "" {
-			t.Errorf("defaultSpecialistPrompt(%q) returned empty string", role)
+			t.Errorf("DefaultSpecialistPrompt(%q) returned empty string", tt)
 		}
 	}
 }

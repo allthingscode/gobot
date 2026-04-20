@@ -130,6 +130,8 @@ func applyFrontMatterField(job *Job, key, val string) {
 		job.Name = val
 	case "specialist":
 		job.Payload.Channel = val
+	case "agent":
+		job.Payload.Agent = val
 	case "to":
 		job.Payload.To = val
 	case "subject":
