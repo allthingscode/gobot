@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/browser"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
@@ -96,11 +97,12 @@ func buildSpecialistModels(cfg *config.Config) map[string]string {
 }
 
 func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, specialistModels map[string]string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider) []Tool {
-	return []Tool{
+	tools := []Tool{
 		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg),
 		&ReadTextFileTool{workspace: cfg.WorkspacePath("", "")},
 		newShellExecTool(cfg.WorkspacePath("", ""), cfg.ExecTimeout()),
 	}
+	return appendBrowserTools(cfg, tools)
 }
 
 //nolint:gochecknoglobals // mockable function for testing
@@ -182,6 +184,25 @@ func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool) []To
 		}
 	} else {
 		slog.Warn("run: send_email tool disabled -- strategic_edition.user_email not set in config")
+	}
+	return tools
+}
+
+func appendBrowserTools(cfg *config.Config, tools []Tool) []Tool {
+	if cfg.Browser.DebugPort > 0 || cfg.Browser.Headless {
+		client, err := browser.NewClient(cfg.Browser)
+		if err != nil {
+			slog.Warn("browser: failed to initialize client, skipping tools", "err", err)
+			return tools
+		}
+		tools = append(tools,
+			browser.NewNavigateTool(client),
+			browser.NewScreenshotTool(client),
+			browser.NewGetTextTool(client),
+			browser.NewClickTool(client),
+			browser.NewTypeTool(client),
+		)
+		slog.Info("run: registered browser tools")
 	}
 	return tools
 }

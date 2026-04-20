@@ -21,12 +21,12 @@ var bomPrefix = []byte{0xEF, 0xBB, 0xBF}
 
 // LoggingConfig controls log persistence, rotation, and formatting.
 type LoggingConfig struct {
-	Level      string `json:"level"`       // "DEBUG", "INFO", "WARN", "ERROR"
-	Format     string `json:"format"`      // "text", "json"
+	Level      string `json:"level"`        // "DEBUG", "INFO", "WARN", "ERROR"
+	Format     string `json:"format"`       // "text", "json"
 	MaxSizeMB  int    `json:"max_size_mb"`  // default: 50
 	MaxBackups int    `json:"max_backups"`  // default: 5
 	MaxAgeDays int    `json:"max_age_days"` // default: 30
-	Compress   bool   `json:"compress"`    // default: true
+	Compress   bool   `json:"compress"`     // default: true
 }
 
 // Config mirrors the relevant fields of ~/.gobot/config.json.
@@ -42,6 +42,12 @@ type Config struct {
 	Cron       CronConfig       `json:"cron"`
 	Heartbeat  HeartbeatConfig  `json:"heartbeat"`
 	Logging    LoggingConfig    `json:"logging"`
+	Browser    BrowserConfig    `json:"browser"`
+}
+
+type BrowserConfig struct {
+	DebugPort int  `json:"debug_port"` // 0 = disabled; non-zero = attach to existing Chrome
+	Headless  bool `json:"headless"`   // true = launch headless Chrome
 }
 
 type CronConfig struct {
