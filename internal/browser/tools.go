@@ -32,6 +32,7 @@ type NavigateTool struct {
 	executor Executor
 }
 
+// NewNavigateTool creates a new instance of the NavigateTool.
 func NewNavigateTool(c *Client) *NavigateTool {
 	return &NavigateTool{client: c, executor: DefaultExecutor{}}
 }
@@ -79,6 +80,7 @@ type ScreenshotTool struct {
 	executor Executor
 }
 
+// NewScreenshotTool creates a new instance of the ScreenshotTool.
 func NewScreenshotTool(c *Client) *ScreenshotTool {
 	return &ScreenshotTool{client: c, executor: DefaultExecutor{}}
 }
@@ -116,6 +118,7 @@ type GetTextTool struct {
 	executor Executor
 }
 
+// NewGetTextTool creates a new instance of the GetTextTool.
 func NewGetTextTool(c *Client) *GetTextTool {
 	return &GetTextTool{client: c, executor: DefaultExecutor{}}
 }
@@ -204,6 +207,7 @@ type TypeTool struct {
 	executor Executor
 }
 
+// NewTypeTool creates a new instance of the TypeTool.
 func NewTypeTool(c *Client) *TypeTool {
 	return &TypeTool{client: c, executor: DefaultExecutor{}}
 }
