@@ -9,7 +9,7 @@ import (
 func TestFactory_InitAll_Empty(t *testing.T) { //nolint:paralleltest // mutates global registry; must not run in parallel
 	t.Cleanup(ResetForTest)
 	f := &Factory{}
-	err := f.InitAll(context.Background())
+	err := f.InitAll(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected no error with empty config, got %v", err)
 	}

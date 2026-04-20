@@ -3,23 +3,25 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
+	"github.com/allthingscode/gobot/internal/config"
 	"google.golang.org/genai"
 )
 
 // Factory initializes all configured providers and registers them.
 type Factory struct {
-	GeminiAPIKey    string
-	AnthropicAPIKey string
-	OpenAIAPIKey    string
-	OpenAIBaseURL   string
-	OpenRouterAPIKey string
+	GeminiAPIKey      string
+	AnthropicAPIKey   string
+	OpenAIAPIKey      string
+	OpenAIBaseURL     string
+	OpenRouterAPIKey  string
 	OpenRouterBaseURL string
 }
 
 // InitAll initializes and registers all providers for which an API key is present.
 //nolint:gocognit,cyclop // Provider registration is inherently linear
-func (f *Factory) InitAll(ctx context.Context) error {
+func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
 	// Gemini
 	if f.GeminiAPIKey != "" {
 		client, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -55,5 +57,46 @@ func (f *Factory) InitAll(ctx context.Context) error {
 		}
 	}
 
+	// Cost-based Routing (F-116)
+	if cfg != nil && cfg.Strategic.Routing.Enabled {
+		if err := f.setupRouting(cfg); err != nil {
+			slog.Warn("factory: routing setup failed, continuing with direct providers", "err", err)
+		}
+	}
+
 	return nil
+}
+
+func (f *Factory) setupRouting(cfg *config.Config) error {
+	rCfg := cfg.Strategic.Routing
+	// Default provider is the 'executor' for routing.
+	execProvName := cfg.DefaultProvider()
+	execProv, err := Get(execProvName)
+	if err != nil {
+		return fmt.Errorf("executor provider %q: %w", execProvName, err)
+	}
+
+	mgrProvName := rCfg.ManagerProvider
+	if mgrProvName == "" {
+		mgrProvName = execProvName
+	}
+	mgrProv, err := Get(mgrProvName)
+	if err != nil {
+		return fmt.Errorf("manager provider %q: %w", mgrProvName, err)
+	}
+
+	routingProv := NewRoutingProvider(execProv, mgrProv, rCfg)
+	// We don't register it by name because it wraps the default logic.
+	// Instead, we could replace the default provider in the registry or
+	// let the app layer handle the wrapping as it currently does.
+	// RE-EVALUATING: The app layer already calls wrapRoutingProvider in bootstrap.go.
+	// The F-116 spec says "Extend internal/provider/factory.go with routing logic".
+	// If we move it here, we should remove it from bootstrap.go to avoid double wrapping.
+	slog.Info("factory: cost routing initialized", "manager", rCfg.ManagerModel)
+
+	// To effectively "route" all calls through the RoutingProvider, we can
+	// register it as a special provider or wrap the Get calls.
+	// For F-116, let's keep it simple and register it under a "routing" name
+	// and then update bootstrap to use it if enabled.
+	return Register(routingProv)
 }

@@ -72,8 +72,9 @@ func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, 
 		OpenRouterAPIKey:  cfg.OpenRouterAPIKey(),
 		OpenRouterBaseURL: cfg.OpenRouterBaseURL(),
 	}
-	if err := factory.InitAll(ctx); err != nil {
-		return nil, "", fmt.Errorf("init providers: %w", err)
+
+	if err := factory.InitAll(ctx, cfg); err != nil {
+		return nil, "", fmt.Errorf("provider factory init: %w", err)
 	}
 
 	provName := cfg.DefaultProvider()
@@ -84,14 +85,18 @@ func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, 
 		provName = "openrouter"
 	}
 
+	// Use cost-based routing if enabled (F-116)
+	if cfg.Strategic.Routing.Enabled {
+		if rp, err := provider.Get("routing"); err == nil {
+			return rp, model, nil
+		}
+	}
+
 	prov, err := provider.Get(provName)
 	if err != nil {
 		return nil, "", fmt.Errorf("provider: %w", err)
 	}
 
-	if cfg.Strategic.Routing.Enabled {
-		prov = wrapRoutingProvider(prov, provName, cfg)
-	}
 	return prov, model, nil
 }
 
