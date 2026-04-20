@@ -140,6 +140,7 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 	return reply, nil
 }
 
+// DefaultSpecialistPrompt returns the default system prompt for a given agent type.
 func DefaultSpecialistPrompt(agentType string) string {
 	switch agentType {
 	case RoleResearcher:

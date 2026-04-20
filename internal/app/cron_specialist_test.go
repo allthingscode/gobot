@@ -47,15 +47,10 @@ func (m *mockChatProvider) Chat(_ context.Context, _ provider.ChatRequest) (*pro
 	}, nil
 }
 
-func TestCronDispatcher_DispatchSpecialist_Telegram(t *testing.T) {
-	// paralleltest: we use ResetForTest which modifies global state.
-	// To satisfy the linter while keeping correctness, we'll mark it Parallel
-	// but the global ResetForTest still makes this risky if other tests
-	// in the same package use the provider registry.
-	t.Parallel()
-
+func TestCronDispatcher_DispatchSpecialist_Telegram(t *testing.T) { //nolint:paralleltest // modifies global provider registry
 	mockProv := &mockChatProvider{resp: "Mock Specialist Result"}
 	provider.ResetForTest()
+	t.Cleanup(provider.ResetForTest)
 	if err := provider.Register(mockProv); err != nil {
 		t.Fatalf("failed to register mock provider: %v", err)
 	}
