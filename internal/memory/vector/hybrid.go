@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"time"
@@ -76,9 +77,9 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 			vecResults = append(vecResults, res)
 		}
 	}
-	if len(vecResults) > limit*2 {
-		vecResults = vecResults[:limit*2]
-	}
+	
+	// Apply MMR to re-rank and downsample to limit*2
+	vecResults = applyMMR(vecResults, 0.7, limit*2)
 
 	// 3. Hybrid RRF Merge
 	merged := MergeResults(ftsResults, vecResults, 60)
@@ -147,12 +148,13 @@ func MergeResults(ftsResults []FTSResult, vecResults []chromem.Result, k int) []
 
 	merged := make([]HybridResult, 0, len(scores))
 	for id, rrfScore := range scores {
+		decay := computeTimeDecay(timestampMap[id])
 		normImp := float64(importanceMap[id]) / 5.0 // normalise to [0.2, 1.0]
 		merged = append(merged, HybridResult{
 			ID:        id,
 			Content:   contentMap[id],
 			Timestamp: timestampMap[id],
-			Score:     rrfScore * (rrfBlendWeight + importanceBlendWeight*normImp),
+			Score:     rrfScore * (rrfBlendWeight + importanceBlendWeight*(normImp*decay)),
 		})
 	}
 
@@ -161,4 +163,92 @@ func MergeResults(ftsResults []FTSResult, vecResults []chromem.Result, k int) []
 	})
 
 	return merged
+}
+
+// nolint:cyclop,gocognit // MMR algorithm requires nested loops and multiple checks; splitting would reduce clarity.
+func applyMMR(results []chromem.Result, lambda float32, limit int) []chromem.Result {
+	if limit >= len(results) {
+		limit = len(results)
+	}
+	if limit <= 0 || len(results) == 0 {
+		return nil
+	}
+
+	var selected []chromem.Result
+	var selectedIdx []int
+
+	unselected := make([]int, len(results))
+	for i := range results {
+		unselected[i] = i
+	}
+
+	for len(selected) < limit && len(unselected) > 0 {
+		bestIdx := -1
+		var bestScore float32 = -math.MaxFloat32
+		bestUnselectedIdx := -1
+
+		for i, idx := range unselected {
+			candidate := results[idx]
+			sim1 := candidate.Similarity
+
+			var maxSim2 float32 = 0
+			for _, sIdx := range selectedIdx {
+				sim2 := cosineSimilarity(candidate.Embedding, results[sIdx].Embedding)
+				if sim2 > maxSim2 {
+					maxSim2 = sim2
+				}
+			}
+
+			mmrScore := lambda*sim1 - (1-lambda)*maxSim2
+			if math.IsNaN(float64(mmrScore)) {
+				mmrScore = 0
+			}
+			if mmrScore > bestScore {
+				bestScore = mmrScore
+				bestIdx = idx
+				bestUnselectedIdx = i
+			}
+		}
+
+		if bestIdx == -1 {
+			bestIdx = unselected[0]
+			bestUnselectedIdx = 0
+		}
+
+		selected = append(selected, results[bestIdx])
+		selectedIdx = append(selectedIdx, bestIdx)
+		unselected = append(unselected[:bestUnselectedIdx], unselected[bestUnselectedIdx+1:]...)
+	}
+
+	return selected
+}
+
+func cosineSimilarity(a, b []float32) float32 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dotProduct, normA, normB float32
+	for i := range a {
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dotProduct / float32(math.Sqrt(float64(normA))*math.Sqrt(float64(normB)))
+}
+
+const halfLifeHours = 720.0 // 30 days
+func computeTimeDecay(ts string) float64 {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return 1.0 // no decay if parse fails
+	}
+	hours := time.Since(t).Hours()
+	if hours < 0 {
+		hours = 0
+	}
+	decayLambda := math.Ln2 / halfLifeHours
+	return math.Exp(-decayLambda * hours)
 }

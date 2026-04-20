@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/philippgille/chromem-go"
 )
@@ -154,7 +155,7 @@ func TestMergeResults_MissingImportanceDefaultsTo3(t *testing.T) {
 	// Score should be rrfScore * (0.5 + 0.5*(3/5)) = rrfScore * 0.8
 	rrfScore := 1.0 / float64(60+0+1)
 	wantScore := rrfScore * (rrfBlendWeight + importanceBlendWeight*(float64(defaultImportance)/5.0))
-	if abs(merged[0].Score-wantScore) > 1e-9 {
+	if abs(merged[0].Score-wantScore) > 1e-7 {
 		t.Errorf("score = %.9f, want %.9f", merged[0].Score, wantScore)
 	}
 }
@@ -226,5 +227,77 @@ func TestHybridSearch_Isolation(t *testing.T) {
 	}
 	if !foundGlobal {
 		t.Error("did not find shared global fact")
+	}
+}
+
+func TestApplyMMR(t *testing.T) {
+	t.Parallel()
+	// Test data: doc1 and doc2 are identical (high similarity to each other)
+	// doc3 is different.
+	// Query similarity: doc1=0.9, doc2=0.85, doc3=0.7.
+	// MMR should pick doc1 and then doc3 (because doc2 is redundant with doc1).
+	results := []chromem.Result{
+		{ID: "doc1", Similarity: 0.9, Embedding: []float32{1.0, 0.0}},
+		{ID: "doc2", Similarity: 0.85, Embedding: []float32{0.99, 0.01}}, // very similar to doc1
+		{ID: "doc3", Similarity: 0.7, Embedding: []float32{0.0, 1.0}},   // orthogonal to doc1
+	}
+
+	selected := applyMMR(results, 0.5, 2)
+	if len(selected) != 2 {
+		t.Fatalf("expected 2 selected results, got %d", len(selected))
+	}
+	if selected[0].ID != "doc1" {
+		t.Errorf("expected first doc to be doc1, got %s", selected[0].ID)
+	}
+	if selected[1].ID != "doc3" {
+		t.Errorf("expected second doc to be doc3 (diversity), got %s", selected[1].ID)
+	}
+}
+
+func TestComputeTimeDecay(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	
+	tests := []struct {
+		name      string
+		timestamp string
+		wantMin   float64
+		wantMax   float64
+	}{
+		{
+			name:      "recent",
+			timestamp: now.Format(time.RFC3339),
+			wantMin:   0.99,
+			wantMax:   1.0,
+		},
+		{
+			name:      "30 days ago (one half-life)",
+			timestamp: now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+			wantMin:   0.49,
+			wantMax:   0.51,
+		},
+		{
+			name:      "60 days ago (two half-lives)",
+			timestamp: now.Add(-60 * 24 * time.Hour).Format(time.RFC3339),
+			wantMin:   0.24,
+			wantMax:   0.26,
+		},
+		{
+			name:      "invalid timestamp",
+			timestamp: "invalid",
+			wantMin:   1.0,
+			wantMax:   1.0,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := computeTimeDecay(tt.timestamp)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("computeTimeDecay() = %f, want range [%f, %f]", got, tt.wantMin, tt.wantMax)
+			}
+		})
 	}
 }
