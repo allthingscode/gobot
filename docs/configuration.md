@@ -107,6 +107,17 @@ Map of server names to their command configurations.
 
 ---
 
+### 4a. Browser Automation (`browser`)
+
+Settings for the `chromedp`-based headless browser tools.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `debug_port` | int | Port to attach to an existing Chrome instance (e.g., `9222`). `0` = disabled. |
+| `headless` | bool | If `true`, launches a new headless Chrome instance for browser tools. |
+
+---
+
 ### 5. Strategic Edition (`strategic_edition`)
 
 | Field | Type | Description |

@@ -21,6 +21,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 **Unique to gobot — no other Go alternative has these:**
 
 - **📧 Deep Google Workspace** — Gmail, Calendar, and Tasks are first-class tools. Ask about your schedule, summarize emails, add tasks. No competitor in this space has native Google OAuth integration.
+- **🌐 Headless Browser Automation** — Native integration with `chromedp` (pure Go, no CGO) allows the agent to navigate the web, extract text, and capture screenshots for vision models without external dependencies like Puppeteer.
 - **🛑 Human-in-the-Loop (HITL) approvals** — gobot pauses before irreversible actions (sending emails, creating calendar entries) and waits for your explicit confirmation. Most alternatives run to completion without asking.
 - **🔒 Windows-native secrets** — API keys are encrypted with DPAPI on Windows (OS-level keystore), not stored in plaintext config files. Windows is a first-class platform, not an afterthought.
 

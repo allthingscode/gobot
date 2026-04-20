@@ -69,6 +69,7 @@ This document provides a deep dive into gobot's architecture, covering data flow
 | `agent` | `internal/agent` | Core agent loop: LLM turns, tool dispatch, compaction, session management | `agent.go`, `compaction.go`, `handoff.go`, `hooks.go` |
 | `audit` | `internal/audit` | Markdown audit report generation (immutable audit trail) | `audit.go`, `ledger.go`, `redact.go` |
 | `bot` | `internal/bot` | Telegram bot client, message routing, pairing gate | `bot.go`, `pairing_handler.go` |
+| `browser` | `internal/browser` | Pure-Go headless browser automation via chromedp | `browser.go`, `tools.go` |
 | `config` | `internal/config` | Configuration loading from YAML/JSON, validation, typed accessors | `config.go`, `validator.go` |
 | `context` | `internal/context` | Durable checkpointing and session state persistence (SQLite) | `manager.go`, `db.go`, `pairing.go` |
 | `cron` | `internal/cron` | Autonomous background job scheduler | `scheduler.go`, `cron.go`, `batch.go` |
@@ -255,4 +256,4 @@ This will be implemented when the project scales beyond single-user deployments.
 
 ---
 
-*Last updated: 2026-04-05*
+*Last updated: 2026-04-19*

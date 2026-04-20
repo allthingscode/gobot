@@ -120,10 +120,11 @@ func TestNewService_Success(t *testing.T) {
 
 func TestNewService_Refresh(t *testing.T) {
 	t.Parallel()
+	const newTokenLiteral = "new-token"
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "new-token",
+			"access_token": newTokenLiteral,
 			"expires_in":   3600,
 		})
 	})
@@ -144,14 +145,14 @@ func TestNewService_Refresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
-	if svc.accessToken != "new-token" {
-		t.Errorf("want new-token, got %q", svc.accessToken)
+	if svc.accessToken != newTokenLiteral {
+		t.Errorf("want %s, got %q", newTokenLiteral, svc.accessToken)
 	}
 
 	data, _ := os.ReadFile(tokenPath)
 	var updated storedToken
 	_ = json.Unmarshal(data, &updated)
-	if updated.Token != "new-token" {
+	if updated.Token != newTokenLiteral {
 		t.Errorf("token.json not updated with new token")
 	}
 }

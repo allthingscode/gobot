@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ---
 
+## [0.2.1] - 2026-04-19
+
+### Added
+- **Chrome Browser Tool (F-110)**: Implements native, pure-Go headless browser automation via `chromedp`. Includes tools for navigation, taking screenshots, getting text, clicking, and typing via CSS selectors.
+- **Semantic Memory Deduplication (F-112)**: Implements logic to prevent identical or semantically duplicate memories from filling up the context window.
+- **Memory Importance Scoring (F-114)**: Adds importance scoring to semantic memory consolidation to prioritize high-signal context retrieval.
+- **Log Rotation (C-152)**: Adds built-in log rotation with `lumberjack` to prevent unbounded log file growth.
+
+### Fixed
+- **Panic Handlers (C-151)**: Adds stack traces and removes `os.Exit(1)` from background goroutine panics, improving resilience for Telegram, Heartbeat, and Cron background tasks.
+
+---
+
 ## [0.2.0] - 2026-04-18
 
 ### Added

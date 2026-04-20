@@ -160,6 +160,7 @@ type ClickTool struct {
 	executor Executor
 }
 
+// NewClickTool creates a new instance of the ClickTool.
 func NewClickTool(c *Client) *ClickTool {
 	return &ClickTool{client: c, executor: DefaultExecutor{}}
 }
