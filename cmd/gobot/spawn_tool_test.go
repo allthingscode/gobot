@@ -10,6 +10,7 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/app"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 // mockRunner implements agent.Runner for testing.
@@ -39,7 +40,7 @@ func (m *mockRunner) RunText(_ context.Context, _, _, _ string) (string, error) 
 // newTestSpawnTool builds a SpawnTool backed by a mockRunner factory.
 func newTestSpawnTool(runner agent.Runner, prompts map[string]string) *app.SpawnTool {
 	return &app.SpawnTool{
-		RunnerFactory:     func(_, _ string) agent.Runner { return runner },
+		RunnerFactory:     func(_ provider.Provider, _, _ string) agent.Runner { return runner },
 		Model:             "test-model",
 		SpecialistPrompts: prompts,
 	}
@@ -98,7 +99,7 @@ func TestSpawnTool_Execute_SpecialistPrompt(t *testing.T) {
 	// Verification logic: ensure the factory is called with our custom prompt.
 	var capturedPrompt string
 	st := &app.SpawnTool{
-		RunnerFactory: func(_, sys string) agent.Runner {
+		RunnerFactory: func(_ provider.Provider, _, sys string) agent.Runner {
 			capturedPrompt = sys
 			return &mockRunner{response: "ok"}
 		},

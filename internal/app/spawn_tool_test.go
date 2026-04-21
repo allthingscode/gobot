@@ -7,6 +7,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 type mockSubAgentRunner struct {
@@ -45,7 +46,7 @@ func TestSpawnTool_Execute_Success(t *testing.T) {
 	t.Parallel()
 	runner := &mockSubAgentRunner{response: "Hello from sub-agent"}
 	tool := &SpawnTool{
-		RunnerFactory: func(m, sp string) agent.Runner {
+		RunnerFactory: func(_ provider.Provider, _, _ string) agent.Runner {
 			return runner
 		},
 		Model: "test-model",

@@ -22,7 +22,8 @@ const (
 // SpawnTool implements Tool and enables the main agent to delegate complex
 // tasks to ephemeral, specialized sub-agents (F-001).
 type SpawnTool struct {
-	RunnerFactory     func(model, systemPrompt string) agent.Runner
+	RunnerFactory     func(prov provider.Provider, model, systemPrompt string) agent.Runner
+	DefaultProv       provider.Provider
 	Model             string
 	SpecialistPrompts map[string]string
 	SpecialistModels  map[string]string
@@ -65,11 +66,12 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, me
 // newSpawnTool creates a SpawnTool that builds sub-runners from a provider.
 func newSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
 	return &SpawnTool{
-		RunnerFactory: func(m, systemPrompt string) agent.Runner {
-			runner := NewAgentRunner(prov, m, systemPrompt, cfg)
+		RunnerFactory: func(p provider.Provider, m, systemPrompt string) agent.Runner {
+			runner := NewAgentRunner(p, m, systemPrompt, cfg)
 			runner.MemStore = memStore
 			return runner
 		},
+		DefaultProv:       prov,
 		Model:             model,
 		SpecialistPrompts: specialistPrompts,
 		SpecialistModels:  specialistModels,
@@ -114,7 +116,14 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 		model = t.Model
 	}
 
-	subRunner := t.RunnerFactory(model, systemPrompt)
+	// Resolve the provider configured for this specialist; fall back to the parent's provider.
+	prov := t.DefaultProv
+	if t.Cfg != nil {
+		if p, err := provider.Get(t.Cfg.SpecialistProvider(agentType)); err == nil {
+			prov = p
+		}
+	}
+	subRunner := t.RunnerFactory(prov, model, systemPrompt)
 
 	if c, ok := subRunner.(ToolLimitConfigurable); ok {
 		c.SetMaxToolIterations(spawnMaxIterations)
