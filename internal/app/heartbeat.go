@@ -69,7 +69,7 @@ func (hb *HeartbeatRunner) check(ctx context.Context) {
 	hb.writeLivenessFile(len(failures))
 
 	if len(failures) == 0 {
-		slog.Debug("heartbeat: all probes OK")
+		slog.Info("heartbeat: all probes OK", "heartbeat", true)
 		return
 	}
 

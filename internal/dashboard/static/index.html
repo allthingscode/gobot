@@ -256,9 +256,28 @@
                 line.appendChild(fieldsSpan);
 
                 // Update status info if present in fields
-                if (entry.fields.session_id) document.getElementById('session-id').textContent = entry.fields.session_id;
+                const sid = entry.fields.session_id || entry.fields.session;
+                if (sid) {
+                    document.getElementById('session-id').textContent = sid;
+                    
+                    // Update agent name based on session key prefix
+                    if (sid.startsWith("agent:")) {
+                        const parts = sid.split(":");
+                        if (parts.length > 1) {
+                            document.getElementById('agent-name').textContent = parts[1];
+                            document.getElementById('agent-name').style.color = "var(--warn-color)";
+                        }
+                    } else {
+                        document.getElementById('agent-name').textContent = "gobot-strategic";
+                        document.getElementById('agent-name').style.color = "var(--info-color)";
+                    }
+                }
+
                 if (entry.fields.model) document.getElementById('agent-model').textContent = entry.fields.model;
                 if (entry.fields.tool) document.getElementById('current-tool').textContent = entry.fields.tool;
+                if (entry.fields.heartbeat) {
+                    document.getElementById('last-heartbeat').textContent = new Date(entry.timestamp).toLocaleTimeString();
+                }
             }
 
             if (filterText && !line.textContent.toLowerCase().includes(filterText)) {
