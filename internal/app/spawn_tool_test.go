@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
 )
@@ -71,6 +72,77 @@ func TestSpawnTool_Execute_Error(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for missing objective parameter, got nil")
 	}
+}
+
+// TestSpawnTool_Execute_UsesSpecialistProvider ensures that when a specialist has
+// an explicit provider configured, Execute routes to that provider rather than
+// the parent agent's default provider. Regression for the bug where all sub-agents
+// were always dispatched through the parent provider (e.g. Gemini receiving an
+// OpenRouter-only model, causing 404s).
+func TestSpawnTool_Execute_UsesSpecialistProvider(t *testing.T) { //nolint:paralleltest // modifies global provider registry
+	const defaultProvName = "default-prov"
+	const specialistProvName = "specialist-prov"
+
+	defaultProv := &mockNamedProvider{name: defaultProvName}
+	specialistProv := &mockNamedProvider{name: specialistProvName}
+
+	provider.ResetForTest()
+	t.Cleanup(provider.ResetForTest)
+	if err := provider.Register(defaultProv); err != nil {
+		t.Fatalf("register default provider: %v", err)
+	}
+	if err := provider.Register(specialistProv); err != nil {
+		t.Fatalf("register specialist provider: %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Specialists: map[string]config.SpecialistConfig{
+				RoleResearcher: {Model: "specialist-model", Provider: specialistProvName},
+			},
+		},
+	}
+
+	var capturedProv provider.Provider
+	tool := &SpawnTool{
+		RunnerFactory: func(prov provider.Provider, _, _ string) agent.Runner {
+			capturedProv = prov
+			return &mockSubAgentRunner{response: "ok"}
+		},
+		DefaultProv:      defaultProv,
+		Model:            "default-model",
+		SpecialistModels: map[string]string{RoleResearcher: "specialist-model"},
+		Cfg:              cfg,
+	}
+
+	_, err := tool.Execute(context.Background(), "sess", "user", map[string]any{
+		"agent_type": RoleResearcher,
+		"objective":  "research something",
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if capturedProv != specialistProv {
+		t.Errorf("RunnerFactory received provider %q, want %q", capturedProv.Name(), specialistProvName)
+	}
+}
+
+// mockNamedProvider is a minimal Provider that returns a fixed name.
+type mockNamedProvider struct {
+	provider.Provider
+	name string
+}
+
+func (m *mockNamedProvider) Name() string { return m.name }
+func (m *mockNamedProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.ChatResponse, error) {
+	resp := "ok"
+	return &provider.ChatResponse{
+		Message: agentctx.StrategicMessage{
+			Role:    agentctx.RoleAssistant,
+			Content: &agentctx.MessageContent{Str: &resp},
+		},
+	}, nil
 }
 
 func TestDefaultSpecialistPrompt(t *testing.T) {
