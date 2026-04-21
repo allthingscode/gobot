@@ -55,6 +55,34 @@ func (m *concDispatcher) Dispatch(_ context.Context, p Payload) error {
 	return nil
 }
 
+// peakConcDispatcher tracks the maximum number of concurrently active
+// Dispatch calls without relying on wall-clock timing.
+type peakConcDispatcher struct {
+	active atomic.Int64
+	peak   atomic.Int64
+	calls  atomic.Int64
+	delay  time.Duration
+}
+
+func (d *peakConcDispatcher) Dispatch(_ context.Context, _ Payload) error {
+	cur := d.active.Add(1)
+	for {
+		old := d.peak.Load()
+		if cur <= old {
+			break
+		}
+		if d.peak.CompareAndSwap(old, cur) {
+			break
+		}
+	}
+	if d.delay > 0 {
+		time.Sleep(d.delay)
+	}
+	d.active.Add(-1)
+	d.calls.Add(1)
+	return nil
+}
+
 // atomicCountDispatcher counts dispatches using an atomic counter.
 type atomicCountDispatcher struct {
 	counter *atomic.Int64
@@ -127,10 +155,9 @@ func TestScheduler_DispatchesDueJob(t *testing.T) {
 }
 
 // TestScheduler_ConcurrentDispatch_MultipleDueJobs verifies that when
-// multiple jobs are due at the same tick they are dispatched concurrently,
-// not sequentially.  Each dispatch has a 100 ms artificial delay; sequential
-// dispatch of 5 jobs would take >= 500 ms.  The test requires completion
-// within 400 ms, which is only achievable with concurrent dispatch.
+// multiple jobs are due at the same tick they are dispatched concurrently.
+// It measures peak concurrent active dispatches rather than wall-clock
+// elapsed time to avoid spurious failures on slow or loaded CI runners.
 func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -148,28 +175,20 @@ func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 		}
 	}
 	storePath := writeJobsJSON(t, dir, jobs)
-	disp := &concDispatcher{delay: 100 * time.Millisecond}
+	disp := &peakConcDispatcher{delay: 50 * time.Millisecond}
 	s := NewScheduler(storePath, "", disp)
 	s.pollInterval = 1 * time.Millisecond
 	s.store = loadStore(t, storePath)
 
-	start := time.Now()
 	if err := s.poll(context.Background()); err != nil {
 		t.Fatalf("poll error: %v", err)
 	}
-	elapsed := time.Since(start)
 
-	// Sequential would take >= 500 ms; concurrent should finish in ~100 ms.
-	// Allow up to 400 ms to accommodate slow CI runners while still rejecting
-	// sequential implementations.
-	if elapsed >= 400*time.Millisecond {
-		t.Errorf("poll took %v — jobs may not be running concurrently (sequential would take ~500ms)", elapsed)
+	if got := disp.calls.Load(); got != n {
+		t.Fatalf("expected %d dispatch calls, got %d", n, got)
 	}
-
-	disp.mu.Lock()
-	defer disp.mu.Unlock()
-	if len(disp.calls) != n {
-		t.Fatalf("expected %d dispatch calls, got %d", n, len(disp.calls))
+	if peak := disp.peak.Load(); peak < 2 {
+		t.Errorf("expected concurrent dispatch (peak active >= 2), got peak=%d", peak)
 	}
 }
 
