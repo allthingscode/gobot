@@ -24,7 +24,7 @@ func (m *mockExecutor) Run(_ context.Context, name string, args []string) (strin
 
 func TestShellExecTool_Name(t *testing.T) {
 	t.Parallel()
-	tool := newShellExecTool(t.TempDir(), 2*time.Minute)
+	tool := newShellExecTool(t.TempDir(), 2*time.Minute, nil)
 	if got := tool.Name(); got != "shell_exec" {
 		t.Errorf("Name() = %q, want %q", got, "shell_exec")
 	}

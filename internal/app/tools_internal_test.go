@@ -74,7 +74,7 @@ func TestAppendGmailTools_All(t *testing.T) {
 	cfg.Strategic.UserEmail = "test@example.com"
 	cfg.Strategic.GmailReadonly = true
 	
-	got := appendGmailTools(cfg, "root", tools)
+	got := appendGmailTools(cfg, "root", tools, nil)
 	// send_email, search_gmail, read_gmail
 	if len(got) != 3 {
 		t.Errorf("expected 3 tools, got %d", len(got))
@@ -88,7 +88,7 @@ func TestAppendGmailTools_SendOnly(t *testing.T) {
 	cfg.Strategic.UserEmail = "test@example.com"
 	cfg.Strategic.GmailReadonly = false
 	
-	got := appendGmailTools(cfg, "root", tools)
+	got := appendGmailTools(cfg, "root", tools, nil)
 	// send_email only
 	if len(got) != 1 {
 		t.Errorf("expected 1 tool, got %d", len(got))

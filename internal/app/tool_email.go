@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -17,19 +18,26 @@ type SendEmailTool struct {
 	secretsRoot string
 	storageRoot string
 	userEmail   string
+	registry    *ToolRegistry // C-184: idempotency
 }
 
 const sendEmailToolName = "send_email"
 
 // newSendEmailTool returns a SendEmailTool that loads OAuth credentials from
 // secretsRoot/token.json and always sends to userEmail.
-func newSendEmailTool(secretsRoot, storageRoot, userEmail string) *SendEmailTool {
-	return &SendEmailTool{secretsRoot: secretsRoot, storageRoot: storageRoot, userEmail: userEmail}
+func newSendEmailTool(secretsRoot, storageRoot, userEmail string, registry *ToolRegistry) *SendEmailTool {
+	return &SendEmailTool{
+		secretsRoot: secretsRoot,
+		storageRoot: storageRoot,
+		userEmail:   userEmail,
+		registry:    registry,
+	}
 }
 
 type sendEmailArgs struct {
-	Subject string `json:"subject" schema:"Email subject line."`
-	Body    string `json:"body" schema:"Email body. Use HTML for best results: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists. Plain text is also accepted."`
+	Subject     string `json:"subject" schema:"Email subject line."`
+	Body        string `json:"body" schema:"Email body. Use HTML for best results: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists. Plain text is also accepted."`
+	ExecutionID string `json:"execution_id,omitempty" schema:"Optional unique ID for this execution to ensure idempotency across session resumes."`
 }
 
 func (s *SendEmailTool) Name() string { return sendEmailToolName }
@@ -57,6 +65,11 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 		return "", fmt.Errorf("send_email: body is required")
 	}
 
+	executionID, _ := args["execution_id"].(string)
+	if result, hit := s.checkIdempotency(sessionKey, executionID); hit {
+		return result, nil
+	}
+
 	svc, err := google.NewService(ctx, s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("send_email: auth: %w", err)
@@ -67,7 +80,28 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 		return fallbackMsg, nil
 	}
 
-	return fmt.Sprintf("Email sent to %s: %s", s.userEmail, subject), nil
+	result := fmt.Sprintf("Email sent to %s: %s", s.userEmail, subject)
+	s.storeIdempotency(sessionKey, executionID, result)
+
+	return result, nil
+}
+
+func (s *SendEmailTool) checkIdempotency(sessionKey, executionID string) (string, bool) {
+	if executionID != "" && s.registry != nil {
+		if result, ok := s.registry.Check(sessionKey, executionID); ok {
+			slog.Info("send_email: idempotency hit", "session", sessionKey, "execution_id", executionID)
+			return result, true
+		}
+	}
+	return "", false
+}
+
+func (s *SendEmailTool) storeIdempotency(sessionKey, executionID, result string) {
+	if executionID != "" && s.registry != nil {
+		if storeErr := s.registry.Store(sessionKey, executionID, result); storeErr != nil {
+			slog.Warn("send_email: failed to store idempotency result", "err", storeErr)
+		}
+	}
 }
 
 // -- SearchGmailTool -----------------------------------------------------------

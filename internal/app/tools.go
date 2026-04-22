@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/browser"
@@ -74,15 +76,15 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
-func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider) []Tool {
+func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry) []Tool {
 	specialistModels := buildSpecialistModels(cfg)
 	secretsRoot := cfg.SecretsRoot()
-	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv)
+	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv, registry)
 	tools = appendMCPtools(cfg, tools)
 	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools)
 	tools = appendCalendarTaskTools(secretsRoot, tools)
 	tools = appendGoogleTools(cfg, tools)
-	tools = appendGmailTools(cfg, secretsRoot, tools)
+	tools = appendGmailTools(cfg, secretsRoot, tools, registry)
 	return tools
 }
 
@@ -96,11 +98,11 @@ func buildSpecialistModels(cfg *config.Config) map[string]string {
 	return specialistModels
 }
 
-func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, specialistModels map[string]string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider) []Tool {
+func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, specialistModels map[string]string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry) []Tool {
 	tools := []Tool{
 		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg),
 		&ReadTextFileTool{workspace: cfg.WorkspacePath("", "")},
-		newShellExecTool(cfg.WorkspacePath("", ""), cfg.ExecTimeout()),
+		newShellExecTool(cfg.WorkspacePath("", ""), cfg.ExecTimeout(), registry),
 	}
 	return appendBrowserTools(cfg, tools)
 }
@@ -172,9 +174,9 @@ func appendGoogleTools(cfg *config.Config, tools []Tool) []Tool {
 	return tools
 }
 
-func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool) []Tool {
+func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, registry *ToolRegistry) []Tool {
 	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
-		tools = append(tools, newSendEmailTool(secretsRoot, cfg.StorageRoot(), userEmail))
+		tools = append(tools, newSendEmailTool(secretsRoot, cfg.StorageRoot(), userEmail, registry))
 		if cfg.Strategic.GmailReadonly {
 			tools = append(tools, newSearchGmailTool(secretsRoot))
 			tools = append(tools, newReadGmailTool(secretsRoot))
@@ -218,4 +220,77 @@ type Tool interface {
 	// Execute runs the tool with the supplied arguments.
 	// userID is used for workspace and memory isolation (F-073).
 	Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error)
+}
+
+// ToolRegistry manages a task-scoped JSON registry for tool idempotency.
+type ToolRegistry struct {
+	mu         sync.Mutex
+	storageDir string
+}
+
+// NewToolRegistry creates a new ToolRegistry rooted in storageDir.
+func NewToolRegistry(storageDir string) *ToolRegistry {
+	return &ToolRegistry{storageDir: storageDir}
+}
+
+type toolRegistryData struct {
+	Executions map[string]string `json:"executions"`
+}
+
+func (r *ToolRegistry) getPath(sessionKey string) string {
+	return filepath.Join(r.storageDir, sessionKey, "tool_registry.json")
+}
+
+// Check verifies if an executionID has already been recorded for the session.
+func (r *ToolRegistry) Check(sessionKey, executionID string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	data, err := r.load(sessionKey)
+	if err != nil {
+		return "", false
+	}
+	res, ok := data.Executions[executionID]
+	return res, ok
+}
+
+// Store records a successful tool execution result for an executionID.
+func (r *ToolRegistry) Store(sessionKey, executionID, result string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	data, err := r.load(sessionKey)
+	if err != nil {
+		data = &toolRegistryData{Executions: make(map[string]string)}
+	}
+	data.Executions[executionID] = result
+	return r.save(sessionKey, data)
+}
+
+func (r *ToolRegistry) load(sessionKey string) (*toolRegistryData, error) {
+	path := r.getPath(sessionKey)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read registry: %w", err)
+	}
+	var data toolRegistryData
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, fmt.Errorf("unmarshal registry: %w", err)
+	}
+	return &data, nil
+}
+
+func (r *ToolRegistry) save(sessionKey string, data *toolRegistryData) error {
+	path := r.getPath(sessionKey)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir registry: %w", err)
+	}
+	b, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal registry: %w", err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return fmt.Errorf("write registry: %w", err)
+	}
+	return nil
 }
