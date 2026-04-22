@@ -5,12 +5,18 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
 
 const (
 	testSessionKey = "test-session"
+	
+	// Constants for platform detection to avoid magic strings.
+	windowsOS      = "windows"
+	cmdExecutor    = "cmd"
+	shExecutor     = "sh"
 )
 
 func TestToolRegistry_Idempotency(t *testing.T) {
@@ -64,10 +70,20 @@ func TestShellExecTool_Idempotency(t *testing.T) {
 
 	execID := "unique-id-123"
 	
-	// First execution
+	// First execution - use platform-appropriate command
+	var cmd string
+	var cmdArgs []any
+	if runtime.GOOS == windowsOS {
+		cmd = cmdExecutor
+		cmdArgs = []any{"/c", "echo first"}
+	} else {
+		cmd = shExecutor
+		cmdArgs = []any{"-c", "echo first"}
+	}
+	
 	args1 := map[string]any{
-		"command": "cmd",
-		"args": []any{"/c", "echo first"},
+		"command": cmd,
+		"args":    cmdArgs,
 		"execution_id": execID,
 	}
 	
@@ -77,9 +93,17 @@ func TestShellExecTool_Idempotency(t *testing.T) {
 	}
 	
 	// Second execution with SAME ID but DIFFERENT command
+	if runtime.GOOS == windowsOS {
+		cmd = cmdExecutor
+		cmdArgs = []any{"/c", "echo second"}
+	} else {
+		cmd = shExecutor
+		cmdArgs = []any{"-c", "echo second"}
+	}
+	
 	args2 := map[string]any{
-		"command": "cmd",
-		"args": []any{"/c", "echo second"},
+		"command": cmd,
+		"args":    cmdArgs,
 		"execution_id": execID,
 	}
 	
@@ -93,9 +117,17 @@ func TestShellExecTool_Idempotency(t *testing.T) {
 	}
 	
 	// Third execution with DIFFERENT ID
+	if runtime.GOOS == windowsOS {
+		cmd = cmdExecutor
+		cmdArgs = []any{"/c", "echo third"}
+	} else {
+		cmd = shExecutor
+		cmdArgs = []any{"-c", "echo third"}
+	}
+	
 	args3 := map[string]any{
-		"command": "cmd",
-		"args": []any{"/c", "echo third"},
+		"command": cmd,
+		"args":    cmdArgs,
 		"execution_id": "different-id",
 	}
 	
