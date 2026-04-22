@@ -246,6 +246,7 @@ func TestIsTransientError(t *testing.T) {
 		{"RemoteProtocolError", errors.New("RemoteProtocolError"), true},
 		{"io.EOF", io.EOF, true},
 		{"DeadlineExceeded", context.DeadlineExceeded, true},
+		{"no choices returned", errors.New("openrouter: no choices returned"), true},
 		{"invalid token", errors.New("invalid token"), false},
 		{"unauthorized", errors.New("unauthorized"), false},
 		{"bad request", errors.New("bad request"), false},

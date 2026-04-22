@@ -142,11 +142,38 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 	reply, err := subMgr.Dispatch(subCtx, subKey, userID, objective)
 	elapsed := time.Since(start)
 	if err != nil {
-		slog.Error("spawn: sub-agent failed", "subKey", subKey, "model", model, "elapsed", elapsed, "err", err)
-		return "", fmt.Errorf("spawn %s: %w", agentType, err)
+		return t.handleFallback(subCtx, subKey, userID, objective, agentType, systemPrompt, prov, model, start, err)
 	}
 	slog.Info("spawn: sub-agent complete", "subKey", subKey, "model", model, "elapsed", elapsed, "replyLen", len(reply), "iterations", limitedRunner.Count)
 	return reply, nil
+}
+
+func (t *SpawnTool) handleFallback(ctx context.Context, subKey, userID, objective, agentType, systemPrompt string, failedProv provider.Provider, failedModel string, start time.Time, originalErr error) (string, error) {
+	if t.Cfg != nil && failedProv != nil && t.DefaultProv != nil && failedProv.Name() != t.DefaultProv.Name() {
+		slog.Warn("spawn: specialist provider failed, falling back to default",
+			"type", agentType,
+			"specialist_provider", failedProv.Name(),
+			"fallback_provider", t.DefaultProv.Name(),
+			"fallback_model", t.Model,
+		)
+
+		fallbackRunner := t.RunnerFactory(t.DefaultProv, t.Model, systemPrompt)
+		if c, ok := fallbackRunner.(ToolLimitConfigurable); ok {
+			c.SetMaxToolIterations(spawnMaxIterations)
+		}
+		fallbackLimited := &iterLimitRunner{Inner: fallbackRunner, Max: spawnMaxIterations}
+		fallbackMgr := agent.NewSessionManager(fallbackLimited, nil, t.Model)
+
+		fallbackReply, fallbackErr := fallbackMgr.Dispatch(ctx, subKey, userID, objective)
+		if fallbackErr == nil {
+			slog.Info("spawn: fallback sub-agent complete", "subKey", subKey, "model", t.Model, "elapsed", time.Since(start), "replyLen", len(fallbackReply), "iterations", fallbackLimited.Count)
+			return fallbackReply, nil
+		}
+		slog.Error("spawn: fallback sub-agent also failed", "subKey", subKey, "model", t.Model, "err", fallbackErr)
+	}
+
+	slog.Error("spawn: sub-agent failed", "subKey", subKey, "model", failedModel, "elapsed", time.Since(start), "err", originalErr)
+	return "", fmt.Errorf("spawn %s: %w", agentType, originalErr)
 }
 
 // DefaultSpecialistPrompt returns the default system prompt for a given agent type.
