@@ -59,4 +59,26 @@ else
     echo "    WARN: gh not found; skipping CI status check"
 fi
 
+echo "--- pre-push: running tests"
+TEMP_LOG=$(mktemp)
+cleanup() { rm -f "$TEMP_LOG"; }
+trap cleanup EXIT
+# Run tests with the race detector when a C compiler is available; fall back
+# gracefully when CGO is absent (e.g. bare Windows without WSL).
+if ! go test -race -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+    if grep -q "requires cgo\|requires a C compiler" "$TEMP_LOG"; then
+        echo "WARN: Race detector unavailable (no C compiler — CGO disabled)."
+        echo "      Run 'wsl -e go test -race -mod=readonly ./...' to catch data races."
+        if ! go test -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+            echo "ERROR: go test failed"
+            cat "$TEMP_LOG"
+            exit 1
+        fi
+    else
+        echo "ERROR: go test -race failed"
+        cat "$TEMP_LOG"
+        exit 1
+    fi
+fi
+
 echo "--- pre-push: all checks passed"

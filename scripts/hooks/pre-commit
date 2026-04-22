@@ -1,6 +1,6 @@
 #!/bin/sh
 # gobot pre-commit hook
-# Runs go vet, golangci-lint, and the full test suite before every commit.
+# Runs golangci-lint and go mod verify before every commit.
 # A non-zero exit from any command aborts the commit.
 #
 # Install: cp scripts/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
@@ -47,12 +47,6 @@ if [ -n "$STAGED_FILES" ]; then
         git diff --cached --unified=0 -- "$STAGED_FILES" | grep '^\+' | grep -v '^\+\+\+' | grep -Ei '[A-Z]:\\\\+'
         exit 1
     fi
-fi
-
-if ! go vet -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
-    echo "ERROR: go vet failed"
-    cat "$TEMP_LOG"
-    exit 1
 fi
 
 if ! go mod verify > "$TEMP_LOG" 2>&1; then
@@ -103,24 +97,6 @@ else
     echo "WARN: golangci-lint not found locally; CI will enforce lint"
 fi
 
-# Run tests with the race detector when a C compiler is available; fall back
-# gracefully when CGO is absent (e.g. bare Windows without WSL).
-if ! go test -race -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
-    if grep -q "requires cgo\|requires a C compiler" "$TEMP_LOG"; then
-        echo "WARN: Race detector unavailable (no C compiler — CGO disabled)."
-        echo "      Run 'wsl -e go test -race -mod=readonly ./...' to catch data races."
-        if ! go test -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
-            echo "ERROR: go test failed"
-            cat "$TEMP_LOG"
-            exit 1
-        fi
-    else
-        echo "ERROR: go test -race failed"
-        cat "$TEMP_LOG"
-        exit 1
-    fi
-fi
-
 # Dev factory quality gate — mandatory when factory is present
 if [ -d ".private" ]; then
     if [ ! -f ".private/scripts/factory_lint.go" ]; then
@@ -135,4 +111,4 @@ if [ -d ".private" ]; then
     fi
 fi
 
-echo "--- Pre-commit: all checks passed (vet, lint, test)"
+echo "--- Pre-commit: all checks passed (lint)"
