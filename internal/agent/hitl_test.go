@@ -12,6 +12,12 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 )
 
+const (
+	statusApprovedVal = "approved"
+	statusRejectedVal = "rejected"
+	statusPendingVal  = "pending"
+)
+
 type mockBotAPI struct {
 	bot.API
 	mu           sync.Mutex
@@ -43,7 +49,7 @@ func (m *mockBotAPI) getSentButtons() [][][]bot.Button {
 func TestHITLManager_PreToolHook_NonHighRisk(t *testing.T) {
 	t.Parallel()
 	api := &mockBotAPI{}
-	m := NewHITLManager(api, []string{"high_risk"})
+	m := NewHITLManager(api, nil, []string{"high_risk"})
 
 	got, err := m.PreToolHook(context.Background(), "telegram:123", "low_risk", nil)
 	if err != nil {
@@ -52,12 +58,15 @@ func TestHITLManager_PreToolHook_NonHighRisk(t *testing.T) {
 	if got != "" {
 		t.Errorf("got %q, want empty string", got)
 	}
+	if len(api.sentMessages) > 0 {
+		t.Error("sent messages for non-high-risk tool")
+	}
 }
 
 func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 	t.Parallel()
 	api := &mockBotAPI{}
-	m := NewHITLManager(api, []string{"high_risk"})
+	m := NewHITLManager(api, nil, []string{"high_risk"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -68,7 +77,7 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 	var err error
 
 	go func() {
-		got, err = m.PreToolHook(ctx, "telegram:123", "high_risk", map[string]any{"cmd": "rm -rf /"})
+		got, err = m.PreToolHook(ctx, "telegram:123", "high_risk", nil)
 		close(done)
 	}()
 
@@ -105,14 +114,14 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 		t.Fatalf("PreToolHook failed: %v", err)
 	}
 	if got != "" {
-		t.Errorf("got %q, want empty string (approved)", got)
+		t.Errorf("got %q, want empty string", got)
 	}
 }
 
 func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 	t.Parallel()
 	api := &mockBotAPI{}
-	m := NewHITLManager(api, []string{"high_risk"})
+	m := NewHITLManager(api, nil, []string{"high_risk"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -170,7 +179,7 @@ func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 func TestHITLManager_PreToolHook_FailClosed(t *testing.T) {
 	t.Parallel()
 	api := &mockBotAPI{}
-	m := NewHITLManager(api, []string{"high_risk"})
+	m := NewHITLManager(api, nil, []string{"high_risk"})
 
 	tests := []struct {
 		name       string
@@ -209,5 +218,93 @@ func TestHITLManager_PreToolHook_FailClosed(t *testing.T) {
 				t.Errorf("expected error containing %q, got %v", tt.wantErr, err)
 			}
 		})
+	}
+}
+
+type mockHITLStore struct {
+	approvals map[string]string
+	mu        sync.Mutex
+}
+
+func (m *mockHITLStore) GetHITLApproval(ctx context.Context, reqID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.approvals[reqID], nil
+}
+
+func (m *mockHITLStore) SaveHITLApproval(ctx context.Context, reqID, _, _ string, _ map[string]any, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.approvals == nil {
+		m.approvals = make(map[string]string)
+	}
+	m.approvals[reqID] = status
+	return nil
+}
+
+func TestHITLManager_Persistence(t *testing.T) {
+	t.Parallel()
+	api := &mockBotAPI{}
+	store := &mockHITLStore{approvals: make(map[string]string)}
+	m := NewHITLManager(api, store, []string{"high_risk"})
+
+	sessionKey := "telegram:123"
+	toolName := "high_risk"
+	args := map[string]any{"cmd": "ls"}
+	reqID := m.createRequestID(sessionKey, toolName, args)
+
+	// 1. Simulate a previous approval in the store
+	store.approvals[reqID] = statusApprovedVal
+
+	got, err := m.PreToolHook(context.Background(), sessionKey, toolName, args)
+	if err != nil {
+		t.Fatalf("PreToolHook failed: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected auto-approval from store, got %q", got)
+	}
+	if len(api.sentMessages) > 0 {
+		t.Errorf("sent %d messages, expected 0 (already approved)", len(api.sentMessages))
+	}
+
+	// 2. Simulate a previous rejection
+	reqID2 := m.createRequestID(sessionKey, toolName, map[string]any{"cmd": "rm"})
+	store.approvals[reqID2] = statusRejectedVal
+
+	_, err = m.PreToolHook(context.Background(), sessionKey, toolName, map[string]any{"cmd": "rm"})
+	if !errors.Is(err, ErrToolDenied) {
+		t.Errorf("expected ErrToolDenied, got %v", err)
+	}
+
+	// 3. Simulate pending status (resuming)
+	reqID3 := m.createRequestID(sessionKey, toolName, map[string]any{"cmd": "mv"})
+	store.approvals[reqID3] = statusPendingVal
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = m.PreToolHook(ctx, sessionKey, toolName, map[string]any{"cmd": "mv"})
+		close(done)
+	}()
+
+	// Should be waiting on channel, not sending message
+	time.Sleep(50 * time.Millisecond)
+	if len(api.sentMessages) > 0 {
+		t.Errorf("sent messages for pending request, expected 0")
+	}
+
+	// Simulate approval via callback
+	if err := m.HandleCallback(context.Background(), bot.InboundCallback{
+		ChatID: 123,
+		Data:   "hitl:approve:" + reqID3,
+	}); err != nil {
+		t.Fatalf("HandleCallback failed: %v", err)
+	}
+
+	<-done
+	if store.approvals[reqID3] != statusApprovedVal {
+		t.Errorf("expected store to be updated to approved, got %q", store.approvals[reqID3])
 	}
 }

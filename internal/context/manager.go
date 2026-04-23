@@ -239,7 +239,7 @@ func (m *CheckpointManager) DB() *sql.DB {
 func (m *CheckpointManager) UpdateSessionTokens(ctx context.Context, threadID string, tokens int, compactedAt *time.Time) error {
 	var compactArg interface{}
 	if compactedAt != nil {
-		compactArg = compactedAt.Format("2006-01-02T15:04:05Z")
+		compactArg = compactedAt.Format(time.RFC3339)
 	}
 	_, err := m.db.ExecContext(
 		ctx,
@@ -271,12 +271,54 @@ func (m *CheckpointManager) GetSessionTokens(ctx context.Context, threadID strin
 		tokens = int(tokensNull.Int64)
 	}
 	if compactNull.Valid && compactNull.String != "" {
-		t, err := time.Parse("2006-01-02T15:04:05Z", compactNull.String)
+		t, err := time.Parse(time.RFC3339, compactNull.String)
+		if err != nil {
+			// Fallback to old format if needed
+			t, err = time.Parse("2006-01-02 15:04:05", compactNull.String)
+		}
 		if err == nil {
 			compactedAt = &t
 		}
 	}
 	return tokens, compactedAt, nil
+}
+
+// GetHITLApproval retrieves the status of a HITL request.
+func (m *CheckpointManager) GetHITLApproval(ctx context.Context, reqID string) (string, error) {
+	var status string
+	err := m.db.QueryRowContext(ctx, `SELECT status FROM hitl_approvals WHERE request_id = ?`, reqID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("GetHITLApproval: %w", err)
+	}
+	return status, nil
+}
+
+// SaveHITLApproval inserts or updates a HITL request status.
+func (m *CheckpointManager) SaveHITLApproval(ctx context.Context, reqID, sessionKey, toolName string, args map[string]any, status string) error {
+	argBytes, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("SaveHITLApproval: marshal args: %w", err)
+	}
+
+	var decidedAt interface{}
+	if status == "approved" || status == "rejected" {
+		decidedAt = time.Now().Format("2006-01-02 15:04:05")
+	}
+
+	_, err = m.db.ExecContext(ctx, `
+		INSERT INTO hitl_approvals (request_id, session_key, tool_name, args, status, created_at, decided_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+		ON CONFLICT(request_id) DO UPDATE SET
+			status = excluded.status,
+			decided_at = COALESCE(excluded.decided_at, decided_at)
+	`, reqID, sessionKey, toolName, string(argBytes), status, decidedAt)
+	if err != nil {
+		return fmt.Errorf("SaveHITLApproval: %w", err)
+	}
+	return nil
 }
 
 // ListResumable returns all active threads that have at least one checkpoint,

@@ -27,7 +27,7 @@ func TestHITLInitialization(t *testing.T) {
 	mgr := &agent.SessionManager{}
 	api := &hitlMockAPI{}
 
-	_, hitl := SetupHooks(cfg, runner, mgr, api)
+	_, hitl := SetupHooks(cfg, runner, mgr, api, nil)
 
 	// Verify that HITL manager is initialized with HighRisk tools, NOT chat IDs
 	ctx := context.Background()
@@ -66,7 +66,7 @@ rules:
 	mgr := &agent.SessionManager{}
 	api := &hitlMockAPI{}
 
-	hooks, _ := SetupHooks(cfg, runner, mgr, api)
+	hooks, _ := SetupHooks(cfg, runner, mgr, api, nil)
 
 	// Verify that policy-required HITL fails closed for non-Telegram sessions
 	ctx := context.Background()
@@ -104,7 +104,7 @@ rules:
 	mgr := &agent.SessionManager{}
 	api := &hitlMockAPI{}
 
-	hooks, _ := SetupHooks(cfg, runner, mgr, api)
+	hooks, _ := SetupHooks(cfg, runner, mgr, api, nil)
 
 	// Verify that cron sessions are auto-approved even if policy requires HITL
 	ctx := context.Background()

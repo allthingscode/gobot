@@ -91,7 +91,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 
 	mgr := stack.NewSessionManager(cfg, store, tracer)
 	api, _ := NewTgAPI(cfg.TelegramToken(), cfg.TelegramAllowedFrom(), cfg)
-	_, hitl := SetupHooks(cfg, stack.Runner, mgr, api)
+	_, hitl := SetupHooks(cfg, stack.Runner, mgr, api, store)
 
 	handler := &DispatchHandler{Mgr: mgr, Memory: stack.MemStore, Hitl: hitl}
 	SetupConsolidator(cfg, stack, mgr, handler, otelProvider)
@@ -232,9 +232,10 @@ func InitIdempotency(ctx context.Context, cfg *config.Config, runner *AgentRunne
 }
 
 // SetupHooks initializes and registers lifecycle hooks for the agent and runner.
-func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManager, api bot.API) (*agent.Hooks, *agent.HITLManager) {
+func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManager, api bot.API, store agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager) {
 	hooks := &agent.Hooks{}
-	hitl := agent.NewHITLManager(api, cfg.HighRiskTools())
+	hitlStore, _ := store.(agent.HITLStore)
+	hitl := agent.NewHITLManager(api, hitlStore, cfg.HighRiskTools())
 	hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
 
 	policyPath := agent.ResolvePolicyFilePath(cfg.PolicyFilePath(), cfg.StorageRoot())

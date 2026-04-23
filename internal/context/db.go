@@ -129,6 +129,43 @@ func addTokenColumnsIfMissing(db *sql.DB) error {
 
 // initSchema creates the threads, checkpoints, and idempotency_keys tables if they do not exist.
 func initSchema(db *sql.DB) error {
+	if err := createBaseTables(db); err != nil {
+		return err
+	}
+	if err := createIndices(db); err != nil {
+		return err
+	}
+	if err := createIdempotencyTable(db); err != nil {
+		return err
+	}
+
+	if err := addChecksumColumnIfMissing(db); err != nil {
+		return fmt.Errorf("initSchema: add checksum column: %w", err)
+	}
+
+	if err := addTokenColumnsIfMissing(db); err != nil {
+		return fmt.Errorf("initSchema: add token columns: %w", err)
+	}
+
+	_, err := db.ExecContext(stdctx.Background(), `
+		CREATE TABLE IF NOT EXISTS hitl_approvals (
+			request_id   TEXT PRIMARY KEY,
+			session_key  TEXT NOT NULL,
+			tool_name    TEXT NOT NULL,
+			args         JSON NOT NULL,
+			status       TEXT NOT NULL, -- 'pending', 'approved', 'rejected'
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			decided_at   DATETIME
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("initSchema: create hitl_approvals: %w", err)
+	}
+
+	return nil
+}
+
+func createBaseTables(db *sql.DB) error {
 	_, err := db.ExecContext(stdctx.Background(), `
 		CREATE TABLE IF NOT EXISTS threads (
 			thread_id         TEXT PRIMARY KEY,
@@ -157,24 +194,22 @@ func initSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("initSchema: create checkpoints: %w", err)
 	}
+	return nil
+}
 
-	_, err = db.ExecContext(stdctx.Background(), `
+func createIndices(db *sql.DB) error {
+	_, err := db.ExecContext(stdctx.Background(), `
 		CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_iteration 
 		ON checkpoints(thread_id, iteration DESC)
 	`)
 	if err != nil {
 		return fmt.Errorf("initSchema: create idx_checkpoints_thread_iteration: %w", err)
 	}
+	return nil
+}
 
-	if err := addChecksumColumnIfMissing(db); err != nil {
-		return fmt.Errorf("initSchema: add checksum column: %w", err)
-	}
-
-	if err := addTokenColumnsIfMissing(db); err != nil {
-		return fmt.Errorf("initSchema: add token columns: %w", err)
-	}
-
-	_, err = db.ExecContext(stdctx.Background(), `
+func createIdempotencyTable(db *sql.DB) error {
+	_, err := db.ExecContext(stdctx.Background(), `
 		CREATE TABLE IF NOT EXISTS idempotency_keys (
 			key         TEXT PRIMARY KEY,
 			tool_name   TEXT NOT NULL,
@@ -203,6 +238,5 @@ func initSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("initSchema: create idx_idempotency_created: %w", err)
 	}
-
 	return nil
 }

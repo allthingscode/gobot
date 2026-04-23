@@ -124,7 +124,7 @@ func TestSetupHooks(t *testing.T) {
 	runner := &AgentRunner{}
 	mgr := &agent.SessionManager{}
 	
-	h, hitl := SetupHooks(cfg, runner, mgr, nil)
+	h, hitl := SetupHooks(cfg, runner, mgr, nil, nil)
 	if h == nil || hitl == nil {
 		t.Error("SetupHooks returned nil")
 	}

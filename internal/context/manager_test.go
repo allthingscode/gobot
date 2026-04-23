@@ -743,3 +743,76 @@ func TestUpdateSessionTokens_UpdatesExistingRow(t *testing.T) { //nolint:paralle
 		t.Errorf("expected tokens=2000 (latest update), got %d", tokens)
 	}
 }
+
+func TestHITLApprovals(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+	m := newTestManager(t)
+	ctx := context.Background()
+	reqID := "req123"
+	sessionKey := "telegram:123"
+	toolName := "test_tool"
+	args := map[string]any{"arg1": "val1"}
+
+	// 1. Initial pending
+	if err := m.SaveHITLApproval(ctx, reqID, sessionKey, toolName, args, "pending"); err != nil {
+		t.Fatalf("SaveHITLApproval pending: %v", err)
+	}
+
+	status, err := m.GetHITLApproval(ctx, reqID)
+	if err != nil {
+		t.Fatalf("GetHITLApproval: %v", err)
+	}
+	if status != "pending" {
+		t.Errorf("expected status=pending, got %q", status)
+	}
+
+	// 2. Approve
+	if err := m.SaveHITLApproval(ctx, reqID, sessionKey, toolName, args, "approved"); err != nil {
+		t.Fatalf("SaveHITLApproval approved: %v", err)
+	}
+
+	status, err = m.GetHITLApproval(ctx, reqID)
+	if err != nil {
+		t.Fatalf("GetHITLApproval: %v", err)
+	}
+	if status != "approved" {
+		t.Errorf("expected status=approved, got %q", status)
+	}
+
+	// 3. Unknown request
+	status, err = m.GetHITLApproval(ctx, "unknown")
+	if err != nil {
+		t.Fatalf("GetHITLApproval unknown: %v", err)
+	}
+	if status != "" {
+		t.Errorf("expected empty status for unknown, got %q", status)
+	}
+}
+
+func TestGetSessionTokens_FallbackFormat(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+	m := newTestManager(t)
+	ctx := context.Background()
+	threadID := "t-fallback"
+	
+	if err := m.CreateThread(ctx, threadID, "model", nil); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+
+	// Manually insert with old format
+	oldTimeStr := "2026-04-11 20:00:00"
+	_, err := m.db.ExecContext(ctx, "UPDATE threads SET last_compacted_at = ? WHERE thread_id = ?", oldTimeStr, threadID)
+	if err != nil {
+		t.Fatalf("manual update: %v", err)
+	}
+
+	_, compactedAt, err := m.GetSessionTokens(ctx, threadID)
+	if err != nil {
+		t.Fatalf("GetSessionTokens: %v", err)
+	}
+	if compactedAt == nil {
+		t.Fatal("expected non-nil compactedAt from fallback")
+	}
+	expected, _ := time.Parse("2006-01-02 15:04:05", oldTimeStr)
+	if !compactedAt.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, compactedAt)
+	}
+}

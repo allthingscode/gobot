@@ -14,22 +14,30 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 )
 
+// HITLStore abstracts the persistence layer for HITL approvals.
+type HITLStore interface {
+	GetHITLApproval(ctx context.Context, reqID string) (string, error)
+	SaveHITLApproval(ctx context.Context, reqID, sessionKey, toolName string, args map[string]any, status string) error
+}
+
 // HITLManager manages human-in-the-loop approvals via Telegram.
 type HITLManager struct {
 	api           bot.API
+	store         HITLStore
 	highRiskTools map[string]bool
 	pending       map[string]chan bool
 	mu            sync.Mutex
 }
 
 // NewHITLManager creates a HITLManager for the given API and set of high-risk tools.
-func NewHITLManager(api bot.API, tools []string) *HITLManager {
+func NewHITLManager(api bot.API, store HITLStore, tools []string) *HITLManager {
 	hrt := make(map[string]bool, len(tools))
 	for _, t := range tools {
 		hrt[t] = true
 	}
 	return &HITLManager{
 		api:           api,
+		store:         store,
 		highRiskTools: hrt,
 		pending:       make(map[string]chan bool),
 	}
@@ -38,6 +46,11 @@ func NewHITLManager(api bot.API, tools []string) *HITLManager {
 // PreToolHook is the hook function to be registered with agent.Hooks.
 func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName string, args map[string]any) (string, error) {
 	if !m.highRiskTools[toolName] {
+		return "", nil
+	}
+
+	// F-048: Auto-approve cron jobs (scheduled tasks)
+	if strings.HasPrefix(sessionKey, "cron:") {
 		return "", nil
 	}
 
@@ -63,19 +76,23 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName 
 		return false, err
 	}
 
-	argBytes, _ := json.MarshalIndent(args, "", "  ")
 	reqID := m.createRequestID(sessionKey, toolName, args)
 
-	m.mu.Lock()
-	ch := make(chan bool, 1)
-	m.pending[reqID] = ch
-	m.mu.Unlock()
+	// F-057: Check for persisted status to survive bot restarts
+	if m.store != nil {
+		if handled, approved, err := m.checkPersistedStatus(ctx, reqID); handled {
+			return approved, err
+		}
+	}
 
-	defer func() {
-		m.mu.Lock()
-		delete(m.pending, reqID)
-		m.mu.Unlock()
-	}()
+	argBytes, _ := json.MarshalIndent(args, "", "  ")
+
+	// Persist as pending before sending
+	if m.store != nil {
+		if err := m.store.SaveHITLApproval(ctx, reqID, sessionKey, toolName, args, "pending"); err != nil {
+			slog.Warn("HITL: failed to persist pending status", "reqID", reqID, "err", err)
+		}
+	}
 
 	msg := bot.OutboundMessage{
 		ChatID: chatID,
@@ -92,13 +109,25 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName 
 		return false, fmt.Errorf("HITL: failed to send request: %w", err)
 	}
 
-	select {
-	case <-ctx.Done():
-		return false, fmt.Errorf("context done: %w", ctx.Err())
-	case approved := <-ch:
-		return approved, nil
-	case <-time.After(10 * time.Minute): // Timeout for human response
-		return false, fmt.Errorf("HITL: approval timeout")
+	return m.waitForApproval(ctx, reqID)
+}
+
+func (m *HITLManager) checkPersistedStatus(ctx context.Context, reqID string) (handled, approved bool, err error) {
+	status, err := m.store.GetHITLApproval(ctx, reqID)
+	if err != nil {
+		return false, false, fmt.Errorf("checkPersistedStatus: %w", err)
+	}
+	switch status {
+	case "approved":
+		return true, true, nil
+	case "rejected":
+		return true, false, nil
+	case "pending":
+		// Already sent to Telegram, just wait for response
+		approved, err := m.waitForApproval(ctx, reqID)
+		return true, approved, err
+	default:
+		return false, false, nil
 	}
 }
 
@@ -120,6 +149,27 @@ func (m *HITLManager) parseTelegramChatID(sessionKey, toolName string) (int64, e
 	return chatID, nil
 }
 
+func (m *HITLManager) waitForApproval(ctx context.Context, reqID string) (bool, error) {
+	m.mu.Lock()
+	ch := make(chan bool, 1)
+	m.pending[reqID] = ch
+	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		delete(m.pending, reqID)
+		m.mu.Unlock()
+	}()
+
+	select {
+	case <-ctx.Done():
+		return false, fmt.Errorf("context done: %w", ctx.Err())
+	case approved := <-ch:
+		return approved, nil
+	case <-time.After(10 * time.Minute): // Timeout for human response
+		return false, fmt.Errorf("HITL: approval timeout")
+	}
+}
 
 // HandleCallback processes HITL callback queries.
 func (m *HITLManager) HandleCallback(ctx context.Context, cb bot.InboundCallback) error {
@@ -134,32 +184,49 @@ func (m *HITLManager) HandleCallback(ctx context.Context, cb bot.InboundCallback
 
 	action := parts[1]
 	reqID := parts[2]
+	approved := action == "approve"
+
+	status := "approved"
+	if !approved {
+		status = "rejected"
+	}
+
+	// Persist the decision
+	if m.store != nil {
+		if err := m.store.SaveHITLApproval(ctx, reqID, "", "", nil, status); err != nil {
+			slog.Warn("HITL: failed to persist decision", "reqID", reqID, "status", status, "err", err)
+		}
+	}
 
 	m.mu.Lock()
 	ch, ok := m.pending[reqID]
 	m.mu.Unlock()
 
 	if !ok {
-		// Possibly expired or already handled
+		// Possibly expired, already handled, or bot restarted
+		slog.Info("HITL: callback received for non-pending request (persisted)", "reqID", reqID, "action", action)
+		msgStatus := "Approved"
+		if !approved {
+			msgStatus = "Rejected"
+		}
 		_ = m.api.Send(ctx, bot.OutboundMessage{
 			ChatID: cb.ChatID,
-			Text:   "This request has expired or already been handled.",
+			Text:   fmt.Sprintf("Request %s (persisted).", msgStatus),
 		})
 		return nil
 	}
 
-	approved := action == "approve"
 	slog.Info("HITL: callback received", "reqID", reqID, "action", action, "chatID", cb.ChatID)
 	ch <- approved
 
-	status := "Approved"
+	displayStatus := "Approved"
 	if !approved {
-		status = "Rejected"
+		displayStatus = "Rejected"
 	}
 
 	_ = m.api.Send(ctx, bot.OutboundMessage{
 		ChatID: cb.ChatID,
-		Text:   fmt.Sprintf("Request %s.", status),
+		Text:   fmt.Sprintf("Request %s.", displayStatus),
 	})
 
 	return nil
