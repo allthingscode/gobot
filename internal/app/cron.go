@@ -277,7 +277,23 @@ func (cd *CronDispatcher) sendTelegramResponse(ctx context.Context, to, response
 // Alert sends a failure notification directly via Telegram, bypassing the agent
 // runner. This prevents a cascading failure when the runner itself is the error source.
 func (cd *CronDispatcher) Alert(ctx context.Context, p cron.Payload) error {
-	_, to, _ := cron.ResolveRoutableChannel(p, cd.storageRoot)
+	channel, to, _ := cron.ResolveRoutableChannel(p, cd.storageRoot)
+	if channel == chanEmail {
+		recipient := to
+		if recipient == "" {
+			recipient = cd.userEmail
+		}
+		if recipient == "" {
+			slog.Warn("CronDispatcher.Alert: unroutable email alert, no recipient configured", "channel", channel)
+			return nil
+		}
+		alertPayload := p
+		if alertPayload.Subject == "" {
+			alertPayload.Subject = "Gobot Alert"
+		}
+		cd.sendEmailResponse(ctx, alertPayload, recipient, p.Message)
+		return nil
+	}
 	if to == "" {
 		slog.Warn("CronDispatcher.Alert: unroutable payload, dropping", "channel", p.Channel)
 		return nil

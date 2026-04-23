@@ -6,7 +6,8 @@ const (
 	RoleArchitect  = "architect"
 	RoleReviewer   = "reviewer"
 	RoleOperator   = "operator"
-	RoleResearcher = "researcher"
-	RoleAnalyst    = "analyst"
-	RoleWriter     = "writer"
+	RoleResearcher  = "researcher"
+	RoleAnalyst     = "analyst"
+	RoleWriter      = "writer"
+	RoleBasicWorker = "basicWorker"
 )

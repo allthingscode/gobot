@@ -83,7 +83,7 @@ func newSpawnTool(prov provider.Provider, model string, specialistPrompts, speci
 func (s *SpawnTool) Name() string { return spawnToolName }
 
 type spawnArgs struct {
-	AgentType string `json:"agent_type" schema:"The specialist type to spawn. Options: 'researcher' (fact-finding, web research), 'analyst' (data/situation analysis), 'writer' (drafting content)."`
+	AgentType string `json:"agent_type" schema:"The specialist type to spawn. Options: 'researcher' (fact-finding, web research), 'analyst' (data/situation analysis), 'writer' (drafting content), 'basicWorker' (simple text tasks requiring no tools: summarization, formatting, classification)."`
 	Objective string `json:"objective" schema:"The specific, self-contained task or question for the sub-agent to complete. Be explicit -- the sub-agent has no conversation context. Required."`
 }
 
@@ -142,7 +142,7 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 	reply, err := subMgr.Dispatch(subCtx, subKey, userID, objective)
 	elapsed := time.Since(start)
 	if err != nil {
-		return t.handleFallback(subCtx, subKey, userID, objective, agentType, systemPrompt, prov, model, start, err)
+		return t.handleFallback(ctx, subKey, userID, objective, agentType, systemPrompt, prov, model, start, err)
 	}
 	slog.Info("spawn: sub-agent complete", "subKey", subKey, "model", model, "elapsed", elapsed, "replyLen", len(reply), "iterations", limitedRunner.Count)
 	return reply, nil
@@ -164,7 +164,9 @@ func (t *SpawnTool) handleFallback(ctx context.Context, subKey, userID, objectiv
 		fallbackLimited := &iterLimitRunner{Inner: fallbackRunner, Max: spawnMaxIterations}
 		fallbackMgr := agent.NewSessionManager(fallbackLimited, nil, t.Model)
 
-		fallbackReply, fallbackErr := fallbackMgr.Dispatch(ctx, subKey, userID, objective)
+		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, spawnMaxTimeout)
+		defer fallbackCancel()
+		fallbackReply, fallbackErr := fallbackMgr.Dispatch(fallbackCtx, subKey, userID, objective)
 		if fallbackErr == nil {
 			slog.Info("spawn: fallback sub-agent complete", "subKey", subKey, "model", t.Model, "elapsed", time.Since(start), "replyLen", len(fallbackReply), "iterations", fallbackLimited.Count)
 			return fallbackReply, nil
@@ -185,6 +187,8 @@ func DefaultSpecialistPrompt(agentType string) string {
 		return "You are a strategic analyst. Analyze the given data or situation and return actionable insights in a structured format. Be direct and evidence-based. Do not ask clarifying questions -- deliver your analysis."
 	case RoleWriter:
 		return "You are a professional writer and editor. Produce clear, well-structured content based on the given objective. Deliver the final written output directly without preamble."
+	case RoleBasicWorker:
+		return "You are a focused task executor. Complete the given objective directly and return only the result. No preamble, no explanations, no tool calls — just the output."
 	default:
 		return "You are a specialized sub-agent. Complete the given objective thoroughly and return a structured summary of your findings. Be concise and direct."
 	}
