@@ -102,6 +102,7 @@ jobs:
                     go tool cover -func artifacts/coverage-windows.out
             -   name: Upload Windows Coverage Artifact
                 uses: actions/upload-artifact@v7
+                continue-on-error: true
                 with:
                     name: coverage-windows
                     path: artifacts/coverage-windows.out
