@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,5 +164,48 @@ func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 	}
 	if got != "" {
 		t.Errorf("got %q, want empty string (rejected)", got)
+	}
+}
+
+func TestHITLManager_PreToolHook_FailClosed(t *testing.T) {
+	t.Parallel()
+	api := &mockBotAPI{}
+	m := NewHITLManager(api, []string{"high_risk"})
+
+	tests := []struct {
+		name       string
+		sessionKey string
+		toolName   string
+		wantErr    string
+	}{
+		{
+			name:       "Non-Telegram session",
+			sessionKey: "cli:user123",
+			toolName:   "high_risk",
+			wantErr:    "unsupported for HITL",
+		},
+		{
+			name:       "Invalid chat ID",
+			sessionKey: "telegram:abc",
+			toolName:   "high_risk",
+			wantErr:    "failed to parse chat ID",
+		},
+		{
+			name:       "Missing chat ID",
+			sessionKey: "telegram",
+			toolName:   "high_risk",
+			wantErr:    "unsupported for HITL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := m.PreToolHook(context.Background(), tt.sessionKey, tt.toolName, nil)
+			if err == nil {
+				t.Error("expected error, got nil")
+			} else if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
 	}
 }
