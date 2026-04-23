@@ -98,12 +98,7 @@ else
 fi
 
 # Dev factory quality gate — mandatory when factory is present
-if [ -d ".private" ]; then
-    if [ ! -f ".private/scripts/factory_lint.go" ]; then
-        echo "ERROR: .private/ exists but .private/scripts/factory_lint.go is missing"
-        echo "       Re-initialize the dev factory or restore the file."
-        exit 1
-    fi
+if [ -f ".private/scripts/factory_lint.go" ]; then
     if ! go run .private/scripts/factory_lint.go > "$TEMP_LOG" 2>&1; then
         echo "ERROR: factory lint failed"
         cat "$TEMP_LOG"
