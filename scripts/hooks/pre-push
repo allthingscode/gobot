@@ -81,4 +81,20 @@ if ! go test -race -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
     fi
 fi
 
+# Cross-compile for Linux to catch platform-incompatible code before CI does.
+# On Linux/macOS this is a no-op (native GOOS already covers it).
+if [ "$(go env GOOS)" = "windows" ]; then
+    echo "--- pre-push: GOOS=linux compile check"
+    if ! GOOS=linux go test -run=^$ -exec=echo -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+        echo "ERROR: GOOS=linux compile check failed — code will not build on CI"
+        cat "$TEMP_LOG"
+        exit 1
+    fi
+fi
+
+echo "--- pre-push: checking for unguarded platform-specific commands"
+if ! ./scripts/check_platform_cmds.sh; then
+    exit 1
+fi
+
 echo "--- pre-push: all checks passed"
