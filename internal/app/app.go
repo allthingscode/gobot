@@ -234,7 +234,7 @@ func InitIdempotency(ctx context.Context, cfg *config.Config, runner *AgentRunne
 // SetupHooks initializes and registers lifecycle hooks for the agent and runner.
 func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManager, api bot.API) (*agent.Hooks, *agent.HITLManager) {
 	hooks := &agent.Hooks{}
-	hitl := agent.NewHITLManager(api, cfg.TelegramAllowedFrom())
+	hitl := agent.NewHITLManager(api, cfg.HighRiskTools())
 	hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
 
 	policyPath := agent.ResolvePolicyFilePath(cfg.PolicyFilePath(), cfg.StorageRoot())
@@ -245,6 +245,7 @@ func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManag
 	}
 	policyHook := agent.NewPolicyHook(policy, hitl)
 	hooks.RegisterPreTool(policyHook.PreToolHook)
+	hooks.RegisterPreTool(hitl.PreToolHook)
 
 	mgr.SetHooks(hooks)
 	runner.SetHooks(hooks)

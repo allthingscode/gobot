@@ -41,11 +41,6 @@ func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName stri
 		return "", nil
 	}
 
-	// F-048: Auto-approve cron jobs (scheduled tasks)
-	if strings.HasPrefix(sessionKey, "cron:") {
-		return "", nil
-	}
-
 	approved, err := m.RequestApproval(ctx, sessionKey, toolName, args)
 	if err != nil {
 		return "", err
@@ -58,19 +53,14 @@ func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName stri
 
 // RequestApproval sends an approval request to Telegram and waits for a response.
 func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName string, args map[string]any) (bool, error) {
-	// Parse chatID from sessionKey (format: "telegram:chatID" or "telegram:chatID:threadID")
-	parts := strings.Split(sessionKey, ":")
-	if len(parts) < 2 || parts[0] != "telegram" {
-		channel := "unknown"
-		if len(parts) > 0 && parts[0] != "" {
-			channel = parts[0]
-		}
-		// B-056: Fail closed for non-Telegram sessions.
-		return false, fmt.Errorf("HITL: high-risk tool %q requires human approval, but session channel %q is unsupported for HITL", toolName, channel)
+	// F-048: Auto-approve cron jobs (scheduled tasks)
+	if strings.HasPrefix(sessionKey, "cron:") {
+		return true, nil
 	}
-	chatID, err := strconv.ParseInt(parts[1], 10, 64)
+
+	chatID, err := m.parseTelegramChatID(sessionKey, toolName)
 	if err != nil {
-		return false, fmt.Errorf("HITL: failed to parse chat ID from session key %q: %w", sessionKey, err)
+		return false, err
 	}
 
 	argBytes, _ := json.MarshalIndent(args, "", "  ")
@@ -111,6 +101,25 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName 
 		return false, fmt.Errorf("HITL: approval timeout")
 	}
 }
+
+func (m *HITLManager) parseTelegramChatID(sessionKey, toolName string) (int64, error) {
+	// Parse chatID from sessionKey (format: "telegram:chatID" or "telegram:chatID:threadID")
+	parts := strings.Split(sessionKey, ":")
+	if len(parts) < 2 || parts[0] != "telegram" {
+		channel := "unknown"
+		if len(parts) > 0 && parts[0] != "" {
+			channel = parts[0]
+		}
+		// B-056: Fail closed for non-Telegram sessions.
+		return 0, fmt.Errorf("HITL: high-risk tool %q requires human approval, but session channel %q is unsupported for HITL", toolName, channel)
+	}
+	chatID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("HITL: failed to parse chat ID from session key %q: %w", sessionKey, err)
+	}
+	return chatID, nil
+}
+
 
 // HandleCallback processes HITL callback queries.
 func (m *HITLManager) HandleCallback(ctx context.Context, cb bot.InboundCallback) error {
