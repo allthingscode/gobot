@@ -8,7 +8,7 @@ By default, `gobot` looks for `config.json` in:
 - **Windows:** `%USERPROFILE%\.gobot\config.json`
 - **Linux/macOS:** `~/.gobot/config.json`
 
-You can override the storage root with `gobot init --root <path>` or the `GOBOT_HOME` environment variable.
+You can override the storage root with `gobot init --root <path>` or the `GOBOT_STORAGE` environment variable. (`GOBOT_HOME` controls the config file path only, not the storage root.)
 
 ---
 

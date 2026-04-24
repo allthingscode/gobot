@@ -103,20 +103,59 @@ gobot's design principle is **stability for one user over scale for many**. Ever
 
 ## Get Started in 60 Seconds
 
-1. **Prerequisites**: Telegram bot token + Gemini/Anthropic/OpenAI API key
+1. **Prerequisites**:
+   - Go 1.26.2 or later
+   - Telegram bot token ([BotFather](https://t.me/botfather)) and your numeric Telegram chat ID
+   - At least one LLM API key (Gemini, Anthropic, OpenAI, or OpenRouter)
+   - *(Optional)* Google OAuth2 "Desktop app" credentials for Gmail/Calendar/Tasks
+
 2. **Install**:
    ```bash
    git clone https://github.com/allthingscode/gobot.git
    cd gobot
-   # Windows (PowerShell):
+   # Windows (PowerShell) — produces bin/gobot.exe:
    .\scripts\build.ps1
-   # Linux/macOS:
+   # Linux/macOS — produces bin/gobot:
    ./scripts/build.sh
    ```
-3. **Initialize**: `./bin/gobot init` (This creates a default config file)
-4. **Configure**: Add your API keys to the newly created `config.json` (typically at `~/.gobot/config.json`)
-5. **Authorize** (for Google tools): `./bin/gobot reauth`
-6. **Run**: `./bin/gobot run`
+
+3. **Initialize** — creates workspace directories and a default config file if none exists:
+   ```bash
+   # Windows:
+   .\bin\gobot.exe init
+   # Linux/macOS:
+   ./bin/gobot init
+   ```
+
+4. **Configure**: Edit `~/.gobot/config.json` (Windows: `%USERPROFILE%\.gobot\config.json`).
+   Add your LLM API key(s) and set `channels.telegram.allowFrom` to your numeric Telegram chat ID.
+
+5. **Google OAuth** *(skip if not using Gmail/Calendar/Tasks)*:
+   - In [Google Cloud Console](https://console.cloud.google.com/), create an OAuth2 "Desktop app" credential and enable the Gmail, Calendar, and Tasks APIs.
+   - Save the downloaded credentials file to `~/gobot_data/secrets/client_secrets.json` (adjust path if you changed `storage_root`).
+   - Run:
+     ```bash
+     # Windows:
+     .\bin\gobot.exe reauth
+     # Linux/macOS:
+     ./bin/gobot reauth
+     ```
+
+6. **Authorize your Telegram user**:
+   ```bash
+   # Windows:
+   .\bin\gobot.exe authorize <your-telegram-chat-id>
+   # Linux/macOS:
+   ./bin/gobot authorize <your-telegram-chat-id>
+   ```
+
+7. **Run**:
+   ```bash
+   # Windows:
+   .\bin\gobot.exe run
+   # Linux/macOS:
+   ./bin/gobot run
+   ```
 
 ## Documentation
 
