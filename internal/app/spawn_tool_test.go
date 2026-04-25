@@ -79,7 +79,7 @@ func TestSpawnTool_Execute_Error(t *testing.T) {
 // the parent agent's default provider. Regression for the bug where all sub-agents
 // were always dispatched through the parent provider (e.g. Gemini receiving an
 // OpenRouter-only model, causing 404s).
-func TestSpawnTool_Execute_UsesSpecialistProvider(t *testing.T) { //nolint:paralleltest // modifies global provider registry
+func TestSpawnTool_Execute_UsesSpecialistProvider(t *testing.T) { //nolint:paralleltest // uses global state // modifies global provider registry
 	const defaultProvName = "default-prov"
 	const specialistProvName = "specialist-prov"
 

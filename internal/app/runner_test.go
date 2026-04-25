@@ -610,7 +610,7 @@ func TestRunner_ToolResultSizeLimiting(t *testing.T) {
 	}
 }
 
-func TestRunner_StructuredLogging(t *testing.T) { //nolint:paralleltest // mutates global slog.SetDefault — running parallel causes a data race with other tests that call slog
+func TestRunner_StructuredLogging(t *testing.T) { //nolint:paralleltest // uses global state // mutates global slog.SetDefault — running parallel causes a data race with other tests that call slog
 	var buf bytes.Buffer
 	handler := slog.NewTextHandler(&buf, nil)
 	logger := slog.New(handler)

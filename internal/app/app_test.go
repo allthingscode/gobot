@@ -14,7 +14,7 @@ import (
 	"github.com/allthingscode/gobot/internal/memory"
 )
 
-//nolint:paralleltest // sets global logger
+//nolint:paralleltest // uses global state // sets global logger
 func TestSetupLogging(t *testing.T) {
 	oldLogger := slog.Default()
 	defer slog.SetDefault(oldLogger)

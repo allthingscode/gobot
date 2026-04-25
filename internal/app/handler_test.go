@@ -10,7 +10,7 @@ import (
 	"github.com/allthingscode/gobot/internal/memory"
 )
 
-//nolint:paralleltest // modifies global breaker registry
+//nolint:paralleltest // uses global state // modifies global breaker registry
 func TestDispatchHandler_maybeHandleAdminCommand(t *testing.T) {
 	h := &DispatchHandler{}
 	
