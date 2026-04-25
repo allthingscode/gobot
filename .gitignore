@@ -51,6 +51,7 @@ bin/
 artifacts/
 bench.txt
 coverage-windows*
+coverage_baseline
 c.out
 s.out
 v.out
