@@ -566,7 +566,7 @@ func TestCmdConfigValidate_Valid(t *testing.T) {
 }
 
 func TestCmdCheckpoints_Empty(t *testing.T) {
-	t.Setenv("GOBOT_STORAGE", t.TempDir())
+	isolateStorage(t)
 	cmd := cmdCheckpoints()
 	cmd.SilenceErrors = true
 	_ = cmd.Execute()

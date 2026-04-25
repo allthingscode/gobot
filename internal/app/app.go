@@ -107,7 +107,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 
 	var b *bot.Bot
 	if cfg.Channels.Telegram.Enabled {
-		b = StartTelegramBot(ctx, cfg, cfg.TelegramToken(), gateHandler, tracer, &wg)
+		b = StartTelegramBot(ctx, api, gateHandler, tracer, &wg)
 	}
 
 	StartCron(ctx, cfg, stack, b, tracer, &wg)
@@ -333,10 +333,9 @@ func RunIdempotencyCleanup(ctx context.Context, store *agentctx.IdempotencyStore
 }
 
 // StartTelegramBot initializes and starts the Telegram polling bot.
-func StartTelegramBot(ctx context.Context, cfg *config.Config, token string, gateHandler bot.Handler, tracer *observability.DispatchTracer, wg *sync.WaitGroup) *bot.Bot {
-	api, err := NewTgAPI(token, cfg.TelegramAllowedFrom(), cfg)
-	if err != nil {
-		slog.Error("gobot: telegram bot initialization failed", "err", err)
+func StartTelegramBot(ctx context.Context, api bot.API, gateHandler bot.Handler, tracer *observability.DispatchTracer, wg *sync.WaitGroup) *bot.Bot {
+	if api == nil {
+		slog.Error("gobot: telegram bot initialization failed, API is nil")
 		return nil
 	}
 	b := bot.New(api, gateHandler)
@@ -360,7 +359,8 @@ func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bo
 	if !cfg.Cron.Enabled {
 		return
 	}
-	cd := NewCronDispatcher(cfg, stack, b, tracer)
+	mgr := stack.NewSessionManager(cfg, nil, tracer)
+	cd := NewCronDispatcher(cfg, mgr, stack, b)
 	wg.Add(1)
 	go func() {
 		defer RecoverWithStack("cron-dispatcher")

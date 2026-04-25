@@ -15,7 +15,6 @@ import (
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/memory/vector"
-	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
@@ -43,8 +42,7 @@ type CronDispatcher struct {
 }
 
 // NewCronDispatcher initializes a new CronDispatcher using the given stack and bot.
-func NewCronDispatcher(cfg *config.Config, stack *AgentStack, b *bot.Bot, tracer *observability.DispatchTracer) *CronDispatcher {
-	mgr := stack.NewSessionManager(cfg, nil, tracer)
+func NewCronDispatcher(cfg *config.Config, mgr *agent.SessionManager, stack *AgentStack, b *bot.Bot) *CronDispatcher {
 	return &CronDispatcher{
 		mgr:          mgr,
 		b:            b,
