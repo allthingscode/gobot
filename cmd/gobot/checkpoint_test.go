@@ -25,4 +25,9 @@ func TestExtractMessageText(t *testing.T) {
 	if got := extractMessageText(agentctx.StrategicMessage{Content: &agentctx.MessageContent{Items: []agentctx.ContentItem{item}}}); got != "world" {
 		t.Errorf("got %q, want 'world'", got)
 	}
+
+	// Case 4: Items with no text field → "(no text content)"
+	if got := extractMessageText(agentctx.StrategicMessage{Content: &agentctx.MessageContent{Items: []agentctx.ContentItem{{}}}}); got != "(no text content)" {
+		t.Errorf("got %q, want '(no text content)'", got)
+	}
 }

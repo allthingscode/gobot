@@ -37,15 +37,27 @@ func cmdConfig() *cobra.Command {
 }
 
 func cmdConfigReformat() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reformat",
+	var checkOnly bool
+	cmd := &cobra.Command{
+		Use:   "reformat [path]",
 		Short: "Reformat config.json with standard 4-space indentation",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Long:  "Reformat the configuration file. If no path is provided, the default ~/.gobot/config.json is used.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
 			path := config.DefaultConfigPath()
+			if len(args) > 0 {
+				path = args[0]
+			}
+
 			cfg, err := config.LoadFrom(path)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
+
+			if checkOnly {
+				return runFormatCheck(path, cfg)
+			}
+
 			if err := cfg.Save(path); err != nil {
 				return fmt.Errorf("save config: %w", err)
 			}
@@ -53,12 +65,35 @@ func cmdConfigReformat() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "Only check if the config is correctly formatted without rewriting it")
+	return cmd
 }
 
-func cmdConfigValidate() *cobra.Command {	cmd := &cobra.Command{
-		Use:   "validate",
+func runFormatCheck(path string, cfg *config.Config) error {
+	currentData, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("config file %s does not exist", path)
+		}
+		return fmt.Errorf("read current config: %w", err)
+	}
+	formattedData, err := cfg.Marshal()
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if string(currentData) != string(formattedData) {
+		return fmt.Errorf("config %s is not correctly formatted; run 'gobot config reformat' to fix", path)
+	}
+	fmt.Printf("Config %s is correctly formatted\n", path)
+	return nil
+}
+
+func cmdConfigValidate() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "validate [path]",
 		Short: "Validate configuration and exit with appropriate code",
-		Long: `Validate the current configuration and report any errors.
+		Long: `Validate the configuration file and report any errors.
+If no path is provided, the default ~/.gobot/config.json is used.
 
 Returns exit code:
   0 - Configuration is valid
@@ -66,9 +101,14 @@ Returns exit code:
   2 - Configuration has warnings only
 
 Can be used in CI/CD pipelines to verify configuration before deployment.`,
+		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
+		RunE: func(_ *cobra.Command, args []string) error {
+			path := config.DefaultConfigPath()
+			if len(args) > 0 {
+				path = args[0]
+			}
+			cfg, err := config.LoadFrom(path)
 			if err != nil {
 				return &exitCodeError{code: 1, err: fmt.Errorf("failed to load config: %w", err)}
 			}

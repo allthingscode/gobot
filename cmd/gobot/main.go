@@ -53,9 +53,7 @@ func main() {
 	)
 
 	if err := root.Execute(); err != nil {
-		if !root.SilenceErrors {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -64,9 +62,9 @@ func cmdVersion() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
-		Run: func(_ *cobra.Command, _ []string) {
-			fmt.Printf("gobot %s (%s) built %s\n", version, commitHash, buildTime)
-			fmt.Printf("runtime: %s/%s (%s)\n", runtime.GOOS, runtime.GOARCH, runtime.Version())
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "gobot %s (%s) built %s\n", version, commitHash, buildTime)
+			fmt.Fprintf(cmd.OutOrStdout(), "runtime: %s/%s (%s)\n", runtime.GOOS, runtime.GOARCH, runtime.Version())
 		},
 	}
 }

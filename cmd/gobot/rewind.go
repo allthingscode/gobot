@@ -82,7 +82,7 @@ func printSnapshots(snapshots []agent.SnapshotMetadata) {
 	}
 
 	for i := 0; i < limit; i++ {
-		s := snapshots[i]
+		s := snapshots[i] //nolint:gosec // G602: bounds guaranteed; limit = min(len(snapshots), 10)
 		ts := s.Timestamp
 		if len(ts) > 19 {
 			ts = ts[:19]

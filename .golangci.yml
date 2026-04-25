@@ -73,6 +73,13 @@ linters:
             - path: ".*_test\\.go$"
               linters:
                   - wrapcheck
+            - path: "cli_coverage_test\\.go$"
+              linters:
+                  - paralleltest
+            - path: ".*_coverage_test\\.go$"
+              linters:
+                  - testpackage
+                  - paralleltest
 
     enable:
         - errcheck
