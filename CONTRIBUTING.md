@@ -36,6 +36,7 @@ golangci-lint run --modules-download-mode=readonly
 ```
 
 ## Coding Standards
+- **Configuration**: `config.json` must be formatted with 4-space indentation and a UTF-8 BOM. Use `go run ./cmd/gobot config reformat` to fix formatting and `go run ./cmd/gobot config validate` to check for errors.
 - **Wrap all errors**: `fmt.Errorf("context: %w", err)` — never return naked errors from external calls.
 - **Context usage**: Pass `context.Context` as the first parameter to every function that performs I/O.
 - **No panics**: Avoid `panic()` in `internal/` packages; return errors instead.

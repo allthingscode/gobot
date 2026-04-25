@@ -135,3 +135,18 @@ jobs:
                 with:
                     name: bench-${{ github.sha }}
                     path: artifacts/bench.txt
+
+    config-check:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
+                with:
+                    go-version-file: go.mod
+                    cache: true
+            -   name: Check config.sample.json format
+                run: go run -mod=readonly ./cmd/gobot config reformat --check config.sample.json
+            -   name: Validate config.sample.json
+                run: |
+                    mkdir -p ~/gobot_data
+                    go run -mod=readonly ./cmd/gobot config validate config.sample.json

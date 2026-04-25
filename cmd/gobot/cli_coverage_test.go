@@ -7,12 +7,14 @@ import (
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
-	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
 func setupTestHome(t *testing.T) string {
 	t.Helper()
-	tempDir := t.TempDir()
+	tempDir, err := os.MkdirTemp("", "gobot-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
 	
 	// Normalize path to avoid short name issues on Windows.
 	if absDir, err := filepath.Abs(tempDir); err == nil {
@@ -27,8 +29,7 @@ func setupTestHome(t *testing.T) string {
 	t.Setenv("GOBOT_STORAGE", tempDir)
 	
 	t.Cleanup(func() {
-		// Close ALL DB connections and clear the instance cache.
-		agentctx.ResetCheckpointManagerForTest()
+		_ = os.RemoveAll(tempDir)
 	})
 	return tempDir
 }

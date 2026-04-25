@@ -14,10 +14,10 @@ import (
 	"github.com/allthingscode/gobot/internal/secrets"
 )
 
-// bomPrefix is the UTF-8 byte order mark written by some Windows editors.
+// BOMPrefix is the UTF-8 byte order mark written by some Windows editors.
 //
 //nolint:gochecknoglobals // Immutable constant for BOM detection
-var bomPrefix = []byte{0xEF, 0xBB, 0xBF}
+var BOMPrefix = []byte{0xEF, 0xBB, 0xBF}
 
 // LoggingConfig controls log persistence, rotation, and formatting.
 type LoggingConfig struct {
@@ -386,21 +386,29 @@ func parseDurationOrDefault(s string, defaultVal time.Duration) time.Duration {
 	return d
 }
 
+// Marshal returns the config as indented JSON with a leading UTF-8 BOM.
+func (c *Config) Marshal() ([]byte, error) {
+	data, err := json.MarshalIndent(c, "", "    ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+
+	finalData := make([]byte, 0, len(BOMPrefix)+len(data))
+	finalData = append(finalData, BOMPrefix...)
+	finalData = append(finalData, data...)
+	return finalData, nil
+}
+
 // Save marshals the config to JSON and writes it to the specified path.
 func (c *Config) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	data, err := json.MarshalIndent(c, "", "    ")
+	data, err := c.Marshal()
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return err
 	}
-
-	// Prepend UTF-8 BOM for Windows compatibility as per project mandate
-	finalData := make([]byte, 0, len(bomPrefix)+len(data))
-	finalData = append(finalData, bomPrefix...)
-	finalData = append(finalData, data...)
-	if err := os.WriteFile(path, finalData, 0o600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config file: %w", err)
 	}
 	return nil
@@ -704,9 +712,9 @@ func decode(r io.Reader) (*Config, error) {
 
 	// Strip UTF-8 BOM if present
 	if len(data) >= 3 &&
-		data[0] == bomPrefix[0] &&
-		data[1] == bomPrefix[1] &&
-		data[2] == bomPrefix[2] {
+		data[0] == BOMPrefix[0] &&
+		data[1] == BOMPrefix[1] &&
+		data[2] == BOMPrefix[2] {
 		data = data[3:]
 	}
 

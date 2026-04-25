@@ -97,4 +97,17 @@ if ! ./scripts/check_platform_cmds.sh; then
     exit 1
 fi
 
+echo "--- pre-push: validating config.json"
+# We check the default config path (~/.gobot/config.json)
+if ! go run ./cmd/gobot config reformat --check > /dev/null 2>&1; then
+    echo "ERROR: config.json is not correctly formatted."
+    echo "       Run 'go run ./cmd/gobot config reformat' to fix."
+    exit 1
+fi
+if ! go run ./cmd/gobot config validate > /dev/null 2>&1; then
+    echo "ERROR: config.json validation failed."
+    echo "       Run 'go run ./cmd/gobot config validate' for details."
+    exit 1
+fi
+
 echo "--- pre-push: all checks passed"

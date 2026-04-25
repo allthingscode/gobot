@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestOpenDB(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
+func TestOpenDB(t *testing.T) { //nolint:paralleltest // modifies global environment
 	t.Run("creates directory and database", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()
@@ -49,7 +49,7 @@ func TestOpenDB(t *testing.T) { //nolint:paralleltest // uses global state // mo
 	})
 }
 
-func TestInitSchema(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
+func TestInitSchema(t *testing.T) { //nolint:paralleltest // modifies global environment
 	t.Run("creates all required tables", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()

@@ -113,8 +113,8 @@ func runFallbackTest(t *testing.T, tt fallbackTestCase, defaultProv, specialistP
 	}
 }
 
+//nolint:paralleltest // uses global state
 func TestSpawnTool_Execute_Fallback(t *testing.T) {
-	t.Parallel()
 	const defaultProvName = "default-prov"
 	const specialistProvName = "specialist-prov"
 
@@ -168,7 +168,6 @@ func TestSpawnTool_Execute_Fallback(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			runFallbackTest(t, tt, defaultProv, specialistProv)
 		})
 	}

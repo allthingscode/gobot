@@ -147,7 +147,7 @@ func InitVectorStore(cfg *config.Config, prov provider.Provider, runner *AgentRu
 		return nil, nil, cleanup
 	}
 
-	embedProv = vector.NewGeminiProvider(gp.Client(), cfg.EmbeddingModel())
+	embedProv = vector.NewGeminiProvider(cfg.GeminiAPIKey(), cfg.EmbeddingModel())
 	vsPath := filepath.Join(cfg.StorageRoot(), "memory", "vectors.db")
 	vs, err := vector.NewStore(vsPath)
 	if err != nil {

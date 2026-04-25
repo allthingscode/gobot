@@ -11,7 +11,7 @@ import (
 
 // TestProtectUnprotect verifies AES-256-GCM round-trips correctly for various inputs.
 //
-//nolint:paralleltest // uses global state // whyNoLint: uses t.Setenv for isolation
+//nolint:paralleltest // whyNoLint: uses t.Setenv for isolation
 func TestProtectUnprotect(t *testing.T) {
 	// Not parallel — uses t.Setenv for key-file isolation.
 	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(t.TempDir(), "encryption.key"))
@@ -63,7 +63,7 @@ func TestProtect_NonceRandomness(t *testing.T) {
 
 // TestUnprotect_CorruptCiphertext verifies that tampered ciphertext returns an error.
 //
-//nolint:paralleltest // uses global state // whyNoLint: uses t.Setenv for isolation
+//nolint:paralleltest // whyNoLint: uses t.Setenv for isolation
 func TestUnprotect_CorruptCiphertext(t *testing.T) {
 	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(t.TempDir(), "encryption.key"))
 

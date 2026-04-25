@@ -220,7 +220,7 @@ func TestRoutingProvider_FallbackOnError(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // uses global state // touches global provider registry
+//nolint:paralleltest // touches global provider registry
 func TestRoutingProvider_OpenRouterPrefix(t *testing.T) {
 	// Not parallel because it touches the global provider registry.
 	provider.ResetForTest()

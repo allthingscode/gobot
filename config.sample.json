@@ -1,0 +1,118 @@
+﻿{
+    "agents": {
+        "defaults": {
+            "model": "gemini-3-flash-preview",
+            "provider": "gemini",
+            "maxTokens": 0,
+            "maxToolIterations": 25,
+            "maxToolResultBytes": 32768,
+            "lockTimeoutSeconds": 120,
+            "memoryWindow": 50,
+            "contextPruning": {
+                "ttl": "720h",
+                "keepLastAssistants": 5
+            },
+            "compaction": {
+                "strategy": "summarization",
+                "memoryFlush": {
+                    "prompt": "",
+                    "ttl": "2160h",
+                    "globalTTL": "",
+                    "globalNamespacePatterns": []
+                },
+                "summarization": {
+                    "enabled": true,
+                    "model": "",
+                    "threshold": 0.7
+                }
+            }
+        },
+        "specialists": {}
+    },
+    "channels": {
+        "telegram": {
+            "enabled": false,
+            "hitl": true,
+            "token": "",
+            "allowFrom": []
+        }
+    },
+    "providers": {
+        "gemini": {
+            "apiKey": "DUMMY_KEY_FOR_CI_VALIDATION"
+        },
+        "anthropic": {
+            "apiKey": ""
+        },
+        "openai": {
+            "apiKey": ""
+        },
+        "openrouter": {
+            "apiKey": ""
+        },
+        "google": {
+            "apiKey": "",
+            "customCx": ""
+        }
+    },
+    "tools": {
+        "exec": {
+            "timeout": 120
+        },
+        "mcpServers": {},
+        "high_risk": []
+    },
+    "strategic_edition": {
+        "user_email": "",
+        "user_chat_id": 0,
+        "storage_root": "",
+        "vector_search_enabled": false,
+        "multi_user_enabled": false,
+        "gmail_readonly": true,
+        "observability": {
+            "service_name": "gobot",
+            "service_version": "dev",
+            "otlp_endpoint": "",
+            "sampling_rate": 1,
+            "dev_mode": true
+        },
+        "routing": {
+            "enabled": false,
+            "manager_model": ""
+        }
+    },
+    "gateway": {
+        "enabled": false,
+        "dashboard_enabled": false,
+        "auth_token": "",
+        "host": "127.0.0.1",
+        "port": 18790,
+        "web_addr": ""
+    },
+    "resilience": {
+        "circuit_breakers": {}
+    },
+    "context": {
+        "session_token_budget": 80000,
+        "compaction_summary_turns": 20
+    },
+    "cron": {
+        "enabled": false
+    },
+    "heartbeat": {
+        "enabled": false,
+        "interval": "15m"
+    },
+    "logging": {
+        "level": "INFO",
+        "format": "text",
+        "max_size_mb": 50,
+        "max_backups": 5,
+        "max_age_days": 30,
+        "compress": true
+    },
+    "browser": {
+        "debug_port": 0,
+        "headless": true
+    }
+}

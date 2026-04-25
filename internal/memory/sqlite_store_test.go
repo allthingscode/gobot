@@ -442,7 +442,7 @@ func openV1DB(t *testing.T) *sql.DB {
 	return db
 }
 
-//nolint:paralleltest // uses global state // subtests share a single in-memory DB; parallel execution would close it prematurely
+//nolint:paralleltest // subtests share a single in-memory DB; parallel execution would close it prematurely
 func TestInitMemorySchema_V1ToV2Migration(t *testing.T) {
 	t.Parallel()
 	db := openV1DB(t)

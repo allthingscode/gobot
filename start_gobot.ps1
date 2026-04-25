@@ -8,20 +8,6 @@ $GobotExe   = Join-Path $AppPath "gobot.exe"
 $StorageRoot = if ($env:GOBOT_STORAGE) { $env:GOBOT_STORAGE } else { Join-Path $env:USERPROFILE "gobot_data" }
 $LogDir     = Join-Path $StorageRoot "logs"
 $LockFile   = Join-Path $LogDir "gobot.pid"
-$ConfigPath = Join-Path $env:USERPROFILE ".gobot\config.json"
-
-# --- JSON Auto-Formatting ---
-if (Test-Path $ConfigPath) {
-    if (Test-Path $GobotExe) {
-        Write-Host "Reformatting config.json for readability..." -ForegroundColor Gray
-        try {
-            & $GobotExe config reformat
-        }
-        catch {
-            Write-Host "Warning: Failed to reformat config.json: $_" -ForegroundColor Yellow
-        }
-    }
-}
 
 if (-not (Test-Path $GobotExe)) {
     Write-Host "Error: gobot.exe not found at $GobotExe" -ForegroundColor Red
