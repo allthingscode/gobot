@@ -67,7 +67,7 @@ func TestEnsureAwarenessFile(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // mocking package-level variable
+//nolint:paralleltest // uses global state // mocking package-level variable
 func TestLoadPrivateFile(t *testing.T) {
 	origHome := userHomeDir
 	defer func() { userHomeDir = origHome }()
@@ -120,7 +120,7 @@ func TestLoadPrivateFile(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // mocking package-level variable
+//nolint:paralleltest // uses global state // mocking package-level variable
 func TestLoadSystemPrompt(t *testing.T) {
 	origHome := userHomeDir
 	defer func() { userHomeDir = origHome }()

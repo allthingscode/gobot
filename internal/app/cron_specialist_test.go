@@ -47,7 +47,7 @@ func (m *mockChatProvider) Chat(_ context.Context, _ provider.ChatRequest) (*pro
 	}, nil
 }
 
-func TestCronDispatcher_DispatchSpecialist_Telegram(t *testing.T) { //nolint:paralleltest // modifies global provider registry
+func TestCronDispatcher_DispatchSpecialist_Telegram(t *testing.T) { //nolint:paralleltest // uses global state // modifies global provider registry
 	mockProv := &mockChatProvider{resp: "Mock Specialist Result"}
 	provider.ResetForTest()
 	t.Cleanup(provider.ResetForTest)

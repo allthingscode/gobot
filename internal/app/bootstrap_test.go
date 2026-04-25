@@ -9,7 +9,7 @@ import (
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
-//nolint:paralleltest // touches global provider registry
+//nolint:paralleltest // uses global state // touches global provider registry
 func TestInitProviders_OpenRouterRouting(t *testing.T) {
 	// Not parallel because it touches the global provider registry.
 	t.Cleanup(provider.ResetForTest)
@@ -48,7 +48,7 @@ func TestInitProviders_ManagerModel(t *testing.T) {
 	}
 }
 
-func TestInitProviders_CostRouting(t *testing.T) { //nolint:paralleltest // touches global provider registry
+func TestInitProviders_CostRouting(t *testing.T) { //nolint:paralleltest // uses global state // touches global provider registry
 	t.Cleanup(provider.ResetForTest)
 	
 	// Register mock providers.

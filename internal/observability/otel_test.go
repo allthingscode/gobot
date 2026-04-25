@@ -242,7 +242,7 @@ func TestNewSlogHandler_NoSpan(t *testing.T) {
 
 // TestNewSlogHandler_WithSpan injects trace_id and span_id when a span is active.
 //
-//nolint:paralleltest // modifies global OTel tracer provider; cannot run concurrently
+//nolint:paralleltest // uses global state // modifies global OTel tracer provider; cannot run concurrently
 func TestNewSlogHandler_WithSpan(t *testing.T) {
 	// Not parallel: installs a global tracer provider.
 	original := otel.GetTracerProvider() // capture before overwriting
@@ -293,7 +293,7 @@ func TestNewTintedHandler(t *testing.T) {
 // TestOtelSlogHandler_WithAttrs verifies that pre-attached attributes are preserved
 // and OTel span IDs are still injected after WithAttrs.
 //
-//nolint:paralleltest // modifies global OTel tracer provider; cannot run concurrently
+//nolint:paralleltest // uses global state // modifies global OTel tracer provider; cannot run concurrently
 func TestOtelSlogHandler_WithAttrs(t *testing.T) {
 	// Not parallel: installs a global tracer provider.
 	original := otel.GetTracerProvider()
@@ -408,7 +408,7 @@ func TestProvider_RecordFactsSkipped(t *testing.T) {
 // TestNewProvider_OTLPPath exercises the full OTLP initialization path.
 // gRPC dials lazily so this returns in <5ms even with an unavailable endpoint.
 //
-//nolint:paralleltest // modifies global OTel tracer/meter providers; cannot run concurrently
+//nolint:paralleltest // uses global state // modifies global OTel tracer/meter providers; cannot run concurrently
 func TestNewProvider_OTLPPath(t *testing.T) {
 	origTP := otel.GetTracerProvider()
 	origMP := otel.GetMeterProvider()
@@ -486,7 +486,7 @@ func TestProvider_RecordMetrics_NonNil(t *testing.T) {
 // TestOtelSlogHandler_WithGroup verifies that a group prefix is preserved
 // and OTel span IDs are still injected after WithGroup.
 //
-//nolint:paralleltest // modifies global OTel tracer provider; cannot run concurrently
+//nolint:paralleltest // uses global state // modifies global OTel tracer provider; cannot run concurrently
 func TestOtelSlogHandler_WithGroup(t *testing.T) {
 	// Not parallel: installs a global tracer provider.
 	original := otel.GetTracerProvider()

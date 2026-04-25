@@ -116,7 +116,7 @@ func TestEnumerateMCPTools(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // modifies global variable
+//nolint:paralleltest // uses global state // modifies global variable
 func TestAppendMCPTools_FallbackAndCollision(t *testing.T) {
 	orig := enumerateMCPToolsFunc
 	defer func() { enumerateMCPToolsFunc = orig }()

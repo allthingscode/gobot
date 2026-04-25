@@ -51,6 +51,11 @@ func resetCheckpointManagerInstances() {
 	cmInstances = make(map[string]*CheckpointManager)
 }
 
+// ResetCheckpointManagerForTest clears the cached instances. Used only for testing.
+func ResetCheckpointManagerForTest() {
+	resetCheckpointManagerInstances()
+}
+
 // GetCheckpointManager returns a CheckpointManager for the specified dbDir.
 // It caches instances to ensure only one handle is open per directory.
 func GetCheckpointManager(dbDir string) (*CheckpointManager, error) {

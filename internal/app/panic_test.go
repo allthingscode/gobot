@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-//nolint:paralleltest // sets global logger
+//nolint:paralleltest // uses global state // sets global logger
 func TestRecoverWithStack(t *testing.T) {
 	var buf bytes.Buffer
 	h := slog.NewJSONHandler(&buf, nil)
@@ -51,7 +51,7 @@ func TestRecoverWithStack(t *testing.T) {
 	})
 }
 
-//nolint:paralleltest // sets global logger
+//nolint:paralleltest // uses global state // sets global logger
 func TestBackgroundGoroutinesRecovery(t *testing.T) {
 	var buf bytes.Buffer
 	h := slog.NewJSONHandler(&buf, nil)

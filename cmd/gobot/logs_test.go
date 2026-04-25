@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestLogsCommand(t *testing.T) { //nolint:paralleltest // modifies global env
+func TestLogsCommand(t *testing.T) { //nolint:paralleltest // uses global state // modifies global env
 	_, logsDir := setupLogsTest(t)
 	createTestLogs(t, logsDir)
 
@@ -110,7 +110,7 @@ func createTestLogs(t *testing.T, logsDir string) {
 	_ = os.Chtimes(newerLog, now, now)
 }
 
-func TestLogsCommand_StorageRootOverride(t *testing.T) { //nolint:paralleltest // modifies global env
+func TestLogsCommand_StorageRootOverride(t *testing.T) { //nolint:paralleltest // uses global state // modifies global env
 	homeDir, _ := os.MkdirTemp("", "gobot-test-logs-override-*")
 	defer os.RemoveAll(homeDir)
 

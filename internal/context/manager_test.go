@@ -42,7 +42,7 @@ func strPtr(s string) *string { return &s }
 
 // ── CreateThread ──────────────────────────────────────────────────────────────
 
-func TestCreateThread(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestCreateThread(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	tests := []struct {
 		name     string
@@ -89,7 +89,7 @@ func TestCreateThread(t *testing.T) { //nolint:paralleltest // modifies global e
 
 // ── SaveSnapshot ─────────────────────────────────────────────────────────────
 
-func TestSaveSnapshot(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestSaveSnapshot(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	msg := func(role MessageRole, text string) StrategicMessage {
 		content := MessageContent{Str: strPtr(text)}
@@ -166,7 +166,7 @@ func setupThreadWithSnapshots(t *testing.T, m *CheckpointManager, threadID strin
 	return lastMsgs
 }
 
-func TestLoadLatest_UnknownThread(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestLoadLatest_UnknownThread(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
 	snap, err := m.LoadLatest(context.Background(), "no-such-thread")
@@ -178,7 +178,7 @@ func TestLoadLatest_UnknownThread(t *testing.T) { //nolint:paralleltest // modif
 	}
 }
 
-func TestLoadLatest_MultipleSnapshots(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestLoadLatest_MultipleSnapshots(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
 	setupThreadWithSnapshots(t, m, "t1", 2)
@@ -204,7 +204,7 @@ func TestLoadLatest_MultipleSnapshots(t *testing.T) { //nolint:paralleltest // m
 	}
 }
 
-func TestLoadLatest_RoundTrip(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestLoadLatest_RoundTrip(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
 	original := setupThreadWithSnapshots(t, m, "t1", 1)
@@ -226,7 +226,7 @@ func TestLoadLatest_RoundTrip(t *testing.T) { //nolint:paralleltest // modifies 
 
 // ── CompleteThread ────────────────────────────────────────────────────────────
 
-func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestCompleteThread(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	t.Run("marks thread as completed", func(t *testing.T) {
 		t.Parallel()
@@ -267,7 +267,7 @@ func TestCompleteThread(t *testing.T) { //nolint:paralleltest // modifies global
 
 // ── ListResumable ─────────────────────────────────────────────────────────────
 
-func TestListResumable_Empty(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestListResumable_Empty(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
 	result, err := m.ListResumable(context.Background())
@@ -279,7 +279,7 @@ func TestListResumable_Empty(t *testing.T) { //nolint:paralleltest // modifies g
 	}
 }
 
-func TestListResumable_Ordered(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestListResumable_Ordered(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
 	for _, id := range []string{"tA", "tB"} {
@@ -300,7 +300,7 @@ func TestListResumable_Ordered(t *testing.T) { //nolint:paralleltest // modifies
 	}
 }
 
-func TestListResumable_NoSnapshotExcluded(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestListResumable_NoSnapshotExcluded(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 	t.Parallel()
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "no-snap", "model", nil); err != nil {
@@ -317,7 +317,7 @@ func TestListResumable_NoSnapshotExcluded(t *testing.T) { //nolint:paralleltest 
 
 // ── Closed-DB error paths ─────────────────────────────────────────────────────
 
-func TestSaveSnapshot_TxBeginError(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestSaveSnapshot_TxBeginError(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
@@ -333,7 +333,7 @@ func TestSaveSnapshot_TxBeginError(t *testing.T) { //nolint:paralleltest // modi
 	}
 }
 
-func TestListResumable_QueryError(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestListResumable_QueryError(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	m := newTestManager(t)
 	_ = m.db.Close() // force query to fail
@@ -344,7 +344,7 @@ func TestListResumable_QueryError(t *testing.T) { //nolint:paralleltest // modif
 	}
 }
 
-func TestCreateThread_ExecError(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestCreateThread_ExecError(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	m := newTestManager(t)
 	_ = m.db.Close()
@@ -359,7 +359,7 @@ func TestCreateThread_ExecError(t *testing.T) { //nolint:paralleltest // modifie
 	}
 }
 
-func TestCompleteThread_ExecError(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestCompleteThread_ExecError(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	m := newTestManager(t)
 	_ = m.db.Close()
@@ -376,7 +376,7 @@ func TestCompleteThread_ExecError(t *testing.T) { //nolint:paralleltest // modif
 
 // ── LoadLatest error paths ────────────────────────────────────────────────────
 
-func TestLoadLatest_CorruptState(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestLoadLatest_CorruptState(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	t.Run("returns error when state JSON is corrupt", func(t *testing.T) {
 		t.Parallel()
@@ -398,7 +398,7 @@ func TestLoadLatest_CorruptState(t *testing.T) { //nolint:paralleltest // modifi
 	})
 }
 
-func TestLoadLatest_CorruptMetadata(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestLoadLatest_CorruptMetadata(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	t.Run("falls back to empty map when metadata JSON is corrupt", func(t *testing.T) {
 		t.Parallel()
@@ -434,7 +434,7 @@ func TestLoadLatest_CorruptMetadata(t *testing.T) { //nolint:paralleltest // mod
 
 // ── SaveSnapshot validation path ──────────────────────────────────────────────
 
-func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	// StrategicMessage with a channel (or func) in ToolCalls cannot marshal.
 	// The simplest way to exercise the marshal-returns-false path is to pass
@@ -487,7 +487,7 @@ func resetSingleton() {
 	resetCheckpointManagerInstances()
 }
 
-func TestGetCheckpointManager_Error(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestGetCheckpointManager_Error(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	t.Run("returns error when storage root is not creatable", func(t *testing.T) {
 		t.Parallel()
@@ -510,7 +510,7 @@ func TestGetCheckpointManager_Error(t *testing.T) { //nolint:paralleltest // mod
 	})
 }
 
-func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	// Reset the singleton state for this test.
 	cmOnce = sync.Once{}
@@ -536,7 +536,7 @@ func TestGetCheckpointManager_Singleton(t *testing.T) { //nolint:paralleltest //
 
 // ── Checksum tests ────────────────────────────────────────────────────────────
 
-func TestSaveSnapshot_StoresChecksum(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestSaveSnapshot_StoresChecksum(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
@@ -564,7 +564,7 @@ func TestSaveSnapshot_StoresChecksum(t *testing.T) { //nolint:paralleltest // mo
 	}
 }
 
-func TestLoadLatest_ChecksumMismatch(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestLoadLatest_ChecksumMismatch(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
@@ -587,7 +587,7 @@ func TestLoadLatest_ChecksumMismatch(t *testing.T) { //nolint:paralleltest // mo
 	}
 }
 
-func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) { //nolint:paralleltest // modifies global environment
+func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) { //nolint:paralleltest // uses global state // modifies global environment
 
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
@@ -608,7 +608,7 @@ func TestLoadLatest_NullChecksum_LegacyCompat(t *testing.T) { //nolint:parallelt
 	}
 }
 
-func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated by newTestManager, but sticking to convention
+func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // uses global state // isolated by newTestManager, but sticking to convention
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "tidx", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -656,7 +656,7 @@ func TestLoadLatest_IndexUsage(t *testing.T) { //nolint:paralleltest // isolated
 	}
 }
 
-func TestUpdateSessionTokens(t *testing.T) { //nolint:paralleltest // uses newTestManager isolation
+func TestUpdateSessionTokens(t *testing.T) { //nolint:paralleltest // uses global state // uses newTestManager isolation
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -680,7 +680,7 @@ func TestUpdateSessionTokens(t *testing.T) { //nolint:paralleltest // uses newTe
 	}
 }
 
-func TestUpdateSessionTokens_WithCompactedAt(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+func TestUpdateSessionTokens_WithCompactedAt(t *testing.T) { //nolint:paralleltest // uses global state // isolated via newTestManager
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -706,7 +706,7 @@ func TestUpdateSessionTokens_WithCompactedAt(t *testing.T) { //nolint:parallelte
 	}
 }
 
-func TestGetSessionTokens_UnknownSession(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+func TestGetSessionTokens_UnknownSession(t *testing.T) { //nolint:paralleltest // uses global state // isolated via newTestManager
 	m := newTestManager(t)
 	tokens, compactedAt, err := m.GetSessionTokens(context.Background(), "unknown-session")
 	if err != nil {
@@ -720,7 +720,7 @@ func TestGetSessionTokens_UnknownSession(t *testing.T) { //nolint:paralleltest /
 	}
 }
 
-func TestUpdateSessionTokens_UpdatesExistingRow(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+func TestUpdateSessionTokens_UpdatesExistingRow(t *testing.T) { //nolint:paralleltest // uses global state // isolated via newTestManager
 	m := newTestManager(t)
 	if err := m.CreateThread(context.Background(), "t1", "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
@@ -744,7 +744,7 @@ func TestUpdateSessionTokens_UpdatesExistingRow(t *testing.T) { //nolint:paralle
 	}
 }
 
-func TestHITLApprovals(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+func TestHITLApprovals(t *testing.T) { //nolint:paralleltest // uses global state // isolated via newTestManager
 	m := newTestManager(t)
 	ctx := context.Background()
 	reqID := "req123"
@@ -788,7 +788,7 @@ func TestHITLApprovals(t *testing.T) { //nolint:paralleltest // isolated via new
 	}
 }
 
-func TestGetSessionTokens_FallbackFormat(t *testing.T) { //nolint:paralleltest // isolated via newTestManager
+func TestGetSessionTokens_FallbackFormat(t *testing.T) { //nolint:paralleltest // uses global state // isolated via newTestManager
 	m := newTestManager(t)
 	ctx := context.Background()
 	threadID := "t-fallback"
