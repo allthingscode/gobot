@@ -3,8 +3,6 @@ package vector
 
 import (
 	"testing"
-
-	"google.golang.org/genai"
 )
 
 func TestNewGeminiProvider_StoresModel(t *testing.T) {
@@ -25,7 +23,7 @@ func TestNewGeminiProvider_StoresModel(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			p := NewGeminiProvider(&genai.Client{}, tc.model)
+			p := NewGeminiProvider("test-api-key", tc.model)
 			if p.model != tc.model {
 				t.Errorf("NewGeminiProvider model = %q, want %q", p.model, tc.model)
 			}

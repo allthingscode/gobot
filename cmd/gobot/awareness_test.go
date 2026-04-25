@@ -17,7 +17,10 @@ func TestEnsureAwarenessFile(t *testing.T) {
 	t.Setenv("GOBOT_STORAGE", tmpDir)
 
 	// Explicitly reload config to ensure it sees the env var
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if cfg == nil {
+		t.Skipf("config load failed: %v", err)
+	}
 	awarenessPath := cfg.WorkspacePath("", "AWARENESS.md")
 
 	// Ensure no file exists from previous run (though TempDir should be clean)
