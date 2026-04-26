@@ -98,7 +98,7 @@ else
 fi
 
 # Dev factory quality gate — mandatory when factory is present and backlog is modified
-if [ -f ".private/scripts/factory_lint.go" ] && git diff --cached --name-only | grep -qE '^.private/backlog/'; then
+if [ -f ".private/scripts/factory_lint.go" ] && git diff --cached --name-only | grep -qE '^\.private/(backlog/|prompt-library/|sops/|scripts/|session/handoff\.schema\.json)'; then
     if ! go run .private/scripts/factory_lint.go > "$TEMP_LOG" 2>&1; then
         echo "ERROR: factory lint failed"
         cat "$TEMP_LOG"
