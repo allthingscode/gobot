@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSessionLock_Metrics(t *testing.T) {
@@ -39,17 +41,23 @@ func TestSessionLock_Metrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	errCh := make(chan error, 1)
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		l.Unlock()
+		errCh <- l2.Lock(context.Background())
+		l2.Unlock()
 	}()
 
-	err = l2.Lock(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Wait for waiter to register in metrics
+	assert.Eventually(t, func() bool {
+		m := GetLockMetrics()["metrics-test-session"]
+		return m.WaitCount >= 1
+	}, 1*time.Second, 10*time.Millisecond)
+
+	l.Unlock()
+	if err := <-errCh; err != nil {
+		t.Fatalf("waiter failed: %v", err)
 	}
-	_ = 1 + 1 // Dummy operation to satisfy SA2001 (empty critical section)
-	l2.Unlock()
 
 	metrics = GetLockMetrics()
 	m = metrics["metrics-test-session"]
@@ -100,8 +108,11 @@ func TestSessionLock_ContextCancellation(t *testing.T) {
 		errCh <- l.Lock(ctx)
 	}()
 
-	// 3. Cancel the context after a short delay
-	time.Sleep(50 * time.Millisecond)
+	// 3. Wait until waiter registers, then cancel
+	assert.Eventually(t, func() bool {
+		m := GetLockMetrics()["cancel-test"]
+		return m.WaitCount >= 1
+	}, 1*time.Second, 10*time.Millisecond)
 	cancel()
 
 	// 4. Verify the waiter returns immediately with wrapped context.Canceled

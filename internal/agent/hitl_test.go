@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/bot"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -82,15 +83,11 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 	}()
 
 	// Wait for the message to be sent
-	for {
+	assert.Eventually(t, func() bool {
 		m.mu.Lock()
-		numPending := len(m.pending)
-		m.mu.Unlock()
-		if numPending > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		defer m.mu.Unlock()
+		return len(m.pending) > 0
+	}, 1*time.Second, 10*time.Millisecond)
 
 	// Extract reqID from sent buttons
 	sentButtons := api.getSentButtons()
@@ -137,15 +134,11 @@ func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 	}()
 
 	// Wait for the message to be sent
-	for {
+	assert.Eventually(t, func() bool {
 		m.mu.Lock()
-		numPending := len(m.pending)
-		m.mu.Unlock()
-		if numPending > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		defer m.mu.Unlock()
+		return len(m.pending) > 0
+	}, 1*time.Second, 10*time.Millisecond)
 
 	// Extract reqID from sent buttons
 	sentButtons := api.getSentButtons()
@@ -289,8 +282,14 @@ func TestHITLManager_Persistence(t *testing.T) {
 		close(done)
 	}()
 
-	// Should be waiting on channel, not sending message
-	time.Sleep(50 * time.Millisecond)
+	// Should be waiting on channel, not sending message.
+	// Wait until it reaches the blocking point.
+	assert.Eventually(t, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return len(m.pending) > 0
+	}, 1*time.Second, 10*time.Millisecond)
+
 	if len(api.sentMessages) > 0 {
 		t.Errorf("sent messages for pending request, expected 0")
 	}

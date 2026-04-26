@@ -91,7 +91,7 @@ func (m *iterLimitMockTool) Execute(_ context.Context, _, _ string, _ map[string
 
 func TestExtractText(t *testing.T) {
 	t.Parallel()
-	s1 := "hello"
+	s1 := "hello" //nolint:goconst // test fixture
 	tests := []struct {
 		name string
 		msg  agentctx.StrategicMessage

@@ -10,6 +10,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/app"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGenerateIdempotencyKey(t *testing.T) {
@@ -109,21 +110,17 @@ func TestIdempotencyCleanup(t *testing.T) {
 
 	// 6. Test the periodic loop function (RunIdempotencyCleanup).
 	go app.RunIdempotencyCleanup(ctx, store, 100*time.Millisecond)
-	time.Sleep(200 * time.Millisecond)
 
 	// Add another one and backdate it
 	_ = store.Store(ctx, "expired-key-2", "test-tool", "hash3", "result", "session")
 	_, _ = db.ExecContext(ctx, "UPDATE idempotency_keys SET created_at = ? WHERE key = 'expired-key-2'", past)
 
 	// Poll until cleanup fires (up to 5s to tolerate loaded CI runners under -race).
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	assert.Eventually(t, func() bool {
 		_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM idempotency_keys").Scan(&count)
-		if count == 1 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return count == 1
+	}, 5*time.Second, 50*time.Millisecond)
+
 	if count != 1 {
 		t.Errorf("DB count after periodic loop = %d, want 1 (expired key should be gone)", count)
 	}

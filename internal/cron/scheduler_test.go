@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type mockDispatcher struct {
@@ -377,26 +379,20 @@ func TestScheduler_FakeClock(t *testing.T) {
 	}()
 
 	// Wait for scheduler to reach After()
-	for i := 0; i < 50; i++ {
-		if fc.HasWaiter() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	assert.Eventually(t, func() bool {
+		return fc.HasWaiter()
+	}, 1*time.Second, 10*time.Millisecond)
 
 	// 1. Advance to 1000ms. Poll should trigger.
 	fc.Advance(1000 * time.Millisecond)
 
 	// Wait for poll to complete and Scheduler to wait on After() again
-	for i := 0; i < 100; i++ {
+	assert.Eventually(t, func() bool {
 		dispatcher.mu.Lock()
 		count := len(dispatcher.payloads)
 		dispatcher.mu.Unlock()
-		if count == 1 && fc.HasWaiter() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return count == 1 && fc.HasWaiter()
+	}, 1*time.Second, 10*time.Millisecond)
 
 	dispatcher.mu.Lock()
 	if len(dispatcher.payloads) != 1 {
@@ -408,15 +404,12 @@ func TestScheduler_FakeClock(t *testing.T) {
 
 	// 2. Advance another 1h. Poll should trigger again.
 	fc.Advance(1 * time.Hour)
-	for i := 0; i < 100; i++ {
+	assert.Eventually(t, func() bool {
 		dispatcher.mu.Lock()
 		count := len(dispatcher.payloads)
 		dispatcher.mu.Unlock()
-		if count == 2 && fc.HasWaiter() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return count == 2 && fc.HasWaiter()
+	}, 1*time.Second, 10*time.Millisecond)
 
 	dispatcher.mu.Lock()
 	if len(dispatcher.payloads) != 2 {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/testutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRetryIntegration_5xxFailures(t *testing.T) {
@@ -241,7 +242,9 @@ func TestRetryIntegration_RecoveryAfterNetworkReturns(t *testing.T) {
 	}
 
 	// Wait for CB to enter half-open state
-	time.Sleep(150 * time.Millisecond)
+	assert.Eventually(t, func() bool {
+		return cb.State() == "half-open"
+	}, 2*time.Second, 10*time.Millisecond)
 
 	// Restore network
 	fs.Update(func(f *testutil.FaultyServer) {

@@ -326,10 +326,11 @@ func TestBot_Run_DispatchesMessages(t *testing.T) {
 
 	// Close the updates channel so Run exits the drain loop, then cancel ctx.
 	go func() {
-		// Wait long enough for goroutines to potentially complete.
-		time.Sleep(100 * time.Millisecond)
+		// Wait for messages to be processed.
+		assert.Eventually(t, func() bool {
+			return len(handler.getCalls()) >= 2
+		}, 1*time.Second, 10*time.Millisecond)
 		close(api.updates)
-		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 
@@ -359,9 +360,10 @@ func TestBot_Run_NoReplyForEmptyResponse(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		assert.Eventually(t, func() bool {
+			return len(handler.getCalls()) >= 1
+		}, 1*time.Second, 10*time.Millisecond)
 		close(api.updates)
-		time.Sleep(10 * time.Millisecond)
 		cancel()
 	}()
 	_ = bot.Run(ctx)
@@ -387,9 +389,10 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		// Wait for goroutines to potentially complete.
-		time.Sleep(100 * time.Millisecond)
+		assert.Eventually(t, func() bool {
+			return customHandler.callCount() >= 2
+		}, 1*time.Second, 10*time.Millisecond)
 		close(api.updates)
-		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 	_ = bot.Run(ctx)
@@ -418,15 +421,11 @@ func TestBot_Run_RetriesOnTransientError(t *testing.T) {
 
 	go func() {
 		// Wait for the message to be processed, then close and cancel.
-		for {
-			time.Sleep(50 * time.Millisecond)
-			if len(handler.getCalls()) >= 1 {
-				close(fallback.updates)
-				time.Sleep(10 * time.Millisecond)
-				cancel()
-				return
-			}
-		}
+		assert.Eventually(t, func() bool {
+			return len(handler.getCalls()) >= 1
+		}, 10*time.Second, 100*time.Millisecond)
+		close(fallback.updates)
+		cancel()
 	}()
 
 	_ = bot.Run(ctx)
@@ -475,9 +474,10 @@ func TestBot_Run_ThreadAwareSessionKey(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		assert.Eventually(t, func() bool {
+			return len(handler.getCalls()) >= 1
+		}, 1*time.Second, 10*time.Millisecond)
 		close(api.updates)
-		time.Sleep(10 * time.Millisecond)
 		cancel()
 	}()
 	_ = bot.Run(ctx)
@@ -587,7 +587,6 @@ func TestBot_CallbackLeakPrevention(t *testing.T) {
 	defer cancel()
 
 	// Capture initial goroutines
-	time.Sleep(10 * time.Millisecond)
 	initialGoroutines := runtime.NumGoroutine()
 
 	done := make(chan struct{})
@@ -613,17 +612,13 @@ func TestBot_CallbackLeakPrevention(t *testing.T) {
 		t.Fatal("bot did not shut down after context cancellation")
 	}
 
-	// Wait a brief moment for goroutines to drain
-	time.Sleep(50 * time.Millisecond)
-
-	finalGoroutines := runtime.NumGoroutine()
+	// Wait a brief moment for goroutines to drain and verify no leaks
+	assert.Eventually(t, func() bool {
+		return runtime.NumGoroutine() <= initialGoroutines+2
+	}, 2*time.Second, 10*time.Millisecond)
 
 	// Unblock to avoid polluting other tests
 	close(handler.block)
-
-	if finalGoroutines > initialGoroutines+2 {
-		t.Errorf("goroutine leak: started with %d, ended with %d", initialGoroutines, finalGoroutines)
-	}
 }
 
 func TestBot_Run_DropsInvalidMessages(t *testing.T) {
@@ -639,9 +634,10 @@ func TestBot_Run_DropsInvalidMessages(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		assert.Eventually(t, func() bool {
+			return len(handler.getCalls()) >= 1
+		}, 1*time.Second, 10*time.Millisecond)
 		close(api.updates)
-		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 	_ = bot.Run(ctx)

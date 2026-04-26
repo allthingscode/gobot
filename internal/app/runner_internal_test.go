@@ -20,23 +20,24 @@ const (
 	testUser   = "user"
 	testModel  = "test-model"
 	testResult = "result"
+	basePrompt = "base prompt"
 )
 
 func TestRunner_BuildSystemPrompt_NoMemStore(t *testing.T) {
 	t.Parallel()
 	r := &AgentRunner{
-		SystemPrompt: "base prompt",
+		SystemPrompt: basePrompt,
 	}
 	got := r.buildSystemPrompt(context.Background(), testSess, nil, nil)
-	if got != "base prompt" {
-		t.Errorf("got %q, want 'base prompt'", got)
+	if got != basePrompt {
+		t.Errorf("got %q, want %q", got, basePrompt)
 	}
 }
 
 func TestRunner_BuildSystemPrompt_WithMemStore(t *testing.T) {
 	t.Parallel()
 	r := &AgentRunner{
-		SystemPrompt: "base prompt",
+		SystemPrompt: basePrompt,
 		Cfg:          &config.Config{},
 	}
 	userMsg := "test message"
@@ -46,8 +47,8 @@ func TestRunner_BuildSystemPrompt_WithMemStore(t *testing.T) {
 	
 	// With nil memStore, should return base prompt
 	got := r.buildSystemPrompt(context.Background(), testSess, messages, nil)
-	if got != "base prompt" {
-		t.Errorf("got %q, want 'base prompt'", got)
+	if got != basePrompt {
+		t.Errorf("got %q, want %q", got, basePrompt)
 	}
 }
 

@@ -196,10 +196,13 @@ func TestResourceRegistry_Shutdown_Timeout(t *testing.T) {
 	t.Parallel()
 	reg := NewResourceRegistry()
 
+	blockCh := make(chan struct{})
+	defer close(blockCh)
+
 	res1 := &mockResource{
 		name: "res1",
 		shutdownFn: func() error {
-			time.Sleep(5 * time.Second)
+			<-blockCh
 			return nil
 		},
 	}
@@ -299,8 +302,11 @@ func TestClosableResource_Close(t *testing.T) {
 
 func TestClosableResource_Timeout(t *testing.T) {
 	t.Parallel()
+	blockCh := make(chan struct{})
+	defer close(blockCh)
+
 	res := NewClosableResource("slow", func() error {
-		time.Sleep(5 * time.Second)
+		<-blockCh
 		return nil
 	})
 
