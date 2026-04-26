@@ -108,7 +108,7 @@ func hasColumn(db *sql.DB, colName string) (bool, error) {
 func addTokenColumnsIfMissing(db *sql.DB) error {
 	hasTokens, err := hasColumn(db, "estimated_tokens")
 	if err != nil {
-		return err
+		return fmt.Errorf("check estimated_tokens: %w", err)
 	}
 	if !hasTokens {
 		if _, err := db.ExecContext(stdctx.Background(), "ALTER TABLE threads ADD COLUMN estimated_tokens INTEGER DEFAULT 0"); err != nil {
@@ -117,7 +117,7 @@ func addTokenColumnsIfMissing(db *sql.DB) error {
 	}
 	hasCompactedAt, err := hasColumn(db, "last_compacted_at")
 	if err != nil {
-		return err
+		return fmt.Errorf("check last_compacted_at: %w", err)
 	}
 	if !hasCompactedAt {
 		if _, err := db.ExecContext(stdctx.Background(), "ALTER TABLE threads ADD COLUMN last_compacted_at DATETIME"); err != nil {
@@ -130,13 +130,13 @@ func addTokenColumnsIfMissing(db *sql.DB) error {
 // initSchema creates the threads, checkpoints, and idempotency_keys tables if they do not exist.
 func initSchema(db *sql.DB) error {
 	if err := createBaseTables(db); err != nil {
-		return err
+		return fmt.Errorf("create base tables: %w", err)
 	}
 	if err := createIndices(db); err != nil {
-		return err
+		return fmt.Errorf("create indices: %w", err)
 	}
 	if err := createIdempotencyTable(db); err != nil {
-		return err
+		return fmt.Errorf("create idempotency table: %w", err)
 	}
 
 	if err := addChecksumColumnIfMissing(db); err != nil {

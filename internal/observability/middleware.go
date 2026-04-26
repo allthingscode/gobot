@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -32,8 +33,9 @@ func (d *DispatchTracer) TraceBotDispatch(ctx context.Context, sessionKey string
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("bot dispatch: %w", err)
 	}
-	return err
+	return nil
 }
 
 // TraceAgentDispatch traces an agent session dispatch operation.
@@ -51,10 +53,10 @@ func (d *DispatchTracer) TraceAgentDispatch(ctx context.Context, sessionKey stri
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-	} else {
-		span.SetAttributes(attribute.Int("response.length", len(response)))
+		return response, fmt.Errorf("agent dispatch: %w", err)
 	}
-	return response, err
+	span.SetAttributes(attribute.Int("response.length", len(response)))
+	return response, nil
 }
 
 // TraceProviderCall traces a provider API call.
@@ -76,8 +78,9 @@ func (d *DispatchTracer) TraceProviderCall(ctx context.Context, sessionKey strin
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("provider call: %w", err)
 	}
-	return err
+	return nil
 }
 
 // TraceToolExecution traces a tool execution with duration metrics.
@@ -105,8 +108,9 @@ func (d *DispatchTracer) TraceToolExecution(ctx context.Context, sessionKey, too
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		return result, fmt.Errorf("tool execution: %w", err)
 	}
-	return result, err
+	return result, nil
 }
 
 // RecordTokens records token consumption via the underlying provider.

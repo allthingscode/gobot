@@ -150,7 +150,7 @@ func (l *AuditLedger) GetAll() ([]AuditRecord, error) {
 func (l *AuditLedger) Verify() error {
 	records, err := l.GetAll()
 	if err != nil {
-		return err
+		return fmt.Errorf("audit verify: get all: %w", err)
 	}
 	for i, r := range records {
 		expected := auditHash(r.PrevHash, r.Timestamp, r.SessionID, r.Actor, r.Action, r.Result)

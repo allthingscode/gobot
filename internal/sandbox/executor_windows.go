@@ -159,7 +159,7 @@ func resumeMainThread(pid uint32) error {
 
 	threadID, err := findFirstThreadForPID(snap, pid)
 	if err != nil {
-		return err
+		return fmt.Errorf("find main thread: %w", err)
 	}
 
 	return resumeThread(threadID)

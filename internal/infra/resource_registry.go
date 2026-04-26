@@ -145,11 +145,11 @@ func (r *ResourceRegistry) shutdownOne(ctx context.Context, res Resource) error 
 		if err != nil {
 			r.metrics.Failures++
 			slog.Error("resource shutdown failed", "name", res.Name(), "err", err)
-		} else {
-			r.metrics.Shutdowns++
-			slog.Debug("resource shutdown complete", "name", res.Name())
+			return fmt.Errorf("shutdown %s: %w", res.Name(), err)
 		}
-		return err
+		r.metrics.Shutdowns++
+		slog.Debug("resource shutdown complete", "name", res.Name())
+		return nil
 	case <-ctx.Done():
 		r.metrics.Failures++
 		slog.Error("resource shutdown timed out", "name", res.Name())
@@ -223,7 +223,10 @@ func (c *ClosableResource) Shutdown(ctx context.Context) error {
 	select {
 	case err := <-done:
 		c.closed = true
-		return err
+		if err != nil {
+			return fmt.Errorf("shutdown %s: %w", c.name, err)
+		}
+		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("shutdown %s: %w", c.name, ctx.Err())
 	}

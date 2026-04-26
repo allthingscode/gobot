@@ -59,7 +59,7 @@ var TimeoutClient = &http.Client{Timeout: 30 * time.Second}
 func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 	clientID, clientSecret, err := resolveClientCredentials(secretsRoot)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve credentials: %w", err)
 	}
 
 	const port = 8080
@@ -71,7 +71,7 @@ func AuthorizeInteractive(secretsRoot string, scopes []string) error {
 
 	code, err := waitForAuthCode(port)
 	if err != nil {
-		return err
+		return fmt.Errorf("wait for auth code: %w", err)
 	}
 
 	token, err := exchangeCode(context.Background(), code, clientID, clientSecret, redirectURI)

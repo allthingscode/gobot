@@ -47,7 +47,7 @@ func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
 
 	copySessionFiles(sessionDir, snapshotDir)
 	if err := writeSnapshotMetadata(snapshotDir, snapshotName, specialist, taskID); err != nil {
-		return err
+		return fmt.Errorf("write snapshot metadata: %w", err)
 	}
 
 	slog.Info("snapshot: created checkpoint", "name", snapshotName)
@@ -199,11 +199,11 @@ func RestoreSnapshot(storageRoot, snapshotName string) error {
 	}
 
 	if err := deleteSessionFilesForRestore(sessionDir); err != nil {
-		return err
+		return fmt.Errorf("delete session files: %w", err)
 	}
 
 	if err := copySnapshotContents(snapshotDir, sessionDir); err != nil {
-		return err
+		return fmt.Errorf("copy snapshot contents: %w", err)
 	}
 
 	slog.Info("snapshot: restored state from checkpoint", "name", snapshotName)

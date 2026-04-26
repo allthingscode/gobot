@@ -40,7 +40,7 @@ func (s *SecretsStore) Set(key, value string) error {
 	}
 	m, err := s.load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load secrets: %w", err)
 	}
 	m[key] = base64.StdEncoding.EncodeToString(encrypted)
 	return s.save(m)
@@ -51,28 +51,28 @@ func (s *SecretsStore) Set(key, value string) error {
 func (s *SecretsStore) Get(key string) (string, error) {
 	m, err := s.load()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("load secrets: %w", err)
 	}
 	encoded, ok := m[key]
 	if !ok {
 		return "", nil
 	}
-	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
+	encrypted, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", fmt.Errorf("secrets get %q: base64 decode: %w", key, err)
+		return "", fmt.Errorf("decode secret %q: %w", key, err)
 	}
-	plaintext, err := unprotect(ciphertext)
+	decrypted, err := unprotect(encrypted)
 	if err != nil {
-		return "", fmt.Errorf("secrets get %q: %w", key, err)
+		return "", fmt.Errorf("unprotect secret %q: %w", key, err)
 	}
-	return string(plaintext), nil
+	return string(decrypted), nil
 }
 
-// List returns all stored key names in sorted order.
+// List returns a sorted list of all keys in the store.
 func (s *SecretsStore) List() ([]string, error) {
 	m, err := s.load()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load secrets: %w", err)
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -86,7 +86,7 @@ func (s *SecretsStore) List() ([]string, error) {
 func (s *SecretsStore) Delete(key string) error {
 	m, err := s.load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load secrets: %w", err)
 	}
 	delete(m, key)
 	return s.save(m)
