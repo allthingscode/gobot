@@ -245,7 +245,7 @@ func (c *Consolidator) isDuplicate(ctx context.Context, sessionKey, fact string)
 	}
 
 	// Fallback to lexical word-overlap (existing logic).
-	return c.isLexicalDuplicate(sessionKey, fact)
+	return c.isLexicalDuplicate(ctx, sessionKey, fact)
 }
 
 func (c *Consolidator) isSemanticDuplicate(ctx context.Context, sessionKey, fact string) bool {
@@ -278,8 +278,8 @@ func (c *Consolidator) isSemanticDuplicate(ctx context.Context, sessionKey, fact
 	return false
 }
 
-func (c *Consolidator) isLexicalDuplicate(sessionKey, fact string) bool {
-	existing, err := c.store.Search(context.Background(), fact, sessionKey, 1)
+func (c *Consolidator) isLexicalDuplicate(ctx context.Context, sessionKey, fact string) bool {
+	existing, err := c.store.Search(ctx, fact, sessionKey, 1)
 	if err != nil || len(existing) == 0 {
 		return false
 	}

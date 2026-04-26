@@ -268,6 +268,26 @@ func (r *AgentRunner) hybridRagSearch(ctx context.Context, sessionKey, userText 
 
 func (r *AgentRunner) ftsSearch(ctx context.Context, userText, sessionKey string, memStore *memory.MemoryStore) []map[string]any {
 	var results []map[string]any
+	var err error
+
+	if r.Tracer != nil {
+		err = r.Tracer.TraceMemorySearch(ctx, "fts", func(ctx context.Context) error {
+			var err2 error
+			results, err2 = memStore.Search(ctx, userText, sessionKey, 10)
+			if err2 != nil {
+				return fmt.Errorf("fts search: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		results, err = memStore.Search(ctx, userText, sessionKey, 10)
+	}
+
+	if err != nil {
+		slog.Error("runner: FTS search failed", "err", err, "session", sessionKey)
+		return nil
+	}
+
 	if len(results) > 0 {
 		return memory.FilterRAGResults(results, 0.0)
 	}
