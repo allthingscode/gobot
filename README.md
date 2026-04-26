@@ -179,6 +179,12 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 
 Works everywhere you do — **Windows** (with enhanced security), **Linux**, and **macOS**. Same binary, same features.
 
+## Footprint
+
+- **Binary size:** 28.98 MB, measured on April 26, 2026 with `go build -mod=readonly -trimpath -ldflags="-s -w" -o gobot-c191.exe ./cmd/gobot`.
+- **Idle RSS:** 72.59 MB, sampled after 60 seconds from `tasklist /FI "IMAGENAME eq gobot-c191.exe" /FO CSV /NH` while `gobot run` was idle in a temp profile.
+- **Soft ceiling:** keep the stripped Windows binary under 40 MB; if it grows past that, investigate dependency or asset growth before shipping.
+
 ## Built for Humans Who Demand More
 
 While other agents need constant babysitting and break with updates, gobot:
