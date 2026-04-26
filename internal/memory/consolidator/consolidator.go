@@ -60,6 +60,7 @@ type Consolidator struct {
 	globalTTL              string                  // F-071: TTL for global namespace
 	patterns               []string                // F-071: Patterns for global routing
 	obs                    *observability.Provider // optional observability provider
+	tracer                 *observability.DispatchTracer
 }
 
 // New creates a Consolidator. Both runner and store must be non-nil.
@@ -76,7 +77,13 @@ func New(runner TextRunner, store *memory.MemoryStore, vecStore *vector.Store, e
 		globalTTL:              "",
 		patterns:               nil,
 		obs:                    nil,
+		tracer:                 nil,
 	}
+}
+
+// SetTracer sets the tracer for consolidation operations.
+func (c *Consolidator) SetTracer(t *observability.DispatchTracer) {
+	c.tracer = t
 }
 
 // SetSemanticDedupThreshold sets the threshold for semantic deduplication (0-1).
@@ -140,9 +147,25 @@ func (c *Consolidator) ConsolidateAsync(sessionKey, reply string) {
 // consolidate runs the LLM extraction and indexes facts. Returns the number
 // of facts indexed. Exported for testing via a direct call.
 func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string) (int, error) {
+	if c.tracer != nil {
+		var indexed int
+		err := c.tracer.TraceConsolidation(ctx, sessionKey, func(ctx context.Context) error {
+			var err2 error
+			indexed, err2 = c.consolidateInner(ctx, sessionKey, reply)
+			return err2
+		})
+		if err != nil {
+			return indexed, fmt.Errorf("memory consolidation trace: %w", err)
+		}
+		return indexed, nil
+	}
+	return c.consolidateInner(ctx, sessionKey, reply)
+}
+
+func (c *Consolidator) consolidateInner(ctx context.Context, sessionKey, reply string) (int, error) {
 	facts, err := c.extractFacts(ctx, sessionKey, reply)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("extract facts: %w", err)
 	}
 	if len(facts) == 0 {
 		return 0, nil
@@ -153,6 +176,7 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 	}
 
 	indexed, skipped := c.indexFacts(ctx, sessionKey, facts)
+	c.recordIndexingMetrics(ctx, indexed, skipped)
 
 	if c.vecStore != nil && indexed > 0 {
 		if err := c.vecStore.Save(); err != nil {
@@ -160,15 +184,18 @@ func (c *Consolidator) consolidate(ctx context.Context, sessionKey, reply string
 		}
 	}
 
-	if c.obs != nil {
-		c.obs.RecordFactsIndexed(ctx, int64(indexed))
-		if skipped > 0 {
-			c.obs.RecordFactsSkipped(ctx, int64(skipped))
-		}
-	}
-
 	c.cleanupNamespaces(sessionKey)
 	return indexed, nil
+}
+
+func (c *Consolidator) recordIndexingMetrics(ctx context.Context, indexed, skipped int) {
+	if c.obs == nil {
+		return
+	}
+	c.obs.RecordFactsIndexed(ctx, int64(indexed))
+	if skipped > 0 {
+		c.obs.RecordFactsSkipped(ctx, int64(skipped))
+	}
 }
 
 func (c *Consolidator) extractFacts(ctx context.Context, sessionKey, reply string) ([]ScoredFact, error) {
@@ -252,7 +279,7 @@ func (c *Consolidator) isSemanticDuplicate(ctx context.Context, sessionKey, fact
 }
 
 func (c *Consolidator) isLexicalDuplicate(sessionKey, fact string) bool {
-	existing, err := c.store.Search(fact, sessionKey, 1)
+	existing, err := c.store.Search(context.Background(), fact, sessionKey, 1)
 	if err != nil || len(existing) == 0 {
 		return false
 	}

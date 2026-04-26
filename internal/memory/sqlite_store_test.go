@@ -104,7 +104,7 @@ func TestMigrationV0ToV1(t *testing.T) {
 	}
 
 	// 4. Verify data is migrated with session: prefix
-	results, err := store.Search("legacy", "sess123", 5)
+	results, err := store.Search(context.Background(),"legacy", "sess123", 5)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestSearch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			results, err := store.Search(tc.query, tc.sessionKey, tc.limit)
+			results, err := store.Search(context.Background(),tc.query, tc.sessionKey, tc.limit)
 			if err != nil {
 				t.Fatalf("Search() unexpected error: %v", err)
 			}
@@ -284,7 +284,7 @@ func TestRebuild(t *testing.T) {
 	}
 
 	// Verify the indexed content is searchable.
-	results, _ := store.Search("financial report", "session-alpha", 5)
+	results, _ := store.Search(context.Background(),"financial report", "session-alpha", 5)
 	if len(results) == 0 {
 		t.Error("expected to find 'financial report' after rebuild")
 	}
@@ -386,7 +386,7 @@ func TestIndexWithImportance_StoresAndRetrieves(t *testing.T) {
 	if err := store.IndexWithImportance("session:s1", "Project deadline May 2026", 5); err != nil {
 		t.Fatalf("IndexWithImportance: %v", err)
 	}
-	results, err := store.Search("deadline", "s1", 5)
+	results, err := store.Search(context.Background(),"deadline", "s1", 5)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestIndex_UsesDefaultImportance(t *testing.T) {
 	}
 	// Verify we can query it (importance=3 default is stored, not tested directly here
 	// since Search doesn't return importance — the schema migration test covers that).
-	results, err := store.Search("default importance", "s1", 5)
+	results, err := store.Search(context.Background(),"default importance", "s1", 5)
 	if err != nil || len(results) == 0 {
 		t.Fatalf("Search after Index: err=%v results=%d", err, len(results))
 	}

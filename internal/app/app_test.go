@@ -87,7 +87,7 @@ func TestSetupConsolidator(t *testing.T) {
 	mgr := &agent.SessionManager{}
 	handler := &DispatchHandler{}
 	
-	SetupConsolidator(cfg, stack, mgr, handler, nil)
+	SetupConsolidator(cfg, stack, mgr, handler, nil, nil)
 	if handler.Consolidator == nil {
 		t.Error("SetupConsolidator failed to set handler.Consolidator")
 	}
@@ -139,7 +139,7 @@ func TestRunAgentLoop(t *testing.T) {
 	cfg := &config.Config{}
 	stack := &AgentStack{Runner: &AgentRunner{}}
 	
-	_ = runAgentLoop(ctx, cfg, stack, nil, nil)
+	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil)
 }
 
 func TestRunPreFlightDiagnostics(t *testing.T) {

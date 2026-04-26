@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -69,7 +70,7 @@ func runMemorySearch(query string) error {
 		return fmt.Errorf("new memory store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-	results, err := store.Search(query, "", 10)
+	results, err := store.Search(context.Background(), query, "", 10)
 	if err != nil {
 		return fmt.Errorf("search memory: %w", err)
 	}

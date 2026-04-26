@@ -28,7 +28,7 @@ type FTSResult struct {
 
 // memorySearcher defines the subset of MemoryStore needed for hybrid search.
 type memorySearcher interface {
-	Search(query, sessionKey string, limit int) ([]map[string]any, error)
+	Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error)
 }
 
 // HybridSearch orchestrates a keyword search (FTS5) and a semantic search (vector),
@@ -39,7 +39,7 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 	}
 
 	// 1. FTS5 Keyword Search
-	ftsResultsRaw, err := fts.Search(query, sessionKey, limit*2) // fetch more for re-ranking
+	ftsResultsRaw, err := fts.Search(ctx, query, sessionKey, limit*2) // fetch more for re-ranking
 	if err != nil {
 		return nil, fmt.Errorf("fts search: %w", err)
 	}

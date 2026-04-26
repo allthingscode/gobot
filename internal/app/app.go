@@ -51,13 +51,14 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 		defer shutdownOTel(otelProvider)
 	}
 
-	stack, cleanup, err := BuildAgentStack(ctx, cfg)
+	tracer := observability.NewDispatchTracer(otelProvider)
+	stack, cleanup, err := BuildAgentStack(ctx, cfg, tracer)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	return runAgentLoop(ctx, cfg, stack, otelProvider, hub)
+	return runAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer)
 }
 
 func validateRunPrerequisites(cfg *config.Config) error {
@@ -81,10 +82,7 @@ func shutdownOTel(p *observability.Provider) {
 	}
 }
 
-func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub) error {
-	tracer := observability.NewDispatchTracer(otelProvider)
-	stack.Runner.SetTracer(tracer)
-
+func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer) error {
 	var wg sync.WaitGroup
 	store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
 	InitIdempotency(ctx, cfg, stack.Runner, store, &wg)
@@ -94,7 +92,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	_, hitl := SetupHooks(cfg, stack.Runner, mgr, api, store)
 
 	handler := &DispatchHandler{Mgr: mgr, Memory: stack.MemStore, Hitl: hitl}
-	SetupConsolidator(cfg, stack, mgr, handler, otelProvider)
+	SetupConsolidator(cfg, stack, mgr, handler, otelProvider, tracer)
 
 	gateHandler := SetupGateHandler(store, handler)
 	if cfg.Gateway.Enabled {
@@ -254,11 +252,14 @@ func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManag
 }
 
 // SetupConsolidator initializes the memory consolidation engine if a memory store is available.
-func SetupConsolidator(cfg *config.Config, stack *AgentStack, mgr *agent.SessionManager, handler *DispatchHandler, otelProvider *observability.Provider) {
+func SetupConsolidator(cfg *config.Config, stack *AgentStack, mgr *agent.SessionManager, handler *DispatchHandler, otelProvider *observability.Provider, tracer *observability.DispatchTracer) {
 	if stack.MemStore == nil {
 		return
 	}
 	h := consolidator.New(stack.Runner, stack.MemStore, stack.VecStore, stack.EmbedProv)
+	if tracer != nil {
+		h.SetTracer(tracer)
+	}
 	if cfg.Agents.Defaults.Compaction.Strategy == "memoryFlush" {
 		h.SetPrompt(cfg.Agents.Defaults.Compaction.MemoryFlush.Prompt)
 		h.SetTTL(cfg.Agents.Defaults.Compaction.MemoryFlush.TTL)

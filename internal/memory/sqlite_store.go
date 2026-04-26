@@ -200,14 +200,14 @@ func (m *MemoryStore) Index(namespace, content string) error {
 //
 // Returns nil (not an error) when the query is empty, no results match,
 // or FTS5 rejects the query syntax.
-func (m *MemoryStore) Search(query, sessionKey string, limit int) ([]map[string]any, error) {
+func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error) {
 	safe := sanitizeFTSQuery(query)
 	if safe == "" || limit <= 0 {
 		return nil, nil
 	}
 
 	sessionNamespace := "session:" + sessionKey
-	rows, err := m.db.QueryContext(context.Background(),
+	rows, err := m.db.QueryContext(ctx,
 		`SELECT namespace, content, timestamp
 		 FROM memory_fts
 		 WHERE memory_fts MATCH ? AND namespace IN (?, 'global')

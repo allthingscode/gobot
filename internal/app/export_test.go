@@ -56,15 +56,15 @@ func NewShellExecTool(storageRoot string, timeout time.Duration, registry *ToolR
 }
 
 func NewListCalendarTool(storageRoot string) Tool {
-	return newListCalendarTool(storageRoot)
+	return newListCalendarTool(storageRoot, nil)
 }
 
 func NewListTasksTool(storageRoot string) Tool {
-	return newListTasksTool(storageRoot)
+	return newListTasksTool(storageRoot, nil)
 }
 
 func NewCreateTaskTool(storageRoot string) Tool {
-	return newCreateTaskTool(storageRoot)
+	return newCreateTaskTool(storageRoot, nil)
 }
 
 func LoadPrivateFile(cfg *config.Config, name string) string {

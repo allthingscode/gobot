@@ -16,7 +16,7 @@ import (
 func TestSendEmailTool_Basic(t *testing.T) {
 	t.Parallel()
 
-	tool := newSendEmailTool("/tmp/secrets", "/tmp/storage", "user@example.com", nil)
+	tool := newSendEmailTool("/tmp/secrets", "/tmp/storage", "user@example.com", nil, nil)
 
 	t.Run("Name", func(t *testing.T) {
 		t.Parallel()
@@ -54,7 +54,7 @@ func TestSendEmailTool_Basic(t *testing.T) {
 func TestSendEmailTool_Execute_Validation(t *testing.T) {
 	t.Parallel()
 
-	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com", nil)
+	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com", nil, nil)
 
 	tests := []struct {
 		name   string
@@ -88,7 +88,7 @@ func TestSendEmailTool_Execute_AuthFailure(t *testing.T) {
 	t.Parallel()
 
 	// An empty secretsRoot has no token.json, so google.NewService will fail.
-	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com", nil)
+	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com", nil, nil)
 	_, err := tool.Execute(context.Background(), "test-session", "", map[string]any{
 		"subject": "Test subject",
 		"body":    "Test body",
@@ -113,13 +113,13 @@ func TestGmailTools_Declarations(t *testing.T) {
 	}{
 		{
 			name:     "Search",
-			tool:     newSearchGmailTool(t.TempDir()),
+			tool:     newSearchGmailTool(t.TempDir(), nil),
 			wantName: searchGmailToolName,
 			wantProp: "query",
 		},
 		{
 			name:     "Read",
-			tool:     newReadGmailTool(t.TempDir()),
+			tool:     newReadGmailTool(t.TempDir(), nil),
 			wantName: readGmailToolName,
 			wantProp: "message_id",
 		},
@@ -162,13 +162,13 @@ func TestGmailTools_Execute_Validation(t *testing.T) {
 	}{
 		{
 			name:   "SearchMissingQuery",
-			tool:   newSearchGmailTool(tmp),
+			tool:   newSearchGmailTool(tmp, nil),
 			args:   map[string]any{},
 			errSub: "query is required",
 		},
 		{
 			name:   "ReadMissingID",
-			tool:   newReadGmailTool(tmp),
+			tool:   newReadGmailTool(tmp, nil),
 			args:   map[string]any{},
 			errSub: "message_id is required",
 		},

@@ -67,7 +67,7 @@ func TestWebSearchTool(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tool := newWebSearchTool(tt.apiKey, tt.cx)
+			tool := newWebSearchTool(tt.apiKey, tt.cx, nil)
 			tool.baseURL = server.URL // Override for testing
 
 			res, err := tool.Execute(context.Background(), "test-session", "", tt.args)
@@ -134,7 +134,7 @@ func validateWebSearchResult(t *testing.T, tt struct {
 
 func TestCompleteTaskTool_Name(t *testing.T) {
 	t.Parallel()
-	tool := newCompleteTaskTool("/tmp/secrets")
+	tool := newCompleteTaskTool("/tmp/secrets", nil)
 	if tool.Name() != completeTaskToolName {
 		t.Errorf("Name() = %q, want %q", tool.Name(), completeTaskToolName)
 	}
@@ -142,7 +142,7 @@ func TestCompleteTaskTool_Name(t *testing.T) {
 
 func TestCompleteTaskTool_MissingTaskID(t *testing.T) {
 	t.Parallel()
-	tool := newCompleteTaskTool("/tmp/secrets")
+	tool := newCompleteTaskTool("/tmp/secrets", nil)
 	_, err := tool.Execute(context.Background(), "session:1", "", map[string]any{"task_id": ""})
 	if err == nil {
 		t.Fatal("expected error for missing task_id, got nil")
@@ -154,7 +154,7 @@ func TestCompleteTaskTool_MissingTaskID(t *testing.T) {
 
 func TestUpdateTaskTool_Name(t *testing.T) {
 	t.Parallel()
-	tool := newUpdateTaskTool("/tmp/secrets")
+	tool := newUpdateTaskTool("/tmp/secrets", nil)
 	if tool.Name() != updateTaskToolName {
 		t.Errorf("Name() = %q, want %q", tool.Name(), updateTaskToolName)
 	}
@@ -162,7 +162,7 @@ func TestUpdateTaskTool_Name(t *testing.T) {
 
 func TestUpdateTaskTool_MissingTaskID(t *testing.T) {
 	t.Parallel()
-	tool := newUpdateTaskTool("/tmp/secrets")
+	tool := newUpdateTaskTool("/tmp/secrets", nil)
 	_, err := tool.Execute(context.Background(), "session:1", "", map[string]any{
 		"task_id": "",
 		"title":   "something",
@@ -177,7 +177,7 @@ func TestUpdateTaskTool_MissingTaskID(t *testing.T) {
 
 func TestCompleteTaskTool_Declaration(t *testing.T) {
 	t.Parallel()
-	tool := newCompleteTaskTool("/tmp/secrets")
+	tool := newCompleteTaskTool("/tmp/secrets", nil)
 	decl := tool.Declaration()
 
 	props, _ := decl.Parameters["properties"].(map[string]any)
@@ -198,7 +198,7 @@ func TestCompleteTaskTool_Declaration(t *testing.T) {
 
 func TestUpdateTaskTool_Declaration(t *testing.T) {
 	t.Parallel()
-	tool := newUpdateTaskTool("/tmp/secrets")
+	tool := newUpdateTaskTool("/tmp/secrets", nil)
 	decl := tool.Declaration()
 
 	props, _ := decl.Parameters["properties"].(map[string]any)

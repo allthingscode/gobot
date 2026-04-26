@@ -66,7 +66,7 @@ func TestDispatchHandler_indexMemory(t *testing.T) {
 	h.indexMemory("sess", "user message", "assistant reply")
 	
 	// Verify it was indexed
-	results, _ := memStore.Search("user message", "sess", 10)
+	results, _ := memStore.Search(context.Background(), "user message", "sess", 10)
 	if len(results) == 0 {
 		t.Error("expected indexed content to be searchable")
 	}

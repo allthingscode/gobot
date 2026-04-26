@@ -53,7 +53,7 @@ func TestSetupGateHandler_Coverage(t *testing.T) {
 func TestSetupConsolidator_Coverage(t *testing.T) {
 	cfg := &config.Config{}
 	stack := &AgentStack{Runner: &AgentRunner{}}
-	SetupConsolidator(cfg, stack, nil, nil, nil)
+	SetupConsolidator(cfg, stack, nil, nil, nil, nil)
 }
 
 func TestLiveProbes_Coverage(t *testing.T) {

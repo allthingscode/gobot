@@ -8,6 +8,7 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 
 	"github.com/allthingscode/gobot/internal/memory/vector"
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/philippgille/chromem-go"
 )
@@ -16,20 +17,22 @@ const searchDocsToolName = "search_docs"
 
 // MemorySearcher is the minimal interface needed for hybrid retrieval.
 type MemorySearcher interface {
-	Search(query, namespace string, limit int) ([]map[string]any, error)
+	Search(ctx context.Context, query, namespace string, limit int) ([]map[string]any, error)
 }
 
 type SearchDocsTool struct {
 	memStore  MemorySearcher
 	vecStore  *vector.Store
 	embedProv vector.EmbeddingProvider
+	tracer    *observability.DispatchTracer
 }
 
-func newSearchDocsTool(memStore MemorySearcher, vecStore *vector.Store, embedProv vector.EmbeddingProvider) *SearchDocsTool {
+func newSearchDocsTool(memStore MemorySearcher, vecStore *vector.Store, embedProv vector.EmbeddingProvider, tracer *observability.DispatchTracer) *SearchDocsTool {
 	return &SearchDocsTool{
 		memStore:  memStore,
 		vecStore:  vecStore,
 		embedProv: embedProv,
+		tracer:    tracer,
 	}
 }
 
@@ -56,17 +59,49 @@ func (t *SearchDocsTool) Execute(ctx context.Context, sessionKey, userID string,
 
 	limit := parseLimit(args["limit"])
 
-	mappedFTS, err := t.searchFTS(query, limit)
-	if err != nil {
-		return "", err
+	var merged []vector.HybridResult
+	var err error
+	var mappedFTS []vector.FTSResult
+
+	if t.tracer != nil {
+		err = t.tracer.TraceMemorySearch(ctx, "hybrid", func(ctx context.Context) error {
+			var errInner error
+			mappedFTS, errInner = t.searchFTS(ctx, query, limit)
+			if errInner != nil {
+				return fmt.Errorf("fts search: %w", errInner)
+			}
+
+			var vecResultsInner []chromem.Result
+			vecResultsInner, errInner = t.searchVectors(ctx, query, limit)
+			if errInner != nil {
+				return fmt.Errorf("vector search: %w", errInner)
+			}
+
+			merged = vector.MergeResults(mappedFTS, vecResultsInner, 60)
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("hybrid search trace: %w", err)
+		}
+	} else {
+		var err2 error
+		mappedFTS, err2 = t.searchFTS(ctx, query, limit)
+		if err2 != nil {
+			return "", fmt.Errorf("fts search: %w", err2)
+		}
+
+		var vecResults []chromem.Result
+		vecResults, err2 = t.searchVectors(ctx, query, limit)
+		if err2 != nil {
+			return "", fmt.Errorf("vector search: %w", err2)
+		}
+
+		merged = vector.MergeResults(mappedFTS, vecResults, 60)
 	}
 
-	vecResults, err := t.searchVectors(ctx, query, limit)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("search_docs execution: %w", err)
 	}
-
-	merged := vector.MergeResults(mappedFTS, vecResults, 60)
 
 	return formatResults(merged, limit)
 }
@@ -87,8 +122,8 @@ func parseLimit(arg any) int {
 	return limit
 }
 
-func (t *SearchDocsTool) searchFTS(query string, limit int) ([]vector.FTSResult, error) {
-	ftsResults, err := t.memStore.Search(query, "", limit*2)
+func (t *SearchDocsTool) searchFTS(ctx context.Context, query string, limit int) ([]vector.FTSResult, error) {
+	ftsResults, err := t.memStore.Search(ctx, query, "", limit*2)
 	if err != nil {
 		return nil, fmt.Errorf("fts search: %w", err)
 	}
