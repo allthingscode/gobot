@@ -27,7 +27,7 @@ func TestAppendMemoryTools(t *testing.T) {
 	cfg := &config.Config{}
 	
 	// Case 1: all nil
-	got := appendMemoryTools(nil, nil, nil, cfg, tools)
+	got := appendMemoryTools(nil, nil, nil, cfg, tools, nil)
 	if len(got) != 0 {
 		t.Error("expected zero tools for nil inputs")
 	}
@@ -47,7 +47,7 @@ func TestAppendMemoryTools_Full(t *testing.T) {
 	var tools []Tool
 	cfg := &config.Config{}
 	
-	got := appendMemoryTools(memStore, nil, nil, cfg, tools)
+	got := appendMemoryTools(memStore, nil, nil, cfg, tools, nil)
 	if len(got) != 1 {
 		t.Errorf("expected 1 tool (search_memory), got %d", len(got))
 	}
@@ -60,7 +60,7 @@ func TestAppendGoogleTools_All(t *testing.T) {
 	cfg.Providers.Google.APIKey = "key"
 	cfg.Providers.Google.CustomCX = "cx"
 	
-	got := appendGoogleTools(cfg, tools)
+	got := appendGoogleTools(cfg, tools, nil)
 	// web_search
 	if len(got) != 1 {
 		t.Errorf("expected 1 tool, got %d", len(got))
@@ -74,7 +74,7 @@ func TestAppendGmailTools_All(t *testing.T) {
 	cfg.Strategic.UserEmail = "test@example.com"
 	cfg.Strategic.GmailReadonly = true
 	
-	got := appendGmailTools(cfg, "root", tools, nil)
+	got := appendGmailTools(cfg, "root", tools, nil, nil)
 	// send_email, search_gmail, read_gmail
 	if len(got) != 3 {
 		t.Errorf("expected 3 tools, got %d", len(got))
@@ -88,7 +88,7 @@ func TestAppendGmailTools_SendOnly(t *testing.T) {
 	cfg.Strategic.UserEmail = "test@example.com"
 	cfg.Strategic.GmailReadonly = false
 	
-	got := appendGmailTools(cfg, "root", tools, nil)
+	got := appendGmailTools(cfg, "root", tools, nil, nil)
 	// send_email only
 	if len(got) != 1 {
 		t.Errorf("expected 1 tool, got %d", len(got))
@@ -98,7 +98,7 @@ func TestAppendGmailTools_SendOnly(t *testing.T) {
 func TestAppendCalendarTaskTools(t *testing.T) {
 	t.Parallel()
 	var tools []Tool
-	got := appendCalendarTaskTools("root", tools)
+	got := appendCalendarTaskTools("root", tools, nil)
 	if len(got) != 6 {
 		t.Errorf("expected 6 calendar/task tools, got %d", len(got))
 	}

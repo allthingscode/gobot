@@ -215,19 +215,19 @@ type mockMemSearcher struct {
 	err     error
 }
 
-func (m *mockMemSearcher) Search(_, _ string, _ int) ([]map[string]any, error) {
+func (m *mockMemSearcher) Search(_ context.Context, _, _ string, _ int) ([]map[string]any, error) {
 	return m.results, m.err
 }
 
 func TestSearchDocsTool_Name(t *testing.T) {
-	tool := newSearchDocsTool(&mockMemSearcher{}, nil, nil)
+	tool := newSearchDocsTool(&mockMemSearcher{}, nil, nil, nil)
 	if tool.Name() != searchDocsToolName {
 		t.Errorf("expected %q, got %q", searchDocsToolName, tool.Name())
 	}
 }
 
 func TestSearchDocsTool_Declaration(t *testing.T) {
-	tool := newSearchDocsTool(&mockMemSearcher{}, nil, nil)
+	tool := newSearchDocsTool(&mockMemSearcher{}, nil, nil, nil)
 	decl := tool.Declaration()
 	if decl.Name != searchDocsToolName {
 		t.Errorf("expected %q in declaration, got %q", searchDocsToolName, decl.Name)
@@ -238,7 +238,7 @@ func TestSearchDocsTool_Declaration(t *testing.T) {
 }
 
 func TestSearchDocsTool_Execute_EmptyQuery(t *testing.T) {
-	tool := newSearchDocsTool(&mockMemSearcher{}, nil, nil)
+	tool := newSearchDocsTool(&mockMemSearcher{}, nil, nil, nil)
 	_, err := tool.Execute(context.Background(), "key", "user", map[string]any{})
 	if err == nil {
 		t.Error("expected error for empty query")
@@ -247,7 +247,7 @@ func TestSearchDocsTool_Execute_EmptyQuery(t *testing.T) {
 
 func TestSearchDocsTool_Execute_FTSError(t *testing.T) {
 	searcher := &mockMemSearcher{err: errors.New("fts failed")}
-	tool := newSearchDocsTool(searcher, nil, nil)
+	tool := newSearchDocsTool(searcher, nil, nil, nil)
 	_, err := tool.Execute(context.Background(), "key", "user", map[string]any{"query": "foo"})
 	if err == nil {
 		t.Error("expected error when FTS search fails")
@@ -260,7 +260,7 @@ func TestSearchDocsTool_Execute_NoResults(t *testing.T) {
 	if err != nil {
 		t.Skip("cannot create vector store:", err)
 	}
-	tool := newSearchDocsTool(&mockMemSearcher{}, store, nil)
+	tool := newSearchDocsTool(&mockMemSearcher{}, store, nil, nil)
 	result, err := tool.Execute(context.Background(), "k", "u", map[string]any{"query": "anything"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -280,7 +280,7 @@ func TestSearchDocsTool_Execute_WithFTSResults(t *testing.T) {
 	if err != nil {
 		t.Skip("cannot create vector store:", err)
 	}
-	tool := newSearchDocsTool(searcher, store, nil)
+	tool := newSearchDocsTool(searcher, store, nil, nil)
 	result, err := tool.Execute(context.Background(), "k", "u", map[string]any{"query": "test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -389,7 +389,7 @@ func TestInitMemory_Basic(t *testing.T) {
 
 func TestListCalendarTool_Methods(t *testing.T) {
 	dir := t.TempDir()
-	tool := newListCalendarTool(dir)
+	tool := newListCalendarTool(dir, nil)
 	if tool.Name() != listCalendarToolName {
 		t.Errorf("expected %q, got %q", listCalendarToolName, tool.Name())
 	}
@@ -401,7 +401,7 @@ func TestListCalendarTool_Methods(t *testing.T) {
 
 func TestListTasksTool_Methods(t *testing.T) {
 	dir := t.TempDir()
-	tool := newListTasksTool(dir)
+	tool := newListTasksTool(dir, nil)
 	if tool.Name() != listTasksToolName {
 		t.Errorf("expected %q, got %q", listTasksToolName, tool.Name())
 	}
@@ -413,7 +413,7 @@ func TestListTasksTool_Methods(t *testing.T) {
 
 func TestCreateTaskTool_Methods(t *testing.T) {
 	dir := t.TempDir()
-	tool := newCreateTaskTool(dir)
+	tool := newCreateTaskTool(dir, nil)
 	if tool.Name() != createTaskToolName {
 		t.Errorf("expected %q, got %q", createTaskToolName, tool.Name())
 	}
@@ -424,7 +424,7 @@ func TestCreateTaskTool_Methods(t *testing.T) {
 }
 
 func TestCreateTaskTool_Execute_NoTitle(t *testing.T) {
-	tool := newCreateTaskTool(t.TempDir())
+	tool := newCreateTaskTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{"title": ""})
 	if err == nil {
 		t.Error("expected error for empty title")
@@ -432,7 +432,7 @@ func TestCreateTaskTool_Execute_NoTitle(t *testing.T) {
 }
 
 func TestCompleteTaskTool_Execute_NoID(t *testing.T) {
-	tool := newCompleteTaskTool(t.TempDir())
+	tool := newCompleteTaskTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{})
 	if err == nil {
 		t.Error("expected error for empty task_id")
@@ -440,7 +440,7 @@ func TestCompleteTaskTool_Execute_NoID(t *testing.T) {
 }
 
 func TestCompleteTaskTool_Execute_WithID(t *testing.T) {
-	tool := newCompleteTaskTool(t.TempDir())
+	tool := newCompleteTaskTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{"task_id": "task-123"})
 	if err == nil {
 		t.Log("expected auth error, got nil")
@@ -448,7 +448,7 @@ func TestCompleteTaskTool_Execute_WithID(t *testing.T) {
 }
 
 func TestUpdateTaskTool_Execute_NoID(t *testing.T) {
-	tool := newUpdateTaskTool(t.TempDir())
+	tool := newUpdateTaskTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{})
 	if err == nil {
 		t.Error("expected error for empty task_id")
@@ -457,7 +457,7 @@ func TestUpdateTaskTool_Execute_NoID(t *testing.T) {
 
 func TestCreateCalendarEventTool_Methods(t *testing.T) {
 	dir := t.TempDir()
-	tool := newCreateCalendarEventTool(dir)
+	tool := newCreateCalendarEventTool(dir, nil)
 	if tool.Name() != createCalendarEventToolName {
 		t.Errorf("expected %q, got %q", createCalendarEventToolName, tool.Name())
 	}
@@ -468,7 +468,7 @@ func TestCreateCalendarEventTool_Methods(t *testing.T) {
 }
 
 func TestCreateCalendarEventTool_Execute_NoSummary(t *testing.T) {
-	tool := newCreateCalendarEventTool(t.TempDir())
+	tool := newCreateCalendarEventTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{})
 	if err == nil {
 		t.Error("expected error for missing summary")
@@ -476,7 +476,7 @@ func TestCreateCalendarEventTool_Execute_NoSummary(t *testing.T) {
 }
 
 func TestCreateCalendarEventTool_Execute_NoStartTime(t *testing.T) {
-	tool := newCreateCalendarEventTool(t.TempDir())
+	tool := newCreateCalendarEventTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{"summary": "Meeting"})
 	if err == nil {
 		t.Error("expected error for missing start_time")
@@ -484,7 +484,7 @@ func TestCreateCalendarEventTool_Execute_NoStartTime(t *testing.T) {
 }
 
 func TestWebSearchTool_Methods(t *testing.T) {
-	tool := newWebSearchTool("key", "cx")
+	tool := newWebSearchTool("key", "cx", nil)
 	if tool.Name() != webSearchToolName {
 		t.Errorf("expected %q, got %q", webSearchToolName, tool.Name())
 	}
@@ -495,7 +495,7 @@ func TestWebSearchTool_Methods(t *testing.T) {
 }
 
 func TestListCalendarTool_Execute_NoToken(t *testing.T) {
-	tool := newListCalendarTool(t.TempDir())
+	tool := newListCalendarTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{})
 	if err == nil {
 		t.Log("expected auth error without token")
@@ -503,7 +503,7 @@ func TestListCalendarTool_Execute_NoToken(t *testing.T) {
 }
 
 func TestListTasksTool_Execute_NoToken(t *testing.T) {
-	tool := newListTasksTool(t.TempDir())
+	tool := newListTasksTool(t.TempDir(), nil)
 	_, err := tool.Execute(context.Background(), "", "", map[string]any{})
 	if err == nil {
 		t.Log("expected auth error without token")
@@ -550,7 +550,7 @@ func TestBuildSystemPrompt_WithMemStore_SkipRAG(t *testing.T) {
 func TestSetupConsolidator_NilMemStore(t *testing.T) {
 	stack := &AgentStack{}
 	handler := &DispatchHandler{}
-	SetupConsolidator(&config.Config{}, stack, nil, handler, nil)
+	SetupConsolidator(&config.Config{}, stack, nil, handler, nil, nil)
 	if handler.Consolidator != nil {
 		t.Error("expected nil consolidator when stack has no MemStore")
 	}
@@ -566,7 +566,7 @@ func TestSetupConsolidator_WithMemStore(t *testing.T) {
 	stack := &AgentStack{Runner: runner, MemStore: memStore}
 	mgr := agent.NewSessionManager(runner, nil, "test-model")
 	handler := &DispatchHandler{}
-	SetupConsolidator(cfg, stack, mgr, handler, nil)
+	SetupConsolidator(cfg, stack, mgr, handler, nil, nil)
 	if handler.Consolidator == nil {
 		t.Error("expected non-nil consolidator when stack has MemStore")
 	}

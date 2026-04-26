@@ -277,7 +277,7 @@ func TestSetupConsolidator_Coverage(t *testing.T) {
 	mgr := agent.NewSessionManager(stack.Runner, nil, "model")
 	handler := &app.DispatchHandler{}
 	
-	app.SetupConsolidator(cfg, stack, mgr, handler, nil)
+	app.SetupConsolidator(cfg, stack, mgr, handler, nil, nil)
 }
 
 type mockEmbeddingProvider struct{}
@@ -304,7 +304,7 @@ func TestRegisterTools_Coverage(t *testing.T) {
 	cfg.Strategic.GmailReadonly = false
 	
 	reg := app.NewToolRegistry(t.TempDir())
-	tools := app.RegisterTools(cfg, nil, "model", nil, nil, nil, reg)
+	tools := app.RegisterTools(cfg, nil, "model", nil, nil, nil, reg, nil)
 	if len(tools) == 0 {
 		t.Error("RegisterTools returned no tools")
 	}
@@ -632,13 +632,13 @@ func TestBuildAgentStack_Routing_Coverage(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.Routing.Enabled = true
 	
-	_, _, _ = app.BuildAgentStack(context.Background(), cfg)
+	_, _, _ = app.BuildAgentStack(context.Background(), cfg, nil)
 }
 
 func TestBuildAgentStack_Errors(t *testing.T) { //nolint:paralleltest // uses global state // resets global provider registry
 	provider.ResetForTest()
 	cfg := &config.Config{}
-	_, _, err := app.BuildAgentStack(context.Background(), cfg)
+	_, _, err := app.BuildAgentStack(context.Background(), cfg, nil)
 	if err == nil {
 		t.Error("expected error for empty config")
 	}

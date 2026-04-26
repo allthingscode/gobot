@@ -66,11 +66,11 @@ func TestReadTextFileTool_Execute_SandboxEscaping(t *testing.T) {
 	}
 }
 
-func TestRegisterTools(t *testing.T) {
+func TestRegisterTools_App(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
 	prov := &app.MockProvider{}
-	tools := app.RegisterTools(cfg, prov, "model", nil, nil, nil, nil)
+	tools := app.RegisterTools(cfg, prov, "model", nil, nil, nil, nil, nil)
 	if len(tools) == 0 {
 		t.Error("RegisterTools returned zero tools")
 	}

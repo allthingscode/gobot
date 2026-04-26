@@ -83,6 +83,64 @@ func (d *DispatchTracer) TraceProviderCall(ctx context.Context, sessionKey strin
 	return nil
 }
 
+// TraceGoogleCall traces a Google API call.
+func (d *DispatchTracer) TraceGoogleCall(ctx context.Context, service, method string, fn func(context.Context) error) error {
+	if d.provider == nil {
+		return fn(ctx)
+	}
+	ctx, span := d.provider.StartSpan(ctx, fmt.Sprintf("google.%s.%s", service, method),
+		attribute.String("google.service", service),
+		attribute.String("google.method", method),
+	)
+	defer span.End()
+
+	err := fn(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("google %s.%s call: %w", service, method, err)
+	}
+	return nil
+}
+
+// TraceMemorySearch traces a memory search operation.
+func (d *DispatchTracer) TraceMemorySearch(ctx context.Context, searchType string, fn func(context.Context) error) error {
+	if d.provider == nil {
+		return fn(ctx)
+	}
+	ctx, span := d.provider.StartSpan(ctx, "memory.search",
+		attribute.String("memory.search_type", searchType),
+	)
+	defer span.End()
+
+	err := fn(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("memory search (%s): %w", searchType, err)
+	}
+	return nil
+}
+
+// TraceConsolidation traces an LLM-based memory consolidation.
+func (d *DispatchTracer) TraceConsolidation(ctx context.Context, sessionKey string, fn func(context.Context) error) error {
+	if d.provider == nil {
+		return fn(ctx)
+	}
+	ctx, span := d.provider.StartSpan(ctx, "memory.consolidate",
+		attribute.String("session.key", sessionKey),
+	)
+	defer span.End()
+
+	err := fn(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("memory consolidation: %w", err)
+	}
+	return nil
+}
+
 // TraceToolExecution traces a tool execution with duration metrics.
 func (d *DispatchTracer) TraceToolExecution(ctx context.Context, sessionKey, toolName string, fn func(context.Context) (string, error)) (string, error) {
 	if d.provider == nil {

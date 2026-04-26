@@ -207,7 +207,7 @@ func TestBuildAgentStack_Basic_App(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = t.TempDir()
 
-	stack, cleanup, err := BuildAgentStack(context.Background(), cfg)
+	stack, cleanup, err := BuildAgentStack(context.Background(), cfg, nil)
 	if err != nil {
 		t.Logf("BuildAgentStack failed as expected (likely no keys): %v", err)
 	}

@@ -17,7 +17,7 @@ type mockMemoryStore struct {
 	lastLimit      int
 }
 
-func (m *mockMemoryStore) Search(query, sessionKey string, limit int) ([]map[string]any, error) {
+func (m *mockMemoryStore) Search(_ context.Context, query, sessionKey string, limit int) ([]map[string]any, error) {
 	m.lastQuery = query
 	m.lastSessionKey = sessionKey
 	m.lastLimit = limit

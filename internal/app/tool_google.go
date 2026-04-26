@@ -7,6 +7,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/integrations/google"
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
@@ -20,10 +21,11 @@ const listCalendarToolName = "list_calendar_events"
 // range); max_results is used as the hard cap instead.
 type ListCalendarTool struct {
 	secretsRoot string
+	tracer      *observability.DispatchTracer
 }
 
-func newListCalendarTool(secretsRoot string) *ListCalendarTool {
-	return &ListCalendarTool{secretsRoot: secretsRoot}
+func newListCalendarTool(secretsRoot string, tracer *observability.DispatchTracer) *ListCalendarTool {
+	return &ListCalendarTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 type listCalendarArgs struct {
@@ -42,6 +44,36 @@ func (t *ListCalendarTool) Declaration() provider.ToolDeclaration {
 }
 
 func (t *ListCalendarTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
+	maxResults := t.parseMaxResults(args)
+
+	var events []google.CalendarEvent
+	var err error
+	if t.tracer != nil {
+		err = t.tracer.TraceGoogleCall(ctx, "calendar", "ListUpcomingEvents", func(ctx context.Context) error {
+			var err2 error
+			events, err2 = google.ListUpcomingEvents(ctx, t.secretsRoot, maxResults)
+			if err2 != nil {
+				return fmt.Errorf("list upcoming events: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		events, err2 = google.ListUpcomingEvents(ctx, t.secretsRoot, maxResults)
+		if err2 != nil {
+			err = fmt.Errorf("list upcoming events: %w", err2)
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("list_calendar_events: %w", err)
+	}
+	if len(events) == 0 {
+		return "No upcoming calendar events found.", nil
+	}
+	return google.FormatEventsMarkdown(events), nil
+}
+
+func (t *ListCalendarTool) parseMaxResults(args map[string]any) int {
 	maxResults := 10
 	if v, ok := args["max_results"]; ok {
 		switch n := v.(type) {
@@ -56,15 +88,7 @@ func (t *ListCalendarTool) Execute(ctx context.Context, _, _ string, args map[st
 	if maxResults <= 0 {
 		maxResults = 10
 	}
-
-	events, err := google.ListUpcomingEvents(ctx, t.secretsRoot, maxResults)
-	if err != nil {
-		return "", fmt.Errorf("list_calendar_events: %w", err)
-	}
-	if len(events) == 0 {
-		return "No upcoming calendar events found.", nil
-	}
-	return google.FormatEventsMarkdown(events), nil
+	return maxResults
 }
 
 // ── ListTasksTool ──────────────────────────────────────────────────────────────
@@ -74,10 +98,11 @@ const listTasksToolName = "list_tasks"
 // ListTasksTool fetches open Google Tasks and returns them as formatted Markdown.
 type ListTasksTool struct {
 	secretsRoot string
+	tracer      *observability.DispatchTracer
 }
 
-func newListTasksTool(secretsRoot string) *ListTasksTool {
-	return &ListTasksTool{secretsRoot: secretsRoot}
+func newListTasksTool(secretsRoot string, tracer *observability.DispatchTracer) *ListTasksTool {
+	return &ListTasksTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 type listTasksArgs struct {
@@ -102,7 +127,24 @@ func (t *ListTasksTool) Execute(ctx context.Context, _, _ string, args map[strin
 		}
 	}
 
-	tasks, err := google.ListTasks(ctx, t.secretsRoot, tasklistID)
+	var tasks []google.Task
+	var err error
+	if t.tracer != nil {
+		err = t.tracer.TraceGoogleCall(ctx, "tasks", "ListTasks", func(ctx context.Context) error {
+			var err2 error
+			tasks, err2 = google.ListTasks(ctx, t.secretsRoot, tasklistID)
+			if err2 != nil {
+				return fmt.Errorf("list tasks: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		tasks, err2 = google.ListTasks(ctx, t.secretsRoot, tasklistID)
+		if err2 != nil {
+			err = fmt.Errorf("list tasks: %w", err2)
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("list_tasks: %w", err)
 	}
@@ -119,10 +161,11 @@ const createTaskToolName = "create_task"
 // CreateTaskTool creates a new Google Task and returns a confirmation string.
 type CreateTaskTool struct {
 	secretsRoot string
+	tracer      *observability.DispatchTracer
 }
 
-func newCreateTaskTool(secretsRoot string) *CreateTaskTool {
-	return &CreateTaskTool{secretsRoot: secretsRoot}
+func newCreateTaskTool(secretsRoot string, tracer *observability.DispatchTracer) *CreateTaskTool {
+	return &CreateTaskTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 func (t *CreateTaskTool) Name() string { return createTaskToolName }
@@ -157,7 +200,24 @@ func (t *CreateTaskTool) Execute(ctx context.Context, _, _ string, args map[stri
 		}
 	}
 
-	id, err := google.CreateTask(ctx, t.secretsRoot, tasklistID, title, notes)
+	var id string
+	var err error
+	if t.tracer != nil {
+		err = t.tracer.TraceGoogleCall(ctx, "tasks", "CreateTask", func(ctx context.Context) error {
+			var err2 error
+			id, err2 = google.CreateTask(ctx, t.secretsRoot, tasklistID, title, notes)
+			if err2 != nil {
+				return fmt.Errorf("create task: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		id, err2 = google.CreateTask(ctx, t.secretsRoot, tasklistID, title, notes)
+		if err2 != nil {
+			err = fmt.Errorf("create task: %w", err2)
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("create_task: %w", err)
 	}
@@ -168,10 +228,13 @@ func (t *CreateTaskTool) Execute(ctx context.Context, _, _ string, args map[stri
 
 const completeTaskToolName = "complete_task"
 
-type CompleteTaskTool struct{ secretsRoot string }
+type CompleteTaskTool struct {
+	secretsRoot string
+	tracer      *observability.DispatchTracer
+}
 
-func newCompleteTaskTool(secretsRoot string) *CompleteTaskTool {
-	return &CompleteTaskTool{secretsRoot: secretsRoot}
+func newCompleteTaskTool(secretsRoot string, tracer *observability.DispatchTracer) *CompleteTaskTool {
+	return &CompleteTaskTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 func (t *CompleteTaskTool) Name() string { return completeTaskToolName }
@@ -196,7 +259,15 @@ func (t *CompleteTaskTool) Execute(ctx context.Context, _, _ string, args map[st
 		return "", fmt.Errorf("complete_task: task_id is required")
 	}
 	tasklistID, _ := args["tasklist_id"].(string)
-	if err := google.CompleteTask(ctx, t.secretsRoot, tasklistID, taskID); err != nil {
+	var err error
+	if t.tracer != nil {
+		err = t.tracer.TraceGoogleCall(ctx, "tasks", "CompleteTask", func(ctx context.Context) error {
+			return google.CompleteTask(ctx, t.secretsRoot, tasklistID, taskID)
+		})
+	} else {
+		err = google.CompleteTask(ctx, t.secretsRoot, tasklistID, taskID)
+	}
+	if err != nil {
 		return "", fmt.Errorf("complete_task: %w", err)
 	}
 	return fmt.Sprintf("Task %s marked as completed.", taskID), nil
@@ -206,10 +277,13 @@ func (t *CompleteTaskTool) Execute(ctx context.Context, _, _ string, args map[st
 
 const updateTaskToolName = "update_task"
 
-type UpdateTaskTool struct{ secretsRoot string }
+type UpdateTaskTool struct {
+	secretsRoot string
+	tracer      *observability.DispatchTracer
+}
 
-func newUpdateTaskTool(secretsRoot string) *UpdateTaskTool {
-	return &UpdateTaskTool{secretsRoot: secretsRoot}
+func newUpdateTaskTool(secretsRoot string, tracer *observability.DispatchTracer) *UpdateTaskTool {
+	return &UpdateTaskTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 func (t *UpdateTaskTool) Name() string { return updateTaskToolName }
@@ -241,7 +315,15 @@ func (t *UpdateTaskTool) Execute(ctx context.Context, _, _ string, args map[stri
 	notes, _ := args["notes"].(string)
 	due, _ := args["due"].(string)
 
-	if err := google.UpdateTask(ctx, t.secretsRoot, tasklistID, taskID, title, notes, due); err != nil {
+	var err error
+	if t.tracer != nil {
+		err = t.tracer.TraceGoogleCall(ctx, "tasks", "UpdateTask", func(ctx context.Context) error {
+			return google.UpdateTask(ctx, t.secretsRoot, tasklistID, taskID, title, notes, due)
+		})
+	} else {
+		err = google.UpdateTask(ctx, t.secretsRoot, tasklistID, taskID, title, notes, due)
+	}
+	if err != nil {
 		return "", fmt.Errorf("update_task: %w", err)
 	}
 	return fmt.Sprintf("Task %s updated.", taskID), nil
@@ -254,10 +336,11 @@ const createCalendarEventToolName = "create_calendar_event"
 // CreateCalendarEventTool creates a new event in a Google Calendar.
 type CreateCalendarEventTool struct {
 	secretsRoot string
+	tracer      *observability.DispatchTracer
 }
 
-func newCreateCalendarEventTool(secretsRoot string) *CreateCalendarEventTool {
-	return &CreateCalendarEventTool{secretsRoot: secretsRoot}
+func newCreateCalendarEventTool(secretsRoot string, tracer *observability.DispatchTracer) *CreateCalendarEventTool {
+	return &CreateCalendarEventTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 func (t *CreateCalendarEventTool) Name() string { return createCalendarEventToolName }
@@ -298,7 +381,24 @@ func (t *CreateCalendarEventTool) Execute(ctx context.Context, _, _ string, args
 	description, _ := args["description"].(string)
 	location, _ := args["location"].(string)
 
-	id, err := google.CreateEvent(ctx, t.secretsRoot, calendarID, summary, description, startTime, endTime, location)
+	var id string
+	var err error
+	if t.tracer != nil {
+		err = t.tracer.TraceGoogleCall(ctx, "calendar", "CreateEvent", func(ctx context.Context) error {
+			var err2 error
+			id, err2 = google.CreateEvent(ctx, t.secretsRoot, calendarID, summary, description, startTime, endTime, location)
+			if err2 != nil {
+				return fmt.Errorf("create event: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		id, err2 = google.CreateEvent(ctx, t.secretsRoot, calendarID, summary, description, startTime, endTime, location)
+		if err2 != nil {
+			err = fmt.Errorf("create event: %w", err2)
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("create_calendar_event: %w", err)
 	}
@@ -314,13 +414,15 @@ type WebSearchTool struct {
 	apiKey  string
 	cx      string
 	baseURL string
+	tracer  *observability.DispatchTracer
 }
 
-func newWebSearchTool(apiKey, cx string) *WebSearchTool {
+func newWebSearchTool(apiKey, cx string, tracer *observability.DispatchTracer) *WebSearchTool {
 	return &WebSearchTool{
 		apiKey:  apiKey,
 		cx:      cx,
 		baseURL: google.DefaultBaseURL,
+		tracer:  tracer,
 	}
 }
 
@@ -348,7 +450,24 @@ func (t *WebSearchTool) Execute(ctx context.Context, _, _ string, args map[strin
 		BaseURL:    t.baseURL,
 		HTTPClient: google.DefaultSearchClient,
 	}
-	results, err := svc.Execute(ctx, t.apiKey, t.cx, query)
+	var results []google.SearchResult
+	var err error
+	if t.tracer != nil {
+		err = t.tracer.TraceGoogleCall(ctx, "search", "Execute", func(ctx context.Context) error {
+			var err2 error
+			results, err2 = svc.Execute(ctx, t.apiKey, t.cx, query)
+			if err2 != nil {
+				return fmt.Errorf("search execute: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		results, err2 = svc.Execute(ctx, t.apiKey, t.cx, query)
+		if err2 != nil {
+			err = fmt.Errorf("search execute: %w", err2)
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("google_search: %w", err)
 	}

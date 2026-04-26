@@ -30,7 +30,7 @@ type AgentStack struct {
 // BuildAgentStack extracts the shared provider, system prompt, runner, and tool
 // initialization sequence used by both 'run' and 'simulate' commands.
 // Returns a stack of components and a cleanup function (to close memory store).
-func BuildAgentStack(ctx context.Context, cfg *config.Config) (*AgentStack, func(), error) {
+func BuildAgentStack(ctx context.Context, cfg *config.Config, tracer *observability.DispatchTracer) (*AgentStack, func(), error) {
 	prov, model, err := InitProviders(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
@@ -43,6 +43,9 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config) (*AgentStack, func
 	}
 
 	runner := NewAgentRunner(prov, model, systemPrompt, cfg)
+	if tracer != nil {
+		runner.SetTracer(tracer)
+	}
 	memStore, cleanup := InitMemory(cfg, runner)
 	vecStore, embedProv, vecCleanup := InitVectorStore(cfg, prov, runner)
 
@@ -55,7 +58,7 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config) (*AgentStack, func
 	}
 	registry := NewToolRegistry(sessionRoot)
 
-	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry))
+	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry, tracer))
 
 	finalCleanup := func() {
 		cleanup()

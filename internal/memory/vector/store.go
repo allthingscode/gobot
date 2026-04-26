@@ -8,6 +8,10 @@ import (
 	"sync"
 
 	"github.com/philippgille/chromem-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Store wraps chromem.DB to manage the vector database lifecycle.
@@ -72,6 +76,14 @@ func (s *Store) AddDocument(ctx context.Context, collectionName string, doc chro
 
 // Search performs a cosine similarity search on the collection with optional metadata filtering.
 func (s *Store) Search(ctx context.Context, collectionName, query string, limit int, where map[string]string, embeddingFunc chromem.EmbeddingFunc) ([]chromem.Result, error) {
+	ctx, span := otel.Tracer("gobot-memory").Start(ctx, "vector.Store.Search",
+		trace.WithAttributes(
+			attribute.String("memory.collection", collectionName),
+			attribute.Int("memory.limit", limit),
+		),
+	)
+	defer span.End()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -91,9 +103,12 @@ func (s *Store) Search(ctx context.Context, collectionName, query string, limit 
 
 	results, err := col.Query(ctx, query, limit, where, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("query collection: %w", err)
 	}
 
+	span.SetAttributes(attribute.Int("memory.results_count", len(results)))
 	return results, nil
 }
 

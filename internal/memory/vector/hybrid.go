@@ -9,6 +9,10 @@ import (
 	"time"
 
 	"github.com/philippgille/chromem-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // HybridResult represents a merged search result.
@@ -28,19 +32,26 @@ type FTSResult struct {
 
 // memorySearcher defines the subset of MemoryStore needed for hybrid search.
 type memorySearcher interface {
-	Search(query, sessionKey string, limit int) ([]map[string]any, error)
+	Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error)
 }
 
 // HybridSearch orchestrates a keyword search (FTS5) and a semantic search (vector),
 // merging them using Reciprocal Rank Fusion (RRF).
 func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv EmbeddingProvider, query, sessionKey string, limit int) ([]HybridResult, error) {
+	ctx, span := otel.Tracer("gobot-memory").Start(ctx, "vector.HybridSearch",
+		trace.WithAttributes(attribute.Int("memory.limit", limit)),
+	)
+	defer span.End()
+
 	if limit <= 0 {
 		limit = 5
 	}
 
 	// 1. FTS5 Keyword Search
-	ftsResultsRaw, err := fts.Search(query, sessionKey, limit*2) // fetch more for re-ranking
+	ftsResultsRaw, err := fts.Search(ctx, query, sessionKey, limit*2) // fetch more for re-ranking
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("fts search: %w", err)
 	}
 
@@ -88,6 +99,7 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 		merged = merged[:limit]
 	}
 
+	span.SetAttributes(attribute.Int("memory.results_count", len(merged)))
 	return merged, nil
 }
 

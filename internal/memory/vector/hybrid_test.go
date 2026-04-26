@@ -16,7 +16,7 @@ type mockSearcher struct {
 	results []map[string]any
 }
 
-func (m *mockSearcher) Search(query, sessionKey string, limit int) ([]map[string]any, error) {
+func (m *mockSearcher) Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error) {
 	return m.results, nil
 }
 

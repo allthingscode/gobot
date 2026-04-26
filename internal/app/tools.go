@@ -15,6 +15,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
@@ -76,15 +77,15 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
-func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry) []Tool {
+func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, tracer *observability.DispatchTracer) []Tool {
 	specialistModels := buildSpecialistModels(cfg)
 	secretsRoot := cfg.SecretsRoot()
 	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv, registry)
 	tools = appendMCPtools(cfg, tools)
-	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools)
-	tools = appendCalendarTaskTools(secretsRoot, tools)
-	tools = appendGoogleTools(cfg, tools)
-	tools = appendGmailTools(cfg, secretsRoot, tools, registry)
+	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools, tracer)
+	tools = appendCalendarTaskTools(secretsRoot, tools, tracer)
+	tools = appendGoogleTools(cfg, tools, tracer)
+	tools = appendGmailTools(cfg, secretsRoot, tools, registry, tracer)
 	return tools
 }
 
@@ -141,32 +142,32 @@ func appendMCPtools(cfg *config.Config, tools []Tool) []Tool {
 	return tools
 }
 
-func appendMemoryTools(memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, cfg *config.Config, tools []Tool) []Tool {
+func appendMemoryTools(memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, cfg *config.Config, tools []Tool, tracer *observability.DispatchTracer) []Tool {
 	if memStore != nil {
-		tools = append(tools, NewSearchMemoryTool(memStore))
+		tools = append(tools, NewSearchMemoryTool(memStore, tracer))
 	}
 	if memStore != nil && vecStore != nil && embedProv != nil {
-		tools = append(tools, newSearchDocsTool(memStore, vecStore, embedProv))
+		tools = append(tools, newSearchDocsTool(memStore, vecStore, embedProv, tracer))
 	}
 	return tools
 }
 
-func appendCalendarTaskTools(secretsRoot string, tools []Tool) []Tool {
+func appendCalendarTaskTools(secretsRoot string, tools []Tool, tracer *observability.DispatchTracer) []Tool {
 	return append(tools, []Tool{
-		newListCalendarTool(secretsRoot),
-		newCreateCalendarEventTool(secretsRoot),
-		newListTasksTool(secretsRoot),
-		newCreateTaskTool(secretsRoot),
-		newCompleteTaskTool(secretsRoot),
-		newUpdateTaskTool(secretsRoot),
+		newListCalendarTool(secretsRoot, tracer),
+		newCreateCalendarEventTool(secretsRoot, tracer),
+		newListTasksTool(secretsRoot, tracer),
+		newCreateTaskTool(secretsRoot, tracer),
+		newCompleteTaskTool(secretsRoot, tracer),
+		newUpdateTaskTool(secretsRoot, tracer),
 	}...)
 }
 
-func appendGoogleTools(cfg *config.Config, tools []Tool) []Tool {
+func appendGoogleTools(cfg *config.Config, tools []Tool, tracer *observability.DispatchTracer) []Tool {
 	googleKey := cfg.GoogleAPIKey()
 	googleCX := cfg.GoogleCX()
 	if googleKey != "" && googleCX != "" {
-		tools = append(tools, newWebSearchTool(googleKey, googleCX))
+		tools = append(tools, newWebSearchTool(googleKey, googleCX, tracer))
 		slog.Info("run: registered google_search tool")
 	} else {
 		slog.Warn("run: google_search tool disabled -- providers.google.apiKey or customCx not set")
@@ -174,12 +175,12 @@ func appendGoogleTools(cfg *config.Config, tools []Tool) []Tool {
 	return tools
 }
 
-func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, registry *ToolRegistry) []Tool {
+func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, registry *ToolRegistry, tracer *observability.DispatchTracer) []Tool {
 	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
-		tools = append(tools, newSendEmailTool(secretsRoot, cfg.StorageRoot(), userEmail, registry))
+		tools = append(tools, newSendEmailTool(secretsRoot, cfg.StorageRoot(), userEmail, registry, tracer))
 		if cfg.Strategic.GmailReadonly {
-			tools = append(tools, newSearchGmailTool(secretsRoot))
-			tools = append(tools, newReadGmailTool(secretsRoot))
+			tools = append(tools, newSearchGmailTool(secretsRoot, tracer))
+			tools = append(tools, newReadGmailTool(secretsRoot, tracer))
 			slog.Info("run: registered gmail tools (send, search, read)")
 		} else {
 			slog.Info("run: registered gmail tools (send only; gmail_readonly=false)")

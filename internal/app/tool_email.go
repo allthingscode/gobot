@@ -9,6 +9,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/integrations/google"
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/reporter"
 	"golang.org/x/sync/errgroup"
@@ -19,18 +20,20 @@ type SendEmailTool struct {
 	storageRoot string
 	userEmail   string
 	registry    *ToolRegistry // C-184: idempotency
+	tracer      *observability.DispatchTracer
 }
 
 const sendEmailToolName = "send_email"
 
 // newSendEmailTool returns a SendEmailTool that loads OAuth credentials from
 // secretsRoot/token.json and always sends to userEmail.
-func newSendEmailTool(secretsRoot, storageRoot, userEmail string, registry *ToolRegistry) *SendEmailTool {
+func newSendEmailTool(secretsRoot, storageRoot, userEmail string, registry *ToolRegistry, tracer *observability.DispatchTracer) *SendEmailTool {
 	return &SendEmailTool{
 		secretsRoot: secretsRoot,
 		storageRoot: storageRoot,
 		userEmail:   userEmail,
 		registry:    registry,
+		tracer:      tracer,
 	}
 }
 
@@ -75,7 +78,14 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 		return "", fmt.Errorf("send_email: auth: %w", err)
 	}
 
-	if err := svc.Send(ctx, s.userEmail, subject, body); err != nil {
+	if s.tracer != nil {
+		err = s.tracer.TraceGoogleCall(ctx, "gmail", "Send", func(ctx context.Context) error {
+			return svc.Send(ctx, s.userEmail, subject, body)
+		})
+	} else {
+		err = svc.Send(ctx, s.userEmail, subject, body)
+	}
+	if err != nil {
 		fallbackMsg := reporter.FallbackNotify(s.storageRoot, subject, body, s.userEmail, err.Error())
 		return fallbackMsg, nil
 	}
@@ -110,10 +120,11 @@ const searchGmailToolName = "search_gmail"
 
 type SearchGmailTool struct {
 	secretsRoot string
+	tracer      *observability.DispatchTracer
 }
 
-func newSearchGmailTool(secretsRoot string) *SearchGmailTool {
-	return &SearchGmailTool{secretsRoot: secretsRoot}
+func newSearchGmailTool(secretsRoot string, tracer *observability.DispatchTracer) *SearchGmailTool {
+	return &SearchGmailTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 type searchGmailArgs struct {
@@ -137,19 +148,14 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 		return "", fmt.Errorf("search_gmail: query is required")
 	}
 
-	maxResults := 5
-	if v, ok := args["max_results"]; ok {
-		if n, ok := v.(float64); ok {
-			maxResults = int(n)
-		}
-	}
+	maxResults := s.parseMaxResults(args)
 
 	svc, err := google.NewService(ctx, s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("search_gmail: auth: %w", err)
 	}
 
-	summaries, err := svc.SearchMessages(ctx, query, maxResults)
+	summaries, err := s.searchMessages(ctx, svc, query, maxResults)
 	if err != nil {
 		return "", fmt.Errorf("search_gmail: %w", err)
 	}
@@ -163,6 +169,42 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 		return "", err
 	}
 
+	return s.formatResults(summaries, messages), nil
+}
+
+func (s *SearchGmailTool) parseMaxResults(args map[string]any) int {
+	maxResults := 5
+	if v, ok := args["max_results"]; ok {
+		if n, ok := v.(float64); ok {
+			maxResults = int(n)
+		}
+	}
+	return maxResults
+}
+
+func (s *SearchGmailTool) searchMessages(ctx context.Context, svc *google.Service, query string, maxResults int) ([]google.MessageSummary, error) {
+	var summaries []google.MessageSummary
+	var err error
+	if s.tracer != nil {
+		err = s.tracer.TraceGoogleCall(ctx, "gmail", "SearchMessages", func(ctx context.Context) error {
+			var err2 error
+			summaries, err2 = svc.SearchMessages(ctx, query, maxResults)
+			if err2 != nil {
+				return fmt.Errorf("search messages: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		summaries, err2 = svc.SearchMessages(ctx, query, maxResults)
+		if err2 != nil {
+			err = fmt.Errorf("search messages: %w", err2)
+		}
+	}
+	return summaries, err
+}
+
+func (s *SearchGmailTool) formatResults(summaries []google.MessageSummary, messages []*google.Message) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Found %d messages:\n\n", len(summaries))
 	for i, msg := range messages {
@@ -178,7 +220,7 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 		fmt.Fprintf(&sb, "  **Snippet**: %s\n\n", msg.Snippet)
 	}
 
-	return sb.String(), nil
+	return sb.String()
 }
 
 func (s *SearchGmailTool) fetchDetails(ctx context.Context, svc *google.Service, summaries []google.MessageSummary) ([]*google.Message, error) {
@@ -214,10 +256,11 @@ const readGmailToolName = "read_gmail"
 
 type ReadGmailTool struct {
 	secretsRoot string
+	tracer      *observability.DispatchTracer
 }
 
-func newReadGmailTool(secretsRoot string) *ReadGmailTool {
-	return &ReadGmailTool{secretsRoot: secretsRoot}
+func newReadGmailTool(secretsRoot string, tracer *observability.DispatchTracer) *ReadGmailTool {
+	return &ReadGmailTool{secretsRoot: secretsRoot, tracer: tracer}
 }
 
 func (s *ReadGmailTool) Name() string { return readGmailToolName }
@@ -245,7 +288,23 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[strin
 		return "", fmt.Errorf("read_gmail: auth: %w", err)
 	}
 
-	msg, err := svc.GetMessage(ctx, msgID)
+	var msg *google.Message
+	if s.tracer != nil {
+		err = s.tracer.TraceGoogleCall(ctx, "gmail", "GetMessage", func(ctx context.Context) error {
+			var err2 error
+			msg, err2 = svc.GetMessage(ctx, msgID)
+			if err2 != nil {
+				return fmt.Errorf("get message: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		msg, err2 = svc.GetMessage(ctx, msgID)
+		if err2 != nil {
+			err = fmt.Errorf("get message: %w", err2)
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("read_gmail: %w", err)
 	}

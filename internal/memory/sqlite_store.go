@@ -13,6 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	_ "modernc.org/sqlite" // register "sqlite" driver
 )
 
@@ -200,14 +204,19 @@ func (m *MemoryStore) Index(namespace, content string) error {
 //
 // Returns nil (not an error) when the query is empty, no results match,
 // or FTS5 rejects the query syntax.
-func (m *MemoryStore) Search(query, sessionKey string, limit int) ([]map[string]any, error) {
+func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error) {
+	ctx, span := otel.Tracer("gobot-memory").Start(ctx, "MemoryStore.Search",
+		trace.WithAttributes(attribute.Int("memory.limit", limit)),
+	)
+	defer span.End()
+
 	safe := sanitizeFTSQuery(query)
 	if safe == "" || limit <= 0 {
 		return nil, nil
 	}
 
 	sessionNamespace := "session:" + sessionKey
-	rows, err := m.db.QueryContext(context.Background(),
+	rows, err := m.db.QueryContext(ctx,
 		`SELECT namespace, content, timestamp
 		 FROM memory_fts
 		 WHERE memory_fts MATCH ? AND namespace IN (?, 'global')
@@ -242,8 +251,11 @@ func (m *MemoryStore) Search(query, sessionKey string, limit int) ([]map[string]
 		})
 	}
 	if err := rows.Err(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return results, fmt.Errorf("memory: search scan: %w", err)
 	}
+	span.SetAttributes(attribute.Int("memory.results_count", len(results)))
 	return results, nil
 }
 

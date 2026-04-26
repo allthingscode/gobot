@@ -91,7 +91,7 @@ func TestRunner_FtsSearch(t *testing.T) {
 	}
 
 	r := &AgentRunner{}
-	results := r.ftsSearch("how are you", testSess, memStore)
+	results := r.ftsSearch(context.Background(), "how are you", testSess, memStore)
 	if len(results) == 0 {
 		t.Error("expected FTS results, got none")
 	}

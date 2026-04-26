@@ -218,20 +218,9 @@ func (r *AgentRunner) getRagBlock(ctx context.Context, sessionKey, userText stri
 	var filtered []map[string]any
 
 	if r.Cfg.VectorSearchEnabled() && r.VecStore != nil && r.EmbedProv != nil {
-		hybridResults, err := vector.HybridSearch(ctx, memStore, r.VecStore, r.EmbedProv, userText, sessionKey, 5)
-		if err == nil {
-			for _, res := range hybridResults {
-				filtered = append(filtered, map[string]any{
-					"content": res.Content,
-					"score":   res.Score,
-				})
-			}
-		} else {
-			slog.Warn("runner: hybrid RAG search failed, falling back to FTS5", "err", err)
-			filtered = r.ftsSearch(userText, sessionKey, memStore)
-		}
+		filtered = r.hybridRagSearch(ctx, sessionKey, userText, memStore)
 	} else {
-		filtered = r.ftsSearch(userText, sessionKey, memStore)
+		filtered = r.ftsSearch(ctx, userText, sessionKey, memStore)
 	}
 
 	block, n := memory.FormatRAGBlock(filtered)
@@ -242,8 +231,64 @@ func (r *AgentRunner) getRagBlock(ctx context.Context, sessionKey, userText stri
 	return ""
 }
 
-func (r *AgentRunner) ftsSearch(userText, sessionKey string, memStore *memory.MemoryStore) []map[string]any {
-	if results, _ := memStore.Search(userText, sessionKey, 5); len(results) > 0 {
+func (r *AgentRunner) hybridRagSearch(ctx context.Context, sessionKey, userText string, memStore *memory.MemoryStore) []map[string]any {
+	var hybridResults []vector.HybridResult
+	var err error
+	if r.Tracer != nil {
+		err = r.Tracer.TraceMemorySearch(ctx, "hybrid", func(ctx context.Context) error {
+			var err2 error
+			hybridResults, err2 = vector.HybridSearch(ctx, memStore, r.VecStore, r.EmbedProv, userText, sessionKey, 5)
+			if err2 != nil {
+				return fmt.Errorf("hybrid search: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		var err2 error
+		hybridResults, err2 = vector.HybridSearch(ctx, memStore, r.VecStore, r.EmbedProv, userText, sessionKey, 5)
+		if err2 != nil {
+			err = fmt.Errorf("hybrid search: %w", err2)
+		}
+	}
+
+	if err == nil {
+		filtered := make([]map[string]any, 0, len(hybridResults))
+		for _, res := range hybridResults {
+			filtered = append(filtered, map[string]any{
+				"content": res.Content,
+				"score":   res.Score,
+			})
+		}
+		return filtered
+	}
+
+	slog.Warn("runner: hybrid RAG search failed, falling back to FTS5", "err", err)
+	return r.ftsSearch(ctx, userText, sessionKey, memStore)
+}
+
+func (r *AgentRunner) ftsSearch(ctx context.Context, userText, sessionKey string, memStore *memory.MemoryStore) []map[string]any {
+	var results []map[string]any
+	var err error
+
+	if r.Tracer != nil {
+		err = r.Tracer.TraceMemorySearch(ctx, "fts", func(ctx context.Context) error {
+			var err2 error
+			results, err2 = memStore.Search(ctx, userText, sessionKey, 10)
+			if err2 != nil {
+				return fmt.Errorf("fts search: %w", err2)
+			}
+			return nil
+		})
+	} else {
+		results, err = memStore.Search(ctx, userText, sessionKey, 10)
+	}
+
+	if err != nil {
+		slog.Error("runner: FTS search failed", "err", err, "session", sessionKey)
+		return nil
+	}
+
+	if len(results) > 0 {
 		return memory.FilterRAGResults(results, 0.0)
 	}
 	return nil
