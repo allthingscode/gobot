@@ -48,11 +48,14 @@ func TestSessionLock_Metrics(t *testing.T) {
 		l2.Unlock()
 	}()
 
-	// Wait for waiter to register in metrics
+	// Wait for waiter to register in metrics, then give it time to block on the select.
 	assert.Eventually(t, func() bool {
 		m := GetLockMetrics()["metrics-test-session"]
 		return m.WaitCount >= 1
 	}, 1*time.Second, 10*time.Millisecond)
+	// WaitCount is incremented before the goroutine reaches select <-l.ch.
+	// Sleep briefly so it is definitely blocked when we call Unlock, ensuring elapsed > 0.
+	time.Sleep(20 * time.Millisecond)
 
 	l.Unlock()
 	if err := <-errCh; err != nil {
