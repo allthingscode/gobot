@@ -59,6 +59,9 @@ func TestSessionLock_Metrics(t *testing.T) {
 		t.Fatalf("waiter failed: %v", err)
 	}
 
+	// Wait for wait time to be recorded
+	time.Sleep(1 * time.Millisecond)
+
 	metrics = GetLockMetrics()
 	m = metrics["metrics-test-session"]
 	if m.ContentionCount < 1 {
