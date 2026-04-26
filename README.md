@@ -101,15 +101,18 @@ gobot's design principle is **stability for one user over scale for many**. Ever
 
 ---
 
-## Get Started in 60 Seconds
+## Get Started
 
-1. **Prerequisites**:
-   - Go 1.26.2 or later
-   - Telegram bot token ([BotFather](https://t.me/botfather)) and your numeric Telegram chat ID
-   - At least one LLM API key (Gemini, Anthropic, OpenAI, or OpenRouter)
-   - *(Optional)* Google OAuth2 "Desktop app" credentials for Gmail/Calendar/Tasks
+**What you need before you begin:**
+- Go 1.26.2 or later
+- A Telegram bot token — create one by messaging [@BotFather](https://t.me/botfather) and following the prompts
+- Your numeric Telegram chat ID — message [@userinfobot](https://t.me/userinfobot) and it will reply with your ID (it looks like `123456789`)
+- At least one LLM API key (Gemini, Anthropic, OpenAI, or OpenRouter)
+- *(Optional)* Google OAuth2 "Desktop app" credentials for Gmail/Calendar/Tasks
 
-2. **Install**:
+**Steps:**
+
+1. **Build**:
    ```bash
    git clone https://github.com/allthingscode/gobot.git
    cd gobot
@@ -119,7 +122,7 @@ gobot's design principle is **stability for one user over scale for many**. Ever
    ./scripts/build.sh
    ```
 
-3. **Initialize** — creates workspace directories and a default config file if none exists:
+2. **Initialize** — creates workspace directories and a starter config file:
    ```bash
    # Windows:
    .\bin\gobot.exe init
@@ -127,12 +130,37 @@ gobot's design principle is **stability for one user over scale for many**. Ever
    ./bin/gobot init
    ```
 
-4. **Configure**: Edit `~/.gobot/config.json` (Windows: `%USERPROFILE%\.gobot\config.json`).
-   Add your LLM API key(s) and set `channels.telegram.allowFrom` to your numeric Telegram chat ID.
+3. **Configure**: Edit `~/.gobot/config.json` (Windows: `%USERPROFILE%\.gobot\config.json`).
+
+   Minimum working config — fill in the three `YOUR_*` placeholders:
+   ```json
+   {
+     "agents": { "defaults": { "model": "gemini-2.5-flash", "provider": "gemini" } },
+     "channels": {
+       "telegram": {
+         "enabled": true,
+         "token": "YOUR_TELEGRAM_BOT_TOKEN",
+         "allowFrom": ["YOUR_TELEGRAM_CHAT_ID"]
+       }
+     },
+     "providers": { "gemini": { "apiKey": "YOUR_GEMINI_API_KEY" } },
+     "strategic_edition": { "storage_root": "" }
+   }
+   ```
+   `allowFrom` is the whitelist — only chat IDs listed here can interact with the bot. Use the numeric ID from [@userinfobot](https://t.me/userinfobot).
+
+4. **Register your Telegram user** with the bot's access control database:
+   ```bash
+   # Windows:
+   .\bin\gobot.exe authorize <your-telegram-chat-id>
+   # Linux/macOS:
+   ./bin/gobot authorize <your-telegram-chat-id>
+   ```
+   > **Why both?** `allowFrom` in config is the network-level whitelist (messages from unlisted IDs are dropped before any processing). `authorize` registers the user in the database for conversation history and per-user state. Both are required.
 
 5. **Google OAuth** *(skip if not using Gmail/Calendar/Tasks)*:
    - In [Google Cloud Console](https://console.cloud.google.com/), create an OAuth2 "Desktop app" credential and enable the Gmail, Calendar, and Tasks APIs.
-   - Save the downloaded credentials file to `~/gobot_data/secrets/client_secrets.json` (adjust path if you changed `storage_root`).
+   - Save the downloaded JSON file to `~/gobot_data/secrets/client_secrets.json` (adjust if you changed `storage_root`).
    - Run:
      ```bash
      # Windows:
@@ -141,13 +169,14 @@ gobot's design principle is **stability for one user over scale for many**. Ever
      ./bin/gobot reauth
      ```
 
-6. **Authorize your Telegram user**:
+6. **Verify your setup**:
    ```bash
    # Windows:
-   .\bin\gobot.exe authorize <your-telegram-chat-id>
+   .\bin\gobot.exe doctor
    # Linux/macOS:
-   ./bin/gobot authorize <your-telegram-chat-id>
+   ./bin/gobot doctor
    ```
+   All critical checks should show `[OK]`. Warnings (`[WRN]`) are advisory only.
 
 7. **Run**:
    ```bash
@@ -156,6 +185,7 @@ gobot's design principle is **stability for one user over scale for many**. Ever
    # Linux/macOS:
    ./bin/gobot run
    ```
+   Send a message to your bot in Telegram — it should respond. Start with something simple like "Hello!" to confirm everything is working.
 
 ## Documentation
 

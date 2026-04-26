@@ -4,7 +4,6 @@ package doctor
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +78,14 @@ func Run(cfg *config.Config, probes *Probes) error {
 	return nil
 }
 
+// geminiLiveChecks returns a Gemini live-probe result if a key is configured, otherwise nil.
+func geminiLiveChecks(key string, probe func(string) error, r func(Result, bool) Result) []Result {
+	if key == "" {
+		return nil
+	}
+	return []Result{r(checkGeminiLive(key, probe), false)}
+}
+
 // GetResults performs all health checks and returns the results.
 // Pass probes as nil to skip live connectivity checks.
 func GetResults(cfg *config.Config, probes *Probes) []Result {
@@ -87,9 +94,9 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		p = *probes
 	}
 
-	apiKey := cfg.GeminiAPIKey()
-	if apiKey == "" {
-		apiKey = os.Getenv("GOOGLE_API_KEY")
+	geminiKey := cfg.GeminiAPIKey()
+	if geminiKey == "" {
+		geminiKey = os.Getenv("GOOGLE_API_KEY")
 	}
 
 	secretsRoot := filepath.Join(cfg.StorageRoot(), "secrets")
@@ -104,11 +111,13 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkLogs(cfg), false),
 		r(checkAPIKey(cfg), true),
 		r(checkTelegram(cfg.TelegramToken(), p.ProbeTelegram), false),
-		r(checkGeminiLive(apiKey, p.ProbeGemini), false),
 		r(checkGoogleToken(secretsRoot), false),
 		r(checkGmailToken(secretsRoot), false),
 		r(checkJobsDir(cfg), false),
 	}
+
+	// Only probe Gemini live if Gemini is actually configured.
+	checks = append(checks, geminiLiveChecks(geminiKey, p.ProbeGemini, r)...)
 
 	// Add Resilience checks (F-054)
 	// Proactively register configured breakers so they show up in the report
@@ -177,21 +186,26 @@ func checkLogs(cfg *config.Config) Result {
 }
 
 func checkAPIKey(cfg *config.Config) Result {
-	key := cfg.GeminiAPIKey()
-	if key == "" {
-		key = os.Getenv("GOOGLE_API_KEY")
+	type entry struct {
+		name string
+		key  string
 	}
-	if key == "" {
-		return Result{Name: "gemini api key", OK: false, Detail: "not found in config or GOOGLE_API_KEY env"}
+	candidates := []entry{
+		{"gemini", cfg.GeminiAPIKey()},
+		{"anthropic", cfg.AnthropicAPIKey()},
+		{"openai", cfg.OpenAIAPIKey()},
+		{"openrouter", cfg.OpenRouterAPIKey()},
 	}
-	var masked string
-	if len(key) < 8 {
-		masked = "***"
-	} else {
-		masked = key[:4] + "..." + key[len(key)-4:]
+	var found []string
+	for _, e := range candidates {
+		if e.key != "" {
+			found = append(found, e.name)
+		}
 	}
-	slog.Debug("api key found", "masked", masked) //nolint:gosec // G706: masked value is safe for logging
-	return Result{Name: "gemini api key", OK: true, Detail: masked}
+	if len(found) == 0 {
+		return Result{Name: "llm api key", OK: false, Detail: "no key found — set GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY"}
+	}
+	return Result{Name: "llm api key", OK: true, Detail: strings.Join(found, ", ")}
 }
 
 // checkTelegram validates the Telegram bot token.

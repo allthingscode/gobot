@@ -156,11 +156,29 @@ func TestCheckAPIKey_FromConfig(t *testing.T) {
 }
 
 func TestCheckAPIKey_FromEnv(t *testing.T) {
-	t.Setenv("GOOGLE_API_KEY", "env-api-key-5678")
+	t.Setenv("GEMINI_API_KEY", "env-api-key-5678")
 
 	r := checkAPIKey(cfgWithRoot(t.TempDir()))
 	if !r.OK {
 		t.Errorf("expected OK=true for key in env, got: %s", r.Detail)
+	}
+}
+
+func TestCheckAPIKey_AnthropicKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+
+	r := checkAPIKey(cfgWithRoot(t.TempDir()))
+	if !r.OK {
+		t.Errorf("expected OK=true for Anthropic key, got: %s", r.Detail)
+	}
+}
+
+func TestCheckAPIKey_OpenAIKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test-key")
+
+	r := checkAPIKey(cfgWithRoot(t.TempDir()))
+	if !r.OK {
+		t.Errorf("expected OK=true for OpenAI key, got: %s", r.Detail)
 	}
 }
 
@@ -173,9 +191,6 @@ func TestCheckAPIKey_Short(t *testing.T) {
 	if !r.OK {
 		t.Errorf("expected OK=true for short key, got: %s", r.Detail)
 	}
-	if r.Detail != "***" {
-		t.Errorf("expected detail *** for short key, got: %s", r.Detail)
-	}
 }
 
 func TestCheckAPIKey_Exact8(t *testing.T) {
@@ -187,14 +202,13 @@ func TestCheckAPIKey_Exact8(t *testing.T) {
 	if !r.OK {
 		t.Errorf("expected OK=true for 8-char key, got: %s", r.Detail)
 	}
-	expected := "1234...5678"
-	if r.Detail != expected {
-		t.Errorf("expected detail %s for 8-char key, got: %s", expected, r.Detail)
-	}
 }
 
 func TestCheckAPIKey_Missing(t *testing.T) {
-	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 
 	r := checkAPIKey(cfgWithRoot(t.TempDir()))
 	if r.OK {
@@ -405,7 +419,7 @@ func TestRun_AllChecksPass(t *testing.T) {
 	writeTokenJSON(t, filepath.Join(root, "secrets"), "google_token.json", time.Now().Add(1*time.Hour), "")
 	writeTokenJSON(t, filepath.Join(root, "secrets", "gmail"), "token.json", time.Now().Add(1*time.Hour), "")
 
-	t.Setenv("GOOGLE_API_KEY", "test-key-for-run-1234")
+	t.Setenv("GEMINI_API_KEY", "test-key-for-run-1234")
 
 	cfg := cfgWithRoot(root)
 	cfg.Channels.Telegram.Token = "123:test-token"
@@ -417,7 +431,7 @@ func TestRun_AllChecksPass(t *testing.T) {
 }
 
 func TestRun_FailsOnBadStorageRoot(t *testing.T) {
-	t.Setenv("GOOGLE_API_KEY", "test-key-for-run-1234")
+	t.Setenv("GEMINI_API_KEY", "test-key-for-run-1234")
 
 	cfg := cfgWithRoot(filepath.Join(t.TempDir(), "nonexistent"))
 	if err := Run(cfg, nil); err == nil {
