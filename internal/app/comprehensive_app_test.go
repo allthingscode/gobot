@@ -509,10 +509,19 @@ func TestShellExecTool_Coverage(t *testing.T) {
 		t.Error("expected error for missing command")
 	}
 	
-	// Case 2: simple command (echo)
+	// Case 2: simple command (echo) — cross-platform
+	var cmd string
+	var args []any
+	if runtime.GOOS == "windows" {
+		cmd = "cmd"
+		args = []any{"/c", "echo", "hello"}
+	} else {
+		cmd = "sh"
+		args = []any{"-c", "echo hello"}
+	}
 	res, err := tool.Execute(ctx, "sess", "user", map[string]any{
-		"command": "cmd",
-		"args": []any{"/c", "echo", "hello"},
+		"command": cmd,
+		"args":    args,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
