@@ -148,5 +148,6 @@ jobs:
                 run: go run -mod=readonly ./cmd/gobot config reformat --check config.sample.json
             -   name: Validate config.sample.json
                 run: |
-                    mkdir -p ~/gobot_data
+                    mkdir -p ~/gobot_data/workspace
+                    touch ~/gobot_data/workspace/AWARENESS.md
                     go run -mod=readonly ./cmd/gobot config validate config.sample.json
