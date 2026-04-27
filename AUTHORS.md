@@ -1,7 +1,7 @@
 # Matthew Hayes
 **I build autonomous software factories that actually ship production code.**
 
-[linkedin.com/in/matthew-l-hayes](https://www.linkedin.com/in/matthew-l-hayes) · [github.com/allthingscode](https://github.com/allthingscode) · Sachse, Texas
+[linkedin.com/in/matthew-l-hayes](https://www.linkedin.com/in/matthew-l-hayes) · [github.com/allthingscode](https://github.com/allthingscode) · [Articles on Agentic Software Development](https://allthingscode.github.io/articles/) · Sachse, Texas
 
 ---
 
