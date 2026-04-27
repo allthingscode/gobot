@@ -25,6 +25,7 @@ type TgAPI struct {
 	allowFrom map[int64]bool
 	msgChan   chan bot.InboundMessage
 	cbChan    chan bot.InboundCallback
+	username  string
 }
 
 // NewTgAPI initializes a new Telegram API adapter using the telego library.
@@ -55,7 +56,13 @@ func NewTgAPI(token string, allowFrom []string, cfg *config.Config) (*TgAPI, err
 		allowFrom: af,
 		msgChan:   make(chan bot.InboundMessage, 100),
 		cbChan:    make(chan bot.InboundCallback, 100),
+		username:  self.Username,
 	}, nil
+}
+
+// Username returns the bot's Telegram username.
+func (api *TgAPI) Username() string {
+	return api.username
 }
 
 const dedupTTL = 5 * time.Minute
