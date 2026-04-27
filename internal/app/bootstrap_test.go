@@ -104,9 +104,18 @@ func TestInitVectorStore_Failures(t *testing.T) {
 	cfg := &config.Config{}
 	runner := &AgentRunner{}
 	
-	// Prov is not a GeminiProvider
+	// Case 1: Vector search disabled
+	cfg.Strategic.VectorSearchEnabled = false
+	vs, ep, cleanup := InitVectorStore(cfg, nil, runner)
+	if vs != nil || ep != nil {
+		t.Error("expected nil vs and ep when VectorSearchEnabled is false")
+	}
+	cleanup()
+
+	// Case 2: Prov is not a GeminiProvider
+	cfg.Strategic.VectorSearchEnabled = true
 	prov := &MockProvider{}
-	vs, ep, cleanup := InitVectorStore(cfg, prov, runner)
+	vs, ep, cleanup = InitVectorStore(cfg, prov, runner)
 	if vs != nil || ep != nil {
 		t.Error("expected nil vs and ep for non-Gemini provider")
 	}

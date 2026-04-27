@@ -142,6 +142,10 @@ func InitMemory(cfg *config.Config, runner *AgentRunner) (memStore *memory.Memor
 // InitVectorStore initializes the semantic vector store and embedding provider.
 func InitVectorStore(cfg *config.Config, prov provider.Provider, runner *AgentRunner) (*vector.Store, vector.EmbeddingProvider, func()) {
 	cleanup := func() {}
+	if !cfg.VectorSearchEnabled() {
+		return nil, nil, cleanup
+	}
+
 	var vecStore *vector.Store
 	var embedProv vector.EmbeddingProvider
 

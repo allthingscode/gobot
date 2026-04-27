@@ -361,6 +361,7 @@ func TestInitVectorStore_GeminiNoAPIKey(t *testing.T) {
 func TestInitVectorStore_GeminiWithAPIKey(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Strategic.VectorSearchEnabled = true
 	cfg.Providers.Gemini.APIKey = "test-api-key"
 	runner := &AgentRunner{}
 	prov := provider.NewGeminiProvider(nil)
