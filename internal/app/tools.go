@@ -81,9 +81,9 @@ func RegisterTools(cfg *config.Config, prov provider.Provider, model string, mem
 	specialistModels := buildSpecialistModels(cfg)
 	secretsRoot := cfg.SecretsRoot()
 	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv, registry)
+	tools = appendCalendarTaskTools(secretsRoot, tools, tracer)
 	tools = appendMCPtools(cfg, tools)
 	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools, tracer)
-	tools = appendCalendarTaskTools(secretsRoot, tools, tracer)
 	tools = appendGoogleTools(cfg, tools, tracer)
 	tools = appendGmailTools(cfg, secretsRoot, tools, registry, tracer)
 	return tools
