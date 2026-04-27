@@ -293,4 +293,3 @@ Hello`
 		t.Errorf("expected empty Agent, got %q", job.Payload.Agent)
 	}
 }
-

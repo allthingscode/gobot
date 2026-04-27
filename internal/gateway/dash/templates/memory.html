@@ -14,6 +14,53 @@
 
 <div class="card p-4 mt-4">
     <h5>Search Engine</h5>
-    <p class="text-muted">Memory search UI coming soon.</p>
+    <form class="mb-4" hx-get="/dash/memory/search" hx-target="#search-results" hx-indicator="#search-indicator">
+        <input type="hidden" name="partial" value="true">
+        <div class="input-group">
+            <input type="text" name="q" class="form-control" placeholder="Search long-term memory..." value="{{.Query}}">
+            <button class="btn btn-primary" type="submit">Search</button>
+        </div>
+        <div id="search-indicator" class="htmx-indicator mt-2">
+            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                <span class="visually-hidden">Searching...</span>
+            </div>
+            Searching memory...
+        </div>
+    </form>
+
+    <div id="search-results">
+        {{template "search_results" .}}
+    </div>
 </div>
+{{end}}
+
+{{define "search_results"}}
+    {{if .Results}}
+    <div class="table-responsive">
+        <table class="table table-hover small">
+            <thead>
+                <tr>
+                    <th style="width: 10%;">Score</th>
+                    <th style="width: 15%;">Timestamp</th>
+                    <th style="width: 15%;">Namespace</th>
+                    <th>Content</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Results}}
+                <tr>
+                    <td class="text-muted">{{printf "%.3f" .score}}</td>
+                    <td class="text-muted">{{.timestamp}}</td>
+                    <td><span class="badge bg-light text-dark border">{{.namespace}}</span></td>
+                    <td class="text-wrap">{{.content}}</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{else if .Query}}
+    <div class="text-center py-4 text-muted">
+        No matches found for "{{.Query}}".
+    </div>
+    {{end}}
 {{end}}

@@ -25,6 +25,7 @@ type Alerter interface {
 
 // Scheduler handles the lifecycle of scheduled jobs.
 type Scheduler struct {
+	mu               sync.RWMutex
 	storePath        string
 	itemsDir         string
 	dispatcher       Dispatcher
@@ -63,6 +64,18 @@ func NewScheduler(storePath, itemsDir string, dispatcher Dispatcher) *Scheduler 
 	}
 
 	return s
+}
+
+// Jobs returns a copy of the current list of jobs.
+func (s *Scheduler) Jobs() []Job {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.store == nil {
+		return nil
+	}
+	jobs := make([]Job, len(s.store.Jobs))
+	copy(jobs, s.store.Jobs)
+	return jobs
 }
 
 // WithJobTimeout sets the per-job execution timeout.

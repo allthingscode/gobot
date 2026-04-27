@@ -3,22 +3,32 @@ package dash
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
 )
 
-// mockMemoryStats implements MemoryStatsProvider.
+// mockMemoryStats implements MemoryProvider.
 type mockMemoryStats struct {
-	count int
-	err   error
+	count     int
+	err       error
+	lastLimit int
+	results   []map[string]any
 }
 
 func (m *mockMemoryStats) Stats() (int, error) {
 	return m.count, m.err
+}
+
+func (m *mockMemoryStats) Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error) {
+	m.lastLimit = limit
+	return m.results, nil
 }
 
 func TestDashboardHandlers(t *testing.T) {
@@ -140,5 +150,96 @@ func TestRenderError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 status when templates missing, got %d", w.Code)
+	}
+}
+
+func TestMemorySearchUsesTop10(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	memoryMock := &mockMemoryStats{
+		count: 1,
+		results: []map[string]any{
+			{"content": "alpha", "score": 0.99, "timestamp": "2026-01-01T00:00:00Z", "namespace": "facts"},
+		},
+	}
+	h := NewHandler(Resources{
+		Config: cfg,
+		Memory: memoryMock,
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/memory/search?q=alpha&partial=true", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	if memoryMock.lastLimit != 10 {
+		t.Fatalf("search limit: got %d, want 10", memoryMock.lastLimit)
+	}
+	if !strings.Contains(w.Body.String(), "0.990") {
+		t.Fatalf("body missing score rendering: %s", w.Body.String())
+	}
+}
+
+func TestCronUsesConfigTasks(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Cron.Tasks = []struct {
+		Name     string `json:"name"`
+		Schedule string `json:"schedule"`
+	}{
+		{Name: "Daily Review", Schedule: "0 9 * * *"},
+	}
+
+	h := NewHandler(Resources{Config: cfg})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/cron", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Daily Review") {
+		t.Fatalf("body missing config task name: %s", body)
+	}
+	if !strings.Contains(body, "0 9 * * *") {
+		t.Fatalf("body missing config schedule: %s", body)
+	}
+}
+
+func TestLogsTailPartial(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = dir
+	logDir := filepath.Join(dir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs dir: %v", err)
+	}
+	logPath := filepath.Join(logDir, "gobot.log")
+	var sb strings.Builder
+	for i := 1; i <= 210; i++ {
+		fmt.Fprintf(&sb, "line-%d\n", i)
+	}
+	if err := os.WriteFile(logPath, []byte(sb.String()), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	h := NewHandler(Resources{Config: cfg})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "line-1\nline-2\nline-3\n") {
+		t.Fatalf("expected tail truncation to drop early lines")
+	}
+	if !strings.Contains(body, "line-210") {
+		t.Fatalf("expected latest line in tail output")
 	}
 }
