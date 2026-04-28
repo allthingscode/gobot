@@ -34,6 +34,7 @@ func TestShellExecTool_Name(t *testing.T) {
 	}
 }
 
+//nolint:funlen // table-driven coverage for shell_exec behaviors
 func TestShellExecTool_Execute(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -51,6 +52,13 @@ func TestShellExecTool_Execute(t *testing.T) {
 		{
 			name:    "missing_command",
 			args:    map[string]any{},
+			wantErr: true,
+		},
+		{
+			name: "go_requires_subcommand",
+			args: map[string]any{
+				"command": "go",
+			},
 			wantErr: true,
 		},
 		{

@@ -69,6 +69,7 @@ func (t *shellExecTool) Declaration() provider.ToolDeclaration {
 
 func (t *shellExecTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	cmd, _ := args["command"].(string)
+	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return "", errors.New("shell_exec: command is required")
 	}
@@ -96,6 +97,9 @@ func (t *shellExecTool) Execute(ctx context.Context, sessionKey, userID string, 
 
 	// Remap Unix-only commands (ls, cat, grep, etc.) through PowerShell.
 	cmd, cmdArgs = shell.RemapUnixCommand(cmd, cmdArgs)
+	if cmd == "go" && len(cmdArgs) == 0 {
+		return "", errors.New("shell_exec: go requires at least one argument (e.g. 'version', 'test', 'build')")
+	}
 
 	// Resource limits are intentionally 0 (disabled). Per-process CPU/memory
 	// caps via Windows Job Objects kill grandchildren (e.g. go test binaries)

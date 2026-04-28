@@ -699,3 +699,25 @@ func TestExtractText_StringContent(t *testing.T) {
 		t.Errorf("expected 'hello', got %q", got)
 	}
 }
+
+func TestShouldRetry_RateLimit(t *testing.T) {
+	runner := &AgentRunner{}
+	if !runner.shouldRetry(errors.New("HTTP 429 Too Many Requests")) {
+		t.Error("expected true for HTTP 429 rate-limit error")
+	}
+	if !runner.shouldRetry(errors.New("RESOURCE_EXHAUSTED: quota")) {
+		t.Error("expected true for RESOURCE_EXHAUSTED error")
+	}
+}
+
+func TestShouldRetryGeminiProbe(t *testing.T) {
+	if !shouldRetryGeminiProbe(errors.New("HTTP 429 Too Many Requests")) {
+		t.Error("expected true for HTTP 429")
+	}
+	if !shouldRetryGeminiProbe(errors.New("RESOURCE_EXHAUSTED")) {
+		t.Error("expected true for RESOURCE_EXHAUSTED")
+	}
+	if shouldRetryGeminiProbe(errors.New("invalid api key")) {
+		t.Error("expected false for non-retryable auth error")
+	}
+}

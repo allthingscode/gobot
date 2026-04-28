@@ -650,10 +650,23 @@ func (r *AgentRunner) attemptChat(ctx context.Context, sessionKey string, attemp
 }
 
 func (r *AgentRunner) shouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
 	if errors.Is(err, resilience.ErrCircuitOpen) {
 		return false
 	}
+	if isRateLimitError(err) {
+		return true
+	}
 	return bot.IsTransientError(err)
+}
+
+func isRateLimitError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "429") ||
+		strings.Contains(msg, "resource_exhausted") ||
+		strings.Contains(msg, "rate limit")
 }
 
 // ExtractText joins all non-empty text parts from a StrategicMessage.
