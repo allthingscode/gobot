@@ -75,6 +75,43 @@ func TestReadTextFileTool_Execute_SandboxEscaping(t *testing.T) {
 	}
 }
 
+func TestReadTextFileTool_Execute_ProjectRootFallback(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	
+	// Create a workspace root and a project root
+	workspaceDir := filepath.Join(tmpDir, "workspace")
+	projectDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create file ONLY in project root
+	content := "Project Content"
+	filePath := filepath.Join(projectDir, "project_file.txt")
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = tmpDir // WorkspacePath(userID) will use this + /workspace
+	cfg.SetProjectRoot(projectDir)
+	
+	tool := app.NewReadTextFileTool(cfg)
+	got, err := tool.Execute(context.Background(), "sess", "user", map[string]any{
+		"file_path": "project_file.txt",
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if got != content {
+		t.Errorf("Execute got %q, want %q", got, content)
+	}
+}
+
 func TestRegisterTools_App(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}

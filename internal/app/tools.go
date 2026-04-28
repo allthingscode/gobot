@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -65,7 +66,7 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 	if err == nil {
 		return string(data), nil
 	}
-	if !os.IsNotExist(err) && !strings.Contains(err.Error(), "outside root") {
+	if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "outside root") {
 		return "", fmt.Errorf("read_text_file: %w", err)
 	}
 
@@ -75,7 +76,7 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 		if err == nil {
 			return string(data), nil
 		}
-		if !os.IsNotExist(err) && !strings.Contains(err.Error(), "outside root") {
+		if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "outside root") {
 			return "", fmt.Errorf("read_text_file: %w", err)
 		}
 	}
@@ -91,7 +92,7 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 
 func (t *ReadTextFileTool) readFileFromRoot(path, root string) ([]byte, error) {
 	if root == "" {
-		return nil, fmt.Errorf("empty root")
+		return nil, fmt.Errorf("empty root (outside root)")
 	}
 
 	fullPath := path
@@ -115,7 +116,7 @@ func (t *ReadTextFileTool) readFileFromRoot(path, root string) ([]byte, error) {
 		return data, nil
 	}
 
-	return nil, fmt.Errorf("path %q is on a different drive than root %q", path, root)
+	return nil, fmt.Errorf("path %q is on a different drive than root %q (outside root)", path, root)
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
