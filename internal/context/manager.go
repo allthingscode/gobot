@@ -164,7 +164,17 @@ func (m *CheckpointManager) parseMetadata(metaJSON string) map[string]any {
 	return metadata
 }
 
+func (m *CheckpointManager) isCompleted(ctx context.Context, threadID string) bool {
+	var status string
+	err := m.db.QueryRowContext(ctx, `SELECT status FROM threads WHERE thread_id = ?`, threadID).Scan(&status)
+	return err == nil && status == "completed"
+}
+
 func (m *CheckpointManager) LoadLatest(ctx context.Context, threadID string) (*ThreadSnapshot, error) {
+	if m.isCompleted(ctx, threadID) {
+		return nil, nil
+	}
+
 	row := m.db.QueryRowContext(
 		ctx,
 		`SELECT iteration, state, checksum FROM checkpoints

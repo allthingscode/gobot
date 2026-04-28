@@ -26,8 +26,7 @@ func cmdReauth() *cobra.Command {
 			scopes := []string{
 				"https://www.googleapis.com/auth/tasks",
 				"https://www.googleapis.com/auth/calendar.readonly",
-				"https://www.googleapis.com/auth/google.send",
-				"https://www.googleapis.com/auth/google.readonly",
+				"https://www.googleapis.com/auth/gmail.send",
 			}
 
 			fmt.Println("Starting Go-native interactive authorization...")

@@ -321,7 +321,9 @@ func TestDispatchHandler_HandleCallback_Coverage(t *testing.T) {
 
 func TestReadTextFileTool_Error(t *testing.T) {
 	t.Parallel()
-	tool := app.NewReadTextFileTool(t.TempDir())
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = t.TempDir()
+	tool := app.NewReadTextFileTool(cfg)
 	_, err := tool.Execute(context.Background(), "s", "u", map[string]any{
 		"file_path": "non-existent",
 	})
@@ -475,7 +477,9 @@ func TestSetupGateHandler_Coverage(t *testing.T) {
 func TestAgentRunner_CallTool_Coverage(t *testing.T) {
 	t.Parallel()
 	r := &app.AgentRunner{}
-	r.SetTools([]app.Tool{app.NewReadTextFileTool(t.TempDir())})
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = t.TempDir()
+	r.SetTools([]app.Tool{app.NewReadTextFileTool(cfg)})
 	
 	// Tool exists but will fail due to missing file
 	res, err := r.ExecuteSingleToolCall(context.Background(), "sess", "user", "read_text_file", map[string]any{"file_path": "test"}, 0, 1)
@@ -499,7 +503,9 @@ func TestAgentRunner_CallTool_Coverage(t *testing.T) {
 func TestShellExecTool_Coverage(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	tool := app.NewShellExecTool(tempDir, 1*time.Second, nil)
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = tempDir
+	tool := app.NewShellExecTool(cfg, 1*time.Second, nil)
 	
 	ctx := context.Background()
 	

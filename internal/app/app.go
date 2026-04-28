@@ -29,6 +29,11 @@ import (
 
 // RunAgent is the high-level entry point for the strategic agent.
 func RunAgent(ctx context.Context, cfg *config.Config) error {
+	// F-133: Record project root from where we were started.
+	if wd, err := os.Getwd(); err == nil {
+		cfg.SetProjectRoot(wd)
+	}
+
 	if err := validateRunPrerequisites(cfg); err != nil {
 		return err
 	}

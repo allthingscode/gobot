@@ -43,6 +43,20 @@ type Config struct {
 	Heartbeat  HeartbeatConfig  `json:"heartbeat"`
 	Logging    LoggingConfig    `json:"logging"`
 	Browser    BrowserConfig    `json:"browser"`
+
+	// projectRoot is the directory where the bot was started (source code).
+	// Not exported to avoid appearing in config.json.
+	projectRoot string
+}
+
+// ProjectRoot returns the project source directory.
+func (c *Config) ProjectRoot() string {
+	return c.projectRoot
+}
+
+// SetProjectRoot sets the project source directory.
+func (c *Config) SetProjectRoot(root string) {
+	c.projectRoot = root
 }
 
 type BrowserConfig struct {

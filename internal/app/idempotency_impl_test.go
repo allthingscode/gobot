@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/config"
 )
 
 const (
@@ -66,7 +68,9 @@ func TestShellExecTool_Idempotency(t *testing.T) {
 	
 	// Create a dummy workspace
 	workspace := t.TempDir()
-	tool := newShellExecTool(workspace, 10*time.Second, registry)
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = workspace
+	tool := newShellExecTool(cfg, 10*time.Second, registry)
 
 	execID := "unique-id-123"
 	

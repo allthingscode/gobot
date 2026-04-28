@@ -25,12 +25,12 @@ const (
 
 // ReadTextFileTool implements Tool and reads a file from the workspace.
 type ReadTextFileTool struct {
-	workspace string
+	cfg *config.Config
 }
 
 // NewReadTextFileTool creates a new ReadTextFileTool instance.
-func NewReadTextFileTool(workspace string) *ReadTextFileTool {
-	return &ReadTextFileTool{workspace: workspace}
+func NewReadTextFileTool(cfg *config.Config) *ReadTextFileTool {
+	return &ReadTextFileTool{cfg: cfg}
 }
 
 type readTextFileArgs struct {
@@ -49,31 +49,73 @@ func (t *ReadTextFileTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-// Execute reads the file from the workspace.
+// Execute reads the file from the workspace or project root.
 func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
 	path, _ := args["file_path"].(string)
 	if path == "" {
 		return "", fmt.Errorf("read_text_file: file_path is required")
 	}
 
-	// Resolve to absolute path relative to workspace if not already absolute.
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(t.workspace, path)
-	}
+	// F-073: Determine workspace root for this user
+	workspace := t.cfg.WorkspacePath(userID)
+	project := t.cfg.ProjectRoot()
 
-	// Enforce sandbox: path must be within the workspace directory.
-	cleanPath := filepath.Clean(path)
-	cleanWorkspace := filepath.Clean(t.workspace)
-	rel, err := filepath.Rel(cleanWorkspace, cleanPath)
-	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("read_text_file: path %q is outside workspace", path)
+	// 1. Try Workspace Root
+	data, err := t.readFileFromRoot(path, workspace)
+	if err == nil {
+		return string(data), nil
 	}
-
-	data, err := os.ReadFile(cleanPath)
-	if err != nil {
+	if !os.IsNotExist(err) && !strings.Contains(err.Error(), "outside root") {
 		return "", fmt.Errorf("read_text_file: %w", err)
 	}
-	return string(data), nil
+
+	// 2. Try Project Root (source code)
+	if project != "" {
+		data, err := t.readFileFromRoot(path, project)
+		if err == nil {
+			return string(data), nil
+		}
+		if !os.IsNotExist(err) && !strings.Contains(err.Error(), "outside root") {
+			return "", fmt.Errorf("read_text_file: %w", err)
+		}
+	}
+
+	// If we got here, it's either not found or outside both roots.
+	// For security, if it was outside the workspace and project, report that.
+	if strings.Contains(err.Error(), "outside root") {
+		return "", fmt.Errorf("read_text_file: path %q is outside allowed roots (workspace and project)", path)
+	}
+
+	return "", fmt.Errorf("read_text_file: open %s: The system cannot find the file specified in workspace or project root", path)
+}
+
+func (t *ReadTextFileTool) readFileFromRoot(path, root string) ([]byte, error) {
+	if root == "" {
+		return nil, fmt.Errorf("empty root")
+	}
+
+	fullPath := path
+	if !filepath.IsAbs(fullPath) {
+		fullPath = filepath.Join(root, path)
+	}
+
+	cleanPath := filepath.Clean(fullPath)
+	cleanRoot := filepath.Clean(root)
+
+	// Normalize drive letters on Windows for comparison
+	if strings.EqualFold(filepath.VolumeName(cleanPath), filepath.VolumeName(cleanRoot)) {
+		rel, err := filepath.Rel(cleanRoot, cleanPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("path %q is outside root %q", path, root)
+		}
+		data, err := os.ReadFile(cleanPath)
+		if err != nil {
+			return nil, fmt.Errorf("read file: %w", err)
+		}
+		return data, nil
+	}
+
+	return nil, fmt.Errorf("path %q is on a different drive than root %q", path, root)
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
@@ -102,8 +144,8 @@ func buildSpecialistModels(cfg *config.Config) map[string]string {
 func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, specialistModels map[string]string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry) []Tool {
 	tools := []Tool{
 		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg),
-		&ReadTextFileTool{workspace: cfg.WorkspacePath("", "")},
-		newShellExecTool(cfg.WorkspacePath("", ""), cfg.ExecTimeout(), registry),
+		NewReadTextFileTool(cfg),
+		newShellExecTool(cfg, cfg.ExecTimeout(), registry),
 	}
 	return appendBrowserTools(cfg, tools)
 }
@@ -177,10 +219,11 @@ func appendGoogleTools(cfg *config.Config, tools []Tool, tracer *observability.D
 
 func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, registry *ToolRegistry, tracer *observability.DispatchTracer) []Tool {
 	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
-		tools = append(tools, newSendEmailTool(secretsRoot, cfg.StorageRoot(), userEmail, registry, tracer))
+		gmailSecrets := filepath.Join(secretsRoot, "gmail")
+		tools = append(tools, newSendEmailTool(gmailSecrets, cfg.StorageRoot(), userEmail, registry, tracer))
 		if cfg.Strategic.GmailReadonly {
-			tools = append(tools, newSearchGmailTool(secretsRoot, tracer))
-			tools = append(tools, newReadGmailTool(secretsRoot, tracer))
+			tools = append(tools, newSearchGmailTool(gmailSecrets, tracer))
+			tools = append(tools, newReadGmailTool(gmailSecrets, tracer))
 			slog.Info("run: registered gmail tools (send, search, read)")
 		} else {
 			slog.Info("run: registered gmail tools (send only; gmail_readonly=false)")
@@ -239,7 +282,9 @@ type toolRegistryData struct {
 }
 
 func (r *ToolRegistry) getPath(sessionKey string) string {
-	return filepath.Join(r.storageDir, sessionKey, "tool_registry.json")
+	// Sanitize sessionKey for Windows (replace colons which are common in telegram:IDs)
+	safeKey := strings.ReplaceAll(sessionKey, ":", "_")
+	return filepath.Join(r.storageDir, safeKey, "tool_registry.json")
 }
 
 // Check verifies if an executionID has already been recorded for the session.

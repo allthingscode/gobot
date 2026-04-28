@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/sandbox"
 )
 
 type mockExecutor struct {
@@ -24,7 +27,8 @@ func (m *mockExecutor) Run(_ context.Context, name string, args []string) (strin
 
 func TestShellExecTool_Name(t *testing.T) {
 	t.Parallel()
-	tool := newShellExecTool(t.TempDir(), 2*time.Minute, nil)
+	cfg := &config.Config{}
+	tool := newShellExecTool(cfg, 2*time.Minute, nil)
 	if got := tool.Name(); got != "shell_exec" {
 		t.Errorf("Name() = %q, want %q", got, "shell_exec")
 	}
@@ -75,13 +79,35 @@ func TestShellExecTool_Execute(t *testing.T) {
 			},
 			wantArgs: []string{"a", "b"},
 		},
+		{
+			name: "cwd_in_workspace",
+			args: map[string]any{
+				"command": "cmd",
+				"cwd":     "subdir",
+			},
+			mockOutput: "hello",
+			wantOutput: "hello",
+		},
+		{
+			name: "cwd_outside_forbidden",
+			args: map[string]any{
+				"command": "cmd",
+				"cwd":     "../../windows",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			mock := &mockExecutor{output: tc.mockOutput, err: tc.mockErr}
-			tool := &shellExecTool{exec: mock}
+			cfg := &config.Config{}
+			cfg.Strategic.StorageRoot = t.TempDir()
+			tool := &shellExecTool{
+				cfg:     cfg,
+				newExec: func(sandbox.Config) sandbox.Executor { return mock },
+			}
 
 			output, err := tool.Execute(ctx, "test-session", "", tc.args)
 			validateShellExecResult(t, tc, output, err, mock)

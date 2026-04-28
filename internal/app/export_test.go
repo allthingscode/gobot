@@ -51,8 +51,8 @@ func NewSpawnTool(prov provider.Provider, model string, specialistPrompts, speci
 	return newSpawnTool(prov, model, specialistPrompts, specialistModels, memStore, cfg)
 }
 
-func NewShellExecTool(storageRoot string, timeout time.Duration, registry *ToolRegistry) Tool {
-	return newShellExecTool(storageRoot, timeout, registry)
+func NewShellExecTool(cfg *config.Config, timeout time.Duration, registry *ToolRegistry) Tool {
+	return newShellExecTool(cfg, timeout, registry)
 }
 
 func NewListCalendarTool(storageRoot string) Tool {

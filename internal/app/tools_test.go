@@ -32,12 +32,19 @@ func TestReadTextFileTool_Execute_Success(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	content := "Hello, Go!"
-	filePath := filepath.Join(tmpDir, "test.txt")
+	// Create file in the expected workspace subdirectory
+	workspaceDir := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(workspaceDir, "test.txt")
 	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	tool := app.NewReadTextFileTool(tmpDir)
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = tmpDir
+	tool := app.NewReadTextFileTool(cfg)
 	got, err := tool.Execute(context.Background(), "sess", "user", map[string]any{
 		"file_path": "test.txt",
 	})
@@ -52,7 +59,9 @@ func TestReadTextFileTool_Execute_Success(t *testing.T) {
 func TestReadTextFileTool_Execute_SandboxEscaping(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
-	tool := app.NewReadTextFileTool(tmpDir)
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = tmpDir
+	tool := app.NewReadTextFileTool(cfg)
 
 	// Attempt to read something outside the sandbox
 	_, err := tool.Execute(context.Background(), "sess", "user", map[string]any{
@@ -61,7 +70,7 @@ func TestReadTextFileTool_Execute_SandboxEscaping(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for path outside sandbox, got nil")
 	}
-	if !strings.Contains(err.Error(), "is outside workspace") {
+	if !strings.Contains(err.Error(), "is outside allowed roots") {
 		t.Errorf("expected sandbox error, got: %v", err)
 	}
 }

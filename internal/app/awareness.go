@@ -145,9 +145,12 @@ func EnsureAwarenessFile(cfg *config.Config) {
 // Kept separate so it can be tested without filesystem side effects.
 func buildAwarenessContent(cfg *config.Config) string {
 	storageRoot := cfg.StorageRoot()
+	workspaceRoot := cfg.WorkspacePath("") // shared workspace root
+	projectRoot := cfg.ProjectRoot()
 	cronItemsDir := cfg.WorkspacePath("", "jobs")
 	return "# STRATEGIC AWARENESS\n" +
-		"- **Workspace Root:** " + storageRoot + "\n" +
+		"- **Workspace Root:** " + workspaceRoot + "\n" +
+		"- **Project Root:** " + projectRoot + "\n" +
 		"- **System Role:** Strategic Orchestrator\n" +
 		"- **Edition:** Gobot Strategic Edition\n" +
 		"\n" +
@@ -163,5 +166,8 @@ func buildAwarenessContent(cfg *config.Config) string {
 		"- **Long-Term Memory:** Checkpoint database at `" + cfg.WorkspacePath("", "checkpoints.db") + "`.\n" +
 		"\n" +
 		"## OPERATOR MANDATES\n" +
-		"- **Zero Drive-Root Writes:** Never write to drive roots. All output goes under `" + storageRoot + "`.\n"
+		"- **Zero Drive-Root Writes:** Never write to drive roots. All output goes under `" + storageRoot + "`.\n" +
+		"- **Source Access:** The `read_text_file` tool can access both the Workspace Root and the Project Root.\n" +
+		"- **No Make:** The `make` command is NOT available on this Windows environment. Use native `go` commands or PowerShell scripts in `scripts/` instead.\n" +
+		"- **Go Tests:** ALWAYS run `go test` from the **Project Root** (use `cwd: \"" + projectRoot + "\"`). Use `go test -mod=readonly ./internal/... ./cmd/...`. Do NOT use `-race` — CGO is disabled on this Windows environment and race detection requires it.\n"
 }

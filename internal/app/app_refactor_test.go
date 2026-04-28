@@ -236,12 +236,19 @@ func TestAgentRunner_Setters_App(t *testing.T) {
 func TestReadTextFileTool_App(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "test.txt")
+	workspaceDir := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(workspaceDir, "test.txt")
 	if err := os.WriteFile(filePath, []byte("hello world"), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewReadTextFileTool(tmpDir)
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = tmpDir
+
+	tool := NewReadTextFileTool(cfg)
 
 	res, err := tool.Execute(context.Background(), "", "", map[string]any{"file_path": "test.txt"})
 	if err != nil {

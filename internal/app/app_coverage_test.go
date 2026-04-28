@@ -514,8 +514,11 @@ func TestListTasksTool_Execute_NoToken(t *testing.T) {
 // --- shellExecTool Declaration ---
 
 func TestShellExecTool_Declaration(t *testing.T) {
-	registry := NewToolRegistry(t.TempDir())
-	tool := newShellExecTool(t.TempDir(), 30*time.Second, registry)
+	tempDir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = tempDir
+	registry := NewToolRegistry(tempDir)
+	tool := newShellExecTool(cfg, 30*time.Second, registry)
 	decl := tool.Declaration()
 	if decl.Name != shellExecToolName {
 		t.Errorf("expected %q, got %q", shellExecToolName, decl.Name)
