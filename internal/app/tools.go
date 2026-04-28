@@ -175,7 +175,7 @@ func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, sp
 		NewReadTextFileTool(cfg),
 		newShellExecTool(cfg, cfg.ExecTimeout(), registry),
 	}
-	return appendBrowserTools(cfg, tools)
+	return appendBrowserTools(cfg, prov, model, tools)
 }
 
 //nolint:gochecknoglobals // mockable function for testing
@@ -262,7 +262,7 @@ func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, regi
 	return tools
 }
 
-func appendBrowserTools(cfg *config.Config, tools []Tool) []Tool {
+func appendBrowserTools(cfg *config.Config, prov provider.Provider, model string, tools []Tool) []Tool {
 	if cfg.Browser.DebugPort > 0 || cfg.Browser.Headless {
 		client, err := browser.NewClient(cfg.Browser)
 		if err != nil {
@@ -278,6 +278,7 @@ func appendBrowserTools(cfg *config.Config, tools []Tool) []Tool {
 			browser.NewGetTextsTool(client),
 			browser.NewClickTool(client),
 			browser.NewTypeTool(client),
+			newWebExtractTool(cfg, prov, model),
 		)
 		slog.Info("run: registered browser tools")
 	}
