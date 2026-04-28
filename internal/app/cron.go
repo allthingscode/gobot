@@ -288,15 +288,36 @@ func (cd *CronDispatcher) verifySearchToolProvenance(sessionKey string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	if latest == "" {
-		return false, nil
+	if latest != "" {
+		data, readErr := os.ReadFile(latest)
+		if readErr != nil {
+			return false, fmt.Errorf("read latest session transcript: %w", readErr)
+		}
+		text := string(data)
+		if strings.Contains(text, "search_ai") || strings.Contains(text, "google_search") {
+			return true, nil
+		}
 	}
-	data, err := os.ReadFile(latest)
+
+	return cd.verifySearchToolProvenanceFromLogs(sessionKey)
+}
+
+func (cd *CronDispatcher) verifySearchToolProvenanceFromLogs(sessionKey string) (bool, error) {
+	logPath := filepath.Join(cd.storageRoot, "logs", "gobot.log")
+	data, err := os.ReadFile(logPath)
 	if err != nil {
-		return false, fmt.Errorf("read latest session transcript: %w", err)
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read gobot log: %w", err)
 	}
 	text := string(data)
-	if strings.Contains(text, "search_ai") || strings.Contains(text, "google_search") {
+	parentMarker := `session=` + sessionKey + ` tool=spawn_subagent`
+	subSession := `session=agent:researcher:` + sessionKey
+	parentHasSpawn := strings.Contains(text, parentMarker)
+	subHasSearch := (strings.Contains(text, subSession) && strings.Contains(text, `tool=search_ai`)) ||
+		(strings.Contains(text, subSession) && strings.Contains(text, `tool=google_search`))
+	if parentHasSpawn && subHasSearch {
 		return true, nil
 	}
 	return false, nil
