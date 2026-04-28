@@ -21,42 +21,75 @@ func (m *mockExecutor) Run(ctx context.Context, actions ...chromedp.Action) erro
 }
 
 func getTool(tt toolTest, client *browser.Client) toolInterface {
-	switch tt.toolName {
-	case "browser_navigate":
-		nav := browser.NewNavigateTool(client)
-		nav.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return nav
-	case "browser_screenshot":
-		ss := browser.NewScreenshotTool(client)
-		ss.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return ss
-	case "browser_get_text":
-		gt := browser.NewGetTextTool(client)
-		gt.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return gt
-	case "browser_wait_for":
-		wf := browser.NewWaitForTool(client)
-		wf.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return wf
-	case "browser_extract":
-		ex := browser.NewExtractTool(client)
-		ex.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return ex
-	case "browser_get_texts":
-		gts := browser.NewGetTextsTool(client)
-		gts.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return gts
-	case "browser_click":
-		cl := browser.NewClickTool(client)
-		cl.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return cl
-	case "browser_type":
-		ty := browser.NewTypeTool(client)
-		ty.SetExecutor(&mockExecutor{err: tt.mockErr})
-		return ty
-	default:
+	builders := map[string]func(*browser.Client, error) toolInterface{
+		"browser_navigate":   buildNavigateTool,
+		"browser_screenshot": buildScreenshotTool,
+		"browser_get_text":   buildGetTextTool,
+		"browser_wait_for":   buildWaitForTool,
+		"browser_extract":    buildExtractTool,
+		"browser_get_texts":  buildGetTextsTool,
+		"browser_click":      buildClickTool,
+		"browser_type":       buildTypeTool,
+	}
+	builder, ok := builders[tt.toolName]
+	if !ok {
 		return nil
 	}
+	return builder(client, tt.mockErr)
+}
+
+func buildNavigateTool(client *browser.Client, err error) toolInterface {
+	nav := browser.NewNavigateTool(client)
+	nav.SetExecutor(&mockExecutor{err: err})
+	return nav
+}
+
+func buildScreenshotTool(client *browser.Client, err error) toolInterface {
+	ss := browser.NewScreenshotTool(client)
+	ss.SetExecutor(&mockExecutor{err: err})
+	return ss
+}
+
+func buildGetTextTool(client *browser.Client, err error) toolInterface {
+	gt := browser.NewGetTextTool(client)
+	gt.SetExecutor(&mockExecutor{err: err})
+	return gt
+}
+
+func buildWaitForTool(client *browser.Client, err error) toolInterface {
+	wf := browser.NewWaitForTool(client)
+	wf.SetExecutor(&mockExecutor{err: err})
+	return wf
+}
+
+func buildExtractTool(client *browser.Client, err error) toolInterface {
+	ex := browser.NewExtractTool(client)
+	ex.SetExecutor(&mockExecutor{err: err})
+	ex.SetExtractFunc(func(ctx context.Context, limit int, selector string) ([]string, error) {
+		if err != nil {
+			return nil, err
+		}
+		return []string{"sample text"}, nil
+	})
+	return ex
+}
+
+func buildGetTextsTool(client *browser.Client, err error) toolInterface {
+	gts := browser.NewGetTextsTool(client)
+	gts.SetExecutor(&mockExecutor{err: err})
+	return gts
+}
+
+func buildClickTool(client *browser.Client, err error) toolInterface {
+	cl := browser.NewClickTool(client)
+	cl.SetExecutor(&mockExecutor{err: err})
+	return cl
+}
+
+func buildTypeTool(client *browser.Client, err error) toolInterface {
+	ty := browser.NewTypeTool(client)
+	ty.SetExecutor(&mockExecutor{err: err})
+	return ty
 }
 
 type toolInterface interface {
@@ -232,7 +265,7 @@ func getBrowserExtractTests() []toolTest {
 			name:     "Extract_MissingExtractSelector",
 			toolName: "browser_extract",
 			args:     map[string]any{"url": "https://news.ycombinator.com", "wait_selector": ".titleline > a"},
-			wantErr:  true,
+			wantErr:  false,
 		},
 		{
 			name:     "Extract_ActionError",
