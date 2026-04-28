@@ -437,10 +437,12 @@ func (r *AgentRunner) handleCategoryAError(sessionKey, name, paramsHash, result 
 		slog.String("output", result),
 	)
 
+	prefix := ""
 	if result != "" {
-		return fmt.Sprintf("%s\nError: %v", result, err)
+		prefix = result + "\n"
 	}
-	return fmt.Sprintf("Error: %v", err)
+
+	return fmt.Sprintf("%sTOOL_ERROR [%s]: %v\n\nCRITICAL INSTRUCTION: The tool failed to provide the requested information. You MUST NOT use your internal training data, previous knowledge, or memory to 'guess' or 'hallucinate' the missing data. If the information was essential, simply inform the user that it is currently unavailable due to a technical error. Do NOT invent results or model names.", prefix, name, err)
 }
 
 func (r *AgentRunner) runPostToolHooks(ctx context.Context, name, result string) string {

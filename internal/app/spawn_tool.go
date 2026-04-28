@@ -29,6 +29,12 @@ type SpawnTool struct {
 	SpecialistModels  map[string]string
 	MemStore          *memory.MemoryStore
 	Cfg               *config.Config
+	SubTools          []Tool
+}
+
+// SetSubTools registers the tools available to spawned sub-agents.
+func (s *SpawnTool) SetSubTools(tools []Tool) {
+	s.SubTools = tools
 }
 
 type iterLimitRunner struct {
@@ -65,12 +71,7 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, me
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from a provider.
 func newSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
-	return &SpawnTool{
-		RunnerFactory: func(p provider.Provider, m, systemPrompt string) agent.Runner {
-			runner := NewAgentRunner(p, m, systemPrompt, cfg)
-			runner.MemStore = memStore
-			return runner
-		},
+	st := &SpawnTool{
 		DefaultProv:       prov,
 		Model:             model,
 		SpecialistPrompts: specialistPrompts,
@@ -78,6 +79,15 @@ func newSpawnTool(prov provider.Provider, model string, specialistPrompts, speci
 		MemStore:          memStore,
 		Cfg:               cfg,
 	}
+	st.RunnerFactory = func(p provider.Provider, m, systemPrompt string) agent.Runner {
+		runner := NewAgentRunner(p, m, systemPrompt, cfg)
+		runner.MemStore = memStore
+		if len(st.SubTools) > 0 {
+			runner.SetTools(st.SubTools)
+		}
+		return runner
+	}
+	return st
 }
 
 func (s *SpawnTool) Name() string { return spawnToolName }
@@ -175,14 +185,14 @@ func (t *SpawnTool) handleFallback(ctx context.Context, subKey, userID, objectiv
 	}
 
 	slog.Error("spawn: sub-agent failed", "subKey", subKey, "model", failedModel, "elapsed", time.Since(start), "err", originalErr)
-	return "", fmt.Errorf("spawn %s: %w", agentType, originalErr)
+	return "", fmt.Errorf("sub-agent %s failed to complete the task: %w", agentType, originalErr)
 }
 
 // DefaultSpecialistPrompt returns the default system prompt for a given agent type.
 func DefaultSpecialistPrompt(agentType string) string {
 	switch agentType {
 	case RoleResearcher:
-		return "You are a focused research specialist. Research the given topic thoroughly using available search tools and return a concise, factual, well-structured report. Do not ask clarifying questions -- work with what you have and deliver your best findings."
+		return "You are a focused research specialist. Your goal is to find current, factual information using available search tools. MANDATORY: You MUST use search tools for any time-sensitive data (news, weather, markets, tech releases). You are FORBIDDEN from using your internal training data or memory for current events as it is likely outdated. If search tools return no results or fail, state clearly that the information could not be found. Do not ask clarifying questions."
 	case RoleAnalyst:
 		return "You are a strategic analyst. Analyze the given data or situation and return actionable insights in a structured format. Be direct and evidence-based. Do not ask clarifying questions -- deliver your analysis."
 	case RoleWriter:

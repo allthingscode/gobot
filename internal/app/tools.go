@@ -128,7 +128,34 @@ func RegisterTools(cfg *config.Config, prov provider.Provider, model string, mem
 	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools, tracer)
 	tools = appendGoogleTools(cfg, tools, tracer)
 	tools = appendGmailTools(cfg, secretsRoot, tools, registry, tracer)
+	wireSubTools(tools)
 	return tools
+}
+
+// wireSubTools finds the SpawnTool in the list and gives it a safe read-only subset
+// of tools for sub-agents to use (excludes spawn itself and side-effecting tools).
+func wireSubTools(tools []Tool) {
+	var spawn *SpawnTool
+	for _, t := range tools {
+		if s, ok := t.(*SpawnTool); ok {
+			spawn = s
+			break
+		}
+	}
+	if spawn == nil {
+		return
+	}
+	sub := make([]Tool, 0, len(tools))
+	for _, t := range tools {
+		if t.Name() == spawnToolName {
+			continue
+		}
+		if t.Declaration().SideEffecting {
+			continue
+		}
+		sub = append(sub, t)
+	}
+	spawn.SetSubTools(sub)
 }
 
 func buildSpecialistModels(cfg *config.Config) map[string]string {

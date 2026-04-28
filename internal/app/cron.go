@@ -73,6 +73,8 @@ func (cd *CronDispatcher) Run(ctx context.Context) {
 
 // Dispatch routes a cron job payload to the agent and sends the reply.
 func (cd *CronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
+	p.Message = resolvePlaceholders(p.Message)
+
 	if cd.handleSystemJob(ctx, p) {
 		return nil
 	}
@@ -339,9 +341,13 @@ func parseSessionKey(sessionKey string) (chatID, threadID int64, err error) {
 // resolveEmailSubject builds the email subject line from the payload.
 func resolveEmailSubject(p cron.Payload) string {
 	if p.Subject != "" {
-		now := time.Now()
-		dateStr := fmt.Sprintf("%s %d, %d", now.Format("January"), now.Day(), now.Year())
-		return strings.ReplaceAll(p.Subject, "{{DATE}}", dateStr)
+		return resolvePlaceholders(p.Subject)
 	}
 	return "Gobot Strategic Briefing"
+}
+
+func resolvePlaceholders(text string) string {
+	now := time.Now()
+	dateStr := fmt.Sprintf("%s %d, %d", now.Format("January"), now.Day(), now.Year())
+	return strings.ReplaceAll(text, "{{DATE}}", dateStr)
 }
