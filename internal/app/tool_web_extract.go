@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/state"
 	"github.com/chromedp/chromedp"
 )
 
@@ -24,15 +27,25 @@ type WebExtractTool struct {
 	model         string
 	executor      browser.Executor // for testing
 	clientFactory func(config.BrowserConfig) (*browser.Client, error)
+	stateMgr      *state.Manager
 }
 
 func newWebExtractTool(cfg *config.Config, prov provider.Provider, model string) *WebExtractTool {
+	mCfg := state.ManagerConfig{
+		StateDir:    filepath.Join(cfg.StorageRoot(), "web_extraction_state"),
+		LockTimeout: 30 * time.Second,
+		MaxRetries:  3,
+	}
+	mgr := state.NewManager(mCfg)
+	_ = mgr.Init()
+
 	return &WebExtractTool{
 		cfg:           cfg,
 		prov:          prov,
 		model:         model,
 		executor:      browser.DefaultExecutor{},
 		clientFactory: browser.NewClient,
+		stateMgr:      mgr,
 	}
 }
 
@@ -58,7 +71,7 @@ func (t *WebExtractTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
+func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) { //nolint:gocognit,cyclop,funlen // sequential workflow logic
 	urlStr, _ := args["url"].(string)
 	goal, _ := args["goal"].(string)
 
@@ -69,8 +82,48 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 		return "", fmt.Errorf("web_extract: goal is required")
 	}
 
+	safeKey := strings.ReplaceAll(sessionKey, ":", "_")
+	wfID := state.WorkflowID("web_extract_" + safeKey)
+	extState := state.WebExtractionState{
+		SessionID:   sessionKey,
+		URL:         urlStr,
+		ActivePhase: state.PhaseNavigate,
+		UpdatedAt:   time.Now(),
+	}
+	initialData, _ := json.Marshal(extState)
+	_, _ = t.stateMgr.CreateWorkflow(wfID, initialData)
+	_ = t.stateMgr.UpdateStatus(wfID, state.StatusRunning)
+
+	updatePhase := func(phase state.WebExtractionPhase, selectors []string, errMsg string) {
+		extState.ActivePhase = phase
+		extState.UpdatedAt = time.Now()
+		if selectors != nil {
+			extState.LastSelectors = selectors
+		}
+		if errMsg != "" {
+			extState.LastError = errMsg
+		}
+		if data, err := json.Marshal(extState); err == nil {
+			if wf, err := t.stateMgr.LoadWorkflow(wfID); err == nil {
+				wf.Data = data
+				_ = t.stateMgr.SaveCheckpoint(wf)
+			}
+		}
+	}
+
+	defer func() {
+		if extState.LastError == "" {
+			_ = t.stateMgr.UpdateStatus(wfID, state.StatusCompleted)
+			_ = t.stateMgr.Archive(wfID)
+		} else {
+			_ = t.stateMgr.UpdateStatus(wfID, state.StatusFailed)
+		}
+	}()
+
+	slog.Info("web_extract: starting navigate phase", "session", sessionKey, "url", urlStr)
 	client, err := t.initBrowser()
 	if err != nil {
+		updatePhase(state.PhaseNavigate, nil, err.Error())
 		return "", err
 	}
 	defer client.Close()
@@ -81,21 +134,36 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 
 	title, err := t.navigate(runCtx, client, sessionKey, userID, urlStr)
 	if err != nil {
+		updatePhase(state.PhaseNavigate, nil, err.Error())
 		return "", err
 	}
 
+	slog.Info("web_extract: starting plan phase", "session", sessionKey)
+	updatePhase(state.PhasePlan, nil, "")
+
 	pageMapJSON, err := t.capturePageMap(runCtx)
 	if err != nil {
+		updatePhase(state.PhasePlan, nil, err.Error())
 		return "", err
 	}
 
 	plan, err := t.getLLMPlan(runCtx, goal, pageMapJSON)
 	if err != nil {
+		updatePhase(state.PhasePlan, nil, err.Error())
 		return "", err
 	}
 
+	var selectors []string
+	if plan.Selector != "" {
+		selectors = []string{plan.Selector}
+	}
+
+	slog.Info("web_extract: starting extract phase", "session", sessionKey, "selector", plan.Selector)
+	updatePhase(state.PhaseExtract, selectors, "")
+
 	finalItems, err := t.performExtraction(runCtx, client, plan, sessionKey, userID)
 	if err != nil {
+		updatePhase(state.PhaseExtract, selectors, err.Error())
 		return "", err
 	}
 
@@ -103,9 +171,13 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 		return "No items matching the goal were found on the page.", nil
 	}
 
+	slog.Info("web_extract: starting summarize phase", "session", sessionKey)
+	updatePhase(state.PhaseSummarize, selectors, "")
+
 	summary, err := t.summarizeResults(runCtx, goal, finalItems)
 	if err != nil {
 		// Non-critical failure: return raw data if summarization fails
+		updatePhase(state.PhaseSummarize, selectors, err.Error())
 		return t.formatResponse(title, finalItems, "Extraction complete (summary failed)"), nil
 	}
 

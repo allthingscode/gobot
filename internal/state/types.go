@@ -52,3 +52,24 @@ func (s WorkflowStatus) IsTerminal() bool {
 func (s WorkflowStatus) IsActive() bool {
 	return !s.IsTerminal()
 }
+
+// WebExtractionPhase represents the current phase of the extraction process.
+type WebExtractionPhase string
+
+const (
+	PhaseNavigate  WebExtractionPhase = "navigate"
+	PhasePlan      WebExtractionPhase = "plan"
+	PhaseExtract   WebExtractionPhase = "extract"
+	PhaseRetry     WebExtractionPhase = "retry"
+	PhaseSummarize WebExtractionPhase = "summarize"
+)
+
+// WebExtractionState tracks the progress of a web extraction session.
+type WebExtractionState struct {
+	SessionID     string             `json:"session_id"`
+	URL           string             `json:"url"`
+	ActivePhase   WebExtractionPhase `json:"active_phase"`
+	LastSelectors []string           `json:"last_selectors"`
+	LastError     string             `json:"last_error,omitempty"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}

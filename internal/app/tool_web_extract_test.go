@@ -20,7 +20,7 @@ type webExtractMockProvider struct {
 	idx       int
 }
 
-func (m *webExtractMockProvider) Name() string { return "mock" }
+func (m *webExtractMockProvider) Name() string { return mockName }
 func (m *webExtractMockProvider) Chat(ctx context.Context, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	if m.idx >= len(m.responses) {
 		return nil, fmt.Errorf("no more mock responses")
@@ -47,7 +47,7 @@ func (m *webExtractMockExecutor) Run(ctx context.Context, actions ...chromedp.Ac
 	return nil
 }
 
-func TestWebExtractTool_Execute(t *testing.T) {
+func TestWebExtractTool_Execute(t *testing.T) { //nolint:gocognit,funlen // test table runner
 	t.Parallel()
 
 	tests := []struct {
@@ -89,6 +89,9 @@ func TestWebExtractTool_Execute(t *testing.T) {
 				Browser: config.BrowserConfig{
 					Headless: true,
 				},
+				Strategic: config.StrategicConfig{
+					StorageRoot: t.TempDir(),
+				},
 			}
 
 			prov := &webExtractMockProvider{
@@ -115,6 +118,12 @@ func TestWebExtractTool_Execute(t *testing.T) {
 				t.Fatalf("Execute failed: %v", err)
 			}
 
+			// Verify state was cleaned up/archived
+			active, _ := tool.stateMgr.ListActive()
+			if len(active) > 0 {
+				t.Errorf("Expected 0 active workflows, got %d", len(active))
+			}
+
 			if tt.name == "SelectorExtraction" {
 				if !strings.Contains(resp, "No items matching") {
 					t.Errorf("expected 'No items matching' response, got: %s", resp)
@@ -128,4 +137,5 @@ func TestWebExtractTool_Execute(t *testing.T) {
 			}
 		})
 	}
+
 }

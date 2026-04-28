@@ -311,7 +311,7 @@ func (m *MockProvider) Name() string {
 	if m.name != "" {
 		return m.name
 	}
-	return "mock"
+	return "mock" //nolint:goconst // string used in tests
 }
 func (m *MockProvider) Models() []provider.ModelInfo { return nil }
 func (m *MockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.ChatResponse, error) {
