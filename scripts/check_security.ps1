@@ -27,10 +27,9 @@ if (-not (Get-Command govulncheck -ErrorAction SilentlyContinue)) {
     }
 }
 
-# Run govulncheck with -mod=readonly to ensure it doesn't modify go.mod/go.sum
-# Note: govulncheck doesn't have a direct -mod=readonly flag, but it uses the go command underneath.
-# It should be safe to run on its own.
-govulncheck ./...
+# Run govulncheck with package scopes that work with this repository layout.
+# Avoid bare ./... from repo root due known package-pattern failures in scripts/.
+govulncheck ./internal/... ./cmd/...
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`nSECURITY: Reachable vulnerabilities detected. Fix before pushing." -ForegroundColor Red
