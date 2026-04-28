@@ -19,18 +19,36 @@ func cmdLogs() *cobra.Command {
 	var filter string
 	var since string
 	var follow bool
+	var list bool
 
 	cmd := &cobra.Command{
-		Use:   "logs",
+		Use:   "logs [file]",
 		Short: "View the most recent gobot logs",
+		Long: `View the most recent gobot logs.
+If [file] is provided, it will read that specific log file (by name, e.g. gobot-2026-04-28T09-45-17.284.log).
+Otherwise, it defaults to the most recently modified log file.`,
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if lines <= 0 {
 				return fmt.Errorf("--lines must be greater than 0, got %d", lines)
 			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runLogs(cmd, lines, filter, since, follow)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config load failed: %w", err)
+			}
+
+			if list {
+				return runLogsList(cmd, cfg.LogsRoot())
+			}
+
+			var targetFile string
+			if len(args) > 0 {
+				targetFile = filepath.Join(cfg.LogsRoot(), args[0])
+			}
+
+			return runLogs(cmd, targetFile, lines, filter, since, follow)
 		},
 	}
 
@@ -38,19 +56,40 @@ func cmdLogs() *cobra.Command {
 	cmd.Flags().StringVar(&filter, "filter", "", "Filter by level: ERROR, WARN, INFO, DEBUG")
 	cmd.Flags().StringVar(&since, "since", "", "Show logs since duration (e.g., 1h, 30m)")
 	cmd.Flags().BoolVar(&follow, "follow", false, "Follow log output")
+	cmd.Flags().BoolVar(&list, "list", false, "List available log files")
 
 	return cmd
 }
 
-func runLogs(cmd *cobra.Command, lines int, filter, since string, follow bool) error {
+func runLogsList(cmd *cobra.Command, logsDir string) error {
+	entries, err := os.ReadDir(logsDir)
+	if err != nil {
+		return fmt.Errorf("read logs dir: %w", err)
+	}
+
+	cmd.Println("Available log files:")
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "gobot") && strings.HasSuffix(entry.Name(), ".log") {
+			info, _ := entry.Info()
+			cmd.Printf("  %-40s %10d bytes  %s\n", entry.Name(), info.Size(), info.ModTime().Format(time.RFC3339))
+		}
+	}
+	return nil
+}
+
+func runLogs(cmd *cobra.Command, targetFile string, lines int, filter, since string, follow bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("config load failed: %w", err)
 	}
 
-	latestPath, err := findLatestLogFile(cfg.LogsRoot())
-	if err != nil {
-		return err
+	latestPath := targetFile
+	if latestPath == "" {
+		var err error
+		latestPath, err = findLatestLogFile(cfg.LogsRoot())
+		if err != nil {
+			return err
+		}
 	}
 
 	sinceTime, err := parseSinceDuration(since)

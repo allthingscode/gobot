@@ -31,9 +31,25 @@ func cmdConfig() *cobra.Command {
 	cmd.AddCommand(
 		cmdConfigValidate(),
 		cmdConfigReformat(),
+		cmdConfigStorageRoot(),
 	)
 
 	return cmd
+}
+
+func cmdConfigStorageRoot() *cobra.Command {
+	return &cobra.Command{
+		Use:   "storage-root",
+		Short: "Print the resolved storage root path",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), cfg.StorageRoot())
+			return nil
+		},
+	}
 }
 
 func cmdConfigReformat() *cobra.Command {

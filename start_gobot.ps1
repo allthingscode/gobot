@@ -5,7 +5,17 @@
 
 $AppPath    = $PSScriptRoot
 $GobotExe   = Join-Path $AppPath "gobot.exe"
-$StorageRoot = if ($env:GOBOT_STORAGE) { $env:GOBOT_STORAGE } else { Join-Path $env:USERPROFILE "gobot_data" }
+
+# Resolve StorageRoot using the executable to ensure consistency with config.json
+if (Test-Path $GobotExe) {
+    $StorageRoot = & $GobotExe config storage-root
+    if ($LASTEXITCODE -ne 0 -or -not $StorageRoot) {
+        $StorageRoot = if ($env:GOBOT_STORAGE) { $env:GOBOT_STORAGE } else { Join-Path $env:USERPROFILE "gobot_data" }
+    }
+} else {
+    $StorageRoot = if ($env:GOBOT_STORAGE) { $env:GOBOT_STORAGE } else { Join-Path $env:USERPROFILE "gobot_data" }
+}
+
 $LogDir     = Join-Path $StorageRoot "logs"
 $LockFile   = Join-Path $LogDir "gobot.pid"
 
