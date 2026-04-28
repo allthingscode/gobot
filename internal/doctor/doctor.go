@@ -111,6 +111,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkLogs(cfg), false),
 		r(checkAPIKey(cfg), true),
 		r(checkTelegram(cfg.TelegramToken(), p.ProbeTelegram), false),
+		r(checkGoogleOAuthSecrets(cfg), false),
 		r(checkGoogleToken(secretsRoot), false),
 		r(checkGmailToken(secretsRoot), false),
 		r(checkJobsDir(cfg), false),
@@ -248,6 +249,30 @@ func checkGoogleToken(secretsRoot string) Result {
 // checkGmailToken reads secrets/gmail/token.json and reports the token expiry.
 func checkGmailToken(secretsRoot string) Result {
 	return checkTokenFile("gmail token", filepath.Join(secretsRoot, "gmail", "token.json"))
+}
+
+// checkGoogleOAuthSecrets verifies that OAuth client secrets exist before reauth.
+func checkGoogleOAuthSecrets(cfg *config.Config) Result {
+	path := filepath.Join(cfg.SecretsRoot(), "client_secrets.json")
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return Result{
+				Name:   "google oauth secrets",
+				OK:     false,
+				Detail: fmt.Sprintf("missing required file before gobot reauth: %s", path),
+			}
+		}
+		return Result{
+			Name:   "google oauth secrets",
+			OK:     false,
+			Detail: fmt.Sprintf("unable to check %s: %v", path, err),
+		}
+	}
+	return Result{
+		Name:   "google oauth secrets",
+		OK:     true,
+		Detail: path,
+	}
 }
 
 // checkTokenFile reads a token JSON file and reports its expiry.

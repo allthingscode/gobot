@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -291,7 +292,90 @@ func TestCheckGeminiLive_ProbeError(t *testing.T) {
 	}
 }
 
+func TestCheckGoogleOAuthSecrets(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		createFile  bool
+		expectedOK  bool
+		detailParts []string
+	}{
+		{
+			name:        "present",
+			createFile:  true,
+			expectedOK:  true,
+			detailParts: []string{"client_secrets.json"},
+		},
+		{
+			name:        "missing",
+			createFile:  false,
+			expectedOK:  false,
+			detailParts: []string{"client_secrets.json", "before gobot reauth"},
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertGoogleOAuthSecretsResult(t, tc.createFile, tc.expectedOK, tc.detailParts)
+		})
+	}
+}
+
+func assertGoogleOAuthSecretsResult(t *testing.T, createFile, expectedOK bool, detailParts []string) {
+	t.Helper()
+
+	root := t.TempDir()
+	secretsDir := filepath.Join(root, "secrets")
+	if err := os.MkdirAll(secretsDir, 0o755); err != nil {
+		t.Fatalf("mkdir secrets dir: %v", err)
+	}
+
+	expectedPath := filepath.Join(secretsDir, "client_secrets.json")
+	if createFile {
+		if err := os.WriteFile(expectedPath, []byte(`{"installed":{}}`), 0o600); err != nil {
+			t.Fatalf("write client secrets file: %v", err)
+		}
+	}
+
+	result := checkGoogleOAuthSecrets(cfgWithRoot(root))
+	if result.Name != "google oauth secrets" {
+		t.Fatalf("expected check name %q, got %q", "google oauth secrets", result.Name)
+	}
+	if result.OK != expectedOK {
+		t.Fatalf("expected OK=%v, got %v (detail=%q)", expectedOK, result.OK, result.Detail)
+	}
+	for _, part := range detailParts {
+		if !strings.Contains(result.Detail, part) {
+			t.Fatalf("expected detail %q to contain %q", result.Detail, part)
+		}
+	}
+	if !strings.Contains(result.Detail, expectedPath) {
+		t.Fatalf("expected detail to include resolved path %q, got %q", expectedPath, result.Detail)
+	}
+}
+
 // ── checkTokenFile ────────────────────────────────────────────────────────────
+
+func TestGetResults_GoogleOAuthSecretsIsNonCritical(t *testing.T) {
+	t.Parallel()
+
+	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	found := false
+	for _, result := range results {
+		if result.Name == "google oauth secrets" {
+			found = true
+			if result.Critical {
+				t.Fatalf("expected google oauth secrets check to be non-critical")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected google oauth secrets check to be registered in GetResults")
+	}
+}
 
 func TestCheckTokenFile_Missing(t *testing.T) {
 	t.Parallel()
