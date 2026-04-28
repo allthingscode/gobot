@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -222,13 +225,148 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	slog.Info("dispatching cron job", "session", sessionKey, "channel", chanEmail)
 	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
+		cd.sendEmailResponse(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
 		return fmt.Errorf("dispatch email: %w", err)
+	}
+	if isMorningBriefingJob(p.ID) {
+		if err := cd.enforceMorningBriefingGuards(sessionKey, response); err != nil {
+			cd.sendEmailResponse(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
+			return fmt.Errorf("dispatch email validation: %w", err)
+		}
 	}
 
 	if response != "" {
 		cd.sendEmailResponse(ctx, p, recipient, response)
 	}
 	return nil
+}
+
+func isMorningBriefingJob(jobID string) bool {
+	return strings.EqualFold(strings.TrimSpace(jobID), "morning_briefing")
+}
+
+func (cd *CronDispatcher) enforceMorningBriefingGuards(sessionKey, response string) error {
+	if err := validateMorningBriefingResponse(response); err != nil {
+		return err
+	}
+	ok, err := cd.verifySearchToolProvenance(sessionKey)
+	if err != nil {
+		return fmt.Errorf("provenance check failed: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("provenance check failed: no live search tool usage found in session transcript")
+	}
+	return nil
+}
+
+func validateMorningBriefingResponse(response string) error {
+	body := strings.TrimSpace(response)
+	if body == "" {
+		return fmt.Errorf("empty response")
+	}
+	if strings.Contains(body, "Daily Briefing Status: Partial/Unavailable") {
+		return nil
+	}
+	if strings.Contains(body, "TOOL_ERROR") {
+		return fmt.Errorf("response contains TOOL_ERROR marker")
+	}
+	// Require multiple source attributions.
+	sourceCount := strings.Count(body, "[Sources:")
+	if sourceCount < 3 {
+		return fmt.Errorf("insufficient source attributions: found %d, require >= 3", sourceCount)
+	}
+	// Require published dates to support freshness checks.
+	dateRe := regexp.MustCompile(`\b20\d{2}-\d{2}-\d{2}\b`)
+	if len(dateRe.FindAllString(body, -1)) < 2 {
+		return fmt.Errorf("insufficient published dates in output")
+	}
+	return nil
+}
+
+func (cd *CronDispatcher) verifySearchToolProvenance(sessionKey string) (bool, error) {
+	latest, err := cd.latestSessionTranscriptPath(sessionKey)
+	if err != nil {
+		return false, err
+	}
+	if latest == "" {
+		return false, nil
+	}
+	data, err := os.ReadFile(latest)
+	if err != nil {
+		return false, fmt.Errorf("read latest session transcript: %w", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "search_ai") || strings.Contains(text, "google_search") {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (cd *CronDispatcher) latestSessionTranscriptPath(sessionKey string) (string, error) {
+	sessionRoot := filepath.Join(cd.storageRoot, "workspace", "sessions")
+	safeSession := sanitizeSessionKeyForFile(sessionKey)
+	dayDirs, err := os.ReadDir(sessionRoot)
+	if err != nil {
+		return "", fmt.Errorf("read sessions dir: %w", err)
+	}
+	candidates := collectSessionTranscriptCandidates(sessionRoot, dayDirs, safeSession)
+	if len(candidates) == 0 {
+		return "", nil
+	}
+	sortSessionTranscriptCandidates(candidates)
+	return candidates[0], nil
+}
+
+func collectSessionTranscriptCandidates(sessionRoot string, dayDirs []os.DirEntry, safeSession string) []string {
+	candidates := make([]string, 0)
+	for _, d := range dayDirs {
+		if !d.IsDir() {
+			continue
+		}
+		dayPath := filepath.Join(sessionRoot, d.Name())
+		matches, globErr := filepath.Glob(filepath.Join(dayPath, safeSession+"_*.md"))
+		if globErr != nil {
+			continue
+		}
+		candidates = append(candidates, matches...)
+	}
+	return candidates
+}
+
+func sortSessionTranscriptCandidates(candidates []string) {
+	sort.Slice(candidates, func(i, j int) bool {
+		ii, iErr := os.Stat(candidates[i])
+		jj, jErr := os.Stat(candidates[j])
+		if iErr != nil || jErr != nil {
+			return candidates[i] > candidates[j]
+		}
+		return ii.ModTime().After(jj.ModTime())
+	})
+}
+
+var nonFileCharsRe = regexp.MustCompile(`[^a-zA-Z0-9_\-]`)
+
+func sanitizeSessionKeyForFile(s string) string {
+	return nonFileCharsRe.ReplaceAllString(s, "_")
+}
+
+func buildCronFailureEmailBody(p cron.Payload, sessionKey string, dispatchErr error) string {
+	now := time.Now().Format(time.RFC3339)
+	return fmt.Sprintf(
+		"<h1>Cron Briefing Status: Partial/Unavailable</h1>"+
+			"<p>I could not retrieve all required live information for this run.</p>"+
+			"<ul>"+
+			"<li><strong>Job ID:</strong> %s</li>"+
+			"<li><strong>Session:</strong> %s</li>"+
+			"<li><strong>Timestamp:</strong> %s</li>"+
+			"<li><strong>Error Hint:</strong> %s</li>"+
+			"</ul>"+
+			"<p>This email was sent intentionally so you still receive a status update even when live research fails.</p>",
+		p.ID,
+		sessionKey,
+		now,
+		dispatchErr.Error(),
+	)
 }
 
 func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, recipient, response string) {

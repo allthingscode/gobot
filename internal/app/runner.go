@@ -418,6 +418,9 @@ func (r *AgentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, 
 			errors.Is(execErr, agent.ErrToolDenied) {
 			return "", execErr
 		}
+		if isFailClosedCronSession(sessionKey) {
+			return "", fmt.Errorf("tool failure in fail-closed cron session [%s]: %w", name, execErr)
+		}
 		return r.handleCategoryAError(sessionKey, name, paramsHash, result, execErr), nil
 	}
 
@@ -426,6 +429,10 @@ func (r *AgentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, 
 	}
 
 	return result, nil
+}
+
+func isFailClosedCronSession(sessionKey string) bool {
+	return strings.HasPrefix(sessionKey, "cron:")
 }
 
 func (r *AgentRunner) handleCategoryAError(sessionKey, name, paramsHash, result string, err error) string {

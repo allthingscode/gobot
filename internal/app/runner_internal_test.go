@@ -44,7 +44,7 @@ func TestRunner_BuildSystemPrompt_WithMemStore(t *testing.T) {
 	messages := []agentctx.StrategicMessage{
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &userMsg}},
 	}
-	
+
 	// With nil memStore, should return base prompt
 	got := r.buildSystemPrompt(context.Background(), testSess, messages, nil)
 	if got != basePrompt {
@@ -101,9 +101,9 @@ func TestRunner_ExecuteToolInner(t *testing.T) {
 	t.Parallel()
 	r := &AgentRunner{}
 	r.SetTools([]Tool{&mockTool{name: "test_tool"}})
-	
+
 	ctx := context.Background()
-	
+
 	// Case 1: Success
 	got, err := r.executeToolInner(ctx, testSess, testUser, "test_tool", nil)
 	if err != nil {
@@ -123,10 +123,10 @@ func TestRunner_ExecuteToolInner(t *testing.T) {
 func TestAgentRunner_Setters(t *testing.T) {
 	t.Parallel()
 	r := &AgentRunner{}
-	
+
 	r.SetTracer(nil)
 	r.SetIdempotencyStore(nil)
-	
+
 	r.SetMaxToolIterations(50)
 	if r.MaxToolIterations != 50 {
 		t.Errorf("SetMaxToolIterations failed: got %d, want 50", r.MaxToolIterations)
@@ -148,7 +148,7 @@ func TestRunner_RetryChat(t *testing.T) {
 		Breaker: resilience.New("mock", 3, time.Minute, time.Second),
 		Limiter: rate.NewLimiter(rate.Inf, 1),
 	}
-	
+
 	resp, err := r.RetryChat(context.Background(), testSess, provider.ChatRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -164,7 +164,7 @@ func TestRunner_ExecuteTool(t *testing.T) {
 		SideEffectingTools: map[string]bool{"write": true},
 	}
 	r.SetTools([]Tool{&mockTool{name: "write"}})
-	
+
 	// Without IdempStore, it should just call inner
 	got, err := r.executeTool(context.Background(), testSess, testUser, "idem-1", "write", nil, "model")
 	if err != nil {
@@ -177,9 +177,19 @@ func TestRunner_ExecuteTool(t *testing.T) {
 
 func TestRunner_GenerateIdempotencyKey(t *testing.T) {
 	t.Parallel()
-	
+
 	key1 := GenerateIdempotencyKey()
 	if key1 == "" {
 		t.Error("expected non-empty key")
+	}
+}
+
+func TestIsFailClosedCronSession(t *testing.T) {
+	t.Parallel()
+	if !isFailClosedCronSession("cron:morning_briefing:email:user@example.com") {
+		t.Fatal("expected cron session to be fail-closed")
+	}
+	if isFailClosedCronSession("telegram:12345") {
+		t.Fatal("did not expect non-cron session to be fail-closed")
 	}
 }

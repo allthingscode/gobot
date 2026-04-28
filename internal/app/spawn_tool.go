@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -184,8 +185,66 @@ func (t *SpawnTool) handleFallback(ctx context.Context, subKey, userID, objectiv
 		slog.Error("spawn: fallback sub-agent also failed", "subKey", subKey, "model", t.Model, "err", fallbackErr)
 	}
 
+	if reply, ok := t.tryConfiguredModelFallbacks(ctx, subKey, userID, objective, agentType, systemPrompt, failedModel, start); ok {
+		return reply, nil
+	}
+
 	slog.Error("spawn: sub-agent failed", "subKey", subKey, "model", failedModel, "elapsed", time.Since(start), "err", originalErr)
 	return "", fmt.Errorf("sub-agent %s failed to complete the task: %w", agentType, originalErr)
+}
+
+func (t *SpawnTool) tryConfiguredModelFallbacks(ctx context.Context, subKey, userID, objective, agentType, systemPrompt, failedModel string, start time.Time) (string, bool) {
+	if t.Cfg == nil {
+		return "", false
+	}
+	fallbackKeys := []string{agentType + "_fallback", agentType + "_escalation"}
+	for _, key := range fallbackKeys {
+		spec, ok := t.Cfg.Agents.Specialists[key]
+		if !ok || strings.TrimSpace(spec.Model) == "" || spec.Model == failedModel {
+			continue
+		}
+
+		altProv := t.DefaultProv
+		if p, err := provider.Get(t.Cfg.SpecialistProvider(key)); err == nil {
+			altProv = p
+		}
+
+		slog.Warn("spawn: attempting configured model fallback",
+			"type", agentType,
+			"fallback_key", key,
+			"model", spec.Model,
+			"provider", altProv.Name(),
+		)
+
+		altRunner := t.RunnerFactory(altProv, spec.Model, systemPrompt)
+		if c, ok := altRunner.(ToolLimitConfigurable); ok {
+			c.SetMaxToolIterations(spawnMaxIterations)
+		}
+		altLimited := &iterLimitRunner{Inner: altRunner, Max: spawnMaxIterations}
+		altMgr := agent.NewSessionManager(altLimited, nil, spec.Model)
+
+		altCtx, altCancel := context.WithTimeout(ctx, spawnMaxTimeout)
+		reply, err := altMgr.Dispatch(altCtx, subKey, userID, objective)
+		altCancel()
+		if err == nil {
+			slog.Info("spawn: configured model fallback complete",
+				"subKey", subKey,
+				"fallback_key", key,
+				"model", spec.Model,
+				"elapsed", time.Since(start),
+				"replyLen", len(reply),
+				"iterations", altLimited.Count,
+			)
+			return reply, true
+		}
+		slog.Error("spawn: configured model fallback failed",
+			"subKey", subKey,
+			"fallback_key", key,
+			"model", spec.Model,
+			"err", err,
+		)
+	}
+	return "", false
 }
 
 // DefaultSpecialistPrompt returns the default system prompt for a given agent type.

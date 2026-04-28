@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,9 +143,9 @@ func TestParseSessionKey(t *testing.T) {
 			checkParseResult(t, tc.input, gotChatID, gotThreadID, err, tc.wantChatID, tc.wantThreadID, tc.wantErr)
 		})
 	}
-	}
+}
 
-	func checkParseResult(t *testing.T, input string, gotChatID, gotThreadID int64, err error, wantChatID, wantThreadID int64, wantErr bool) {
+func checkParseResult(t *testing.T, input string, gotChatID, gotThreadID int64, err error, wantChatID, wantThreadID int64, wantErr bool) {
 	t.Helper()
 	if wantErr {
 		if err == nil {
@@ -162,8 +164,7 @@ func TestParseSessionKey(t *testing.T) {
 	if gotThreadID != wantThreadID {
 		t.Errorf("parseSessionKey(%q): threadID = %d, want %d", input, gotThreadID, wantThreadID)
 	}
-	}
-
+}
 
 func TestCronSessionKeyIsolation(t *testing.T) {
 	t.Parallel()
@@ -270,7 +271,63 @@ func TestCronEmailSessionKeyIncludesJobID(t *testing.T) {
 func TestCronDispatcher_Alert(t *testing.T) {
 	t.Parallel()
 	cd := &CronDispatcher{}
-	
+
 	// Case 1: nil bot
 	_ = cd.Alert(context.Background(), cron.Payload{Message: "test alert"})
+}
+
+func TestBuildCronFailureEmailBody(t *testing.T) {
+	t.Parallel()
+	p := cron.Payload{ID: "morning_briefing"}
+	body := buildCronFailureEmailBody(p, "cron:morning_briefing:email:test@example.com", context.DeadlineExceeded)
+	if !strings.Contains(body, "Partial/Unavailable") {
+		t.Fatalf("expected failure status in body, got: %s", body)
+	}
+	if !strings.Contains(body, "morning_briefing") {
+		t.Fatalf("expected job id in body, got: %s", body)
+	}
+	if !strings.Contains(body, "Error Hint") {
+		t.Fatalf("expected error hint in body, got: %s", body)
+	}
+}
+
+func TestValidateMorningBriefingResponse(t *testing.T) {
+	t.Parallel()
+	valid := `<h2>Finance</h2><span class="source-link">[Sources: https://a]</span>` +
+		`<span class="source-link">[Sources: https://b]</span>` +
+		`<span class="source-link">[Sources: https://c]</span>` +
+		`<p>Published: 2026-04-28 and 2026-04-27</p>`
+	if err := validateMorningBriefingResponse(valid); err != nil {
+		t.Fatalf("expected valid response, got %v", err)
+	}
+
+	if err := validateMorningBriefingResponse("TOOL_ERROR [spawn_subagent]: bad"); err == nil {
+		t.Fatal("expected TOOL_ERROR response to fail")
+	}
+	if err := validateMorningBriefingResponse("<p>No sources or dates</p>"); err == nil {
+		t.Fatal("expected low-evidence response to fail")
+	}
+}
+
+func TestVerifySearchToolProvenance(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sessionKey := "cron:morning_briefing:email:user@example.com"
+	safe := sanitizeSessionKeyForFile(sessionKey)
+	dayDir := filepath.Join(root, "workspace", "sessions", "2026-04-28")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logFile := filepath.Join(dayDir, safe+"_20260428T130000Z.md")
+	if err := os.WriteFile(logFile, []byte("tool_call: search_ai"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cd := &CronDispatcher{storageRoot: root}
+	ok, err := cd.verifySearchToolProvenance(sessionKey)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected provenance check to pass with search_ai evidence")
+	}
 }
