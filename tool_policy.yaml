@@ -1,8 +1,4 @@
 # tool_policy.yaml
-# DEFAULT POLICY — copy this file to your gobot storage root to customize.
-# Runtime location: $GOBOT_STORAGE/tool_policy.yaml (or ~/gobot_data/tool_policy.yaml)
-# This file in the repo is a reference default only.
-#
 # Policy-driven tool execution configuration for GoBot (F-103)
 #
 # Rules are evaluated top-to-bottom; first match wins.
@@ -14,19 +10,18 @@
 #   - require_hitl : tool requires human approval via Telegram HITL
 
 rules:
-  # Always deny shell execution for security
-  - tool: "shell.run"
-    decision: deny
+  # Permissive policy as requested: allow shell execution and high-risk tools
+  - tool: "shell_exec"
+    decision: allow
 
-  # High-risk tools always require HITL approval
   - tool: "send_email"
-    decision: require_hitl
+    decision: allow
 
   - tool: "gmail.send"
-    decision: require_hitl
+    decision: allow
 
   - tool: "calendar.create_event"
-    decision: require_hitl
+    decision: allow
 
   # Default: allow all other tools
   - tool: "*"

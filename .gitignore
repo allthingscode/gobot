@@ -47,6 +47,7 @@ scripts/profile.ps1
 scripts/profile.sh
 
 # Temporary/Generated Files
+_trash/
 bin/
 artifacts/
 bench.txt
