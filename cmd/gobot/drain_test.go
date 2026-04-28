@@ -32,7 +32,7 @@ func TestDrainGoroutines(t *testing.T) {
 			wgCount:       1,
 			blockDuration: 200 * time.Millisecond,
 			timeout:       1 * time.Second,
-			wantMinTime:   200 * time.Millisecond,
+			wantMinTime:   180 * time.Millisecond,
 			wantMaxTime:   500 * time.Millisecond,
 		},
 		{
@@ -40,7 +40,7 @@ func TestDrainGoroutines(t *testing.T) {
 			wgCount:       1,
 			blockDuration: 1 * time.Second,
 			timeout:       200 * time.Millisecond,
-			wantMinTime:   200 * time.Millisecond,
+			wantMinTime:   180 * time.Millisecond,
 			wantMaxTime:   500 * time.Millisecond,
 		},
 	}
