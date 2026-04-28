@@ -15,6 +15,10 @@ import (
 )
 
 const awarenessMaxJournalChars = 4000
+const browserToolRoutingGuidance = "## WEB EXTRACTION TOOL ROUTING\n" +
+	"- For web scraping or \"get info from a page\" requests, prefer `browser_extract` first.\n" +
+	"- Use `browser_extract` with `url`, `wait_selector`, `extract_selector`, and optional `limit`.\n" +
+	"- Only fall back to manual chaining (`browser_navigate` + `browser_wait_for` + `browser_get_texts`) when interaction steps are required.\n"
 
 // userHomeDir is a package-level variable to allow mocking in tests.
 //
@@ -49,6 +53,7 @@ func LoadSystemPrompt(cfg *config.Config) string {
 	if schedule := loadScheduleContext(secretsRoot); schedule != "" {
 		parts = append(parts, schedule)
 	}
+	parts = append(parts, browserToolRoutingGuidance)
 
 	return strings.Join(parts, "\n\n")
 }

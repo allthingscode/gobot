@@ -272,7 +272,10 @@ func appendBrowserTools(cfg *config.Config, tools []Tool) []Tool {
 		tools = append(tools,
 			browser.NewNavigateTool(client),
 			browser.NewScreenshotTool(client),
+			browser.NewWaitForTool(client),
+			browser.NewExtractTool(client),
 			browser.NewGetTextTool(client),
+			browser.NewGetTextsTool(client),
 			browser.NewClickTool(client),
 			browser.NewTypeTool(client),
 		)

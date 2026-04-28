@@ -34,6 +34,18 @@ func getTool(tt toolTest, client *browser.Client) toolInterface {
 		gt := browser.NewGetTextTool(client)
 		gt.SetExecutor(&mockExecutor{err: tt.mockErr})
 		return gt
+	case "browser_wait_for":
+		wf := browser.NewWaitForTool(client)
+		wf.SetExecutor(&mockExecutor{err: tt.mockErr})
+		return wf
+	case "browser_extract":
+		ex := browser.NewExtractTool(client)
+		ex.SetExecutor(&mockExecutor{err: tt.mockErr})
+		return ex
+	case "browser_get_texts":
+		gts := browser.NewGetTextsTool(client)
+		gts.SetExecutor(&mockExecutor{err: tt.mockErr})
+		return gts
 	case "browser_click":
 		cl := browser.NewClickTool(client)
 		cl.SetExecutor(&mockExecutor{err: tt.mockErr})
@@ -88,6 +100,10 @@ func runToolTest(t *testing.T, client *browser.Client, tt toolTest) {
 }
 
 func getBrowserTestsPart1() []toolTest {
+	return append(append(getBrowserCoreNavigationTests(), getBrowserCoreExtractionTests()...), getBrowserExtractTests()...)
+}
+
+func getBrowserCoreNavigationTests() []toolTest {
 	return []toolTest{
 		{
 			name:       "Navigate_Success",
@@ -124,6 +140,31 @@ func getBrowserTestsPart1() []toolTest {
 			wantErr:  true,
 		},
 		{
+			name:       "WaitFor_Success",
+			toolName:   "browser_wait_for",
+			args:       map[string]any{"selector": "h1", "timeout_millis": 1000},
+			wantErr:    false,
+			wantResult: "ready",
+		},
+		{
+			name:     "WaitFor_MissingSelector",
+			toolName: "browser_wait_for",
+			args:     map[string]any{"selector": " "},
+			wantErr:  true,
+		},
+		{
+			name:     "WaitFor_ActionError",
+			toolName: "browser_wait_for",
+			args:     map[string]any{"selector": "h1"},
+			mockErr:  context.Canceled,
+			wantErr:  true,
+		},
+	}
+}
+
+func getBrowserCoreExtractionTests() []toolTest {
+	return []toolTest{
+		{
 			name:       "GetText_Success",
 			toolName:   "browser_get_text",
 			args:       map[string]any{"selector": "h1"},
@@ -140,6 +181,63 @@ func getBrowserTestsPart1() []toolTest {
 			name:     "GetText_ActionError",
 			toolName: "browser_get_text",
 			args:     map[string]any{"selector": "h1"},
+			mockErr:  context.Canceled,
+			wantErr:  true,
+		},
+		{
+			name:       "GetTexts_Success",
+			toolName:   "browser_get_texts",
+			args:       map[string]any{"selector": ".titleline > a", "limit": 5},
+			wantErr:    false,
+			wantResult: "[",
+		},
+		{
+			name:     "GetTexts_MissingSelector",
+			toolName: "browser_get_texts",
+			args:     map[string]any{"selector": " "},
+			wantErr:  true,
+		},
+		{
+			name:     "GetTexts_ActionError",
+			toolName: "browser_get_texts",
+			args:     map[string]any{"selector": ".titleline > a"},
+			mockErr:  context.Canceled,
+			wantErr:  true,
+		},
+	}
+}
+
+func getBrowserExtractTests() []toolTest {
+	return []toolTest{
+		{
+			name:       "Extract_Success",
+			toolName:   "browser_extract",
+			args:       map[string]any{"url": "https://news.ycombinator.com", "wait_selector": ".titleline > a", "extract_selector": ".titleline > a", "limit": 5},
+			wantErr:    false,
+			wantResult: "\"items\"",
+		},
+		{
+			name:     "Extract_MissingURL",
+			toolName: "browser_extract",
+			args:     map[string]any{"wait_selector": ".titleline > a", "extract_selector": ".titleline > a"},
+			wantErr:  true,
+		},
+		{
+			name:     "Extract_MissingWaitSelector",
+			toolName: "browser_extract",
+			args:     map[string]any{"url": "https://news.ycombinator.com", "extract_selector": ".titleline > a"},
+			wantErr:  true,
+		},
+		{
+			name:     "Extract_MissingExtractSelector",
+			toolName: "browser_extract",
+			args:     map[string]any{"url": "https://news.ycombinator.com", "wait_selector": ".titleline > a"},
+			wantErr:  true,
+		},
+		{
+			name:     "Extract_ActionError",
+			toolName: "browser_extract",
+			args:     map[string]any{"url": "https://news.ycombinator.com", "wait_selector": ".titleline > a", "extract_selector": ".titleline > a"},
 			mockErr:  context.Canceled,
 			wantErr:  true,
 		},

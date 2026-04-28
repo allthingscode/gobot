@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/chromedp/chromedp"
 
@@ -13,6 +14,10 @@ import (
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	mu        sync.Mutex
+	tabCtx    context.Context
+	tabCancel context.CancelFunc
 }
 
 // NewClient creates a new browser client based on the configuration.
@@ -58,8 +63,28 @@ func NewClientForTest(ctx context.Context, cancel context.CancelFunc) *Client {
 	return &Client{ctx: ctx, cancel: cancel}
 }
 
+// TabContext returns a persistent tab context shared across browser tool calls.
+func (c *Client) TabContext() context.Context {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.tabCtx == nil {
+		c.tabCtx, c.tabCancel = chromedp.NewContext(c.ctx)
+	}
+	return c.tabCtx
+}
+
 // Close cancels the browser context and allocator.
 func (c *Client) Close() {
+	c.mu.Lock()
+	tabCancel := c.tabCancel
+	c.tabCancel = nil
+	c.tabCtx = nil
+	c.mu.Unlock()
+
+	if tabCancel != nil {
+		tabCancel()
+	}
 	if c.cancel != nil {
 		c.cancel()
 	}

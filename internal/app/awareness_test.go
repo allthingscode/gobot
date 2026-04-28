@@ -131,45 +131,53 @@ func TestLoadSystemPrompt(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = tmpStorage
 
-	// Create SOUL.md in ~/.gobot
-	dotGobotDir := filepath.Join(tmpHome, ".gobot")
-	if err := os.MkdirAll(dotGobotDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dotGobotDir, "SOUL.md"), []byte("soul content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create AWARENESS.md in workspace
-	workspaceDir := filepath.Join(tmpStorage, "workspace")
-	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "AWARENESS.md"), []byte("awareness content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a journal entry for today
-	journalDir := filepath.Join(workspaceDir, "journal")
-	if err := os.MkdirAll(journalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	today := time.Now().Format("2006-01-02")
-	if err := os.WriteFile(filepath.Join(journalDir, today+".md"), []byte("journal content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	seedPromptFiles(t, tmpHome, tmpStorage)
 
 	got := LoadSystemPrompt(cfg)
+	assertContainsAll(t, got, []string{
+		"soul content",
+		"awareness content",
+		"journal content",
+		"prefer `browser_extract` first",
+	})
+}
 
-	// Check if all parts are present
-	if !strings.Contains(got, "soul content") {
-		t.Error("LoadSystemPrompt() missing soul content")
+func seedPromptFiles(t *testing.T, tmpHome, tmpStorage string) {
+	t.Helper()
+	dotGobotDir := filepath.Join(tmpHome, ".gobot")
+	mustMkdirAll(t, dotGobotDir)
+	mustWriteFile(t, filepath.Join(dotGobotDir, "SOUL.md"), "soul content")
+
+	workspaceDir := filepath.Join(tmpStorage, "workspace")
+	mustMkdirAll(t, workspaceDir)
+	mustWriteFile(t, filepath.Join(workspaceDir, "AWARENESS.md"), "awareness content")
+
+	journalDir := filepath.Join(workspaceDir, "journal")
+	mustMkdirAll(t, journalDir)
+	today := time.Now().Format("2006-01-02")
+	mustWriteFile(t, filepath.Join(journalDir, today+".md"), "journal content")
+}
+
+func mustMkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(got, "awareness content") {
-		t.Error("LoadSystemPrompt() missing awareness content")
+}
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(got, "journal content") {
-		t.Error("LoadSystemPrompt() missing journal content")
+}
+
+func assertContainsAll(t *testing.T, got string, needles []string) {
+	t.Helper()
+	for _, needle := range needles {
+		if !strings.Contains(got, needle) {
+			t.Errorf("LoadSystemPrompt() missing content: %q", needle)
+		}
 	}
 }
 
