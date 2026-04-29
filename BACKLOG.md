@@ -1,4 +1,4 @@
-﻿# Gobot Strategic Backlog
+# Gobot Strategic Backlog
 
 Master index for the Go-native Strategic Edition agent. This backlog is the single source of truth for all planned features, active bugs, and architectural refactors.
 
@@ -15,16 +15,16 @@ All items in this backlog must be prioritized strictly according to the followin
 **Process guidance**: See AGENTS.md and .private/sops/groomer.md for Agent/Groomer workflow.
 
 **Directory Layout**:
-- `features/active/` â€” Active feature work (F-XXX.md)
-- `features/archived/` â€” Completed features
-- `bugs/active/` â€” Active bug fixes (B-XXX.md)
-- `bugs/archived/` â€” Fixed bugs
-- `chores/active/` â€” Active maintenance tasks (C-XXX.md)
-- `chores/archived/` â€” Completed chores
-- `blocked/` â€” Dead-letter holding for blocked tasks (exceeded circuit breakers)
-- `../session/global/gate_decisions/` â€” Human Gate decision records (C-096)
-- `BACKLOG.md` â€” Master index (this file)
-- `ARCHIVED.md` â€” Historical archive table (reference only)
+- `features/active/` — Active feature work (F-XXX.md)
+- `features/archived/` — Completed features
+- `bugs/active/` — Active bug fixes (B-XXX.md)
+- `bugs/archived/` — Fixed bugs
+- `chores/active/` — Active maintenance tasks (C-XXX.md)
+- `chores/archived/` — Completed chores
+- `blocked/` — Dead-letter holding for blocked tasks (exceeded circuit breakers)
+- `../session/global/gate_decisions/` — Human Gate decision records (C-096)
+- `BACKLOG.md` — Master index (this file)
+- `ARCHIVED.md` — Historical archive table (reference only)
 
 ---
 
@@ -38,11 +38,17 @@ All items in this backlog must be prioritized strictly according to the followin
 ### **Features**
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
+| F-128 | Comprehensive Google Cloud Setup Guide | P2 | Researcher | Planning |
+| F-129 | Security & Secrets Management Guide | P2 | Researcher | Planning |
+| F-130 | Deployment & Persistence Guide | P2 | Researcher | Planning |
+| F-131 | Browser Prerequisite Check | P1 | Architect | Production |
+| F-132 | Authorization Validation Check | P1 | Architect | Planning |
+| F-133 | Automatic Workspace Initialization | P2 | Architect | Planning |
 
 ### **Chores**
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
-| C-209 | Isolate Concurrent Test Execution | Production |
+| C-211 | Go Version Compatibility Audit | P1 | Researcher | Planning |
 
 ---
 
@@ -50,20 +56,8 @@ All items in this backlog must be prioritized strictly according to the followin
 
 | Priority | Count | Items |
 |:---:|:---|:---|
-| **P1** | 1 | C-209 |
-| **P2** | 0 | - |
+| **P1** | 3 | C-211, F-131, F-132 |
+| **P2** | 4 | F-128, F-129, F-130, F-133 |
 | **P3** | 0 | - |
 
-**Status Overview**: 1 active item.
-
-
-
-
-
-
-
-
-
-
-
-
+**Status Overview**: 7 active items.
