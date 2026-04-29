@@ -85,7 +85,7 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 	}
 
 	safeKey := strings.ReplaceAll(sessionKey, ":", "_")
-	wfID := state.WorkflowID("web_extract_" + safeKey)
+	wfID := state.WorkflowID(fmt.Sprintf("web_extract_%s_%d", safeKey, time.Now().UnixNano()))
 	extState := state.WebExtractionState{
 		SessionID:   sessionKey,
 		URL:         urlStr,
@@ -109,11 +109,9 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 		if selectors != nil {
 			extState.LastSelectors = selectors
 		}
-		if errMsg != "" {
-			extState.LastError = errMsg
-		}
+		extState.LastError = errMsg
 		if data, err := json.Marshal(extState); err == nil {
-			if wf, err := t.stateMgr.LoadWorkflow(wfID); err == nil {
+			if wf, err := t.stateMgr.LoadWithRecovery(wfID); err == nil {
 				wf.Data = data
 				if err := t.stateMgr.SaveCheckpoint(wf); err != nil {
 					slog.Warn("web_extract: failed to save checkpoint", "workflow", wfID, "err", err)

@@ -12,6 +12,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/state"
 	"github.com/chromedp/chromedp"
 )
 
@@ -139,3 +140,72 @@ func TestWebExtractTool_Execute(t *testing.T) { //nolint:gocognit,funlen // test
 	}
 
 }
+
+func TestWebExtractTool_Execute_FailurePersistence(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		Browser: config.BrowserConfig{
+			Headless: true,
+		},
+		Strategic: config.StrategicConfig{
+			StorageRoot: t.TempDir(),
+		},
+	}
+
+	// Mock provider that returns a valid plan, but we'll force navigation failure
+	prov := &webExtractMockProvider{
+		responses: []string{`{"selector": ".test"}`},
+	}
+
+	tool := newWebExtractTool(cfg, prov, "test-model")
+
+	// Force navigation failure
+	tool.executor = &webExtractMockExecutor{
+		runFunc: func(ctx context.Context, actions ...chromedp.Action) error {
+			return fmt.Errorf("navigation failed")
+		},
+	}
+	tool.clientFactory = func(cfg config.BrowserConfig) (*browser.Client, error) {
+		return browser.NewClientForTest(context.Background(), func() {}), nil
+	}
+
+	args := map[string]any{
+		"url":  "http://example.com",
+		"goal": "extract data",
+	}
+
+	_, err := tool.Execute(context.Background(), "fail-session", "user", args)
+	if err == nil {
+		t.Fatal("Expected error from Execute, got nil")
+	}
+
+	// Verify state manager reflects failure
+	active, err := tool.stateMgr.ListActive()
+	if err != nil {
+		t.Fatalf("ListActive failed: %v", err)
+	}
+
+	// On failure, the workflow is NOT archived, so it should be in active list with status failed
+	if len(active) == 0 {
+		t.Fatal("Expected 1 active (failed) workflow, got 0")
+	}
+
+	wf, err := tool.stateMgr.LoadWithRecovery(active[0])
+	if err != nil {
+		t.Fatalf("LoadWithRecovery failed: %v", err)
+	}
+
+	if wf.Status != state.StatusFailed {
+		t.Errorf("Expected status failed, got %s", wf.Status)
+	}
+
+	var extState state.WebExtractionState
+	if err := json.Unmarshal(wf.Data, &extState); err != nil {
+		t.Fatalf("Failed to unmarshal state data: %v", err)
+	}
+
+	if !strings.Contains(extState.LastError, "navigation failed") {
+		t.Errorf("Expected LastError to contain 'navigation failed', got %q", extState.LastError)
+	}
+}
+
