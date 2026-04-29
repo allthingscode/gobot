@@ -8,6 +8,10 @@ set -euo pipefail
 # Isolate Go and Lint caches per worktree
 export GOCACHE="$(git rev-parse --show-toplevel)/.go-build-cache"
 export GOLANGCI_LINT_CACHE="$(git rev-parse --show-toplevel)/.golangci-lint-cache"
+export GOTMPDIR="$(git rev-parse --show-toplevel)/.tmp/go"
+export TMP="$(git rev-parse --show-toplevel)/.tmp/process"
+export TEMP="$TMP"
+mkdir -p "$GOCACHE" "$GOLANGCI_LINT_CACHE" "$GOTMPDIR" "$TMP"
 
 # Check for golangci-lint prerequisite
 if ! command -v golangci-lint &> /dev/null; then
@@ -24,8 +28,8 @@ go vet -mod=readonly ./internal/... ./cmd/...
 echo "==> [2/5] golangci-lint"
 golangci-lint run --modules-download-mode=readonly ./internal/... ./cmd/...
 
-echo "==> [3/5] go test"
-go test -mod=readonly ./internal/... ./cmd/...
+echo "==> [3/4] gotestsum"
+gotestsum --format testdox -- -mod=readonly ./internal/... ./cmd/...
 
 echo "==> [4/4] doc-lint"
 go run scripts/doc_lint.go
