@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,10 +13,19 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/state"
 	"github.com/chromedp/chromedp"
 )
 
 const webExtractToolName = "web_extract"
+
+const (
+	constraintNone           = "none"
+	constraintAuthRequired   = "auth_required"
+	constraintAntiBotBlocked = "anti_bot_blocked"
+	constraintDynamicPending = "dynamic_pending"
+	constraintUnsupported    = "unsupported"
+)
 
 // WebExtractTool orchestrates browser navigation and LLM-guided data extraction.
 type WebExtractTool struct {
@@ -48,6 +58,22 @@ type webExtractPlan struct {
 	Reasoning string   `json:"reasoning"`
 }
 
+type webConstraintPayload struct {
+	Status         string `json:"status"`
+	Classification string `json:"classification"`
+	LastSignal     string `json:"last_signal"`
+	Retryable      bool   `json:"retryable"`
+	Guidance       string `json:"guidance"`
+}
+
+type pageExtractionContext struct {
+	client      *browser.Client
+	runCtx      context.Context
+	cancelRun   context.CancelFunc
+	pageTitle   string
+	pageMapJSON string
+}
+
 func (t *WebExtractTool) Name() string { return webExtractToolName }
 
 func (t *WebExtractTool) Declaration() provider.ToolDeclaration {
@@ -59,42 +85,26 @@ func (t *WebExtractTool) Declaration() provider.ToolDeclaration {
 }
 
 func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
-	urlStr, _ := args["url"].(string)
-	goal, _ := args["goal"].(string)
-
-	if urlStr == "" {
-		return "", fmt.Errorf("web_extract: url is required")
-	}
-	if goal == "" {
-		return "", fmt.Errorf("web_extract: goal is required")
-	}
-
-	client, err := t.initBrowser()
+	urlStr, goal, err := parseWebExtractArgs(args)
 	if err != nil {
 		return "", err
 	}
-	defer client.Close()
+	pageCtx, err := t.preparePageContext(ctx, sessionKey, userID, urlStr)
+	if err != nil {
+		return "", err
+	}
+	defer pageCtx.client.Close()
+	defer pageCtx.cancelRun()
+	if payload, blocked := t.classifyAndPersistConstraint(pageCtx.runCtx, sessionKey, pageCtx.pageTitle, pageCtx.pageMapJSON); blocked {
+		return payload, nil
+	}
 
-	tabCtx := client.TabContext()
-	runCtx, cancel := context.WithTimeout(tabCtx, 60*time.Second)
-	defer cancel()
-
-	title, err := t.navigate(runCtx, client, sessionKey, userID, urlStr)
+	plan, err := t.getLLMPlan(pageCtx.runCtx, goal, pageCtx.pageMapJSON)
 	if err != nil {
 		return "", err
 	}
 
-	pageMapJSON, err := t.capturePageMap(runCtx)
-	if err != nil {
-		return "", err
-	}
-
-	plan, err := t.getLLMPlan(runCtx, goal, pageMapJSON)
-	if err != nil {
-		return "", err
-	}
-
-	finalItems, err := t.performExtraction(runCtx, client, plan, sessionKey, userID)
+	finalItems, err := t.performExtraction(pageCtx.runCtx, pageCtx.client, plan, sessionKey, userID)
 	if err != nil {
 		return "", err
 	}
@@ -103,13 +113,64 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 		return "No items matching the goal were found on the page.", nil
 	}
 
-	summary, err := t.summarizeResults(runCtx, goal, finalItems)
+	summary, err := t.summarizeResults(pageCtx.runCtx, goal, finalItems)
 	if err != nil {
 		// Non-critical failure: return raw data if summarization fails
-		return t.formatResponse(title, finalItems, "Extraction complete (summary failed)"), nil
+		return t.formatResponse(pageCtx.pageTitle, finalItems, "Extraction complete (summary failed)"), nil
 	}
 
-	return t.formatResponse(title, finalItems, summary), nil
+	return t.formatResponse(pageCtx.pageTitle, finalItems, summary), nil
+}
+
+func parseWebExtractArgs(args map[string]any) (urlStr, goal string, err error) {
+	urlStr, _ = args["url"].(string)
+	goal, _ = args["goal"].(string)
+	if urlStr == "" {
+		return "", "", fmt.Errorf("web_extract: url is required")
+	}
+	if goal == "" {
+		return "", "", fmt.Errorf("web_extract: goal is required")
+	}
+	return urlStr, goal, nil
+}
+
+func (t *WebExtractTool) preparePageContext(ctx context.Context, sessionKey, userID, urlStr string) (pageExtractionContext, error) {
+	client, err := t.initBrowser()
+	if err != nil {
+		return pageExtractionContext{}, err
+	}
+	tabCtx := client.TabContext()
+	runCtx, cancel := context.WithTimeout(tabCtx, 60*time.Second)
+	title, err := t.navigate(runCtx, client, sessionKey, userID, urlStr)
+	if err != nil {
+		cancel()
+		return pageExtractionContext{}, err
+	}
+	pageMapJSON, err := t.capturePageMap(runCtx)
+	if err != nil {
+		cancel()
+		return pageExtractionContext{}, err
+	}
+	return pageExtractionContext{
+		client:      client,
+		runCtx:      runCtx,
+		cancelRun:   cancel,
+		pageTitle:   title,
+		pageMapJSON: pageMapJSON,
+	}, nil
+}
+
+func (t *WebExtractTool) classifyAndPersistConstraint(ctx context.Context, sessionKey, title, pageMapJSON string) (string, bool) {
+	waitResult, err := browser.WaitForDynamicContentBounded(ctx, t.executor, "", 4, 8*time.Second)
+	if err != nil {
+		return marshalConstraintPayload(constraintDynamicPending, "dynamic_wait_error"), true
+	}
+	classification, signal := classifyPageConstraint(title, pageMapJSON, waitResult)
+	t.persistConstraintSignal(sessionKey, classification, signal)
+	if classification == constraintNone {
+		return "", false
+	}
+	return marshalConstraintPayload(classification, signal), true
 }
 
 func (t *WebExtractTool) initBrowser() (*browser.Client, error) {
@@ -259,4 +320,90 @@ func (t *WebExtractTool) formatResponse(title string, items []string, summary st
 	}
 	b, _ := json.Marshal(payload)
 	return string(b)
+}
+
+func (t *WebExtractTool) persistConstraintSignal(sessionKey, classification, signal string) {
+	if err := state.SavePageConstraintSignal(t.cfg.StorageRoot(), sessionKey, classification, signal); err != nil {
+		slog.Warn("web_extract: failed to persist page constraint signal", "session", sessionKey, "classification", classification, "err", err)
+	}
+}
+
+func classifyPageConstraint(title, pageMapJSON string, waitResult browser.DynamicWaitResult) (classification, signal string) {
+	titleLower := strings.ToLower(strings.TrimSpace(title))
+	snippetLower := strings.ToLower(pageSnippet(pageMapJSON))
+	fullText := titleLower + " " + snippetLower
+
+	if classification, signal, ok := classifyTerminalConstraint(fullText, waitResult.LastSignal); ok {
+		return classification, signal
+	}
+	if waitResult.TimedOut || !waitResult.Completed {
+		return constraintDynamicPending, "dynamic_wait_timeout"
+	}
+	return constraintNone, constraintNone
+}
+
+func classifyTerminalConstraint(fullText, lastSignal string) (classification, signal string, ok bool) {
+	if isAntiBotSignal(fullText, lastSignal) {
+		return constraintAntiBotBlocked, "anti_bot_signal", true
+	}
+	if isAuthSignal(fullText, lastSignal) {
+		return constraintAuthRequired, "auth_signal", true
+	}
+	if containsAny(fullText, "unsupported browser", "javascript required", "enable javascript") {
+		return constraintUnsupported, "unsupported_runtime", true
+	}
+	return "", "", false
+}
+
+func isAntiBotSignal(fullText, lastSignal string) bool {
+	return containsAny(fullText, "captcha", "verify you are human", "access denied", "cloudflare") || lastSignal == "anti_bot_signal"
+}
+
+func isAuthSignal(fullText, lastSignal string) bool {
+	return containsAny(fullText, "log in", "sign in", "authentication required", "please login") || lastSignal == "auth_signal"
+}
+
+func pageSnippet(pageMapJSON string) string {
+	var page map[string]any
+	if err := json.Unmarshal([]byte(pageMapJSON), &page); err != nil {
+		return ""
+	}
+	snippet, _ := page["snippet"].(string)
+	return snippet
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}
+
+func marshalConstraintPayload(classification, signal string) string {
+	payload := webConstraintPayload{
+		Status:         "constraint_blocked",
+		Classification: classification,
+		LastSignal:     signal,
+		Retryable:      classification == constraintDynamicPending,
+		Guidance:       guidanceForClassification(classification),
+	}
+	b, _ := json.Marshal(payload)
+	return string(b)
+}
+
+func guidanceForClassification(classification string) string {
+	switch classification {
+	case constraintAuthRequired:
+		return "This page appears to require authentication. Sign in through browser tools first, then retry extraction."
+	case constraintAntiBotBlocked:
+		return "This page appears protected by anti-bot controls (captcha/challenge). Automated extraction is blocked; complete the challenge manually, then retry."
+	case constraintDynamicPending:
+		return "The page appears to still be loading dynamic content. Retry extraction after additional wait or interaction."
+	case constraintUnsupported:
+		return "This page requires runtime capabilities that are not supported in the current extraction flow."
+	default:
+		return "No page constraints detected."
+	}
 }

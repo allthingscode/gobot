@@ -129,3 +129,55 @@ func TestWebExtractTool_Execute(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyPageConstraint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		title       string
+		pageMapJSON string
+		waitResult  browser.DynamicWaitResult
+		wantClass   string
+		wantSignal  string
+	}{
+		{
+			name:        "AuthRequired",
+			title:       "Sign In",
+			pageMapJSON: `{"snippet":"Please log in to continue"}`,
+			waitResult:  browser.DynamicWaitResult{Completed: true},
+			wantClass:   "auth_required",
+			wantSignal:  "auth_signal",
+		},
+		{
+			name:        "AntiBotBlocked",
+			title:       "Attention Required",
+			pageMapJSON: `{"snippet":"Verify you are human"}`,
+			waitResult:  browser.DynamicWaitResult{Completed: true},
+			wantClass:   "anti_bot_blocked",
+			wantSignal:  "anti_bot_signal",
+		},
+		{
+			name:        "DynamicPending",
+			title:       "News",
+			pageMapJSON: `{"snippet":"Latest updates"}`,
+			waitResult:  browser.DynamicWaitResult{Completed: false, TimedOut: true},
+			wantClass:   "dynamic_pending",
+			wantSignal:  "dynamic_wait_timeout",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotClass, gotSignal := classifyPageConstraint(tt.title, tt.pageMapJSON, tt.waitResult)
+			if gotClass != tt.wantClass {
+				t.Fatalf("classification = %q, want %q", gotClass, tt.wantClass)
+			}
+			if gotSignal != tt.wantSignal {
+				t.Fatalf("signal = %q, want %q", gotSignal, tt.wantSignal)
+			}
+		})
+	}
+}
