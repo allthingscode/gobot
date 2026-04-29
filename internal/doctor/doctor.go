@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
+
+var lookPath = exec.LookPath //nolint:gochecknoglobals // for testing
 
 // Probes holds optional live connectivity probe functions.
 // Set a field to nil to skip that live check (reported as "skipped").
@@ -115,6 +119,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkGoogleToken(secretsRoot), false),
 		r(checkGmailToken(secretsRoot), false),
 		r(checkJobsDir(cfg), false),
+		r(checkBrowser(), false),
 	}
 
 	// Only probe Gemini live if Gemini is actually configured.
@@ -400,4 +405,65 @@ func checkConcurrency() []Result {
 		})
 	}
 	return results
+}
+
+// checkBrowser verifies the presence of a Chrome/Chromium executable for browser-based tools.
+func checkBrowser() Result {
+	path, ok := findBrowser()
+	if !ok {
+		return Result{
+			Name:   "browser",
+			OK:     false,
+			Detail: "Chrome/Chromium not found in PATH — browser-based tools will be disabled",
+		}
+	}
+	return Result{
+		Name:   "browser",
+		OK:     true,
+		Detail: path,
+	}
+}
+
+// findBrowser searches for common browser executables based on the operating system.
+func findBrowser() (string, bool) {
+	var names []string
+	switch runtime.GOOS {
+	case "windows":
+		names = []string{"chrome.exe", "msedge.exe", "brave.exe"}
+	case "darwin":
+		names = []string{
+			"google-chrome",
+			"chromium",
+			"microsoft-edge",
+			"brave-browser",
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+		}
+	default: // linux, etc.
+		names = []string{
+			"google-chrome",
+			"google-chrome-stable",
+			"chromium",
+			"chromium-browser",
+			"chrome",
+			"microsoft-edge",
+			"brave-browser",
+		}
+	}
+
+	for _, name := range names {
+		// If it's an absolute path, check if it exists and is executable
+		if filepath.IsAbs(name) {
+			if info, err := os.Stat(name); err == nil && !info.IsDir() {
+				return name, true
+			}
+			continue
+		}
+		path, err := lookPath(name)
+		if err == nil {
+			return path, true
+		}
+	}
+	return "", false
 }

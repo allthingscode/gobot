@@ -552,3 +552,40 @@ func TestDoctor_BreakerWarning(t *testing.T) {
 		t.Errorf("expected to find breaker migration warning for 'old'")
 	}
 }
+
+// ── checkBrowser ─────────────────────────────────────────────────────────────
+
+func TestCheckBrowser_Found(t *testing.T) {
+	t.Parallel()
+	// Backup and restore lookPath
+	oldLookPath := lookPath
+	defer func() { lookPath = oldLookPath }()
+
+	lookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+
+	r := checkBrowser()
+	if !r.OK {
+		t.Errorf("expected OK=true when browser is found, got: %s", r.Detail)
+	}
+}
+
+func TestCheckBrowser_NotFound(t *testing.T) {
+	t.Parallel()
+	// Backup and restore lookPath
+	oldLookPath := lookPath
+	defer func() { lookPath = oldLookPath }()
+
+	lookPath = func(name string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	r := checkBrowser()
+	if r.OK {
+		t.Error("expected OK=false when browser is not found")
+	}
+	if !strings.Contains(r.Detail, "not found") {
+		t.Errorf("expected detail to mention not found, got: %s", r.Detail)
+	}
+}
