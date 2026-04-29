@@ -37,7 +37,9 @@ func newWebExtractTool(cfg *config.Config, prov provider.Provider, model string)
 		MaxRetries:  3,
 	}
 	mgr := state.NewManager(mCfg)
-	_ = mgr.Init()
+	if err := mgr.Init(); err != nil {
+		slog.Error("web_extract: failed to initialize state manager", "dir", mCfg.StateDir, "err", err)
+	}
 
 	return &WebExtractTool{
 		cfg:           cfg,
@@ -90,9 +92,16 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 		ActivePhase: state.PhaseNavigate,
 		UpdatedAt:   time.Now(),
 	}
-	initialData, _ := json.Marshal(extState)
-	_, _ = t.stateMgr.CreateWorkflow(wfID, initialData)
-	_ = t.stateMgr.UpdateStatus(wfID, state.StatusRunning)
+	initialData, err := json.Marshal(extState)
+	if err != nil {
+		slog.Error("web_extract: failed to marshal initial state", "err", err)
+	}
+	if _, err := t.stateMgr.CreateWorkflow(wfID, initialData); err != nil {
+		slog.Warn("web_extract: failed to create workflow state", "workflow", wfID, "err", err)
+	}
+	if err := t.stateMgr.UpdateStatus(wfID, state.StatusRunning); err != nil {
+		slog.Warn("web_extract: failed to update status to running", "workflow", wfID, "err", err)
+	}
 
 	updatePhase := func(phase state.WebExtractionPhase, selectors []string, errMsg string) {
 		extState.ActivePhase = phase
@@ -106,17 +115,27 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 		if data, err := json.Marshal(extState); err == nil {
 			if wf, err := t.stateMgr.LoadWorkflow(wfID); err == nil {
 				wf.Data = data
-				_ = t.stateMgr.SaveCheckpoint(wf)
+				if err := t.stateMgr.SaveCheckpoint(wf); err != nil {
+					slog.Warn("web_extract: failed to save checkpoint", "workflow", wfID, "err", err)
+				}
+			} else {
+				slog.Warn("web_extract: failed to load workflow for update", "workflow", wfID, "err", err)
 			}
 		}
 	}
 
 	defer func() {
 		if extState.LastError == "" {
-			_ = t.stateMgr.UpdateStatus(wfID, state.StatusCompleted)
-			_ = t.stateMgr.Archive(wfID)
+			if err := t.stateMgr.UpdateStatus(wfID, state.StatusCompleted); err != nil {
+				slog.Warn("web_extract: failed to update status to completed", "workflow", wfID, "err", err)
+			}
+			if err := t.stateMgr.Archive(wfID); err != nil {
+				slog.Warn("web_extract: failed to archive workflow", "workflow", wfID, "err", err)
+			}
 		} else {
-			_ = t.stateMgr.UpdateStatus(wfID, state.StatusFailed)
+			if err := t.stateMgr.UpdateStatus(wfID, state.StatusFailed); err != nil {
+				slog.Warn("web_extract: failed to update status to failed", "workflow", wfID, "err", err)
+			}
 		}
 	}()
 
@@ -129,7 +148,7 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 	defer client.Close()
 
 	tabCtx := client.TabContext()
-	runCtx, cancel := context.WithTimeout(tabCtx, 60*time.Second)
+	runCtx, cancel := context.WithTimeout(tabCtx, 120*time.Second) // Increased timeout for retries
 	defer cancel()
 
 	title, err := t.navigate(runCtx, client, sessionKey, userID, urlStr)
@@ -138,36 +157,61 @@ func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string,
 		return "", err
 	}
 
-	slog.Info("web_extract: starting plan phase", "session", sessionKey)
-	updatePhase(state.PhasePlan, nil, "")
-
-	pageMapJSON, err := t.capturePageMap(runCtx)
-	if err != nil {
-		updatePhase(state.PhasePlan, nil, err.Error())
-		return "", err
-	}
-
-	plan, err := t.getLLMPlan(runCtx, goal, pageMapJSON)
-	if err != nil {
-		updatePhase(state.PhasePlan, nil, err.Error())
-		return "", err
-	}
-
+	var finalItems []string
 	var selectors []string
-	if plan.Selector != "" {
-		selectors = []string{plan.Selector}
-	}
+	maxRetries := 2
 
-	slog.Info("web_extract: starting extract phase", "session", sessionKey, "selector", plan.Selector)
-	updatePhase(state.PhaseExtract, selectors, "")
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			slog.Info("web_extract: retrying extraction", "session", sessionKey, "attempt", attempt)
+			updatePhase(state.PhaseRetry, selectors, fmt.Sprintf("Retrying extraction (attempt %d/%d)", attempt, maxRetries))
+			time.Sleep(1 * time.Second)
+		}
 
-	finalItems, err := t.performExtraction(runCtx, client, plan, sessionKey, userID)
-	if err != nil {
-		updatePhase(state.PhaseExtract, selectors, err.Error())
-		return "", err
+		slog.Info("web_extract: starting plan phase", "session", sessionKey, "attempt", attempt)
+		updatePhase(state.PhasePlan, nil, "")
+
+		pageMapJSON, err := t.capturePageMap(runCtx)
+		if err != nil {
+			extState.LastError = fmt.Sprintf("plan failed (capture): %v", err)
+			updatePhase(state.PhasePlan, nil, extState.LastError)
+			continue
+		}
+
+		plan, err := t.getLLMPlan(runCtx, goal, pageMapJSON)
+		if err != nil {
+			extState.LastError = fmt.Sprintf("plan failed (llm): %v", err)
+			updatePhase(state.PhasePlan, nil, extState.LastError)
+			continue
+		}
+
+		if plan.Selector != "" {
+			selectors = []string{plan.Selector}
+		} else {
+			selectors = nil
+		}
+
+		slog.Info("web_extract: starting extract phase", "session", sessionKey, "selector", plan.Selector)
+		updatePhase(state.PhaseExtract, selectors, "")
+
+		finalItems, err = t.performExtraction(runCtx, client, plan, sessionKey, userID)
+		if err != nil {
+			extState.LastError = fmt.Sprintf("extraction failed: %v", err)
+			updatePhase(state.PhaseExtract, selectors, extState.LastError)
+			continue
+		}
+
+		if len(finalItems) > 0 {
+			extState.LastError = "" // Clear error on success
+			break
+		}
+
+		extState.LastError = "No items found with current plan"
+		updatePhase(state.PhaseExtract, selectors, extState.LastError)
 	}
 
 	if len(finalItems) == 0 {
+		extState.LastError = "" // Clear error so the tool is marked as completed/archived even if no items were found
 		return "No items matching the goal were found on the page.", nil
 	}
 
