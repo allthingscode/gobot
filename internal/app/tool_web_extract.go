@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +19,14 @@ import (
 
 const webExtractToolName = "web_extract"
 
+const (
+	constraintNone           = "none"
+	constraintAuthRequired   = "auth_required"
+	constraintAntiBotBlocked = "anti_bot_blocked"
+	constraintDynamicPending = "dynamic_pending"
+	constraintUnsupported    = "unsupported"
+)
+
 // WebExtractTool orchestrates browser navigation and LLM-guided data extraction.
 type WebExtractTool struct {
 	cfg           *config.Config
@@ -27,27 +34,15 @@ type WebExtractTool struct {
 	model         string
 	executor      browser.Executor // for testing
 	clientFactory func(config.BrowserConfig) (*browser.Client, error)
-	stateMgr      *state.Manager
 }
 
 func newWebExtractTool(cfg *config.Config, prov provider.Provider, model string) *WebExtractTool {
-	mCfg := state.ManagerConfig{
-		StateDir:    filepath.Join(cfg.StorageRoot(), "web_extraction_state"),
-		LockTimeout: 30 * time.Second,
-		MaxRetries:  3,
-	}
-	mgr := state.NewManager(mCfg)
-	if err := mgr.Init(); err != nil {
-		slog.Error("web_extract: failed to initialize state manager", "dir", mCfg.StateDir, "err", err)
-	}
-
 	return &WebExtractTool{
 		cfg:           cfg,
 		prov:          prov,
 		model:         model,
 		executor:      browser.DefaultExecutor{},
 		clientFactory: browser.NewClient,
-		stateMgr:      mgr,
 	}
 }
 
@@ -63,6 +58,22 @@ type webExtractPlan struct {
 	Reasoning string   `json:"reasoning"`
 }
 
+type webConstraintPayload struct {
+	Status         string `json:"status"`
+	Classification string `json:"classification"`
+	LastSignal     string `json:"last_signal"`
+	Retryable      bool   `json:"retryable"`
+	Guidance       string `json:"guidance"`
+}
+
+type pageExtractionContext struct {
+	client      *browser.Client
+	runCtx      context.Context
+	cancelRun   context.CancelFunc
+	pageTitle   string
+	pageMapJSON string
+}
+
 func (t *WebExtractTool) Name() string { return webExtractToolName }
 
 func (t *WebExtractTool) Declaration() provider.ToolDeclaration {
@@ -73,157 +84,93 @@ func (t *WebExtractTool) Declaration() provider.ToolDeclaration {
 	}
 }
 
-func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) { //nolint:gocognit,cyclop,funlen // sequential workflow logic
-	urlStr, _ := args["url"].(string)
-	goal, _ := args["goal"].(string)
-
-	if urlStr == "" {
-		return "", fmt.Errorf("web_extract: url is required")
-	}
-	if goal == "" {
-		return "", fmt.Errorf("web_extract: goal is required")
-	}
-
-	safeKey := strings.ReplaceAll(sessionKey, ":", "_")
-	wfID := state.WorkflowID(fmt.Sprintf("web_extract_%s_%d", safeKey, time.Now().UnixNano()))
-	extState := state.WebExtractionState{
-		SessionID:   sessionKey,
-		URL:         urlStr,
-		ActivePhase: state.PhaseNavigate,
-		UpdatedAt:   time.Now(),
-	}
-	initialData, err := json.Marshal(extState)
+func (t *WebExtractTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
+	urlStr, goal, err := parseWebExtractArgs(args)
 	if err != nil {
-		slog.Error("web_extract: failed to marshal initial state", "err", err)
-	}
-	if _, err := t.stateMgr.CreateWorkflow(wfID, initialData); err != nil {
-		slog.Warn("web_extract: failed to create workflow state", "workflow", wfID, "err", err)
-	}
-	if err := t.stateMgr.UpdateStatus(wfID, state.StatusRunning); err != nil {
-		slog.Warn("web_extract: failed to update status to running", "workflow", wfID, "err", err)
-	}
-
-	updatePhase := func(phase state.WebExtractionPhase, selectors []string, errMsg string) {
-		extState.ActivePhase = phase
-		extState.UpdatedAt = time.Now()
-		if selectors != nil {
-			extState.LastSelectors = selectors
-		}
-		extState.LastError = errMsg
-		if data, err := json.Marshal(extState); err == nil {
-			if wf, err := t.stateMgr.LoadWithRecovery(wfID); err == nil {
-				wf.Data = data
-				if err := t.stateMgr.SaveCheckpoint(wf); err != nil {
-					slog.Warn("web_extract: failed to save checkpoint", "workflow", wfID, "err", err)
-				}
-			} else {
-				slog.Warn("web_extract: failed to load workflow for update", "workflow", wfID, "err", err)
-			}
-		}
-	}
-
-	defer func() {
-		if extState.LastError == "" {
-			if err := t.stateMgr.UpdateStatus(wfID, state.StatusCompleted); err != nil {
-				slog.Warn("web_extract: failed to update status to completed", "workflow", wfID, "err", err)
-			}
-			if err := t.stateMgr.Archive(wfID); err != nil {
-				slog.Warn("web_extract: failed to archive workflow", "workflow", wfID, "err", err)
-			}
-		} else {
-			if err := t.stateMgr.UpdateStatus(wfID, state.StatusFailed); err != nil {
-				slog.Warn("web_extract: failed to update status to failed", "workflow", wfID, "err", err)
-			}
-		}
-	}()
-
-	slog.Info("web_extract: starting navigate phase", "session", sessionKey, "url", urlStr)
-	client, err := t.initBrowser()
-	if err != nil {
-		updatePhase(state.PhaseNavigate, nil, err.Error())
 		return "", err
 	}
-	defer client.Close()
-
-	tabCtx := client.TabContext()
-	runCtx, cancel := context.WithTimeout(tabCtx, 120*time.Second) // Increased timeout for retries
-	defer cancel()
-
-	title, err := t.navigate(runCtx, client, sessionKey, userID, urlStr)
+	pageCtx, err := t.preparePageContext(ctx, sessionKey, userID, urlStr)
 	if err != nil {
-		updatePhase(state.PhaseNavigate, nil, err.Error())
+		return "", err
+	}
+	defer pageCtx.client.Close()
+	defer pageCtx.cancelRun()
+	if payload, blocked := t.classifyAndPersistConstraint(pageCtx.runCtx, sessionKey, pageCtx.pageTitle, pageCtx.pageMapJSON); blocked {
+		return payload, nil
+	}
+
+	plan, err := t.getLLMPlan(pageCtx.runCtx, goal, pageCtx.pageMapJSON)
+	if err != nil {
 		return "", err
 	}
 
-	var finalItems []string
-	var selectors []string
-	maxRetries := 2
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			slog.Info("web_extract: retrying extraction", "session", sessionKey, "attempt", attempt)
-			updatePhase(state.PhaseRetry, selectors, fmt.Sprintf("Retrying extraction (attempt %d/%d)", attempt, maxRetries))
-			time.Sleep(1 * time.Second)
-		}
-
-		slog.Info("web_extract: starting plan phase", "session", sessionKey, "attempt", attempt)
-		updatePhase(state.PhasePlan, nil, "")
-
-		pageMapJSON, err := t.capturePageMap(runCtx)
-		if err != nil {
-			extState.LastError = fmt.Sprintf("plan failed (capture): %v", err)
-			updatePhase(state.PhasePlan, nil, extState.LastError)
-			continue
-		}
-
-		plan, err := t.getLLMPlan(runCtx, goal, pageMapJSON)
-		if err != nil {
-			extState.LastError = fmt.Sprintf("plan failed (llm): %v", err)
-			updatePhase(state.PhasePlan, nil, extState.LastError)
-			continue
-		}
-
-		if plan.Selector != "" {
-			selectors = []string{plan.Selector}
-		} else {
-			selectors = nil
-		}
-
-		slog.Info("web_extract: starting extract phase", "session", sessionKey, "selector", plan.Selector)
-		updatePhase(state.PhaseExtract, selectors, "")
-
-		finalItems, err = t.performExtraction(runCtx, client, plan, sessionKey, userID)
-		if err != nil {
-			extState.LastError = fmt.Sprintf("extraction failed: %v", err)
-			updatePhase(state.PhaseExtract, selectors, extState.LastError)
-			continue
-		}
-
-		if len(finalItems) > 0 {
-			extState.LastError = "" // Clear error on success
-			break
-		}
-
-		extState.LastError = "No items found with current plan"
-		updatePhase(state.PhaseExtract, selectors, extState.LastError)
+	finalItems, err := t.performExtraction(pageCtx.runCtx, pageCtx.client, plan, sessionKey, userID)
+	if err != nil {
+		return "", err
 	}
 
 	if len(finalItems) == 0 {
-		extState.LastError = "" // Clear error so the tool is marked as completed/archived even if no items were found
 		return "No items matching the goal were found on the page.", nil
 	}
 
-	slog.Info("web_extract: starting summarize phase", "session", sessionKey)
-	updatePhase(state.PhaseSummarize, selectors, "")
-
-	summary, err := t.summarizeResults(runCtx, goal, finalItems)
+	summary, err := t.summarizeResults(pageCtx.runCtx, goal, finalItems)
 	if err != nil {
 		// Non-critical failure: return raw data if summarization fails
-		updatePhase(state.PhaseSummarize, selectors, err.Error())
-		return t.formatResponse(title, finalItems, "Extraction complete (summary failed)"), nil
+		return t.formatResponse(pageCtx.pageTitle, finalItems, "Extraction complete (summary failed)"), nil
 	}
 
-	return t.formatResponse(title, finalItems, summary), nil
+	return t.formatResponse(pageCtx.pageTitle, finalItems, summary), nil
+}
+
+func parseWebExtractArgs(args map[string]any) (urlStr, goal string, err error) {
+	urlStr, _ = args["url"].(string)
+	goal, _ = args["goal"].(string)
+	if urlStr == "" {
+		return "", "", fmt.Errorf("web_extract: url is required")
+	}
+	if goal == "" {
+		return "", "", fmt.Errorf("web_extract: goal is required")
+	}
+	return urlStr, goal, nil
+}
+
+func (t *WebExtractTool) preparePageContext(ctx context.Context, sessionKey, userID, urlStr string) (pageExtractionContext, error) {
+	client, err := t.initBrowser()
+	if err != nil {
+		return pageExtractionContext{}, err
+	}
+	tabCtx := client.TabContext()
+	runCtx, cancel := context.WithTimeout(tabCtx, 60*time.Second)
+	title, err := t.navigate(runCtx, client, sessionKey, userID, urlStr)
+	if err != nil {
+		cancel()
+		return pageExtractionContext{}, err
+	}
+	pageMapJSON, err := t.capturePageMap(runCtx)
+	if err != nil {
+		cancel()
+		return pageExtractionContext{}, err
+	}
+	return pageExtractionContext{
+		client:      client,
+		runCtx:      runCtx,
+		cancelRun:   cancel,
+		pageTitle:   title,
+		pageMapJSON: pageMapJSON,
+	}, nil
+}
+
+func (t *WebExtractTool) classifyAndPersistConstraint(ctx context.Context, sessionKey, title, pageMapJSON string) (string, bool) {
+	waitResult, err := browser.WaitForDynamicContentBounded(ctx, t.executor, "", 4, 8*time.Second)
+	if err != nil {
+		return marshalConstraintPayload(constraintDynamicPending, "dynamic_wait_error"), true
+	}
+	classification, signal := classifyPageConstraint(title, pageMapJSON, waitResult)
+	t.persistConstraintSignal(sessionKey, classification, signal)
+	if classification == constraintNone {
+		return "", false
+	}
+	return marshalConstraintPayload(classification, signal), true
 }
 
 func (t *WebExtractTool) initBrowser() (*browser.Client, error) {
@@ -373,4 +320,90 @@ func (t *WebExtractTool) formatResponse(title string, items []string, summary st
 	}
 	b, _ := json.Marshal(payload)
 	return string(b)
+}
+
+func (t *WebExtractTool) persistConstraintSignal(sessionKey, classification, signal string) {
+	if err := state.SavePageConstraintSignal(t.cfg.StorageRoot(), sessionKey, classification, signal); err != nil {
+		slog.Warn("web_extract: failed to persist page constraint signal", "session", sessionKey, "classification", classification, "err", err)
+	}
+}
+
+func classifyPageConstraint(title, pageMapJSON string, waitResult browser.DynamicWaitResult) (classification, signal string) {
+	titleLower := strings.ToLower(strings.TrimSpace(title))
+	snippetLower := strings.ToLower(pageSnippet(pageMapJSON))
+	fullText := titleLower + " " + snippetLower
+
+	if classification, signal, ok := classifyTerminalConstraint(fullText, waitResult.LastSignal); ok {
+		return classification, signal
+	}
+	if waitResult.TimedOut || !waitResult.Completed {
+		return constraintDynamicPending, "dynamic_wait_timeout"
+	}
+	return constraintNone, constraintNone
+}
+
+func classifyTerminalConstraint(fullText, lastSignal string) (classification, signal string, ok bool) {
+	if isAntiBotSignal(fullText, lastSignal) {
+		return constraintAntiBotBlocked, "anti_bot_signal", true
+	}
+	if isAuthSignal(fullText, lastSignal) {
+		return constraintAuthRequired, "auth_signal", true
+	}
+	if containsAny(fullText, "unsupported browser", "javascript required", "enable javascript") {
+		return constraintUnsupported, "unsupported_runtime", true
+	}
+	return "", "", false
+}
+
+func isAntiBotSignal(fullText, lastSignal string) bool {
+	return containsAny(fullText, "captcha", "verify you are human", "access denied", "cloudflare") || lastSignal == "anti_bot_signal"
+}
+
+func isAuthSignal(fullText, lastSignal string) bool {
+	return containsAny(fullText, "log in", "sign in", "authentication required", "please login") || lastSignal == "auth_signal"
+}
+
+func pageSnippet(pageMapJSON string) string {
+	var page map[string]any
+	if err := json.Unmarshal([]byte(pageMapJSON), &page); err != nil {
+		return ""
+	}
+	snippet, _ := page["snippet"].(string)
+	return snippet
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}
+
+func marshalConstraintPayload(classification, signal string) string {
+	payload := webConstraintPayload{
+		Status:         "constraint_blocked",
+		Classification: classification,
+		LastSignal:     signal,
+		Retryable:      classification == constraintDynamicPending,
+		Guidance:       guidanceForClassification(classification),
+	}
+	b, _ := json.Marshal(payload)
+	return string(b)
+}
+
+func guidanceForClassification(classification string) string {
+	switch classification {
+	case constraintAuthRequired:
+		return "This page appears to require authentication. Sign in through browser tools first, then retry extraction."
+	case constraintAntiBotBlocked:
+		return "This page appears protected by anti-bot controls (captcha/challenge). Automated extraction is blocked; complete the challenge manually, then retry."
+	case constraintDynamicPending:
+		return "The page appears to still be loading dynamic content. Retry extraction after additional wait or interaction."
+	case constraintUnsupported:
+		return "This page requires runtime capabilities that are not supported in the current extraction flow."
+	default:
+		return "No page constraints detected."
+	}
 }

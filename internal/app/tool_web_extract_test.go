@@ -12,7 +12,6 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
-	"github.com/allthingscode/gobot/internal/state"
 	"github.com/chromedp/chromedp"
 )
 
@@ -21,7 +20,7 @@ type webExtractMockProvider struct {
 	idx       int
 }
 
-func (m *webExtractMockProvider) Name() string { return mockName }
+func (m *webExtractMockProvider) Name() string { return "mock" }
 func (m *webExtractMockProvider) Chat(ctx context.Context, req provider.ChatRequest) (*provider.ChatResponse, error) {
 	if m.idx >= len(m.responses) {
 		return nil, fmt.Errorf("no more mock responses")
@@ -48,7 +47,7 @@ func (m *webExtractMockExecutor) Run(ctx context.Context, actions ...chromedp.Ac
 	return nil
 }
 
-func TestWebExtractTool_Execute(t *testing.T) { //nolint:gocognit,funlen // test table runner
+func TestWebExtractTool_Execute(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -90,9 +89,6 @@ func TestWebExtractTool_Execute(t *testing.T) { //nolint:gocognit,funlen // test
 				Browser: config.BrowserConfig{
 					Headless: true,
 				},
-				Strategic: config.StrategicConfig{
-					StorageRoot: t.TempDir(),
-				},
 			}
 
 			prov := &webExtractMockProvider{
@@ -119,12 +115,6 @@ func TestWebExtractTool_Execute(t *testing.T) { //nolint:gocognit,funlen // test
 				t.Fatalf("Execute failed: %v", err)
 			}
 
-			// Verify state was cleaned up/archived
-			active, _ := tool.stateMgr.ListActive()
-			if len(active) > 0 {
-				t.Errorf("Expected 0 active workflows, got %d", len(active))
-			}
-
 			if tt.name == "SelectorExtraction" {
 				if !strings.Contains(resp, "No items matching") {
 					t.Errorf("expected 'No items matching' response, got: %s", resp)
@@ -138,74 +128,56 @@ func TestWebExtractTool_Execute(t *testing.T) { //nolint:gocognit,funlen // test
 			}
 		})
 	}
-
 }
 
-func TestWebExtractTool_Execute_FailurePersistence(t *testing.T) {
+func TestClassifyPageConstraint(t *testing.T) {
 	t.Parallel()
-	cfg := &config.Config{
-		Browser: config.BrowserConfig{
-			Headless: true,
+
+	tests := []struct {
+		name        string
+		title       string
+		pageMapJSON string
+		waitResult  browser.DynamicWaitResult
+		wantClass   string
+		wantSignal  string
+	}{
+		{
+			name:        "AuthRequired",
+			title:       "Sign In",
+			pageMapJSON: `{"snippet":"Please log in to continue"}`,
+			waitResult:  browser.DynamicWaitResult{Completed: true},
+			wantClass:   "auth_required",
+			wantSignal:  "auth_signal",
 		},
-		Strategic: config.StrategicConfig{
-			StorageRoot: t.TempDir(),
+		{
+			name:        "AntiBotBlocked",
+			title:       "Attention Required",
+			pageMapJSON: `{"snippet":"Verify you are human"}`,
+			waitResult:  browser.DynamicWaitResult{Completed: true},
+			wantClass:   "anti_bot_blocked",
+			wantSignal:  "anti_bot_signal",
+		},
+		{
+			name:        "DynamicPending",
+			title:       "News",
+			pageMapJSON: `{"snippet":"Latest updates"}`,
+			waitResult:  browser.DynamicWaitResult{Completed: false, TimedOut: true},
+			wantClass:   "dynamic_pending",
+			wantSignal:  "dynamic_wait_timeout",
 		},
 	}
 
-	// Mock provider that returns a valid plan, but we'll force navigation failure
-	prov := &webExtractMockProvider{
-		responses: []string{`{"selector": ".test"}`},
-	}
-
-	tool := newWebExtractTool(cfg, prov, "test-model")
-
-	// Force navigation failure
-	tool.executor = &webExtractMockExecutor{
-		runFunc: func(ctx context.Context, actions ...chromedp.Action) error {
-			return fmt.Errorf("navigation failed")
-		},
-	}
-	tool.clientFactory = func(cfg config.BrowserConfig) (*browser.Client, error) {
-		return browser.NewClientForTest(context.Background(), func() {}), nil
-	}
-
-	args := map[string]any{
-		"url":  "http://example.com",
-		"goal": "extract data",
-	}
-
-	_, err := tool.Execute(context.Background(), "fail-session", "user", args)
-	if err == nil {
-		t.Fatal("Expected error from Execute, got nil")
-	}
-
-	// Verify state manager reflects failure
-	active, err := tool.stateMgr.ListActive()
-	if err != nil {
-		t.Fatalf("ListActive failed: %v", err)
-	}
-
-	// On failure, the workflow is NOT archived, so it should be in active list with status failed
-	if len(active) == 0 {
-		t.Fatal("Expected 1 active (failed) workflow, got 0")
-	}
-
-	wf, err := tool.stateMgr.LoadWithRecovery(active[0])
-	if err != nil {
-		t.Fatalf("LoadWithRecovery failed: %v", err)
-	}
-
-	if wf.Status != state.StatusFailed {
-		t.Errorf("Expected status failed, got %s", wf.Status)
-	}
-
-	var extState state.WebExtractionState
-	if err := json.Unmarshal(wf.Data, &extState); err != nil {
-		t.Fatalf("Failed to unmarshal state data: %v", err)
-	}
-
-	if !strings.Contains(extState.LastError, "navigation failed") {
-		t.Errorf("Expected LastError to contain 'navigation failed', got %q", extState.LastError)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotClass, gotSignal := classifyPageConstraint(tt.title, tt.pageMapJSON, tt.waitResult)
+			if gotClass != tt.wantClass {
+				t.Fatalf("classification = %q, want %q", gotClass, tt.wantClass)
+			}
+			if gotSignal != tt.wantSignal {
+				t.Fatalf("signal = %q, want %q", gotSignal, tt.wantSignal)
+			}
+		})
 	}
 }
-

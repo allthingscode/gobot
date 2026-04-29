@@ -83,8 +83,10 @@ type iterLimitMockTool struct {
 	err  error
 }
 
-func (m *iterLimitMockTool) Name() string                        { return m.name }
-func (m *iterLimitMockTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: m.name} }
+func (m *iterLimitMockTool) Name() string { return m.name }
+func (m *iterLimitMockTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: m.name}
+}
 func (m *iterLimitMockTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	return "ok", m.err
 }
@@ -311,7 +313,7 @@ func (m *MockProvider) Name() string {
 	if m.name != "" {
 		return m.name
 	}
-	return "mock" //nolint:goconst // string used in tests
+	return mockName
 }
 func (m *MockProvider) Models() []provider.ModelInfo { return nil }
 func (m *MockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.ChatResponse, error) {
