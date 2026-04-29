@@ -5,13 +5,27 @@ COMMIT   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILT_AT := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
 LDFLAGS  := -X main.version=$(VERSION) -X main.commitHash=$(COMMIT) -X main.buildTime=$(BUILT_AT)
 
+# Handle missing vendor directory
+MOD_FLAG :=
+ifeq ($(wildcard vendor/),)
+    MOD_FLAG :=
+    PREBUILD := go_mod_download
+else
+    MOD_FLAG := -mod=vendor
+    PREBUILD :=
+endif
+
 .DEFAULT_GOAL := help
 
-.PHONY: build test lint doc-lint cover clean help
+.PHONY: build test lint doc-lint cover clean help go_mod_download
 
-build: ## Build the gobot binary
+go_mod_download:
+	@echo "Vendor directory missing. Downloading modules..."
+	go mod download
+
+build: $(PREBUILD) ## Build the gobot binary
 	@mkdir -p bin
-	go build -mod=vendor -ldflags "$(LDFLAGS)" -o bin/gobot ./cmd/gobot
+	go build $(MOD_FLAG) -ldflags "$(LDFLAGS)" -o bin/gobot ./cmd/gobot
 
 test: ## Run tests with race detection
 	go test -race -mod=readonly ./internal/... ./cmd/...

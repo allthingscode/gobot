@@ -12,9 +12,18 @@ if (Get-Command goversioninfo -ErrorAction SilentlyContinue) {
     goversioninfo -platform-specific -o resource.syso versioninfo.json
 }
 
+$MOD_FLAG = ""
+if (Test-Path "vendor") {
+    Write-Host "Using vendor directory..."
+    $MOD_FLAG = "-mod=vendor"
+} else {
+    Write-Host "Vendor directory missing. Downloading modules..."
+    go mod download
+}
+
 if (-not (Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }
 Write-Host "Building gobot $VERSION ($COMMIT)..."
-go build -mod=vendor -ldflags $LDFLAGS -o bin/gobot.exe ./cmd/gobot
+go build $MOD_FLAG -ldflags $LDFLAGS -o bin/gobot.exe ./cmd/gobot
 $EXIT_CODE = $LASTEXITCODE
 
 if (Test-Path resource.syso) {
