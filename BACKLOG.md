@@ -34,16 +34,14 @@ All items in this backlog must be prioritized strictly according to the followin
 
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
-| B-059 | Scheduled Email Duplicate Sends | P0 | Architect | Archived |
 
 ### **Features**
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
+| F-134 | Reviewed Scheduled Workflows | P1 | Architect | Planning |
 | F-128 | Comprehensive Google Cloud Setup Guide | P2 | Researcher | Planning |
 | F-129 | Security & Secrets Management Guide | P2 | Researcher | Planning |
 | F-130 | Deployment & Persistence Guide | P2 | Researcher | Planning |
-| F-131 | Browser Prerequisite Check | P1 | Architect | Production |
-| F-132 | Authorization Validation Check | P1 | Architect | Archived |
 | F-133 | Automatic Workspace Initialization | P2 | Architect | Planning |
 
 ### **Chores**
@@ -57,12 +55,9 @@ All items in this backlog must be prioritized strictly according to the followin
 
 | Priority | Count | Items |
 |:---:|:---|:---|
-| **P0** | 1 | B-059 |
-| **P1** | 2 | C-211, F-131 |
+| **P0** | 0 | - |
+| **P1** | 2 | F-134, C-211 |
 | **P2** | 4 | F-128, F-129, F-130, F-133 |
 | **P3** | 0 | - |
 
-**Status Overview**: 7 active items.
-P3** | 0 | - |
-
-**Status Overview**: 7 active items.
+**Status Overview**: 6 active items.
