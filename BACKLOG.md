@@ -42,7 +42,7 @@ All items in this backlog must be prioritized strictly according to the followin
 | F-129 | Security & Secrets Management Guide | P2 | Researcher | Planning |
 | F-130 | Deployment & Persistence Guide | P2 | Researcher | Planning |
 | F-131 | Browser Prerequisite Check | P1 | Architect | Production |
-| F-132 | Authorization Validation Check | P1 | Architect | Planning |
+| F-132 | Authorization Validation Check | P1 | Architect | Archived |
 | F-133 | Automatic Workspace Initialization | P2 | Architect | Planning |
 
 ### **Chores**
