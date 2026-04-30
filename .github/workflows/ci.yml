@@ -33,6 +33,18 @@ jobs:
                 run: go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
             -   name: Run govulncheck
                 run: govulncheck ./...
+ 
+    version-check:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v6
+            -   uses: actions/setup-go@v6
+                with:
+                    go-version-file: go.mod
+                    cache: true
+            -   name: Check Go version alignment
+                run: go run scripts/check_go_version_alignment/main.go
+
 
     test:
         strategy:
