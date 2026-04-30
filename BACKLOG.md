@@ -34,11 +34,11 @@ All items in this backlog must be prioritized strictly according to the followin
 
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
+| B-060 | Doctor Race Test Around Browser Lookup | P1 | Architect | Planning |
 
 ### **Features**
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
-| F-134 | Reviewed Scheduled Workflows | P1 | Architect | Planning |
 | F-128 | Comprehensive Google Cloud Setup Guide | P2 | Researcher | Planning |
 | F-129 | Security & Secrets Management Guide | P2 | Researcher | Planning |
 | F-130 | Deployment & Persistence Guide | P2 | Researcher | Planning |
@@ -47,7 +47,7 @@ All items in this backlog must be prioritized strictly according to the followin
 ### **Chores**
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
-| C-211 | Go Version Compatibility Audit | P1 | Researcher | Planning |
+| C-211 | Go Version Compatibility Audit | P1 | Groomer | Production |
 
 ---
 
@@ -56,7 +56,7 @@ All items in this backlog must be prioritized strictly according to the followin
 | Priority | Count | Items |
 |:---:|:---|:---|
 | **P0** | 0 | - |
-| **P1** | 2 | F-134, C-211 |
+| **P1** | 2 | B-060, C-211 |
 | **P2** | 4 | F-128, F-129, F-130, F-133 |
 | **P3** | 0 | - |
 
