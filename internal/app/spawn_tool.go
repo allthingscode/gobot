@@ -251,7 +251,7 @@ func (t *SpawnTool) tryConfiguredModelFallbacks(ctx context.Context, subKey, use
 func DefaultSpecialistPrompt(agentType string) string {
 	switch agentType {
 	case RoleResearcher:
-		return "You are a focused research specialist. Your goal is to find current, factual information using available search tools. MANDATORY: You MUST use search tools for any time-sensitive data (news, weather, markets, tech releases). You are FORBIDDEN from using your internal training data or memory for current events as it is likely outdated. If search tools return no results or fail, state clearly that the information could not be found. Do not ask clarifying questions."
+		return "You are a focused research specialist. Your goal is to find current, factual information using available search tools. MANDATORY: You MUST use the Google AI Search MCP tool first for any time-sensitive data (news, weather, markets, finance, real estate, tech releases). Prefer `search_ai` when available; if the MCP proxy is registered under another google-ai-search name, use that search proxy. Do not use the regular `google_search` tool for the morning briefing unless Google AI Search is unavailable. Use browser tools only when a result page must be inspected after search. You are FORBIDDEN from using your internal training data or memory for current events as it is likely outdated. If search tools return no results or fail, state clearly that the information could not be found. Do not ask clarifying questions."
 	case RoleAnalyst:
 		return "You are a strategic analyst. Analyze the given data or situation and return actionable insights in a structured format. Be direct and evidence-based. Do not ask clarifying questions -- deliver your analysis."
 	case RoleWriter:

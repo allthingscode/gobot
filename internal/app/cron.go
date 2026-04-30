@@ -265,7 +265,7 @@ func validateMorningBriefingResponse(response string) error {
 		return fmt.Errorf("empty response")
 	}
 	if strings.Contains(body, "Daily Briefing Status: Partial/Unavailable") {
-		return nil
+		return fmt.Errorf("response reports partial or unavailable briefing status")
 	}
 	if strings.Contains(body, "TOOL_ERROR") {
 		return fmt.Errorf("response contains TOOL_ERROR marker")
@@ -294,7 +294,7 @@ func (cd *CronDispatcher) verifySearchToolProvenance(sessionKey string) (bool, e
 			return false, fmt.Errorf("read latest session transcript: %w", readErr)
 		}
 		text := string(data)
-		if strings.Contains(text, "search_ai") || strings.Contains(text, "google_search") {
+		if hasGoogleAISearchEvidence(text) {
 			return true, nil
 		}
 	}
@@ -315,12 +315,42 @@ func (cd *CronDispatcher) verifySearchToolProvenanceFromLogs(sessionKey string) 
 	parentMarker := `session=` + sessionKey + ` tool=spawn_subagent`
 	subSession := `session=agent:researcher:` + sessionKey
 	parentHasSpawn := strings.Contains(text, parentMarker)
-	subHasSearch := (strings.Contains(text, subSession) && strings.Contains(text, `tool=search_ai`)) ||
-		(strings.Contains(text, subSession) && strings.Contains(text, `tool=google_search`))
+	subHasSearch := hasLineWithAll(text, subSession, "tool=") && hasGoogleAISearchSessionEvidence(text, subSession)
 	if parentHasSpawn && subHasSearch {
 		return true, nil
 	}
 	return false, nil
+}
+
+func hasGoogleAISearchEvidence(text string) bool {
+	return strings.Contains(text, "search_ai") ||
+		strings.Contains(text, "google-ai-search") ||
+		strings.Contains(text, "google_ai_search")
+}
+
+func hasGoogleAISearchSessionEvidence(text, sessionMarker string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, sessionMarker) && hasGoogleAISearchEvidence(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLineWithAll(text string, needles ...string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		matched := true
+		for _, needle := range needles {
+			if !strings.Contains(line, needle) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func (cd *CronDispatcher) latestSessionTranscriptPath(sessionKey string) (string, error) {
@@ -328,6 +358,9 @@ func (cd *CronDispatcher) latestSessionTranscriptPath(sessionKey string) (string
 	safeSession := sanitizeSessionKeyForFile(sessionKey)
 	dayDirs, err := os.ReadDir(sessionRoot)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
 		return "", fmt.Errorf("read sessions dir: %w", err)
 	}
 	candidates := collectSessionTranscriptCandidates(sessionRoot, dayDirs, safeSession)

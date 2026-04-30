@@ -16,6 +16,7 @@ import (
 
 const awarenessMaxJournalChars = 4000
 const browserToolRoutingGuidance = "## WEB EXTRACTION TOOL ROUTING\n" +
+	"- For current facts, news, weather, market, finance, or real-estate lookup requests, use the Google AI Search MCP tool first (for example `search_ai`, or the registered `google-ai-search` search proxy).\n" +
 	"- For web scraping or \"get info from a page\" requests, prefer `browser_extract` first.\n" +
 	"- Use `browser_extract` with `url`, `wait_selector`, `extract_selector`, and optional `limit`.\n" +
 	"- Only fall back to manual chaining (`browser_navigate` + `browser_wait_for` + `browser_get_texts`) when interaction steps are required.\n"

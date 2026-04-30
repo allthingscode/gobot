@@ -12,6 +12,8 @@ import (
 	"github.com/allthingscode/gobot/internal/reporter"
 )
 
+const testMorningBriefingEmailSession = "cron:morning_briefing:email:user@example.com"
+
 func TestResolveEmailSubject(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -304,6 +306,9 @@ func TestValidateMorningBriefingResponse(t *testing.T) {
 	if err := validateMorningBriefingResponse("TOOL_ERROR [spawn_subagent]: bad"); err == nil {
 		t.Fatal("expected TOOL_ERROR response to fail")
 	}
+	if err := validateMorningBriefingResponse("Daily Briefing Status: Partial/Unavailable"); err == nil {
+		t.Fatal("expected partial/unavailable response to fail")
+	}
 	if err := validateMorningBriefingResponse("<p>No sources or dates</p>"); err == nil {
 		t.Fatal("expected low-evidence response to fail")
 	}
@@ -312,7 +317,7 @@ func TestValidateMorningBriefingResponse(t *testing.T) {
 func TestVerifySearchToolProvenance(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	sessionKey := "cron:morning_briefing:email:user@example.com"
+	sessionKey := testMorningBriefingEmailSession
 	safe := sanitizeSessionKeyForFile(sessionKey)
 	dayDir := filepath.Join(root, "workspace", "sessions", "2026-04-28")
 	if err := os.MkdirAll(dayDir, 0o755); err != nil {
@@ -329,5 +334,52 @@ func TestVerifySearchToolProvenance(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected provenance check to pass with search_ai evidence")
+	}
+}
+
+func TestVerifySearchToolProvenanceRejectsRegularGoogleSearch(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sessionKey := testMorningBriefingEmailSession
+	safe := sanitizeSessionKeyForFile(sessionKey)
+	dayDir := filepath.Join(root, "workspace", "sessions", "2026-04-28")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logFile := filepath.Join(dayDir, safe+"_20260428T130000Z.md")
+	if err := os.WriteFile(logFile, []byte("tool_call: google_search"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cd := &CronDispatcher{storageRoot: root}
+	ok, err := cd.verifySearchToolProvenance(sessionKey)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected provenance check to reject regular google_search evidence")
+	}
+}
+
+func TestVerifySearchToolProvenanceFromLogsRequiresGoogleAISearchInSubSession(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sessionKey := testMorningBriefingEmailSession
+	logDir := filepath.Join(root, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logBody := "session=" + sessionKey + " tool=spawn_subagent\n" +
+		"session=agent:researcher:" + sessionKey + " tool=google_search\n" +
+		"session=other tool=search_ai\n"
+	if err := os.WriteFile(filepath.Join(logDir, "gobot.log"), []byte(logBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cd := &CronDispatcher{storageRoot: root}
+	ok, err := cd.verifySearchToolProvenance(sessionKey)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected provenance check to reject search_ai evidence outside the researcher sub-session")
 	}
 }

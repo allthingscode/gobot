@@ -138,6 +138,7 @@ func TestLoadSystemPrompt(t *testing.T) {
 		"soul content",
 		"awareness content",
 		"journal content",
+		"Google AI Search MCP tool first",
 		"prefer `browser_extract` first",
 	})
 }

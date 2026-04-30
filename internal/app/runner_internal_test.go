@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,5 +192,16 @@ func TestIsFailClosedCronSession(t *testing.T) {
 	}
 	if isFailClosedCronSession("telegram:12345") {
 		t.Fatal("did not expect non-cron session to be fail-closed")
+	}
+}
+
+func TestResearcherPromptPrefersGoogleAISearch(t *testing.T) {
+	t.Parallel()
+	prompt := DefaultSpecialistPrompt(RoleResearcher)
+	if !strings.Contains(prompt, "Google AI Search MCP tool first") {
+		t.Fatalf("researcher prompt should prefer Google AI Search, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "Do not use the regular `google_search` tool") {
+		t.Fatalf("researcher prompt should discourage regular google_search for briefing, got %q", prompt)
 	}
 }
