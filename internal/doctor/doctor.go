@@ -17,8 +17,6 @@ import (
 	"github.com/allthingscode/gobot/internal/resilience"
 )
 
-var lookPath = exec.LookPath //nolint:gochecknoglobals // for testing
-
 // Probes holds optional live connectivity probe functions.
 // Set a field to nil to skip that live check (reported as "skipped").
 type Probes struct {
@@ -30,6 +28,9 @@ type Probes struct {
 	// ProbeGmail validates Gmail OAuth2 credentials can produce an access token.
 	// gmailSecretsPath is the directory containing token.json (e.g. secrets/gmail).
 	ProbeGmail func(gmailSecretsPath string) error
+	// LookPath is used to find executables in the system PATH.
+	// Defaults to exec.LookPath if nil.
+	LookPath func(name string) (string, error)
 }
 
 // Result represents the outcome of a single health check.
@@ -98,6 +99,9 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 	if probes != nil {
 		p = *probes
 	}
+	if p.LookPath == nil {
+		p.LookPath = exec.LookPath
+	}
 
 	geminiKey := cfg.GeminiAPIKey()
 	if geminiKey == "" {
@@ -120,7 +124,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkGoogleToken(secretsRoot), false),
 		r(checkGmailToken(secretsRoot), false),
 		r(checkJobsDir(cfg), false),
-		r(checkBrowser(), false),
+		r(checkBrowser(p.LookPath), false),
 		r(checkAuthorization(cfg), false),
 	}
 
@@ -128,6 +132,21 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 	checks = append(checks, geminiLiveChecks(geminiKey, p.ProbeGemini, r)...)
 
 	// Add Resilience checks (F-054)
+	checks = append(checks, getResilienceResults(cfg, r)...)
+
+	// Add Concurrency checks (F-056)
+	conResults := checkConcurrency()
+	for _, res := range conResults {
+		checks = append(checks, r(res, false))
+	}
+
+	return checks
+}
+
+// getResilienceResults handles registration and health checks for circuit breakers.
+func getResilienceResults(cfg *config.Config, r func(Result, bool) Result) []Result {
+	var results []Result
+
 	// Proactively register configured breakers so they show up in the report
 	for name := range cfg.Resilience.CircuitBreakers {
 		if resilience.Get(name) == nil {
@@ -138,13 +157,13 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 
 	resResults := checkResilience()
 	for _, res := range resResults {
-		checks = append(checks, r(res, false))
+		results = append(results, r(res, false))
 	}
 
 	// Check for old-format circuit breaker durations (C-138)
 	for name, bc := range cfg.Resilience.CircuitBreakers {
 		if bc.Window == "" || bc.Timeout == "" {
-			checks = append(checks, Result{
+			results = append(results, Result{
 				Name:     "breaker migration: " + name,
 				OK:       false,
 				Detail:   "duration fields are empty; migrate to string format (e.g. \"60s\")",
@@ -153,13 +172,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		}
 	}
 
-	// Add Concurrency checks (F-056)
-	conResults := checkConcurrency()
-	for _, res := range conResults {
-		checks = append(checks, r(res, false))
-	}
-
-	return checks
+	return results
 }
 
 func checkStorageRoot(cfg *config.Config) Result {
@@ -410,8 +423,8 @@ func checkConcurrency() []Result {
 }
 
 // checkBrowser verifies the presence of a Chrome/Chromium executable for browser-based tools.
-func checkBrowser() Result {
-	path, ok := findBrowser()
+func checkBrowser(lookPath func(string) (string, error)) Result {
+	path, ok := findBrowser(lookPath)
 	if !ok {
 		return Result{
 			Name:   "browser",
@@ -427,7 +440,7 @@ func checkBrowser() Result {
 }
 
 // findBrowser searches for common browser executables based on the operating system.
-func findBrowser() (string, bool) {
+func findBrowser(lookPath func(string) (string, error)) (string, bool) {
 	var names []string
 	switch runtime.GOOS {
 	case "windows":

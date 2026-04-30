@@ -561,15 +561,12 @@ func TestDoctor_BreakerWarning(t *testing.T) {
 
 func TestCheckBrowser_Found(t *testing.T) {
 	t.Parallel()
-	// Backup and restore lookPath
-	oldLookPath := lookPath
-	defer func() { lookPath = oldLookPath }()
 
-	lookPath = func(name string) (string, error) {
+	mockLookPath := func(name string) (string, error) {
 		return "/usr/bin/" + name, nil
 	}
 
-	r := checkBrowser()
+	r := checkBrowser(mockLookPath)
 	if !r.OK {
 		t.Errorf("expected OK=true when browser is found, got: %s", r.Detail)
 	}
@@ -577,15 +574,12 @@ func TestCheckBrowser_Found(t *testing.T) {
 
 func TestCheckBrowser_NotFound(t *testing.T) {
 	t.Parallel()
-	// Backup and restore lookPath
-	oldLookPath := lookPath
-	defer func() { lookPath = oldLookPath }()
 
-	lookPath = func(name string) (string, error) {
+	mockLookPath := func(name string) (string, error) {
 		return "", errors.New("not found")
 	}
 
-	r := checkBrowser()
+	r := checkBrowser(mockLookPath)
 	if r.OK {
 		t.Error("expected OK=false when browser is not found")
 	}
