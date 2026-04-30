@@ -41,7 +41,7 @@ The highest-leverage systems are hybrid — AI handles judgment-heavy work, dete
 
 ---
 
-## What I'm Looking For
+## Want to Work With Me?
 
 I'm open to conversations about roles at the intersection of **agentic AI**, **platform engineering**, and **autonomous systems**.
 
