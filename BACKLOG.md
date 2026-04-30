@@ -34,6 +34,7 @@ All items in this backlog must be prioritized strictly according to the followin
 
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
+| B-059 | Scheduled Email Duplicate Sends | P0 | Architect | Archived |
 
 ### **Features**
 | ID | Title | Priority | Specialist | Status |
@@ -56,8 +57,12 @@ All items in this backlog must be prioritized strictly according to the followin
 
 | Priority | Count | Items |
 |:---:|:---|:---|
-| **P1** | 3 | C-211, F-131, F-132 |
+| **P0** | 1 | B-059 |
+| **P1** | 2 | C-211, F-131 |
 | **P2** | 4 | F-128, F-129, F-130, F-133 |
 | **P3** | 0 | - |
+
+**Status Overview**: 7 active items.
+P3** | 0 | - |
 
 **Status Overview**: 7 active items.
