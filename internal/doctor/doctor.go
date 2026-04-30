@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/resilience"
@@ -120,6 +121,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkGmailToken(secretsRoot), false),
 		r(checkJobsDir(cfg), false),
 		r(checkBrowser(), false),
+		r(checkAuthorization(cfg), false),
 	}
 
 	// Only probe Gemini live if Gemini is actually configured.
@@ -466,4 +468,46 @@ func findBrowser() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func checkAuthorization(cfg *config.Config) Result {
+	mgr, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
+	if err != nil {
+		return Result{
+			Name:   "authorization",
+			OK:     false,
+			Detail: fmt.Sprintf("failed to open checkpoint database: %v", err),
+		}
+	}
+	store, err := agentctx.NewPairingStore(mgr.DB())
+	if err != nil {
+		return Result{
+			Name:   "authorization",
+			OK:     false,
+			Detail: fmt.Sprintf("failed to initialize pairing store: %v", err),
+		}
+	}
+
+	count, err := store.CountAuthorized()
+	if err != nil {
+		return Result{
+			Name:   "authorization",
+			OK:     false,
+			Detail: fmt.Sprintf("failed to query authorized users: %v", err),
+		}
+	}
+
+	if count == 0 {
+		return Result{
+			Name:   "authorization",
+			OK:     false,
+			Detail: "no users authorized — bot will drop all messages; run 'gobot authorize <chat-id>'",
+		}
+	}
+
+	return Result{
+		Name:   "authorization",
+		OK:     true,
+		Detail: fmt.Sprintf("%d user(s) authorized", count),
+	}
 }

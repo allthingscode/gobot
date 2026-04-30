@@ -58,6 +58,19 @@ func (s *PairingStore) IsAuthorized(chatID int64) (bool, error) {
 	return count > 0, nil
 }
 
+// CountAuthorized returns the number of authorized users in the database.
+func (s *PairingStore) CountAuthorized() (int, error) {
+	var count int
+	err := s.db.QueryRowContext(
+		stdctx.Background(),
+		`SELECT COUNT(*) FROM authorized_users`,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count authorized users: %w", err)
+	}
+	return count, nil
+}
+
 // GetOrCreateCode returns a non-expired pairing code for chatID, creating one if needed.
 func (s *PairingStore) GetOrCreateCode(chatID int64) (string, error) {
 	var code string

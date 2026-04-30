@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
 // cfgWithRoot returns a Config with StorageRoot set to root.
@@ -361,6 +362,7 @@ func assertGoogleOAuthSecretsResult(t *testing.T, createFile, expectedOK bool, d
 
 func TestGetResults_GoogleOAuthSecretsIsNonCritical(t *testing.T) {
 	t.Parallel()
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
 
 	results := GetResults(cfgWithRoot(t.TempDir()), nil)
 	found := false
@@ -487,6 +489,7 @@ func TestCheckJobsDir_WithJobs(t *testing.T) {
 // ── Run ───────────────────────────────────────────────────────────────────────
 
 func TestRun_AllChecksPass(t *testing.T) {
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
 	root := t.TempDir()
 	// Setup required subdirs for doctor
 	if err := os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755); err != nil {
@@ -515,6 +518,7 @@ func TestRun_AllChecksPass(t *testing.T) {
 }
 
 func TestRun_FailsOnBadStorageRoot(t *testing.T) {
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
 	t.Setenv("GEMINI_API_KEY", "test-key-for-run-1234")
 
 	cfg := cfgWithRoot(filepath.Join(t.TempDir(), "nonexistent"))
@@ -589,3 +593,46 @@ func TestCheckBrowser_NotFound(t *testing.T) {
 		t.Errorf("expected detail to mention not found, got: %s", r.Detail)
 	}
 }
+
+// ── checkAuthorization ───────────────────────────────────────────────────────
+
+//nolint:paralleltest // agentctx caches CheckpointManager instances by path; t.TempDir is unique but ResetCheckpointManagerInstancesForTest is global
+func TestCheckAuthorization(t *testing.T) {
+	// This test doesn't use t.Parallel() because agentctx caches CheckpointManager instances by path.
+	// t.TempDir() gives us unique paths, but let's be safe.
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
+
+	root := t.TempDir()
+	cfg := cfgWithRoot(root)
+
+	// Case 1: Database initialized but no users
+	r := checkAuthorization(cfg)
+	if r.OK {
+		t.Error("expected OK=false for zero authorized users")
+	}
+	if !strings.Contains(r.Detail, "no users authorized") {
+		t.Errorf("expected detail to mention no users authorized, got: %s", r.Detail)
+	}
+
+	// Case 2: One user authorized
+	mgr, err := agentctx.GetCheckpointManager(root)
+	if err != nil {
+		t.Fatalf("failed to get checkpoint manager: %v", err)
+	}
+	store, err := agentctx.NewPairingStore(mgr.DB())
+	if err != nil {
+		t.Fatalf("failed to create pairing store: %v", err)
+	}
+	if err := store.AuthorizeByChatID(12345, "test"); err != nil {
+		t.Fatalf("failed to authorize user: %v", err)
+	}
+
+	r = checkAuthorization(cfg)
+	if !r.OK {
+		t.Errorf("expected OK=true for 1 authorized user, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "1 user(s) authorized") {
+		t.Errorf("expected detail to mention 1 user authorized, got: %s", r.Detail)
+	}
+}
+
