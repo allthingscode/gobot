@@ -159,7 +159,7 @@ gobot's design principle is **stability for one user over scale for many**. Ever
    > **Why both?** `allowFrom` in config is the network-level whitelist (messages from unlisted IDs are dropped before any processing). `authorize` registers the user in the database for conversation history and per-user state. Both are required.
 
 5. **Google OAuth** *(skip if not using Gmail/Calendar/Tasks)*:
-   - In [Google Cloud Console](https://console.cloud.google.com/), create an OAuth2 "Desktop app" credential and enable the Gmail, Calendar, and Tasks APIs.
+   - Follow the [Google Cloud Setup Guide](docs/google-setup.md) to create an OAuth2 "Desktop app" credential and enable the required APIs.
    - Save the downloaded JSON file to `~/gobot_data/secrets/client_secrets.json` (adjust if you changed `storage_root`).
    - Run:
      ```bash

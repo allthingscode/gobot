@@ -38,10 +38,9 @@ All items in this backlog must be prioritized strictly according to the followin
 ### **Features**
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
-| F-128 | Comprehensive Google Cloud Setup Guide | P2 | Researcher | Planning |
+| F-128 | Comprehensive Google Cloud Setup Guide | P2 | Researcher | Ready |
 | F-129 | Security & Secrets Management Guide | P2 | Researcher | Planning |
 | F-130 | Deployment & Persistence Guide | P2 | Researcher | Planning |
-| F-133 | Automatic Workspace Initialization | P2 | Architect | Production |
 
 ### **Chores**
 | ID | Title | Priority | Specialist | Status |
@@ -55,7 +54,7 @@ All items in this backlog must be prioritized strictly according to the followin
 |:---:|:---|:---|
 | **P0** | 0 | - |
 | **P1** | 0 | - |
-| **P2** | 4 | F-128, F-129, F-130, F-133 |
+| **P2** | 3 | F-128, F-129, F-130 |
 | **P3** | 0 | - |
 
-**Status Overview**: 4 active items.
+**Status Overview**: 3 active items.

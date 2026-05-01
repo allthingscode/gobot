@@ -120,6 +120,8 @@ Settings for the `chromedp`-based headless browser tools.
 
 ### 5. Strategic Edition (`strategic_edition`)
 
+Settings for advanced agent features, including Google Workspace integration. For instructions on setting up Google credentials, see the [Google Cloud Setup Guide](google-setup.md).
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `user_email` | string | Primary email address for Google Workspace tools. Required to enable Gmail and Calendar tools. |
