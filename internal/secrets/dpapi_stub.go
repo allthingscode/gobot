@@ -68,11 +68,11 @@ func unprotect(ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// keyFilePath returns the path to the 32-byte AES-256 encryption key file.
+// KeyFilePath returns the path to the 32-byte AES-256 encryption key file.
 // The GOBOT_ENCRYPTION_KEY_FILE environment variable overrides the default
 // (~/.config/gobot/encryption.key on Linux; ~/Library/Application Support on macOS)
 // so that tests and CI can use an isolated temporary path.
-func keyFilePath() string {
+func KeyFilePath() string {
 	if v := os.Getenv("GOBOT_ENCRYPTION_KEY_FILE"); v != "" {
 		return v
 	}
@@ -87,7 +87,7 @@ func keyFilePath() string {
 // loadOrCreateKey reads the 32-byte AES-256 key from disk, generating and
 // persisting a fresh key if the file does not yet exist.
 func loadOrCreateKey() ([]byte, error) {
-	path := keyFilePath()
+	path := KeyFilePath()
 	data, err := os.ReadFile(path)
 	if err == nil {
 		if len(data) != 32 {

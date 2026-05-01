@@ -48,3 +48,8 @@ func unprotect(ciphertext []byte) ([]byte, error) {
 	copy(result, unsafe.Slice(dataOut.Data, dataOut.Size))
 	return result, nil
 }
+
+// KeyFilePath returns an empty string on Windows as it uses DPAPI instead of a key file.
+func KeyFilePath() string {
+	return ""
+}

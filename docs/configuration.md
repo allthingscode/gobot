@@ -66,7 +66,7 @@ Controls default model parameters and specialist overrides.
 
 ### 3. Providers (`providers`)
 
-Credentials and endpoints for LLM providers. All API keys fall back to the DPAPI secrets store, then to environment variables.
+Credentials and endpoints for LLM providers. All API keys fall back to the DPAPI secrets store, then to environment variables. For detailed information on managing sensitive credentials, see the [Security & Secrets](security.md) documentation.
 
 | Section | Field | Description | Env fallback |
 |---------|-------|-------------|--------------|

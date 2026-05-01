@@ -15,6 +15,7 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/resilience"
+	"github.com/allthingscode/gobot/internal/secrets"
 )
 
 // Probes holds optional live connectivity probe functions.
@@ -117,6 +118,9 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 	checks := []Result{ //nolint:prealloc // capacity depends on resResults and conResults which require iteration to compute
 		r(checkStorageRoot(cfg), true),
 		r(checkWorkspace(cfg), true),
+		r(checkSecurityStore(cfg), true),
+		r(checkPlaintextSecrets(cfg), false),
+		r(checkHITL(cfg), false),
 		r(checkLogs(cfg), false),
 		r(checkAPIKey(cfg), true),
 		r(checkTelegram(cfg.TelegramToken(), p.ProbeTelegram), false),
@@ -523,4 +527,82 @@ func checkAuthorization(cfg *config.Config) Result {
 		OK:     true,
 		Detail: fmt.Sprintf("%d user(s) authorized", count),
 	}
+}
+
+func checkSecurityStore(cfg *config.Config) Result {
+	ws := filepath.Join(cfg.StorageRoot(), "workspace")
+	secretsFile := filepath.Join(ws, "dpapi_secrets.json")
+
+	_, err := os.Stat(secretsFile)
+	exists := err == nil
+
+	keyPath := secrets.KeyFilePath()
+	if keyPath == "" { // Windows
+		if !exists {
+			return Result{Name: "security store", OK: true, Detail: "no vault found (optional)"}
+		}
+		return Result{Name: "security store", OK: true, Detail: "using Windows DPAPI"}
+	}
+
+	// Linux/macOS
+	keyInfo, keyErr := os.Stat(keyPath)
+	keyExists := keyErr == nil
+
+	if exists && !keyExists {
+		return Result{Name: "security store", OK: false, Detail: fmt.Sprintf("vault exists but encryption key is missing: %s", keyPath)}
+	}
+
+	if !exists && !keyExists {
+		return Result{Name: "security store", OK: true, Detail: "no vault or key found (optional)"}
+	}
+
+	if keyExists {
+		mode := keyInfo.Mode().Perm()
+		if mode != 0o600 {
+			return Result{Name: "security store", OK: false, Detail: fmt.Sprintf("insecure key permissions: %s (got %o, want 0600)", keyPath, mode)}
+		}
+		return Result{Name: "security store", OK: true, Detail: "AES-256 vault active"}
+	}
+
+	return Result{Name: "security store", OK: true, Detail: "optional"}
+}
+
+func checkPlaintextSecrets(cfg *config.Config) Result {
+	var plaintext []string
+	if cfg.Providers.Gemini.APIKey != "" {
+		plaintext = append(plaintext, "Gemini")
+	}
+	if cfg.Channels.Telegram.Token != "" {
+		plaintext = append(plaintext, "Telegram")
+	}
+	if cfg.Providers.Anthropic.APIKey != "" {
+		plaintext = append(plaintext, "Anthropic")
+	}
+	if cfg.Providers.OpenAI.APIKey != "" {
+		plaintext = append(plaintext, "OpenAI")
+	}
+	if cfg.Providers.OpenRouter.APIKey != "" {
+		plaintext = append(plaintext, "OpenRouter")
+	}
+
+	if len(plaintext) > 0 {
+		return Result{
+			Name: "plaintext secrets",
+			OK:   false,
+			Detail: fmt.Sprintf("keys for %s found in config.json; move to secure vault with 'gobot secrets set'",
+				strings.Join(plaintext, ", ")),
+		}
+	}
+	return Result{Name: "plaintext secrets", OK: true, Detail: "all keys stored securely (or missing)"}
+}
+
+func checkHITL(cfg *config.Config) Result {
+	if !cfg.Channels.Telegram.HITL {
+		return Result{
+			Name:   "human-in-the-loop",
+			OK:     false,
+			Detail: "HITL is disabled; high-risk tools will run without approval",
+		}
+	}
+	return Result{Name: "human-in-the-loop", OK: true, Detail: "enabled for Telegram"}
 }

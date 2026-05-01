@@ -190,6 +190,7 @@ gobot's design principle is **stability for one user over scale for many**. Ever
 ## Documentation
 
 - [Architecture](docs/architecture.md) — data flow, package responsibilities, key design decisions
+- [Security & Secrets](docs/security.md) — philosophy, secrets management, and encryption model
 - [Configuration Reference](docs/configuration.md) — all config fields with defaults and examples
 - [Locking Strategy](docs/locking-strategy.md) — session-scoped locking design and rationale
 
