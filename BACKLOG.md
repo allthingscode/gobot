@@ -8,7 +8,7 @@ Master index for the Go-native Strategic Edition agent. This backlog is the sing
 ## **Prioritization Principles**
 
 All items in this backlog must be prioritized strictly according to the following principles:
-1. **Increase Stability:** Fixes for crashes, silent failures, and core reliability issues (e.g., config validation, resource leaks) always take precedence over new features.
+1. **Increase Stability:** Fixes for crashes, silent failures, and reliability issues (e.g., config validation, resource leaks) always take precedence over new features.
 2. **Decrease Fragility:** Refactoring brittle systems (e.g., error handling, resource cleanup) and expanding test coverage are prioritized above cosmetic or QoL improvements.
 3. **Avoid New Bugs:** Implementation plans must include defensive coding practices and adequate observability (logs, metrics) to prevent the introduction of new regressions.
 
@@ -38,8 +38,6 @@ All items in this backlog must be prioritized strictly according to the followin
 ### **Features**
 | ID | Title | Priority | Specialist | Status |
 |---|---|---|---|---|
-| F-128 | Comprehensive Google Cloud Setup Guide | P2 | Researcher | Ready |
-| F-129 | Security & Secrets Management Guide | P2 | Researcher | Planning |
 | F-130 | Deployment & Persistence Guide | P2 | Researcher | Planning |
 
 ### **Chores**
@@ -54,7 +52,7 @@ All items in this backlog must be prioritized strictly according to the followin
 |:---:|:---|:---|
 | **P0** | 0 | - |
 | **P1** | 0 | - |
-| **P2** | 3 | F-128, F-129, F-130 |
+| **P2** | 1 | F-130 |
 | **P3** | 0 | - |
 
-**Status Overview**: 3 active items.
+**Status Overview**: 1 active items.
