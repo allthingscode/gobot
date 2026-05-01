@@ -54,7 +54,7 @@ You must enable the specific APIs for each service you want Gobot to use:
 1.  Rename the downloaded JSON file to `client_secrets.json`.
 2.  Move it to your Gobot secrets directory. By default, this is:
     *   **Windows**: `%USERPROFILE%\gobot_data\secrets\client_secrets.json`
-    *   **Linux/macOS**: `~/gobot_data/secrets\client_secrets.json`
+    *   **Linux/macOS**: `~/gobot_data/secrets/client_secrets.json`
 3.  Run the re-authorization command:
     ```bash
     # Windows:
