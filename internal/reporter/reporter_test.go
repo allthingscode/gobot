@@ -294,6 +294,45 @@ func TestStripHTML(t *testing.T) {
 	}
 }
 
+func TestCondenseSources(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "rewrites full URL to hostname link",
+			input: `<span class="source-link">[Sources: https://www.wsj.com/articles/some-long-slug]</span>`,
+			want:  `<span class="source-link">Sources: <a href="https://www.wsj.com/articles/some-long-slug">www.wsj.com</a></span>`,
+		},
+		{
+			name:  "multiple citations rewritten independently",
+			input: `[Sources: https://a.com/x] and [Sources: https://b.org/y]`,
+			want:  `Sources: <a href="https://a.com/x">a.com</a> and Sources: <a href="https://b.org/y">b.org</a>`,
+		},
+		{
+			name:  "no sources tag left unchanged",
+			input: `<p>No citations here</p>`,
+			want:  `<p>No citations here</p>`,
+		},
+		{
+			name:  "URL with query params preserved in href",
+			input: `[Sources: https://example.com/path?q=1&lang=en]`,
+			want:  `Sources: <a href="https://example.com/path?q=1&amp;lang=en">example.com</a>`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := condenseSources(tc.input)
+			if got != tc.want {
+				t.Errorf("condenseSources(%q)\n got: %q\nwant: %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTemplateManager_CustomDir(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()

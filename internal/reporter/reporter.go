@@ -3,6 +3,8 @@ package reporter
 import (
 	_ "embed"
 	"fmt"
+	"html"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -97,6 +99,9 @@ func (m *TemplateManager) Wrap(body string) string {
 		return body
 	}
 
+	body = condenseSources(body)
+	lowerBody = strings.ToLower(body)
+
 	style := "<style>" + m.css + "</style>"
 
 	if !strings.Contains(lowerBody, "<html") {
@@ -188,11 +193,30 @@ func WrapHTML(body string) string {
 // htmlTagRe matches any HTML tag for stripping purposes.
 var htmlTagRe = regexp.MustCompile("<[^>]+>")
 
+// sourceRe matches [Sources: URL] citations produced by the briefing agent.
+var sourceRe = regexp.MustCompile(`\[Sources:\s*(https?://[^\]]+)\]`)
+
+// condenseSources rewrites inline [Sources: URL] citations into clickable anchor
+// tags whose display text is just the hostname, keeping the full URL in href.
+func condenseSources(body string) string {
+	return sourceRe.ReplaceAllStringFunc(body, func(match string) string {
+		sub := sourceRe.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		rawURL := strings.TrimSpace(sub[1])
+		u, err := url.Parse(rawURL)
+		if err != nil || u.Host == "" {
+			return match
+		}
+		return `Sources: <a href="` + html.EscapeString(rawURL) + `">` + u.Hostname() + `</a>`
+	})
+}
+
 // StripHTML removes HTML tags from s to produce a plain-text fallback.
 // Block-level closing tags are replaced with newlines for readability.
 // Used to generate the text/plain part of multipart emails.
-func StripHTML(html string) string {
-	s := html
+func StripHTML(s string) string {
 	for _, tag := range []string{"</p>", "</div>", "</h1>", "</h2>", "</h3>", "<br>", "<br/>", "<br />"} {
 		s = strings.ReplaceAll(s, tag, "\n")
 	}
