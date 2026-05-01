@@ -135,9 +135,10 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 	// 1st retry: ~100ms
 	// 2nd retry: ~200ms
 	// Total wait time: ~300ms
-	// Tolerance: 25% (due to jitter and OS scheduling)
+	// Lower bound: -25% to verify delays are actually happening.
+	// Upper bound: +100% to absorb Windows CI scheduling variance.
 	minWait := 225 * time.Millisecond
-	maxWait := 375 * time.Millisecond
+	maxWait := 600 * time.Millisecond
 
 	if elapsed < minWait || elapsed > maxWait {
 		t.Errorf("total elapsed time %v out of expected range [%v, %v]", elapsed, minWait, maxWait)

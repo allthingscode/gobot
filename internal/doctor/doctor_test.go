@@ -633,7 +633,6 @@ func TestCheckAuthorization(t *testing.T) {
 // ── checkSecurityStore ────────────────────────────────────────────────────────
 
 func TestCheckSecurityStore(t *testing.T) {
-	t.Parallel()
 	root := t.TempDir()
 	cfg := cfgWithRoot(root)
 
@@ -643,7 +642,14 @@ func TestCheckSecurityStore(t *testing.T) {
 		t.Errorf("expected OK=true for no vault, got: %s", r.Detail)
 	}
 
-	// Case 2: Vault exists
+	// Case 2: Vault exists — point key path to a temp file so Linux/macOS CI
+	// doesn't look at the real ~/.config/gobot/encryption.key.
+	keyFile := filepath.Join(root, "encryption.key")
+	if err := os.WriteFile(keyFile, make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", keyFile)
+
 	ws := filepath.Join(root, "workspace")
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
