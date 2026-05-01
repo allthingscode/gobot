@@ -92,6 +92,16 @@ func runInit(root string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	if err := ensureWorkspace(cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("Initialized gobot workspace at %s\n", cfg.StorageRoot())
+	return nil
+}
+
+// ensureWorkspace creates the required workspace directories if they are missing.
+func ensureWorkspace(cfg *config.Config) error {
 	if err := os.MkdirAll(cfg.StorageRoot(), 0o755); err != nil {
 		return fmt.Errorf("mkdir storage root: %w", err)
 	}
@@ -110,8 +120,18 @@ func runInit(root string) error {
 		fmt.Printf("Created default config file at %s\n", configPath)
 	}
 
-	fmt.Printf("Initialized gobot workspace at %s\n", cfg.StorageRoot())
 	return nil
+}
+
+// isWorkspaceIncomplete returns true if any of the required workspace directories are missing.
+func isWorkspaceIncomplete(cfg *config.Config) bool {
+	dirs := []string{"sessions", "secrets", "memory", "logs"}
+	for _, d := range dirs {
+		if _, err := os.Stat(cfg.WorkspacePath("", d)); os.IsNotExist(err) {
+			return true
+		}
+	}
+	return false
 }
 
 func cmdDoctor() *cobra.Command {
@@ -141,6 +161,14 @@ func cmdRun() *cobra.Command {
 			if webAddr != "" {
 				cfg.Gateway.WebAddr = webAddr
 			}
+
+			if isWorkspaceIncomplete(cfg) {
+				fmt.Printf("Workspace missing or incomplete at %s. Initializing...\n", cfg.StorageRoot())
+				if err := ensureWorkspace(cfg); err != nil {
+					return fmt.Errorf("auto-init: %w", err)
+				}
+			}
+
 			return app.RunAgent(cmd.Context(), cfg)
 		},
 	}
