@@ -584,6 +584,9 @@ func checkPlaintextSecrets(cfg *config.Config) Result {
 	if cfg.Providers.OpenRouter.APIKey != "" {
 		plaintext = append(plaintext, "OpenRouter")
 	}
+	if cfg.Providers.Google.APIKey != "" {
+		plaintext = append(plaintext, "Google")
+	}
 
 	if len(plaintext) > 0 {
 		return Result{

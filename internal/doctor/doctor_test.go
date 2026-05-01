@@ -630,3 +630,131 @@ func TestCheckAuthorization(t *testing.T) {
 	}
 }
 
+// ── checkSecurityStore ────────────────────────────────────────────────────────
+
+func TestCheckSecurityStore(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cfg := cfgWithRoot(root)
+
+	// Case 1: No vault
+	r := checkSecurityStore(cfg)
+	if !r.OK {
+		t.Errorf("expected OK=true for no vault, got: %s", r.Detail)
+	}
+
+	// Case 2: Vault exists
+	ws := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "dpapi_secrets.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r = checkSecurityStore(cfg)
+	if !r.OK {
+		t.Errorf("expected OK=true for vault exists, got: %s", r.Detail)
+	}
+}
+
+// ── checkPlaintextSecrets ─────────────────────────────────────────────────────
+
+func TestCheckPlaintextSecrets(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		cfg      *config.Config
+		wantOK   bool
+		contains string
+	}{
+		{
+			name:   "all secure",
+			cfg:    &config.Config{},
+			wantOK: true,
+		},
+		{
+			name: "gemini plaintext",
+			cfg: &config.Config{
+				Providers: config.ProvidersConfig{
+					Gemini: config.GeminiConfig{APIKey: "sk-123"},
+				},
+			},
+			wantOK:   false,
+			contains: "Gemini",
+		},
+		{
+			name: "multiple plaintext",
+			cfg: &config.Config{
+				Providers: config.ProvidersConfig{
+					Gemini:     config.GeminiConfig{APIKey: "sk-123"},
+					Google:     config.GoogleConfig{APIKey: "google-123"},
+					Anthropic:  config.AnthropicConfig{APIKey: "ant-123"},
+					OpenAI:     config.OpenAIConfig{APIKey: "oa-123"},
+					OpenRouter: config.OpenAIConfig{APIKey: "or-123"},
+				},
+				Channels: config.ChannelsConfig{
+					Telegram: config.TelegramConfig{Token: "bot-token"},
+				},
+			},
+			wantOK:   false,
+			contains: "Gemini, Telegram, Anthropic, OpenAI, OpenRouter, Google",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := checkPlaintextSecrets(tt.cfg)
+			if r.OK != tt.wantOK {
+				t.Errorf("got OK=%v, want %v", r.OK, tt.wantOK)
+			}
+			if tt.contains != "" && !strings.Contains(r.Detail, tt.contains) {
+				t.Errorf("expected detail to contain %q, got: %s", tt.contains, r.Detail)
+			}
+		})
+	}
+}
+
+// ── checkHITL ─────────────────────────────────────────────────────────────────
+
+func TestCheckHITL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		cfg    *config.Config
+		wantOK bool
+	}{
+		{
+			name: "enabled",
+			cfg: &config.Config{
+				Channels: config.ChannelsConfig{
+					Telegram: config.TelegramConfig{HITL: true},
+				},
+			},
+			wantOK: true,
+		},
+		{
+			name: "disabled",
+			cfg: &config.Config{
+				Channels: config.ChannelsConfig{
+					Telegram: config.TelegramConfig{HITL: false},
+				},
+			},
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := checkHITL(tt.cfg)
+			if r.OK != tt.wantOK {
+				t.Errorf("got OK=%v, want %v", r.OK, tt.wantOK)
+			}
+		})
+	}
+}
+
