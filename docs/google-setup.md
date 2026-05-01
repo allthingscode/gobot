@@ -45,6 +45,7 @@ You must enable the specific APIs for each service you want Gobot to use:
 1.  Go to **APIs & Services > Credentials**.
 2.  Click **Create Credentials > OAuth client ID**.
 3.  Select **Application type**: **Desktop app**.
+    *   **Note**: "Desktop app" is the only supported application type for Gobot. Do not select "Web application" or other types.
 4.  Name it `Gobot Desktop` and click **Create**.
 5.  A dialog will appear showing your Client ID and Client Secret. Click **Download JSON** to save the file.
 
@@ -53,7 +54,7 @@ You must enable the specific APIs for each service you want Gobot to use:
 1.  Rename the downloaded JSON file to `client_secrets.json`.
 2.  Move it to your Gobot secrets directory. By default, this is:
     *   **Windows**: `%USERPROFILE%\gobot_data\secrets\client_secrets.json`
-    *   **Linux/macOS**: `~/gobot_data/secrets/client_secrets.json`
+    *   **Linux/macOS**: `~/gobot_data/secrets\client_secrets.json`
 3.  Run the re-authorization command:
     ```bash
     # Windows:
@@ -61,16 +62,33 @@ You must enable the specific APIs for each service you want Gobot to use:
     # Linux/macOS:
     ./bin/gobot reauth
     ```
-4.  Follow the link in your terminal to authorize the app. You may see a "Google hasn't verified this app" warning; click **Advanced** and then **Go to Gobot (unsafe)** to proceed.
+4.  Follow the link in your terminal to authorize the app.
 
-## Important: Internal vs. External Apps
+## Troubleshooting & FAQ
 
-### Internal (Workspace)
-Recommended for Google Workspace users. Your credentials will remain valid indefinitely unless you manually revoke them.
+### "Google hasn't verified this app" Warning
+When you first authorize Gobot, you will likely see a warning screen from Google. Since you are running a private instance, this is expected.
+1. Click **Advanced**.
+2. Click **Go to Gobot (unsafe)**.
+3. Grant the requested permissions.
 
-### External (Testing)
-If you are using a personal account and the app is in "Testing" mode (unverified):
-*   **7-Day Token Expiration**: Your refresh token will expire every **7 days**. You will need to run `gobot reauth` weekly to maintain the connection.
-*   **Test User Limit**: Only the users you explicitly add to the "Test Users" list on the consent screen can authorize the app.
+### Why no Redirect URIs?
+Gobot uses a "loopback flow" for authentication. When you select **Desktop app** in the Google Cloud Console, Google automatically allows redirects to `http://localhost`. You do not need to manually configure any redirect URIs in the console.
 
-To avoid the 7-day expiration, you would need to publish the app and go through Google's verification process, which is generally not worth the effort for a private self-hosted assistant.
+### 7-Day Token Expiration (External/Testing Mode)
+If you are using a personal `@gmail.com` account (External User Type) and your app is in **Testing** mode:
+*   **Expiration**: Your refresh token will expire every **7 days**. 
+*   **Resolution**: You will need to run `gobot reauth` weekly to maintain the connection.
+*   **Alternative**: If you have a Google Workspace organization, use the **Internal** user type to avoid this expiration.
+
+### Refresh Token Revocation
+If you need to force a full re-authorization, delete the `token.json` file in your `gobot_data` directory before running `gobot reauth`.
+
+## Internal vs. External Apps Summary
+
+| Feature | Internal (Workspace) | External (Testing) |
+| :--- | :--- | :--- |
+| **User Base** | Organization users only | Any Google account (added as test user) |
+| **Verification** | Not required | Not required (for up to 100 test users) |
+| **Token Life** | Indefinite (until revoked) | **7 Days** |
+| **Setup Complexity** | Low | Low |
