@@ -190,6 +190,7 @@ gobot's design principle is **stability for one user over scale for many**. Ever
 ## Documentation
 
 - [Architecture](docs/architecture.md) — data flow, package responsibilities, key design decisions
+- [Deployment & Persistence](docs/deployment.md) — guide for background service setup on Linux and Windows
 - [Google Cloud Setup Guide](docs/google-setup.md) — step-by-step instructions for Gmail, Calendar, and Tasks integration
 - [Security & Secrets](docs/security.md) — philosophy, secrets management, and encryption model
 - [Configuration Reference](docs/configuration.md) — all config fields with defaults and examples
