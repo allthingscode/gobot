@@ -4,10 +4,10 @@ import (
 	_ "embed"
 	"fmt"
 	"html"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,21 +86,12 @@ func NewTemplateManagerWithCSS(dir, customCSSPath string) *TemplateManager {
 
 // Wrap inspects the body and wraps it with CSS and HTML if necessary.
 func (m *TemplateManager) Wrap(body string) string {
-	lowerBody := strings.ToLower(body)
-	htmlTags := []string{"<html", "<body>", "<h1", "<h2", "<h3", "<p>", "<div", "<ul>", "<ol>", "<li>", "<strong>", "<em>", "<span"}
-	isHTML := false
-	for _, tag := range htmlTags {
-		if strings.Contains(lowerBody, tag) {
-			isHTML = true
-			break
-		}
-	}
-	if !isHTML {
+	if !looksLikeHTML(body) {
 		return body
 	}
 
-	body = condenseSources(body)
-	lowerBody = strings.ToLower(body)
+	body = CompactSources(body)
+	lowerBody := strings.ToLower(body)
 
 	style := "<style>" + m.css + "</style>"
 
@@ -194,23 +185,105 @@ func WrapHTML(body string) string {
 var htmlTagRe = regexp.MustCompile("<[^>]+>")
 
 // sourceRe matches [Sources: URL] citations produced by the briefing agent.
-var sourceRe = regexp.MustCompile(`\[Sources:\s*(https?://[^\]]+)\]`)
+var sourceRe = regexp.MustCompile(`\[Sources:\s*([^\]]+)\]`)
 
-// condenseSources rewrites inline [Sources: URL] citations into clickable anchor
-// tags whose display text is just the hostname, keeping the full URL in href.
-func condenseSources(body string) string {
-	return sourceRe.ReplaceAllStringFunc(body, func(match string) string {
-		sub := sourceRe.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
+// CompactSources replaces verbose inline [Sources: URL] citations with numbered
+// references and appends a compact source appendix at the end of the message.
+func CompactSources(body string) string {
+	matches := sourceRe.FindAllStringSubmatchIndex(body, -1)
+	if len(matches) == 0 {
+		return body
+	}
+
+	isHTML := looksLikeHTML(body)
+	urlToIndex, indexToURL := make(map[string]int), make([]string, 0, 8)
+	rewritten := rewriteInlineSources(body, matches, urlToIndex, &indexToURL)
+
+	if len(indexToURL) == 0 {
+		return rewritten
+	}
+
+	return rewritten + buildSourceAppendix(indexToURL, isHTML)
+}
+
+func rewriteInlineSources(body string, matches [][]int, urlToIndex map[string]int, indexToURL *[]string) string {
+	var b strings.Builder
+	last := 0
+
+	for _, m := range matches {
+		if len(m) < 4 {
+			continue
 		}
-		rawURL := strings.TrimSpace(sub[1])
-		u, err := url.Parse(rawURL)
-		if err != nil || u.Host == "" {
-			return match
+		start, end, cStart, cEnd := m[0], m[1], m[2], m[3]
+		b.WriteString(body[last:start])
+
+		indices := sourceIndices(body[cStart:cEnd], urlToIndex, indexToURL)
+		if len(indices) == 0 {
+			b.WriteString(body[start:end])
+		} else {
+			b.WriteString("[Sources: ")
+			b.WriteString(strings.Join(indices, ", "))
+			b.WriteString("]")
 		}
-		return `Sources: <a href="` + html.EscapeString(rawURL) + `">` + u.Hostname() + `</a>`
-	})
+		last = end
+	}
+
+	b.WriteString(body[last:])
+	return b.String()
+}
+
+func sourceIndices(rawSources string, urlToIndex map[string]int, indexToURL *[]string) []string {
+	parts := strings.Split(rawSources, ",")
+	indices := make([]string, 0, len(parts))
+	for _, part := range parts {
+		u := strings.TrimSpace(part)
+		if u == "" {
+			continue
+		}
+		idx, ok := urlToIndex[u]
+		if !ok {
+			*indexToURL = append(*indexToURL, u)
+			idx = len(*indexToURL)
+			urlToIndex[u] = idx
+		}
+		indices = append(indices, strconv.Itoa(idx))
+	}
+	return indices
+}
+
+func buildSourceAppendix(indexToURL []string, isHTML bool) string {
+	var appendix strings.Builder
+	if isHTML {
+		appendix.WriteString("<h3>Sources</h3><ol>")
+		for i, u := range indexToURL {
+			appendix.WriteString(`<li><a href="`)
+			appendix.WriteString(html.EscapeString(u))
+			appendix.WriteString(`">`)
+			appendix.WriteString(strconv.Itoa(i + 1))
+			appendix.WriteString("</a></li>")
+		}
+		appendix.WriteString("</ol>")
+		return appendix.String()
+	}
+	appendix.WriteString("\n\nSources\n")
+	for i, u := range indexToURL {
+		appendix.WriteString(strconv.Itoa(i + 1))
+		appendix.WriteString(". ")
+		appendix.WriteString(u)
+		appendix.WriteString("\n")
+	}
+	return strings.TrimRight(appendix.String(), "\n")
+}
+
+func looksLikeHTML(body string) bool {
+	lowerBody := strings.ToLower(body)
+	htmlTags := []string{"<html", "<body>", "<h1", "<h2", "<h3", "<p>", "<div", "<ul>", "<ol>", "<li>", "<strong>", "<em>", "<span"}
+	for _, tag := range htmlTags {
+		if strings.Contains(lowerBody, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // StripHTML removes HTML tags from s to produce a plain-text fallback.

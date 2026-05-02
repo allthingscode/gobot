@@ -294,7 +294,7 @@ func TestStripHTML(t *testing.T) {
 	}
 }
 
-func TestCondenseSources(t *testing.T) {
+func TestCompactSources(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -302,32 +302,42 @@ func TestCondenseSources(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "rewrites full URL to hostname link",
-			input: `<span class="source-link">[Sources: https://www.wsj.com/articles/some-long-slug]</span>`,
-			want:  `<span class="source-link">Sources: <a href="https://www.wsj.com/articles/some-long-slug">www.wsj.com</a></span>`,
+			name:  "plain text single source",
+			input: `Weather update [Sources: https://www.wsj.com/articles/some-long-slug]`,
+			want:  "Weather update [Sources: 1]\n\nSources\n1. https://www.wsj.com/articles/some-long-slug",
 		},
 		{
-			name:  "multiple citations rewritten independently",
+			name:  "plain text multiple citations rewritten independently",
 			input: `[Sources: https://a.com/x] and [Sources: https://b.org/y]`,
-			want:  `Sources: <a href="https://a.com/x">a.com</a> and Sources: <a href="https://b.org/y">b.org</a>`,
+			want:  "[Sources: 1] and [Sources: 2]\n\nSources\n1. https://a.com/x\n2. https://b.org/y",
+		},
+		{
+			name:  "deduplicates repeated sources",
+			input: `[Sources: https://a.com/x] then [Sources: https://a.com/x]`,
+			want:  "[Sources: 1] then [Sources: 1]\n\nSources\n1. https://a.com/x",
+		},
+		{
+			name:  "handles comma separated citation list",
+			input: `[Sources: https://a.com/x, https://b.org/y]`,
+			want:  "[Sources: 1, 2]\n\nSources\n1. https://a.com/x\n2. https://b.org/y",
+		},
+		{
+			name:  "html appends linked source list",
+			input: `<span class="source-link">[Sources: https://www.wsj.com/articles/some-long-slug]</span>`,
+			want:  `<span class="source-link">[Sources: 1]</span><h3>Sources</h3><ol><li><a href="https://www.wsj.com/articles/some-long-slug">1</a></li></ol>`,
 		},
 		{
 			name:  "no sources tag left unchanged",
 			input: `<p>No citations here</p>`,
 			want:  `<p>No citations here</p>`,
 		},
-		{
-			name:  "URL with query params preserved in href",
-			input: `[Sources: https://example.com/path?q=1&lang=en]`,
-			want:  `Sources: <a href="https://example.com/path?q=1&amp;lang=en">example.com</a>`,
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := condenseSources(tc.input)
+			got := CompactSources(tc.input)
 			if got != tc.want {
-				t.Errorf("condenseSources(%q)\n got: %q\nwant: %q", tc.input, got, tc.want)
+				t.Errorf("CompactSources(%q)\n got: %q\nwant: %q", tc.input, got, tc.want)
 			}
 		})
 	}
