@@ -103,11 +103,11 @@ func TestDispatchHandler_Functional(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // mutates global logger and writes to temp log path
 func TestSetupLogging_Minimal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping file logging test on Windows due to file lock")
 	}
-	t.Parallel()
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = tempDir
