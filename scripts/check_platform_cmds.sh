@@ -15,22 +15,24 @@ set -e
 FAILED_MARKER=$(mktemp)
 rm -f "$FAILED_MARKER"
 
-# Patterns that indicate Windows-specific commands
-PATTERNS='("cmd"|cmd\.exe|cmd /c|cmd /C|powershell|powershell\.exe|\.bat"|\.cmd"|\.exe")'
+# Patterns that indicate platform-specific commands
+# Windows: cmd, powershell, .bat, .cmd, .exe
+# Linux/macOS: bash, zsh, /bin/, /usr/bin/
+PATTERNS='("cmd"|cmd\.exe|cmd /c|cmd /C|powershell|powershell\.exe|\.bat"|\.cmd"|\.exe"|"bash"|"zsh"|"/bin/|"/usr/bin/)'
 
 # Find all test files, excluding vendor/ and isolated worktrees
 files=$(find . -name "*_test.go" -not -path "./vendor/*" -not -path "./.agent-workspaces/*")
 
 for file in $files; do
-    # 1. Skip files that are explicitly tagged for windows only
-    if head -n 20 "$file" | grep -qE "(//go:build windows|// \+build windows)"; then
+    # 1. Skip files that are explicitly tagged for a specific OS only
+    if head -n 20 "$file" | grep -qE "(//go:build (windows|linux|darwin|unix|!windows|!linux|!darwin|!unix)|// \+build (windows|linux|darwin|unix|!windows|!linux|!darwin|!unix))"; then
         continue
     fi
 
     # 2. Search for patterns and get line numbers.
     # We filter out known false positives:
     # - filepath.Join(..., "cmd") which refers to the cmd/ directory
-    # - http/https URLs containing powershell
+    # - http/https URLs containing the patterns
     # - "cmd": as a map key
     # - "command": "cmd" as a map entry (often mocked)
     # - cmdExecutor = "cmd" or similar constant definitions
@@ -56,7 +58,7 @@ for file in $files; do
                 trimmed_content=$(echo "$content" | sed 's/^[[:space:]]*//')
                 echo "  Match: $trimmed_content"
                 echo ""
-                echo "  This command only works on Windows. Wrap it in a runtime.GOOS guard:"
+                echo "  This command may be platform-specific. Wrap it in a runtime.GOOS guard or use a cross-platform abstraction:"
                 echo ""
                 echo "    if runtime.GOOS == \"windows\" {"
                 echo "        cmd, args = \"cmd\", []string{\"/c\", \"echo hello\"}"
