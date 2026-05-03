@@ -112,7 +112,6 @@ func NewService(ctx context.Context, secretsRoot string) (*Service, error) {
 
 // Send delivers an email via the Gmail API.
 func (s *Service) Send(ctx context.Context, to, subject, body string) error {
-	body = reporter.CompactSources(body)
 	wrapped := reporter.WrapHTML(body)
 	isHTML := wrapped != body
 	const multipartBoundary = "gobot_alt_20260328"

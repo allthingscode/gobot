@@ -255,11 +255,11 @@ func buildSourceAppendix(indexToURL []string, isHTML bool) string {
 	var appendix strings.Builder
 	if isHTML {
 		appendix.WriteString("<h3>Sources</h3><ol>")
-		for i, u := range indexToURL {
+		for _, u := range indexToURL {
 			appendix.WriteString(`<li><a href="`)
 			appendix.WriteString(html.EscapeString(u))
 			appendix.WriteString(`">`)
-			appendix.WriteString(strconv.Itoa(i + 1))
+			appendix.WriteString(html.EscapeString(u))
 			appendix.WriteString("</a></li>")
 		}
 		appendix.WriteString("</ol>")

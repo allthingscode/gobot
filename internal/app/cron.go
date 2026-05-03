@@ -223,7 +223,15 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	}
 	sessionKey := "cron:" + jobID + ":" + chanEmail + ":" + recipient
 	slog.Info("dispatching cron job", "session", sessionKey, "channel", chanEmail)
-	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
+
+	msg := "[AUTONOMOUS] " + p.Message
+	if isMorningBriefingJob(p.ID) {
+		if freshCtx := loadScheduleContext(cd.secretsRoot); freshCtx != "" {
+			msg = freshCtx + "\n\n" + msg
+		}
+	}
+
+	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", msg)
 	if err != nil {
 		cd.sendEmailResponse(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
 		return fmt.Errorf("dispatch email: %w", err)

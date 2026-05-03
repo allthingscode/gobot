@@ -324,7 +324,7 @@ func TestCompactSources(t *testing.T) {
 		{
 			name:  "html appends linked source list",
 			input: `<span class="source-link">[Sources: https://www.wsj.com/articles/some-long-slug]</span>`,
-			want:  `<span class="source-link">[Sources: 1]</span><h3>Sources</h3><ol><li><a href="https://www.wsj.com/articles/some-long-slug">1</a></li></ol>`,
+			want:  `<span class="source-link">[Sources: 1]</span><h3>Sources</h3><ol><li><a href="https://www.wsj.com/articles/some-long-slug">https://www.wsj.com/articles/some-long-slug</a></li></ol>`,
 		},
 		{
 			name:  "no sources tag left unchanged",
