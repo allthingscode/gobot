@@ -128,7 +128,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkGoogleToken(secretsRoot), false),
 		r(checkGmailToken(secretsRoot), false),
 		r(checkJobsDir(cfg), false),
-		r(checkBrowser(p.LookPath), false),
+		r(checkBrowser(cfg.Browser, p.LookPath), false),
 		r(checkAuthorization(cfg), false),
 	}
 
@@ -426,20 +426,31 @@ func checkConcurrency() []Result {
 	return results
 }
 
-// checkBrowser verifies the presence of a Chrome/Chromium executable for browser-based tools.
-func checkBrowser(lookPath func(string) (string, error)) Result {
-	path, ok := findBrowser(lookPath)
-	if !ok {
+// checkBrowser verifies browser availability based on the configured mode.
+func checkBrowser(cfg config.BrowserConfig, lookPath func(string) (string, error)) Result {
+	switch {
+	case cfg.DebugPort > 0:
+		return Result{
+			Name:   "browser",
+			OK:     true,
+			Detail: fmt.Sprintf("remote debug mode (port %d) — ensure Chrome is running with --remote-debugging-port=%d", cfg.DebugPort, cfg.DebugPort),
+		}
+	case cfg.Headless:
+		path, ok := findBrowser(lookPath)
+		if !ok {
+			return Result{
+				Name:   "browser",
+				OK:     false,
+				Detail: "Chrome/Chromium not found in PATH — browser-based tools will be disabled",
+			}
+		}
+		return Result{Name: "browser", OK: true, Detail: path}
+	default:
 		return Result{
 			Name:   "browser",
 			OK:     false,
-			Detail: "Chrome/Chromium not found in PATH — browser-based tools will be disabled",
+			Detail: "browser not configured (set browser.headless=true or browser.debug_port) — browser-based tools will be disabled",
 		}
-	}
-	return Result{
-		Name:   "browser",
-		OK:     true,
-		Detail: path,
 	}
 }
 

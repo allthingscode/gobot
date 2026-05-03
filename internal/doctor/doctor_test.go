@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -566,7 +567,7 @@ func TestCheckBrowser_Found(t *testing.T) {
 		return "mock-browser-path-" + name, nil
 	}
 
-	r := checkBrowser(mockLookPath)
+	r := checkBrowser(config.BrowserConfig{Headless: true}, mockLookPath)
 	if !r.OK {
 		t.Errorf("expected OK=true when browser is found, got: %s", r.Detail)
 	}
@@ -579,12 +580,36 @@ func TestCheckBrowser_NotFound(t *testing.T) {
 		return "", errors.New("not found")
 	}
 
-	r := checkBrowser(mockLookPath)
+	r := checkBrowser(config.BrowserConfig{Headless: true}, mockLookPath)
 	if r.OK {
 		t.Error("expected OK=false when browser is not found")
 	}
 	if !strings.Contains(r.Detail, "not found") {
 		t.Errorf("expected detail to mention not found, got: %s", r.Detail)
+	}
+}
+
+func TestCheckBrowser_RemoteDebug(t *testing.T) {
+	t.Parallel()
+
+	r := checkBrowser(config.BrowserConfig{DebugPort: 9222}, exec.LookPath)
+	if !r.OK {
+		t.Errorf("expected OK=true for remote debug mode, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "9222") {
+		t.Errorf("expected detail to mention port, got: %s", r.Detail)
+	}
+}
+
+func TestCheckBrowser_NotConfigured(t *testing.T) {
+	t.Parallel()
+
+	r := checkBrowser(config.BrowserConfig{}, exec.LookPath)
+	if r.OK {
+		t.Error("expected OK=false when browser is not configured")
+	}
+	if !strings.Contains(r.Detail, "not configured") {
+		t.Errorf("expected detail to mention not configured, got: %s", r.Detail)
 	}
 }
 
