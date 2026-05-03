@@ -563,7 +563,7 @@ func TestCheckBrowser_Found(t *testing.T) {
 	t.Parallel()
 
 	mockLookPath := func(name string) (string, error) {
-		return filepath.FromSlash("/usr/bin/" + name), nil
+		return "mock-browser-path-" + name, nil
 	}
 
 	r := checkBrowser(mockLookPath)
