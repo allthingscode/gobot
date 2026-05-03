@@ -9,25 +9,69 @@ Gobot is designed to be an "always-on" assistant. To ensure it remains active ac
 
 ## Linux Deployment (systemd)
 
-On Linux, `systemd` is the recommended way to manage Gobot.
+On Linux, `systemd` is the recommended way to manage Gobot. There are two options depending on your setup.
 
-### 1. Preparation
-Ensure the `gobot` binary is built and located in a stable directory (e.g., `/opt/gobot`).
+### Option A: User Service (recommended for personal use)
+
+A user service runs under your own account without `sudo` and starts when you log in. This is the right choice for a personal assistant.
 
 ```bash
 # Build the binary
 ./scripts/build.sh
-# Move to opt
+mkdir -p ~/.local/bin
+cp bin/gobot ~/.local/bin/
+```
+
+Create `~/.config/systemd/user/gobot.service`:
+
+```ini
+[Unit]
+Description=Gobot Strategic Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/gobot run
+Restart=always
+RestartSec=5
+Environment=GOBOT_STORAGE=%h/gobot_data
+Environment=GOBOT_ENCRYPTION_KEY_FILE=%h/.config/gobot/encryption.key
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now gobot
+# View logs:
+journalctl --user -u gobot -f
+```
+
+> **Encryption key:** The key at `~/.config/gobot/encryption.key` is separate from your data directory. Back it up to a password manager or secure location — if it is lost, all stored secrets become permanently unrecoverable. See [Security & Secrets](security.md#4-criticality-of-encryptionkey-non-windows).
+
+### Option B: System Service (for servers or headless machines)
+
+A system service runs as a dedicated `gobot` user and starts at boot, independent of any login session.
+
+```bash
+# Build the binary
+./scripts/build.sh
 sudo mkdir -p /opt/gobot
 sudo cp bin/gobot /opt/gobot/
 ```
 
-### 2. Encryption Key
-On Linux, Gobot uses an AES key file for secret encryption. By default, this is stored at `~/.config/gobot/encryption.key`. 
+**Encryption key:** Generate the key as the `gobot` user and store it somewhere that user can read:
 
-**Warning:** If you run the service as a dedicated user (recommended), you must ensure the key file is accessible to that user or provided via the `GOBOT_ENCRYPTION_KEY_FILE` environment variable.
+```bash
+sudo useradd -r -s /bin/false gobot
+sudo mkdir -p /etc/gobot
+sudo -u gobot gobot init   # creates key at ~gobot/.config/gobot/encryption.key
+sudo mv ~gobot/.config/gobot/encryption.key /etc/gobot/encryption.key
+sudo chown gobot:gobot /etc/gobot/encryption.key
+sudo chmod 600 /etc/gobot/encryption.key
+```
 
-### 3. Create systemd Unit File
 Create `/etc/systemd/system/gobot.service`:
 
 ```ini
@@ -40,12 +84,9 @@ Type=simple
 User=gobot
 Group=gobot
 WorkingDirectory=/opt/gobot
-# Environment variables
 Environment=GOBOT_STORAGE=/var/lib/gobot
 Environment=GOBOT_ENCRYPTION_KEY_FILE=/etc/gobot/encryption.key
-# Start command
 ExecStart=/opt/gobot/gobot run
-# Persistence
 Restart=always
 RestartSec=5
 
@@ -53,18 +94,66 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-### 4. Enable and Start
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable gobot
 sudo systemctl start gobot
-```
-
-### 5. Monitoring
-To view real-time logs:
-```bash
+# View logs:
 journalctl -u gobot -f
 ```
+
+---
+
+## macOS Deployment (launchd)
+
+On macOS, use `launchd` to run Gobot as a login agent (starts when you log in, runs in the background).
+
+```bash
+./scripts/build.sh
+mkdir -p ~/bin
+cp bin/gobot ~/bin/
+```
+
+Create `~/Library/LaunchAgents/com.gobot.agent.plist` (replace `YOUR_USERNAME` with your macOS username):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.gobot.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOUR_USERNAME/bin/gobot</string>
+        <string>run</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>GOBOT_STORAGE</key>
+        <string>/Users/YOUR_USERNAME/gobot_data</string>
+        <key>GOBOT_ENCRYPTION_KEY_FILE</key>
+        <string>/Users/YOUR_USERNAME/.config/gobot/encryption.key</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/gobot_data/logs/gobot.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/gobot_data/logs/gobot-error.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.gobot.agent.plist
+# View logs:
+tail -f ~/gobot_data/logs/gobot.log
+```
+
+> **Encryption key:** Back up `~/.config/gobot/encryption.key` separately — losing it makes all stored secrets permanently unrecoverable.
 
 ---
 
@@ -107,6 +196,37 @@ You can use the provided script to check for errors:
 
 ---
 
+## Environment Variables & Docker
+
+All sensitive values can be supplied entirely via environment variables — no secrets in config.json is required. This is the right approach for containers and CI pipelines.
+
+| Variable | Purpose |
+|---|---|
+| `GOBOT_STORAGE` | Root data directory (databases, logs, secrets vault) |
+| `GOBOT_HOME` | Path to `config.json` (default `~/.gobot/config.json`) |
+| `GOBOT_ENCRYPTION_KEY_FILE` | Linux/macOS AES key path (default `~/.config/gobot/encryption.key`) |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `GEMINI_API_KEY` | Gemini API key |
+| `ANTHROPIC_API_KEY` | Claude/Anthropic API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
+
+**Fallback chain:** For each API key, gobot checks `config.json` first, then the encrypted secrets store, then the environment variable. Setting the environment variable is sufficient even if `config.json` has an empty value for that field.
+
+Example minimal Docker run (Linux):
+```bash
+docker run \
+  -e TELEGRAM_BOT_TOKEN=your_token \
+  -e GEMINI_API_KEY=your_key \
+  -v /host/gobot_data:/data \
+  -v /host/encryption.key:/run/secrets/encryption.key:ro \
+  -e GOBOT_STORAGE=/data \
+  -e GOBOT_ENCRYPTION_KEY_FILE=/run/secrets/encryption.key \
+  gobot run
+```
+
+---
+
 ## Updates & Maintenance
 
 ### Updating Gobot
@@ -119,6 +239,7 @@ To update a deployed instance:
 
 ### Backups
 Always backup the following:
-1. **Database:** `gobot.db` and `memory.db` (usually in `GOBOT_STORAGE`).
-2. **Secrets:** On Linux, the `encryption.key` file. On Windows, ensure you have access to the user profile used for DPAPI.
-3. **Config:** `config.json`.
+1. **Database:** `gobot.db` and `memory.db` in your `GOBOT_STORAGE` directory (default `~/gobot_data/`).
+2. **Linux/macOS encryption key:** `~/.config/gobot/encryption.key` (or `$GOBOT_ENCRYPTION_KEY_FILE` if overridden). **This file is not inside your data directory.** Back it up separately — e.g., export to a password manager. If it is lost, all secrets stored via `gobot secrets set` become permanently unrecoverable.
+3. **Windows:** The secrets vault is tied to your Windows user account via DPAPI. Ensure you retain access to that user profile; the vault cannot be decrypted on a different account or machine.
+4. **Config:** `~/.gobot/config.json` (or `$GOBOT_HOME` if overridden).

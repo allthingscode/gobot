@@ -149,6 +149,8 @@ gobot's design principle is **stability for one user over scale for many**. Ever
    ```
    `allowFrom` is the whitelist — only chat IDs listed here can interact with the bot. Use the numeric ID from [@userinfobot](https://t.me/userinfobot).
 
+   > **Two separate paths:** The config file (`~/.gobot/config.json`) and the data directory (`~/gobot_data/` by default) are in different locations. `GOBOT_HOME` overrides the config file path; `GOBOT_STORAGE` overrides the data directory. If you move one, update the other accordingly.
+
 4. **Register your Telegram user** with the bot's access control database:
    ```bash
    # Windows:
