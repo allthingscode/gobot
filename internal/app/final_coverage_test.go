@@ -38,7 +38,7 @@ func TestStartDashboard_Coverage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	StartDashboard(ctx, "127.0.0.1:0", nil, &wg)
-	
+
 	// Wait a bit to ensure it actually starts
 	time.Sleep(20 * time.Millisecond)
 	cancel()

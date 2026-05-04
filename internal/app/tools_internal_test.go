@@ -14,7 +14,7 @@ func TestBuildSpecialistModels(t *testing.T) {
 	cfg.Agents.Specialists = map[string]config.SpecialistConfig{
 		"researcher": {Model: "m1"},
 	}
-	
+
 	got := buildSpecialistModels(cfg)
 	if got["researcher"] != "m1" {
 		t.Errorf("expected researcher model m1, got %q", got["researcher"])
@@ -25,7 +25,7 @@ func TestAppendMemoryTools(t *testing.T) {
 	t.Parallel()
 	var tools []Tool
 	cfg := &config.Config{}
-	
+
 	// Case 1: all nil
 	got := appendMemoryTools(nil, nil, nil, cfg, tools, nil)
 	if len(got) != 0 {
@@ -46,7 +46,7 @@ func TestAppendMemoryTools_Full(t *testing.T) {
 
 	var tools []Tool
 	cfg := &config.Config{}
-	
+
 	got := appendMemoryTools(memStore, nil, nil, cfg, tools, nil)
 	if len(got) != 1 {
 		t.Errorf("expected 1 tool (search_memory), got %d", len(got))
@@ -59,7 +59,7 @@ func TestAppendGoogleTools_All(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Providers.Google.APIKey = "key"
 	cfg.Providers.Google.CustomCX = "cx"
-	
+
 	got := appendGoogleTools(cfg, tools, nil)
 	// web_search
 	if len(got) != 1 {
@@ -73,7 +73,7 @@ func TestAppendGmailTools_All(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.UserEmail = "test@example.com"
 	cfg.Strategic.GmailReadonly = true
-	
+
 	got := appendGmailTools(cfg, "root", tools, nil, nil)
 	// send_email, search_gmail, read_gmail
 	if len(got) != 3 {
@@ -87,7 +87,7 @@ func TestAppendGmailTools_SendOnly(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.UserEmail = "test@example.com"
 	cfg.Strategic.GmailReadonly = false
-	
+
 	got := appendGmailTools(cfg, "root", tools, nil, nil)
 	// send_email only
 	if len(got) != 1 {

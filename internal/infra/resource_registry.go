@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // Resource represents a managed resource that can be shut down.
@@ -144,7 +146,7 @@ func (r *ResourceRegistry) shutdownOne(ctx context.Context, res Resource) error 
 	case err := <-done:
 		if err != nil {
 			r.metrics.Failures++
-			slog.Error("resource shutdown failed", "name", res.Name(), "err", err)
+			slog.Error("resource shutdown failed", slog.String("name", res.Name()), logattr.Err(err))
 			return fmt.Errorf("shutdown %s: %w", res.Name(), err)
 		}
 		r.metrics.Shutdowns++
@@ -166,6 +168,7 @@ func (r *ResourceRegistry) Metrics() RegistryMetrics {
 
 // DefaultRegistry is the global registry instance.
 // Use this for process-wide resource tracking.
+//
 //nolint:gochecknoglobals // Global registry is the canonical instance for process-wide tracking
 var DefaultRegistry = NewResourceRegistry()
 

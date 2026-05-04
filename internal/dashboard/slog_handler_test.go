@@ -46,7 +46,7 @@ func TestSlogHandler_WithAttrs(t *testing.T) {
 
 	handler := NewSlogHandler(h, slog.Default().Handler())
 	handler = handler.WithAttrs([]slog.Attr{slog.String("attr1", "val1")}).(*SlogHandler)
-	
+
 	r := slog.Record{
 		Time:    time.Now(),
 		Level:   slog.LevelInfo,

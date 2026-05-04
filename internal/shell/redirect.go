@@ -43,25 +43,25 @@ func RedirectCDrive(command, workspaceRoot, projectRoot string) string {
 // redirectPath rewrites a single matched absolute path. quote is the surrounding
 // quote character (if any).
 func redirectPath(match, workspaceRoot, quote string) string {
-        // Strip quotes
-        path := match
-        if quote != "" {
-                path = strings.Trim(match, quote)
-        }
+	// Strip quotes
+	path := match
+	if quote != "" {
+		path = strings.Trim(match, quote)
+	}
 
-        // The regex guarantees path starts with [A-Z]:, so the volume is always the first 2 bytes.
-        // filepath.VolumeName returns "" on Linux; extract manually to be cross-platform.
-        if len(path) < 2 || path[1] != ':' {
-                return match // should not happen with our regex
-        }
-        inner := path[2:]
-        // Normalize separators to forward slashes for cross-platform filepath handling.
-        normalizedInner := strings.ReplaceAll(inner, "\\", "/")
+	// The regex guarantees path starts with [A-Z]:, so the volume is always the first 2 bytes.
+	// filepath.VolumeName returns "" on Linux; extract manually to be cross-platform.
+	if len(path) < 2 || path[1] != ':' {
+		return match // should not happen with our regex
+	}
+	inner := path[2:]
+	// Normalize separators to forward slashes for cross-platform filepath handling.
+	normalizedInner := strings.ReplaceAll(inner, "\\", "/")
 
-        // Build new path using filepath.Join for OS-specific separators.
-        // We trim leading separators from inner to ensure Join works correctly.
-        newPath := filepath.Join(workspaceRoot, strings.TrimLeft(normalizedInner, "/"))
+	// Build new path using filepath.Join for OS-specific separators.
+	// We trim leading separators from inner to ensure Join works correctly.
+	newPath := filepath.Join(workspaceRoot, strings.TrimLeft(normalizedInner, "/"))
 
-        // Restore quotes if they were present
-        return quote + newPath + quote
+	// Restore quotes if they were present
+	return quote + newPath + quote
 }

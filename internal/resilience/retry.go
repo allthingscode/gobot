@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"strings"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // HTTPStatusError wraps an HTTP error response so IsRetryable can make
@@ -33,6 +35,7 @@ type RetryConfig struct {
 
 // DefaultRetryConfig is the standard retry configuration for gobot API calls:
 // 3 attempts, 500ms initial delay, 10s cap, 2x multiplier, ±20% jitter.
+//
 //nolint:gochecknoglobals // Package-level default retry config; immutable
 var DefaultRetryConfig = RetryConfig{
 	MaxAttempts:  3,
@@ -73,7 +76,7 @@ func Do(ctx context.Context, cfg RetryConfig, shouldRetry func(error) bool, fn f
 		delay = nextDelay(delay, cfg)
 	}
 
-	slog.Warn("retry: all attempts exhausted", "attempts", cfg.MaxAttempts, "err", lastErr)
+	slog.Warn("retry: all attempts exhausted", slog.Int("attempts", cfg.MaxAttempts), logattr.Err(lastErr))
 	return lastErr
 }
 
@@ -129,10 +132,10 @@ func logRetrySuccess(attempt int) {
 
 func logRetryAttempt(attempt, maxAttempts int, err error, sleep time.Duration) {
 	slog.Warn("retry: attempt failed, retrying",
-		"attempt", attempt,
-		"max_attempts", maxAttempts,
-		"err", err,
-		"delay", sleep,
+		slog.Int("attempt", attempt),
+		slog.Int("max_attempts", maxAttempts),
+		logattr.Err(err),
+		slog.Duration("delay", sleep),
 	)
 }
 

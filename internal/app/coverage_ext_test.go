@@ -15,8 +15,8 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
-	"github.com/allthingscode/gobot/internal/cron"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/resilience"
 	telego "github.com/mymmrac/telego"
@@ -53,8 +53,10 @@ func (m *coverageMockProvider) Name() string {
 	}
 	return mockName
 }
-func (m *coverageMockProvider) Embed(ctx context.Context, text string) ([]float32, error) { return nil, nil }
-func (m *coverageMockProvider) Models() []provider.ModelInfo                               { return nil }
+func (m *coverageMockProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	return nil, nil
+}
+func (m *coverageMockProvider) Models() []provider.ModelInfo { return nil }
 
 func TestCronDispatcher_MoreBranches_Part1(t *testing.T) {
 	t.Parallel()

@@ -22,6 +22,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/observability"
 )
@@ -226,7 +227,7 @@ func (m *SessionManager) resolveStore(userID string) CheckpointStore {
 		if s, err := provider(userID); err == nil {
 			return s
 		} else {
-			slog.Warn("agent: CheckpointStoreProvider failed, falling back to shared store", "userID", userID, "err", err)
+			slog.Warn("agent: CheckpointStoreProvider failed, falling back to shared store", logattr.UserID(userID), logattr.Err(err))
 		}
 	}
 	return sharedStore
@@ -294,7 +295,7 @@ func (m *SessionManager) loadHistory(ctx context.Context, sessionKey string, sto
 			model := m.model
 			m.mu.RUnlock()
 			if createErr := store.CreateThread(ctx, sessionKey, model, nil); createErr != nil {
-				slog.Error("agent: CreateThread failed (continuing statelessly)", "session", sessionKey, "err", createErr)
+				slog.Error("agent: CreateThread failed (continuing statelessly)", logattr.SessionKey(sessionKey), logattr.Err(createErr))
 				stateless = true
 			}
 		}
@@ -371,7 +372,7 @@ func (m *SessionManager) prepareHistory(ctx context.Context, sessionKey string, 
 	}
 
 	if pruned, droppedMsgs := PruneMessages(messages, m.pruningPolicy); len(droppedMsgs) > 0 {
-		slog.Info("agent: pruned context", "session", sessionKey, "dropped", len(droppedMsgs), "remaining", len(pruned))
+		slog.Info("agent: pruned context", logattr.SessionKey(sessionKey), slog.Int("dropped", len(droppedMsgs)), slog.Int("remaining", len(pruned)))
 		messages = pruned
 		if m.consolidator != nil {
 			m.consolidateDropped(sessionKey, droppedMsgs)
@@ -389,7 +390,7 @@ func (m *SessionManager) runPreHistoryHooks(ctx context.Context, sessionKey stri
 	messages = m.hooks.RunPreHistory(ctx, messages)
 	if len(messages) == 0 && len(original) > 0 {
 		if m.hooks.HasPreHistory() {
-			slog.Warn("agent: RunPreHistory hook returned empty — preserving history as fallback", "session", sessionKey)
+			slog.Warn("agent: RunPreHistory hook returned empty — preserving history as fallback", logattr.SessionKey(sessionKey))
 		}
 		return original
 	}
@@ -404,7 +405,7 @@ func (m *SessionManager) summarizeHistoryIfNeeded(ctx context.Context, sessionKe
 
 	model := summarization.SummarizationModel(m.model)
 	if model == "" {
-		slog.Warn("agent: summarization enabled but no model configured, skipping summarization", "session", sessionKey)
+		slog.Warn("agent: summarization enabled but no model configured, skipping summarization", logattr.SessionKey(sessionKey))
 		return messages
 	}
 
@@ -416,11 +417,11 @@ func (m *SessionManager) summarizeHistoryIfNeeded(ctx context.Context, sessionKe
 	toSummarize := messages[:len(messages)-keepN]
 	summary, err := m.runSummarization(ctx, sessionKey, toSummarize, model)
 	if err != nil {
-		slog.Warn("agent: summarization failed, falling back to plain compaction", "session", sessionKey, "err", err)
+		slog.Warn("agent: summarization failed, falling back to plain compaction", logattr.SessionKey(sessionKey), logattr.Err(err))
 		return messages
 	}
 
-	slog.Info("agent: context summarized", "session", sessionKey, "summary_len", len(summary))
+	slog.Info("agent: context summarized", logattr.SessionKey(sessionKey), slog.Int("summary_len", len(summary)))
 	summaryMsg := agentctx.StrategicMessage{
 		Role:      agentctx.RoleSystem,
 		Content:   &agentctx.MessageContent{Str: &summary},
@@ -447,7 +448,7 @@ func (m *SessionManager) runSummarization(ctx context.Context, sessionKey string
 	sb.WriteString(summarizationPrompt)
 	for _, msg := range messages {
 		if sb.Len() >= DefaultMaxCompactionInputBytes {
-			slog.Warn("agent: summarization input exceeded byte cap, truncating", "session", sessionKey)
+			slog.Warn("agent: summarization input exceeded byte cap, truncating", logattr.SessionKey(sessionKey))
 			break
 		}
 		fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content.String())
@@ -465,7 +466,7 @@ func (m *SessionManager) compactHistoryIfNeeded(sessionKey string, messages []ag
 		return messages
 	}
 
-	slog.Info("agent: compacted context", "session", sessionKey, "dropped", dropped, "remaining", len(compacted))
+	slog.Info("agent: compacted context", logattr.SessionKey(sessionKey), slog.Int("dropped", dropped), slog.Int("remaining", len(compacted)))
 
 	if m.consolidator != nil && m.compactionPolicy.Strategy == "memoryFlush" {
 		m.runConsolidation(sessionKey, messages, keep)
@@ -529,13 +530,12 @@ func (m *SessionManager) updateTokenBudget(ctx context.Context, sessionKey strin
 	tokens, _, _ := store.GetSessionTokens(ctx, sessionKey)
 	newTokens := tokens + estimateTokensForMessages(updated)
 	if err := store.UpdateSessionTokens(ctx, sessionKey, newTokens, nil); err != nil {
-		slog.Warn("agent: UpdateSessionTokens failed", "session", sessionKey, "err", err)
-	} else {
-		slog.Debug("agent: session token budget", "session", sessionKey, "tokens", newTokens, "budget", m.tokenBudget)
-		if newTokens > m.tokenBudget && m.summaryTurns > 0 {
-			slog.Info("agent: session token budget exceeded, triggering compaction", "session", sessionKey)
-			go m.compactSessionAsync(ctx, sessionKey, store)
-		}
+		slog.Warn("agent: UpdateSessionTokens failed", logattr.SessionKey(sessionKey), logattr.Err(err))
+	}
+	slog.Debug("agent: session token budget", logattr.SessionKey(sessionKey), slog.Int("tokens", newTokens), slog.Int("budget", m.tokenBudget))
+	if newTokens > m.tokenBudget {
+		slog.Info("agent: session token budget exceeded, triggering compaction", logattr.SessionKey(sessionKey))
+		go m.compactSessionAsync(ctx, sessionKey, store)
 	}
 }
 
@@ -546,12 +546,12 @@ func (m *SessionManager) persistResult(ctx context.Context, sessionKey string, i
 
 	it := iteration + 1
 	if _, err := store.SaveSnapshot(ctx, sessionKey, it, updated); err != nil {
-		slog.Warn("agent: SaveSnapshot failed", "session", sessionKey, "err", err)
+		slog.Warn("agent: SaveSnapshot failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 	}
 
 	if m.logger != nil {
 		if err := m.logger.Log(sessionKey, it, updated); err != nil {
-			slog.Warn("agent: session log write failed", "session", sessionKey, "err", err)
+			slog.Warn("agent: session log write failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		}
 	}
 }
@@ -598,14 +598,14 @@ func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey 
 }
 
 func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey string, store CheckpointStore) {
-	slog.Info("agent: starting per-session compaction", "session", sessionKey)
+	slog.Info("agent: starting per-session compaction", logattr.SessionKey(sessionKey))
 	snap, err := store.LoadLatest(ctx, sessionKey)
 	if err != nil {
-		slog.Warn("agent: compactSessionAsync LoadLatest failed", "session", sessionKey, "err", err)
+		slog.Warn("agent: compactSessionAsync LoadLatest failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		return
 	}
 	if snap == nil || len(snap.Messages) == 0 {
-		slog.Warn("agent: compactSessionAsync no messages to compact", "session", sessionKey)
+		slog.Warn("agent: compactSessionAsync no messages to compact", logattr.SessionKey(sessionKey))
 		return
 	}
 	summaryTurns := m.summaryTurns
@@ -613,14 +613,14 @@ func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey str
 		summaryTurns = 20
 	}
 	if len(snap.Messages) <= summaryTurns {
-		slog.Info("agent: compactSessionAsync not enough messages to compact", "session", sessionKey, "have", len(snap.Messages), "need", summaryTurns+1)
+		slog.Info("agent: compactSessionAsync not enough messages to compact", logattr.SessionKey(sessionKey), slog.Int("have", len(snap.Messages)), slog.Int("need", summaryTurns+1))
 		return
 	}
 	toSummarize := snap.Messages[:len(snap.Messages)-summaryTurns]
 	kept := snap.Messages[len(snap.Messages)-summaryTurns:]
 	summary, err := m.buildCompactionSummary(ctx, sessionKey, toSummarize)
 	if err != nil {
-		slog.Warn("agent: compactSessionAsync summarization failed", "session", sessionKey, "err", err)
+		slog.Warn("agent: compactSessionAsync summarization failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		return
 	}
 	summaryMsg := agentctx.StrategicMessage{
@@ -632,14 +632,14 @@ func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey str
 	now := time.Now()
 	tokens := estimateTokensForMessages(compacted)
 	if err := store.UpdateSessionTokens(ctx, sessionKey, tokens, &now); err != nil {
-		slog.Warn("agent: UpdateSessionTokens after compaction failed", "session", sessionKey, "err", err)
+		slog.Warn("agent: UpdateSessionTokens after compaction failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 	}
 	_, err = store.SaveSnapshot(ctx, sessionKey, snap.Iteration, compacted)
 	if err != nil {
-		slog.Warn("agent: SaveSnapshot after compaction failed", "session", sessionKey, "err", err)
+		slog.Warn("agent: SaveSnapshot after compaction failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		return
 	}
-	slog.Info("agent: per-session compaction complete", "session", sessionKey, "before", len(snap.Messages), "after", len(compacted), "tokens_after", tokens)
+	slog.Info("agent: per-session compaction complete", logattr.SessionKey(sessionKey), slog.Int("before", len(snap.Messages)), slog.Int("after", len(compacted)), slog.Int("tokens_after", tokens))
 }
 
 // StripSilent removes the "[SILENT]" prefix from message (trimming surrounding

@@ -88,7 +88,7 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 			vecResults = append(vecResults, res)
 		}
 	}
-	
+
 	// Apply MMR to re-rank and downsample to limit*2
 	vecResults = applyMMR(vecResults, 0.7, limit*2)
 

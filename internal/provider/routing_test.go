@@ -38,10 +38,10 @@ func TestRoutingProvider_Disabled(t *testing.T) {
 	}
 	manager := &MockProvider{name: "mgr"}
 	cfg := config.RoutingConfig{Enabled: false}
-	
+
 	p := provider.NewRoutingProvider(exec, manager, cfg)
 	resp, err := p.Chat(context.Background(), provider.ChatRequest{})
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,14 +67,14 @@ func TestRoutingProvider_BypassConversational(t *testing.T) {
 		},
 	}
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
-	
+
 	p := provider.NewRoutingProvider(exec, manager, cfg)
 	// No tools, short message
 	req := provider.ChatRequest{
 		Messages: []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("hello")}}},
 	}
 	resp, err := p.Chat(context.Background(), req)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRoutingProvider_EscalateToExecutor(t *testing.T) {
 	t.Parallel()
 	classificationCalled := false
 	executorCalled := false
-	
+
 	exec := &MockProvider{
 		name: "exec",
 		chatFunc: func(req provider.ChatRequest) (*provider.ChatResponse, error) {
@@ -98,7 +98,7 @@ func TestRoutingProvider_EscalateToExecutor(t *testing.T) {
 			return &provider.ChatResponse{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: strPtr("exec final response")}}}, nil
 		},
 	}
-	
+
 	manager := &MockProvider{
 		name: "mgr",
 		chatFunc: func(req provider.ChatRequest) (*provider.ChatResponse, error) {
@@ -110,17 +110,17 @@ func TestRoutingProvider_EscalateToExecutor(t *testing.T) {
 			return nil, fmt.Errorf("unexpected manager call (non-classification), sys: %q", req.SystemInstruction)
 		},
 	}
-	
+
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
 	p := provider.NewRoutingProvider(exec, manager, cfg)
-	
+
 	// Force classification by including tools
 	req := provider.ChatRequest{
-		Tools: []provider.ToolDeclaration{{Name: "complex_tool"}},
+		Tools:    []provider.ToolDeclaration{{Name: "complex_tool"}},
 		Messages: []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("do something complex")}}},
 	}
 	resp, err := p.Chat(context.Background(), req)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,11 +139,11 @@ func TestRoutingProvider_HandleByManager(t *testing.T) {
 	t.Parallel()
 	classificationCalled := false
 	managerFinalCalled := false
-	
+
 	exec := &MockProvider{name: "exec", chatFunc: func(req provider.ChatRequest) (*provider.ChatResponse, error) {
 		return nil, errors.New("executor should not be called")
 	}}
-	
+
 	manager := &MockProvider{
 		name: "mgr",
 		chatFunc: func(req provider.ChatRequest) (*provider.ChatResponse, error) {
@@ -155,17 +155,17 @@ func TestRoutingProvider_HandleByManager(t *testing.T) {
 			return &provider.ChatResponse{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: strPtr("mgr final response")}}}, nil
 		},
 	}
-	
+
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
 	p := provider.NewRoutingProvider(exec, manager, cfg)
-	
+
 	// Long message (> 100 chars) to force classification even without tools
 	longMsg := strings.Repeat("this is a very long message that should trigger classification logic even if there are no tools attached to the request ", 2)
 	req := provider.ChatRequest{
 		Messages: []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr(longMsg)}}},
 	}
 	resp, err := p.Chat(context.Background(), req)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestRoutingProvider_HandleByManager(t *testing.T) {
 func TestRoutingProvider_FallbackOnError(t *testing.T) {
 	t.Parallel()
 	executorCalled := false
-	
+
 	exec := &MockProvider{
 		name: "exec",
 		chatFunc: func(req provider.ChatRequest) (*provider.ChatResponse, error) {
@@ -191,24 +191,24 @@ func TestRoutingProvider_FallbackOnError(t *testing.T) {
 			return &provider.ChatResponse{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: strPtr("exec fallback response")}}}, nil
 		},
 	}
-	
+
 	manager := &MockProvider{
 		name: "mgr",
 		chatFunc: func(req provider.ChatRequest) (*provider.ChatResponse, error) {
 			return nil, errors.New("manager api down")
 		},
 	}
-	
+
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
 	p := provider.NewRoutingProvider(exec, manager, cfg)
-	
+
 	// Force classification attempt by using a long message
 	longMsg := strings.Repeat("long message ", 20)
 	req := provider.ChatRequest{
 		Messages: []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr(longMsg)}}},
 	}
 	resp, err := p.Chat(context.Background(), req)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestRoutingProvider_OpenRouterPrefix(t *testing.T) {
 	// Not parallel because it touches the global provider registry.
 	provider.ResetForTest()
 	t.Cleanup(provider.ResetForTest)
-	
+
 	openRouterCalled := false
 	op := &MockProvider{
 		name: "openrouter",
@@ -235,17 +235,17 @@ func TestRoutingProvider_OpenRouterPrefix(t *testing.T) {
 		},
 	}
 	_ = provider.Register(op)
-	
+
 	exec := &MockProvider{name: "exec"}
 	manager := &MockProvider{name: "mgr"}
 	cfg := config.RoutingConfig{Enabled: true}
 	p := provider.NewRoutingProvider(exec, manager, cfg)
-	
+
 	req := provider.ChatRequest{
 		Model: "openrouter/mistral-7b",
 	}
 	resp, err := p.Chat(context.Background(), req)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

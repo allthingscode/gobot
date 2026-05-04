@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/resilience"
 	"github.com/allthingscode/gobot/internal/secrets"
 )

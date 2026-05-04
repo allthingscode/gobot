@@ -212,7 +212,7 @@ func TestDispatchTracer_NilProvider(t *testing.T) {
 	}
 
 	// Should not panic
-	err := dt.TraceBotDispatch(context.Background(), "session", func(_ context.Context) error {
+	err := dt.TraceBotDispatch(context.Background(), "test-session", func(_ context.Context) error {
 		return nil
 	})
 	if err != nil {

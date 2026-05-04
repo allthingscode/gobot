@@ -41,10 +41,10 @@ func setupMockWorkspace(t *testing.T, tempDir string) string {
 	t.Helper()
 	wsDir := filepath.Join(tempDir, "workspace")
 	files := map[string]string{
-		"README.md":            "# Readme\nContent here.",
+		"README.md":           "# Readme\nContent here.",
 		"docs/setup.md":       "# Setup\nStep 1.",
 		"vendor/dep.md":       "should skip",
-		".private/secret.md": "should skip",
+		".private/secret.md":  "should skip",
 		"node_modules/mod.md": "should skip",
 		"not-md.txt":          "should skip",
 	}

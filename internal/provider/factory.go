@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/logattr"
 	"google.golang.org/genai"
 )
 
@@ -20,6 +21,7 @@ type Factory struct {
 }
 
 // InitAll initializes and registers all providers for which an API key is present.
+//
 //nolint:gocognit,cyclop // Provider registration is inherently linear
 func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
 	// Gemini
@@ -60,7 +62,7 @@ func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
 	// Cost-based Routing (F-116)
 	if cfg != nil && cfg.Strategic.Routing.Enabled {
 		if err := f.setupRouting(cfg); err != nil {
-			slog.Warn("factory: routing setup failed, continuing with direct providers", "err", err)
+			slog.Warn("factory: routing setup failed, continuing with direct providers", logattr.Err(err))
 		}
 	}
 

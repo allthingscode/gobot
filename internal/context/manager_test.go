@@ -55,7 +55,7 @@ func TestCreateThread(t *testing.T) { //nolint:paralleltest // modifies global e
 			name:     "basic creation",
 			threadID: "t1",
 			model:    "gemini-3-flash",
-			metadata: map[string]any{"session": "abc"},
+			metadata: map[string]any{"session_key": "abc"},
 		},
 		{
 			name:     "nil metadata defaults to empty map",
@@ -385,7 +385,7 @@ func TestLoadLatest_CorruptState(t *testing.T) { //nolint:paralleltest // modifi
 			t.Fatalf("CreateThread: %v", err)
 		}
 		// Insert a checkpoint with invalid JSON in the state column.
-		if _, err := m.db.ExecContext(context.Background(), 
+		if _, err := m.db.ExecContext(context.Background(),
 			`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
 			"t1", 1, "NOT_VALID_JSON",
 		); err != nil {
@@ -404,14 +404,14 @@ func TestLoadLatest_CorruptMetadata(t *testing.T) { //nolint:paralleltest // mod
 		t.Parallel()
 		m := newTestManager(t)
 		// Insert a thread with invalid metadata JSON directly.
-		if _, err := m.db.ExecContext(context.Background(), 
+		if _, err := m.db.ExecContext(context.Background(),
 			`INSERT INTO threads (thread_id, model, status, metadata) VALUES (?, ?, 'active', ?)`,
 			"t1", "model", "NOT_JSON",
 		); err != nil {
 			t.Fatalf("insert corrupt thread: %v", err)
 		}
 		content := MessageContent{Str: strPtr("hi")}
-		if _, err := m.db.ExecContext(context.Background(), 
+		if _, err := m.db.ExecContext(context.Background(),
 			`INSERT INTO checkpoints (thread_id, iteration, state) VALUES (?, ?, ?)`,
 			"t1", 1, `[{"role":"user","content":"hi"}]`,
 		); err != nil {
@@ -792,7 +792,7 @@ func TestGetSessionTokens_FallbackFormat(t *testing.T) { //nolint:paralleltest /
 	m := newTestManager(t)
 	ctx := context.Background()
 	threadID := "t-fallback"
-	
+
 	if err := m.CreateThread(ctx, threadID, "model", nil); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}

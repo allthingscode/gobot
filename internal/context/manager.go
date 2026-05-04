@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // ThreadSnapshot is the return type for LoadLatest.
@@ -113,18 +115,18 @@ func (m *CheckpointManager) SaveSnapshot(ctx context.Context, threadID string, i
 			preview = truncate(messages[0].Content.String(), 200)
 		}
 		slog.Warn("context: SaveSnapshot skipped — message failed validation (marshal)",
-			"session", threadID,
-			"err", err,
-			"preview", preview)
+			logattr.SessionKey(threadID),
+			logattr.Err(err),
+			slog.String("preview", preview))
 		return false, fmt.Errorf("SaveSnapshot: marshal messages: %w", err)
 	}
 	// Validate round-trip.
 	var check []StrategicMessage
 	if err := json.Unmarshal(stateJSON, &check); err != nil {
 		slog.Warn("context: SaveSnapshot skipped — message failed validation (unmarshal)",
-			"session", threadID,
-			"err", err,
-			"preview", truncate(string(stateJSON), 200))
+			logattr.SessionKey(threadID),
+			logattr.Err(err),
+			slog.String("preview", truncate(string(stateJSON), 200)))
 		return false, fmt.Errorf("SaveSnapshot: validate round-trip: %w", err)
 	}
 

@@ -58,7 +58,7 @@ func TestSetupLogging(t *testing.T) {
 func TestValidateRunPrerequisites(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	
+
 	// Case 1: Telegram disabled, no token needed
 	cfg.Channels.Telegram.Enabled = false
 	if err := validateRunPrerequisites(cfg); err != nil {
@@ -86,7 +86,7 @@ func TestSetupConsolidator(t *testing.T) {
 	}
 	mgr := &agent.SessionManager{}
 	handler := &DispatchHandler{}
-	
+
 	SetupConsolidator(cfg, stack, mgr, handler, nil, nil)
 	if handler.Consolidator == nil {
 		t.Error("SetupConsolidator failed to set handler.Consolidator")
@@ -96,7 +96,7 @@ func TestSetupConsolidator(t *testing.T) {
 func TestSetupGateHandler(t *testing.T) {
 	t.Parallel()
 	handler := &DispatchHandler{}
-	
+
 	// Case 1: nil store
 	got := SetupGateHandler(nil, handler)
 	if got != handler {
@@ -123,7 +123,7 @@ func TestSetupHooks(t *testing.T) {
 	cfg := &config.Config{}
 	runner := &AgentRunner{}
 	mgr := &agent.SessionManager{}
-	
+
 	h, hitl := SetupHooks(cfg, runner, mgr, nil, nil)
 	if h == nil || hitl == nil {
 		t.Error("SetupHooks returned nil")
@@ -135,10 +135,10 @@ func TestRunAgentLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Cancel immediately to test the loop exit
 	cancel()
-	
+
 	cfg := &config.Config{}
 	stack := &AgentStack{Runner: &AgentRunner{}}
-	
+
 	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil)
 }
 

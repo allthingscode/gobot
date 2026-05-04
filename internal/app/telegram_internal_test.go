@@ -53,18 +53,18 @@ func TestTgAPI_HandleUpdate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Case 1: Message update
 	u1 := telego.Update{
 		UpdateID: 1,
 		Message: &telego.Message{
 			MessageID: 1,
-			Chat: telego.Chat{ID: 1},
-			Text: "hi",
+			Chat:      telego.Chat{ID: 1},
+			Text:      "hi",
 		},
 	}
 	api.handleUpdate(ctx, u1)
-	
+
 	select {
 	case <-api.msgChan:
 	default:
@@ -83,7 +83,7 @@ func TestTgAPI_AllowFrom(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Message from allowed chat
 	m1 := &telego.Message{MessageID: 1, Chat: telego.Chat{ID: 123}, Text: "ok"}
 	api.handleMessage(ctx, m1)

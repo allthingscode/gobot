@@ -78,7 +78,7 @@ func TestReadTextFileTool_Execute_SandboxEscaping(t *testing.T) {
 func TestReadTextFileTool_Execute_ProjectRootFallback(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
-	
+
 	// Create a workspace root and a project root
 	workspaceDir := filepath.Join(tmpDir, "workspace")
 	projectDir := filepath.Join(tmpDir, "project")
@@ -99,7 +99,7 @@ func TestReadTextFileTool_Execute_ProjectRootFallback(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = tmpDir // WorkspacePath(userID) will use this + /workspace
 	cfg.SetProjectRoot(projectDir)
-	
+
 	tool := app.NewReadTextFileTool(cfg)
 	got, err := tool.Execute(context.Background(), "sess", "user", map[string]any{
 		"file_path": "project_file.txt",

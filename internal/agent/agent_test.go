@@ -228,7 +228,7 @@ func TestSessionManager_CompactionWithMemoryFlush(t *testing.T) {
 		}
 	}
 	_, _ = store.SaveSnapshot(context.Background(),
-"sess1", 1, history)
+		"sess1", 1, history)
 
 	// Set compaction policy.
 	mgr.SetMemoryWindow(5)
@@ -489,7 +489,7 @@ func TestDispatch_PreHistoryHook_NilSafe(t *testing.T) {
 			}
 			store := newMockStore()
 			_, _ = store.SaveSnapshot(context.Background(),
-"s1", 1, history)
+				"s1", 1, history)
 			mgr.store = store
 
 			hooks := &Hooks{}
@@ -537,7 +537,7 @@ func TestSessionManager_CompactionWithTrivialMessageFiltering(t *testing.T) {
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("hello")}},
 	}
 	_, _ = store.SaveSnapshot(context.Background(),
-"sess1", 1, history)
+		"sess1", 1, history)
 
 	mgr.SetMemoryWindow(2)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -585,7 +585,7 @@ func TestSessionManager_CompactionWithNilConsolidator(t *testing.T) {
 		}
 	}
 	_, _ = store.SaveSnapshot(context.Background(),
-"sess1", 1, history)
+		"sess1", 1, history)
 
 	mgr.SetMemoryWindow(5)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -616,7 +616,7 @@ func TestSessionManager_CompactionWithMixedRoles(t *testing.T) {
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("confirmed")}},
 	}
 	_, _ = store.SaveSnapshot(context.Background(),
-"sess1", 1, history)
+		"sess1", 1, history)
 
 	mgr.SetMemoryWindow(2)
 	mgr.SetCompactionPolicy(config.CompactionPolicyConfig{
@@ -718,7 +718,7 @@ func TestSessionManager_B037_KeepN_Division_Zero(t *testing.T) {
 		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: ptrStr("message 2")}},
 	}
 	_, _ = store.SaveSnapshot(context.Background(),
-"sess1", 1, history)
+		"sess1", 1, history)
 
 	// Dispatch a new message.
 	_, err := mgr.Dispatch(ctx, "sess1", "", "new message")
@@ -848,7 +848,7 @@ func TestSessionManager_CompactionSummarizationFailure(t *testing.T) {
 	// This will trigger compaction when we add one more message
 	history := generateTestHistory(15)
 	_, _ = store.SaveSnapshot(context.Background(),
-"sess1", 1, history)
+		"sess1", 1, history)
 
 	// Dispatch a new message to trigger compaction (16th message)
 	// This should trigger summarization, which will fail due to our mock,

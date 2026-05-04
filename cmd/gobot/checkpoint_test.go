@@ -8,7 +8,7 @@ import (
 
 func TestExtractMessageText(t *testing.T) {
 	t.Parallel()
-	
+
 	// Case 1: nil content
 	if got := extractMessageText(agentctx.StrategicMessage{Content: nil}); got != "(no content)" {
 		t.Errorf("got %q, want '(no content)'", got)

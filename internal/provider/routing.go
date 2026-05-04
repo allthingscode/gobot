@@ -6,8 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // RoutingProvider implements the Provider interface by delegating to a cheap
@@ -39,6 +40,7 @@ func (p *RoutingProvider) Models() []ModelInfo {
 }
 
 // Chat implements the routing logic.
+//
 //nolint:cyclop // Complex routing logic with classification and escalation
 func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	// If the model is explicitly prefixed with "openrouter/", route to that
@@ -75,7 +77,7 @@ func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespo
 
 	// 2. Classification Turn
 	classifyReq := ChatRequest{
-		Model: p.cfg.ManagerModel,
+		Model:             p.cfg.ManagerModel,
 		SystemInstruction: "Does the user message require tool execution, deep technical analysis, or complex reasoning? Reply ONLY with 'YES' or 'NO'.",
 		Messages: []agentctx.StrategicMessage{
 			{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &lastMsg}},
@@ -84,7 +86,7 @@ func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespo
 
 	resp, err := p.manager.Chat(ctx, classifyReq)
 	if err != nil {
-		slog.Warn("routing: classification failed, falling back to executor", "err", err)
+		slog.Warn("routing: classification failed, falling back to executor", logattr.Err(err))
 		return p.executorChat(ctx, req)
 	}
 

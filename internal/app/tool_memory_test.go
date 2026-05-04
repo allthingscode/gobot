@@ -24,8 +24,8 @@ func (m *mockMemoryStore) Search(_ context.Context, query, sessionKey string, li
 	return m.results, m.err
 }
 
-func (m *mockMemoryStore) Index(namespace, content string) error { return nil }
-func (m *mockMemoryStore) Close() error                         { return nil }
+func (m *mockMemoryStore) Index(namespace, content string) error  { return nil }
+func (m *mockMemoryStore) Close() error                           { return nil }
 func (m *mockMemoryStore) Rebuild(sessionDir string) (int, error) { return 0, nil }
 
 func TestMemoryTool_Name(t *testing.T) {

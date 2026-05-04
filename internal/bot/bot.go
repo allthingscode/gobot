@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/errgroup"
+	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/allthingscode/gobot/internal/observability"
+	"golang.org/x/sync/errgroup"
 )
 
 // InboundMessage is a normalized message received from Telegram.
@@ -226,7 +227,7 @@ func (b *Bot) drainCallbacks(ctx context.Context, callbacks <-chan InboundCallba
 			if !ok {
 				return nil // reconnect
 			}
-			slog.Info("bot: callback received from API channel", "chatID", cb.ChatID, "session", cb.SessionKey)
+			slog.Info("bot: callback received from API channel", slog.Int64("chatID", cb.ChatID), logattr.SessionKey(cb.SessionKey))
 			go b.dispatchCallback(ctx, cb)
 		}
 	}
@@ -237,7 +238,7 @@ func (b *Bot) dispatchCallback(ctx context.Context, cb InboundCallback) {
 		if errors.Is(err, context.Canceled) {
 			slog.Warn("bot: HandleCallback canceled by context", "chatID", cb.ChatID)
 		} else {
-			slog.Error("bot: HandleCallback failed", "err", err)
+			slog.Error("bot: HandleCallback failed", logattr.Err(err))
 		}
 	}
 }
@@ -279,7 +280,7 @@ func (b *Bot) drainUpdates(ctx context.Context, updates <-chan InboundMessage) e
 }
 
 func (b *Bot) waitRetry(ctx context.Context, op string, err error, delay *time.Duration, maxDelay time.Duration) error {
-	slog.Error("bot: "+op+" failed", "err", err, "retry_in", *delay)
+	slog.Error("bot: "+op+" failed", logattr.Err(err), slog.Duration("retry_in", *delay))
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("wait retry: %w", ctx.Err())
@@ -295,12 +296,12 @@ func (b *Bot) waitRetry(ctx context.Context, op string, err error, delay *time.D
 // dispatch processes a single inbound message and sends a reply if non-empty.
 func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 	if err := msg.Validate(); err != nil {
-		slog.Warn("bot: invalid inbound message dropped", "err", err)
+		slog.Warn("bot: invalid inbound message dropped", logattr.Err(err))
 		return
 	}
 
 	sessionKey := SessionKey(msg.ChatID, msg.ThreadID, msg.SenderID)
-	slog.Info("bot: message received", "session", sessionKey, "text", msg.Text)
+	slog.Info("bot: message received", logattr.SessionKey(sessionKey), slog.String("text", msg.Text))
 
 	// Start typing indicator
 	stopTyping := b.api.Typing(ctx, msg.ChatID, msg.ThreadID)
@@ -314,7 +315,7 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 	}
 
 	if err := b.handleAndSend(ctx, sessionKey, msg); err != nil {
-		slog.Error("bot: handleAndSend failed", "session", sessionKey, "err", err)
+		slog.Error("bot: handleAndSend failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 	}
 }
 
@@ -335,7 +336,7 @@ func (b *Bot) handleAndSend(ctx context.Context, sessionKey string, msg InboundM
 	if err := b.api.Send(ctx, out); err != nil {
 		return fmt.Errorf("send error: %w", err)
 	}
-	slog.Info("bot: message sent", "session", sessionKey)
+	slog.Info("bot: message sent", logattr.SessionKey(sessionKey))
 	return nil
 }
 

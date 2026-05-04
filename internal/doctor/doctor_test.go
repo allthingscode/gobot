@@ -788,4 +788,3 @@ func TestCheckHITL(t *testing.T) {
 		})
 	}
 }
-

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/logattr"
 	robfigcron "github.com/robfig/cron/v3"
 )
 
@@ -132,7 +133,7 @@ func computeNextRunCron(s Schedule, nowMS int64) int64 {
 	parser := robfigcron.NewParser(robfigcron.Minute | robfigcron.Hour | robfigcron.Dom | robfigcron.Month | robfigcron.Dow)
 	schedule, err := parser.Parse(s.Expr)
 	if err != nil {
-		slog.Warn("KindCron: invalid cron expression", "expr", s.Expr, "err", err)
+		slog.Warn("KindCron: invalid cron expression", slog.String("expr", s.Expr), logattr.Err(err))
 		return 0
 	}
 	now := time.UnixMilli(nowMS).In(loc)
@@ -149,7 +150,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			return fmt.Errorf("scheduler run: %w", ctx.Err())
 		case <-s.clock.After(s.pollInterval):
 			if err := s.poll(ctx); err != nil {
-				slog.Error("cron: poll error", "err", err)
+				slog.Error("cron: poll error", logattr.Err(err))
 			}
 		}
 	}
@@ -214,8 +215,8 @@ func (s *Scheduler) reloadJobsJSON() {
 func (s *Scheduler) checkPersistentReloadFailure() {
 	if s.lastReloadErr != nil && s.clock.Now().Sub(s.lastReloadErrAt) >= 5*time.Minute {
 		slog.Warn("cron: persistent jobs.json reload failure",
-			"err", s.lastReloadErr,
-			"failed_at", s.lastReloadErrAt)
+			logattr.Err(s.lastReloadErr),
+			slog.Time("failed_at", s.lastReloadErrAt))
 		s.lastReloadErrAt = s.clock.Now()
 	}
 }
@@ -232,7 +233,7 @@ func (s *Scheduler) reloadModularJobs() {
 
 	modularJobs, err := LoadModularJobs(s.itemsDir)
 	if err != nil {
-		slog.Warn("cron: failed to load modular jobs", "err", err)
+		slog.Warn("cron: failed to load modular jobs", logattr.Err(err))
 		return
 	}
 
@@ -339,7 +340,7 @@ func (s *Scheduler) executeJob(ctx context.Context, dj dueJob) error {
 	p.ID = dj.id
 	err := s.dispatcher.Dispatch(jobCtx, p)
 	if err != nil {
-		slog.Error("cron: job dispatch failed", "id", dj.id, "err", err)
+		slog.Error("cron: job dispatch failed", slog.String("id", dj.id), logattr.Err(err))
 		s.sendFailureAlert(ctx, dj, err)
 		return fmt.Errorf("dispatch job: %w", err)
 	}
@@ -354,11 +355,11 @@ func (s *Scheduler) sendFailureAlert(ctx context.Context, dj dueJob, err error) 
 	}
 	if a, ok := s.dispatcher.(Alerter); ok {
 		if alertErr := a.Alert(ctx, alert); alertErr != nil {
-			slog.Error("cron: job failure alert could not be sent", "id", dj.id, "err", alertErr)
+			slog.Error("cron: job failure alert could not be sent", slog.String("id", dj.id), logattr.Err(alertErr))
 		}
 	} else {
 		if alertErr := s.dispatcher.Dispatch(ctx, alert); alertErr != nil {
-			slog.Error("cron: job failure alert could not be sent", "id", dj.id, "err", alertErr)
+			slog.Error("cron: job failure alert could not be sent", slog.String("id", dj.id), logattr.Err(alertErr))
 		}
 	}
 }
@@ -377,7 +378,7 @@ func (s *Scheduler) saveStore() {
 
 func (s *Scheduler) recordReloadError(err error) {
 	if s.lastReloadErr == nil {
-		slog.Error("cron: jobs.json reload failed", "err", err)
+		slog.Error("cron: jobs.json reload failed", logattr.Err(err))
 		s.lastReloadErr = err
 		s.lastReloadErrAt = s.clock.Now()
 	} else {

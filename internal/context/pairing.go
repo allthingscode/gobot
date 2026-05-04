@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // PairingStore manages authorized users and pairing codes in SQLite.
@@ -141,7 +143,7 @@ func (s *PairingStore) AuthorizeByCode(code string) (int64, error) {
 		`DELETE FROM pairing_codes WHERE code = ?`,
 		code,
 	); err != nil {
-		slog.Warn("pairing: failed to delete used code", "code", code, "err", err)
+		slog.Warn("pairing: failed to delete used code", slog.String("code", code), logattr.Err(err))
 	}
 
 	return chatID, nil

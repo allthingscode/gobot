@@ -7,7 +7,7 @@ import (
 
 func TestStripBOM(t *testing.T) {
 	t.Parallel()
-	
+
 	// Case 1: No BOM
 	data := []byte("hello")
 	if got := stripBOM(data); !bytes.Equal(got, data) {

@@ -81,19 +81,19 @@ func TestEnumerateMCPTools(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:      "tools/list call failure",
-			mockErr:   errors.New("connection closed"),
-			wantErr:   true,
+			name:    "tools/list call failure",
+			mockErr: errors.New("connection closed"),
+			wantErr: true,
 		},
 		{
-			name:      "mcp response error",
-			resp:      `{"error":{"code":-32603,"message":"internal error"}}`,
-			wantErr:   true,
+			name:    "mcp response error",
+			resp:    `{"error":{"code":-32603,"message":"internal error"}}`,
+			wantErr: true,
 		},
 		{
-			name:      "invalid json",
-			resp:      `{"result":`,
-			wantErr:   true,
+			name:    "invalid json",
+			resp:    `{"result":`,
+			wantErr: true,
 		},
 	}
 
@@ -165,8 +165,8 @@ func TestAppendMCPTools_FallbackAndCollision(t *testing.T) {
 
 	// We want to make sure the iteration is predictable or that we check the results irrespective of order
 	tools := appendMCPtools(cfg, []Tool{})
-	
-	// Tools should include: 
+
+	// Tools should include:
 	// 1. fallback for server-a (server_a)
 	// 2. server-b -> search (or server_b__search if c was processed first)
 	// 3. server-c -> search (or server_c__search)

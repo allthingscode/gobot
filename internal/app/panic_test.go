@@ -14,19 +14,19 @@ func TestRecoverWithStack(t *testing.T) {
 	var buf bytes.Buffer
 	h := slog.NewJSONHandler(&buf, nil)
 	logger := slog.New(h)
-	
+
 	oldLogger := slog.Default()
 	slog.SetDefault(logger)
 	defer slog.SetDefault(oldLogger)
 
 	t.Run("it recovers from panic and logs stack", func(t *testing.T) {
 		buf.Reset()
-		
+
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
 			defer RecoverWithStack("test-task")
-			
+
 			slog.Info("inside-goroutine")
 			panic("test-error")
 		}()
@@ -56,7 +56,7 @@ func TestBackgroundGoroutinesRecovery(t *testing.T) {
 	var buf bytes.Buffer
 	h := slog.NewJSONHandler(&buf, nil)
 	logger := slog.New(h)
-	
+
 	oldLogger := slog.Default()
 	slog.SetDefault(logger)
 	defer slog.SetDefault(oldLogger)
@@ -65,13 +65,13 @@ func TestBackgroundGoroutinesRecovery(t *testing.T) {
 		buf.Reset()
 		var wg sync.WaitGroup
 		wg.Add(1)
-		
+
 		go func() {
 			defer wg.Done()
 			defer RecoverWithStack("heartbeat-runner")
 			panic("heartbeat-panic")
 		}()
-		
+
 		wg.Wait()
 
 		logOutput := buf.String()

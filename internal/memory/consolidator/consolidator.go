@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
@@ -135,11 +136,11 @@ func (c *Consolidator) ConsolidateAsync(sessionKey, reply string) {
 		defer cancel()
 		n, err := c.consolidate(ctx, sessionKey, reply)
 		if err != nil {
-			slog.Warn("consolidator: failed", "session", sessionKey, "err", err)
+			slog.Warn("consolidator: failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 			return
 		}
 		if n > 0 {
-			slog.Debug("consolidator: indexed facts", "session", sessionKey, "count", n)
+			slog.Debug("consolidator: indexed facts", logattr.SessionKey(sessionKey), slog.Int("count", n))
 		}
 	}()
 }
@@ -180,7 +181,7 @@ func (c *Consolidator) consolidateInner(ctx context.Context, sessionKey, reply s
 
 	if c.vecStore != nil && indexed > 0 {
 		if err := c.vecStore.Save(); err != nil {
-			slog.Warn("consolidator: failed to save vector db", "err", err)
+			slog.Warn("consolidator: failed to save vector db", logattr.Err(err))
 		}
 	}
 
@@ -227,7 +228,7 @@ func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts 
 
 		namespace := c.resolveNamespace(fact, sessionKey)
 		if err := c.store.IndexWithImportance(namespace, fact, sf.Importance); err != nil {
-			slog.Warn("consolidator: index failed", "fact", fact, "err", err)
+			slog.Warn("consolidator: index failed", slog.String("fact", fact), logattr.Err(err))
 			skipped++
 			continue
 		}
@@ -322,21 +323,21 @@ func (c *Consolidator) indexVectorFact(ctx context.Context, sessionKey, fact, na
 		return c.embedProv.Embed(ctx, text)
 	}
 	if err := c.vecStore.AddDocument(ctx, "memory_facts", doc, embedFunc); err != nil {
-		slog.Warn("consolidator: vector index failed", "fact", fact, "err", err)
+		slog.Warn("consolidator: vector index failed", slog.String("fact", fact), logattr.Err(err))
 	}
 }
 
 func (c *Consolidator) cleanupNamespaces(sessionKey string) {
 	if c.ttl != "" {
 		if deleted, err := c.store.CleanupNamespace("session:"+sessionKey, c.ttl); err != nil {
-			slog.Warn("consolidator: session cleanup failed", "err", err)
+			slog.Warn("consolidator: session cleanup failed", logattr.Err(err))
 		} else if deleted > 0 {
 			slog.Debug("consolidator: session cleanup completed", "deleted", deleted)
 		}
 	}
 	if c.globalTTL != "" {
 		if deleted, err := c.store.CleanupNamespace("global", c.globalTTL); err != nil {
-			slog.Warn("consolidator: global cleanup failed", "err", err)
+			slog.Warn("consolidator: global cleanup failed", logattr.Err(err))
 		} else if deleted > 0 {
 			slog.Debug("consolidator: global cleanup completed", "deleted", deleted)
 		}

@@ -42,13 +42,13 @@ func (m *mockFallbackRunner) Run(_ context.Context, _, _ string, _ []agentctx.St
 }
 
 type fallbackTestCase struct {
-	name             string
-	specialistProv   string
-	specialistErr    error
-	fallbackErr      error
-	wantResult       string
-	wantErr          string
-	expectedRunners  int
+	name            string
+	specialistProv  string
+	specialistErr   error
+	fallbackErr     error
+	wantResult      string
+	wantErr         string
+	expectedRunners int
 }
 
 func runFallbackTest(t *testing.T, tt fallbackTestCase, defaultProv, specialistProv provider.Provider) {

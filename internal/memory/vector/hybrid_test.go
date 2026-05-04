@@ -239,7 +239,7 @@ func TestApplyMMR(t *testing.T) {
 	results := []chromem.Result{
 		{ID: "doc1", Similarity: 0.9, Embedding: []float32{1.0, 0.0}},
 		{ID: "doc2", Similarity: 0.85, Embedding: []float32{0.99, 0.01}}, // very similar to doc1
-		{ID: "doc3", Similarity: 0.7, Embedding: []float32{0.0, 1.0}},   // orthogonal to doc1
+		{ID: "doc3", Similarity: 0.7, Embedding: []float32{0.0, 1.0}},    // orthogonal to doc1
 	}
 
 	selected := applyMMR(results, 0.5, 2)
@@ -257,7 +257,7 @@ func TestApplyMMR(t *testing.T) {
 func TestComputeTimeDecay(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
-	
+
 	tests := []struct {
 		name      string
 		timestamp string

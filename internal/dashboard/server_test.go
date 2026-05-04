@@ -39,7 +39,7 @@ func TestServer_Events(t *testing.T) {
 	ctx, cancel := context.WithCancel(req.Context())
 	req = req.WithContext(ctx)
 
-	// Use a real ResponseWriter that supports Flushing if possible, 
+	// Use a real ResponseWriter that supports Flushing if possible,
 	// but httptest.ResponseRecorder supports it in newer Go versions.
 	w := httptest.NewRecorder()
 

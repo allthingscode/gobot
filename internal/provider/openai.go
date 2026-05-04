@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	defaultOpenAIBaseURL    = "https://api.openai.com/v1"
+	defaultOpenAIBaseURL     = "https://api.openai.com/v1"
 	defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
-	providerNameOpenAI      = "openai"
-	providerNameOpenRouter  = "openrouter"
+	providerNameOpenAI       = "openai"
+	providerNameOpenRouter   = "openrouter"
 )
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs.

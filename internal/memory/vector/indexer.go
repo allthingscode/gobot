@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/philippgille/chromem-go"
 )
 
@@ -68,7 +69,7 @@ func shouldSkip(d fs.DirEntry) bool {
 func processMarkdownFile(path, workspaceDir string) []chromem.Document {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		slog.Warn("vector indexer: unreadable file", "path", path, "err", err)
+		slog.Warn("vector indexer: unreadable file", slog.String("path", path), logattr.Err(err))
 		return nil
 	}
 

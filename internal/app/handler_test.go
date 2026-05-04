@@ -13,7 +13,7 @@ import (
 //nolint:paralleltest // uses global state // modifies global breaker registry
 func TestDispatchHandler_maybeHandleAdminCommand(t *testing.T) {
 	h := &DispatchHandler{}
-	
+
 	reply, ok := h.maybeHandleAdminCommand("sess", "/reset_circuits")
 	if !ok || reply == "" {
 		t.Error("expected /reset_circuits to be handled")
@@ -64,7 +64,7 @@ func TestDispatchHandler_indexMemory(t *testing.T) {
 	}
 
 	h.indexMemory("sess", "user message", "assistant reply")
-	
+
 	// Verify it was indexed
 	results, _ := memStore.Search(context.Background(), "user message", "sess", 10)
 	if len(results) == 0 {
@@ -75,7 +75,7 @@ func TestDispatchHandler_indexMemory(t *testing.T) {
 func TestDispatchHandler_HandleCallback(t *testing.T) {
 	t.Parallel()
 	h := &DispatchHandler{}
-	
+
 	// Just ensure it doesn't panic with nil Hitl
 	_ = h.HandleCallback(context.Background(), bot.InboundCallback{})
 }

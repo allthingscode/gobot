@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // ParseModularJobFile parses a Markdown file with YAML-style front-matter into a Job.
@@ -224,7 +226,7 @@ func LoadModularJobs(itemsDir string) ([]Job, error) {
 		path := filepath.Join(itemsDir, e.Name())
 		job, err := ParseModularJobFile(path)
 		if err != nil {
-			slog.Warn("Cron: skipping malformed job file", "file", e.Name(), "err", err)
+			slog.Warn("Cron: skipping malformed job file", slog.String("file", e.Name()), logattr.Err(err))
 			continue
 		}
 		jobs = append(jobs, *job)

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/lmittmann/tint"
 	slogcommon "github.com/samber/slog-otel"
 	"go.opentelemetry.io/otel"
@@ -315,12 +316,12 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 
 	if p.tracerProvider != nil {
 		if err := p.tracerProvider.Shutdown(ctx); err != nil {
-			slog.Warn("observability: failed to shutdown tracer provider", "err", err)
+			slog.Warn("observability: failed to shutdown tracer provider", logattr.Err(err))
 		}
 	}
 	if p.meterProvider != nil {
 		if err := p.meterProvider.Shutdown(ctx); err != nil {
-			slog.Warn("observability: failed to shutdown meter provider", "err", err)
+			slog.Warn("observability: failed to shutdown meter provider", logattr.Err(err))
 		}
 	}
 	return nil

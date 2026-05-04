@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 const calendarBaseURL = "https://www.googleapis.com/calendar/v3"
@@ -94,7 +96,7 @@ func listUpcomingEventsWithClient(ctx context.Context, secretsRoot string, maxRe
 			// Log and skip — a shared calendar with expired permissions should
 			// not block everything else.
 			slog.Warn("calendar: skipping calendar due to fetch error",
-				"calendar", cal.Summary, "err", err)
+				slog.String("calendar", cal.Summary), logattr.Err(err))
 			continue
 		}
 		for _, item := range resp.Items {

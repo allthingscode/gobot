@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // PairingStorer is the subset of PairingStore methods needed by PairingHandler.
@@ -26,7 +28,7 @@ func NewPairingHandler(store PairingStorer, inner Handler) *PairingHandler {
 func (h *PairingHandler) Handle(ctx context.Context, sessionKey string, msg InboundMessage) (string, error) {
 	authorized, err := h.store.IsAuthorized(msg.ChatID)
 	if err != nil {
-		slog.Warn("pairing: auth check failed", "chat_id", msg.ChatID, "err", err)
+		slog.Warn("pairing: auth check failed", slog.Int64("chat_id", msg.ChatID), logattr.Err(err))
 		return "", fmt.Errorf("is authorized: %w", err)
 	}
 
@@ -40,7 +42,7 @@ func (h *PairingHandler) Handle(ctx context.Context, sessionKey string, msg Inbo
 
 	code, err := h.store.GetOrCreateCode(msg.ChatID)
 	if err != nil {
-		slog.Warn("pairing: get or create code failed", "chat_id", msg.ChatID, "err", err)
+		slog.Warn("pairing: get or create code failed", slog.Int64("chat_id", msg.ChatID), logattr.Err(err))
 		return "", fmt.Errorf("get or create code: %w", err)
 	}
 

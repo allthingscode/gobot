@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/logattr"
 )
 
 // Severity represents the criticality of a validation error.
@@ -335,7 +337,7 @@ func (v *Validator) validatePaths(result *ValidationResult) {
 	// Check secrets directory permissions (platform-specific)
 	secretsDir := filepath.Join(root, "secrets")
 	if err := v.checkPathPermissions(secretsDir, result); err != nil {
-		slog.Debug("path permission check failed", "path", secretsDir, "err", err)
+		slog.Debug("path permission check failed", slog.String("path", secretsDir), logattr.Err(err))
 	}
 }
 
@@ -347,7 +349,7 @@ func (v *Validator) validateDiskSpace(result *ValidationResult) {
 
 	// Get available disk space (platform-specific)
 	if err := v.checkDiskSpace(root, result); err != nil {
-		slog.Debug("disk space check failed", "path", root, "err", err)
+		slog.Debug("disk space check failed", slog.String("path", root), logattr.Err(err))
 	}
 }
 

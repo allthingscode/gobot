@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/allthingscode/gobot/internal/secrets"
 )
 
@@ -500,7 +501,7 @@ func (c *Config) resolveSecret(store *secrets.SecretsStore, configVal, storeKey,
 	}
 	val, err := store.Get(storeKey)
 	if err != nil {
-		slog.Warn("secrets store lookup failed, falling back to env", "key", storeKey, "err", err)
+		slog.Warn("secrets store lookup failed, falling back to env", slog.String("key", storeKey), logattr.Err(err))
 	}
 	if val != "" {
 		return val
@@ -619,7 +620,7 @@ func (c *Config) mcpEnvFor(serverName string, store *secrets.SecretsStore) map[s
 			strings.ToLower(varName))
 		v, err := store.Get(key)
 		if err != nil {
-			slog.Warn("secrets store lookup failed, falling back to env", "key", key, "err", err)
+			slog.Warn("secrets store lookup failed, falling back to env", slog.String("key", key), logattr.Err(err))
 		}
 		if v != "" {
 			env[varName] = v

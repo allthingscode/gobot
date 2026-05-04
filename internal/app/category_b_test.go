@@ -19,7 +19,7 @@ func strPtr(s string) *string { return &s }
 func TestRunner_CategoryB_ContextCanceled(t *testing.T) {
 	t.Parallel()
 	name := "test_tool"
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel context immediately
 
@@ -117,7 +117,7 @@ func TestRunner_CategoryB_PolicyDenied(t *testing.T) {
 	cfg := &config.Config{}
 	runner := app.NewAgentRunner(mock, "model", "sys", cfg)
 	runner.SetTools([]app.Tool{&categoryBMockTool{name: name}})
-	
+
 	// Add a hook that returns ErrToolDenied
 	hooks := &agent.Hooks{}
 	hooks.RegisterPreTool(func(ctx context.Context, sessionKey, toolName string, args map[string]any) (string, error) {
@@ -141,8 +141,10 @@ type categoryBMockTool struct {
 	name string
 }
 
-func (m *categoryBMockTool) Name() string                        { return m.name }
-func (m *categoryBMockTool) Declaration() provider.ToolDeclaration { return provider.ToolDeclaration{Name: m.name} }
+func (m *categoryBMockTool) Name() string { return m.name }
+func (m *categoryBMockTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: m.name}
+}
 func (m *categoryBMockTool) Execute(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	return "ok", nil
 }

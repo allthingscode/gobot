@@ -6,9 +6,9 @@ import (
 
 // SessionState represents the formalized schema for the Dev Factory's session state.
 type SessionState struct {
-	Version          string                    `json:"version"`           // schema version, e.g., "2.0"
-	Timestamp        time.Time                 `json:"timestamp"`         // ISO-8601
-	Tasks            map[string]*TaskState     `json:"tasks,omitempty"`   // multi-task support
+	Version           string                      `json:"version"`           // schema version, e.g., "2.0"
+	Timestamp         time.Time                   `json:"timestamp"`         // ISO-8601
+	Tasks             map[string]*TaskState       `json:"tasks,omitempty"`   // multi-task support
 	LegacySpecialists map[string]*SpecialistState `json:"_legacy,omitempty"` // for backward compatibility
 }
 

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/logattr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -226,7 +227,7 @@ func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limi
 	)
 	if err != nil {
 		// FTS5 returns an error on bad query syntax — treat as empty result set.
-		slog.Debug("memory: search query rejected (returning empty)", "err", err)
+		slog.Debug("memory: search query rejected (returning empty)", logattr.Err(err))
 		return nil, nil
 	}
 	defer func() { _ = rows.Close() }()
@@ -278,13 +279,13 @@ func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
 		}
 		data, err := os.ReadFile(path) //nolint:gosec // G122: path comes from WalkDir callback which is already root-scoped
 		if err != nil {
-			slog.Warn("memory rebuild: skipping unreadable file", "path", path, "err", err)
+			slog.Warn("memory rebuild: skipping unreadable file", slog.String("path", path), logattr.Err(err))
 			return nil
 		}
 		sessionKey := strings.TrimSuffix(filepath.Base(path), ".md")
 		namespace := "session:" + sessionKey
 		if err := m.Index(namespace, string(data)); err != nil {
-			slog.Warn("memory rebuild: index failed", "path", path, "err", err)
+			slog.Warn("memory rebuild: index failed", slog.String("path", path), logattr.Err(err))
 			return nil
 		}
 		count++
@@ -307,7 +308,7 @@ func (m *MemoryStore) CleanupNamespace(namespace, ttl string) (int64, error) {
 	}
 	duration, err := time.ParseDuration(ttl)
 	if err != nil {
-		slog.Warn("memory: invalid TTL duration", "ttl", ttl, "err", err)
+		slog.Warn("memory: invalid TTL duration", slog.String("ttl", ttl), logattr.Err(err))
 		return 0, nil
 	}
 	if duration <= 0 {

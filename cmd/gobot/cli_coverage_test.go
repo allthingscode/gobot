@@ -15,7 +15,7 @@ func setupTestHome(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
-	
+
 	// Normalize path to avoid short name issues on Windows.
 	if absDir, err := filepath.Abs(tempDir); err == nil {
 		tempDir = absDir
@@ -27,7 +27,7 @@ func setupTestHome(t *testing.T) string {
 
 	t.Setenv("GOBOT_HOME", tempDir)
 	t.Setenv("GOBOT_STORAGE", tempDir)
-	
+
 	t.Cleanup(func() {
 		_ = os.RemoveAll(tempDir)
 	})
@@ -55,7 +55,7 @@ func TestCmdLogs_Functional(t *testing.T) {
 	logDir := filepath.Join(tempDir, "logs")
 	_ = os.MkdirAll(logDir, 0o755)
 	_ = os.WriteFile(filepath.Join(logDir, "gobot.log"), []byte("test log\n"), 0o600)
-	
+
 	cmd := cmdLogs()
 	cmd.SetArgs([]string{"--lines", "1"})
 	_ = cmd.Execute()
@@ -67,7 +67,7 @@ func TestCmdConfig_Functional(t *testing.T) {
 	cfg := &config.Config{}
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-	
+
 	cmd := cmdConfig()
 	cmd.SetArgs([]string{"validate"})
 	_ = cmd.Execute()
@@ -77,11 +77,11 @@ func TestCmdConfig_Functional(t *testing.T) {
 func TestCmdSecrets_Functional(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace", "secrets"), 0o755)
-	
+
 	cmd := cmdSecretsSet()
 	cmd.SetArgs([]string{"key1", "val1"})
 	_ = cmd.Execute()
-	
+
 	cmdGet := cmdSecretsGet()
 	cmdGet.SetArgs([]string{"key1"})
 	_ = cmdGet.Execute()
@@ -91,7 +91,7 @@ func TestCmdSecrets_Functional(t *testing.T) {
 func TestCmdCheckpoints_List_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	
+
 	cmd := cmdCheckpoints()
 	cmd.SetArgs([]string{})
 	_ = cmd.Execute()
@@ -101,7 +101,7 @@ func TestCmdCheckpoints_List_Coverage(t *testing.T) {
 func TestCmdRewind_List_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	
+
 	cmd := cmdRewind()
 	cmd.SetArgs([]string{"list"})
 	_ = cmd.Execute()
@@ -111,7 +111,7 @@ func TestCmdRewind_List_Coverage(t *testing.T) {
 func TestCmdFactory_Functional(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	
+
 	cmd := cmdFactory()
 	cmd.SetArgs([]string{"state", "list"})
 	_ = cmd.Execute()
@@ -122,7 +122,7 @@ func TestCmdSimulate_Functional_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
 	_ = os.WriteFile(filepath.Join(tempDir, "workspace", "AWARENESS.md"), []byte("test"), 0o600)
-	
+
 	cmd := cmdSimulate()
 	cmd.SetArgs([]string{"hello"})
 	_ = cmd.Execute()
@@ -132,7 +132,7 @@ func TestCmdSimulate_Functional_Coverage(t *testing.T) {
 func TestCmdAuthorize_Execute_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	
+
 	cmd := cmdAuthorize()
 	cmd.SetArgs([]string{"12345"})
 	_ = cmd.Execute()
@@ -142,7 +142,7 @@ func TestCmdAuthorize_Execute_Coverage(t *testing.T) {
 func TestCmdEmail_Execute_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	
+
 	cmd := cmdEmail()
 	cmd.SetArgs([]string{"subj", "body"})
 	_ = cmd.Execute()
@@ -152,7 +152,7 @@ func TestCmdEmail_Execute_Coverage(t *testing.T) {
 func TestCmdCalendar_Execute_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	
+
 	cmd := cmdCalendar()
 	cmd.SetArgs([]string{})
 	_ = cmd.Execute()
@@ -162,7 +162,7 @@ func TestCmdCalendar_Execute_Coverage(t *testing.T) {
 func TestCmdTasks_Execute_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	
+
 	cmd := cmdTasks()
 	cmd.SetArgs([]string{"list"})
 	_ = cmd.Execute()
@@ -172,7 +172,7 @@ func TestCmdTasks_Execute_Coverage(t *testing.T) {
 func TestCmdMemory_Execute_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	
+
 	cmd := cmdMemory()
 	cmd.SetArgs([]string{"rebuild"})
 	_ = cmd.Execute()
@@ -182,7 +182,7 @@ func TestCmdMemory_Execute_Coverage(t *testing.T) {
 func TestCmdState_Execute_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	
+
 	cmd := cmdState()
 	cmd.SetArgs([]string{"list"})
 	_ = cmd.Execute()

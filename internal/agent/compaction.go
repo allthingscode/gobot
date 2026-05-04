@@ -157,7 +157,6 @@ func keepResponsesForCall(messages []agentctx.StrategicMessage, keep []bool, too
 	}
 }
 
-
 func stripLeadingAssistantTurns(compacted []agentctx.StrategicMessage) []agentctx.StrategicMessage {
 	if len(compacted) == 0 {
 		return compacted
@@ -287,4 +286,3 @@ func applyTTLPruning(messages []agentctx.StrategicMessage, keep []bool, cutoff t
 		}
 	}
 }
-

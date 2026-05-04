@@ -18,7 +18,7 @@ func TestAutoInit(t *testing.T) {
 
 	// Set GOBOT_STORAGE to the temp dir
 	t.Setenv("GOBOT_STORAGE", tmpDir)
-	
+
 	// Ensure GOBOT_HOME is also set to a temp dir to avoid messing with real config
 	tmpHome, err := os.MkdirTemp("", "gobot-home-*")
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestCmdRunAutoInit(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	t.Setenv("GOBOT_STORAGE", tmpDir)
-	
+
 	tmpHome, err := os.MkdirTemp("", "gobot-home-run-autoinit-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpHome)
@@ -63,7 +63,7 @@ func TestCmdRunAutoInit(t *testing.T) {
 	// We want to verify that running 'gobot run' initializes the workspace.
 	// We'll use a context that we can cancel to prevent RunAgent from hanging,
 	// but we expect it to fail early anyway because of missing config/keys.
-	
+
 	cmd := cmdRun()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -75,9 +75,9 @@ func TestCmdRunAutoInit(t *testing.T) {
 	// Verify that the workspace directories were created
 	cfg, err := config.Load()
 	require.NoError(t, err)
-	
+
 	assert.False(t, isWorkspaceIncomplete(cfg), "Workspace should be complete after running cmdRun")
-	
+
 	dirs := []string{"sessions", "secrets", "memory", "logs"}
 	for _, d := range dirs {
 		path := cfg.WorkspacePath("", d)
