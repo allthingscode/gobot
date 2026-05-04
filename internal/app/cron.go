@@ -224,22 +224,21 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	sessionKey := "cron:" + jobID + ":" + chanEmail + ":" + recipient
 	slog.Info("dispatching cron job", "session", sessionKey, "channel", chanEmail)
 
-	msg := "[AUTONOMOUS] " + p.Message
-	if isMorningBriefingJob(p.ID) {
-		if freshCtx := loadScheduleContext(cd.secretsRoot); freshCtx != "" {
-			msg = freshCtx + "\n\n" + msg
-		}
-	}
+	msg := cd.buildEmailDispatchMessage(p)
 
 	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", msg)
 	if err != nil {
-		cd.sendEmailResponse(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
+		cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
+		if isMorningBriefingJob(p.ID) {
+			go cd.retryMorningBriefingOnce(p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
+		}
 		return fmt.Errorf("dispatch email: %w", err)
 	}
 	if isMorningBriefingJob(p.ID) {
-		if err := cd.enforceMorningBriefingGuards(sessionKey, response); err != nil {
-			cd.sendEmailResponse(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
-			return fmt.Errorf("dispatch email validation: %w", err)
+		if guardErr := cd.enforceMorningBriefingGuards(sessionKey, response); guardErr != nil {
+			cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, guardErr))
+			go cd.retryMorningBriefingOnce(p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
+			return fmt.Errorf("dispatch email validation: %w", guardErr)
 		}
 	}
 
@@ -247,6 +246,17 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 		cd.sendEmailResponse(ctx, p, recipient, response)
 	}
 	return nil
+}
+
+func (cd *CronDispatcher) buildEmailDispatchMessage(p cron.Payload) string {
+	msg := "[AUTONOMOUS] " + p.Message
+	if !isMorningBriefingJob(p.ID) {
+		return msg
+	}
+	if freshCtx := loadScheduleContext(cd.secretsRoot); freshCtx != "" {
+		msg = freshCtx + "\n\n" + msg
+	}
+	return msg
 }
 
 func isMorningBriefingJob(jobID string) bool {
@@ -278,15 +288,14 @@ func validateMorningBriefingResponse(response string) error {
 	if strings.Contains(body, "TOOL_ERROR") {
 		return fmt.Errorf("response contains TOOL_ERROR marker")
 	}
-	// Require multiple source attributions.
-	sourceCount := strings.Count(body, "[Sources:")
-	if sourceCount < 3 {
-		return fmt.Errorf("insufficient source attributions: found %d, require >= 3", sourceCount)
+	// Require at least one source attribution (partial briefs may have fewer sections).
+	if strings.Count(body, "[Sources:") < 1 {
+		return fmt.Errorf("no source attributions found")
 	}
-	// Require published dates to support freshness checks.
+	// Require at least one published date.
 	dateRe := regexp.MustCompile(`\b20\d{2}-\d{2}-\d{2}\b`)
-	if len(dateRe.FindAllString(body, -1)) < 2 {
-		return fmt.Errorf("insufficient published dates in output")
+	if len(dateRe.FindAllString(body, -1)) < 1 {
+		return fmt.Errorf("no published dates in output")
 	}
 	return nil
 }
@@ -441,6 +450,49 @@ func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload,
 	subject := resolveEmailSubject(p)
 	if err := svc.Send(ctx, recipient, subject, response); err != nil {
 		slog.Error("failed to send cron response via email", "err", err, "to", recipient)
+	}
+}
+
+func resolveFailureEmailSubject(p cron.Payload) string {
+	return "⚠️ Failed: " + resolveEmailSubject(p)
+}
+
+func (cd *CronDispatcher) sendFailureEmail(ctx context.Context, p cron.Payload, recipient, body string) {
+	gmailSecrets := filepath.Join(cd.secretsRoot, "gmail")
+	svc, err := google.NewService(ctx, gmailSecrets)
+	if err != nil {
+		slog.Error("failed to initialize gmail service for cron failure email", "err", err)
+		return
+	}
+	subject := resolveFailureEmailSubject(p)
+	if err := svc.Send(ctx, recipient, subject, body); err != nil {
+		slog.Error("failed to send cron failure email", "err", err, "to", recipient)
+	}
+}
+
+func (cd *CronDispatcher) retryMorningBriefingOnce(p cron.Payload, recipient string, delay time.Duration) {
+	slog.Info("cron: morning briefing retry scheduled", "delay", delay)
+	time.Sleep(delay)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	retryKey := fmt.Sprintf("cron:morning_briefing:email:%s:retry1", recipient)
+	msg := cd.buildEmailDispatchMessage(p)
+
+	slog.Info("cron: retrying morning briefing", "session", retryKey)
+	response, err := cd.mgr.Dispatch(ctx, retryKey, "", msg)
+	if err != nil {
+		slog.Error("cron: morning briefing retry failed", "err", err)
+		return
+	}
+	if err := cd.enforceMorningBriefingGuards(retryKey, response); err != nil {
+		slog.Error("cron: morning briefing retry failed validation", "err", err)
+		return
+	}
+	if response != "" {
+		slog.Info("cron: morning briefing retry succeeded, delivering email")
+		cd.sendEmailResponse(ctx, p, recipient, response)
 	}
 }
 

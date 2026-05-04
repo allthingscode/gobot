@@ -303,14 +303,22 @@ func TestValidateMorningBriefingResponse(t *testing.T) {
 		t.Fatalf("expected valid response, got %v", err)
 	}
 
+	// Partial brief (1 source, 1 date) should now pass.
+	partial := `<h2>Finance</h2><span class="source-link">[Sources: https://a]</span>` +
+		`<p>Published: 2026-04-28</p>` +
+		`<h2>Weather</h2><p>Data unavailable.</p>`
+	if err := validateMorningBriefingResponse(partial); err != nil {
+		t.Fatalf("expected partial brief to pass, got %v", err)
+	}
+
 	if err := validateMorningBriefingResponse("TOOL_ERROR [spawn_subagent]: bad"); err == nil {
 		t.Fatal("expected TOOL_ERROR response to fail")
 	}
 	if err := validateMorningBriefingResponse("Daily Briefing Status: Partial/Unavailable"); err == nil {
-		t.Fatal("expected partial/unavailable response to fail")
+		t.Fatal("expected all-sections-failed response to fail")
 	}
 	if err := validateMorningBriefingResponse("<p>No sources or dates</p>"); err == nil {
-		t.Fatal("expected low-evidence response to fail")
+		t.Fatal("expected zero-evidence response to fail")
 	}
 }
 
