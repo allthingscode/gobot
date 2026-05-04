@@ -1,0 +1,2 @@
+time=2026-05-03T23:08:52.918-05:00 level=INFO msg="test text log message"
+{"time":"2026-05-03T23:08:52.9193716-05:00","level":"INFO","msg":"test json log message"}
