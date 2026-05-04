@@ -470,8 +470,8 @@ func TestSaveSnapshot_UnmarshalableMarshal(t *testing.T) { //nolint:paralleltest
 	if !strings.Contains(output, "level=WARN") {
 		t.Errorf("expected level=WARN log, got: %q", output)
 	}
-	if !strings.Contains(output, "session=t1") {
-		t.Errorf("expected session=t1 in log, got: %q", output)
+	if !strings.Contains(output, "session_key=t1") {
+		t.Errorf("expected session_key=t1 in log, got: %q", output)
 	}
 	if !strings.Contains(output, "err=") {
 		t.Errorf("expected err= in log, got: %q", output)
