@@ -361,10 +361,12 @@ func (r *AgentRunner) processToolCalls(ctx context.Context, sessionKey, userID s
 		}
 
 		*toolSeq = append(*toolSeq, name)
-		result, err := r.executeSingleToolCall(ctx, sessionKey, userID, name, args, iter, len(*toolSeq))
+		callCtx, meta := withToolMeta(ctx)
+		result, err := r.executeSingleToolCall(callCtx, sessionKey, userID, name, args, iter, len(*toolSeq))
 		if err != nil {
 			return nil, err
 		}
+		result = formatToolMetaBlock(result, meta)
 
 		messages = append(messages, agentctx.StrategicMessage{
 			Role:       agentctx.RoleTool,

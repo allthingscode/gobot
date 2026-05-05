@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,6 +157,13 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 		return t.handleFallback(ctx, subKey, userID, objective, agentType, systemPrompt, prov, model, start, err)
 	}
 	slog.Info("spawn: sub-agent complete", "subKey", subKey, "model", model, "elapsed", elapsed, "replyLen", len(reply), "iterations", limitedRunner.Count)
+	if m := toolMetaFromCtx(ctx); m != nil {
+		m.Set("agent_type", agentType)
+		m.Set("model", model)
+		m.Set("provider", prov.Name())
+		m.Set("elapsed_ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
+		m.Set("iterations", strconv.Itoa(limitedRunner.Count))
+	}
 	return reply, nil
 }
 
@@ -179,7 +187,15 @@ func (t *SpawnTool) handleFallback(ctx context.Context, subKey, userID, objectiv
 		defer fallbackCancel()
 		fallbackReply, fallbackErr := fallbackMgr.Dispatch(fallbackCtx, subKey, userID, objective)
 		if fallbackErr == nil {
-			slog.Info("spawn: fallback sub-agent complete", "subKey", subKey, "model", t.Model, "elapsed", time.Since(start), "replyLen", len(fallbackReply), "iterations", fallbackLimited.Count)
+			elapsed := time.Since(start)
+			slog.Info("spawn: fallback sub-agent complete", "subKey", subKey, "model", t.Model, "elapsed", elapsed, "replyLen", len(fallbackReply), "iterations", fallbackLimited.Count)
+			if m := toolMetaFromCtx(ctx); m != nil {
+				m.Set("agent_type", agentType)
+				m.Set("model", t.Model)
+				m.Set("provider", t.DefaultProv.Name())
+				m.Set("elapsed_ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
+				m.Set("iterations", strconv.Itoa(fallbackLimited.Count))
+			}
 			return fallbackReply, nil
 		}
 		slog.Error("spawn: fallback sub-agent also failed", "subKey", subKey, "model", t.Model, "err", fallbackErr)
@@ -227,14 +243,22 @@ func (t *SpawnTool) tryConfiguredModelFallbacks(ctx context.Context, subKey, use
 		reply, err := altMgr.Dispatch(altCtx, subKey, userID, objective)
 		altCancel()
 		if err == nil {
+			elapsed := time.Since(start)
 			slog.Info("spawn: configured model fallback complete",
 				"subKey", subKey,
 				"fallback_key", key,
 				"model", spec.Model,
-				"elapsed", time.Since(start),
+				"elapsed", elapsed,
 				"replyLen", len(reply),
 				"iterations", altLimited.Count,
 			)
+			if m := toolMetaFromCtx(ctx); m != nil {
+				m.Set("agent_type", agentType)
+				m.Set("model", spec.Model)
+				m.Set("provider", altProv.Name())
+				m.Set("elapsed_ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
+				m.Set("iterations", strconv.Itoa(altLimited.Count))
+			}
 			return reply, true
 		}
 		slog.Error("spawn: configured model fallback failed",
