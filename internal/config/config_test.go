@@ -312,6 +312,72 @@ func TestLoadFrom_MissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_UnknownField(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		content     string
+		wantErrPart string
+	}{
+		{
+			name:        "top-level unknown key",
+			content:     `{"typo_key":true}`,
+			wantErrPart: "typo_key",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfgPath := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(cfgPath, []byte(tc.content), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, err := LoadFrom(cfgPath)
+			if err == nil {
+				t.Fatal("expected error for unknown top-level key, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrPart) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrPart)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_PartialConfig(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		content   string
+		wantLevel string
+	}{
+		{
+			name:      "logging-only partial config",
+			content:   `{"logging":{"level":"DEBUG"}}`,
+			wantLevel: "DEBUG",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfgPath := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(cfgPath, []byte(tc.content), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			cfg, err := LoadFrom(cfgPath)
+			if err != nil {
+				t.Fatalf("LoadFrom() unexpected error: %v", err)
+			}
+			if cfg.Logging.Level != tc.wantLevel {
+				t.Fatalf("Logging.Level = %q, want %q", cfg.Logging.Level, tc.wantLevel)
+			}
+		})
+	}
+}
+
 func TestDecode_ReadError(t *testing.T) {
 	t.Parallel()
 	_, err := decode(errReader{})
