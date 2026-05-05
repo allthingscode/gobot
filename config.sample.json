@@ -69,6 +69,11 @@
         "vector_search_enabled": false,
         "multi_user_enabled": false,
         "gmail_readonly": true,
+        "google_scopes": [
+            "https://mail.google.com/",
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/tasks"
+        ],
         "observability": {
             "service_name": "gobot",
             "service_version": "dev",
@@ -79,12 +84,7 @@
         "routing": {
             "enabled": false,
             "manager_model": ""
-        },
-        "google_scopes": [
-            "https://mail.google.com/",
-            "https://www.googleapis.com/auth/calendar",
-            "https://www.googleapis.com/auth/tasks"
-        ]
+        }
     },
     "gateway": {
         "enabled": false,
