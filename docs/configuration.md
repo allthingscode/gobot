@@ -132,6 +132,7 @@ Settings for advanced agent features, including Google Workspace integration. Fo
 | `vector_search_enabled` | bool | Enable semantic/hybrid memory search (requires embedding provider). |
 | `multi_user_enabled` | bool | Enable per-user workspace isolation. When true, workspaces are scoped to `{storage_root}/workspace/users/{userID}/`. |
 | `gmail_readonly` | bool | When `true`, registers `search_gmail` and `read_gmail` tools in addition to `send_email`. Set to `false` (default) to allow outbound notifications only. |
+| `google_scopes` | []string | OAuth2 scopes requested by `gobot reauth`. Omit to use the defaults: `https://mail.google.com/`, `https://www.googleapis.com/auth/calendar`, `https://www.googleapis.com/auth/tasks`. See [Google Cloud Setup Guide](google-setup.md#customizing-oauth-scopes). |
 | `templates_path` | string | Directory containing custom email templates (`email.html`). |
 | `custom_css_path` | string | Path to a CSS file that overrides default email styling. |
 | `policy_file_path` | string | Path to a tool policy file for fine-grained allow/deny rules. |

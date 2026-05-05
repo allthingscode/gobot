@@ -232,6 +232,7 @@ type StrategicConfig struct {
 	VectorSearchEnabled bool                `json:"vector_search_enabled"`    // F-030
 	MultiUserEnabled    bool                `json:"multi_user_enabled"`       // F-073
 	GmailReadonly       bool                `json:"gmail_readonly"`           // when false, search_gmail and read_gmail tools are not registered
+	GoogleScopes        []string            `json:"google_scopes,omitempty"`  // OAuth scopes requested during reauth; defaults to full task/calendar/gmail set
 	Observability       ObservabilityConfig `json:"observability"`
 	TemplatesPath       string              `json:"templates_path,omitempty"`   // Custom directory for email templates
 	CustomCSSPath       string              `json:"custom_css_path,omitempty"`  // Custom CSS file for email styling override
@@ -267,6 +268,19 @@ func (c *Config) VectorSearchEnabled() bool {
 // TemplatesPath returns the custom directory for email templates, if configured.
 func (c *Config) TemplatesPath() string {
 	return c.Strategic.TemplatesPath
+}
+
+// GoogleScopes returns the OAuth2 scopes to request during reauth.
+// Defaults to the full task/calendar/gmail set when not configured.
+func (c *Config) GoogleScopes() []string {
+	if len(c.Strategic.GoogleScopes) > 0 {
+		return c.Strategic.GoogleScopes
+	}
+	return []string{
+		"https://www.googleapis.com/auth/tasks",
+		"https://www.googleapis.com/auth/calendar",
+		"https://mail.google.com/",
+	}
 }
 
 // MemoryWindow returns the configured agent memory window (max context messages), defaulting to 50.

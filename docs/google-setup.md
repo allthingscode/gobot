@@ -31,11 +31,10 @@ You must enable the specific APIs for each service you want Gobot to use:
     *   **User support email**: Your email address.
     *   **Developer contact info**: Your email address.
 5.  Click **Save and Continue**.
-6.  **Scopes**: Click **Add or Remove Scopes** and manually add these scopes:
-    *   `https://www.googleapis.com/auth/gmail.readonly` (for reading and searching emails)
-    *   `https://www.googleapis.com/auth/gmail.send` (for sending emails)
-    *   `https://www.googleapis.com/auth/calendar.events` (for managing calendar events)
-    *   `https://www.googleapis.com/auth/tasks` (for managing tasks)
+6.  **Scopes**: Click **Add or Remove Scopes** and manually add the scopes matching your `google_scopes` config (see [Customizing OAuth Scopes](#customizing-oauth-scopes)). The defaults are:
+    *   `https://mail.google.com/` (full Gmail access)
+    *   `https://www.googleapis.com/auth/calendar` (full Calendar access)
+    *   `https://www.googleapis.com/auth/tasks` (full Tasks access)
 7.  Click **Save and Continue**.
 8.  **Test Users**: If you selected "External", you **must** add your own email address as a test user, or the authorization will fail.
 9.  Click **Save and Continue**, then click **Back to Dashboard**.
@@ -63,6 +62,31 @@ You must enable the specific APIs for each service you want Gobot to use:
     ./bin/gobot reauth
     ```
 4.  Follow the link in your terminal to authorize the app.
+
+## Customizing OAuth Scopes
+
+By default, `gobot reauth` requests full access to Gmail, Calendar, and Tasks. You can restrict the scopes by adding `google_scopes` to the `strategic_edition` section of your `config.json`:
+
+```json
+"strategic_edition": {
+  "google_scopes": [
+    "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send"
+  ]
+}
+```
+
+The scopes you list here must also be added to your OAuth Consent Screen in the Google Cloud Console (Step 3.6 above). After changing this list, run `gobot reauth` to re-authorize with the new scopes.
+
+**Default scopes** (when `google_scopes` is omitted):
+
+| Scope | Access |
+| :--- | :--- |
+| `https://mail.google.com/` | Full Gmail |
+| `https://www.googleapis.com/auth/calendar` | Full Calendar |
+| `https://www.googleapis.com/auth/tasks` | Full Tasks |
 
 ## Troubleshooting & FAQ
 

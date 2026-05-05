@@ -22,16 +22,8 @@ func cmdReauth() *cobra.Command {
 			}
 			secretsRoot := cfg.SecretsRoot()
 
-			// Scopes required for gobot
-			scopes := []string{
-				"https://www.googleapis.com/auth/tasks",
-				"https://www.googleapis.com/auth/calendar.events",
-				"https://www.googleapis.com/auth/gmail.readonly",
-				"https://www.googleapis.com/auth/gmail.send",
-			}
-
 			fmt.Println("Starting Go-native interactive authorization...")
-			return google.AuthorizeInteractive(secretsRoot, scopes)
+			return google.AuthorizeInteractive(secretsRoot, cfg.GoogleScopes())
 		},
 	}
 }
