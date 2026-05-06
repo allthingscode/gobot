@@ -40,8 +40,11 @@ func newSendEmailTool(secretsRoot, storageRoot, userEmail string, registry *Tool
 	}
 }
 
-func (s *SendEmailTool) buildEmailContent(subject, body string) google.EmailContent {
-	wrapped := s.tmgr.Wrap(body)
+func buildEmailContent(tmgr *reporter.TemplateManager, subject, body string) google.EmailContent {
+	if tmgr == nil {
+		return google.EmailContent{Subject: subject, Plain: body}
+	}
+	wrapped := tmgr.Wrap(body)
 	if wrapped == body {
 		return google.EmailContent{Subject: subject, Plain: body}
 	}
@@ -100,7 +103,7 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 		return "", fmt.Errorf("send_email: auth: %w", err)
 	}
 
-	content := s.buildEmailContent(subject, body)
+	content := buildEmailContent(s.tmgr, subject, body)
 
 	if s.tracer != nil {
 		err = s.tracer.TraceGoogleCall(ctx, "gmail", "Send", func(ctx context.Context) error {

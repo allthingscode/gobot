@@ -115,12 +115,12 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 		if api != nil {
 			b = StartTelegramBot(ctx, api, gateHandler, tracer, &wg)
 		}
-
-		printStartupBanner(cfg, api)
-
-		StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
-		StartHeartbeat(ctx, cfg, cfg.TelegramToken(), &wg)
 	}
+
+	printStartupBanner(cfg, api)
+
+	StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
+	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), &wg)
 
 	waitForShutdown(ctx, &wg)
 	return nil

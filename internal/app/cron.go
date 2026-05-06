@@ -466,17 +466,6 @@ func buildCronFailureEmailBody(p cron.Payload, sessionKey string, dispatchErr er
 	)
 }
 
-func (cd *CronDispatcher) buildEmailContent(subject, body string) google.EmailContent {
-	wrapped := cd.tmgr.Wrap(body)
-	if wrapped == body {
-		return google.EmailContent{Subject: subject, Plain: body}
-	}
-	return google.EmailContent{
-		Subject: subject,
-		Plain:   reporter.StripHTML(wrapped),
-		HTML:    wrapped,
-	}
-}
 
 func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, recipient, response string) {
 	svc, err := cd.newEmailService(ctx)
@@ -485,7 +474,7 @@ func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload,
 		return
 	}
 	subject := resolveEmailSubject(p)
-	content := cd.buildEmailContent(subject, response)
+	content := buildEmailContent(cd.tmgr, subject, response)
 	if err := svc.Send(ctx, recipient, content); err != nil {
 		slog.Error("failed to send cron response via email", "err", err, "to", recipient)
 	}
@@ -502,7 +491,7 @@ func (cd *CronDispatcher) sendFailureEmail(ctx context.Context, p cron.Payload, 
 		return
 	}
 	subject := resolveFailureEmailSubject(p)
-	content := cd.buildEmailContent(subject, body)
+	content := buildEmailContent(cd.tmgr, subject, body)
 	if err := svc.Send(ctx, recipient, content); err != nil {
 		slog.Error("failed to send cron failure email", "err", err, "to", recipient)
 	}
