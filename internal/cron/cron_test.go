@@ -103,7 +103,7 @@ func TestDetectModularChange(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// 1. Initial detection (empty dir)
-	changed, _ := DetectModularChange(tmpDir, 0.0)
+	changed, _ := DetectModularChange(tmpDir, 0)
 	if changed {
 		t.Errorf("expected no change for empty dir")
 	}
@@ -114,7 +114,7 @@ func TestDetectModularChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changed, newMtime := DetectModularChange(tmpDir, 0.0)
+	changed, newMtime := DetectModularChange(tmpDir, 0)
 	if !changed {
 		t.Errorf("expected change after adding file")
 	}

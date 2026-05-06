@@ -35,24 +35,7 @@ type TemplateManager struct {
 
 // NewTemplateManager initializes a TemplateManager, loading from dir if provided.
 func NewTemplateManager(dir string) *TemplateManager {
-	mgr := &TemplateManager{
-		css:  strings.TrimSpace(defaultCSS),
-		html: strings.TrimSpace(defaultHTML),
-	}
-
-	if dir != "" {
-		cssPath := filepath.Join(dir, "email.css")
-		if b, err := os.ReadFile(cssPath); err == nil {
-			mgr.css = strings.TrimSpace(string(b))
-		}
-
-		htmlPath := filepath.Join(dir, "email.html")
-		if b, err := os.ReadFile(htmlPath); err == nil {
-			mgr.html = strings.TrimSpace(string(b))
-		}
-	}
-
-	return mgr
+	return NewTemplateManagerWithCSS(dir, "")
 }
 
 // NewTemplateManagerWithCSS initializes a TemplateManager, loading from dir if provided,

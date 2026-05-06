@@ -35,7 +35,7 @@ type Scheduler struct {
 	store            *Store
 	lastMtime        int64
 	lastSize         int64
-	lastModularMtime float64
+	lastModularMtime int64
 	lastReloadErr    error
 	lastReloadErrAt  time.Time
 	clock            Clock
@@ -157,24 +157,49 @@ func (s *Scheduler) Run(ctx context.Context) error {
 }
 
 func (s *Scheduler) poll(ctx context.Context) error {
+	s.mu.Lock()
 	s.reloadJobsJSON()
 	s.reloadModularJobs()
 
 	if s.store == nil {
+		s.mu.Unlock()
 		return nil
 	}
 
 	nowMS := s.clock.Now().UnixMilli()
 	due, changed := s.identifyDueJobs(nowMS)
 
-	if len(due) > 0 {
-		s.dispatchDueJobs(ctx, due, nowMS)
-		changed = true
+	if len(due) == 0 {
+		if changed {
+			s.saveStore()
+		}
+		s.mu.Unlock()
+		return nil
 	}
 
-	if changed {
+	if s.dispatcher == nil {
+		for _, dj := range due {
+			s.store.Jobs[dj.index].State.NextRunAtMS = ComputeNextRun(dj.sched, nowMS)
+		}
 		s.saveStore()
+		s.mu.Unlock()
+		return nil
 	}
+	s.mu.Unlock()
+
+	results := s.runJobsConcurrently(ctx, due)
+
+	s.mu.Lock()
+	for _, r := range results {
+		if r.err != nil {
+			s.store.Jobs[r.index].State.FailureCount++
+		} else {
+			s.store.Jobs[r.index].State.SuccessCount++
+		}
+		s.store.Jobs[r.index].State.NextRunAtMS = ComputeNextRun(s.store.Jobs[r.index].Schedule, nowMS)
+	}
+	s.saveStore()
+	s.mu.Unlock()
 
 	return nil
 }
@@ -260,6 +285,11 @@ type dueJob struct {
 	sched   Schedule
 }
 
+type dispatchResult struct {
+	index int
+	err   error
+}
+
 func (s *Scheduler) identifyDueJobs(nowMS int64) ([]dueJob, bool) {
 	changed := false
 	var due []dueJob
@@ -293,39 +323,25 @@ func (s *Scheduler) identifyDueJobs(nowMS int64) ([]dueJob, bool) {
 	return due, changed
 }
 
-func (s *Scheduler) dispatchDueJobs(ctx context.Context, due []dueJob, nowMS int64) {
-	if s.dispatcher == nil {
-		for _, dj := range due {
-			s.store.Jobs[dj.index].State.NextRunAtMS = ComputeNextRun(dj.sched, nowMS)
-		}
-		return
-	}
-
-	type dispatchResult struct {
-		index int
-		err   error
-	}
-	results := make(chan dispatchResult, len(due))
+func (s *Scheduler) runJobsConcurrently(ctx context.Context, due []dueJob) []dispatchResult {
+	resultCh := make(chan dispatchResult, len(due))
 	var wg sync.WaitGroup
 	for _, dj := range due {
 		wg.Add(1)
 		go func(dj dueJob) {
 			defer wg.Done()
 			err := s.executeJob(ctx, dj)
-			results <- dispatchResult{index: dj.index, err: err}
+			resultCh <- dispatchResult{index: dj.index, err: err}
 		}(dj)
 	}
 	wg.Wait()
-	close(results)
+	close(resultCh)
 
-	for r := range results {
-		if r.err != nil {
-			s.store.Jobs[r.index].State.FailureCount++
-		} else {
-			s.store.Jobs[r.index].State.SuccessCount++
-		}
-		s.store.Jobs[r.index].State.NextRunAtMS = ComputeNextRun(s.store.Jobs[r.index].Schedule, nowMS)
+	results := make([]dispatchResult, 0, len(due))
+	for r := range resultCh {
+		results = append(results, r)
 	}
+	return results
 }
 
 func (s *Scheduler) executeJob(ctx context.Context, dj dueJob) error {
@@ -367,9 +383,13 @@ func (s *Scheduler) sendFailureAlert(ctx context.Context, dj dueJob, err error) 
 func (s *Scheduler) saveStore() {
 	data, err := s.store.EncodeJSON()
 	if err != nil {
+		slog.Error("cron: failed to encode jobs store", logattr.Err(err))
 		return
 	}
-	_ = os.WriteFile(s.storePath, data, 0o600)
+	if err := os.WriteFile(s.storePath, data, 0o600); err != nil {
+		slog.Error("cron: failed to save jobs store", logattr.Err(err))
+		return
+	}
 	if info, err := os.Stat(s.storePath); err == nil {
 		s.lastMtime = info.ModTime().UnixNano()
 		s.lastSize = info.Size()

@@ -23,6 +23,7 @@ linters:
                 - style
             disabled-checks:
                 - hugeParam # Not performance-critical
+                - uncheckedInlineErr # False positive: fires on valid `if err := f(); err != nil` patterns
         errcheck:
             exclude-functions:
                 # fmt writers — errors not critical when writing to HTTP/stderr

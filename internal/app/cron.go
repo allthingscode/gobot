@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"html"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -22,8 +24,9 @@ import (
 )
 
 const (
-	chanTelegram = "telegram"
-	chanEmail    = "email"
+	chanTelegram         = "telegram"
+	chanEmail            = "email"
+	morningBriefingJobID = "morning_briefing"
 )
 
 // CronDispatcher implements cron.Dispatcher.
@@ -35,6 +38,7 @@ type CronDispatcher struct {
 	storageRoot string
 	secretsRoot string
 	userEmail   string
+	shutdownCh  <-chan struct{} // closed when the application is shutting down
 
 	vecStore     *vector.Store
 	embedProv    vector.EmbeddingProvider
@@ -64,6 +68,7 @@ func NewCronDispatcher(cfg *config.Config, mgr *agent.SessionManager, stack *Age
 
 // Run starts the cron scheduler and blocks until ctx is canceled.
 func (cd *CronDispatcher) Run(ctx context.Context) {
+	cd.shutdownCh = ctx.Done()
 	scheduler := cron.NewScheduler(
 		filepath.Join(cd.storageRoot, "workspace", "jobs.json"),
 		filepath.Join(cd.storageRoot, "workspace", "jobs"),
@@ -121,6 +126,14 @@ func (cd *CronDispatcher) prepareSpecialistRunner(agentName string, spec config.
 		}
 	}
 	return runner, nil
+}
+
+func (cd *CronDispatcher) newEmailService(ctx context.Context) (*google.Service, error) {
+	svc, err := google.NewService(ctx, filepath.Join(cd.secretsRoot, "gmail"))
+	if err != nil {
+		return nil, fmt.Errorf("gmail service: %w", err)
+	}
+	return svc, nil
 }
 
 func (cd *CronDispatcher) dispatchSpecialist(ctx context.Context, p cron.Payload, channel, to string, silent bool) error {
@@ -230,14 +243,14 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	if err != nil {
 		cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
 		if isMorningBriefingJob(p.ID) {
-			go cd.retryMorningBriefingOnce(p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
+			go cd.retryMorningBriefingOnce(cd.shutdownCh, p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
 		}
 		return fmt.Errorf("dispatch email: %w", err)
 	}
 	if isMorningBriefingJob(p.ID) {
 		if guardErr := cd.enforceMorningBriefingGuards(sessionKey, response); guardErr != nil {
 			cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, guardErr))
-			go cd.retryMorningBriefingOnce(p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
+			go cd.retryMorningBriefingOnce(cd.shutdownCh, p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
 			return fmt.Errorf("dispatch email validation: %w", guardErr)
 		}
 	}
@@ -260,7 +273,7 @@ func (cd *CronDispatcher) buildEmailDispatchMessage(p cron.Payload) string {
 }
 
 func isMorningBriefingJob(jobID string) bool {
-	return strings.EqualFold(strings.TrimSpace(jobID), "morning_briefing")
+	return strings.EqualFold(strings.TrimSpace(jobID), morningBriefingJobID)
 }
 
 func (cd *CronDispatcher) enforceMorningBriefingGuards(sessionKey, response string) error {
@@ -321,11 +334,24 @@ func (cd *CronDispatcher) verifySearchToolProvenance(sessionKey string) (bool, e
 
 func (cd *CronDispatcher) verifySearchToolProvenanceFromLogs(sessionKey string) (bool, error) {
 	logPath := filepath.Join(cd.storageRoot, "logs", "gobot.log")
-	data, err := os.ReadFile(logPath)
+	f, err := os.Open(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
+		return false, fmt.Errorf("open gobot log: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	const maxTailBytes = 512 * 1024
+	if info, statErr := f.Stat(); statErr == nil && info.Size() > maxTailBytes {
+		if _, seekErr := f.Seek(-maxTailBytes, io.SeekEnd); seekErr != nil {
+			_, _ = f.Seek(0, io.SeekStart)
+		}
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
 		return false, fmt.Errorf("read gobot log: %w", err)
 	}
 	text := string(data)
@@ -333,10 +359,7 @@ func (cd *CronDispatcher) verifySearchToolProvenanceFromLogs(sessionKey string) 
 	subSession := `session=agent:researcher:` + sessionKey
 	parentHasSpawn := strings.Contains(text, parentMarker)
 	subHasSearch := hasLineWithAll(text, subSession, "tool=") && hasGoogleAISearchSessionEvidence(text, subSession)
-	if parentHasSpawn && subHasSearch {
-		return true, nil
-	}
-	return false, nil
+	return parentHasSpawn && subHasSearch, nil
 }
 
 func hasGoogleAISearchEvidence(text string) bool {
@@ -433,16 +456,15 @@ func buildCronFailureEmailBody(p cron.Payload, sessionKey string, dispatchErr er
 			"<li><strong>Error Hint:</strong> %s</li>"+
 			"</ul>"+
 			"<p>This email was sent intentionally so you still receive a status update even when live research fails.</p>",
-		p.ID,
-		sessionKey,
-		now,
-		dispatchErr.Error(),
+		html.EscapeString(p.ID),
+		html.EscapeString(sessionKey),
+		html.EscapeString(now),
+		html.EscapeString(dispatchErr.Error()),
 	)
 }
 
 func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, recipient, response string) {
-	gmailSecrets := filepath.Join(cd.secretsRoot, "gmail")
-	svc, err := google.NewService(ctx, gmailSecrets)
+	svc, err := cd.newEmailService(ctx)
 	if err != nil {
 		slog.Error("failed to initialize gmail service for cron", "err", err)
 		return
@@ -458,8 +480,7 @@ func resolveFailureEmailSubject(p cron.Payload) string {
 }
 
 func (cd *CronDispatcher) sendFailureEmail(ctx context.Context, p cron.Payload, recipient, body string) {
-	gmailSecrets := filepath.Join(cd.secretsRoot, "gmail")
-	svc, err := google.NewService(ctx, gmailSecrets)
+	svc, err := cd.newEmailService(ctx)
 	if err != nil {
 		slog.Error("failed to initialize gmail service for cron failure email", "err", err)
 		return
@@ -470,14 +491,19 @@ func (cd *CronDispatcher) sendFailureEmail(ctx context.Context, p cron.Payload, 
 	}
 }
 
-func (cd *CronDispatcher) retryMorningBriefingOnce(p cron.Payload, recipient string, delay time.Duration) {
+func (cd *CronDispatcher) retryMorningBriefingOnce(shutdown <-chan struct{}, p cron.Payload, recipient string, delay time.Duration) {
 	slog.Info("cron: morning briefing retry scheduled", "delay", delay)
-	time.Sleep(delay)
+	select {
+	case <-time.After(delay):
+	case <-shutdown:
+		slog.Info("cron: morning briefing retry cancelled (shutdown)")
+		return
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute) //nolint:gosec // retry goroutine must outlive the triggering request context
 	defer cancel()
 
-	retryKey := fmt.Sprintf("cron:morning_briefing:email:%s:retry1", recipient)
+	retryKey := fmt.Sprintf("cron:%s:email:%s:retry1", morningBriefingJobID, recipient)
 	msg := cd.buildEmailDispatchMessage(p)
 
 	slog.Info("cron: retrying morning briefing", "session", retryKey)

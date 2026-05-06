@@ -109,26 +109,26 @@ func ResolveRoutableChannel(p Payload, _ string) (channel, to string, silent boo
 
 // DetectModularChange detects if any modular .md job files have changed.
 // Ported from detect_modular_change in cron_logic.py.
-func DetectModularChange(itemsDir string, lastItemsMtime float64) (changed bool, newMtime float64) {
+func DetectModularChange(itemsDir string, lastItemsMtime int64) (changed bool, newMtime int64) {
 	files, err := os.ReadDir(itemsDir)
 	if err != nil {
-		return false, 0.0
+		return false, 0
 	}
 
-	var totalMtime float64
+	var totalMtime int64
 	found := false
 	for _, f := range files {
 		if !f.IsDir() && strings.HasSuffix(strings.ToLower(f.Name()), ".md") {
 			info, err := f.Info()
 			if err == nil {
-				totalMtime += float64(info.ModTime().UnixNano()) / 1e9
+				totalMtime += info.ModTime().UnixNano()
 				found = true
 			}
 		}
 	}
 
 	if !found {
-		return false, 0.0
+		return false, 0
 	}
 
 	if totalMtime != lastItemsMtime {
