@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/allthingscode/gobot/internal/reporter"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
 
@@ -28,6 +27,13 @@ var ErrNeedsReauth = errors.New("AUTH_EXPIRED: run gobot reauth")
 const (
 	gmailBaseURL = "https://gmail.googleapis.com/gmail/v1/users/me"
 )
+
+// EmailContent represents the subject and body (plain and/or HTML) of an email.
+type EmailContent struct {
+	Subject string
+	Plain   string
+	HTML    string
+}
 
 // MessageSummary represents a minimal message object from a list/search result.
 type MessageSummary struct {
@@ -111,30 +117,28 @@ func NewService(ctx context.Context, secretsRoot string) (*Service, error) {
 }
 
 // Send delivers an email via the Gmail API.
-func (s *Service) Send(ctx context.Context, to, subject, body string) error {
-	wrapped := reporter.WrapHTML(body)
-	isHTML := wrapped != body
+func (s *Service) Send(ctx context.Context, to string, content EmailContent) error {
+	isHTML := content.HTML != ""
 	const multipartBoundary = "gobot_alt_20260328"
 
 	var sb strings.Builder
 	sb.WriteString("To: " + to + "\r\n")
-	sb.WriteString("Subject: " + mime.QEncoding.Encode("UTF-8", subject) + "\r\n")
+	sb.WriteString("Subject: " + mime.QEncoding.Encode("UTF-8", content.Subject) + "\r\n")
 	sb.WriteString("MIME-Version: 1.0\r\n")
 
 	if isHTML {
-		plainText := reporter.StripHTML(wrapped)
 		sb.WriteString("Content-Type: multipart/alternative; boundary=\"" + multipartBoundary + "\"\r\n")
 		sb.WriteString("\r\n")
 		sb.WriteString("--" + multipartBoundary + "\r\n")
 		sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
-		sb.WriteString(plainText + "\r\n\r\n")
+		sb.WriteString(content.Plain + "\r\n\r\n")
 		sb.WriteString("--" + multipartBoundary + "\r\n")
 		sb.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
-		sb.WriteString(wrapped + "\r\n\r\n")
+		sb.WriteString(content.HTML + "\r\n\r\n")
 		sb.WriteString("--" + multipartBoundary + "--\r\n")
 	} else {
 		sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
-		sb.WriteString(body)
+		sb.WriteString(content.Plain)
 	}
 
 	raw := base64.URLEncoding.EncodeToString([]byte(sb.String()))

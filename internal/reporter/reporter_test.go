@@ -20,11 +20,6 @@ func TestMain(m *testing.M) {
 
 	os.Setenv("GOBOT_HOME", tmpDir)
 
-	// Reset the singleton if it was already initialized.
-	tmMu.Lock()
-	tm = nil
-	tmMu.Unlock()
-
 	code := m.Run()
 	os.RemoveAll(tmpDir)
 	os.Exit(code)
@@ -169,7 +164,7 @@ func validateHTMLMatch(t *testing.T, got string, matches []string) {
 	t.Helper()
 	for _, m := range matches {
 		if !strings.Contains(got, m) {
-			t.Errorf("WrapHTML() missing expected content: %v", m)
+			t.Errorf("Wrap() missing expected content: %v", m)
 		}
 	}
 }
@@ -238,12 +233,13 @@ func TestWrapHTML(t *testing.T) {
 		},
 	}
 
+	tmgr := NewTemplateManager("")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := WrapHTML(tt.body)
+			got := tmgr.Wrap(tt.body)
 			if tt.want != "" && got != tt.want {
-				t.Errorf("WrapHTML() = %v, want %v", got, tt.want)
+				t.Errorf("Wrap() = %v, want %v", got, tt.want)
 			}
 			validateHTMLMatch(t, got, tt.match)
 		})

@@ -77,7 +77,7 @@ func TestCronDispatcher_MoreBranches_Part1(t *testing.T) {
 	runner.Limiter = rate.NewLimiter(rate.Inf, 1)
 	mgr := agent.NewSessionManager(runner, nil, "test")
 
-	cd := NewCronDispatcher(cfg, mgr, &AgentStack{Runner: runner}, b)
+	cd := NewCronDispatcher(cfg, mgr, &AgentStack{Runner: runner}, b, nil)
 
 	pTg := cron.Payload{
 		ID:      "job-tg",
@@ -112,7 +112,7 @@ func TestCronDispatcher_MoreBranches_Part2(t *testing.T) {
 	runner := NewAgentRunner(mockProv, "model", "sys", cfg)
 	runner.Limiter = rate.NewLimiter(rate.Inf, 1)
 	mgr := agent.NewSessionManager(runner, nil, "test")
-	cd := NewCronDispatcher(cfg, mgr, &AgentStack{Runner: runner}, b)
+	cd := NewCronDispatcher(cfg, mgr, &AgentStack{Runner: runner}, b, nil)
 
 	ctx := context.Background()
 

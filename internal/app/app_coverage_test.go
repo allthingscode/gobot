@@ -81,7 +81,7 @@ func TestStartCron_Disabled(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Cron.Enabled = false
 	var wg sync.WaitGroup
-	StartCron(context.Background(), cfg, nil, nil, nil, &wg)
+	StartCron(context.Background(), cfg, nil, nil, nil, nil, &wg)
 	wg.Wait()
 }
 

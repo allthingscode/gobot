@@ -229,10 +229,11 @@ func TestBriefingEmailHTMLDelivery(t *testing.T) {
 		"<strong>Market Futures:</strong> Bearish sentiment.",
 	}
 
+	tmgr := reporter.NewTemplateManager("")
 	for _, body := range responses {
-		got := reporter.WrapHTML(body)
+		got := tmgr.Wrap(body)
 		if !strings.Contains(strings.ToLower(got), "<html") {
-			t.Errorf("WrapHTML output missing HTML wrapper.\n"+
+			t.Errorf("Wrap() output missing HTML wrapper.\n"+
 				"input: %q\noutput: %q", body, got)
 		}
 	}

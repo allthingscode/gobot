@@ -15,6 +15,7 @@ import (
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/reporter"
 )
 
 // AgentStack holds the core components required to run the strategic agent.
@@ -30,7 +31,7 @@ type AgentStack struct {
 // BuildAgentStack extracts the shared provider, system prompt, runner, and tool
 // initialization sequence used by both 'run' and 'simulate' commands.
 // Returns a stack of components and a cleanup function (to close memory store).
-func BuildAgentStack(ctx context.Context, cfg *config.Config, tracer *observability.DispatchTracer) (*AgentStack, func(), error) {
+func BuildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer) (*AgentStack, func(), error) {
 	prov, model, err := InitProviders(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
@@ -58,7 +59,7 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config, tracer *observabil
 	}
 	registry := NewToolRegistry(sessionRoot)
 
-	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry, tracer))
+	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry, tmgr, tracer))
 
 	finalCleanup := func() {
 		cleanup()

@@ -161,7 +161,7 @@ func TestSendEmailTool_Idempotency(t *testing.T) {
 		t.Fatalf("Pre-fill failed: %v", err)
 	}
 
-	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com", registry, nil)
+	tool := newSendEmailTool(t.TempDir(), t.TempDir(), "user@example.com", registry, nil, nil)
 
 	args := map[string]any{
 		"subject":      "Hello",

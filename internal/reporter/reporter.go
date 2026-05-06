@@ -9,10 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/allthingscode/gobot/internal/config"
 )
 
 //go:embed templates/default_email.css
@@ -20,12 +17,6 @@ var defaultCSS string
 
 //go:embed templates/email.html
 var defaultHTML string
-
-//nolint:gochecknoglobals // Global template manager; thread-safe via sync.RWMutex
-var (
-	tmMu sync.RWMutex
-	tm   *TemplateManager
-)
 
 // TemplateManager handles the loading and substitution of email templates.
 type TemplateManager struct {
@@ -134,34 +125,6 @@ func FallbackNotify(storageRoot, subject, body, recipient, reason string) string
 	}
 
 	return fmt.Sprintf("Gmail unavailable (%s). Report saved to: %s", cleanReason, notifFile)
-}
-
-// WrapHTML detects whether body is HTML and, if so, injects a CSS stylesheet and
-// wraps the content in a container div. Plain text bodies are returned unchanged.
-// HTML is detected if the lowercased body contains any common HTML tag.
-func WrapHTML(body string) string {
-	tmMu.RLock()
-	localTM := tm
-	tmMu.RUnlock()
-
-	if localTM == nil {
-		tmMu.Lock()
-		if tm == nil {
-			dir := ""
-			cssPath := ""
-			if cfg, err := config.Load(); err == nil && cfg != nil {
-				dir = cfg.TemplatesPath()
-				if cfg.Strategic.CustomCSSPath != "" {
-					cssPath = cfg.Strategic.CustomCSSPath
-				}
-			}
-			tm = NewTemplateManagerWithCSS(dir, cssPath)
-		}
-		localTM = tm
-		tmMu.Unlock()
-	}
-
-	return localTM.Wrap(body)
 }
 
 // htmlTagRe matches any HTML tag for stripping purposes.

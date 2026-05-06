@@ -7,6 +7,7 @@ import (
 
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/integrations/google"
+	"github.com/allthingscode/gobot/internal/reporter"
 	"github.com/spf13/cobra"
 )
 
@@ -35,8 +36,20 @@ func cmdEmail() *cobra.Command {
 				return fmt.Errorf("auth: %w", err)
 			}
 
+			tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Strategic.CustomCSSPath)
+			wrapped := tmgr.Wrap(body)
+			content := google.EmailContent{
+				Subject: subject,
+				Plain:   reporter.StripHTML(wrapped),
+				HTML:    wrapped,
+			}
+			if wrapped == body {
+				content.HTML = ""
+				content.Plain = body
+			}
+
 			fmt.Printf("Sending test email to %s...\n", userEmail)
-			if err := svc.Send(context.Background(), userEmail, subject, body); err != nil {
+			if err := svc.Send(context.Background(), userEmail, content); err != nil {
 				return fmt.Errorf("send email: %w", err)
 			}
 			fmt.Println("Success! Email sent.")

@@ -22,19 +22,33 @@ type SendEmailTool struct {
 	userEmail   string
 	registry    *ToolRegistry // C-184: idempotency
 	tracer      *observability.DispatchTracer
+	tmgr        *reporter.TemplateManager
 }
 
 const sendEmailToolName = "send_email"
 
 // newSendEmailTool returns a SendEmailTool that loads OAuth credentials from
 // secretsRoot/token.json and always sends to userEmail.
-func newSendEmailTool(secretsRoot, storageRoot, userEmail string, registry *ToolRegistry, tracer *observability.DispatchTracer) *SendEmailTool {
+func newSendEmailTool(secretsRoot, storageRoot, userEmail string, registry *ToolRegistry, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager) *SendEmailTool {
 	return &SendEmailTool{
 		secretsRoot: secretsRoot,
 		storageRoot: storageRoot,
 		userEmail:   userEmail,
 		registry:    registry,
 		tracer:      tracer,
+		tmgr:        tmgr,
+	}
+}
+
+func (s *SendEmailTool) buildEmailContent(subject, body string) google.EmailContent {
+	wrapped := s.tmgr.Wrap(body)
+	if wrapped == body {
+		return google.EmailContent{Subject: subject, Plain: body}
+	}
+	return google.EmailContent{
+		Subject: subject,
+		Plain:   reporter.StripHTML(wrapped),
+		HTML:    wrapped,
 	}
 }
 
@@ -86,12 +100,14 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 		return "", fmt.Errorf("send_email: auth: %w", err)
 	}
 
+	content := s.buildEmailContent(subject, body)
+
 	if s.tracer != nil {
 		err = s.tracer.TraceGoogleCall(ctx, "gmail", "Send", func(ctx context.Context) error {
-			return svc.Send(ctx, s.userEmail, subject, body)
+			return svc.Send(ctx, s.userEmail, content)
 		})
 	} else {
-		err = svc.Send(ctx, s.userEmail, subject, body)
+		err = svc.Send(ctx, s.userEmail, content)
 	}
 	if err != nil {
 		fallbackMsg := reporter.FallbackNotify(s.storageRoot, subject, body, s.userEmail, err.Error())

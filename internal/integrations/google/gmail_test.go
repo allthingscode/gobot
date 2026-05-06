@@ -227,7 +227,7 @@ func TestGmailSend(t *testing.T) {
 
 	t.Run("PlainText", func(t *testing.T) {
 		t.Parallel()
-		err := svc.Send(ctx, "user@example.com", "Hello", "Body text")
+		err := svc.Send(ctx, "user@example.com", EmailContent{Subject: "Hello", Plain: "Body text"})
 		if err != nil {
 			t.Fatalf("Send failed: %v", err)
 		}
@@ -235,7 +235,11 @@ func TestGmailSend(t *testing.T) {
 
 	t.Run("HTML", func(t *testing.T) {
 		t.Parallel()
-		err := svc.Send(ctx, "user@example.com", "Hello HTML", "<html><body>HTML Body</body></html>")
+		err := svc.Send(ctx, "user@example.com", EmailContent{
+			Subject: "Hello HTML",
+			Plain:   "HTML Body",
+			HTML:    "<html><body>HTML Body</body></html>",
+		})
 		if err != nil {
 			t.Fatalf("Send HTML failed: %v", err)
 		}
@@ -302,7 +306,7 @@ func TestGmailErrors(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		svc := &Service{baseURL: server.URL, httpClient: server.Client()}
-		err := svc.Send(context.Background(), "a@b.com", "s", "b")
+		err := svc.Send(context.Background(), "a@b.com", EmailContent{Subject: "s", Plain: "b"})
 		if err != nil {
 			t.Errorf("expected success after retry, got %v", err)
 		}
@@ -322,7 +326,7 @@ func TestGmailErrors(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		svc := &Service{baseURL: server.URL, httpClient: server.Client()}
-		err := svc.Send(context.Background(), "a@b.com", "s", "b")
+		err := svc.Send(context.Background(), "a@b.com", EmailContent{Subject: "s", Plain: "b"})
 		if err == nil {
 			t.Error("expected error, got nil")
 		}

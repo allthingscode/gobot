@@ -139,7 +139,7 @@ func TestRunAgentLoop(t *testing.T) {
 	cfg := &config.Config{}
 	stack := &AgentStack{Runner: &AgentRunner{}}
 
-	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil)
+	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil, nil)
 }
 
 func TestRunPreFlightDiagnostics(t *testing.T) {

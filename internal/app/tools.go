@@ -18,6 +18,7 @@ import (
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/reporter"
 )
 
 const (
@@ -120,7 +121,7 @@ func (t *ReadTextFileTool) readFileFromRoot(path, root string) ([]byte, error) {
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
-func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, tracer *observability.DispatchTracer) []Tool {
+func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer) []Tool {
 	specialistModels := buildSpecialistModels(cfg)
 	secretsRoot := cfg.SecretsRoot()
 	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv, registry)
@@ -128,7 +129,7 @@ func RegisterTools(cfg *config.Config, prov provider.Provider, model string, mem
 	tools = appendMCPtools(cfg, tools)
 	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools, tracer)
 	tools = appendGoogleTools(cfg, tools, tracer)
-	tools = appendGmailTools(cfg, secretsRoot, tools, registry, tracer)
+	tools = appendGmailTools(cfg, secretsRoot, tools, registry, tmgr, tracer)
 	wireSubTools(tools)
 	return tools
 }
@@ -245,10 +246,10 @@ func appendGoogleTools(cfg *config.Config, tools []Tool, tracer *observability.D
 	return tools
 }
 
-func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, registry *ToolRegistry, tracer *observability.DispatchTracer) []Tool {
+func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, registry *ToolRegistry, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer) []Tool {
 	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
 		gmailSecrets := filepath.Join(secretsRoot, "gmail")
-		tools = append(tools, newSendEmailTool(gmailSecrets, cfg.StorageRoot(), userEmail, registry, tracer))
+		tools = append(tools, newSendEmailTool(gmailSecrets, cfg.StorageRoot(), userEmail, registry, tracer, tmgr))
 		if cfg.Strategic.GmailReadonly {
 			tools = append(tools, newSearchGmailTool(gmailSecrets, tracer))
 			tools = append(tools, newReadGmailTool(gmailSecrets, tracer))

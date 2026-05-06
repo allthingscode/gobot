@@ -35,7 +35,7 @@ func TestSendEmailTool_CronIdempotency(t *testing.T) {
 
 	// 2. Create the tool
 	// We use dummy paths; Execute will still fail on auth IF it doesn't hit the cache.
-	tool := newSendEmailTool(t.TempDir(), t.TempDir(), recipient, registry, nil)
+	tool := newSendEmailTool(t.TempDir(), t.TempDir(), recipient, registry, nil, nil)
 
 	// 3. Execute with NO execution_id in args
 	args := map[string]any{
@@ -72,7 +72,7 @@ func TestSendEmailTool_NonCronNoAutoIdempotency(t *testing.T) {
 	cachedResult := "Should not hit"
 	_ = registry.Store(sessionKey, autoExecID, cachedResult)
 
-	tool := newSendEmailTool(t.TempDir(), t.TempDir(), recipient, registry, nil)
+	tool := newSendEmailTool(t.TempDir(), t.TempDir(), recipient, registry, nil, nil)
 	args := map[string]any{
 		"subject": "Hello",
 		"body":    "World",

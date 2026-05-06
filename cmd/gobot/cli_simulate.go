@@ -9,6 +9,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/doctor"
+	"github.com/allthingscode/gobot/internal/reporter"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +31,8 @@ func cmdSimulate() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-			stack, cleanup, err := app.BuildAgentStack(ctx, cfg, nil)
+			tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Strategic.CustomCSSPath)
+			stack, cleanup, err := app.BuildAgentStack(ctx, cfg, tmgr, nil)
 			if err != nil {
 				return fmt.Errorf("build agent stack: %w", err)
 			}

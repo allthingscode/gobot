@@ -24,6 +24,7 @@ import (
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/observability"
+	"github.com/allthingscode/gobot/internal/reporter"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -57,13 +58,14 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 	}
 
 	tracer := observability.NewDispatchTracer(otelProvider)
-	stack, cleanup, err := BuildAgentStack(ctx, cfg, tracer)
+	tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Strategic.CustomCSSPath)
+	stack, cleanup, err := BuildAgentStack(ctx, cfg, tmgr, tracer)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	return runAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer)
+	return runAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer, tmgr)
 }
 
 func validateRunPrerequisites(cfg *config.Config) error {
@@ -87,7 +89,7 @@ func shutdownOTel(p *observability.Provider) {
 	}
 }
 
-func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer) error {
+func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager) error {
 	var wg sync.WaitGroup
 	store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
 	InitIdempotency(ctx, cfg, stack.Runner, store, &wg)
@@ -110,13 +112,15 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 
 	var b *bot.Bot
 	if cfg.Channels.Telegram.Enabled {
-		b = StartTelegramBot(ctx, api, gateHandler, tracer, &wg)
+		if api != nil {
+			b = StartTelegramBot(ctx, api, gateHandler, tracer, &wg)
+		}
+
+		printStartupBanner(cfg, api)
+
+		StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
+		StartHeartbeat(ctx, cfg, cfg.TelegramToken(), &wg)
 	}
-
-	printStartupBanner(cfg, api)
-
-	StartCron(ctx, cfg, stack, b, tracer, &wg)
-	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), &wg)
 
 	waitForShutdown(ctx, &wg)
 	return nil
@@ -381,12 +385,12 @@ func StartTelegramBot(ctx context.Context, api bot.API, gateHandler bot.Handler,
 }
 
 // StartCron starts the modular cron scheduler in a separate goroutine.
-func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bot.Bot, tracer *observability.DispatchTracer, wg *sync.WaitGroup) {
+func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bot.Bot, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer, wg *sync.WaitGroup) {
 	if !cfg.Cron.Enabled {
 		return
 	}
 	mgr := stack.NewSessionManager(cfg, nil, tracer)
-	cd := NewCronDispatcher(cfg, mgr, stack, b)
+	cd := NewCronDispatcher(cfg, mgr, stack, b, tmgr)
 	wg.Add(1)
 	go func() {
 		defer RecoverWithStack("cron-dispatcher")

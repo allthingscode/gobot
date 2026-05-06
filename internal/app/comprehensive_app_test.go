@@ -205,7 +205,7 @@ func TestCronDispatcher_Functional(t *testing.T) {
 	api := &mockBotAPI{}
 	b := bot.New(api, nil)
 
-	cd := app.NewCronDispatcher(cfg, nil, stack, b)
+	cd := app.NewCronDispatcher(cfg, nil, stack, b, nil)
 
 	ctx := context.Background()
 
@@ -313,7 +313,7 @@ func TestRegisterTools_Coverage(t *testing.T) {
 	cfg.Strategic.GmailReadonly = false
 
 	reg := app.NewToolRegistry(t.TempDir())
-	tools := app.RegisterTools(cfg, nil, "model", nil, nil, nil, reg, nil)
+	tools := app.RegisterTools(cfg, nil, "model", nil, nil, nil, reg, nil, nil)
 	if len(tools) == 0 {
 		t.Error("RegisterTools returned no tools")
 	}
@@ -589,7 +589,7 @@ func TestCronDispatcher_Dispatch_Coverage(t *testing.T) {
 	stack := &app.AgentStack{
 		Runner: &app.AgentRunner{},
 	}
-	_ = app.NewCronDispatcher(&config.Config{}, nil, stack, nil)
+	_ = app.NewCronDispatcher(&config.Config{}, nil, stack, nil, nil)
 }
 
 func TestLiveProbes_Coverage(t *testing.T) {
@@ -647,13 +647,13 @@ func TestBuildAgentStack_Routing_Coverage(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.Routing.Enabled = true
 
-	_, _, _ = app.BuildAgentStack(context.Background(), cfg, nil)
+	_, _, _ = app.BuildAgentStack(context.Background(), cfg, nil, nil)
 }
 
 func TestBuildAgentStack_Errors(t *testing.T) { //nolint:paralleltest // uses global state // resets global provider registry
 	provider.ResetForTest()
 	cfg := &config.Config{}
-	_, _, err := app.BuildAgentStack(context.Background(), cfg, nil)
+	_, _, err := app.BuildAgentStack(context.Background(), cfg, nil, nil)
 	if err == nil {
 		t.Error("expected error for empty config")
 	}

@@ -87,7 +87,7 @@ func TestStartCron_Injected(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	StartCron(ctx, cfg, stack, nil, nil, &wg)
+	StartCron(ctx, cfg, stack, nil, nil, nil, &wg)
 	cancel()
 	wg.Wait()
 }
@@ -100,7 +100,7 @@ func TestCronDispatcher_Dispatch_App(t *testing.T) {
 	stack := &AgentStack{Runner: &AgentRunner{}}
 	mgr := agent.NewSessionManager(stack.Runner, nil, "test")
 
-	cd := NewCronDispatcher(cfg, mgr, stack, b)
+	cd := NewCronDispatcher(cfg, mgr, stack, b, nil)
 
 	ctx := context.Background()
 
@@ -129,7 +129,7 @@ func TestCronDispatcher_Alert_App(t *testing.T) {
 	cfg := &config.Config{}
 	api := &appMockAPI{}
 	b := bot.New(api, nil)
-	cd := NewCronDispatcher(cfg, nil, &AgentStack{}, b)
+	cd := NewCronDispatcher(cfg, nil, &AgentStack{}, b, nil)
 
 	p := cron.Payload{
 		Message: "alert message",
@@ -207,7 +207,7 @@ func TestBuildAgentStack_Basic_App(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = t.TempDir()
 
-	stack, cleanup, err := BuildAgentStack(context.Background(), cfg, nil)
+	stack, cleanup, err := BuildAgentStack(context.Background(), cfg, nil, nil)
 	if err != nil {
 		t.Logf("BuildAgentStack failed as expected (likely no keys): %v", err)
 	}
