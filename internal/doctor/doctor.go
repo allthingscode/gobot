@@ -119,6 +119,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkStorageRoot(cfg), true),
 		r(checkWorkspace(cfg), true),
 		r(checkSecurityStore(cfg), true),
+		r(checkEncryptionKey(), false),
 		r(checkPlaintextSecrets(cfg), false),
 		r(checkHITL(cfg), false),
 		r(checkLogs(cfg), false),
@@ -576,6 +577,48 @@ func checkSecurityStore(cfg *config.Config) Result {
 	}
 
 	return Result{Name: "security store", OK: true, Detail: "optional"}
+}
+
+// checkEncryptionKey verifies that the AES-256 encryption key file used by the
+// secrets vault on Linux/macOS exists, is readable, and is the expected 32-byte
+// length. On Windows the secrets package uses DPAPI instead of a key file, so
+// the check returns OK with an informational detail. The check is advisory:
+// failures surface a clear message instead of a generic crypto error at runtime.
+func checkEncryptionKey() Result {
+	keyPath := secrets.KeyFilePath()
+	if keyPath == "" {
+		return Result{Name: "encryption key", OK: true, Detail: "Windows DPAPI (no key file)"}
+	}
+
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Result{
+				Name: "encryption key",
+				OK:   false,
+				Detail: fmt.Sprintf(
+					"missing: %s — set GOBOT_ENCRYPTION_KEY_FILE to override the path; see docs/security.md for backup/restore",
+					keyPath),
+			}
+		}
+		return Result{Name: "encryption key", OK: false, Detail: fmt.Sprintf("stat %s: %v", keyPath, err)}
+	}
+	if info.IsDir() {
+		return Result{Name: "encryption key", OK: false, Detail: fmt.Sprintf("expected file, found directory: %s", keyPath)}
+	}
+
+	data, err := os.ReadFile(keyPath) // #nosec G304 - path comes from KeyFilePath, user-scoped config
+	if err != nil {
+		return Result{Name: "encryption key", OK: false, Detail: fmt.Sprintf("unreadable %s: %v", keyPath, err)}
+	}
+	if len(data) != 32 {
+		return Result{
+			Name:   "encryption key",
+			OK:     false,
+			Detail: fmt.Sprintf("wrong length at %s: got %d byte(s), want 32 (AES-256)", keyPath, len(data)),
+		}
+	}
+	return Result{Name: "encryption key", OK: true, Detail: fmt.Sprintf("AES-256 key present (32 bytes) at %s", keyPath)}
 }
 
 func checkPlaintextSecrets(cfg *config.Config) Result {

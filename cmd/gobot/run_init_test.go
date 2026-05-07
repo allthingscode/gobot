@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -32,7 +36,7 @@ func TestAutoInit(t *testing.T) {
 	assert.True(t, isWorkspaceIncomplete(cfg), "Workspace should be incomplete initially")
 
 	// Call ensureWorkspace
-	err = ensureWorkspace(cfg)
+	err = ensureWorkspace(io.Discard, cfg)
 	require.NoError(t, err)
 
 	// Verify workspace is now complete
@@ -84,4 +88,28 @@ func TestCmdRunAutoInit(t *testing.T) {
 		_, err := os.Stat(path)
 		assert.NoError(t, err, "Directory %s should have been created", path)
 	}
+}
+
+func TestRunInit_PrintsEncryptionKeyWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("GOBOT_STORAGE", tmpDir)
+	t.Setenv("GOBOT_HOME", tmpHome)
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(tmpHome, "encryption.key"))
+
+	var buf bytes.Buffer
+	require.NoError(t, runInit(&buf, ""))
+
+	out := buf.String()
+	assert.Contains(t, out, "Initialized gobot workspace at")
+
+	if runtime.GOOS == "windows" {
+		assert.NotContains(t, out, "encryption key backup",
+			"Windows uses DPAPI; no key file warning should be printed")
+		return
+	}
+	assert.Contains(t, out, "encryption key backup")
+	assert.Contains(t, out, filepath.Join(tmpHome, "encryption.key"))
+	assert.Contains(t, out, "PERMANENTLY UNRECOVERABLE")
+	assert.Contains(t, out, "GOBOT_ENCRYPTION_KEY_FILE")
 }

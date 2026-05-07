@@ -63,7 +63,36 @@ On Linux and macOS, the `encryption.key` file is the **root of trust**.
 
 ---
 
-## 5. Security Best Practices Checklist
+## 5. Backup & Restore (Linux/macOS)
+
+On Linux and macOS the encryption key is stored separately from the encrypted vault. Backing up the data directory alone is **not enough** — without the key file, the vault cannot be decrypted.
+
+### Default Locations
+- **Linux:** `~/.config/gobot/encryption.key`
+- **macOS:** `~/Library/Application Support/gobot/encryption.key`
+- **Override:** Set `GOBOT_ENCRYPTION_KEY_FILE` to use a custom path (useful for tests, CI, or storing the key on removable media).
+- **Vault:** `{storageRoot}/workspace/dpapi_secrets.json`
+
+### What to Back Up
+1. The encryption key file at the path above.
+2. The encrypted vault at `{storageRoot}/workspace/dpapi_secrets.json`.
+
+Store the two artifacts in separate locations whenever possible — keeping the key in a password manager and the vault in your normal data backup is a reasonable split.
+
+### Restore on a New Machine
+1. Install gobot and run `gobot init` to create the workspace skeleton.
+2. Copy the backed-up `encryption.key` to the default location (or set `GOBOT_ENCRYPTION_KEY_FILE`).
+3. Ensure file permissions are `0600` (owner read/write only): `chmod 600 ~/.config/gobot/encryption.key`.
+4. Copy the backed-up `dpapi_secrets.json` into `{storageRoot}/workspace/`.
+5. Run `gobot doctor` — the `encryption key` and `security store` checks should both report OK.
+6. Run `gobot secrets list` to verify the vault decrypts successfully.
+
+### Recovery if the Key is Lost
+There is no recovery path. The 32-byte AES-256 key is the sole root of trust; without it the vault is permanently unrecoverable. The only remediation is to delete `dpapi_secrets.json`, run `gobot init` again to generate a fresh key, and re-set every secret with `gobot secrets set`.
+
+---
+
+## 6. Security Best Practices Checklist
 - [ ] **Avoid Plaintext:** Never store API keys or tokens directly in `config.json`. Use `gobot secrets set` instead.
 - [ ] **Secure the Key (Linux/macOS):** Backup `~/.config/gobot/encryption.key` to a secure location (e.g., a password manager).
 - [ ] **Minimize Whitelist:** Keep `channels.telegram.allowFrom` limited to only necessary users.

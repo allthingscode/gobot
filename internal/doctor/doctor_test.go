@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -786,5 +787,85 @@ func TestCheckHITL(t *testing.T) {
 				t.Errorf("got OK=%v, want %v", r.OK, tt.wantOK)
 			}
 		})
+	}
+}
+
+// ── checkEncryptionKey ───────────────────────────────────────────────────────
+
+const goosWindows = "windows"
+
+func TestCheckEncryptionKey_WindowsSkip(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != goosWindows {
+		t.Skip("Windows-only: DPAPI path used instead of key file")
+	}
+	r := checkEncryptionKey()
+	if !r.OK {
+		t.Errorf("expected OK=true on Windows, got detail: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "DPAPI") {
+		t.Errorf("expected DPAPI in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckEncryptionKey_Missing(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("non-Windows-only: Windows uses DPAPI")
+	}
+	dir := t.TempDir()
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(dir, "missing.key"))
+
+	r := checkEncryptionKey()
+	if r.OK {
+		t.Errorf("expected OK=false when key file missing, got: %+v", r)
+	}
+	if !strings.Contains(r.Detail, "missing") {
+		t.Errorf("expected 'missing' in detail, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "GOBOT_ENCRYPTION_KEY_FILE") {
+		t.Errorf("expected env var hint in detail, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "docs/security.md") {
+		t.Errorf("expected docs reference in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckEncryptionKey_WrongLength(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("non-Windows-only: Windows uses DPAPI")
+	}
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "encryption.key")
+	if err := os.WriteFile(keyPath, make([]byte, 16), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", keyPath)
+
+	r := checkEncryptionKey()
+	if r.OK {
+		t.Errorf("expected OK=false for 16-byte key, got: %+v", r)
+	}
+	if !strings.Contains(r.Detail, "wrong length") {
+		t.Errorf("expected 'wrong length' in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckEncryptionKey_Valid(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("non-Windows-only: Windows uses DPAPI")
+	}
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "encryption.key")
+	if err := os.WriteFile(keyPath, make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", keyPath)
+
+	r := checkEncryptionKey()
+	if !r.OK {
+		t.Errorf("expected OK=true for valid 32-byte key, got: %+v", r)
+	}
+	if !strings.Contains(r.Detail, "AES-256") {
+		t.Errorf("expected 'AES-256' in detail, got: %s", r.Detail)
 	}
 }
