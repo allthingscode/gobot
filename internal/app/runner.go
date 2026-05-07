@@ -344,6 +344,7 @@ func (r *AgentRunner) performReflectionAudit(ctx context.Context, sessionKey, us
 		}, false
 	}
 
+	*reflectionRounds = 0 // Reset on success
 	slog.Debug("runner: reflection passed", "session", sessionKey, "score", score)
 	return agentctx.StrategicMessage{}, true
 }
@@ -563,7 +564,17 @@ func (r *AgentRunner) executeToolInner(ctx context.Context, sessionKey, userID, 
 
 func (r *AgentRunner) handleTerminalResponse(ctx context.Context, sessionKey, userText string, rubric map[string]any, respMsg agentctx.StrategicMessage, messages *[]agentctx.StrategicMessage, reflectionRounds *int) (string, bool) {
 	text := ExtractText(respMsg)
-	if r.EnableReflection && rubric != nil && *reflectionRounds < r.MaxReflectionRounds {
+	if r.EnableReflection && rubric != nil {
+		if *reflectionRounds >= r.MaxReflectionRounds {
+			if r.MaxReflectionRounds > 0 {
+				slog.Warn("reflection: all audit rounds failed, skipping revision",
+					"session", sessionKey,
+					"rounds", r.MaxReflectionRounds,
+				)
+			}
+			return text, true
+		}
+
 		if msg, ok := r.performReflectionAudit(ctx, sessionKey, userText, rubric, text, reflectionRounds); !ok {
 			*messages = append(*messages, msg)
 			return "", false
