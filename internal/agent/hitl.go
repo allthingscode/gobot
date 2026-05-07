@@ -50,7 +50,7 @@ func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName stri
 	}
 
 	// F-048: Auto-approve cron jobs (scheduled tasks)
-	if strings.HasPrefix(sessionKey, "cron:") {
+	if bot.IsCronSession(sessionKey) {
 		return "", nil
 	}
 
@@ -67,7 +67,7 @@ func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName stri
 // RequestApproval sends an approval request to Telegram and waits for a response.
 func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName string, args map[string]any) (bool, error) {
 	// F-048: Auto-approve cron jobs (scheduled tasks)
-	if strings.HasPrefix(sessionKey, "cron:") {
+	if bot.IsCronSession(sessionKey) {
 		return true, nil
 	}
 
@@ -133,8 +133,8 @@ func (m *HITLManager) checkPersistedStatus(ctx context.Context, reqID string) (h
 
 func (m *HITLManager) parseTelegramChatID(sessionKey, toolName string) (int64, error) {
 	// Parse chatID from sessionKey (format: "telegram:chatID" or "telegram:chatID:threadID")
-	parts := strings.Split(sessionKey, ":")
-	if len(parts) < 2 || parts[0] != "telegram" {
+	if !bot.IsTelegramSession(sessionKey) {
+		parts := strings.Split(sessionKey, ":")
 		channel := "unknown"
 		if len(parts) > 0 && parts[0] != "" {
 			channel = parts[0]
@@ -142,6 +142,7 @@ func (m *HITLManager) parseTelegramChatID(sessionKey, toolName string) (int64, e
 		// B-056: Fail closed for non-Telegram sessions.
 		return 0, fmt.Errorf("HITL: high-risk tool %q requires human approval, but session channel %q is unsupported for HITL", toolName, channel)
 	}
+	parts := strings.Split(sessionKey, ":")
 	chatID, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("HITL: failed to parse chat ID from session key %q: %w", sessionKey, err)

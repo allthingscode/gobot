@@ -18,6 +18,23 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	// SessionPrefixTelegram is the prefix for Telegram-originated sessions.
+	SessionPrefixTelegram = "telegram:"
+	// SessionPrefixCron is the prefix for sessions started by the internal cron scheduler.
+	SessionPrefixCron = "cron:"
+)
+
+// IsCronSession returns true if the session key indicates a cron job.
+func IsCronSession(key string) bool {
+	return strings.HasPrefix(key, SessionPrefixCron)
+}
+
+// IsTelegramSession returns true if the session key indicates a Telegram chat.
+func IsTelegramSession(key string) bool {
+	return strings.HasPrefix(key, SessionPrefixTelegram)
+}
+
 // InboundMessage is a normalized message received from Telegram.
 type InboundMessage struct {
 	ChatID    int64
@@ -126,7 +143,7 @@ func (b *Bot) SetTracer(t *observability.DispatchTracer) {
 //   - Group (chatID < 0):        "telegram:<chatID>:<senderID>"
 //
 // Group chats use a per-user key so each sender has an isolated context.
-// Cron sessions use the "cron:" prefix and are unaffected.
+// Cron sessions use the SessionPrefixCron prefix and are unaffected.
 //
 // Mirrors DetectThreadMetadata in internal/telegram and session_key_override
 // in strategery/patches/telegram.py.
@@ -134,15 +151,15 @@ func SessionKey(chatID, threadID, senderID int64) string {
 	if chatID < 0 {
 		// Group or supergroup: isolate per sender.
 		if senderID > 0 {
-			return fmt.Sprintf("telegram:%d:%d", chatID, senderID)
+			return fmt.Sprintf("%s%d:%d", SessionPrefixTelegram, chatID, senderID)
 		}
-		return fmt.Sprintf("telegram:%d", chatID)
+		return fmt.Sprintf("%s%d", SessionPrefixTelegram, chatID)
 	}
 	// DM: factor in topic thread if present.
 	if threadID > 0 {
-		return fmt.Sprintf("telegram:%d:%d", chatID, threadID)
+		return fmt.Sprintf("%s%d:%d", SessionPrefixTelegram, chatID, threadID)
 	}
-	return fmt.Sprintf("telegram:%d", chatID)
+	return fmt.Sprintf("%s%d", SessionPrefixTelegram, chatID)
 }
 
 // IsTransientError returns true if err represents a recoverable network

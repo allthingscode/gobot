@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -89,7 +90,7 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 
 	// B-059: Enforce deterministic ID for cron jobs if none provided.
 	// This prevents duplicate sends within the same day for the same job/recipient.
-	if executionID == "" && strings.HasPrefix(sessionKey, "cron:") {
+	if executionID == "" && bot.IsCronSession(sessionKey) {
 		executionID = fmt.Sprintf("scheduled_email_auto_%s", time.Now().Format("2006-01-02"))
 	}
 
