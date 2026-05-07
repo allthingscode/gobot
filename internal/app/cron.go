@@ -152,7 +152,7 @@ func (cd *CronDispatcher) dispatchSpecialist(ctx context.Context, p cron.Payload
 		return err
 	}
 
-	sessionKey := "cron:" + p.Agent + ":" + p.ID
+	sessionKey := bot.SessionPrefixCron + p.Agent + ":" + p.ID
 	if to != "" {
 		sessionKey += ":" + to
 	}
@@ -214,7 +214,7 @@ func (cd *CronDispatcher) dispatchSilent(ctx context.Context, p cron.Payload, to
 		slog.Warn("unroutable silent cron job", "to", to)
 		return nil
 	}
-	sessionKey := "cron:" + to
+	sessionKey := bot.SessionPrefixCron + to
 	slog.Info("dispatching cron job", "session", sessionKey, "silent", true)
 	_, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[SILENT] [AUTONOMOUS] "+p.Message)
 	if err != nil {
@@ -237,7 +237,7 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	if jobID == "" {
 		jobID = "unknown"
 	}
-	sessionKey := "cron:" + jobID + ":" + chanEmail + ":" + recipient
+	sessionKey := bot.SessionPrefixCron + jobID + ":" + chanEmail + ":" + recipient
 	slog.Info("dispatching cron job", "session", sessionKey, "channel", chanEmail)
 
 	msg := cd.buildEmailDispatchMessage(p)
@@ -509,7 +509,7 @@ func (cd *CronDispatcher) retryMorningBriefingOnce(shutdown <-chan struct{}, p c
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute) //nolint:gosec // retry goroutine must outlive the triggering request context
 	defer cancel()
 
-	retryKey := fmt.Sprintf("cron:%s:email:%s:retry1", morningBriefingJobID, recipient)
+	retryKey := fmt.Sprintf("%s%s:email:%s:retry1", bot.SessionPrefixCron, morningBriefingJobID, recipient)
 	msg := cd.buildEmailDispatchMessage(p)
 
 	slog.Info("cron: retrying morning briefing", "session", retryKey)
@@ -529,7 +529,7 @@ func (cd *CronDispatcher) retryMorningBriefingOnce(shutdown <-chan struct{}, p c
 }
 
 func (cd *CronDispatcher) dispatchTelegram(ctx context.Context, p cron.Payload, to string) error {
-	sessionKey := "cron:" + to
+	sessionKey := bot.SessionPrefixCron + to
 	slog.Info("dispatching cron job", "session", sessionKey, "silent", false)
 	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", "[AUTONOMOUS] "+p.Message)
 	if err != nil {
@@ -599,12 +599,12 @@ func (cd *CronDispatcher) Alert(ctx context.Context, p cron.Payload) error {
 // parseSessionKey parses "telegram:12345" or "telegram:12345:7"
 // into chatID and threadID. Returns error if the key is malformed.
 func parseSessionKey(sessionKey string) (chatID, threadID int64, err error) {
+	if !bot.IsTelegramSession(sessionKey) {
+		return 0, 0, fmt.Errorf("unsupported channel in session key: %s", sessionKey)
+	}
 	parts := strings.Split(sessionKey, ":")
 	if len(parts) < 2 || len(parts) > 3 {
 		return 0, 0, fmt.Errorf("invalid session key format: %s", sessionKey)
-	}
-	if parts[0] != chanTelegram {
-		return 0, 0, fmt.Errorf("unsupported channel in session key: %s", parts[0])
 	}
 
 	chatID, err = strconv.ParseInt(parts[1], 10, 64)

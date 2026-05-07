@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
@@ -185,13 +186,13 @@ func TestRunner_GenerateIdempotencyKey(t *testing.T) {
 	}
 }
 
-func TestIsFailClosedCronSession(t *testing.T) {
+func TestIsCronSession(t *testing.T) {
 	t.Parallel()
-	if !isFailClosedCronSession("cron:morning_briefing:email:user@example.com") {
-		t.Fatal("expected cron session to be fail-closed")
+	if !bot.IsCronSession("cron:morning_briefing:email:user@example.com") {
+		t.Fatal("expected cron session to be detected")
 	}
-	if isFailClosedCronSession("telegram:12345") {
-		t.Fatal("did not expect non-cron session to be fail-closed")
+	if bot.IsCronSession("telegram:12345") {
+		t.Fatal("did not expect non-cron session to be detected")
 	}
 }
 

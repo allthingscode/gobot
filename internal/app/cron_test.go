@@ -8,11 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/reporter"
 )
 
-const testMorningBriefingEmailSession = "cron:morning_briefing:email:user@example.com"
+const testMorningBriefingEmailSession = bot.SessionPrefixCron + "morning_briefing:email:user@example.com"
 
 func TestResolveEmailSubject(t *testing.T) {
 	t.Parallel()
@@ -87,21 +88,21 @@ func TestParseSessionKey(t *testing.T) {
 	}{
 		{
 			name:         "simple telegram key",
-			input:        "telegram:12345",
+			input:        bot.SessionPrefixTelegram + "12345",
 			wantChatID:   12345,
 			wantThreadID: 0,
 			wantErr:      false,
 		},
 		{
 			name:         "telegram key with thread ID",
-			input:        "telegram:12345:7",
+			input:        bot.SessionPrefixTelegram + "12345:7",
 			wantChatID:   12345,
 			wantThreadID: 7,
 			wantErr:      false,
 		},
 		{
 			name:         "large chat ID",
-			input:        "telegram:99999999",
+			input:        bot.SessionPrefixTelegram + "99999999",
 			wantChatID:   99999999,
 			wantThreadID: 0,
 			wantErr:      false,
@@ -118,7 +119,7 @@ func TestParseSessionKey(t *testing.T) {
 		},
 		{
 			name:    "invalid chat ID letters",
-			input:   "telegram:abc",
+			input:   bot.SessionPrefixTelegram + "abc",
 			wantErr: true,
 		},
 		{
@@ -128,12 +129,12 @@ func TestParseSessionKey(t *testing.T) {
 		},
 		{
 			name:    "invalid thread ID letters",
-			input:   "telegram:12345:abc",
+			input:   bot.SessionPrefixTelegram + "12345:abc",
 			wantErr: true,
 		},
 		{
 			name:    "too many parts",
-			input:   "telegram:1:2:3",
+			input:   bot.SessionPrefixTelegram + "1:2:3",
 			wantErr: true,
 		},
 	}
@@ -170,15 +171,15 @@ func checkParseResult(t *testing.T, input string, gotChatID, gotThreadID int64, 
 
 func TestCronSessionKeyIsolation(t *testing.T) {
 	t.Parallel()
-	to := "telegram:12345"
-	cronKey := "cron:" + to
+	to := bot.SessionPrefixTelegram + "12345"
+	cronKey := bot.SessionPrefixCron + to
 	dmKey := to
 	if cronKey == dmKey {
 		t.Errorf("cron session key %q must not equal DM session key %q", cronKey, dmKey)
 	}
 	// Verify the prefix is always present
-	if !strings.HasPrefix(cronKey, "cron:") {
-		t.Errorf("cron session key must start with \"cron:\", got %q", cronKey)
+	if !strings.HasPrefix(cronKey, bot.SessionPrefixCron) {
+		t.Errorf("cron session key must start with %q, got %q", bot.SessionPrefixCron, cronKey)
 	}
 }
 
@@ -188,21 +189,21 @@ func TestCronSessionKeyFormat(t *testing.T) {
 		name string
 		to   string
 	}{
-		{name: "standard telegram key", to: "telegram:12345"},
-		{name: "telegram key with thread", to: "telegram:99999:5"},
-		{name: "telegram zero chat ID", to: "telegram:0"},
+		{name: "standard telegram key", to: bot.SessionPrefixTelegram + "12345"},
+		{name: "telegram key with thread", to: bot.SessionPrefixTelegram + "99999:5"},
+		{name: "telegram zero chat ID", to: bot.SessionPrefixTelegram + "0"},
 		{name: "empty to", to: ""},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cronKey := "cron:" + tc.to
+			cronKey := bot.SessionPrefixCron + tc.to
 			if cronKey == tc.to {
 				t.Errorf("cron session key %q must not equal to value %q", cronKey, tc.to)
 			}
-			if !strings.HasPrefix(cronKey, "cron:") {
-				t.Errorf("cron session key must start with \"cron:\", got %q", cronKey)
+			if !strings.HasPrefix(cronKey, bot.SessionPrefixCron) {
+				t.Errorf("cron session key must start with %q, got %q", bot.SessionPrefixCron, cronKey)
 			}
 		})
 	}
@@ -252,9 +253,9 @@ func TestCronEmailSessionKeyIncludesJobID(t *testing.T) {
 
 	keys := make(map[string]string, len(jobIDs))
 	for _, id := range jobIDs {
-		key := "cron:" + id + ":email:" + recipient
-		if !strings.HasPrefix(key, "cron:") {
-			t.Errorf("session key %q must start with cron:", key)
+		key := bot.SessionPrefixCron + id + ":email:" + recipient
+		if !strings.HasPrefix(key, bot.SessionPrefixCron) {
+			t.Errorf("session key %q must start with %s", key, bot.SessionPrefixCron)
 		}
 		if !strings.Contains(key, ":email:") {
 			t.Errorf("session key %q must contain :email:", key)
@@ -282,7 +283,7 @@ func TestCronDispatcher_Alert(t *testing.T) {
 func TestBuildCronFailureEmailBody(t *testing.T) {
 	t.Parallel()
 	p := cron.Payload{ID: "morning_briefing"}
-	body := buildCronFailureEmailBody(p, "cron:morning_briefing:email:test@example.com", context.DeadlineExceeded)
+	body := buildCronFailureEmailBody(p, bot.SessionPrefixCron+"morning_briefing:email:test@example.com", context.DeadlineExceeded)
 	if !strings.Contains(body, "Partial/Unavailable") {
 		t.Fatalf("expected failure status in body, got: %s", body)
 	}
