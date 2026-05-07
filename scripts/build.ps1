@@ -17,7 +17,7 @@ if (Test-Path "vendor") {
     Write-Host "Using vendor directory..."
     $MOD_FLAG = "-mod=vendor"
 } else {
-    Write-Host "Vendor directory missing. Downloading modules..."
+    Write-Host "Vendor directory missing. Downloading modules (this may take a minute)..."
     go mod download
 }
 

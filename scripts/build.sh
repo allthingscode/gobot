@@ -12,7 +12,7 @@ if [ -d "vendor" ]; then
     echo "Using vendor directory..."
     MOD_FLAG="-mod=vendor"
 else
-    echo "Vendor directory missing. Downloading modules..."
+    echo "Vendor directory missing. Downloading modules (this may take a minute)..."
     go mod download
 fi
 

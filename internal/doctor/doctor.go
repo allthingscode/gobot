@@ -36,10 +36,11 @@ type Probes struct {
 
 // Result represents the outcome of a single health check.
 type Result struct {
-	Name     string `json:"name"`
-	OK       bool   `json:"ok"`
-	Detail   string `json:"detail"`
-	Critical bool   `json:"critical"`
+	Name        string `json:"name"`
+	OK          bool   `json:"ok"`
+	Detail      string `json:"detail"`
+	Remediation string `json:"remediation,omitempty"`
+	Critical    bool   `json:"critical"`
 }
 
 // tokenExpiry is a minimal struct for reading the expiry field and refresh_token from OAuth2 token files.
@@ -55,6 +56,17 @@ func Run(cfg *config.Config, probes *Probes) error {
 
 	results := GetResults(cfg, probes)
 
+	anyCriticalFail := printReport(results)
+
+	fmt.Printf("\n%d checks in %s\n", len(results), time.Since(start).Round(time.Millisecond))
+
+	if anyCriticalFail {
+		return fmt.Errorf("one or more critical health checks failed")
+	}
+	return nil
+}
+
+func printReport(results []Result) bool {
 	fmt.Println("gobot doctor")
 	fmt.Println("============")
 
@@ -74,15 +86,12 @@ func Run(cfg *config.Config, probes *Probes) error {
 		if c.Detail != "" {
 			fmt.Printf(" — %s", c.Detail)
 		}
+		if !c.OK && c.Remediation != "" {
+			fmt.Printf(" [Remediation: %s]", c.Remediation)
+		}
 		fmt.Println()
 	}
-
-	fmt.Printf("\n%d checks in %s\n", len(results), time.Since(start).Round(time.Millisecond))
-
-	if anyCriticalFail {
-		return fmt.Errorf("one or more critical health checks failed")
-	}
-	return nil
+	return anyCriticalFail
 }
 
 // geminiLiveChecks returns a Gemini live-probe result if a key is configured, otherwise nil.
@@ -169,10 +178,11 @@ func getResilienceResults(cfg *config.Config, r func(Result, bool) Result) []Res
 	for name, bc := range cfg.Resilience.CircuitBreakers {
 		if bc.Window == "" || bc.Timeout == "" {
 			results = append(results, Result{
-				Name:     "breaker migration: " + name,
-				OK:       false,
-				Detail:   "duration fields are empty; migrate to string format (e.g. \"60s\")",
-				Critical: false,
+				Name:        "breaker migration: " + name,
+				OK:          false,
+				Detail:      "duration fields are empty; migrate to string format (e.g. \"60s\")",
+				Remediation: "Update Resilience.CircuitBreakers in config.json to use string durations.",
+				Critical:    false,
 			})
 		}
 	}
@@ -184,10 +194,20 @@ func checkStorageRoot(cfg *config.Config) Result {
 	root := cfg.StorageRoot()
 	info, err := os.Stat(root)
 	if err != nil {
-		return Result{Name: "storage root", OK: false, Detail: fmt.Sprintf("%s: %v", root, err)}
+		return Result{
+			Name:        "storage root",
+			OK:          false,
+			Detail:      fmt.Sprintf("%s: %v", root, err),
+			Remediation: "Create the storage directory or check GOBOT_STORAGE environment variable.",
+		}
 	}
 	if !info.IsDir() {
-		return Result{Name: "storage root", OK: false, Detail: fmt.Sprintf("%s is not a directory", root)}
+		return Result{
+			Name:        "storage root",
+			OK:          false,
+			Detail:      fmt.Sprintf("%s is not a directory", root),
+			Remediation: "Ensure GOBOT_STORAGE points to a directory, not a file.",
+		}
 	}
 	return Result{Name: "storage root", OK: true, Detail: root}
 }
@@ -196,7 +216,12 @@ func checkWorkspace(cfg *config.Config) Result {
 	ws := filepath.Join(cfg.StorageRoot(), "workspace")
 	tmp, err := os.CreateTemp(ws, "gobot-doctor-*")
 	if err != nil {
-		return Result{Name: "workspace writable", OK: false, Detail: fmt.Sprintf("%s: %v", ws, err)}
+		return Result{
+			Name:        "workspace writable",
+			OK:          false,
+			Detail:      fmt.Sprintf("%s: %v", ws, err),
+			Remediation: "Ensure the workspace directory is writable by the current user.",
+		}
 	}
 	_ = tmp.Close()
 	_ = os.Remove(tmp.Name())
@@ -206,7 +231,12 @@ func checkWorkspace(cfg *config.Config) Result {
 func checkLogs(cfg *config.Config) Result {
 	logs := filepath.Join(cfg.StorageRoot(), "logs")
 	if err := os.MkdirAll(logs, 0o755); err != nil {
-		return Result{Name: "logs directory", OK: false, Detail: fmt.Sprintf("%v", err)}
+		return Result{
+			Name:        "logs directory",
+			OK:          false,
+			Detail:      fmt.Sprintf("%v", err),
+			Remediation: "Create the logs directory or check parent directory permissions.",
+		}
 	}
 	return Result{Name: "logs directory", OK: true, Detail: logs}
 }
@@ -229,7 +259,12 @@ func checkAPIKey(cfg *config.Config) Result {
 		}
 	}
 	if len(found) == 0 {
-		return Result{Name: "llm api key", OK: false, Detail: "no key found — set GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY"}
+		return Result{
+			Name:        "llm api key",
+			OK:          false,
+			Detail:      "no key found — set GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY",
+			Remediation: "Set a required LLM API key environment variable or use 'gobot secrets set'.",
+		}
 	}
 	return Result{Name: "llm api key", OK: true, Detail: strings.Join(found, ", ")}
 }
@@ -239,14 +274,24 @@ func checkAPIKey(cfg *config.Config) Result {
 func checkTelegram(token string, probe func(string) (string, error)) Result {
 	// #nosec G101 - "REAUTH_REQUIRED" is a placeholder string, not a secret.
 	if token == "" || token == "REAUTH_REQUIRED" {
-		return Result{Name: "telegram", OK: false, Detail: "token not configured or reauth required"}
+		return Result{
+			Name:        "telegram",
+			OK:          false,
+			Detail:      "token not configured or reauth required",
+			Remediation: "Provide a Telegram token in config.json or environment variable, or run 'gobot reauth'.",
+		}
 	}
 	if probe == nil {
 		return Result{Name: "telegram", OK: true, Detail: "token present (live check skipped)"}
 	}
 	username, err := probe(token)
 	if err != nil {
-		return Result{Name: "telegram", OK: false, Detail: err.Error()}
+		return Result{
+			Name:        "telegram",
+			OK:          false,
+			Detail:      err.Error(),
+			Remediation: "Check your Telegram bot token and internet connection.",
+		}
 	}
 	return Result{Name: "telegram", OK: true, Detail: username}
 }
@@ -255,13 +300,23 @@ func checkTelegram(token string, probe func(string) (string, error)) Result {
 // If probe is nil, only the presence of the key is verified.
 func checkGeminiLive(apiKey string, probe func(string) error) Result {
 	if apiKey == "" {
-		return Result{Name: "gemini live", OK: false, Detail: "no api key"}
+		return Result{
+			Name:        "gemini live",
+			OK:          false,
+			Detail:      "no api key",
+			Remediation: "Set GEMINI_API_KEY environment variable.",
+		}
 	}
 	if probe == nil {
 		return Result{Name: "gemini live", OK: true, Detail: "key present (live check skipped)"}
 	}
 	if err := probe(apiKey); err != nil {
-		return Result{Name: "gemini live", OK: false, Detail: err.Error()}
+		return Result{
+			Name:        "gemini live",
+			OK:          false,
+			Detail:      err.Error(),
+			Remediation: "Verify your Gemini API key and quota in Google AI Studio.",
+		}
 	}
 	return Result{Name: "gemini live", OK: true, Detail: "model responded"}
 }
@@ -282,15 +337,17 @@ func checkGoogleOAuthSecrets(cfg *config.Config) Result {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return Result{
-				Name:   "google oauth secrets",
-				OK:     false,
-				Detail: fmt.Sprintf("missing required file before gobot reauth: %s", path),
+				Name:        "google oauth secrets",
+				OK:          false,
+				Detail:      fmt.Sprintf("missing required file before gobot reauth: %s", path),
+				Remediation: "Download client_secrets.json from Google Cloud Console and place it in the secrets directory.",
 			}
 		}
 		return Result{
-			Name:   "google oauth secrets",
-			OK:     false,
-			Detail: fmt.Sprintf("unable to check %s: %v", path, err),
+			Name:        "google oauth secrets",
+			OK:          false,
+			Detail:      fmt.Sprintf("unable to check %s: %v", path, err),
+			Remediation: "Check permissions for the secrets directory and client_secrets.json.",
 		}
 	}
 	return Result{
@@ -335,13 +392,28 @@ func checkTokenFile(name, path string) Result {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Result{Name: name, OK: false, Detail: fmt.Sprintf("not found: %s", path)}
+			return Result{
+				Name:        name,
+				OK:          false,
+				Detail:      fmt.Sprintf("not found: %s", path),
+				Remediation: "Run 'gobot reauth' to generate a new token.",
+			}
 		}
-		return Result{Name: name, OK: false, Detail: err.Error()}
+		return Result{
+			Name:        name,
+			OK:          false,
+			Detail:      err.Error(),
+			Remediation: "Check file permissions for the token file.",
+		}
 	}
 	var tok tokenExpiry
 	if err := json.Unmarshal(data, &tok); err != nil {
-		return Result{Name: name, OK: false, Detail: fmt.Sprintf("invalid JSON: %v", err)}
+		return Result{
+			Name:        name,
+			OK:          false,
+			Detail:      fmt.Sprintf("invalid JSON: %v", err),
+			Remediation: "Delete the invalid token file and run 'gobot reauth'.",
+		}
 	}
 
 	hasRefresh := tok.RefreshToken != ""
@@ -355,7 +427,16 @@ func checkTokenFile(name, path string) Result {
 	}
 
 	ok := !time.Now().After(tok.Expiry) || hasRefresh
-	return Result{Name: name, OK: ok, Detail: buildExpiredTokenDetail(tok.Expiry, hasRefresh)}
+	rem := ""
+	if !ok {
+		rem = "Run 'gobot reauth' to refresh your expired session."
+	}
+	return Result{
+		Name:        name,
+		OK:          ok,
+		Detail:      buildExpiredTokenDetail(tok.Expiry, hasRefresh),
+		Remediation: rem,
+	}
 }
 
 // checkJobsDir verifies the cron jobs directory exists and has .md job files.
@@ -363,7 +444,12 @@ func checkJobsDir(cfg *config.Config) Result {
 	dir := filepath.Join(cfg.StorageRoot(), "workspace", "jobs")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return Result{Name: "jobs directory", OK: false, Detail: fmt.Sprintf("%s: %v", dir, err)}
+		return Result{
+			Name:        "jobs directory",
+			OK:          false,
+			Detail:      fmt.Sprintf("%s: %v", dir, err),
+			Remediation: "Create a 'jobs' directory inside your workspace.",
+		}
 	}
 	count := 0
 	for _, e := range entries {
@@ -372,7 +458,12 @@ func checkJobsDir(cfg *config.Config) Result {
 		}
 	}
 	if count == 0 {
-		return Result{Name: "jobs directory", OK: true, Detail: fmt.Sprintf("%s (no .md jobs)", dir)}
+		return Result{
+			Name:        "jobs directory",
+			OK:          true,
+			Detail:      fmt.Sprintf("%s (no .md jobs)", dir),
+			Remediation: "Add .md job files to the jobs directory to use cron features.",
+		}
 	}
 	return Result{Name: "jobs directory", OK: true, Detail: fmt.Sprintf("%d job(s) in %s", count, dir)}
 }
@@ -392,13 +483,16 @@ func checkResilience() []Result {
 			state, stats.Successes, stats.Failures, stats.Rejections)
 
 		ok := true
+		rem := ""
 		if state == "open" {
 			ok = false
+			rem = "The service is currently failing; wait for the circuit breaker to close or check the underlying service health."
 		}
 		results = append(results, Result{
-			Name:   "breaker: " + name,
-			OK:     ok,
-			Detail: detail,
+			Name:        "breaker: " + name,
+			OK:          ok,
+			Detail:      detail,
+			Remediation: rem,
 		})
 	}
 	return results
@@ -440,17 +534,19 @@ func checkBrowser(cfg config.BrowserConfig, lookPath func(string) (string, error
 		path, ok := findBrowser(lookPath)
 		if !ok {
 			return Result{
-				Name:   "browser",
-				OK:     false,
-				Detail: "Chrome/Chromium not found in PATH — browser-based tools will be disabled",
+				Name:        "browser",
+				OK:          false,
+				Detail:      "Chrome/Chromium not found in PATH — browser-based tools will be disabled",
+				Remediation: "Install Google Chrome or Chromium, or ensure it is in your system PATH.",
 			}
 		}
 		return Result{Name: "browser", OK: true, Detail: path}
 	default:
 		return Result{
-			Name:   "browser",
-			OK:     false,
-			Detail: "browser not configured (set browser.headless=true or browser.debug_port) — browser-based tools will be disabled",
+			Name:        "browser",
+			OK:          false,
+			Detail:      "browser not configured (set browser.headless=true or browser.debug_port) — browser-based tools will be disabled",
+			Remediation: "Set browser.headless=true in config.json to enable browser-based tools.",
 		}
 	}
 }
@@ -503,34 +599,38 @@ func checkAuthorization(cfg *config.Config) Result {
 	mgr, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
 	if err != nil {
 		return Result{
-			Name:   "authorization",
-			OK:     false,
-			Detail: fmt.Sprintf("failed to open checkpoint database: %v", err),
+			Name:        "authorization",
+			OK:          false,
+			Detail:      fmt.Sprintf("failed to open checkpoint database: %v", err),
+			Remediation: "Ensure the storage root is writable and the checkpoint database is not locked.",
 		}
 	}
 	store, err := agentctx.NewPairingStore(mgr.DB())
 	if err != nil {
 		return Result{
-			Name:   "authorization",
-			OK:     false,
-			Detail: fmt.Sprintf("failed to initialize pairing store: %v", err),
+			Name:        "authorization",
+			OK:          false,
+			Detail:      fmt.Sprintf("failed to initialize pairing store: %v", err),
+			Remediation: "Check database integrity and permissions.",
 		}
 	}
 
 	count, err := store.CountAuthorized()
 	if err != nil {
 		return Result{
-			Name:   "authorization",
-			OK:     false,
-			Detail: fmt.Sprintf("failed to query authorized users: %v", err),
+			Name:        "authorization",
+			OK:          false,
+			Detail:      fmt.Sprintf("failed to query authorized users: %v", err),
+			Remediation: "Check database integrity and permissions.",
 		}
 	}
 
 	if count == 0 {
 		return Result{
-			Name:   "authorization",
-			OK:     false,
-			Detail: "no users authorized — bot will drop all messages; run 'gobot authorize <chat-id>'",
+			Name:        "authorization",
+			OK:          false,
+			Detail:      "no users authorized — bot will drop all messages; run 'gobot authorize <chat-id>'",
+			Remediation: "Run 'gobot authorize <chat-id>' to allow users to interact with the bot.",
 		}
 	}
 
@@ -561,7 +661,12 @@ func checkSecurityStore(cfg *config.Config) Result {
 	keyExists := keyErr == nil
 
 	if exists && !keyExists {
-		return Result{Name: "security store", OK: false, Detail: fmt.Sprintf("vault exists but encryption key is missing: %s", keyPath)}
+		return Result{
+			Name:        "security store",
+			OK:          false,
+			Detail:      fmt.Sprintf("vault exists but encryption key is missing: %s", keyPath),
+			Remediation: "Restore the encryption key file from backup to access your secrets.",
+		}
 	}
 
 	if !exists && !keyExists {
@@ -571,7 +676,12 @@ func checkSecurityStore(cfg *config.Config) Result {
 	if keyExists {
 		mode := keyInfo.Mode().Perm()
 		if mode != 0o600 {
-			return Result{Name: "security store", OK: false, Detail: fmt.Sprintf("insecure key permissions: %s (got %o, want 0600)", keyPath, mode)}
+			return Result{
+				Name:        "security store",
+				OK:          false,
+				Detail:      fmt.Sprintf("insecure key permissions: %s (got %o, want 0600)", keyPath, mode),
+				Remediation: fmt.Sprintf("Run 'chmod 600 %s' to secure your encryption key.", keyPath),
+			}
 		}
 		return Result{Name: "security store", OK: true, Detail: "AES-256 vault active"}
 	}
@@ -599,23 +709,40 @@ func checkEncryptionKey() Result {
 				Detail: fmt.Sprintf(
 					"missing: %s — set GOBOT_ENCRYPTION_KEY_FILE to override the path; see docs/security.md for backup/restore",
 					keyPath),
+				Remediation: "Restore the encryption key file from backup or set GOBOT_ENCRYPTION_KEY_FILE.",
 			}
 		}
-		return Result{Name: "encryption key", OK: false, Detail: fmt.Sprintf("stat %s: %v", keyPath, err)}
+		return Result{
+			Name:        "encryption key",
+			OK:          false,
+			Detail:      fmt.Sprintf("stat %s: %v", keyPath, err),
+			Remediation: "Check file system permissions for the encryption key file.",
+		}
 	}
 	if info.IsDir() {
-		return Result{Name: "encryption key", OK: false, Detail: fmt.Sprintf("expected file, found directory: %s", keyPath)}
+		return Result{
+			Name:        "encryption key",
+			OK:          false,
+			Detail:      fmt.Sprintf("expected file, found directory: %s", keyPath),
+			Remediation: "Ensure GOBOT_ENCRYPTION_KEY_FILE points to a file, not a directory.",
+		}
 	}
 
 	data, err := os.ReadFile(keyPath) // #nosec G304 - path comes from KeyFilePath, user-scoped config
 	if err != nil {
-		return Result{Name: "encryption key", OK: false, Detail: fmt.Sprintf("unreadable %s: %v", keyPath, err)}
+		return Result{
+			Name:        "encryption key",
+			OK:          false,
+			Detail:      fmt.Sprintf("unreadable %s: %v", keyPath, err),
+			Remediation: "Ensure the current user has read permissions for the encryption key file.",
+		}
 	}
 	if len(data) != 32 {
 		return Result{
-			Name:   "encryption key",
-			OK:     false,
-			Detail: fmt.Sprintf("wrong length at %s: got %d byte(s), want 32 (AES-256)", keyPath, len(data)),
+			Name:        "encryption key",
+			OK:          false,
+			Detail:      fmt.Sprintf("wrong length at %s: got %d byte(s), want 32 (AES-256)", keyPath, len(data)),
+			Remediation: "Ensure the encryption key file contains exactly 32 bytes of random data.",
 		}
 	}
 	return Result{Name: "encryption key", OK: true, Detail: fmt.Sprintf("AES-256 key present (32 bytes) at %s", keyPath)}
@@ -648,6 +775,7 @@ func checkPlaintextSecrets(cfg *config.Config) Result {
 			OK:   false,
 			Detail: fmt.Sprintf("keys for %s found in config.json; move to secure vault with 'gobot secrets set'",
 				strings.Join(plaintext, ", ")),
+			Remediation: "Use 'gobot secrets set' to move keys from config.json to the secure vault.",
 		}
 	}
 	return Result{Name: "plaintext secrets", OK: true, Detail: "all keys stored securely (or missing)"}
@@ -656,9 +784,10 @@ func checkPlaintextSecrets(cfg *config.Config) Result {
 func checkHITL(cfg *config.Config) Result {
 	if !cfg.Channels.Telegram.HITL {
 		return Result{
-			Name:   "human-in-the-loop",
-			OK:     false,
-			Detail: "HITL is disabled; high-risk tools will run without approval",
+			Name:        "human-in-the-loop",
+			OK:          false,
+			Detail:      "HITL is disabled; high-risk tools will run without approval",
+			Remediation: "Set channels.telegram.hitl=true in config.json for enhanced security.",
 		}
 	}
 	return Result{Name: "human-in-the-loop", OK: true, Detail: "enabled for Telegram"}

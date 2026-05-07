@@ -117,7 +117,9 @@ func ensureWorkspace(out io.Writer, cfg *config.Config) error {
 	}
 
 	configPath := config.DefaultConfigPath()
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, err := os.Stat(configPath); err == nil {
+		fmt.Fprintf(out, "Config file already exists at %s\n", configPath)
+	} else if os.IsNotExist(err) {
 		if err := cfg.Save(configPath); err != nil {
 			return fmt.Errorf("save default config: %w", err)
 		}
