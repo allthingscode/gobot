@@ -71,3 +71,6 @@ oc_main.json
 # Per-worktree Go and Lint caches
 .go-build-cache/
 .golangci-lint-cache/
+
+# Temporary files
+.tmp/
