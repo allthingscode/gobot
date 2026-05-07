@@ -75,7 +75,7 @@ func (t *shellExecTool) Execute(ctx context.Context, sessionKey, userID string, 
 	}
 
 	executionID, _ := args["execution_id"].(string)
-	if result, hit := t.checkIdempotency(sessionKey, executionID); hit {
+	if result, hit := checkIdempotency(t.registry, shellExecToolName, sessionKey, executionID); hit {
 		return result, nil
 	}
 
@@ -124,7 +124,7 @@ func (t *shellExecTool) Execute(ctx context.Context, sessionKey, userID string, 
 		output = output[:shellMaxOutput] + "\n[output truncated]"
 	}
 
-	t.storeIdempotency(sessionKey, executionID, output)
+	storeIdempotency(t.registry, shellExecToolName, sessionKey, executionID, output)
 
 	return output, nil
 }
@@ -137,24 +137,6 @@ func (t *shellExecTool) isSubpath(root, target string) bool {
 		return false
 	}
 	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
-}
-
-func (t *shellExecTool) checkIdempotency(sessionKey, executionID string) (string, bool) {
-	if executionID != "" && t.registry != nil {
-		if result, ok := t.registry.Check(sessionKey, executionID); ok {
-			slog.Info("shell_exec: idempotency hit", "session", sessionKey, "execution_id", executionID)
-			return result, true
-		}
-	}
-	return "", false
-}
-
-func (t *shellExecTool) storeIdempotency(sessionKey, executionID, result string) {
-	if executionID != "" && t.registry != nil {
-		if storeErr := t.registry.Store(sessionKey, executionID, result); storeErr != nil {
-			slog.Warn("shell_exec: failed to store idempotency result", "err", storeErr)
-		}
-	}
 }
 
 func (t *shellExecTool) prepareArgs(rawArgs []any, workspaceRoot string) []string {

@@ -373,3 +373,26 @@ func (r *ToolRegistry) save(sessionKey string, data *toolRegistryData) error {
 	}
 	return nil
 }
+
+// checkIdempotency returns a cached result and true if the execution ID was
+// already recorded, preventing duplicate side effects.
+func checkIdempotency(registry *ToolRegistry, toolName, sessionKey, executionID string) (string, bool) {
+	if executionID == "" || registry == nil {
+		return "", false
+	}
+	if result, ok := registry.Check(sessionKey, executionID); ok {
+		slog.Info(toolName+": idempotency hit", "session", sessionKey, "execution_id", executionID)
+		return result, true
+	}
+	return "", false
+}
+
+// storeIdempotency records a successful tool execution result for an executionID.
+func storeIdempotency(registry *ToolRegistry, toolName, sessionKey, executionID, result string) {
+	if executionID == "" || registry == nil {
+		return
+	}
+	if storeErr := registry.Store(sessionKey, executionID, result); storeErr != nil {
+		slog.Warn(toolName+": failed to store idempotency result", "err", storeErr)
+	}
+}

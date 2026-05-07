@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -94,7 +93,7 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 		executionID = fmt.Sprintf("scheduled_email_auto_%s", time.Now().Format("2006-01-02"))
 	}
 
-	if result, hit := s.checkIdempotency(sessionKey, executionID); hit {
+	if result, hit := checkIdempotency(s.registry, sendEmailToolName, sessionKey, executionID); hit {
 		return result, nil
 	}
 
@@ -118,27 +117,9 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 	}
 
 	result := fmt.Sprintf("Email sent to %s: %s", s.userEmail, subject)
-	s.storeIdempotency(sessionKey, executionID, result)
+	storeIdempotency(s.registry, sendEmailToolName, sessionKey, executionID, result)
 
 	return result, nil
-}
-
-func (s *SendEmailTool) checkIdempotency(sessionKey, executionID string) (string, bool) {
-	if executionID != "" && s.registry != nil {
-		if result, ok := s.registry.Check(sessionKey, executionID); ok {
-			slog.Info("send_email: idempotency hit", "session", sessionKey, "execution_id", executionID)
-			return result, true
-		}
-	}
-	return "", false
-}
-
-func (s *SendEmailTool) storeIdempotency(sessionKey, executionID, result string) {
-	if executionID != "" && s.registry != nil {
-		if storeErr := s.registry.Store(sessionKey, executionID, result); storeErr != nil {
-			slog.Warn("send_email: failed to store idempotency result", "err", storeErr)
-		}
-	}
 }
 
 // -- SearchGmailTool -----------------------------------------------------------
