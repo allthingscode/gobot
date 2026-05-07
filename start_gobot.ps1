@@ -18,6 +18,7 @@ if (Test-Path $GobotExe) {
 
 $LogDir     = Join-Path $StorageRoot "logs"
 $LockFile   = Join-Path $LogDir "gobot.pid"
+$PreflightLog = Join-Path $LogDir "gobot-startup.log"
 
 if (-not (Test-Path $GobotExe)) {
     Write-Host "Error: gobot.exe not found at $GobotExe" -ForegroundColor Red
@@ -27,6 +28,12 @@ if (-not (Test-Path $GobotExe)) {
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
+
+function Write-StartupLog {
+    param([string]$Message)
+    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    Add-Content -Path $PreflightLog -Value "[$timestamp] $Message" -Encoding UTF8
 }
 
 function Check-GobotLock {
@@ -66,6 +73,16 @@ Write-Host ""
 
 # Check for existing instance before starting
 Check-GobotLock
+
+Write-Host "--- Running secrets pre-flight (gobot secrets test) ---" -ForegroundColor Cyan
+& $GobotExe secrets test
+if ($LASTEXITCODE -ne 0) {
+    $msg = "Pre-flight failed: 'gobot secrets test' exited with code $LASTEXITCODE. Ensure this task runs under the same Windows account used for gobot authorize/reauth."
+    Write-Host $msg -ForegroundColor Red
+    Write-StartupLog $msg
+    exit $LASTEXITCODE
+}
+Write-Host "Secrets pre-flight passed." -ForegroundColor Green
 
 try {
     while ($true) {

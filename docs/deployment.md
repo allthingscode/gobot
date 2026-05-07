@@ -175,6 +175,13 @@ Copy-Item bin\gobot.exe .
 Windows uses DPAPI for secret encryption, which is tied to the **specific Windows User account**.
 - **Requirement:** The Task Scheduler task **MUST** run as the same user who performed the `gobot authorize` and `gobot reauth` commands.
 - **Do NOT** run as `SYSTEM` or `LocalService` unless you performed authorization under those accounts.
+- **Pre-flight check:** Run `gobot secrets test` from the same account before enabling your scheduled task. This verifies secrets encryption/decryption works in the current user context.
+
+```powershell
+.\gobot.exe secrets test
+```
+
+If this test fails, do not enable persistence yet. Fix the task account so it matches the account used for authorization.
 
 ### 3. Create Scheduled Task
 1. Open **Task Scheduler**.
@@ -189,6 +196,7 @@ Windows uses DPAPI for secret encryption, which is tied to the **specific Window
 
 ### 4. Monitoring
 Logs are stored in the `logs/` directory within the `GOBOT_STORAGE` path (defaulting to the project root).
+If DPAPI pre-flight fails in startup, `start_gobot.ps1` exits non-zero and writes details to `logs/gobot-startup.log` so Task Scheduler marks the run as failed.
 You can use the provided script to check for errors:
 ```powershell
 .\scripts\get_logs.ps1

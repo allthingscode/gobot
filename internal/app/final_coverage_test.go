@@ -9,6 +9,8 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 )
 
+const testToken = "test"
+
 func TestLiveProbesList_Coverage(t *testing.T) {
 	probes := LiveProbesList()
 	if probes == nil {
@@ -20,7 +22,7 @@ func TestRunAgent_InitSequence_Coverage(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = tmpDir
-	cfg.Providers.Gemini.APIKey = "test"
+	cfg.Providers.Gemini.APIKey = testToken
 	cfg.Strategic.UserChatID = 12345
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os/user"
+	"runtime"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -19,8 +22,19 @@ func cmdSecrets() *cobra.Command {
 		cmdSecretsGet(),
 		cmdSecretsList(),
 		cmdSecretsDelete(),
+		cmdSecretsTest(),
 	)
 	return cmd
+}
+
+const preflightTestKeyPrefix = "preflight.test"
+
+func currentUsername() string {
+	u, err := user.Current()
+	if err != nil || u == nil || u.Username == "" {
+		return "unknown-user"
+	}
+	return u.Username
 }
 
 func cmdSecretsSet() *cobra.Command {
@@ -109,6 +123,48 @@ func cmdSecretsDelete() *cobra.Command {
 				return fmt.Errorf("delete secret: %w", err)
 			}
 			fmt.Printf("Secret %q deleted.\n", args[0])
+			return nil
+		},
+	}
+}
+
+func cmdSecretsTest() *cobra.Command {
+	return &cobra.Command{
+		Use:   "test",
+		Short: "Run a secrets pre-flight round-trip test",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			store := secrets.NewSecretsStore(cfg.StorageRoot())
+			username := currentUsername()
+			testKey := fmt.Sprintf("%s.%d", preflightTestKeyPrefix, time.Now().UTC().UnixNano())
+			testValue := "gobot-secrets-preflight"
+
+			cleanupErr := store.Delete(testKey)
+			if cleanupErr != nil {
+				fmt.Printf("Pre-flight warning: failed cleanup for test key %q: %v\n", testKey, cleanupErr)
+			}
+
+			if err := store.Set(testKey, testValue); err != nil {
+				return fmt.Errorf("secrets pre-flight failed for user %q on %s: write failed: %w", username, runtime.GOOS, err)
+			}
+			defer func() {
+				if err := store.Delete(testKey); err != nil {
+					fmt.Printf("Pre-flight warning: failed cleanup for test key %q: %v\n", testKey, err)
+				}
+			}()
+
+			got, err := store.Get(testKey)
+			if err != nil {
+				return fmt.Errorf("secrets pre-flight failed for user %q on %s: read failed: %w. On Windows, verify Task Scheduler runs under the same account used for gobot authorize/reauth", username, runtime.GOOS, err)
+			}
+			if got != testValue {
+				return fmt.Errorf("secrets pre-flight failed for user %q on %s: readback mismatch (got %q). On Windows, verify Task Scheduler runs under the same account used for gobot authorize/reauth", username, runtime.GOOS, got)
+			}
+
+			fmt.Printf("Secrets pre-flight PASS for user %q on %s.\n", username, runtime.GOOS)
 			return nil
 		},
 	}
