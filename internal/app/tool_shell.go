@@ -101,10 +101,9 @@ func (t *shellExecTool) Execute(ctx context.Context, sessionKey, userID string, 
 		return "", errors.New("shell_exec: go requires at least one argument (e.g. 'version', 'test', 'build')")
 	}
 
-	// Resource limits are intentionally 0 (disabled). Per-process CPU/memory
-	// caps via Windows Job Objects kill grandchildren (e.g. go test binaries)
-	// and leave cmd.Wait hanging on broken pipes. The wall-clock Timeout is
-	// the sole safety net.
+	// MaxMemoryMB and MaxCPUSec are intentionally 0 (disabled): Windows Job Objects
+	// apply limits to the entire job tree, killing child processes spawned by the
+	// shell command. Wall-clock timeout is the sole safety net here.
 	execCfg := sandbox.Config{
 		MaxMemoryMB: 0,
 		MaxCPUSec:   0,
