@@ -376,6 +376,60 @@ func TestRunner_ReflectionLoop(t *testing.T) {
 	}
 }
 
+func TestRunner_ReflectionMaxRoundsExceeded(t *testing.T) {
+	t.Parallel()
+	rubricJSON := `{"task_goal":"test","criteria":[{"name":"Quality","description":"good","weight":1.0}],"success_threshold":0.9}`
+	criticFail := `{"overall_score":0.3,"scores":[{"criterion_name":"Quality","score":0.3,"reasoning":"poor"}],"passed":false,"feedback":"needs work","required_corrections":["improve X"]}`
+
+	makeTextResp := func(text string) *provider.ChatResponse {
+		return &provider.ChatResponse{
+			Message: agentctx.StrategicMessage{
+				Role:    agentctx.RoleAssistant,
+				Content: &agentctx.MessageContent{Str: strPtr(text)},
+			},
+		}
+	}
+
+	mock := &MockProvider{
+		Responses: []*provider.ChatResponse{
+			makeTextResp(rubricJSON),       // call 0: planning rubric
+			makeTextResp("first attempt"),  // call 1: main loop terminal
+			makeTextResp(criticFail),       // call 2: critic fails
+			makeTextResp("second attempt"), // call 3: backtrack terminal
+			makeTextResp(criticFail),       // call 4: critic fails
+			makeTextResp("third attempt"),  // call 5: backtrack terminal -> hits limit
+		},
+	}
+
+	r := &AgentRunner{
+		Prov:                mock,
+		Model:               "mock-model",
+		MaxToolIterations:   10,
+		EnableReflection:    true,
+		MaxReflectionRounds: 2,
+		Limiter:             rate.NewLimiter(rate.Inf, 1),
+		Breaker:             resilience.New("mock", 5, time.Minute, time.Second),
+	}
+
+	userMsg := "test task"
+	messages := []agentctx.StrategicMessage{
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &userMsg}},
+	}
+
+	got, _, err := r.Run(context.Background(), "test-session", "", messages)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	// It should accept the third attempt even though it didn't pass, because we exceeded rounds.
+	if got != "third attempt" {
+		t.Errorf("Run() = %q, want %q (should have accepted third attempt after exceeding rounds)", got, "third attempt")
+	}
+	// rubric (1) + attempts (3) + critics (2) = 6 calls
+	if mock.Idx != 6 {
+		t.Errorf("mock provider called %d times, want 6", mock.Idx)
+	}
+}
+
 func TestRunner_ToolCallValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
