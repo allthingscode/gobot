@@ -21,6 +21,7 @@ func TestOpenRouterProvider_Name(t *testing.T) {
 
 func TestOpenRouterProvider_Chat_PrefixStripping(t *testing.T) {
 	t.Parallel()
+	const userMessage = "hello"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("missing or incorrect auth header: %s", r.Header.Get("Authorization"))
@@ -62,13 +63,12 @@ func TestOpenRouterProvider_Chat_PrefixStripping(t *testing.T) {
 	defer ts.Close()
 
 	p := NewOpenRouterProvider("test-key", ts.URL)
-	str := "hello"
 	req := ChatRequest{
 		Model: "openrouter/mistralai/mistral-7b-instruct",
 		Messages: []agentctx.StrategicMessage{
 			{
 				Role:    agentctx.RoleUser,
-				Content: &agentctx.MessageContent{Str: &str},
+				Content: &agentctx.MessageContent{Str: func() *string { s := userMessage; return &s }()},
 			},
 		},
 	}

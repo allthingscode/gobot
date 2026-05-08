@@ -196,14 +196,18 @@ func TestGeminiProvider_Chat(t *testing.T) {
 func TestGeminiProvider_Helpers(t *testing.T) {
 	t.Parallel()
 	p := NewGeminiProvider(&genai.Client{})
+	const (
+		sampleMessage = "msg 1"
+		sampleTool    = "my_tool"
+		sampleToolRes = `{"res": 1}`
+	)
 
 	t.Run("messagesToContents", func(t *testing.T) {
 		t.Parallel()
-		str1 := "msg 1"
 		messages := []agentctx.StrategicMessage{
-			{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &str1}},
-			{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: &str1}},
-			{Role: agentctx.RoleTool, Name: func() *string { s := "my_tool"; return &s }(), Content: &agentctx.MessageContent{Str: func() *string { s := `{"res": 1}`; return &s }()}},
+			{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: func() *string { s := sampleMessage; return &s }()}},
+			{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: func() *string { s := sampleMessage; return &s }()}},
+			{Role: agentctx.RoleTool, Name: func() *string { s := sampleTool; return &s }(), Content: &agentctx.MessageContent{Str: func() *string { s := sampleToolRes; return &s }()}},
 		}
 
 		contents := p.messagesToContents(messages)
