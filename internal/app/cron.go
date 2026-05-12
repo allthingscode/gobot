@@ -513,7 +513,7 @@ func (cd *CronDispatcher) retryMorningBriefingOnce(shutdown <-chan struct{}, p c
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute) //nolint:gosec // retry goroutine must outlive the triggering request context
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute) //nolint:gosec // retry goroutine must outlive the triggering request context
 	defer cancel()
 
 	retryKey := fmt.Sprintf("%s%s:email:%s:retry1", bot.SessionPrefixCron, morningBriefingJobID, recipient)
