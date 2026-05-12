@@ -48,6 +48,9 @@ type CronDispatcher struct {
 	cfg           *config.Config
 	tmgr          *reporter.TemplateManager
 	runnerFactory func(prov provider.Provider, model, systemPrompt string) *AgentRunner
+	failureEmailHook func(ctx context.Context, p cron.Payload, recipient, body string)
+	dispatchHook     func(ctx context.Context, sessionKey, msg string) (string, error)
+	guardHook        func(sessionKey, response string) error
 }
 
 // NewCronDispatcher initializes a new CronDispatcher using the given stack and bot.
@@ -485,6 +488,10 @@ func resolveFailureEmailSubject(p cron.Payload) string {
 }
 
 func (cd *CronDispatcher) sendFailureEmail(ctx context.Context, p cron.Payload, recipient, body string) {
+	if cd.failureEmailHook != nil {
+		cd.failureEmailHook(ctx, p, recipient, body)
+		return
+	}
 	svc, err := cd.newEmailService(ctx)
 	if err != nil {
 		slog.Error("failed to initialize gmail service for cron failure email", "err", err)
@@ -513,19 +520,45 @@ func (cd *CronDispatcher) retryMorningBriefingOnce(shutdown <-chan struct{}, p c
 	msg := cd.buildEmailDispatchMessage(p)
 
 	slog.Info("cron: retrying morning briefing", "session", retryKey)
-	response, err := cd.mgr.Dispatch(ctx, retryKey, "", msg)
+	response, err := cd.retryDispatch(ctx, retryKey, msg)
 	if err != nil {
 		slog.Error("cron: morning briefing retry failed", "err", err)
+		cd.sendRetryFailureEmail(p, recipient, retryKey, err)
 		return
 	}
-	if err := cd.enforceMorningBriefingGuards(retryKey, response); err != nil {
+	if err := cd.retryEnforceGuards(retryKey, response); err != nil {
 		slog.Error("cron: morning briefing retry failed validation", "err", err)
+		cd.sendRetryFailureEmail(p, recipient, retryKey, err)
 		return
 	}
 	if response != "" {
 		slog.Info("cron: morning briefing retry succeeded, delivering email")
 		cd.sendEmailResponse(ctx, p, recipient, response)
 	}
+}
+
+func (cd *CronDispatcher) retryDispatch(ctx context.Context, retryKey, msg string) (string, error) {
+	if cd.dispatchHook != nil {
+		return cd.dispatchHook(ctx, retryKey, msg)
+	}
+	response, err := cd.mgr.Dispatch(ctx, retryKey, "", msg)
+	if err != nil {
+		return "", fmt.Errorf("retry dispatch: %w", err)
+	}
+	return response, nil
+}
+
+func (cd *CronDispatcher) retryEnforceGuards(retryKey, response string) error {
+	if cd.guardHook != nil {
+		return cd.guardHook(retryKey, response)
+	}
+	return cd.enforceMorningBriefingGuards(retryKey, response)
+}
+
+func (cd *CronDispatcher) sendRetryFailureEmail(p cron.Payload, recipient, retryKey string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, retryKey, fmt.Errorf("retry also failed: %w", err)))
 }
 
 func (cd *CronDispatcher) dispatchTelegram(ctx context.Context, p cron.Payload, to string) error {

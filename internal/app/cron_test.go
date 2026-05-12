@@ -3,10 +3,12 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/cron"
@@ -391,5 +393,80 @@ func TestVerifySearchToolProvenanceFromLogsRequiresGoogleAISearchInSubSession(t 
 	}
 	if ok {
 		t.Fatal("expected provenance check to reject search_ai evidence outside the researcher sub-session")
+	}
+}
+
+func TestRetryMorningBriefingOnceSendsFailureEmailOnRetryFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		dispatchErr   error
+		guardErr      error
+		wantErrSubstr string
+	}{
+		{
+			name:          "dispatch failure sends retry failure email",
+			dispatchErr:   fmt.Errorf("dispatch failed"),
+			wantErrSubstr: "retry also failed: dispatch failed",
+		},
+		{
+			name:          "guard validation failure sends retry failure email",
+			guardErr:      fmt.Errorf("validation failed"),
+			wantErrSubstr: "retry also failed: validation failed",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			emailCalls, emailBody, deadlineDelta := executeRetryFailureScenario(t, tc.dispatchErr, tc.guardErr)
+			assertRetryFailureEmail(t, emailCalls, emailBody, deadlineDelta, tc.wantErrSubstr)
+		})
+	}
+}
+
+func executeRetryFailureScenario(t *testing.T, dispatchErr, guardErr error) (emailCalls int, emailBody string, deadlineDelta time.Duration) {
+	t.Helper()
+
+	cd := &CronDispatcher{
+		dispatchHook: func(_ context.Context, _ string, _ string) (string, error) {
+			if dispatchErr != nil {
+				return "", dispatchErr
+			}
+			return "ok", nil
+		},
+		guardHook: func(_, _ string) error {
+			return guardErr
+		},
+		failureEmailHook: func(ctx context.Context, _ cron.Payload, _ string, body string) {
+			emailCalls++
+			emailBody = body
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("expected retry failure email context to have a deadline")
+			}
+			deadlineDelta = time.Until(deadline)
+		},
+	}
+
+	cd.retryMorningBriefingOnce(make(chan struct{}), cron.Payload{
+		ID:      "morning_briefing",
+		Message: "test message",
+	}, "user@example.com", 0)
+	return emailCalls, emailBody, deadlineDelta
+}
+
+func assertRetryFailureEmail(t *testing.T, emailCalls int, emailBody string, deadlineDelta time.Duration, wantErrSubstr string) {
+	t.Helper()
+	if emailCalls != 1 {
+		t.Fatalf("expected one retry failure email call, got %d", emailCalls)
+	}
+	if !strings.Contains(emailBody, wantErrSubstr) {
+		t.Fatalf("expected retry failure body to include %q, got %q", wantErrSubstr, emailBody)
+	}
+	if deadlineDelta <= 0 || deadlineDelta > 60*time.Second {
+		t.Fatalf("expected short-lived retry failure context <= 60s, got %s", deadlineDelta)
 	}
 }
