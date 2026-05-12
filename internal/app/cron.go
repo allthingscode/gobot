@@ -249,14 +249,14 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	if err != nil {
 		cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
 		if isMorningBriefingJob(p.ID) {
-			go cd.retryMorningBriefingOnce(cd.shutdownCh, p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
+			go cd.retryMorningBriefing(cd.shutdownCh, p, recipient, []time.Duration{30 * time.Minute, 90 * time.Minute}) //nolint:gosec // retry intentionally outlives the request context
 		}
 		return &cron.AlreadyNotifiedError{Err: fmt.Errorf("dispatch email: %w", err)}
 	}
 	if isMorningBriefingJob(p.ID) {
 		if guardErr := cd.enforceMorningBriefingGuards(sessionKey, response); guardErr != nil {
 			cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, guardErr))
-			go cd.retryMorningBriefingOnce(cd.shutdownCh, p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
+			go cd.retryMorningBriefing(cd.shutdownCh, p, recipient, []time.Duration{30 * time.Minute, 90 * time.Minute}) //nolint:gosec // retry intentionally outlives the request context
 			return &cron.AlreadyNotifiedError{Err: fmt.Errorf("dispatch email validation: %w", guardErr)}
 		}
 	}
@@ -504,36 +504,61 @@ func (cd *CronDispatcher) sendFailureEmail(ctx context.Context, p cron.Payload, 
 	}
 }
 
-func (cd *CronDispatcher) retryMorningBriefingOnce(shutdown <-chan struct{}, p cron.Payload, recipient string, delay time.Duration) {
-	slog.Info("cron: morning briefing retry scheduled", "delay", delay)
-	select {
-	case <-time.After(delay):
-	case <-shutdown:
-		slog.Info("cron: morning briefing retry cancelled (shutdown)")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute) //nolint:gosec // retry goroutine must outlive the triggering request context
-	defer cancel()
-
-	retryKey := fmt.Sprintf("%s%s:email:%s:retry1", bot.SessionPrefixCron, morningBriefingJobID, recipient)
+func (cd *CronDispatcher) retryMorningBriefing(shutdown <-chan struct{}, p cron.Payload, recipient string, delays []time.Duration) {
+	startedAt := time.Now()
 	msg := cd.buildEmailDispatchMessage(p)
+	for i, delay := range delays {
+		slog.Info("cron: morning briefing retry scheduled", "attempt", i+1, "delay", delay)
+		if !waitUntilRetryDelay(shutdown, startedAt, delay) {
+			slog.Info("cron: morning briefing retry cancelled (shutdown)")
+			return
+		}
 
-	slog.Info("cron: retrying morning briefing", "session", retryKey)
-	response, err := cd.retryDispatch(ctx, retryKey, msg)
-	if err != nil {
-		slog.Error("cron: morning briefing retry failed", "err", err)
-		cd.sendRetryFailureEmail(p, recipient, retryKey, err)
+		select {
+		case <-shutdown:
+			slog.Info("cron: morning briefing retry cancelled before attempt", "attempt", i+1)
+			return
+		default:
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute) //nolint:gosec // retry goroutine must outlive the triggering request context
+		retryKey := fmt.Sprintf("%s%s:email:%s:retry%d", bot.SessionPrefixCron, morningBriefingJobID, recipient, i+1)
+
+		slog.Info("cron: retrying morning briefing", "session", retryKey, "attempt", i+1)
+		response, err := cd.retryDispatch(ctx, retryKey, msg)
+		if err != nil {
+			cancel()
+			slog.Error("cron: morning briefing retry failed", "err", err, "attempt", i+1)
+			cd.sendRetryFailureEmail(p, recipient, retryKey, err)
+			continue
+		}
+		if err := cd.retryEnforceGuards(retryKey, response); err != nil {
+			cancel()
+			slog.Error("cron: morning briefing retry failed validation", "err", err, "attempt", i+1)
+			cd.sendRetryFailureEmail(p, recipient, retryKey, err)
+			continue
+		}
+		if response != "" {
+			slog.Info("cron: morning briefing retry succeeded, delivering email", "attempt", i+1)
+			cd.sendEmailResponse(ctx, p, recipient, response)
+		}
+		cancel()
 		return
 	}
-	if err := cd.retryEnforceGuards(retryKey, response); err != nil {
-		slog.Error("cron: morning briefing retry failed validation", "err", err)
-		cd.sendRetryFailureEmail(p, recipient, retryKey, err)
-		return
+}
+
+func waitUntilRetryDelay(shutdown <-chan struct{}, startedAt time.Time, targetDelay time.Duration) bool {
+	wait := time.Until(startedAt.Add(targetDelay))
+	if wait <= 0 {
+		return true
 	}
-	if response != "" {
-		slog.Info("cron: morning briefing retry succeeded, delivering email")
-		cd.sendEmailResponse(ctx, p, recipient, response)
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-shutdown:
+		return false
 	}
 }
 

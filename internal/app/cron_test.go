@@ -396,7 +396,7 @@ func TestVerifySearchToolProvenanceFromLogsRequiresGoogleAISearchInSubSession(t 
 	}
 }
 
-func TestRetryMorningBriefingOnceSendsFailureEmailOnRetryFailure(t *testing.T) {
+func TestRetryMorningBriefingSendsFailureEmailOnRetryFailure(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -451,10 +451,10 @@ func executeRetryFailureScenario(t *testing.T, dispatchErr, guardErr error) (ema
 		},
 	}
 
-	cd.retryMorningBriefingOnce(make(chan struct{}), cron.Payload{
+	cd.retryMorningBriefing(make(chan struct{}), cron.Payload{
 		ID:      "morning_briefing",
 		Message: "test message",
-	}, "user@example.com", 0)
+	}, "user@example.com", []time.Duration{0})
 	return emailCalls, emailBody, deadlineDelta
 }
 
@@ -468,5 +468,166 @@ func assertRetryFailureEmail(t *testing.T, emailCalls int, emailBody string, dea
 	}
 	if deadlineDelta <= 0 || deadlineDelta > 60*time.Second {
 		t.Fatalf("expected short-lived retry failure context <= 60s, got %s", deadlineDelta)
+	}
+}
+
+func TestRetryMorningBriefingFlow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		dispatchErrs    []error
+		guardErrs       []error
+		wantDispatches  int
+		wantRetryKeys   []string
+		wantFailureMails int
+	}{
+		{
+			name:           "first retry succeeds second does not run",
+			dispatchErrs:   []error{nil},
+			guardErrs:      []error{nil},
+			wantDispatches: 1,
+			wantRetryKeys: []string{
+				testMorningBriefingEmailSession + ":retry1",
+			},
+			wantFailureMails: 0,
+		},
+		{
+			name:           "first retry fails second retry succeeds",
+			dispatchErrs:   []error{fmt.Errorf("attempt1 failed"), nil},
+			guardErrs:      []error{nil, nil},
+			wantDispatches: 2,
+			wantRetryKeys: []string{
+				testMorningBriefingEmailSession + ":retry1",
+				testMorningBriefingEmailSession + ":retry2",
+			},
+			wantFailureMails: 1,
+		},
+		{
+			name:           "both retries fail",
+			dispatchErrs:   []error{fmt.Errorf("attempt1 failed"), fmt.Errorf("attempt2 failed")},
+			guardErrs:      []error{nil, nil},
+			wantDispatches: 2,
+			wantRetryKeys: []string{
+				testMorningBriefingEmailSession + ":retry1",
+				testMorningBriefingEmailSession + ":retry2",
+			},
+			wantFailureMails: 2,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dispatchCalls, retryKeys, failureMails := runRetryFlowCase(tc)
+			assertRetryFlowCase(t, tc, dispatchCalls, retryKeys, failureMails)
+		})
+	}
+}
+
+func TestRetryMorningBriefingShutdownCancelsPendingRetry(t *testing.T) {
+	t.Parallel()
+
+	shutdown := make(chan struct{})
+	dispatchCalls := 0
+	failureMails := 0
+	cd := &CronDispatcher{
+		dispatchHook: func(_ context.Context, retryKey, _ string) (string, error) {
+			dispatchCalls++
+			if strings.HasSuffix(retryKey, ":retry1") {
+				return "", fmt.Errorf("retry1 failed")
+			}
+			return "ok", nil
+		},
+		guardHook: func(_, _ string) error { return nil },
+		failureEmailHook: func(_ context.Context, _ cron.Payload, _ string, _ string) {
+			failureMails++
+			close(shutdown)
+		},
+		tmgr: reporter.NewTemplateManager(""),
+	}
+
+	cd.retryMorningBriefing(shutdown, cron.Payload{
+		ID:      morningBriefingJobID,
+		Message: "test message",
+	}, "user@example.com", []time.Duration{0, time.Hour})
+
+	if dispatchCalls != 1 {
+		t.Fatalf("dispatchCalls=%d want=1", dispatchCalls)
+	}
+	if failureMails != 1 {
+		t.Fatalf("failureMails=%d want=1", failureMails)
+	}
+}
+
+func lookupAttemptErr(errs []error, idx int) error {
+	if idx < 0 || idx >= len(errs) {
+		return nil
+	}
+	return errs[idx]
+}
+
+func runRetryFlowCase(tc struct {
+	name             string
+	dispatchErrs     []error
+	guardErrs        []error
+	wantDispatches   int
+	wantRetryKeys    []string
+	wantFailureMails int
+}) (dispatchCalls int, retryKeys []string, failureMails int) {
+	dispatchCalls = 0
+	retryKeys = make([]string, 0, 2)
+	failureMails = 0
+
+	cd := &CronDispatcher{
+		dispatchHook: func(_ context.Context, retryKey, _ string) (string, error) {
+			retryKeys = append(retryKeys, retryKey)
+			err := lookupAttemptErr(tc.dispatchErrs, dispatchCalls)
+			dispatchCalls++
+			if err != nil {
+				return "", err
+			}
+			return "ok", nil
+		},
+		guardHook: func(_, _ string) error {
+			return lookupAttemptErr(tc.guardErrs, dispatchCalls-1)
+		},
+		failureEmailHook: func(_ context.Context, _ cron.Payload, _ string, _ string) {
+			failureMails++
+		},
+		tmgr: reporter.NewTemplateManager(""),
+	}
+
+	cd.retryMorningBriefing(make(chan struct{}), cron.Payload{
+		ID:      morningBriefingJobID,
+		Message: "test message",
+	}, "user@example.com", []time.Duration{0, 0})
+
+	return dispatchCalls, retryKeys, failureMails
+}
+
+func assertRetryFlowCase(t *testing.T, tc struct {
+	name             string
+	dispatchErrs     []error
+	guardErrs        []error
+	wantDispatches   int
+	wantRetryKeys    []string
+	wantFailureMails int
+}, dispatchCalls int, retryKeys []string, failureMails int) {
+	t.Helper()
+	if dispatchCalls != tc.wantDispatches {
+		t.Fatalf("dispatchCalls=%d want=%d", dispatchCalls, tc.wantDispatches)
+	}
+	if failureMails != tc.wantFailureMails {
+		t.Fatalf("failureMails=%d want=%d", failureMails, tc.wantFailureMails)
+	}
+	if len(retryKeys) != len(tc.wantRetryKeys) {
+		t.Fatalf("retry key count=%d want=%d (%v)", len(retryKeys), len(tc.wantRetryKeys), retryKeys)
+	}
+	for i := range retryKeys {
+		if retryKeys[i] != tc.wantRetryKeys[i] {
+			t.Fatalf("retryKey[%d]=%q want=%q", i, retryKeys[i], tc.wantRetryKeys[i])
+		}
 	}
 }
