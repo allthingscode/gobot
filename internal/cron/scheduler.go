@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,25 @@ import (
 	"github.com/allthingscode/gobot/internal/logattr"
 	robfigcron "github.com/robfig/cron/v3"
 )
+
+// AlreadyNotifiedError signals that the dispatcher has already delivered a
+// failure notification for this job (e.g. dispatchEmail sent its own failure
+// email). When the scheduler observes this error type, sendFailureAlert
+// suppresses the generic Alerter call to prevent duplicate notifications.
+type AlreadyNotifiedError struct {
+	Err error
+}
+
+// Error returns the underlying error message.
+func (e *AlreadyNotifiedError) Error() string {
+	if e.Err == nil {
+		return "already notified"
+	}
+	return e.Err.Error()
+}
+
+// Unwrap returns the wrapped error for errors.As/Is compatibility.
+func (e *AlreadyNotifiedError) Unwrap() error { return e.Err }
 
 // Dispatcher defines the interface for sending job messages.
 type Dispatcher interface {
@@ -364,6 +384,12 @@ func (s *Scheduler) executeJob(ctx context.Context, dj dueJob) error {
 }
 
 func (s *Scheduler) sendFailureAlert(ctx context.Context, dj dueJob, err error) {
+	var alreadyNotified *AlreadyNotifiedError
+	if errors.As(err, &alreadyNotified) {
+		slog.Info("cron: failure notification already sent by dispatcher, skipping alert",
+			slog.String("id", dj.id))
+		return
+	}
 	alert := Payload{
 		Channel: dj.payload.Channel,
 		To:      dj.payload.To,

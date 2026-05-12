@@ -517,3 +517,73 @@ func (m *blockingDispatcher) Alert(_ context.Context, p Payload) error {
 	m.alerts = append(m.alerts, p)
 	return nil
 }
+
+// TestSchedulerSendFailureAlert_AlreadyNotified verifies that when the
+// dispatcher returns an AlreadyNotifiedError, sendFailureAlert skips Alert()
+// (the dispatcher self-notified), and otherwise Alert() fires as usual.
+func TestSchedulerSendFailureAlert_AlreadyNotified(t *testing.T) {
+	t.Parallel()
+
+	plainErr := errors.New("boom")
+	wrappedErr := &AlreadyNotifiedError{Err: fmt.Errorf("dispatch email: %w", plainErr)}
+
+	tests := []struct {
+		name       string
+		err        error
+		wantAlerts int
+	}{
+		{
+			name:       "plain error triggers Alert",
+			err:        plainErr,
+			wantAlerts: 1,
+		},
+		{
+			name:       "AlreadyNotifiedError suppresses Alert",
+			err:        wrappedErr,
+			wantAlerts: 0,
+		},
+		{
+			name:       "wrapped AlreadyNotifiedError still suppresses Alert",
+			err:        fmt.Errorf("outer: %w", wrappedErr),
+			wantAlerts: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dispatcher := &mockDispatcher{}
+			s := NewScheduler("", "", dispatcher)
+			dj := dueJob{
+				index:   0,
+				id:      "job-1",
+				name:    "Test Job",
+				payload: Payload{Channel: "telegram", To: "telegram:1"},
+			}
+			s.sendFailureAlert(context.Background(), dj, tt.err)
+			assert.Equal(t, tt.wantAlerts, len(dispatcher.alerts), "alert count mismatch")
+		})
+	}
+}
+
+// TestAlreadyNotifiedError_ErrorAndUnwrap exercises the error-interface
+// methods on the sentinel type.
+func TestAlreadyNotifiedError_ErrorAndUnwrap(t *testing.T) {
+	t.Parallel()
+
+	inner := errors.New("inner failure")
+	e := &AlreadyNotifiedError{Err: inner}
+	assert.Equal(t, "inner failure", e.Error())
+	assert.Equal(t, inner, errors.Unwrap(e))
+
+	// Zero-value AlreadyNotifiedError must not panic.
+	empty := &AlreadyNotifiedError{}
+	assert.Equal(t, "already notified", empty.Error())
+	assert.Nil(t, errors.Unwrap(empty))
+
+	// errors.As must succeed against the sentinel through wrapping.
+	wrapped := fmt.Errorf("ctx: %w", e)
+	var target *AlreadyNotifiedError
+	assert.True(t, errors.As(wrapped, &target))
+	assert.Same(t, e, target)
+}

@@ -248,13 +248,13 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 		if isMorningBriefingJob(p.ID) {
 			go cd.retryMorningBriefingOnce(cd.shutdownCh, p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
 		}
-		return fmt.Errorf("dispatch email: %w", err)
+		return &cron.AlreadyNotifiedError{Err: fmt.Errorf("dispatch email: %w", err)}
 	}
 	if isMorningBriefingJob(p.ID) {
 		if guardErr := cd.enforceMorningBriefingGuards(sessionKey, response); guardErr != nil {
 			cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, guardErr))
 			go cd.retryMorningBriefingOnce(cd.shutdownCh, p, recipient, 30*time.Minute) //nolint:gosec // retry intentionally outlives the request context
-			return fmt.Errorf("dispatch email validation: %w", guardErr)
+			return &cron.AlreadyNotifiedError{Err: fmt.Errorf("dispatch email validation: %w", guardErr)}
 		}
 	}
 
