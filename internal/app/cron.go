@@ -247,16 +247,12 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 
 	response, err := cd.mgr.Dispatch(ctx, sessionKey, "", msg)
 	if err != nil {
-		cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
-		if isMorningBriefingJob(p.ID) {
-			go cd.retryMorningBriefing(cd.shutdownCh, p, recipient, []time.Duration{30 * time.Minute, 90 * time.Minute}) //nolint:gosec // retry intentionally outlives the request context
-		}
+		cd.handleMorningBriefingDispatchFailure(ctx, p, recipient, sessionKey, err)
 		return &cron.AlreadyNotifiedError{Err: fmt.Errorf("dispatch email: %w", err)}
 	}
 	if isMorningBriefingJob(p.ID) {
 		if guardErr := cd.enforceMorningBriefingGuards(sessionKey, response); guardErr != nil {
-			cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, guardErr))
-			go cd.retryMorningBriefing(cd.shutdownCh, p, recipient, []time.Duration{30 * time.Minute, 90 * time.Minute}) //nolint:gosec // retry intentionally outlives the request context
+			cd.handleMorningBriefingDispatchFailure(ctx, p, recipient, sessionKey, guardErr)
 			return &cron.AlreadyNotifiedError{Err: fmt.Errorf("dispatch email validation: %w", guardErr)}
 		}
 	}
@@ -280,6 +276,27 @@ func (cd *CronDispatcher) buildEmailDispatchMessage(p cron.Payload) string {
 
 func isMorningBriefingJob(jobID string) bool {
 	return strings.EqualFold(strings.TrimSpace(jobID), morningBriefingJobID)
+}
+
+func shouldRetryMorningBriefingAfterError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "auth_expired") ||
+		strings.Contains(msg, "invalid_grant") ||
+		strings.Contains(msg, "run gobot reauth") ||
+		strings.Contains(msg, "run gobot reauth-google") {
+		return false
+	}
+	return true
+}
+
+func (cd *CronDispatcher) handleMorningBriefingDispatchFailure(ctx context.Context, p cron.Payload, recipient, sessionKey string, err error) {
+	cd.sendFailureEmail(ctx, p, recipient, buildCronFailureEmailBody(p, sessionKey, err))
+	if isMorningBriefingJob(p.ID) && shouldRetryMorningBriefingAfterError(err) {
+		go cd.retryMorningBriefing(cd.shutdownCh, p, recipient, []time.Duration{30 * time.Minute, 90 * time.Minute}) //nolint:gosec // retry intentionally outlives the request context
+	}
 }
 
 func (cd *CronDispatcher) enforceMorningBriefingGuards(sessionKey, response string) error {

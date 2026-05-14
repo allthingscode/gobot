@@ -631,3 +631,31 @@ func assertRetryFlowCase(t *testing.T, tc struct {
 		}
 	}
 }
+
+func TestShouldRetryMorningBriefingAfterError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil error", err: nil, want: false},
+		{name: "auth expired marker", err: fmt.Errorf("gmail service: AUTH_EXPIRED: run gobot reauth"), want: false},
+		{name: "invalid grant", err: fmt.Errorf("calendar auth: google token refresh: invalid_grant"), want: false},
+		{name: "reauth google hint", err: fmt.Errorf("google API 401: token may be expired, run gobot reauth-google"), want: false},
+		{name: "transient network error", err: fmt.Errorf("timeout while calling provider"), want: true},
+		{name: "validation error", err: fmt.Errorf("response contains TOOL_ERROR marker"), want: true},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := shouldRetryMorningBriefingAfterError(tc.err)
+			if got != tc.want {
+				t.Fatalf("shouldRetryMorningBriefingAfterError(%v)=%v want=%v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
