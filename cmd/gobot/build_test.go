@@ -32,6 +32,7 @@ func TestBuildIntegrity(t *testing.T) {
 		cmdCheckpoints(),
 		cmdResume(),
 		cmdSimulate(),
+		cmdChat(),
 		cmdCalendar(),
 		cmdTasks(),
 	)

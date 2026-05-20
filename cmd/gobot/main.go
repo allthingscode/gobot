@@ -38,6 +38,7 @@ func main() {
 		cmdDoctor(),
 		cmdRun(),
 		cmdSimulate(),
+		cmdChat(),
 		cmdRewind(),
 		cmdMemory(),
 		cmdFactory(),
