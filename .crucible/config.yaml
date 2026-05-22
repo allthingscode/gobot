@@ -1,0 +1,58 @@
+﻿# Example project-level Crucible configuration for Gobot.
+# This file is what a project would place at .crucible/config.yaml.
+
+# Absolute path to the Crucible framework repo on the developer's machine.
+# The orchestrator invokes <crucible_root>/powershell/factory.ps1 to run the pipeline.
+# This path is machine-specific; each developer adjusts it locally if needed.
+crucible_root: "C:\\Users\\HayesChiefOfStaff\\Documents\\crucible"
+
+project:
+  name: Gobot
+  description: Go-based Telegram bot used as the reference application for Crucible.
+  default_branch: master
+
+paths:
+  backlog: .crucible/backlog
+  session: .crucible/session
+  workspaces: .crucible/.agent-workspaces
+  prompts: .crucible/prompt-library
+  personas: .crucible/personas
+  sops: .crucible/sops
+
+roles:
+  researcher:
+    model_tier: fast
+  groomer:
+    model_tier: fast
+  architect:
+    model_tier: high-capability
+  reviewer:
+    model_tier: high-capability
+  operator:
+    model_tier: fast
+
+verification:
+  quick:
+    - name: go test
+      command: go test -mod=readonly ./internal/... ./cmd/...
+  full:
+    - name: go vet
+      command: go vet -mod=readonly ./internal/... ./cmd/...
+    - name: golangci-lint
+      command: golangci-lint run --modules-download-mode=readonly ./internal/... ./cmd/...
+    - name: tests
+      command: gotestsum --format testdox -- -mod=readonly ./internal/... ./cmd/...
+    - name: doc lint
+      command: go run scripts/doc_lint.go
+
+project_mandates:
+  - Pure Go only; no CGO.
+  - Persist durable state through SQLite.
+  - Wrap errors with context.
+  - Use structured logging.
+  - No panic in internal packages.
+
+file_affinity_examples:
+  - internal/app/
+  - internal/agent/
+  - cmd/gobot/

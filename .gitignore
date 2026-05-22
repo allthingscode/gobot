@@ -20,10 +20,15 @@ Thumbs.db
 .env
 config.local.json
 
-# Strategic Private Data
+# Strategic Private Data (legacy — superseded by .crucible/ per Crucible dog-food)
 .private/
+.private.archive/
 .gemini/
 .agent-workspaces/
+
+# Crucible framework integration (.crucible/ tracks config + overrides only;
+# data dirs are excluded by the nested .crucible/.gitignore)
+# Do NOT add `.crucible/` here — it must be partially tracked.
 
 # Vendor dependencies
 vendor/
@@ -38,7 +43,7 @@ GEMINI.md
 AGENTS.md
 opencode.json
 
-# Backlog lives in .private/backlog/ — root copy must never exist
+# Backlog lives in .crucible/backlog/ (gitignored as data) — root copy must never exist
 BACKLOG.md
 
 # Claude local settings
