@@ -39,65 +39,60 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 
 ### Broad Comparison — Go Alternatives
 
-| | **gobot** | **GoGogot** | **NeoClaw** | **GoClaw** |
+| | **gobot** | **GoGogot** | **NeoClaw** | **PicoClaw** |
 |---|---|---|---|---|
-| **Stars (Apr 2026)** | — | ~115 | — | ~1,500 |
-| **Storage** | SQLite + chromem-go | In-process notes | SQLite | PostgreSQL + pgvector |
-| **CGO** | None | None | None | Yes (pg drivers) |
-| **LLM providers** | 4 | 6+ | 4 | 20+ |
-| **Channels** | Telegram | Telegram | Telegram + CLI | 7 (Telegram, Discord, Slack…) |
+| **Stars (May 2026)** | — | ~115 | — | 12,000+ |
+| **Storage** | SQLite + chromem-go | In-process notes | SQLite | Not specified |
+| **CGO** | None | None | None | None |
+| **LLM providers** | 4 | 6+ | 4 | MCP |
+| **Channels** | Telegram | Telegram | Telegram + CLI | 16+ (Slack, Discord…) |
 | **Google Workspace** | Yes (Gmail, Cal, Tasks) | No | No | No |
 | **HITL approvals** | Yes | No | No | No |
 | **Windows-native secrets** | Yes (DPAPI) | No | No | No |
-| **Users** | Single-user | Single-user | Single-user | Multi-tenant SaaS |
-| **Infra required** | None | None | None | Postgres + pgvector |
-| **OTel tracing** | Yes | No | No | Yes |
-| **Cron / background jobs** | Yes | No | No | Yes |
+| **Users** | Single-user | Single-user | Single-user | Single-user |
+| **Infra required** | None | None | None | None |
+| **OTel tracing** | Yes | No | No | No |
+| **Binary size** | ~30MB | 15MB | — | — (not published) |
+| **Startup time** | <100ms | <100ms | — | <1s |
 
 **[GoGogot](https://github.com/aspasskiy/GoGogot)** is the most similar project in spirit — lightweight, simple agent loop, Telegram-only, no external dependencies. It edges out gobot on provider count (6 vs 4) and has a smaller reported footprint (15MB binary, 10MB RAM idle). gobot edges out GoGogot on Google Workspace depth, HITL, Windows security, and observability.
 
 **[NeoClaw](https://github.com/jigarvarma2k20/neoclaw)** covers similar ground (SQLite, Telegram, multi-LLM) and adds a CLI mode and SMTP email. gobot's advantage is Google OAuth depth vs. NeoClaw's SMTP-only email, plus HITL and Windows-native secrets.
 
-**GoClaw** (nextlevelbuilder) is the most ambitious Go alternative — see the deep-dive section below.
+**[PicoClaw](https://github.com/sipeed/picoclaw)** is the most popular Go alternative — see the deep-dive section below.
 
 ---
 
-### GoClaw Deep Dive
+### PicoClaw Deep Dive
 
-[GoClaw](https://github.com/nextlevelbuilder/goclaw) is the most technically advanced Go reimplementation. If you are evaluating both, here is the honest comparison.
+[PicoClaw](https://github.com/sipeed/picoclaw) is the most popular Go alternative, focusing on ultra-low footprint and MCP support. If you are evaluating both, here is the honest comparison.
 
-#### GoClaw is the better choice if you need:
-- A **multi-tenant SaaS backend** serving many users from one server
-- **20+ LLM providers** (OpenAI, Groq, DeepSeek, Gemini, Mistral, xAI, Ollama, and more via OpenAI-compatible endpoints)
-- **Agent teams** with inter-agent delegation (one agent hands tasks to another)
-- An **existing PostgreSQL + pgvector** stack you already operate
+#### PicoClaw is the better choice if you need:
+- **Ultra-low footprint** — runs with <10MB RAM and starts up in under 1 second
+- **Broad channel support** — 16+ messaging channels (Slack, Discord, Telegram, etc.) out of the box
+- **Model Context Protocol (MCP)** — native support for the MCP tool ecosystem
+- **A massive community** — over 12,000 stars on GitHub
 
 #### gobot is the better choice if you need:
-- **Zero infrastructure** — SQLite only, no database server to operate or back up
-- **Pure Go / no CGO** — single static binary that ships and runs anywhere without native library dependencies
-- **Google Workspace as a first-class citizen** — Gmail, Calendar, and Tasks are deeply integrated; GoClaw has none of this
-- **Human-in-the-loop (HITL) approvals** — gobot pauses and waits for your confirmation before irreversible actions; GoClaw has no equivalent
-- **Simplicity at the loop level** — gobot's agent loop is a straightforward Read → Think → Act cycle; GoClaw's V3 pipeline runs 8 stages with up to 20 iterations per request and four asynchronous background workers
-- **Single-user focus** — GoClaw's architecture is built around multi-tenant isolation (per-user workspaces, RBAC policy engine, cross-user session scoping). If you're running a personal assistant, you're carrying all that complexity for no benefit
-- **Memory without a vector database server** — GoClaw's 3-tier memory requires pgvector, a PostgreSQL extension. gobot uses chromem-go for in-process vector search backed by SQLite — no extra services
+- **Deep Google Workspace Integration** — Gmail, Calendar, and Tasks are deeply integrated as first-class tools with automated OAuth flows
+- **Human-in-the-loop (HITL) approvals** — gobot pauses and waits for your confirmation before executing irreversible actions
+- **Strong Secrets Security** — OS-level encryption using Windows DPAPI instead of plaintext config files
+- **Production-grade Observability** — built-in OpenTelemetry tracing, structured slog logging, and deep health diagnostics (`doctor` mode)
 
 #### The honest tradeoffs
 
-| | gobot | GoClaw |
+| | gobot | PicoClaw |
 |---|---|---|
-| Storage | SQLite (zero infra) | PostgreSQL + pgvector (requires running DB) |
-| CGO | None (pure Go) | Yes (pg drivers) |
-| Users | Single-user / personal | Multi-tenant SaaS |
+| RAM Footprint | ~72MB idle | <10MB idle |
+| Startup Time | <100ms | <1s |
+| Channels | Telegram | 16+ (Slack, Discord, Telegram, etc.) |
 | Google Workspace | Deep (Gmail, Calendar, Tasks) | Not supported |
 | HITL approvals | Yes | No |
-| LLM providers | 4 (Gemini, Claude, OpenAI, OpenRouter) | 20+ |
-| Agent teams | No | Yes |
-| Pipeline complexity | Simple loop | 8-stage, up to 20 iterations |
-| Memory backend | SQLite + chromem-go (in-process) | pgvector (external service) |
-| Memory workers | Synchronous consolidator | 4 async background workers |
-| OTel tracing | Yes | Yes |
+| Secrets Security | Yes (Windows DPAPI) | No (Plaintext config / Env) |
+| MCP Support | No | Yes |
+| Observability | Full (OTel + slog + doctor) | Basic |
 
-gobot's design principle is **stability for one user over scale for many**. Every architectural decision — SQLite over Postgres, three providers over twenty, a simple loop over an 8-stage pipeline — is a deliberate trade of raw capability for reliability and operational simplicity.
+gobot's design principle is **stability and security for one user over scale for many**. Every architectural decision — SQLite over external servers, structured observability, and Windows-native security — is a deliberate trade of raw channel count for reliability, data security, and operational simplicity.
 
 ---
 
