@@ -53,15 +53,8 @@ func newCLISessionManagerWithDeps(ctx context.Context, cfg *config.Config, mode 
 	store, _ := deps.getCheckpointManager(cfg.StorageRoot())
 	mgr := stack.NewSessionManager(cfg, store, nil)
 
-	switch mode {
-	case cliHooksModeInteractive:
+	if mode == cliHooksModeInteractive {
 		_, _ = deps.setupRuntimeHooks(cfg, stack.Runner, mgr, nil, store)
-	default:
-		// Keep simulate behavior stable: post-dispatch hooks only.
-		hooks := &agent.Hooks{}
-		hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
-		mgr.SetHooks(hooks)
-		stack.Runner.SetHooks(hooks)
 	}
 
 	return mgr, cleanup, nil

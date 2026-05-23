@@ -263,7 +263,6 @@ func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManag
 	hooks := &agent.Hooks{}
 	hitlStore, _ := store.(agent.HITLStore)
 	hitl := agent.NewHITLManager(api, hitlStore, cfg.HighRiskTools())
-	hooks.RegisterPostDispatch(agent.NewHandoffHook(cfg.StorageRoot()))
 
 	policyPath := agent.ResolvePolicyFilePath(cfg.PolicyFilePath(), cfg.StorageRoot())
 	policy, err := agent.NewFilePolicy(policyPath)

@@ -12,13 +12,7 @@ func TestSnapshot(t *testing.T) {
 
 	storageRoot, sessionDir, files := setupSnapshotTest(t)
 
-	ticket := HandoffTicket{
-		TargetSpecialist: "Reviewer",
-		TaskID:           "F-081",
-	}
-
-	// Test CreateSnapshot
-	if err := CreateSnapshot(storageRoot, ticket); err != nil {
+	if err := CreateSnapshot(storageRoot, "Reviewer", "F-081"); err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
@@ -32,7 +26,7 @@ func TestSnapshot(t *testing.T) {
 	verifySnapshotFiles(t, storageRoot, snap.Name, files)
 
 	// Test deduplication
-	if err := CreateSnapshot(storageRoot, ticket); err != nil {
+	if err := CreateSnapshot(storageRoot, "Reviewer", "F-081"); err != nil {
 		t.Fatalf("CreateSnapshot failed on second call: %v", err)
 	}
 	verifyDeduplication(t, storageRoot)

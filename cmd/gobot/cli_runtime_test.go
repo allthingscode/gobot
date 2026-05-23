@@ -46,8 +46,8 @@ func TestNewCLISessionManagerWithDepsSimulateMode(t *testing.T) {
 	if hooksCalled {
 		t.Fatal("simulate mode should not call setupRuntimeHooks")
 	}
-	if runner.Hooks == nil {
-		t.Fatal("simulate mode should install post-dispatch hooks")
+	if runner.Hooks != nil {
+		t.Fatal("simulate mode should not install any hooks")
 	}
 
 	cleanup()

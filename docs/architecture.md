@@ -178,7 +178,7 @@ This document provides a deep dive into gobot's architecture, covering data flow
 
 **Implementation:**
 - `agent.Hooks` struct contains `PreDispatch`, `PostDispatch`, `PreTool`, `PostTool` hooks
-- Hooks are registered at startup in `cmd/gobot/main.go` (e.g., `agent.NewHandoffHook`)
+- Hooks are registered at startup in `internal/app/app.go` `SetupHooks` (currently the policy + HITL hooks)
 - Custom logic (PII redaction, output hardening) run through hooks
 
 **Impact:** Custom logic (e.g., automated handoffs, PII redaction) is isolated from core agent logic.

@@ -38,14 +38,22 @@ func legacyRewindHistoryDir(storageRoot string) string {
 }
 
 // sessionSourceDir returns the directory snapshots are copied from and
-// restored into. Still the legacy in-tree-factory session dir; it will
-// move in the follow-up that retires NewHandoffHook.
+// restored into. Still the legacy in-tree-factory session dir; will move
+// when a Crucible-aware writer replaces the removed NewHandoffHook.
 func sessionSourceDir(storageRoot string) string {
 	return filepath.Join(storageRoot, ".private", "session")
 }
 
 // CreateSnapshot captures the current session state into a history directory.
-func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
+// specialist and taskID identify what this checkpoint was captured for; empty
+// values are accepted and recorded as "unknown" / "untasked".
+func CreateSnapshot(storageRoot, specialist, taskID string) error {
+	if specialist == "" {
+		specialist = unknownSpecialist
+	}
+	if taskID == "" {
+		taskID = untaskedID
+	}
 	sessionDir := sessionSourceDir(storageRoot)
 	historyDir := rewindHistoryDir(storageRoot)
 
@@ -53,7 +61,6 @@ func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
 		return fmt.Errorf("failed to create history dir: %w", err)
 	}
 
-	specialist, taskID := resolveHandoffMetadata(ticket)
 	if shouldSkipSnapshot(storageRoot, specialist, taskID) {
 		return nil
 	}
@@ -79,18 +86,6 @@ const (
 	unknownSpecialist = "unknown"
 	untaskedID        = "untasked"
 )
-
-func resolveHandoffMetadata(ticket HandoffTicket) (specialist, taskID string) {
-	specialist = ticket.TargetSpecialist
-	if specialist == "" {
-		specialist = unknownSpecialist
-	}
-	taskID = ticket.TaskID
-	if taskID == "" {
-		taskID = untaskedID
-	}
-	return
-}
 
 func shouldSkipSnapshot(storageRoot, specialist, taskID string) bool {
 	existing, _ := ListSnapshots(storageRoot)
