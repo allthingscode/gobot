@@ -29,7 +29,7 @@ func TestSnapshot(t *testing.T) {
 	verifySnapshotMetadata(t, snapshots)
 
 	snap := snapshots[0]
-	verifySnapshotFiles(t, sessionDir, snap.Name, files)
+	verifySnapshotFiles(t, storageRoot, snap.Name, files)
 
 	// Test deduplication
 	if err := CreateSnapshot(storageRoot, ticket); err != nil {
@@ -51,9 +51,9 @@ func verifySnapshotMetadata(t *testing.T, snapshots []SnapshotMetadata) {
 	}
 }
 
-func verifySnapshotFiles(t *testing.T, sessionDir, snapName string, files map[string]string) {
+func verifySnapshotFiles(t *testing.T, storageRoot, snapName string, files map[string]string) {
 	t.Helper()
-	snapshotDir := filepath.Join(sessionDir, "history", snapName)
+	snapshotDir := filepath.Join(rewindHistoryDir(storageRoot), snapName)
 	for name, expected := range files {
 		content, err := os.ReadFile(filepath.Join(snapshotDir, name))
 		if err != nil {
@@ -125,5 +125,62 @@ func verifyRestore(t *testing.T, storageRoot, sessionDir, snapName string) {
 
 	if _, err := os.Stat(filepath.Join(sessionDir, "garbage.txt")); !os.IsNotExist(err) {
 		t.Errorf("garbage.txt was not deleted during restore")
+	}
+}
+
+// TestLegacyRewindFallback verifies that snapshots stored at the old
+// {storageRoot}/.private/session/history path are still listed and restorable.
+func TestLegacyRewindFallback(t *testing.T) {
+	t.Parallel()
+
+	tempDir := seedLegacySnapshot(t, "20260101_120000_Reviewer_F-001", "F-001", "legacy task")
+
+	snapshots, err := ListSnapshots(tempDir)
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].TaskID != "F-001" {
+		t.Fatalf("expected legacy snapshot to surface, got %+v", snapshots)
+	}
+
+	verifyLegacyRestore(t, tempDir, snapshots[0].Name, "legacy task")
+}
+
+func seedLegacySnapshot(t *testing.T, snapName, taskID, taskContent string) string {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "gobot-legacy-rewind-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	legacyDir := filepath.Join(tempDir, ".private", "session", "history", snapName)
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("create legacy snapshot dir: %v", err)
+	}
+	meta := `{"timestamp":"2026-01-01T12:00:00Z","specialist":"Reviewer","task_id":"` + taskID + `","git_sha":"abc1234","name":"` + snapName + `"}`
+	if err := os.WriteFile(filepath.Join(legacyDir, "snapshot_metadata.json"), []byte(meta), 0o600); err != nil {
+		t.Fatalf("write legacy metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "task.md"), []byte(taskContent), 0o600); err != nil {
+		t.Fatalf("write legacy task.md: %v", err)
+	}
+	return tempDir
+}
+
+func verifyLegacyRestore(t *testing.T, tempDir, snapName, expectedContent string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".private", "session"), 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+	if err := RestoreSnapshot(tempDir, snapName); err != nil {
+		t.Fatalf("RestoreSnapshot failed for legacy snapshot: %v", err)
+	}
+	restored, err := os.ReadFile(filepath.Join(tempDir, ".private", "session", "task.md"))
+	if err != nil {
+		t.Fatalf("read restored task.md: %v", err)
+	}
+	if string(restored) != expectedContent {
+		t.Errorf("restored content mismatch: got %q, want %q", string(restored), expectedContent)
 	}
 }

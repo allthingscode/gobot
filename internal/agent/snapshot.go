@@ -23,10 +23,31 @@ type SnapshotMetadata struct {
 	Name       string `json:"name"` // directory name
 }
 
+// rewindHistoryDir returns the canonical location for session snapshots:
+// {storageRoot}/state/rewind/. This replaced the legacy in-tree-factory
+// path {storageRoot}/.private/session/history/.
+func rewindHistoryDir(storageRoot string) string {
+	return filepath.Join(storageRoot, "state", "rewind")
+}
+
+// legacyRewindHistoryDir returns the pre-Crucible snapshot location, kept
+// as a read-only fallback so existing snapshots remain restorable for one
+// release. Remove when all known installs have migrated.
+func legacyRewindHistoryDir(storageRoot string) string {
+	return filepath.Join(storageRoot, ".private", "session", "history")
+}
+
+// sessionSourceDir returns the directory snapshots are copied from and
+// restored into. Still the legacy in-tree-factory session dir; it will
+// move in the follow-up that retires NewHandoffHook.
+func sessionSourceDir(storageRoot string) string {
+	return filepath.Join(storageRoot, ".private", "session")
+}
+
 // CreateSnapshot captures the current session state into a history directory.
 func CreateSnapshot(storageRoot string, ticket HandoffTicket) error {
-	sessionDir := filepath.Join(storageRoot, ".private", "session")
-	historyDir := filepath.Join(sessionDir, "history")
+	sessionDir := sessionSourceDir(storageRoot)
+	historyDir := rewindHistoryDir(storageRoot)
 
 	if err := os.MkdirAll(historyDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create history dir: %w", err)
@@ -117,8 +138,36 @@ func writeSnapshotMetadata(snapshotDir, name, specialist, taskID string) error {
 }
 
 // ListSnapshots returns all available snapshots sorted by timestamp (newest first).
+// Reads the canonical location ({storageRoot}/state/rewind/) and the legacy
+// pre-Crucible location ({storageRoot}/.private/session/history/); if the
+// legacy dir contains anything, emits a one-time warning so users migrate.
 func ListSnapshots(storageRoot string) ([]SnapshotMetadata, error) {
-	historyDir := filepath.Join(storageRoot, ".private", "session", "history")
+	snapshots, err := readSnapshotDir(rewindHistoryDir(storageRoot))
+	if err != nil {
+		return nil, err
+	}
+
+	legacy, err := readSnapshotDir(legacyRewindHistoryDir(storageRoot))
+	if err != nil {
+		return nil, err
+	}
+	if len(legacy) > 0 {
+		slog.Warn("rewind: found snapshots at legacy path, please migrate",
+			"legacy_path", legacyRewindHistoryDir(storageRoot),
+			"new_path", rewindHistoryDir(storageRoot),
+			"count", len(legacy))
+		snapshots = append(snapshots, legacy...)
+	}
+
+	// Sort newest first
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].Name > snapshots[j].Name
+	})
+
+	return snapshots, nil
+}
+
+func readSnapshotDir(historyDir string) ([]SnapshotMetadata, error) {
 	entries, err := os.ReadDir(historyDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -144,12 +193,6 @@ func ListSnapshots(storageRoot string) ([]SnapshotMetadata, error) {
 		meta.Name = entry.Name()
 		snapshots = append(snapshots, meta)
 	}
-
-	// Sort newest first
-	sort.Slice(snapshots, func(i, j int) bool {
-		return snapshots[i].Name > snapshots[j].Name
-	})
-
 	return snapshots, nil
 }
 
@@ -189,13 +232,17 @@ func copySnapshotContents(snapshotDir, sessionDir string) error {
 }
 
 // RestoreSnapshot overwrites the current session state with the contents of a named snapshot.
+// Looks for the snapshot at the canonical {storageRoot}/state/rewind/ first,
+// then falls back to the legacy {storageRoot}/.private/session/history/ path.
 func RestoreSnapshot(storageRoot, snapshotName string) error {
-	sessionDir := filepath.Join(storageRoot, ".private", "session")
-	historyDir := filepath.Join(sessionDir, "history")
-	snapshotDir := filepath.Join(historyDir, snapshotName)
-
+	sessionDir := sessionSourceDir(storageRoot)
+	snapshotDir := filepath.Join(rewindHistoryDir(storageRoot), snapshotName)
 	if _, err := os.Stat(snapshotDir); err != nil {
-		return fmt.Errorf("snapshot not found: %s", snapshotName)
+		legacyDir := filepath.Join(legacyRewindHistoryDir(storageRoot), snapshotName)
+		if _, legacyErr := os.Stat(legacyDir); legacyErr != nil {
+			return fmt.Errorf("snapshot not found: %s", snapshotName)
+		}
+		snapshotDir = legacyDir
 	}
 
 	if err := deleteSessionFilesForRestore(sessionDir); err != nil {
