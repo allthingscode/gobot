@@ -21,7 +21,7 @@ rm -f "$FAILED_MARKER"
 PATTERNS='("cmd"|cmd\.exe|cmd /c|cmd /C|powershell|powershell\.exe|\.bat"|\.cmd"|\.exe"|"bash"|"zsh"|"/bin/|"/usr/bin/)'
 
 # Find all test files, excluding vendor/ and isolated worktrees
-files=$(find . -name "*_test.go" -not -path "./vendor/*" -not -path "./.agent-workspaces/*")
+files=$(find . -name "*_test.go" -not -path "./vendor/*" -not -path "./.agent-workspaces/*" -not -path "./.crucible/.agent-workspaces/*")
 
 for file in $files; do
     # 1. Skip files that are explicitly tagged for a specific OS only

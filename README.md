@@ -4,7 +4,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/allthingscode/gobot)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⚡ Built 100% by AI Agents** — gobot was designed, coded, and tested entirely by autonomous AI systems through the Dev Factory recursive improvement system. No human wrote a line of production code.
+**⚡ Built 100% by AI Agents** — gobot was designed, coded, and tested entirely by autonomous AI systems through the Crucible multi-specialist development framework. No human wrote a line of production code.
 
 **👨‍💻 Architect: Matthew Hayes** — See [AUTHORS.md](AUTHORS.md) for professional background and expertise in agentic systems.
 

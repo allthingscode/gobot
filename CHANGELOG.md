@@ -85,7 +85,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Human-in-the-Loop Framework** (F-048): Configuration toggle for human-in-the-loop approvals
 - **HTTP Gateway and Control Flags** (F-046): Gateway enabled/disabled configuration flags
 - **Core Agent Loop**: Full feature parity with the original Python reference implementation
-  - Recursive improvement system with five specialist roles (Researcher, Groomer, Architect, Reviewer, Operator)
+  - Built through a recursive development framework with five specialist roles (Researcher, Groomer, Architect, Reviewer, Operator)
   - Modular cron system with markdown-based job definitions
   - Session checkpointing and recovery
   - Durable state management via SQLite

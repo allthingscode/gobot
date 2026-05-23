@@ -19,7 +19,7 @@ I don't build chat interfaces; I build the hybrid pipelines that turn raw AI cap
 
 ---
 
-## Featured Work: Dev Factory
+## Featured Work: Crucible
 
 A private, production-grade ecosystem where 5 specialized AI agents autonomously develop, test, and ship software:
 
