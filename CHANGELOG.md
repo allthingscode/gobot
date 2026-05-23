@@ -125,7 +125,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## Contributing
 
-This project uses a specialist-based recursive improvement system. See `.private/OPERATING_MANUAL.md` for detailed contribution guidelines and the development workflow.
+This project uses the Crucible multi-specialist agentic framework for planning, implementation, and review. See `.crucible/config.yaml` for the integration and `{{crucible_root}}/docs/operating-manual.md` for the full workflow.
 
 ---
 

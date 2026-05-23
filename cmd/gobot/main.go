@@ -39,7 +39,6 @@ func main() {
 		cmdRun(),
 		cmdSimulate(),
 		cmdChat(),
-		cmdRewind(),
 		cmdMemory(),
 		cmdFactory(),
 		cmdLogs(),

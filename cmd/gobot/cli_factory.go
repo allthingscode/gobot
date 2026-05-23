@@ -25,7 +25,6 @@ func cmdFactory() *cobra.Command {
 
 	cmd.AddCommand(
 		cmdFactoryState(),
-		cmdFactoryTimeline(),
 	)
 
 	return cmd

@@ -98,16 +98,6 @@ func TestCmdCheckpoints_List_Coverage(t *testing.T) {
 }
 
 //nolint:paralleltest // uses global state
-func TestCmdRewind_List_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-
-	cmd := cmdRewind()
-	cmd.SetArgs([]string{"list"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
 func TestCmdFactory_Functional(t *testing.T) {
 	tempDir := setupTestHome(t)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
