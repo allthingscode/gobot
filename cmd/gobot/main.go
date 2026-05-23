@@ -40,7 +40,6 @@ func main() {
 		cmdSimulate(),
 		cmdChat(),
 		cmdMemory(),
-		cmdFactory(),
 		cmdLogs(),
 		cmdConfig(),
 		cmdCheckpoints(),
