@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/memory"
 )
 
@@ -140,6 +142,15 @@ func TestRunAgentLoop(t *testing.T) {
 	stack := &AgentStack{Runner: &AgentRunner{}}
 
 	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil, nil)
+}
+
+func TestInitIdempotencyHandlesTypedNilCheckpointManager(t *testing.T) {
+	t.Parallel()
+
+	var checkpoints *agentctx.CheckpointManager
+	var store agent.CheckpointStore = checkpoints
+
+	InitIdempotency(context.Background(), &config.Config{}, &AgentRunner{}, store, &sync.WaitGroup{})
 }
 
 func TestRunPreFlightDiagnostics(t *testing.T) {

@@ -91,7 +91,13 @@ func shutdownOTel(p *observability.Provider) {
 
 func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager) error {
 	var wg sync.WaitGroup
-	store, _ := agentctx.GetCheckpointManager(cfg.StorageRoot())
+	checkpoints, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
+	var store agent.CheckpointStore
+	if err != nil {
+		slog.Warn("run: checkpoint store unavailable", "err", err)
+	} else if checkpoints != nil {
+		store = checkpoints
+	}
 	InitIdempotency(ctx, cfg, stack.Runner, store, &wg)
 
 	mgr := stack.NewSessionManager(cfg, store, tracer)
@@ -242,7 +248,7 @@ func InitIdempotency(ctx context.Context, cfg *config.Config, runner *AgentRunne
 	}
 	// We need to access the underlying DB from the CheckpointStore.
 	mgr, ok := store.(*agentctx.CheckpointManager)
-	if !ok {
+	if !ok || mgr == nil {
 		slog.Warn("run: idempotency store unavailable, store is not CheckpointManager")
 		return
 	}
