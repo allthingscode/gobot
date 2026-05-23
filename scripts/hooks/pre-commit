@@ -97,9 +97,18 @@ else
     echo "WARN: golangci-lint not found locally; CI will enforce lint"
 fi
 
-# Dev factory quality gate — mandatory when factory is present and backlog is modified
-if [ -f ".private/scripts/factory_lint.go" ] && git diff --cached --name-only | grep -qE '^\.private/(backlog/|prompt-library/|sops/|scripts/|session/handoff\.schema\.json)'; then
-    if ! go run .private/scripts/factory_lint.go > "$TEMP_LOG" 2>&1; then
+# Crucible quality gate - mandatory when local Crucible policy files are modified
+if [ -f ".crucible/config.yaml" ] && git diff --cached --name-only | grep -qE '^\.crucible/(backlog/|prompts/|personas/|sops/|config\.yaml)'; then
+    CRUCIBLE_ROOT=$(sed -n 's/^[[:space:]]*crucible_root:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' .crucible/config.yaml | head -n 1 | sed 's#\\\\#/#g')
+    if [ -z "$CRUCIBLE_ROOT" ]; then
+        echo "ERROR: .crucible/config.yaml is missing crucible_root"
+        exit 1
+    fi
+    if [ ! -f "$CRUCIBLE_ROOT/powershell/tests/factory_lint.go" ]; then
+        echo "ERROR: Crucible factory lint not found at $CRUCIBLE_ROOT/powershell/tests/factory_lint.go"
+        exit 1
+    fi
+    if ! go run "$CRUCIBLE_ROOT/powershell/tests/factory_lint.go" "$CRUCIBLE_ROOT" > "$TEMP_LOG" 2>&1; then
         echo "ERROR: factory lint failed"
         cat "$TEMP_LOG"
         exit 1

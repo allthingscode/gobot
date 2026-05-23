@@ -27,11 +27,10 @@ const browserToolRoutingGuidance = "## WEB EXTRACTION TOOL ROUTING\n" +
 var userHomeDir = os.UserHomeDir
 
 // LoadSystemPrompt builds the combined system prompt from:
-//  1. .private/SOUL.md     — behavior rules (how to respond)
-//  2. .private/IDENTITY.md — who Matthew is (personal context)
-//  3. AWARENESS.md         — how this system works (paths, cron, journal)
-//  4. Journal continuity   — recent activity (auto-injected)
-//  5. Live schedule        — today's calendar + tasks (best-effort)
+//  1. SOUL.md and IDENTITY.md from the user config directory or workspace.
+//  2. AWARENESS.md from the workspace.
+//  3. Journal continuity from recent activity.
+//  4. Live schedule from today's calendar + tasks (best-effort).
 func LoadSystemPrompt(cfg *config.Config) string {
 	var parts []string
 

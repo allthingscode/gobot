@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// HandoffTicket mirrors the schema in .private/HANDOFF_PROTOCOL.md.
+// HandoffTicket mirrors the Crucible handoff schema documented in docs/handoff-protocol.md.
 type HandoffTicket struct {
 	TaskID            string `json:"task_id"`
 	SourceSpecialist  string `json:"source_specialist"`

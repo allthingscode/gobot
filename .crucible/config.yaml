@@ -15,7 +15,7 @@ paths:
   backlog: .crucible/backlog
   session: .crucible/session
   workspaces: .crucible/.agent-workspaces
-  prompts: .crucible/prompt-library
+  prompts: .crucible/prompts
   personas: .crucible/personas
   sops: .crucible/sops
 

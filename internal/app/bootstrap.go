@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -50,13 +49,7 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.Tem
 	memStore, cleanup := InitMemory(cfg, runner)
 	vecStore, embedProv, vecCleanup := InitVectorStore(cfg, prov, runner)
 
-	// C-184: Initialize task-scoped tool registry for idempotency.
-	// In Dev Factory, session dir is .private/session/{task_id}.
-	// In standard gobot, it is storage_root/sessions/{task_id}.
 	sessionRoot := filepath.Join(cfg.StorageRoot(), "sessions")
-	if _, err := os.Stat(".private/session"); err == nil {
-		sessionRoot = ".private/session"
-	}
 	registry := NewToolRegistry(sessionRoot)
 
 	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry, tmgr, tracer))
