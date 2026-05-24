@@ -1,19 +1,58 @@
-# Project Crucible Directory
+# Crucible Install
 
-This directory contains project-local Crucible configuration, behavior overrides, and runtime state.
+This directory is this application's installed Crucible dev factory. It must be self-contained.
 
-Commit configuration and behavior:
+Nothing in this application should reference external paths outside the repository. Crucible files, settings, docs, prompts, personas, SOPs, schemas, and scripts must be self-contained within this directory.
 
-- `config.yaml` — how the project uses Crucible
-- `.gitignore` — the policy file itself
-- `personas/`, `sops/`, `prompts/` — project-specific behavior overrides, only when defaults aren't sufficient
+## Runtime Root
 
-Do not commit data or runtime state. The nested `.gitignore` excludes by default:
+[`config.yaml`](config.yaml) should resolve Crucible to this installed directory:
 
-- `backlog/` — tickets are data, not code (see `docs/git-policy.md`)
-- `session/` — agent scratchpads, handoffs, event logs
-- `.agent-workspaces/` — git worktrees
-- `locks/`, `tmp/`, `cache/` — ephemeral runtime files
-- `research/`, `dev-logs/` — generated artifacts
+```yaml
+crucible_root: ".crucible"
+```
 
-The "configuration in, data out" principle means git history stays focused on real code/behavior changes, not on every ticket status update.
+Agents and scripts then read:
+
+- `{{crucible_root}}/docs/operating-manual.md`
+- `{{crucible_root}}/docs/policy.md`
+- `{{crucible_root}}/docs/orchestrators/`
+- `{{crucible_root}}/prompts/`
+- `{{crucible_root}}/personas/`
+- `{{crucible_root}}/sops/`
+- `{{crucible_root}}/schemas/`
+- `{{crucible_root}}/powershell/`
+
+## What Belongs Here
+
+Commit durable Crucible behavior and configuration:
+
+- `config.yaml`
+- `.gitignore`
+- `README.md`
+- `docs/`
+- `personas/`
+- `sops/`
+- `prompts/`
+- `schemas/`
+- `powershell/`
+- `agent-instructions/`, if present
+
+Project-specific edits to personas, SOPs, or prompts are made in these installed files. They are self-contained within this directory.
+
+## What Stays Runtime-Only
+
+The nested `.gitignore` excludes runtime state and generated artifacts by default:
+
+- `backlog/` - task data, unless Gobot deliberately chooses to publish it
+- `session/` - scratchpads, handoffs, event logs
+- `.agent-workspaces/` - git worktrees
+- `locks/`, `tmp/`, `cache/`
+- `research/`, `dev-logs/`
+- generated logs, JSONL files, handoffs, and eval output
+
+## Crucible Framework Files
+
+Crucible is designed to run in a self-contained manner directly from this directory. No external installations or checkouts are required at runtime.
+
+If a needed manual, prompt, persona, SOP, schema, or script is missing from this directory, please check your installation package.

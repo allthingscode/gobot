@@ -1,10 +1,9 @@
 # Example project-level Crucible configuration for Gobot.
 # This file is what a project would place at .crucible/config.yaml.
 
-# Absolute path to the Crucible framework repo on the developer's machine.
-# The orchestrator invokes <crucible_root>/powershell/factory.ps1 to run the pipeline.
-# This path is machine-specific; each developer adjusts it locally if needed.
-crucible_root: "C:\\Users\\HayesChiefOfStaff\\Documents\\crucible"
+# Crucible bundle root directory for this project.
+# This must point to the folder containing the installed Crucible framework bundle.
+crucible_root: ".crucible"
 
 project:
   name: Gobot
