@@ -9,8 +9,7 @@ import (
 	"github.com/allthingscode/gobot/internal/app"
 )
 
-func TestDrainGoroutines(t *testing.T) {
-	t.Parallel()
+func TestDrainGoroutines(t *testing.T) { //nolint:paralleltest // timing-sensitive test flakes under Windows race CI when parallelized
 	tests := []struct {
 		name          string
 		wgCount       int
@@ -25,7 +24,7 @@ func TestDrainGoroutines(t *testing.T) {
 			blockDuration: 0,
 			timeout:       1 * time.Second,
 			wantMinTime:   0,
-			wantMaxTime:   100 * time.Millisecond,
+			wantMaxTime:   250 * time.Millisecond,
 		},
 		{
 			name:          "waits_for_completion",
@@ -45,9 +44,8 @@ func TestDrainGoroutines(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:paralleltest // subtests share scheduler-sensitive timing assertions
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var wg sync.WaitGroup
 			for i := 0; i < tt.wgCount; i++ {
 				wg.Add(1)

@@ -4,7 +4,7 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $AppPath    = $PSScriptRoot
-$GobotExe   = Join-Path $AppPath "gobot.exe"
+$GobotExe   = Join-Path $AppPath "bin\gobot.exe"
 
 # Resolve StorageRoot using the executable to ensure consistency with config.json
 if (Test-Path $GobotExe) {
@@ -22,7 +22,7 @@ $PreflightLog = Join-Path $LogDir "gobot-startup.log"
 
 if (-not (Test-Path $GobotExe)) {
     Write-Host "Error: gobot.exe not found at $GobotExe" -ForegroundColor Red
-    Write-Host "Build first: go build -mod=vendor ./cmd/gobot/" -ForegroundColor Yellow
+    Write-Host "Build first: .\scripts\build.ps1" -ForegroundColor Yellow
     exit 1
 }
 

@@ -99,7 +99,7 @@ gobot's design principle is **stability and security for one user over scale for
 ## Get Started
 
 **What you need before you begin:**
-- Go 1.26.2 or later
+- Go 1.26.3 or later
 - A Telegram bot token — create one by messaging [@BotFather](https://t.me/botfather) and following the prompts
 - Your numeric Telegram chat ID — message [@userinfobot](https://t.me/userinfobot) and it will reply with your ID (it looks like `123456789`)
 - At least one LLM API key (Gemini, Anthropic, OpenAI, or OpenRouter)
