@@ -1,4 +1,4 @@
-﻿# Example project-level Crucible configuration for Gobot.
+# Example project-level Crucible configuration for Gobot.
 # This file is what a project would place at .crucible/config.yaml.
 
 # Absolute path to the Crucible framework repo on the developer's machine.
