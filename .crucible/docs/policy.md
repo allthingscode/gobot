@@ -1,0 +1,121 @@
+# Dev Factory Policy (Canonical)
+
+> **Source of Truth**: This file is the authoritative definition of Dev Factory operational policies. Documentation and prompt templates must be synchronized with this file.
+
+## 1. Specialist Sequence (The DAG)
+
+The factory operates as a strict Directed Acyclic Graph (DAG). Self-loops and out-of-order transitions are prohibited.
+
+- **Groomer** → `Architect` | `Researcher`
+- **Researcher** → `Groomer`
+- **Architect** → `Reviewer`
+- **Reviewer** → `Operator` (Approved) | `Architect` (Changes Requested)
+- **Operator** → `Done` | `Groomer` (if production issue threshold met)
+
+## 2. Circuit Breakers
+
+Circuit breakers prevent "infinite loops" and budget escalation by blocking tasks for human intervention.
+
+| Breaker Type | Threshold / Trigger | Action |
+|--------------|---------------------|--------|
+| **Review Strike Rule** | 3 failed review cycles | BLOCK task; route to Human |
+| **Handoff Retry Limit** | > 2 consecutive retries to same role | BLOCK task; route to Human |
+| **Token Budget (Low)** | 6 handoffs | BLOCK task; route to Human |
+| **Token Budget (Medium)** | 10 handoffs | BLOCK task; route to Human |
+| **Token Budget (High)** | 24 handoffs | BLOCK task; route to Human |
+| **Merge Conflict** | > 3 rebase attempts | BLOCK task; route to Human |
+| **Fabricated Artifacts** | Missing paths in `artifacts` field | BLOCK task; route to Human |
+| **Verification Failure** | `go test` fails after Reviewer approval | BLOCK task; route to Architect |
+
+### 2.1 Budget Overage Protocol
+
+When a circuit breaker for **Token Budget** is triggered:
+1. **Mandatory Stop**: The agent MUST NOT proceed, modify the budget tier in the spec, or attempt to bypass the block.
+2. **Justification**: The agent MUST provide a concise justification for why the initial budget was insufficient and what remains to be done.
+3. **Approval**: A budget increase MUST be explicitly approved by a human. Agents are prohibited from "auto-increasing" or silently adjusting tiers to keep the pipeline moving.
+
+## 3. Human Gates
+
+Transitions across the "Trust Boundary" require a formal human decision.
+
+- **Research Gate**: Researcher findings MUST be presented to and approved by a human before a Groomer spec is written.
+- **Human Gate (Operator)**: Every completed task must be accepted by a human.
+    - **Outcomes**: `accepted` (approve and pause), `rejected` (rework), `redirected` (approve and jump to a specific task), `abandoned` (do not accept; stop).
+    - **Mandate**: Every decision requires a specific, non-placeholder reason.
+
+## 4. Reviewer Verification Checklist (MANDATORY)
+
+A Reviewer MUST verify these 6 steps in order. A failure at any step blocks approval.
+
+1. **Tests pass** — run the project's `verification.full` test command from `.crucible/config.yaml` (e.g. `go test`, `npm test`, `pytest`)
+2. **Vet / static analysis passes** — run the project's vet/lint commands from `.crucible/config.yaml` (e.g. `go vet`, `npm run lint`, `cargo clippy`)
+3. **Lint passes** — run the project's linter command from `.crucible/config.yaml` (e.g. `golangci-lint`, `ruff`, `eslint`)
+4. **Doc-lint passes** — run the project's doc-lint command if defined in `.crucible/config.yaml`
+5. **Acceptance Criteria met** (mapped 1:1 to spec)
+6. **Scope bounded** (strictly within `file_affinity`)
+
+> The specific commands in steps 1–4 come from the project's `.crucible/config.yaml`, not from Crucible itself. Crucible is language-agnostic; the examples in this repo use Go (`go test`, `go vet`, `golangci-lint`) because the reference application is written in Go.
+
+## 5. Pipeline State Machine
+
+The factory tracks each task through a fixed set of states. Only `factory.ps1` transitions states — specialists never update state directly.
+
+```
+                    ┌─────────────────────────────────────────┐
+                    │                                         │
+         [New item] │                             [Rework]    │
+              ↓     │                                ↑        │
+           READY ───┤                         READY_FOR_REVIEW│
+              │     │                                │        │
+         [Groomer]  │                          [Architect]    │
+              ↓     │                                │        │
+        IN_PROGRESS │                    ┌───────────┘        │
+              │     │                    │  [Reviewer: APPROVED]
+         [Research] │                    ↓                    │
+              ↓     │           READY_FOR_DEPLOY              │
+        RESEARCH_GATE (Human)            │                    │
+              │                     [Operator]                │
+              ↓                          │                    │
+           READY ◄───────────────────────┤                    │
+                                         │ [Human Gate]       │
+                                         ↓                    │
+                                    PRODUCTION                │
+                                    (or RESOLVED)             │
+                                                              │
+        Any state ─────── [Circuit Breaker] ──────► BLOCKED ─┘
+                                                  (human resolves)
+```
+
+**State definitions**:
+
+| State | Meaning | Who sets it |
+|-------|---------|-------------|
+| `Ready` | Eligible for next pipeline step | Groomer, Operator (on cycle), or human |
+| `In Progress` | Actively being worked | factory.ps1 on session start |
+| `Research Gate` | Awaiting human approval of Researcher findings | factory.ps1 |
+| `Ready for Review` | Architect complete; awaiting Reviewer | factory.ps1 |
+| `Ready for Deploy` | Reviewer approved; awaiting Operator | factory.ps1 |
+| `Production` | Merged to main branch | Operator |
+| `Resolved` | Chore/bug closed without a deploy | Operator |
+| `Blocked` | Circuit breaker fired; awaiting human decision | factory.ps1 |
+
+**Valid transitions** (all others are hard-blocked by factory.ps1):
+
+```
+Ready            → In Progress        (factory on Groomer/Architect session start)
+In Progress      → Research Gate      (Researcher session complete)
+In Progress      → Ready for Review   (Architect session complete)
+Research Gate    → In Progress        (human approves Research Gate)
+Ready for Review → Ready for Deploy   (Reviewer APPROVED)
+Ready for Deploy → Production         (Operator merge complete)
+Ready for Deploy → In Progress        (Reviewer sent back to Architect — strike counted)
+Any              → Blocked            (circuit breaker)
+Blocked          → Ready              (human resolution + factory -Recover)
+```
+
+## 6. Security & Isolation
+
+- **Architect Worktrees**: Every task MUST run in an isolated `git worktree` at `.crucible/.agent-workspaces/architect-{id}`.
+- **Prompt Injection Defense**: Handoffs are scanned for patterns (e.g., "ignore previous instructions"). Researcher handoffs trigger an automatic block if patterns are found.
+- **File Affinity**: Groomers define the scope boundary. Specialists must not edit files outside this boundary.
+- **No Push/Commit Shortcuts**: Only the Operator may merge to `master` and push to origin.

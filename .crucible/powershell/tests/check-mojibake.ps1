@@ -1,0 +1,53 @@
+param(
+    [Parameter(Mandatory = $false)]
+    [string[]]$Paths = @(
+        "prompts",
+        ".crucible/personas",
+        ".crucible/sops"
+    )
+)
+
+$ErrorActionPreference = "Stop"
+
+$markers = @(
+    ([string]([char]0x00C3)),                                              # mojibake capital A-tilde
+    ([string]([char]0x00C2)),                                              # mojibake capital A-circumflex
+    ([string]::Concat([char]0x00E2, [char]0x2020, [char]0x2019)),          # mojibake capital A-circumflex?'
+    ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x201D)),          # mojibake capital A-circumflex?"
+    ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x201C)),          # mojibake capital A-circumflex?"
+    ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x0153)),          # mojibake capital A-circumflex??
+    ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x2122))           # mojibake capital A-circumflex??
+)
+
+$targetFiles = @()
+foreach ($path in $Paths) {
+    if (-not (Test-Path -LiteralPath $path)) { continue }
+    $targetFiles += Get-ChildItem -Path $path -Recurse -File |
+        Where-Object { $_.Extension -in @(".md", ".ps1") }
+}
+
+$hits = @()
+foreach ($file in $targetFiles) {
+    foreach ($marker in $markers) {
+        $matches = Select-String -Path $file.FullName -SimpleMatch -Pattern $marker -Encoding UTF8
+        foreach ($m in $matches) {
+            $hits += [pscustomobject]@{
+                Path    = $m.Path
+                Line    = $m.LineNumber
+                Marker  = $marker
+                Snippet = $m.Line.Trim()
+            }
+        }
+    }
+}
+
+if ($hits.Count -gt 0) {
+    Write-Host "[FAIL] Mojibake markers detected:" -ForegroundColor Red
+    $hits | Sort-Object Path, Line, Marker | ForEach-Object {
+        Write-Host ("{0}:{1} [{2}] {3}" -f $_.Path, $_.Line, $_.Marker, $_.Snippet)
+    }
+    exit 1
+}
+
+Write-Host "[PASS] No mojibake markers detected in scoped files." -ForegroundColor Green
+exit 0

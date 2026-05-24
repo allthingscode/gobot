@@ -1,0 +1,179 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "crucible/config.schema.json",
+  "title": "Crucible Project Configuration",
+  "description": "Schema for .crucible/config.yaml — the project-local configuration file that tells Crucible how to run against a specific project.",
+  "type": "object",
+  "required": ["crucible_root", "project", "paths", "roles", "verification", "project_mandates"],
+  "additionalProperties": false,
+  "properties": {
+    "crucible_root": {
+      "type": "string",
+      "description": "Path to this project's installed Crucible bundle. Must point inside the application repo, typically .crucible. The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory.",
+      "minLength": 1,
+      "pattern": "^\\.crucible($|[\\\\/])"
+    },
+    "project": {
+      "type": "object",
+      "description": "Identity and basic metadata for the target project.",
+      "required": ["name", "description", "default_branch"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Short display name for the project.",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "description": "One-sentence description of what the project does.",
+          "minLength": 1
+        },
+        "default_branch": {
+          "type": "string",
+          "description": "The branch Operator merges to. Usually 'main' or 'master'.",
+          "minLength": 1
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "description": "Filesystem paths for Crucible runtime directories, all relative to the project root and rooted under .crucible/.",
+      "required": ["backlog", "session", "workspaces", "prompts", "personas", "sops"],
+      "additionalProperties": false,
+      "properties": {
+        "backlog": {
+          "type": "string",
+          "description": "Backlog directory (BACKLOG.md, features/, bugs/, chores/, blocked/).",
+          "pattern": "^\\.crucible/",
+          "default": ".crucible/backlog"
+        },
+        "session": {
+          "type": "string",
+          "description": "Session directory (handoffs/, scratchpads, event logs, global state).",
+          "pattern": "^\\.crucible/",
+          "default": ".crucible/session"
+        },
+        "workspaces": {
+          "type": "string",
+          "description": "Root for Architect git worktrees (one per in-flight task).",
+          "pattern": "^\\.crucible/",
+          "default": ".crucible/.agent-workspaces"
+        },
+        "prompts": {
+          "type": "string",
+          "description": "Installed prompt template directory for this project.",
+          "pattern": "^\\.crucible/",
+          "default": ".crucible/prompts"
+        },
+        "personas": {
+          "type": "string",
+          "description": "Installed persona definitions directory for this project.",
+          "pattern": "^\\.crucible/",
+          "default": ".crucible/personas"
+        },
+        "sops": {
+          "type": "string",
+          "description": "Installed standard operating procedures directory for this project.",
+          "pattern": "^\\.crucible/",
+          "default": ".crucible/sops"
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "description": "Model tier assignment per specialist role. Controls which AI model class is used for each specialist.",
+      "required": ["researcher", "groomer", "architect", "reviewer", "operator"],
+      "additionalProperties": false,
+      "properties": {
+        "researcher": {
+          "$ref": "#/definitions/role_config"
+        },
+        "groomer": {
+          "$ref": "#/definitions/role_config"
+        },
+        "architect": {
+          "$ref": "#/definitions/role_config"
+        },
+        "reviewer": {
+          "$ref": "#/definitions/role_config"
+        },
+        "operator": {
+          "$ref": "#/definitions/role_config"
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Shell commands the Reviewer runs to verify Architect work. Must be tailored to the project's language and toolchain.",
+      "required": ["quick", "full"],
+      "additionalProperties": false,
+      "properties": {
+        "quick": {
+          "type": "array",
+          "description": "Fast check — run after every Architect commit. Typically just the test suite.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/verification_step"
+          }
+        },
+        "full": {
+          "type": "array",
+          "description": "Complete check — run by the Reviewer before approval. Mirrors CI exactly: vet, lint, tests, doc-lint.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/verification_step"
+          }
+        }
+      }
+    },
+    "project_mandates": {
+      "type": "array",
+      "description": "Project-specific engineering rules that every specialist must respect. The Reviewer checks these during scope validation. Examples: 'No CGO', 'All public functions must have JSDoc'.",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "file_affinity_examples": {
+      "type": "array",
+      "description": "Optional. Illustrative examples of package paths or globs used in file_affinity declarations. Not enforced — just documentation for the Groomer.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "definitions": {
+    "role_config": {
+      "type": "object",
+      "required": ["model_tier"],
+      "additionalProperties": false,
+      "properties": {
+        "model_tier": {
+          "type": "string",
+          "description": "Model capability class for this role.",
+          "enum": ["fast", "high-capability"]
+        }
+      }
+    },
+    "verification_step": {
+      "type": "object",
+      "required": ["name", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name shown in factory output and Reviewer reports.",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute. Must not contain scaffold placeholder values.",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

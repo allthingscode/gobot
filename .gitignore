@@ -79,3 +79,8 @@ oc_main.json
 
 # Temporary files
 .tmp/
+
+# Crucible installed docs whose filenames collide with root personal-note
+# ignores on case-insensitive filesystems.
+!.crucible/docs/orchestrators/claude.md
+!.crucible/docs/orchestrators/gemini.md
