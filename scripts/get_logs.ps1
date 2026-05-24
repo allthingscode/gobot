@@ -12,7 +12,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 if (Test-Path $logDir) {
     # Find the most recent log file
-    $latestLog = Get-ChildItem -Path $logDir -Filter "gobot_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $latestLog = Get-ChildItem -Path $logDir -Filter "gobot-*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     
     if ($latestLog) {
         $logFile = $latestLog.FullName
