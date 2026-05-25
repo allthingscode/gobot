@@ -1,6 +1,7 @@
 # Gobot Strategic Edition — Windows Task Scheduler Registration
 # Run once as Administrator: .\scripts\install_task.ps1
 # Registers gobot to start automatically at user logon.
+# start_gobot.ps1 resolves the binary from bin\gobot.exe first, falling back to project root.
 
 param(
     [switch]$Uninstall

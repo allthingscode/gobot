@@ -5,6 +5,9 @@
 
 $AppPath    = $PSScriptRoot
 $GobotExe   = Join-Path $AppPath "bin\gobot.exe"
+if (-not (Test-Path $GobotExe)) {
+    $GobotExe = Join-Path $AppPath "gobot.exe"
+}
 
 # Resolve StorageRoot using the executable to ensure consistency with config.json
 if (Test-Path $GobotExe) {
@@ -21,7 +24,7 @@ $LockFile   = Join-Path $LogDir "gobot.pid"
 $PreflightLog = Join-Path $LogDir "gobot-startup.log"
 
 if (-not (Test-Path $GobotExe)) {
-    Write-Host "Error: gobot.exe not found at $GobotExe" -ForegroundColor Red
+    Write-Host "Error: gobot.exe not found at bin\gobot.exe or project root" -ForegroundColor Red
     Write-Host "Build first: .\scripts\build.ps1" -ForegroundColor Yellow
     exit 1
 }

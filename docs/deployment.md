@@ -162,13 +162,11 @@ tail -f ~/gobot_data/logs/gobot.log
 On Windows, the `start_gobot.ps1` script provides built-in restart logic and is the preferred way to run Gobot persistently.
 
 ### 1. Preparation
-Build the binary and ensure `gobot.exe` is in the same directory as `start_gobot.ps1`.
+Build the binary. The `start_gobot.ps1` script resolves `bin\gobot.exe` automatically.
 
 ```powershell
 # Build the binary
 .\scripts\build.ps1
-# Copy to root (so start_gobot.ps1 can find it)
-Copy-Item bin\gobot.exe .
 ```
 
 ### 2. Security & DPAPI (Critical)
@@ -178,7 +176,8 @@ Windows uses DPAPI for secret encryption, which is tied to the **specific Window
 - **Pre-flight check:** Run `gobot secrets test` from the same account before enabling your scheduled task. This verifies secrets encryption/decryption works in the current user context.
 
 ```powershell
-.\gobot.exe secrets test
+# Verify secrets decryption using the compiled binary
+.\bin\gobot.exe secrets test
 ```
 
 If this test fails, do not enable persistence yet. Fix the task account so it matches the account used for authorization.
