@@ -7,11 +7,22 @@
 
 param(
     [switch]$FixSummary,
-    [string]$BacklogPath = ".crucible\\backlog\BACKLOG.md"
+    [string]$BacklogPath = "",
+    [switch]$Quiet
 )
 
 $ErrorActionPreference = "Stop"
 $errors = @()
+
+function Write-Quiet {
+    param(
+        [Parameter(Mandatory=$true)][string]$Message,
+        [string]$ForegroundColor = "White"
+    )
+    if (-not $Quiet) {
+        Write-Host $Message -ForegroundColor $ForegroundColor
+    }
+}
 
 function Normalize-ItemList {
     param([string]$Raw)
@@ -21,9 +32,26 @@ function Normalize-ItemList {
     return @($trimmed -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" } | Sort-Object -Unique)
 }
 
+# Dot-source config helpers if they exist
+$helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
+if (Test-Path $helpersPath) {
+    . $helpersPath
+}
+
+if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
+    $backlogDir = Get-ConfiguredPath -Key "backlog"
+    $BacklogPath = Join-Path $backlogDir "BACKLOG.md"
+} else {
+    $backlogDir = Split-Path -Parent $BacklogPath
+}
+
+if (Test-Path $backlogDir) {
+    $backlogDir = (Resolve-Path $backlogDir).Path
+}
+
 try {
-    Write-Host "=== BACKLOG VALIDATION START ==="
-    Write-Host "Backlog Path: $BacklogPath"
+    Write-Quiet "=== BACKLOG VALIDATION START ==="
+    Write-Quiet "Backlog Path: $BacklogPath"
 
     # Parse BACKLOG.md
     if (-not (Test-Path $BacklogPath)) { throw "Backlog file not found at $BacklogPath" }
@@ -52,35 +80,35 @@ try {
         "P3" = @()
     }
 
-    Write-Host "Initialized simple variables"
+    Write-Quiet "Initialized simple variables"
 
     # Scan active directories to get actual counts
     $activeDirs = @(
-        @{ Path = ".crucible\\backlog\features\active"; Type = "features" },
-        @{ Path = ".crucible\\backlog\bugs\active"; Type = "bugs" },
-        @{ Path = ".crucible\\backlog\chores\active"; Type = "chores" }
+        @{ Path = Join-Path $backlogDir "features/active"; Type = "features" },
+        @{ Path = Join-Path $backlogDir "bugs/active"; Type = "bugs" },
+        @{ Path = Join-Path $backlogDir "chores/active"; Type = "chores" }
     )
 
     foreach ($dirInfo in $activeDirs) {
         $dir = $dirInfo.Path
         $type = $dirInfo.Type
-        Write-Host "Scanning $type directory ($dir)..."
+        Write-Quiet "Scanning $type directory ($dir)..."
         if (Test-Path $dir) {
             $files = @(Get-ChildItem -Path $dir -Filter "*.md")
             if ($files) {
-                Write-Host "Found $($files.Count) $type files"
+                Write-Quiet "Found $($files.Count) $type files"
                 foreach ($file in $files) {
                     try {
                         $frontmatter = Get-Content -Path $file.FullName -Head 10
                         if ($frontmatter) {
                             $frontmatterStr = [string]$frontmatter
                             $priority = "P2" # default
-                            if ($frontmatterStr -match 'priority[:]\s*"?([P][0123])"?') {
+                            if ($frontmatterStr -match 'priority:\s*"?([P][0123])"?') {
                                 $priority = $matches[1]
                             }
 
                             $itemId = $null
-                            if ($frontmatterStr -match 'item_id[:]\s*"?([^"\s\r\n]+)"?') {
+                            if ($frontmatterStr -match 'item_id:\s*"?([^"\s\r\n]+)"?') {
                                 $itemId = $matches[1]
                             } else {
                                 $errors += "Missing or invalid item_id in frontmatter of active file: $($file.Name)"
@@ -125,7 +153,7 @@ try {
                                 }
                             }
                             if (-not $matchFound) {
-                                $relPath = $file.FullName -replace '.*\.crucible\\\backlog\\', ''
+                                $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                                 $relPath = $relPath -replace '\\', '/'
                                 $errors += "Orphaned file: $relPath has no entry in BACKLOG.md"
                             }
@@ -140,42 +168,33 @@ try {
     }
 
     # Check B: Broken Links
-    Write-Host "Scanning BACKLOG.md for broken links..."
-    $inTable = $false
+    # Scan the entire document for markdown links into the backlog tree. This is layout-agnostic
+    # so it works with both the unified `## Active Items` table (the scaffolded template) and the
+    # legacy per-type `## **Features**` / `## **Bugs**` / `## **Chores**` sections. HTML comments
+    # are skipped so template/example links inside `<!-- ... -->` do not produce false positives.
+    Write-Quiet "Scanning BACKLOG.md for broken links..."
+    $reportedLinks = @{}
     foreach ($line in $content) {
-        if ($line -match '^## \*\*(Features|Bugs|Chores)\*\*') {
-            $inTable = $true
-            continue
-        }
-        if ($inTable -and $line -match '^---') {
-            $inTable = $false
-            continue
-        }
-        if ($inTable -and $line -match '^## ') {
-            $inTable = $false
-            continue
-        }
-        
-        if ($inTable -and $line -match '^\s*\|') {
-            if ($line -match '\|\s*-+\s*\|') { continue }
-            if ($line -match '\|\s*ID\s*\|\s*Title\s*\|') { continue }
-            
-            if ($line -match '\]\(([^)]+\.md)\)') {
-                $link = $matches[1]
-                $targetPath = Join-Path ".crucible\\backlog" $link.Replace('/', '\')
-                if (-not (Test-Path $targetPath)) {
-                    $errors += "Broken link: BACKLOG.md references $link but file does not exist"
-                }
+        if ($line -match '^\s*<!--') { continue }
+        $linkMatches = [regex]::Matches($line, '\]\(([^)]+\.md)\)')
+        foreach ($m in $linkMatches) {
+            $link = $m.Groups[1].Value
+            if ($link -notmatch '^(features|bugs|chores)/') { continue }
+            if ($reportedLinks.ContainsKey($link)) { continue }
+            $targetPath = Join-Path $backlogDir ($link -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+            if (-not (Test-Path -LiteralPath $targetPath)) {
+                $errors += "Broken link: BACKLOG.md references $link but file does not exist"
+                $reportedLinks[$link] = $true
             }
         }
     }
 
     # Check C: Archived Files Status Validation
-    Write-Host "Validating archived files have correct frontmatter status..."
+    Write-Quiet "Validating archived files have correct frontmatter status..."
     $archivedDirs = @(
-        ".crucible\\backlog\features\archived",
-        ".crucible\\backlog\bugs\archived",
-        ".crucible\\backlog\chores\archived"
+        (Join-Path $backlogDir "features/archived"),
+        (Join-Path $backlogDir "bugs/archived"),
+        (Join-Path $backlogDir "chores/archived")
     )
     foreach ($dir in $archivedDirs) {
         if (Test-Path $dir) {
@@ -183,10 +202,10 @@ try {
             foreach ($file in $archivedFiles) {
                 $frontmatter = Get-Content -Path $file.FullName -Head 10
                 $frontmatterStr = [string]$frontmatter
-                if ($frontmatter -and $frontmatterStr -match 'status[:]\s*"?([^"\s\r\n]+)"?') {
+                if ($frontmatter -and $frontmatterStr -match 'status:\s*"?([^"\s\r\n]+)"?') {
                     $status = $matches[1]
                     if ($status -ne "Production" -and $status -ne "Resolved" -and $status -ne "Abandoned") {
-                        $relPath = $file.FullName -replace '.*\.crucible\\\backlog\\', ''
+                        $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                         $relPath = $relPath -replace '\\', '/'
                         $errors += "Archived file has incorrect status: $relPath has status '$status' (expected 'Production' or 'Resolved')"
                     }
@@ -201,7 +220,7 @@ try {
     $expectedP2 = $actualP2_features + $actualP2_bugs + $actualP2_chores
     $expectedP3 = $actualP3_features + $actualP3_bugs + $actualP3_chores
 
-    Write-Host "Actual counts - P0: $expectedP0, P1: $expectedP1, P2: $expectedP2, P3: $expectedP3"
+    Write-Quiet "Actual counts - P0: $expectedP0, P1: $expectedP1, P2: $expectedP2, P3: $expectedP3"
 
     # Extract Priority Summary counts from BACKLOG.md (only within the Priority Summary section)
     $priorityLines = @()
@@ -275,7 +294,7 @@ try {
         }
     }
 
-    Write-Host "BACKLOG.md counts - P0: $actualP0, P1: $actualP1, P2: $actualP2, P3: $actualP3"
+    Write-Quiet "BACKLOG.md counts - P0: $actualP0, P1: $actualP1, P2: $actualP2, P3: $actualP3"
 
     # Validate Priority Summary counts
     $needsFix = $false
@@ -308,7 +327,7 @@ try {
     }
 
     if ($needsFix -and $FixSummary) {
-        Write-Host "Auto-fixing Priority Summary in BACKLOG.md..."
+        Write-Quiet "Auto-fixing Priority Summary in BACKLOG.md..."
         
         $newContent = @()
         foreach ($line in $content) {
@@ -341,7 +360,7 @@ try {
             }
         }
         $newContent | Set-Content -Path $BacklogPath
-        Write-Host "BACKLOG.md updated successfully."
+        Write-Quiet "BACKLOG.md updated successfully."
         $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
     }
 
@@ -350,7 +369,7 @@ try {
         $errors | ForEach-Object { Write-Host "  - $_" }
         exit 2
     } else {
-        Write-Host "BACKLOG VALIDATION PASSED - All counts are consistent"
+        Write-Quiet "BACKLOG VALIDATION PASSED - All counts are consistent"
         exit 0
     }
 } catch {
