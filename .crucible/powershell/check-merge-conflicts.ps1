@@ -1,27 +1,61 @@
 param (
     [Parameter(Mandatory=$true)]
-    [string]$TaskId
+    [string]$TaskId,
+
+    [Parameter(Mandatory=$false)]
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+$factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
+if (-not (Test-Path -LiteralPath $factoryLibPath)) {
+    throw "Required helper script not found at $factoryLibPath; your Crucible bundle is incomplete."
+}
+. $factoryLibPath
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $REPO_ROOT = (Get-Location).Path
+} else {
+    if (-not (Test-Path -LiteralPath $ProjectRoot)) {
+        Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
+        exit 1
+    }
+    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
+}
+
 Write-Host "--- MERGE SIMULATION: $TaskId ---" -ForegroundColor Cyan
 
 # 1. Verify branches
+$mainBranch = "master"
+git show-ref --verify --quiet refs/heads/main
+if ($LASTEXITCODE -eq 0) { $mainBranch = "main" }
+
 $currentBranch = git rev-parse --abbrev-ref HEAD
-if ($currentBranch -ne "master") {
-    Write-Host "Warning: Not on master branch. Switching to master..." -ForegroundColor Yellow
-    git checkout master
+if ($currentBranch -ne $mainBranch) {
+    Write-Host "Warning: Not on $mainBranch branch. Switching to $mainBranch..." -ForegroundColor Yellow
+    git checkout $mainBranch
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: Could not checkout $mainBranch." -ForegroundColor Red
+        exit 1
+    }
 }
 
-# 2. Update master
-Write-Host "Updating master..." -ForegroundColor Gray
-# Note: we assume 'origin' exists and is reachable. 
-# If not, this might fail, but in local dev it might just be a no-op if no remote.
-try {
-    git pull origin master --quiet
-} catch {
-    Write-Host "Warning: Could not pull from origin. Proceeding with local master." -ForegroundColor Yellow
+# 2. Update main branch when a remote exists.
+Write-Host "Updating $mainBranch..." -ForegroundColor Gray
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$originUrl = git remote get-url origin 2>$null
+$remoteExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousPreference
+if ($remoteExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
+    git pull origin $mainBranch --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: Could not pull origin/$mainBranch." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "No origin remote configured. Proceeding with local $mainBranch." -ForegroundColor Yellow
 }
 
 # 3. Simulate merge
@@ -43,7 +77,8 @@ if ($gitExitCode -ne 0) {
     $conflictingFiles | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
 
     # Generate conflict report
-    $reportDir = ".crucible/session/$TaskId"
+    $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
+    $reportDir = Join-Path $sessionDir $TaskId
     if (-not (Test-Path $reportDir)) { New-Item -ItemType Directory -Force -Path $reportDir | Out-Null }
     
     $report = [ordered]@{

@@ -194,29 +194,29 @@ $resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
     $null
 }
 
-[string[]]$resolvedArtifacts = if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
+[string[]]$resolvedArtifacts = @(if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
     @($Artifacts | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["artifacts"] -and $null -ne $latest.artifacts) {
     @($latest.artifacts)
 } else {
     @()
-}
+})
 
-[string[]]$resolvedFileAffinity = if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
+[string[]]$resolvedFileAffinity = @(if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
     @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["file_affinity"] -and $null -ne $latest.file_affinity) {
     @($latest.file_affinity)
 } else {
     @()
-}
+})
 
-[string[]]$resolvedStubSpecsCreated = if ($null -ne $StubSpecsCreated -and $StubSpecsCreated.Count -gt 0) {
+[string[]]$resolvedStubSpecsCreated = @(if ($null -ne $StubSpecsCreated -and $StubSpecsCreated.Count -gt 0) {
     @($StubSpecsCreated | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["stub_specs_created"] -and $null -ne $latest.stub_specs_created) {
     @($latest.stub_specs_created)
 } else {
     @()
-}
+})
 
 $payload = [ordered]@{
     task_id                  = $TaskId
@@ -239,7 +239,7 @@ $payload = [ordered]@{
 if ($Source -eq "groomer" -or @($resolvedFileAffinity).Count -gt 0) {
     $payload.file_affinity = $resolvedFileAffinity
 }
-if ($Source -eq "groomer" -and $Target -eq "reviewer" -or @($resolvedStubSpecsCreated).Count -gt 0) {
+if (@($resolvedStubSpecsCreated).Count -gt 0) {
     $payload.stub_specs_created = $resolvedStubSpecsCreated
 }
 if (@($ReviewerChecksPassed).Count -gt 0) {

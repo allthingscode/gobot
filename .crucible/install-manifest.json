@@ -1,0 +1,13 @@
+{
+  "scaffold_source": "templates/project/.crucible",
+  "copied_dirs": ["docs", "personas", "sops", "prompts", "schemas", "powershell"],
+  "adopter_owned_excludes": [
+    "config.yaml",
+    "backlog/**",
+    "session/**",
+    "research/**",
+    ".gemini/**",
+    ".private/**",
+    ".agent-workspaces/**"
+  ]
+}

@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory=$false)][ValidateSet("go", "node", "python", "rust")][string]$Language = "",
     [Parameter(Mandatory=$false)][switch]$WithSampleTask,
     [Parameter(Mandatory=$false)][switch]$AppendInstructions,
+    [Parameter(Mandatory=$false)][switch]$StampVersionOnly,
     [Parameter(Mandatory=$false)][switch]$Force,
     [Parameter(Mandatory=$false)][switch]$Quiet
 )
@@ -16,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = Split-Path -Parent $PSScriptRoot
 $templateRoot = Join-Path $REPO_ROOT "templates/project/.crucible"
 
-foreach ($lib in "instruction-blocks.ps1", "language-presets.ps1", "config-helpers.ps1") {
+foreach ($lib in "instruction-blocks.ps1", "language-presets.ps1", "config-helpers.ps1", "install-manifest.ps1") {
     $libPath = Join-Path $PSScriptRoot "lib/$lib"
     if (-not (Test-Path -LiteralPath $libPath)) {
         throw "Required helper script not found at $libPath; your Crucible source directory is incomplete."
@@ -25,6 +26,7 @@ foreach ($lib in "instruction-blocks.ps1", "language-presets.ps1", "config-helpe
 . (Join-Path $PSScriptRoot "lib/instruction-blocks.ps1")
 . (Join-Path $PSScriptRoot "lib/language-presets.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
 
 function Write-Info {
     param(
@@ -40,6 +42,73 @@ function ConvertTo-YamlScalar {
     param([Parameter(Mandatory=$true)][string]$Value)
     $escaped = $Value.Replace("\", "\\").Replace('"', '\"')
     return '"' + $escaped + '"'
+}
+
+function Get-CrucibleSourceStamp {
+    $versionFile = Join-Path $REPO_ROOT "VERSION"
+    $crucibleVersion = ""
+    if (Test-Path -LiteralPath $versionFile) {
+        $crucibleVersion = (Get-Content -LiteralPath $versionFile -Raw -Encoding UTF8).Trim()
+    }
+    $installCommit = ""
+    try {
+        Push-Location $REPO_ROOT
+        $gitOutput = git rev-parse HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and $gitOutput) {
+            $installCommit = ($gitOutput | Out-String).Trim()
+        }
+    } catch {
+        $installCommit = ""
+    } finally {
+        Pop-Location
+    }
+
+    return @{
+        Version = $crucibleVersion
+        Commit = $installCommit
+    }
+}
+
+function Set-CrucibleConfigStamp {
+    param(
+        [Parameter(Mandatory=$true)][string]$ConfigPath,
+        [Parameter(Mandatory=$true)][string]$Version,
+        [Parameter(Mandatory=$true)][string]$Commit,
+        [Parameter(Mandatory=$true)][bool]$AllowExisting
+    )
+
+    if (-not (Test-Path -LiteralPath $ConfigPath)) {
+        throw "Cannot stamp Crucible metadata because config.yaml does not exist at $ConfigPath"
+    }
+
+    $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
+    $hasVersion = ($config -match '(?m)^crucible_version:\s*')
+    $hasCommit = ($config -match '(?m)^crucible_install_commit:\s*')
+    if (($hasVersion -or $hasCommit) -and -not $AllowExisting) {
+        throw "config.yaml already has Crucible version metadata. Re-run with -Force to update crucible_version and crucible_install_commit."
+    }
+
+    if ($Version -match '^[0-9]+\.[0-9]+\.[0-9]+') {
+        if ($hasVersion) {
+            $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $Version))
+        } else {
+            $config = $config.TrimEnd() + "`r`ncrucible_version: " + (ConvertTo-YamlScalar -Value $Version) + "`r`n"
+        }
+    } elseif ($hasVersion) {
+        $config = $config -replace '(?m)^crucible_version: .+\r?\n', ''
+    }
+
+    if ($Commit -match '^[0-9a-f]{40}$') {
+        if ($hasCommit) {
+            $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $Commit))
+        } else {
+            $config = $config.TrimEnd() + "`r`ncrucible_install_commit: " + (ConvertTo-YamlScalar -Value $Commit) + "`r`n"
+        }
+    } elseif ($hasCommit) {
+        $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
+    }
+
+    $config | Out-File -LiteralPath $ConfigPath -Encoding UTF8
 }
 
 function Copy-TemplateDirectory {
@@ -82,6 +151,7 @@ function Copy-TemplateDirectory {
 if (-not (Test-Path -LiteralPath $templateRoot)) {
     throw "Crucible project template not found: $templateRoot"
 }
+$installManifest = Get-InstallManifest -FrameworkRoot $REPO_ROOT
 
 $resolvedProjectRoot = $ProjectRoot
 if (Test-Path -LiteralPath $ProjectRoot) {
@@ -100,10 +170,18 @@ if ([string]::IsNullOrWhiteSpace($Description)) {
 }
 
 $targetCrucible = Join-Path $resolvedProjectRoot ".crucible"
+$configPath = Join-Path $targetCrucible "config.yaml"
+
+if ($StampVersionOnly) {
+    $stamp = Get-CrucibleSourceStamp
+    Set-CrucibleConfigStamp -ConfigPath $configPath -Version $stamp.Version -Commit $stamp.Commit -AllowExisting ([bool]$Force)
+    Write-Info ("Stamped Crucible metadata in " + $configPath) -ForegroundColor Green
+    exit 0
+}
 
 # Detect existing backlog_dir config before overwriting
 $detectedBacklogDir = ""
-$existingConfigPath = Join-Path $targetCrucible "config.yaml"
+$existingConfigPath = $configPath
 if (Test-Path -LiteralPath $existingConfigPath) {
     try {
         $existingContent = Get-Content -LiteralPath $existingConfigPath -Raw -Encoding UTF8
@@ -122,13 +200,12 @@ if ((Test-Path -LiteralPath (Join-Path $targetCrucible "config.yaml")) -and -not
 Copy-TemplateDirectory -Source $templateRoot -Destination $targetCrucible -AllowOverwrite ([bool]$Force)
 
 # Copy active framework directories to make the installation self-contained
-foreach ($dirName in "docs", "personas", "sops", "prompts", "schemas", "powershell") {
+foreach ($dirName in @($installManifest.copied_dirs)) {
     $srcDir = Join-Path $REPO_ROOT $dirName
     $destDir = Join-Path $targetCrucible $dirName
     Copy-TemplateDirectory -Source $srcDir -Destination $destDir -AllowOverwrite ([bool]$Force)
 }
 
-$configPath = Join-Path $targetCrucible "config.yaml"
 if (-not (Test-Path -LiteralPath $configPath)) {
     throw "Bootstrap failed: expected config file was not created at $configPath"
 }
@@ -139,35 +216,15 @@ $config = $config -replace '(?m)^  description: .+$', ('  description: ' + (Conv
 $config = $config -replace '(?m)^  default_branch: .+$', ('  default_branch: ' + (ConvertTo-YamlScalar -Value $DefaultBranch))
 $config = $config -replace '(?m)^crucible_root: .+$', ('crucible_root: ' + (ConvertTo-YamlScalar -Value ".crucible"))
 
-# Stamp Crucible version + install commit from the upstream source repo.
-# Both fields are optional per schema; if we cannot resolve a valid value we
-# strip the placeholder line entirely so the resulting config validates clean.
-$versionFile = Join-Path $REPO_ROOT "VERSION"
-$crucibleVersion = ""
-if (Test-Path -LiteralPath $versionFile) {
-    $crucibleVersion = (Get-Content -LiteralPath $versionFile -Raw -Encoding UTF8).Trim()
-}
-$installCommit = ""
-try {
-    Push-Location $REPO_ROOT
-    $gitOutput = git rev-parse HEAD 2>$null
-    if ($LASTEXITCODE -eq 0 -and $gitOutput) {
-        $installCommit = ($gitOutput | Out-String).Trim()
-    }
-} catch {
-    $installCommit = ""
-} finally {
-    Pop-Location
-}
-
-if ($crucibleVersion -match '^[0-9]+\.[0-9]+\.[0-9]+') {
-    $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $crucibleVersion))
+$stamp = Get-CrucibleSourceStamp
+if ($stamp.Version -match '^[0-9]+\.[0-9]+\.[0-9]+') {
+    $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $stamp.Version))
 } else {
     $config = $config -replace '(?m)^crucible_version: .+\r?\n', ''
 }
 
-if ($installCommit -match '^[0-9a-f]{40}$') {
-    $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $installCommit))
+if ($stamp.Commit -match '^[0-9a-f]{40}$') {
+    $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $stamp.Commit))
 } else {
     $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
 }

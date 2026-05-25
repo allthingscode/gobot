@@ -373,6 +373,47 @@ try {
         Assert-Result -Name "no commit placeholder" -Condition ($config -notmatch 'REPLACE_WITH_COMMIT') -FailureMessage "REPLACE_WITH_COMMIT placeholder remained"
     }
 
+    $results += Run-Test -Name "StampVersionOnly stamps pre-existing config without scaffolding" -Body {
+        $stampOnlyRoot = Join-Path $tempRoot "stamp-only-app"
+        $configDir = Join-Path $stampOnlyRoot ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $configPath = Join-Path $configDir "config.yaml"
+        @"
+project:
+  name: "Existing App"
+custom_value: "preserve me"
+"@ | Out-File -LiteralPath $configPath -Encoding UTF8
+
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $stampOnlyRoot `
+            -StampVersionOnly `
+            -Quiet 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "stamp-only exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+
+        $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $head = ((git -C $REPO_ROOT rev-parse HEAD) | Out-String).Trim()
+        Assert-Result -Name "version stamped" -Condition ($config -match '(?m)^crucible_version:\s+"\d+\.\d+\.\d+') -FailureMessage "crucible_version was not stamped"
+        Assert-Result -Name "commit stamped" -Condition ($config -match ('(?m)^crucible_install_commit:\s+"' + [regex]::Escape($head) + '"')) -FailureMessage "crucible_install_commit did not match HEAD"
+        Assert-Result -Name "custom key preserved" -Condition ($config -match 'custom_value: "preserve me"') -FailureMessage "custom config content was not preserved"
+        Assert-Result -Name "no scaffold copied" -Condition (-not (Test-Path -LiteralPath (Join-Path $stampOnlyRoot ".crucible/powershell"))) -FailureMessage "StampVersionOnly copied scaffold files"
+
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $secondOutput = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+                -ProjectRoot $stampOnlyRoot `
+                -StampVersionOnly `
+                -Quiet 2>&1)
+            $secondExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        $second = $secondOutput -join "`n"
+        Assert-Result -Name "refuses existing stamp" -Condition ($secondExit -ne 0) -FailureMessage ("expected non-zero exit on existing stamp. Output: " + $second)
+        Assert-Result -Name "force guidance" -Condition ($second -match '-Force') -FailureMessage ("missing -Force guidance. Output: " + $second)
+    }
+
     $results += Run-Test -Name "Default install output has no validate-backlog chatter" -Body {
         $quietRoot = Join-Path $tempRoot "quiet-output-app"
         $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
