@@ -3,11 +3,20 @@ param (
     [string]$TaskId,
 
     [Parameter(Mandatory=$true)]
-    [string[]]$Affinity
+    [string[]]$Affinity,
+
+    [Parameter(Mandatory=$false)]
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
-$StateFile = ".crucible/session/global/session_state.json"
+$helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
+if (-not (Test-Path -LiteralPath $helpersPath)) {
+    throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $helpersPath
+$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
+$StateFile = Join-Path $sessionDir "global/session_state.json"
 
 if (-not (Test-Path $StateFile)) {
     exit 0

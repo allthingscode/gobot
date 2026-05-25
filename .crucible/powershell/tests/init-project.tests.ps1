@@ -55,6 +55,8 @@ try {
         $agentsMd = Join-Path $projectRoot ".crucible/agent-instructions/AGENTS.md"
         $claudeMd = Join-Path $projectRoot ".crucible/agent-instructions/CLAUDE.md"
         $geminiMd = Join-Path $projectRoot ".crucible/agent-instructions/GEMINI.md"
+        $configHelpersPath = Join-Path $projectRoot ".crucible/powershell/lib/config-helpers.ps1"
+        Assert-Result -Name "config-helpers.ps1 exists" -Condition (Test-Path -LiteralPath $configHelpersPath) -FailureMessage "config-helpers.ps1 was not created"
         Assert-Result -Name "config exists" -Condition (Test-Path -LiteralPath $configPath) -FailureMessage "config.yaml was not created"
         Assert-Result -Name "ignore exists" -Condition (Test-Path -LiteralPath $ignorePath) -FailureMessage ".gitignore was not created"
         Assert-Result -Name "backlog exists" -Condition (Test-Path -LiteralPath $backlogPath) -FailureMessage "BACKLOG.md was not created"
@@ -82,7 +84,7 @@ try {
         }
         $output = $outputLines -join "`n"
         Assert-Result -Name "overwrite exit" -Condition ($exitCode -ne 0) -FailureMessage ("expected non-zero exit. Output: " + $output)
-        Assert-Result -Name "overwrite message" -Condition ($output -match 'Refusing to overwrite existing file') -FailureMessage ("missing overwrite refusal. Output: " + $output)
+        Assert-Result -Name "overwrite message" -Condition ($output -match 'An installed Crucible bundle already exists') -FailureMessage ("missing overwrite refusal. Output: " + $output)
     }
 
     $results += Run-Test -Name "Force overwrites scaffold-managed files" -Body {
@@ -162,6 +164,335 @@ try {
         } finally {
             Pop-Location
         }
+    }
+
+    # --- AppendInstructions tests ---
+    # Use a separate project root to avoid interference with earlier scaffold tests
+    $appendRoot = Join-Path $tempRoot "append-app"
+
+    $results += Run-Test -Name "AppendInstructions creates instruction files with sentinel markers" -Body {
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $appendRoot `
+            -ProjectName "Append Test" `
+            -AppendInstructions `
+            -Quiet 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "append exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+
+        foreach ($fileName in @("AGENTS.md", "CLAUDE.md", "GEMINI.md")) {
+            $filePath = Join-Path $appendRoot $fileName
+            Assert-Result -Name "$fileName exists" -Condition (Test-Path -LiteralPath $filePath) -FailureMessage "$fileName was not created"
+
+            $content = Get-Content -LiteralPath $filePath -Raw -Encoding UTF8
+            $startCount = ([regex]::Matches($content, "crucible-instructions-start")).Count
+            $endCount   = ([regex]::Matches($content, "crucible-instructions-end")).Count
+            Assert-Result -Name "$fileName has start marker" -Condition ($startCount -eq 1) -FailureMessage ("expected 1 start marker, got " + $startCount)
+            Assert-Result -Name "$fileName has end marker"   -Condition ($endCount -eq 1) -FailureMessage ("expected 1 end marker, got " + $endCount)
+        }
+
+        # Verify AGENTS.md contains canonical content
+        $agentsContent = Get-Content -LiteralPath (Join-Path $appendRoot "AGENTS.md") -Raw -Encoding UTF8
+        Assert-Result -Name "AGENTS has crucible heading" -Condition ($agentsContent -match "## Crucible") -FailureMessage "AGENTS.md missing Crucible heading"
+        Assert-Result -Name "AGENTS has factory snippet" -Condition ($agentsContent -match "factory\.ps1") -FailureMessage "AGENTS.md missing factory.ps1 snippet"
+        Assert-Result -Name "AGENTS has commit list" -Condition ($agentsContent -match "Commit durable Crucible files") -FailureMessage "AGENTS.md missing commit list"
+    }
+
+    $results += Run-Test -Name "AppendInstructions skips when block already exists (idempotent)" -Body {
+        # appendRoot already has instruction files from the previous test
+
+        # Capture file contents before re-run
+        $beforeAgents = Get-Content -LiteralPath (Join-Path $appendRoot "AGENTS.md") -Raw -Encoding UTF8
+        $beforeClaude = Get-Content -LiteralPath (Join-Path $appendRoot "CLAUDE.md") -Raw -Encoding UTF8
+        $beforeGemini = Get-Content -LiteralPath (Join-Path $appendRoot "GEMINI.md") -Raw -Encoding UTF8
+
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $appendRoot `
+            -AppendInstructions `
+            -Force `
+            -Quiet 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "rerun exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+
+        # Marker count unchanged
+        $agentsContent = Get-Content -LiteralPath (Join-Path $appendRoot "AGENTS.md") -Raw -Encoding UTF8
+        $startCount = ([regex]::Matches($agentsContent, "crucible-instructions-start")).Count
+        Assert-Result -Name "still one marker" -Condition ($startCount -eq 1) -FailureMessage ("expected 1 start marker after rerun, got " + $startCount)
+
+        # Content byte-identical
+        $afterAgents = Get-Content -LiteralPath (Join-Path $appendRoot "AGENTS.md") -Raw -Encoding UTF8
+        $afterClaude = Get-Content -LiteralPath (Join-Path $appendRoot "CLAUDE.md") -Raw -Encoding UTF8
+        $afterGemini = Get-Content -LiteralPath (Join-Path $appendRoot "GEMINI.md") -Raw -Encoding UTF8
+        Assert-Result -Name "AGENTS unchanged" -Condition ($beforeAgents -eq $afterAgents) -FailureMessage "AGENTS.md content changed on rerun"
+        Assert-Result -Name "CLAUDE unchanged" -Condition ($beforeClaude -eq $afterClaude) -FailureMessage "CLAUDE.md content changed on rerun"
+        Assert-Result -Name "GEMINI unchanged" -Condition ($beforeGemini -eq $afterGemini) -FailureMessage "GEMINI.md content changed on rerun"
+    }
+
+    $results += Run-Test -Name "AppendInstructions aborts on corrupt sentinel markers" -Body {
+        $corruptRoot = Join-Path $tempRoot "corrupt-app"
+
+        # First create a valid scaffold
+        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $corruptRoot `
+            -ProjectName "Corrupt Test" `
+            -Quiet 2>&1)
+
+        # Create an AGENTS.md with only the start marker (no end marker)
+        $corruptAgents = Join-Path $corruptRoot "AGENTS.md"
+        Set-Content -LiteralPath $corruptAgents -Value "# My Project`n`n<!-- crucible-instructions-start -->`nSome content without end marker" -Encoding UTF8
+
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+                -ProjectRoot $corruptRoot `
+                -AppendInstructions `
+                -Force `
+                -Quiet 2>&1)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "corrupt exit" -Condition ($exitCode -ne 0) -FailureMessage ("expected non-zero exit on corrupt markers. Output: " + $output)
+        Assert-Result -Name "corrupt message" -Condition ($output -match "corrupted|mismatched") -FailureMessage ("expected corruption error message. Output: " + $output)
+    }
+
+    $results += Run-Test -Name "AppendInstructions preserves personal content byte-for-byte" -Body {
+        $preserveRoot = Join-Path $tempRoot "preserve-app"
+
+        # Create scaffold first (without AppendInstructions)
+        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $preserveRoot `
+            -ProjectName "Preserve Test" `
+            -Quiet 2>&1)
+
+        # Create an AGENTS.md with personal content above and below where block will land
+        $personalAgents = Join-Path $preserveRoot "AGENTS.md"
+        $personalContent = "# My Personal Rules`n`nThese are my private workflow notes.`nDo not touch this content.`n`n## My Other Section`n`nMore personal content here.`n"
+        [System.IO.File]::WriteAllText($personalAgents, $personalContent, [System.Text.UTF8Encoding]::new($false))
+
+        # Run AppendInstructions
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $preserveRoot `
+            -AppendInstructions `
+            -Force `
+            -Quiet 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "preserve exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+
+        # Read back and verify personal content is preserved at the start
+        $result = Get-Content -LiteralPath $personalAgents -Raw -Encoding UTF8
+        Assert-Result -Name "starts with personal" -Condition ($result.StartsWith("# My Personal Rules")) -FailureMessage "personal content header was modified"
+        Assert-Result -Name "has personal notes" -Condition ($result -match "These are my private workflow notes\.") -FailureMessage "personal workflow notes were modified"
+        Assert-Result -Name "has other section" -Condition ($result -match "## My Other Section") -FailureMessage "personal section was modified"
+        Assert-Result -Name "has more personal" -Condition ($result -match "More personal content here\.") -FailureMessage "trailing personal content was modified"
+
+        # Also verify the block was appended
+        Assert-Result -Name "has crucible block" -Condition ($result -match "crucible-instructions-start") -FailureMessage "Crucible block was not appended"
+        Assert-Result -Name "has crucible end" -Condition ($result -match "crucible-instructions-end") -FailureMessage "Crucible end marker was not appended"
+    }
+
+    $results += Run-Test -Name "Configures language presets correctly" -Body {
+        foreach ($lang in 'go','node','python','rust') {
+            $langRoot = Join-Path $tempRoot "lang-$lang"
+            $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+                -ProjectRoot $langRoot `
+                -ProjectName "Lang App $lang" `
+                -Language $lang `
+                -Quiet 2>&1)
+            $configPath = Join-Path $langRoot ".crucible/config.yaml"
+            Assert-Result -Name "config exists for $lang" -Condition (Test-Path -LiteralPath $configPath) -FailureMessage "config.yaml not created for $lang"
+            $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+            
+            Assert-Result -Name "no placeholders for $lang" -Condition ($config -notmatch "replace-with-project") -FailureMessage "placeholders remained in config for $lang"
+            
+            if ($lang -eq "go") {
+                Assert-Result -Name "go test command" -Condition ($config -match 'command:\s*"?go test \./\.\.\."?') -FailureMessage "missing go test command"
+            } elseif ($lang -eq "node") {
+                Assert-Result -Name "node test command" -Condition ($config -match 'command:\s*"?npm test"?') -FailureMessage "missing npm test command"
+            }
+        }
+    }
+
+    $results += Run-Test -Name "Scaffolds sample task F-001 correctly" -Body {
+        $sampleRoot = Join-Path $tempRoot "sample-task-app"
+        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $sampleRoot `
+            -ProjectName "Sample App" `
+            -Language "go" `
+            -WithSampleTask `
+            -Quiet 2>&1)
+        
+        $taskPath = Join-Path $sampleRoot ".crucible/backlog/features/active/F-001_Hello_World.md"
+        Assert-Result -Name "sample task exists" -Condition (Test-Path -LiteralPath $taskPath) -FailureMessage "F-001_Hello_World.md was not created"
+        
+        $taskContent = Get-Content -LiteralPath $taskPath -Raw -Encoding UTF8
+        Assert-Result -Name "has go criteria" -Condition ($taskContent -match 'go test \./\.\.\..* passes') -FailureMessage "missing go specific criteria in sample task"
+        
+        $backlogFile = Join-Path $sampleRoot ".crucible/backlog/BACKLOG.md"
+        $backlogContent = Get-Content -LiteralPath $backlogFile -Raw -Encoding UTF8
+        Assert-Result -Name "backlog links task" -Condition ($backlogContent -match '\[F-001\]\(features/active/F-001_Hello_World\.md\)') -FailureMessage "BACKLOG.md missing F-001 link"
+        Assert-Result -Name "backlog summary counts updated" -Condition ($backlogContent -match '\|\s*\*\*P1\*\*\s*\|\s*1\s*\|') -FailureMessage "BACKLOG.md P1 summary count was not updated"
+    }
+
+    $results += Run-Test -Name "Verifies no drift between language-presets and config-reference.md" -Body {
+        $presetsPath = Join-Path $REPO_ROOT "powershell/lib/language-presets.ps1"
+        . $presetsPath
+        $presets = Get-LanguagePresets
+        
+        $docPath = Join-Path $REPO_ROOT "docs/config-reference.md"
+        $docContent = Get-Content -LiteralPath $docPath -Raw -Encoding UTF8
+        
+        foreach ($lang in $presets.Keys) {
+            $preset = $presets[$lang]
+            foreach ($step in $preset.quick) {
+                $cmdEsc = [regex]::Escape($step.command)
+                Assert-Result -Name "doc matches quick command $lang ($($step.command))" -Condition ($docContent -match $cmdEsc) -FailureMessage "docs/config-reference.md does not contain quick verification command preset: $($step.command)"
+            }
+            foreach ($step in $preset.full) {
+                $cmdEsc = [regex]::Escape($step.command)
+                Assert-Result -Name "doc matches full command $lang ($($step.command))" -Condition ($docContent -match $cmdEsc) -FailureMessage "docs/config-reference.md does not contain full verification command preset: $($step.command)"
+            }
+        }
+    }
+
+    $results += Run-Test -Name "Stamps crucible_version and crucible_install_commit from upstream" -Body {
+        $stampRoot = Join-Path $tempRoot "version-stamp-app"
+        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $stampRoot `
+            -ProjectName "Stamp Test" `
+            -Quiet 2>&1)
+        Assert-Result -Name "stamp exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE)
+
+        $configPath = Join-Path $stampRoot ".crucible/config.yaml"
+        $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+
+        Assert-Result -Name "version stamped" -Condition ($config -match '(?m)^crucible_version:\s+"\d+\.\d+\.\d+') -FailureMessage "crucible_version was not stamped with a semver value"
+        Assert-Result -Name "commit stamped" -Condition ($config -match '(?m)^crucible_install_commit:\s+"[0-9a-f]{40}"') -FailureMessage "crucible_install_commit was not stamped with a 40-char SHA"
+        Assert-Result -Name "no version placeholder" -Condition ($config -notmatch 'REPLACE_WITH_VERSION') -FailureMessage "REPLACE_WITH_VERSION placeholder remained"
+        Assert-Result -Name "no commit placeholder" -Condition ($config -notmatch 'REPLACE_WITH_COMMIT') -FailureMessage "REPLACE_WITH_COMMIT placeholder remained"
+    }
+
+    $results += Run-Test -Name "Default install output has no validate-backlog chatter" -Body {
+        $quietRoot = Join-Path $tempRoot "quiet-output-app"
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $quietRoot `
+            -ProjectName "Quiet Output Test" `
+            -Language "go" `
+            -WithSampleTask 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+        Assert-Result -Name "no BACKLOG VALIDATION START" -Condition ($output -notmatch "BACKLOG VALIDATION START") -FailureMessage "BACKLOG VALIDATION chatter appeared in default install output"
+        Assert-Result -Name "no Scanning directory chatter" -Condition ($output -notmatch "Scanning features directory") -FailureMessage "validate-backlog scan chatter appeared in default install output"
+        Assert-Result -Name "output under 40 lines" -Condition ($outputLines.Count -le 40) -FailureMessage ("install output was " + $outputLines.Count + " lines; expected <= 40")
+    }
+
+    $results += Run-Test -Name "Step 5 shows sample-task hint when -WithSampleTask" -Body {
+        $step5Root = Join-Path $tempRoot "step5-with-sample-app"
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $step5Root `
+            -ProjectName "Step5 Sample Test" `
+            -Language "go" `
+            -WithSampleTask 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "exit ok" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+        Assert-Result -Name "F-001 hint in step 5" -Condition ($output -match "F-001 sample task installed") -FailureMessage ("step 5 missing F-001 hint. Output: " + $output)
+        Assert-Result -Name "no generic step 5 wording" -Condition ($output -notmatch "Add initial backlog items") -FailureMessage ("step 5 still shows generic wording. Output: " + $output)
+    }
+
+    $results += Run-Test -Name "Step 5 shows generic hint when no -WithSampleTask" -Body {
+        $step5Root = Join-Path $tempRoot "step5-no-sample-app"
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $step5Root `
+            -ProjectName "Step5 NoSample Test" 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "exit ok" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+        Assert-Result -Name "generic step 5 wording" -Condition ($output -match "Add initial backlog items") -FailureMessage ("step 5 missing generic wording. Output: " + $output)
+        Assert-Result -Name "no F-001 hint" -Condition ($output -notmatch "F-001 sample task installed") -FailureMessage ("step 5 shows F-001 hint unexpectedly. Output: " + $output)
+    }
+
+    $results += Run-Test -Name "Supports configurable backlog directory and moves scaffold files" -Body {
+        $customAppRoot = Join-Path $tempRoot "custom-backlog-app"
+        New-Item -ItemType Directory -Path $customAppRoot -Force | Out-Null
+        
+        # Pre-create config.yaml with custom backlog path configured
+        # This simulates adopter setting up config first
+        $configDir = Join-Path $customAppRoot ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        
+        $initialConfig = @"
+crucible_root: ".crucible"
+paths:
+  backlog: "custom-backlog"
+  session: .crucible/session
+  workspaces: .crucible/.agent-workspaces
+  prompts: .crucible/prompts
+  personas: .crucible/personas
+  sops: .crucible/sops
+project:
+  name: "Custom Backlog App"
+  description: "Test App"
+  default_branch: "main"
+roles:
+  researcher:
+    model_tier: fast
+  groomer:
+    model_tier: fast
+  architect:
+    model_tier: high-capability
+  reviewer:
+    model_tier: high-capability
+  operator:
+    model_tier: fast
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rule 1
+"@
+        $initialConfig | Out-File -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        # Run init-project.ps1 with -Force to overwrite and respect custom config
+        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            -ProjectRoot $customAppRoot `
+            -Force `
+            -WithSampleTask `
+            -Language go `
+            -Quiet 2>&1)
+        Assert-Result -Name "custom backlog init exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE)
+
+        # 1. Assert default backlog directory DOES NOT exist
+        $defaultBacklog = Join-Path $customAppRoot ".crucible/backlog"
+        Assert-Result -Name "default backlog dir absent" -Condition (-not (Test-Path $defaultBacklog)) -FailureMessage "default backlog dir was unexpectedly created"
+
+        # 2. Assert custom backlog directory DOES exist and contains scaffold files
+        $customBacklog = Join-Path $customAppRoot "custom-backlog"
+        Assert-Result -Name "custom backlog dir exists" -Condition (Test-Path $customBacklog) -FailureMessage "custom backlog dir custom-backlog was not created"
+        Assert-Result -Name "BACKLOG.md exists in custom path" -Condition (Test-Path (Join-Path $customBacklog "BACKLOG.md")) -FailureMessage "BACKLOG.md not found in custom backlog directory"
+        Assert-Result -Name "sample task exists in custom path" -Condition (Test-Path (Join-Path $customBacklog "features/active/F-001_Hello_World.md")) -FailureMessage "sample task F-001 not found in custom backlog features/active directory"
+
+        # 3. Assert config validation passes on custom backlog config
+        $valScript = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
+        $valConfig = Join-Path $customAppRoot ".crucible/config.yaml"
+        $valResult = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $valScript -ConfigPath $valConfig 2>&1)
+        Assert-Result -Name "custom config validation exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validate-config exit 0, got " + $LASTEXITCODE + ". Output: " + ($valResult -join "`n"))
+
+        # 4. Assert factory_lint passes in the custom app root context (dynamic linter check)
+        $linterScript = Join-Path $REPO_ROOT "powershell/tests/factory_lint.go"
+        $origCwd = Get-Location
+        Set-Location -LiteralPath $customAppRoot
+        $lintResult = @(go run $linterScript $REPO_ROOT 2>&1)
+        Set-Location -LiteralPath $origCwd
+        Assert-Result -Name "custom backlog linter exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected factory_lint exit 0, got " + $LASTEXITCODE + ". Output: " + ($lintResult -join "`n"))
+
+        # 5. Assert factory-health checks pass using the custom backlog directory (dynamic health check)
+        $healthScript = Join-Path $REPO_ROOT "powershell/factory-health.ps1"
+        $healthResult = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $healthScript -ProjectRoot $customAppRoot 2>&1)
+        Assert-Result -Name "custom backlog health exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected factory-health exit 0, got " + $LASTEXITCODE + ". Output: " + ($healthResult -join "`n"))
     }
 }
 finally {

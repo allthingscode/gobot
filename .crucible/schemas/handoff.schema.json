@@ -122,6 +122,11 @@
     "superseded_reason": {
       "type": "string",
       "description": "Reason this handoff was superseded"
+    },
+    "stub_specs_created": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths of newly-created stub spec files during a Pattern C grooming shortcut"
     }
   },
   "required": ["task_id", "source_specialist", "target_specialist", "reason", "handoff_retry_count", "budget_tier", "cumulative_handoff_count", "prompt_version"],
@@ -165,6 +170,24 @@
       },
       "then": {
         "required": ["file_affinity"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_specialist": { "const": "groomer" },
+          "target_specialist": { "const": "reviewer" }
+        },
+        "required": ["source_specialist", "target_specialist"]
+      },
+      "then": {
+        "required": ["stub_specs_created"],
+        "properties": {
+          "stub_specs_created": {
+            "type": "array",
+            "minItems": 1
+          }
+        }
       }
     },
     {

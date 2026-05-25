@@ -1,11 +1,24 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
-$generator = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
-$handoffDir = ".crucible/session/handoffs"
-$schemaPath = Join-Path $REPO_ROOT "schemas/handoff.schema.json"
+$realRepoRoot = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+$generator = Join-Path $realRepoRoot "powershell/new-handoff.ps1"
+$schemaPath = Join-Path $realRepoRoot "schemas/handoff.schema.json"
 
+# Isolate execution in a temp directory to prevent repo-root test pollution
+$origLocation = Get-Location
+$tempRoot = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), [System.IO.Path]::GetRandomFileName())
+New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+# Copy the powershell directory so relative file path artifacts exist for testing
+Copy-Item -Path (Join-Path $realRepoRoot "powershell") -Destination (Join-Path $tempRoot "powershell") -Recurse -Force | Out-Null
+
+# Set REPO_ROOT to temp root so new-handoff.ps1 resolves its target path to the temp directory
+$REPO_ROOT = $tempRoot
+
+Set-Location -LiteralPath $tempRoot
+
+$handoffDir = ".crucible/session/handoffs"
 $testTaskPrefix = "{task_id}"
 $createdFiles = @()
 $createdSpecFiles = @()
@@ -193,6 +206,7 @@ budget_tier: "low"
             Reason = "Pattern C: stub rows filed, parent task closed - no implementation work"
             PromptVersion = "groomer-sop-v1"
             Artifacts = @("powershell/factory.ps1")
+            StubSpecsCreated = @("backlog/features/active/F-001_Stub.md")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -ne 0) {
@@ -204,12 +218,35 @@ budget_tier: "low"
         if ($obj.source_specialist -ne "groomer" -or $obj.target_specialist -ne "reviewer") {
             throw "Unexpected transition in $path"
         }
+        if ($null -eq $obj.stub_specs_created -or $obj.stub_specs_created.Count -eq 0 -or $obj.stub_specs_created[0] -ne "backlog/features/active/F-001_Stub.md") {
+            throw "Expected stub_specs_created to contain mock spec, got: $($obj.stub_specs_created)"
+        }
         $validationResult = & "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $path -SchemaPath $schemaPath 2>&1
         $validationJson = $validationResult | Where-Object { $_ -match '^\{' } | Select-Object -First 1
         if (-not $validationJson) { throw "Validator produced no JSON output" }
         $validated = $validationJson | ConvertFrom-Json
         if (-not $validated.ok) {
             throw "Validator rejected groomer->reviewer handoff: $($validated.message)"
+        }
+    }
+
+    Invoke-Test -Name "groomer->reviewer rejected when stub_specs_created missing" -Script {
+        $taskId = New-TestTaskId "GR-MISSING-STUB"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "groomer"
+            Target = "reviewer"
+            Reason = "should fail - stub_specs_created is required"
+            PromptVersion = "groomer-sop-v1"
+            Artifacts = @("powershell/factory.ps1")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -eq 0) {
+            $path = Track-HandoffFile -TaskId $taskId
+            throw "Expected failure but generator succeeded - file: $path"
+        }
+        if ($result.Output -notmatch "Schema validation failed") {
+            throw "Expected schema validation failure, got: $($result.Output)"
         }
     }
 
@@ -222,6 +259,7 @@ budget_tier: "low"
             Reason = "should fail - reviewer_checks_passed not allowed from groomer"
             PromptVersion = "groomer-sop-v1"
             Artifacts = @("powershell/factory.ps1")
+            StubSpecsCreated = @("backlog/features/active/F-001_Stub.md")
             ReviewerChecksPassed = @("tests_pass", "vet_pass", "acceptance_criteria_met", "scope_bounded", "no_regressions", "no_hard_mandates_violated")
             SchemaPath = $schemaPath
         }
@@ -272,15 +310,9 @@ budget_tier: "low"
 
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
 } finally {
-    foreach ($file in $createdFiles) {
-        if (Test-Path -LiteralPath $file) {
-            Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
-        }
-    }
-    foreach ($spec in $createdSpecFiles) {
-        if (Test-Path -LiteralPath $spec) {
-            Remove-Item -LiteralPath $spec -Force -ErrorAction SilentlyContinue
-        }
+    Set-Location -LiteralPath $origLocation
+    if (Test-Path -LiteralPath $tempRoot) {
+        Remove-Item -Recurse -Force -LiteralPath $tempRoot -ErrorAction SilentlyContinue
     }
 }
 exit 0

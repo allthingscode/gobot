@@ -1,4 +1,4 @@
-﻿<!-- prompt_version: reviewer_prompt-v22 -->
+<!-- prompt_version: reviewer_prompt-v22 -->
 Reviewer: {task_id}
 
 {prev_session_summary}
@@ -43,6 +43,8 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 
 ## Reviewer Workflow
 
+### Pattern A/B: Standard Code Implementation Review
+(Use this workflow if the incoming handoff is from the `architect` or if an implementation worktree exists.)
 1. **Setup**: Operate inside the assigned worktree: `.crucible/.agent-workspaces/architect-{task_id}`. Do not run `git checkout task/{task_id}` from the main checkout.
 2. **Scope Check**: Run `git diff master...task/{task_id} --name-only` and verify all modified files match the spec's `file_affinity`.
 3. **Automated Verification**: Run the canonical isolated checker before manual review:
@@ -62,6 +64,17 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
      Use `review_decision: CHANGES_REQUESTED` and `acceptance_criteria_met: false` when sending back to Architect.
 7. **CHANGES_REQUESTED**: If code requires fixes, write a concise fix spec to `.crucible/session/{task_id}/architect/task.md`.
 8. **Handoff**: Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` with `target_specialist: "operator"` (approved) or `target_specialist: "architect"` (fixes needed).
+
+### Pattern C: Pure Data-Grooming Review (Groomer → Reviewer Shortcut)
+(Use this workflow if the incoming handoff has `source_specialist: groomer` and no Architect worktree/code changes exist.)
+1. **Validation Check (Mandatory)**: Run the backlog validator and verify it exits 0:
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/validate-backlog.ps1
+   ```
+   Paste the validator output into your session response. If the exit code is non-zero, you MUST reject the handoff (set `review_decision: CHANGES_REQUESTED` and write a handoff to `architect` so the Groomer can repair the backlog structure).
+2. **Stub-Row and Spec Consistency**: Verify every new stub row in `BACKLOG.md` has a corresponding spec file in `backlog/{type}/active/` and matches the stub-row convention (refer to `{{crucible_root}}/sops/reviewer.md` Pattern C Checklist).
+3. **Documentation**: Write findings to `.crucible/session/{task_id}/reviewer/review_report.md` with the mandatory YAML header.
+4. **Handoff**: Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` with `target_specialist: "operator"` (approved) or `target_specialist: "architect"` (fixes needed). If approved, include `reviewer_checks_passed` populated with all standard six checks satisfied by N/A equivalence (refer to `{{crucible_root}}/sops/reviewer.md`).
 
 {rebase_section}
 

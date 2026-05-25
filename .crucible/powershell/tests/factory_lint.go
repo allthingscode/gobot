@@ -44,6 +44,8 @@ func main() {
 	failures = append(failures, lintHandoffSchemaContracts(frameworkRoot)...)
 	failures = append(failures, lintHandoffValidationFixtures(frameworkRoot)...)
 	failures = append(failures, lintPolicyDrift(frameworkRoot)...)
+	failures = append(failures, lintDebugPrints(frameworkRoot)...)
+	failures = append(failures, lintFactorySelfReference(frameworkRoot)...)
 
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "\n--- factory_lint: %d issue(s) found ---\n", len(failures))
@@ -60,11 +62,31 @@ func main() {
 // contains a directory separator AND a recognized file extension.
 var pathRefRe = regexp.MustCompile("`((?:[a-zA-Z0-9_.-]+/)+[a-zA-Z0-9_.-]+\\.(?:go|yml|yaml|json|md|ps1|sh|toml))`")
 
-// lintStaleReferences scans non-archived .md files under .crucible/backlog/
+func getBacklogDir(root string) string {
+	configPath := filepath.Join(root, ".crucible", "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err == nil {
+		content := string(data)
+		pathsBlockRe := regexp.MustCompile(`(?ms)^paths:\s*\r?\n(.*?)(?:\r?\n\S|\z)`)
+		if m := pathsBlockRe.FindStringSubmatch(content); len(m) > 1 {
+			backlogRe := regexp.MustCompile(`(?m)^\s{2}backlog:\s*["']?([^"'\r\n]+)["']?\s*$`)
+			if bm := backlogRe.FindStringSubmatch(m[1]); len(bm) > 1 {
+				val := strings.TrimSpace(bm[1])
+				if filepath.IsAbs(val) {
+					return val
+				}
+				return filepath.Join(root, filepath.FromSlash(val))
+			}
+		}
+	}
+	return filepath.Join(root, ".crucible", "backlog")
+}
+
+// lintStaleReferences scans non-archived .md files under the resolved backlog directory
 // for backtick-quoted file paths and verifies each exists relative to root.
 func lintStaleReferences(root string) []string {
 	var out []string
-	backlogDir := filepath.Join(root, ".crucible", "backlog")
+	backlogDir := getBacklogDir(root)
 	if _, err := os.Stat(backlogDir); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -103,7 +125,8 @@ func lintStaleReferences(root string) []string {
 // referenced (by filename) somewhere in BACKLOG.md.
 func lintBacklogIndex(root string) []string {
 	var out []string
-	backlogMd := filepath.Join(root, ".crucible", "backlog", "BACKLOG.md")
+	backlogDir := getBacklogDir(root)
+	backlogMd := filepath.Join(backlogDir, "BACKLOG.md")
 	data, err := os.ReadFile(backlogMd)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -115,7 +138,7 @@ func lintBacklogIndex(root string) []string {
 	content := string(data)
 
 	for _, subDir := range []string{"features", "bugs", "chores"} {
-		dir := filepath.Join(root, ".crucible", "backlog", subDir, "active")
+		dir := filepath.Join(backlogDir, subDir, "active")
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -134,10 +157,11 @@ func lintBacklogIndex(root string) []string {
 }
 
 // frontmatterStatusRe matches the YAML status field in frontmatter.
-var frontmatterStatusRe = regexp.MustCompile(`(?m)^status[:]\s*"?(.+?)"?\s*$`)
+var frontmatterStatusRe = regexp.MustCompile(`(?m)^status:\s*"?(.+?)"?\s*$`)
 
 // validStatuses lists the allowed status values.
 var validStatuses = map[string]bool{
+	"Stub":             true,
 	"Production":       true,
 	"In Progress":      true,
 	"Planning":         true,
@@ -152,8 +176,9 @@ var validStatuses = map[string]bool{
 // lintBacklogStatus checks that each backlog item has a valid YAML status.
 func lintBacklogStatus(root string) []string {
 	var out []string
+	backlogDir := getBacklogDir(root)
 	for _, subDir := range []string{"features", "bugs", "chores"} {
-		dir := filepath.Join(root, ".crucible", "backlog", subDir, "active")
+		dir := filepath.Join(backlogDir, subDir, "active")
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -175,7 +200,7 @@ func lintBacklogStatus(root string) []string {
 			status := string(m[1])
 			if !validStatuses[status] {
 				out = append(out,
-					fmt.Sprintf("%s/active/%s: invalid status %q (valid: Production, In Progress, Planning, Draft, Archived, Resolved, Ready, Ready for Review, Ready for Deploy)",
+					fmt.Sprintf("%s/active/%s: invalid status %q (valid: Stub, Production, In Progress, Planning, Draft, Archived, Resolved, Ready, Ready for Review, Ready for Deploy)",
 						subDir, e.Name(), status))
 			}
 		}
@@ -533,6 +558,52 @@ func readStringArray(v interface{}) []string {
 		s, ok := item.(string)
 		if ok && strings.TrimSpace(s) != "" {
 			out = append(out, strings.TrimSpace(s))
+		}
+	}
+	return out
+}
+
+// lintDebugPrints ensures no powershell file contains Write-Host.*DEBUG: statements.
+func lintDebugPrints(root string) []string {
+	var out []string
+	powershellDir := filepath.Join(root, "powershell")
+	filepath.WalkDir(powershellDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".ps1") {
+			return nil
+		}
+		// Skip files in directories we don't own or don't want to lint (e.g. adopter worktrees)
+		if strings.Contains(path, ".agent-workspaces") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		lines := strings.Split(string(data), "\n")
+		debugRe := regexp.MustCompile(`(?i)Write-Host\s+.*DEBUG:`)
+		for i, line := range lines {
+			if debugRe.MatchString(line) {
+				relFile, _ := filepath.Rel(root, path)
+				out = append(out, fmt.Sprintf("%s:%d: forbidden Write-Host DEBUG print statement", relFile, i+1))
+			}
+		}
+		return nil
+	})
+	return out
+}
+
+// lintFactorySelfReference ensures factory.ps1 does not hardcode "powershell/factory.ps1"
+func lintFactorySelfReference(root string) []string {
+	var out []string
+	factoryPath := filepath.Join(root, "powershell", "factory.ps1")
+	data, err := os.ReadFile(factoryPath)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "powershell/factory.ps1") && !strings.Contains(line, "crucibleRoot") {
+			out = append(out, fmt.Sprintf("powershell/factory.ps1:%d: hardcoded \"powershell/factory.ps1\" path detected. Prepend with crucible_root configuration instead", i+1))
 		}
 	}
 	return out

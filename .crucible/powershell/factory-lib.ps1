@@ -1,5 +1,11 @@
 Set-StrictMode -Version Latest
 
+$helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
+if (-not (Test-Path -LiteralPath $helpersPath)) {
+    throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $helpersPath
+
 # Canonical runtime specialist list. PowerShell ValidateSet attributes still need
 # string literals, so keep those literals synchronized with this constant.
 $script:FACTORY_SPECIALISTS = @("groomer", "architect", "reviewer", "operator", "researcher")
@@ -23,13 +29,14 @@ function Get-BacklogItemPathForTask {
         @($typeDir)
     }
 
+    $backlogDir = Get-ConfiguredPath -Key "backlog"
     foreach ($dir in $typeDirs) {
-        $activeMatch = Get-ChildItem -Path (".crucible/backlog/" + $dir + "/active") -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($null -ne $activeMatch) {
             return $activeMatch.FullName
         }
 
-        $rootMatch = Get-ChildItem -Path (".crucible/backlog/" + $dir) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        $rootMatch = Get-ChildItem -Path (Join-Path $backlogDir $dir) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($null -ne $rootMatch) {
             return $rootMatch.FullName
         }
@@ -55,7 +62,7 @@ function Get-SpecBudgetTier {
     $tier = ""
     $frontmatter = Get-Content -LiteralPath $specPath -Head 30
     foreach ($line in $frontmatter) {
-        if ($line -match '^\s*budget_tier[:]\s*"?(\w+)"?\s*$') {
+        if ($line -match '^\s*budget_tier:\s*"?(\w+)"?\s*$') {
             $tier = $matches[1].ToLowerInvariant()
             break
         }

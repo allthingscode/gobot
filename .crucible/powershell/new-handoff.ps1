@@ -32,12 +32,27 @@ param(
     [string[]]$HumanApproved = @(),
     [string[]]$HumanDeferred = @(),
     [string[]]$HumanRejected = @(),
+    [string[]]$StubSpecsCreated = @(),
     [string]$SchemaPath = "",
-    [string]$OutputPath = ""
+    [string]$OutputPath = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$ProjectRoot = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+    if ($null -ne $repoRootVar) {
+        $ProjectRoot = $repoRootVar.Value
+    } else {
+        $ProjectRoot = (Get-Location).Path
+    }
+}
+$REPO_ROOT = $ProjectRoot
+
 $factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
 . $factoryLibPath
 
@@ -52,7 +67,7 @@ function Get-CycleIdFromTaskFile {
         return ""
     }
     $raw = Get-Content -LiteralPath $Path -Raw
-    if ($raw -match '(?m)^Cycle ID[:]\s*(.+?)\s*$') {
+    if ($raw -match '(?m)^Cycle ID:\s*(.+?)\s*$') {
         return $Matches[1].Trim()
     }
     return ""
@@ -64,7 +79,7 @@ function Get-PromptVersionFromPromptFile {
         return ""
     }
     $raw = Get-Content -LiteralPath $Path -Raw
-    if ($raw -match '<!--\s*prompt_version[:]\s*(.+?)\s*-->') {
+    if ($raw -match '<!--\s*prompt_version:\s*(.+?)\s*-->') {
         return $Matches[1].Trim()
     }
     return ""
@@ -86,14 +101,15 @@ function Get-LatestActiveHandoffForTask {
     return $null
 }
 
-$handoffDir = ".crucible/session/handoffs"
+$sessionDir = Get-ConfiguredPath -Key "session"
+$handoffDir = Join-Path $sessionDir "handoffs"
 if (-not (Test-Path -LiteralPath $handoffDir)) {
     New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 }
 
 $latest = Get-LatestActiveHandoffForTask -HandoffDir $handoffDir -Task $TaskId
-$sourceTaskPath = ".crucible/session/$TaskId/$Source/task.md"
-$sourcePromptPath = ".crucible/session/$TaskId/$Source/prompt.md"
+$sourceTaskPath = Join-Path $sessionDir "$TaskId/$Source/task.md"
+$sourcePromptPath = Join-Path $sessionDir "$TaskId/$Source/prompt.md"
 $taskCycleId = Get-CycleIdFromTaskFile -Path $sourceTaskPath
 $promptVersionFromPrompt = Get-PromptVersionFromPromptFile -Path $sourcePromptPath
 $specBudgetTier = Get-SpecBudgetTier -Task $TaskId
@@ -194,6 +210,14 @@ $resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
     @()
 }
 
+[string[]]$resolvedStubSpecsCreated = if ($null -ne $StubSpecsCreated -and $StubSpecsCreated.Count -gt 0) {
+    @($StubSpecsCreated | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+} elseif ($null -ne $latest -and $latest.PSObject.Properties["stub_specs_created"] -and $null -ne $latest.stub_specs_created) {
+    @($latest.stub_specs_created)
+} else {
+    @()
+}
+
 $payload = [ordered]@{
     task_id                  = $TaskId
     source_specialist        = $Source
@@ -214,6 +238,9 @@ $payload = [ordered]@{
 
 if ($Source -eq "groomer" -or @($resolvedFileAffinity).Count -gt 0) {
     $payload.file_affinity = $resolvedFileAffinity
+}
+if ($Source -eq "groomer" -and $Target -eq "reviewer" -or @($resolvedStubSpecsCreated).Count -gt 0) {
+    $payload.stub_specs_created = $resolvedStubSpecsCreated
 }
 if (@($ReviewerChecksPassed).Count -gt 0) {
     $payload.reviewer_checks_passed = @($ReviewerChecksPassed)

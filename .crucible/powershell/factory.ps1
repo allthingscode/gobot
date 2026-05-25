@@ -59,6 +59,9 @@ param (
     [string[]]$HandoffReviewerChecksPassed = @(),
 
     [Parameter(Mandatory=$false)]
+    [string[]]$HandoffStubSpecsCreated = @(),
+
+    [Parameter(Mandatory=$false)]
     [string[]]$HumanApproved = @(),
     [Parameter(Mandatory=$false)]
     [string[]]$HumanDeferred = @(),
@@ -94,8 +97,31 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+foreach ($lib in "config-helpers.ps1", "instruction-blocks.ps1", "language-presets.ps1") {
+    $libPath = Join-Path $PSScriptRoot "lib/$lib"
+    if (-not (Test-Path -LiteralPath $libPath)) {
+        throw "Required helper script not found at $libPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    }
+}
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 $factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
 . $factoryLibPath
+
+function Get-CrucibleRoot {
+    param([string]$ProjectRoot = "")
+    $root = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $REPO_ROOT } else { $ProjectRoot }
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+    $configPath = Join-Path $root ".crucible/config.yaml"
+    if (Test-Path -LiteralPath $configPath) {
+        try {
+            $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+            if ($content -match '(?m)^crucible_root:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
+                return $Matches[1].Trim()
+            }
+        } catch {}
+    }
+    return ".crucible"
+}
 # Framework powershell/ directory — used to resolve sibling scripts regardless of CWD.
 $FRAMEWORK_POWERSHELL = $PSScriptRoot
 # Anchor paths to the project root (where .crucible/ lives).
@@ -109,7 +135,38 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     }
     $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
 }
+$crucibleRoot = Get-CrucibleRoot -ProjectRoot $ProjectRoot
 Push-Location $REPO_ROOT
+
+# Display a one-line Crucible version banner from the project's installed config,
+# if version metadata is present. Silent on $Quiet or when config is missing/unstamped.
+if (-not $Quiet) {
+    $bannerCfg = Join-Path $REPO_ROOT ".crucible/config.yaml"
+    if (Test-Path -LiteralPath $bannerCfg) {
+        try {
+            $bannerContent = Get-Content -LiteralPath $bannerCfg -Raw -Encoding UTF8
+            $bannerVersion = $null
+            $bannerCommit = $null
+            if ($bannerContent -match '(?m)^crucible_version:\s+["'']?([^"''\r\n]+)["'']?\s*$') {
+                $bannerVersion = $Matches[1].Trim()
+            }
+            if ($bannerContent -match '(?m)^crucible_install_commit:\s+["'']?([^"''\r\n]+)["'']?\s*$') {
+                $bannerCommit = $Matches[1].Trim()
+            }
+            if ($bannerVersion -and $bannerVersion -match '^[0-9]+\.[0-9]+\.[0-9]+') {
+                if ($bannerCommit -and $bannerCommit -match '^[0-9a-f]{40}$') {
+                    Write-Host ("Crucible v" + $bannerVersion + " (commit " + $bannerCommit.Substring(0, 7) + ")") -ForegroundColor DarkGray
+                } else {
+                    Write-Host ("Crucible v" + $bannerVersion) -ForegroundColor DarkGray
+                }
+            } else {
+                Write-Host "Crucible (unversioned install)" -ForegroundColor DarkGray
+            }
+        } catch {
+            # Banner is informational; never block on a malformed config.
+        }
+    }
+}
 
 # Optional utility mode: readiness diagnostics.
 if ($Doctor) {
@@ -156,6 +213,9 @@ if ($NewHandoff) {
     if ($HandoffReviewerChecksPassed.Count -gt 0) {
         $genParams.ReviewerChecksPassed = $HandoffReviewerChecksPassed
     }
+    if ($HandoffStubSpecsCreated.Count -gt 0) {
+        $genParams.StubSpecsCreated = $HandoffStubSpecsCreated
+    }
 
     if ($HumanApproved.Count -gt 0) { $genParams.HumanApproved = [string[]]$HumanApproved }
     if ($HumanDeferred.Count -gt 0) { $genParams.HumanDeferred = [string[]]$HumanDeferred }
@@ -165,22 +225,28 @@ if ($NewHandoff) {
     exit $LASTEXITCODE
 }
 
-$HANDOFF_DIR = ".crucible/session/handoffs"
-$PROMPT_LIB = ".crucible/prompt-library"
+$sessionDir = Get-ConfiguredPath -Key "session"
+$backlogDir = Get-ConfiguredPath -Key "backlog"
+$workspacesDir = Get-ConfiguredPath -Key "workspaces"
+$HANDOFF_DIR = Join-Path $sessionDir "handoffs"
+$PROMPT_LIB = Get-ConfiguredPath -Key "prompts"
 $budgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
 $ceiling = 0
 $promptText = ""
 
 # When $TaskId is provided, log to per-task file; otherwise global.
 if (-not [string]::IsNullOrEmpty($TaskId)) {
-    $LOG_FILE = ".crucible/session/" + $TaskId + "/pipeline.log.jsonl"
+    $LOG_FILE = Join-Path $sessionDir ($TaskId + "/pipeline.log.jsonl")
     # Ensure the directory exists
     $logDir = Split-Path $LOG_FILE
     if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
 } else {
-    $LOG_FILE = ".crucible/session/global/pipeline.log.jsonl"
+    $LOG_FILE = Join-Path $sessionDir "global/pipeline.log.jsonl"
+    # Ensure the directory exists
+    $logDir = Split-Path $LOG_FILE
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
 }
-$GLOBAL_DIR = ".crucible/session/global"
+$GLOBAL_DIR = Join-Path $sessionDir "global"
 if (-not (Test-Path $GLOBAL_DIR)) { New-Item -ItemType Directory -Force -Path $GLOBAL_DIR | Out-Null }
 $CB_HISTORY_FILE = Join-Path $GLOBAL_DIR "circuit_breakers.jsonl"
 
@@ -203,9 +269,9 @@ function Write-NextStep {
         [switch]$ShouldAutoAdvance
     )
     $nsDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
-        ".crucible/session/" + $TaskId + "/" + $Specialist
+        Join-Path $sessionDir ($TaskId + "/" + $Specialist)
     } else {
-        ".crucible/session/" + $Specialist
+        Join-Path $sessionDir $Specialist
     }
     if (-not (Test-Path $nsDir)) { New-Item -ItemType Directory -Force -Path $nsDir | Out-Null }
     $nsFile = Join-Path $nsDir "next_step.txt"
@@ -336,7 +402,7 @@ function Check-Dependencies {
     $dependsOn = @()
     $parsing = $false
     foreach ($line in $frontmatter) {
-        if ($line -match 'depends_on[:]\s*\[([^\]]*)\]') {
+        if ($line -match 'depends_on:\s*\[([^\]]*)\]') {
             $rawDeps = $matches[1].Split(',') | ForEach-Object { $_.Trim().Replace('"', '').Replace("'", "") }
             $dependsOn = @($rawDeps | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
             break
@@ -358,8 +424,8 @@ function Check-Dependencies {
 
     Write-Quiet "`n[DEPENDENCY] Checking dependencies for $TaskId..." -ForegroundColor Cyan
     $dependencySources = @(
-        @{ Path = ".crucible/backlog/BACKLOG.md"; Name = "BACKLOG.md" },
-        @{ Path = ".crucible/backlog/ARCHIVED.md"; Name = "ARCHIVED.md" }
+        @{ Path = Join-Path $backlogDir "BACKLOG.md"; Name = "BACKLOG.md" },
+        @{ Path = Join-Path $backlogDir "ARCHIVED.md"; Name = "ARCHIVED.md" }
     )
     if (-not ($dependencySources | Where-Object { Test-Path $_.Path })) { return }
 
@@ -463,12 +529,20 @@ function Write-EventLog {
     $json = $eventObj | ConvertTo-Json -Compress
     
     Invoke-FileLock -LockPath "$LOG_FILE.lock" -TimeoutMs 5000 -TimeoutMessage "[EVENT LOG] Lock timeout reached (5000 ms). Forcing removal of stale lock." -ScriptBlock {
-        $json | Out-File -FilePath $LOG_FILE -Append -Encoding UTF8
+        $parentDir = Split-Path -Parent $LOG_FILE
+        if (-not (Test-Path -LiteralPath $parentDir)) {
+            New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+        }
+        [System.IO.File]::AppendAllText($LOG_FILE, $json + "`n", (New-Object System.Text.UTF8Encoding $false))
     }
 
     if ($Event -eq "circuit_breaker") {
         Invoke-FileLock -LockPath "$CB_HISTORY_FILE.lock" -TimeoutMs 5000 -TimeoutMessage "[EVENT LOG] Circuit breaker history lock timeout reached (5000 ms). Forcing stale lock removal." -ScriptBlock {
-            $json | Out-File -FilePath $CB_HISTORY_FILE -Append -Encoding UTF8
+            $parentCB = Split-Path -Parent $CB_HISTORY_FILE
+            if (-not (Test-Path -LiteralPath $parentCB)) {
+                New-Item -ItemType Directory -Path $parentCB -Force | Out-Null
+            }
+            [System.IO.File]::AppendAllText($CB_HISTORY_FILE, $json + "`n", (New-Object System.Text.UTF8Encoding $false))
         }
     }
     
@@ -483,7 +557,8 @@ function Get-LastEntry {
     $lines = Get-Content $LOG_FILE -Tail 200 -Encoding UTF8
     for ($i = $lines.Length - 1; $i -ge 0; $i--) {
         try {
-            $entry = $lines[$i] | ConvertFrom-Json
+            $cleanedLine = $lines[$i] -replace "^$([char]0xFEFF)", ""
+            $entry = $cleanedLine | ConvertFrom-Json
             if ($entry.task_id -eq $TaskId -and $entry.specialist -eq $Specialist -and ($null -eq $Event -or $entry.event -eq $Event)) {
                 return $entry
             }
@@ -502,7 +577,7 @@ function Write-BlockedTaskRecord {
         [string]$HumanDecisionNeeded = "Should we reduce scope, split the task, or abandon it?",
         [string[]]$Artifacts = @()
     )
-    $blockedDir = ".crucible/backlog/blocked"
+    $blockedDir = Join-Path $backlogDir "blocked"
     if (-not (Test-Path $blockedDir)) { New-Item -ItemType Directory -Force -Path $blockedDir | Out-Null }
 
     $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -673,8 +748,7 @@ function Mark-DuplicateHandoffsAsSuperseded {
 
 # --- 1. Load latest handoff.json ---
 if (-not (Test-Path $HANDOFF_DIR)) {
-    Write-Host "Error: Handoff directory not found at $HANDOFF_DIR" -ForegroundColor Red
-    exit 1
+    New-Item -ItemType Directory -Path $HANDOFF_DIR -Force | Out-Null
 }
 
 Mark-DuplicateHandoffsAsSuperseded -TaskId $TaskId -HandoffDir $HANDOFF_DIR
@@ -695,8 +769,61 @@ if (-not [string]::IsNullOrEmpty($TaskId)) {
         }
     }
     if (-not $latestHandoff) {
-        Write-Host ("Error: No active (non-superseded) handoff found for TaskId: " + $TaskId) -ForegroundColor Red
-        exit 1
+        # Auto-bootstrap initial tasks
+        $specPath = Get-BacklogItemPathForTask -Task $TaskId
+        if ($specPath -and (Test-Path $specPath)) {
+            $targetSpec = "groomer"
+            $budgetTier = "low"
+            
+            # Read target_specialist and budget_tier from frontmatter
+            $frontmatter = Get-Content -LiteralPath $specPath -Head 20
+            foreach ($line in $frontmatter) {
+                if ($line -match '^\s*target_specialist:\s*"?(\w+)"?\s*$') {
+                    $targetSpec = $matches[1].ToLowerInvariant()
+                }
+                if ($line -match '^\s*budget_tier:\s*"?(\w+)"?\s*$') {
+                    $budgetTier = $matches[1].ToLowerInvariant()
+                }
+            }
+            
+            $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+            $bootstrapFile = Join-Path $HANDOFF_DIR "$TaskId-$timestamp.json"
+            $currentCommit = ""
+            if (Test-Path .git) {
+                try {
+                    $currentCommit = (git rev-parse HEAD 2>$null).Trim()
+                } catch {}
+            }
+            if (-not $currentCommit) {
+                $currentCommit = "0000000000000000000000000000000000000000"
+            }
+
+            $bootstrapHandoff = @{
+                task_id                  = $TaskId
+                source_specialist        = "operator"
+                target_specialist        = $targetSpec
+                cumulative_handoff_count = 1
+                handoff_retry_count      = 0
+                review_strike_count      = 0
+                rebase_count             = 0
+                budget_tier              = $budgetTier
+                reason                   = "Initial task bootstrap"
+                artifacts                = @()
+                file_affinity            = @()
+                prompt_version           = "1.0.0"
+                session_cycle_id         = "initial"
+                commit_hash              = $currentCommit
+            }
+            # Log session_start for operator bootstrap to prevent "missing_start_event" anomaly
+            Write-EventLog -Event "session_start" -TaskId $TaskId -Specialist "operator" -HandoffCount 1 -CycleId "initial"
+            $bootstrapHandoff | ConvertTo-Json -Depth 12 | Set-Content -Path $bootstrapFile -Encoding UTF8
+            
+            $latestHandoff = Get-Item $bootstrapFile
+            Write-Quiet "[INIT] No handoff found for task $TaskId; auto-bootstrapped initial handoff from operator to $targetSpec at $bootstrapFile" -ForegroundColor Green
+        } else {
+            Write-Host ("Error: No active (non-superseded) handoff found for TaskId: " + $TaskId) -ForegroundColor Red
+            exit 1
+        }
     }
 } else {
     # Unscoped: legacy behavior - pick globally newest handoff
@@ -713,6 +840,7 @@ $handoffFile = $latestHandoff.FullName
 try {
     $handoffRaw = Get-Content $handoffFile -Raw -Encoding UTF8
     $handoff = $handoffRaw | ConvertFrom-Json
+    $isBootstrap = ($handoff.psobject.Properties["reason"] -and $handoff.reason -eq "Initial task bootstrap") -and ($handoff.psobject.Properties["cumulative_handoff_count"] -and $handoff.cumulative_handoff_count -eq 1)
 } catch {
     Write-Host "Error: Failed to parse handoff file $handoffFile" -ForegroundColor Red
     Write-Host $_.Exception.Message
@@ -730,7 +858,8 @@ $logDerivedCount = 0
 if (Test-Path $LOG_FILE) {
     Get-Content $LOG_FILE -Encoding UTF8 | ForEach-Object {
         try {
-            $entry = $_ | ConvertFrom-Json
+            $cleanedLine = $_ -replace "^$([char]0xFEFF)", ""
+            $entry = $cleanedLine | ConvertFrom-Json
             if ($entry.task_id -eq $handoff.task_id -and $entry.event -eq "session_end" -and $entry.cycle_id -ne "test-cycle") { $logDerivedCount++ }
         } catch {}
     }
@@ -745,11 +874,11 @@ if ($logDerivedCount -gt [int]$handoff.cumulative_handoff_count) {
 # Scan known misplaced locations and warn if any are newer than the handoff we found.
 if (-not [string]::IsNullOrEmpty($TaskId)) {
     $misplacedPaths = @(
-        ".crucible/session/$TaskId/handoff.json",
-        ".crucible/session/$TaskId/architect/handoff.json",
-        ".crucible/session/$TaskId/reviewer/handoff.json",
-        ".crucible/session/$TaskId/operator/handoff.json",
-        ".crucible/session/$TaskId/groomer/handoff.json"
+        (Join-Path $sessionDir "$TaskId/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/architect/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/reviewer/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/operator/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/groomer/handoff.json")
     )
     foreach ($mp in $misplacedPaths) {
         if (Test-Path $mp) {
@@ -819,7 +948,7 @@ if ($preflightExit -ne 0 -or -not $preflightOk) {
 }
 
 # Construct the standard session-end command
-$nextFactoryCmd = "powershell.exe -ExecutionPolicy Bypass -File `"powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -Quiet"
+$nextFactoryCmd = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -Quiet"
 
 # --- 1b. Restore or generate cycle_id ---
 if ($handoff.psobject.Properties["cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.cycle_id)) {
@@ -833,7 +962,7 @@ if ($handoff.psobject.Properties["cycle_id"] -and -not [string]::IsNullOrEmpty($
 # --- 1c. Pre-flight Validation ---
 if ($Init) {
     # 1. Check for stale gate pending files for OTHER tasks
-    $gateDir = ".crucible/session/global/gate_decisions"
+    $gateDir = Join-Path $sessionDir "global/gate_decisions"
     if (Test-Path $gateDir) {
         $otherPending = Get-ChildItem -Path $gateDir -Filter "gate_decision_*_pending.json" | 
             Where-Object { $_.Name -notmatch ("gate_decision_" + [regex]::Escape($handoff.task_id) + "_pending\.json") }
@@ -908,9 +1037,9 @@ if (-not $lastEnd -or $lastEndHandoffCount -lt $handoff.cumulative_handoff_count
 
     # A-4: Task.md quality gate (required checklist section only)
     $taskMdPath = if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
-        ".crucible/session/$($handoff.task_id)/$($handoff.source_specialist)/task.md"
+        Join-Path $sessionDir ("$($handoff.task_id)/$($handoff.source_specialist)/task.md")
     } else {
-        ".crucible/session/$($handoff.source_specialist)/task.md"
+        Join-Path $sessionDir ("$($handoff.source_specialist)/task.md")
     }
     if (Test-Path $taskMdPath) {
         $checklistGate = Get-TaskChecklistGateResult -TaskMdPath $taskMdPath -RequiredSectionHeader "## Task List"
@@ -1011,13 +1140,12 @@ if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
     switch ($transition) {
         "groomer -> architect" {
             $specFile = Get-BacklogItemPathForTask -Task $handoff.task_id
-            if ([string]::IsNullOrWhiteSpace($specFile) -or -not (Test-Path -LiteralPath $specFile)) {
-                $verificationPassed = $false
-                $errorMsg = "Mandatory spec file for $($handoff.task_id) not found.`nExpected pattern: .crucible/backlog/{features,bugs,chores}/active/$($handoff.task_id)_*.md`nTip: filename must be {TASK_ID}_{slug}.md (underscore separator)."
+            if ([string]::IsNullOrEmpty($specFile) -or -not (Test-Path $specFile)) {
+                $errorMsg = "Mandatory spec file for $($handoff.task_id) not found.`nExpected pattern: $($backlogDir)/{features,bugs,chores}/active/$($handoff.task_id)_*.md`nTip: filename must be {TASK_ID}_{slug}.md (underscore separator)."
             }
         }
         "architect -> reviewer" {
-            $wtPath = ".crucible/.agent-workspaces/architect-$($handoff.task_id)"
+            $wtPath = Join-Path $workspacesDir ("architect-" + $handoff.task_id)
             if (Test-Path $wtPath) {
                 $branchCheck = git -C $wtPath branch --show-current 2>&1
                 if ($branchCheck -ne "task/$($handoff.task_id)") {
@@ -1037,7 +1165,7 @@ if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
             }
         }
         "reviewer -> operator" {
-            $reportPath = ".crucible/session/$($handoff.task_id)/reviewer/review_report.md"
+            $reportPath = Join-Path $sessionDir "$($handoff.task_id)/reviewer/review_report.md"
             if (-not (Test-Path $reportPath)) {
                 $verificationPassed = $false
                 $errorMsg = "Mandatory review_report.md not found."
@@ -1051,14 +1179,14 @@ if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
                     if ($content -match "(?sm)^\s*---\s*[\r\n]+(.*?)[\r\n]+\s*---") {
                         $yaml = $matches[1]
                         $decision = ""
-                        if ($yaml -match '(?m)^\s*review_decision[:]\s*["'']?(APPROVED|CHANGES_REQUESTED|BLOCKED)["'']?\s*$') { $decision = $matches[1] }
+                        if ($yaml -match '(?m)^\s*review_decision:\s*["'']?(APPROVED|CHANGES_REQUESTED|BLOCKED)["'']?\s*$') { $decision = $matches[1] }
 
                         if ($decision -ne "APPROVED") {
                             $verificationPassed = $false
                             $errorMsg = "Review report YAML 'review_decision' must be 'APPROVED' (found '$decision')."
                         }
 
-                        if ($yaml -match '(?m)^\s*acceptance_criteria_met[:]\s*false\s*$' -or $yaml -notmatch '(?m)^\s*acceptance_criteria_met[:]\s*true\s*$') {
+                        if ($yaml -match '(?m)^\s*acceptance_criteria_met:\s*false\s*$' -or $yaml -notmatch '(?m)^\s*acceptance_criteria_met:\s*true\s*$') {
                              $verificationPassed = $false
                              $errorMsg = "Review report YAML must have 'acceptance_criteria_met: true'."
                         }
@@ -1206,9 +1334,9 @@ if (Test-Path $LOCK_DIR) {
 }
 
 if (-not [string]::IsNullOrEmpty($TaskId)) {
-    $targetDir = ".crucible/session/" + $TaskId + "/" + $handoff.target_specialist
+    $targetDir = Join-Path $sessionDir ($TaskId + "/" + $handoff.target_specialist)
 } else {
-    $targetDir = ".crucible/session/" + $handoff.target_specialist
+    $targetDir = Join-Path $sessionDir $handoff.target_specialist
 }
 
 if (Test-Path $targetDir) {
@@ -1227,7 +1355,7 @@ if ($Recover) {
         exit 1
     }
 
-    $targetDir = ".crucible/session/$TaskId/$($handoff.target_specialist)"
+    $targetDir = Join-Path $sessionDir ($TaskId + "/" + $handoff.target_specialist)
     $taskFile = Join-Path $targetDir "task.md"
 
     if (-not (Test-Path $taskFile)) {
@@ -1344,7 +1472,7 @@ if ($handoff.psobject.Properties["rebase_count"] -and $handoff.rebase_count -ge 
 
 # A-2: Independent isolated test verification before accepting APPROVED ({task_id}, {task_id})
 if ($handoff.source_specialist -eq "reviewer" -and $handoff.target_specialist -eq "operator") {
-    $wtPath = ".crucible/.agent-workspaces/architect-" + $handoff.task_id
+    $wtPath = Join-Path $workspacesDir ("architect-" + $handoff.task_id)
     $isolatedChecksScript = "$FRAMEWORK_POWERSHELL/run-isolated-checks.ps1"
     if (Test-Path $wtPath) {
         if (-not (Test-Path $isolatedChecksScript)) {
@@ -1374,13 +1502,13 @@ if ($handoff.source_specialist -eq "reviewer" -and $handoff.target_specialist -e
 }
 
 # --- 3a. Human Gate ---
-if ($handoff.source_specialist -eq "operator") {
-    $GATE_DIR = ".crucible/session/global/gate_decisions"
+if ($handoff.source_specialist -eq "operator" -and -not $isBootstrap) {
+    $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
     if (-not (Test-Path $GATE_DIR)) {
         New-Item -ItemType Directory -Force -Path $GATE_DIR | Out-Null
     }
 
-    $GATE_PENDING_FILE = Join-Path (".crucible/session/" + $handoff.task_id) "gate_pending.txt"
+    $GATE_PENDING_FILE = Join-Path $sessionDir ($handoff.task_id + "/gate_pending.txt")
     $validOutcomes = @("accepted", "rejected", "redirected", "abandoned")
     $lowSignalGateReasons = @(
         "n/a", "na", "none", "ok", "looks good", "looks good.",
@@ -1489,7 +1617,7 @@ if ($handoff.source_specialist -eq "operator") {
                         $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
                         
                         # Construct gate-specific command for next_step.txt
-                        $gateCommand = "powershell.exe -ExecutionPolicy Bypass -File `"powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
+                        $gateCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
                         Write-NextStep -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_specialist
                         
                         exit 0
@@ -1543,7 +1671,7 @@ if ($handoff.source_specialist -eq "operator") {
                 Write-Host "4. Stop after recording the decision unless the human explicitly starts another task." -ForegroundColor White
                 
                 # Construct gate-specific command for next_step.txt
-                $gateCommand = "powershell.exe -ExecutionPolicy Bypass -File `"powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
+                $gateCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
                 Write-NextStep -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_specialist
                 
                 exit 0
@@ -1560,7 +1688,7 @@ if ($handoff.source_specialist -eq "operator") {
 if ($handoff.source_specialist -eq "groomer" -or $handoff.source_specialist -eq "operator") {
     Write-Quiet "`n[BACKLOG] Running backlog integrity check..." -ForegroundColor Cyan
     try {
-        $result = & "$FRAMEWORK_POWERSHELL/validate-backlog.ps1" -FixSummary 2>&1
+        $result = & "$FRAMEWORK_POWERSHELL/validate-backlog.ps1" -FixSummary -Quiet:$Quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[BACKLOG] VALIDATION FAILED:" -ForegroundColor Red
             $result | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }
@@ -1577,9 +1705,9 @@ if ($handoff.source_specialist -eq "groomer" -or $handoff.source_specialist -eq 
 
 # --- 3c. Dev Log Integrity Gate ---
 # Run automatically when Operator hands off to ensure Dev Logs are clean before next cycle.
-if ($handoff.source_specialist -eq "operator" -and $handoff.task_id -notmatch '^C-FACTORY-') {
+if ($handoff.source_specialist -eq "operator" -and $handoff.task_id -notmatch '^C-FACTORY-' -and -not $isBootstrap) {
     Write-Quiet "`n[DEV LOG] Running Dev Log security validation..." -ForegroundColor Cyan
-    $devLogPath = ".crucible/dev-logs/UNPUBLISHED_LOGS.md"
+    $devLogPath = Join-Path $sessionDir "../dev-logs/UNPUBLISHED_LOGS.md"
     if (-not (Test-Path $devLogPath)) {
         Write-Host "[DEV LOG] VALIDATION FAILED: $devLogPath does not exist." -ForegroundColor Red
         Write-Host "`n[STOP] [NEXT SESSION COMMAND]: YOU must create the Dev Log before proceeding." -ForegroundColor Red
@@ -1596,7 +1724,7 @@ if ($handoff.source_specialist -eq "operator" -and $handoff.task_id -notmatch '^
 
 # --- 3d. Workspace Cleanliness Gate ---
 # Block Operator handoff if untracked files exist outside of private/ignored dirs.
-if ($handoff.source_specialist -eq "operator" -and $handoff.task_id -notmatch '^C-FACTORY-') {
+if ($handoff.source_specialist -eq "operator" -and $handoff.task_id -notmatch '^C-FACTORY-' -and -not $isBootstrap) {
     $rawStatus = git status --porcelain 2>&1
     $strayFiles = @()
     foreach ($line in $rawStatus) {
@@ -1673,7 +1801,7 @@ if ($handoff.target_specialist -eq "done") {
 
 # Warn on concurrent Groomer dispatch - parallel Groomers write to the shared BACKLOG.md without locking (Fix 11)
 if ($handoff.target_specialist -eq "groomer") {
-    $otherGroomerSessions = @(Get-ChildItem -Path ".crucible/session" -Recurse -Filter "task.md" -ErrorAction SilentlyContinue |
+    $otherGroomerSessions = @(Get-ChildItem -Path $sessionDir -Recurse -Filter "task.md" -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match "[/\\]groomer[/\\]task\.md$" -and $_.FullName -notmatch [regex]::Escape($handoff.task_id) })
     if ($otherGroomerSessions.Count -gt 0) {
         Write-Host "[WARN] Another Groomer task.md detected - running concurrent Groomers risks BACKLOG.md corruption:" -ForegroundColor Yellow
@@ -1703,13 +1831,13 @@ if (-not (Test-Path $templateFile)) {
     $promptText = Get-Content $templateFile -Raw -Encoding UTF8
     
     # Extract prompt_version
-    if ($promptText -match '<!--\s*prompt_version[:]\s*(.+?)\s*-->') {
+    if ($promptText -match '<!--\s*prompt_version:\s*(.+?)\s*-->') {
         $promptVersion = $matches[1]
     }
 
     # Simple placeholder replacement
     $promptText = $promptText.Replace("{task_id}", $handoff.task_id)
-    $promptText = $promptText.Replace("{worktree}", (".crucible/.agent-workspaces/architect-" + $handoff.task_id))
+    $promptText = $promptText.Replace("{worktree}", (Join-Path $workspacesDir ("architect-" + $handoff.task_id)))
     
     $rebaseCount = if ($handoff.psobject.Properties["rebase_count"]) { $handoff.rebase_count } else { 0 }
     $promptText = $promptText.Replace("{rebase_count}", $rebaseCount)
@@ -1753,7 +1881,7 @@ if (-not (Test-Path $templateFile)) {
     $promptText = $promptText.Replace("{handoff_file}", $relativeHandoffPath)
 
     # Inject context bundle path
-    $contextBundlePath = ".crucible/session/$TaskId/$($handoff.target_specialist)/context.md"
+    $contextBundlePath = Join-Path $sessionDir "$TaskId/$($handoff.target_specialist)/context.md"
     if (-not [string]::IsNullOrEmpty($TaskId) -and (Test-Path $contextBundlePath)) {
         $promptText = $promptText.Replace("{context_bundle_path}", $contextBundlePath)
     } else {
@@ -1844,8 +1972,9 @@ if ([string]::IsNullOrWhiteSpace($promptText)) {
     # Final pass for task_id (may be introduced by other replacements like context_block)
     $promptText = $promptText.Replace("{task_id}", $handoff.task_id)
 
-    # Unresolved placeholder guard
-    $unresolvedTokens = [regex]::Matches($promptText, '\{[a-zA-Z_][a-zA-Z0-9_]*\}') |
+    # Unresolved placeholder guard — single-brace {token} only; {{double-brace}} tokens are
+    # intentional runtime substitutions that agents resolve from config.yaml, not factory.ps1.
+    $unresolvedTokens = [regex]::Matches($promptText, '(?<!\{)\{[a-zA-Z_][a-zA-Z0-9_]*\}(?!\})') |
         ForEach-Object { $_.Value } | Select-Object -Unique
     if (@($unresolvedTokens).Count -gt 0) {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_specialist `
@@ -1859,9 +1988,9 @@ if ([string]::IsNullOrWhiteSpace($promptText)) {
 # --- 6. Output Command ---
 # P-1: Write assembled prompt to file; emit short invocation command
 $targetSubDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
-    ".crucible/session/$TaskId/$($handoff.target_specialist)"
+    Join-Path $sessionDir "$TaskId/$($handoff.target_specialist)"
 } else {
-    ".crucible/session/$($handoff.target_specialist)"
+    Join-Path $sessionDir $($handoff.target_specialist)
 }
 if (-not (Test-Path $targetSubDir)) { New-Item -ItemType Directory -Force -Path $targetSubDir | Out-Null }
 $promptFilePath = Join-Path $targetSubDir "prompt.md"
@@ -1890,25 +2019,25 @@ Write-Quiet ("TEMPLATE  : " + $handoff.target_specialist + " (v: " + $promptVers
 
 if ($Init -and $handoff.target_specialist -eq "groomer") {
     Write-Quiet "[INIT] Identifying target task for Groomer..." -ForegroundColor Cyan
-    $backlogPath = ".crucible/backlog/BACKLOG.md"
+    $backlogPath = Join-Path $backlogDir "BACKLOG.md"
     if (Test-Path $backlogPath) {
         $backlogContent = Get-Content $backlogPath -Raw -Encoding UTF8
         $readyItems = $backlogContent -split "`n" | Where-Object { $_ -match "\|\s*Ready\s*\|" }
         
         $candidates = @()
-        foreach ($line in $readyItems) {
-            if ($line -match '\|\s*([A-Z]-[0-9]+)\s*\|') {
+        foreach ($item in $readyItems) {
+            if ($item -match '\|\s*([FBC]-[0-9]+)\s*\|') {
                 $tid = $matches[1]
                 $type = if ($tid -match "^F-") { "features" } elseif ($tid -match "^B-") { "bugs" } else { "chores" }
-                $specFiles = Get-ChildItem -Path ".crucible/backlog/$type/active" -Filter "$($tid)_*.md" -ErrorAction SilentlyContinue
+                $specFiles = Get-ChildItem -Path (Join-Path $backlogDir "$type/active") -Filter "$($tid)_*.md" -ErrorAction SilentlyContinue
                 if ($specFiles) {
                     $specFile = $specFiles | Select-Object -First 1
                     $fm = Get-Content $specFile.FullName -Head 10 -Encoding UTF8
                     $priority = "P3"
                     $createdAt = "9999-99-99"
                     foreach ($fml in $fm) {
-                        if ($fml -match 'priority[:]\s*"?(P[0-3])"?') { $priority = $matches[1] }
-                        if ($fml -match 'created_at[:]\s*"?(20[0-9]{2}-[0-9]{2}-[0-9]{2})"?') { $createdAt = $matches[1] }
+                        if ($fml -match 'priority:\s*"?(P[0-3])"?') { $priority = $matches[1] }
+                        if ($fml -match 'created_at:\s*"?(20[0-9]{2}-[0-9]{2}-[0-9]{2})"?') { $createdAt = $matches[1] }
                     }
                     $candidates += [PSCustomObject]@{ TaskId = $tid; Priority = $priority; CreatedAt = $createdAt }
                 }
@@ -1929,7 +2058,7 @@ if ($Init -and $handoff.target_specialist -eq "groomer") {
 }
 
 if ($handoff.target_specialist -eq "architect") {
-    $wtPath = ".crucible/.agent-workspaces/architect-" + $handoff.task_id
+    $wtPath = Join-Path $workspacesDir ("architect-" + $handoff.task_id)
     Write-Quiet ("WORKTREE  : " + $wtPath) -ForegroundColor Cyan
     
     if ($Init) {
@@ -1960,14 +2089,14 @@ if ($handoff.target_specialist -eq "architect") {
         }
 
         # Create task-scoped session directory
-        $sessionDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
-            ".crucible/session/" + $TaskId + "/architect"
+        $archSessionDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
+            Join-Path $sessionDir "$TaskId/architect"
         } else {
-            ".crucible/session/architect"
+            Join-Path $sessionDir "architect"
         }
-        if (-not (Test-Path $sessionDir)) {
-            New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
-            Write-Quiet ("[INIT] Created session dir: $sessionDir") -ForegroundColor Gray
+        if (-not (Test-Path $archSessionDir)) {
+            New-Item -ItemType Directory -Force -Path $archSessionDir | Out-Null
+            Write-Quiet ("[INIT] Created session dir: $archSessionDir") -ForegroundColor Gray
         }
     }
 }
@@ -1975,9 +2104,9 @@ if ($handoff.target_specialist -eq "architect") {
 if ($Init) {
     # Initialize task.md for the specialist - task-scoped when -TaskId is set
     $targetDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
-        ".crucible/session/" + $TaskId + "/" + $handoff.target_specialist
+        Join-Path $sessionDir "$TaskId/$($handoff.target_specialist)"
     } else {
-        ".crucible/session/" + $handoff.target_specialist
+        Join-Path $sessionDir $handoff.target_specialist
     }
     if (-not (Test-Path $targetDir)) {
         New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
@@ -1985,11 +2114,11 @@ if ($Init) {
     $taskFile = Join-Path $targetDir "task.md"
     if (-not (Test-Path $taskFile)) {
         Write-Quiet ("[INIT] Initializing " + $taskFile + "...") -ForegroundColor Yellow
-        $wtPath = ".crucible/.agent-workspaces/architect-" + $handoff.task_id
+        $wtPath = Join-Path $workspacesDir ("architect-" + $handoff.task_id)
         $sessionPath = if (-not [string]::IsNullOrEmpty($TaskId)) {
-            ".crucible/session/" + $TaskId
+            Join-Path $sessionDir $TaskId
         } else {
-            ".crucible/session/" + $handoff.target_specialist
+            Join-Path $sessionDir $handoff.target_specialist
         }
         
         $affinitySection = ""
@@ -2000,13 +2129,13 @@ if ($Init) {
         # Resolve backlog item path so agents don't need to search
         $backlogItemPath = "unknown"
         if ($typeDir -ne "unknown") {
-            $activeFile = Get-ChildItem -Path (".crucible/backlog/" + $typeDir + "/active") -Filter ($handoff.task_id + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+            $activeFile = Get-ChildItem -Path (Join-Path $backlogDir ($typeDir + "/active")) -Filter ($handoff.task_id + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($activeFile) {
-                $backlogItemPath = ".crucible/backlog/" + $typeDir + "/active/" + $activeFile.Name
+                $backlogItemPath = Join-Path $backlogDir ($typeDir + "/active/" + $activeFile.Name)
             } else {
                 # Fall back to root of type dir (Groomer may not have moved it yet)
-                $rootFile = Get-ChildItem -Path (".crucible/backlog/" + $typeDir) -Filter ($handoff.task_id + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($rootFile) { $backlogItemPath = ".crucible/backlog/" + $typeDir + "/" + $rootFile.Name }
+                $rootFile = Get-ChildItem -Path (Join-Path $backlogDir $typeDir) -Filter ($handoff.task_id + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($rootFile) { $backlogItemPath = Join-Path $backlogDir ($typeDir + "/" + $rootFile.Name) }
             }
         }
 
@@ -2014,7 +2143,7 @@ if ($Init) {
         if ($backlogItemPath -ne "unknown" -and (Test-Path $backlogItemPath)) {
             $specFrontmatter = Get-Content $backlogItemPath -Head 20 -Encoding UTF8
             foreach ($fml in $specFrontmatter) {
-                if ($fml -match 'budget_tier[:]\s*"?(\w+)"?') {
+                if ($fml -match 'budget_tier:\s*"?(\w+)"?') {
                     $specBudgetTier = $matches[1].ToLower()
                     if ($specBudgetTier -ne $handoff.budget_tier.ToLower()) {
                         Write-Host "[WARN] budget_tier mismatch: handoff says '$($handoff.budget_tier)' but spec says '$specBudgetTier'. Using spec value to prevent budget escalation." -ForegroundColor Yellow
@@ -2046,7 +2175,7 @@ if ($Init) {
         $selectedTaskList = $selectedTaskList.Replace("{worktree}", $wtPath)
         $selectedTaskList = $selectedTaskList.Replace("{session_dir}", $sessionPath + "/" + $handoff.target_specialist)
 
-        $sessionEndCmd = "powershell.exe -ExecutionPolicy Bypass -File `"powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -Quiet"
+        $sessionEndCmd = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -Quiet"
 
         $taskContent = "# Task: $($handoff.task_id)`n" +
             "Role: $($handoff.target_specialist)`n" +
@@ -2132,7 +2261,7 @@ $actionCmd = $Target + " " + '"' + $shortPrompt + '"'
 
 # Gate transitions always require human confirmation regardless of -AutoAdvance.
 # Research Gate is enforced by Researcher SOP; Human Gate fires on all operator handoffs.
-$isGateTransition = ($handoff.source_specialist -eq "operator") -or ($handoff.source_specialist -eq "researcher")
+$isGateTransition = (($handoff.source_specialist -eq "operator") -or ($handoff.source_specialist -eq "researcher")) -and -not $isBootstrap
 $shouldAutoAdvance = $AutoAdvance -and -not $isGateTransition
 
 Write-NextStep -Command $nextFactoryCmd -TaskId $handoff.task_id -Specialist $handoff.target_specialist -ActionCmd $actionCmd -ShouldAutoAdvance:$shouldAutoAdvance

@@ -15,11 +15,19 @@ param (
 
 $ErrorActionPreference = "Stop"
 
-$STATE_FILE = ".crucible/session/global/session_state.json"
-$BACKLOG_FILE = ".crucible/backlog/BACKLOG.md"
-$LOG_DIR = ".crucible/session"
-$HANDOFF_DIR = ".crucible/session/handoffs"
-$GLOBAL_CB_HISTORY_FILE = ".crucible/session/global/circuit_breakers.jsonl"
+$helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
+if (-not (Test-Path -LiteralPath $helpersPath)) {
+    throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $helpersPath
+$sessionDir = Get-ConfiguredPath -Key "session"
+$backlogDir = Get-ConfiguredPath -Key "backlog"
+
+$STATE_FILE = Join-Path $sessionDir "global/session_state.json"
+$BACKLOG_FILE = Join-Path $backlogDir "BACKLOG.md"
+$LOG_DIR = $sessionDir
+$HANDOFF_DIR = Join-Path $sessionDir "handoffs"
+$GLOBAL_CB_HISTORY_FILE = Join-Path $sessionDir "global/circuit_breakers.jsonl"
 $RECENT_CB_WINDOW_HOURS = 72
 
 # --- 1. Load Data ---
@@ -107,13 +115,21 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     if (-not $isFinished) {
         $logPath = "$LOG_DIR/$taskId/pipeline.log.jsonl"
         if (Test-Path $logPath) {
-            $logs = Get-Content $logPath -ErrorAction SilentlyContinue | ConvertFrom-Json -ErrorAction SilentlyContinue
-            if ($logs) {
-                $lastStart = $logs | Where-Object { $_.event -eq "session_start" } | Select-Object -Last 1
-                if ($lastStart) {
-                    $startTime = [DateTime]::Parse($lastStart.timestamp)
-                    $elapsed = [DateTime]::UtcNow - $startTime.ToUniversalTime()
-                    $duration = "$([Math]::Floor($elapsed.TotalHours))h $($elapsed.Minutes)m"
+            $logLines = Get-Content $logPath -ErrorAction SilentlyContinue
+            if ($logLines) {
+                $logs = @()
+                foreach ($line in $logLines) {
+                    $cleaned = $line -replace "^$([char]0xFEFF)", ""
+                    $parsed = $cleaned | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    if ($parsed) { $logs += $parsed }
+                }
+                if ($logs) {
+                    $lastStart = $logs | Where-Object { $_.event -eq "session_start" } | Select-Object -Last 1
+                    if ($lastStart) {
+                        $startTime = [DateTime]::Parse($lastStart.timestamp)
+                        $elapsed = [DateTime]::UtcNow - $startTime.ToUniversalTime()
+                        $duration = "$([Math]::Floor($elapsed.TotalHours))h $($elapsed.Minutes)m"
+                    }
                 }
             }
         }
@@ -125,13 +141,13 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     }
     
     $dependencies = ""
-    $featureFiles = @(Get-ChildItem -Path ".crucible/backlog" -Recurse -Filter ($taskId + "_*.md") -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "active" })
+    $featureFiles = @(Get-ChildItem -Path $backlogDir -Recurse -Filter ($taskId + "_*.md") -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "active" })
     if ($featureFiles.Count -gt 0) {
         $specContent = Get-Content $featureFiles[0].FullName
         $inDepends = $false
         $deps = @()
         foreach ($line in $specContent) {
-            if ($line -match "^depends_on[:]\s*\[(.*?)\]") {
+            if ($line -match "^depends_on:\s*\[(.*?)\]") {
                 $depsStr = $Matches[1] -replace '["''\s]', ''
                 if ($depsStr) { $deps += $depsStr -split ',' }
                 break
@@ -190,6 +206,7 @@ $cbEventsAll = @()
 if (Test-Path $GLOBAL_CB_HISTORY_FILE) {
     $cbEventsAll = @(
         Get-Content -Path $GLOBAL_CB_HISTORY_FILE -ErrorAction SilentlyContinue |
+            ForEach-Object { $_ -replace "^$([char]0xFEFF)", "" } |
             ConvertFrom-Json -ErrorAction SilentlyContinue |
             Where-Object { $_.event -eq "circuit_breaker" -and $_.timestamp }
     )
@@ -200,6 +217,7 @@ if ($cbEventsAll.Count -eq 0) {
         if (-not (Test-Path $taskLog)) { continue }
         $taskEvents = @(
             Get-Content -Path $taskLog -ErrorAction SilentlyContinue |
+                ForEach-Object { $_ -replace "^$([char]0xFEFF)", "" } |
                 ConvertFrom-Json -ErrorAction SilentlyContinue |
                 Where-Object { $_.event -eq "circuit_breaker" -and $_.timestamp }
         )
