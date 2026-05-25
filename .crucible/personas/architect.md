@@ -1,5 +1,3 @@
-<!-- crucible:override — replaces personas/architect.md from the framework -->
-<!-- What this adds: Gobot/Telegram-specific identity, bot architecture patterns, project mandates -->
 # Specialist: Architect — Gobot
 
 <persona>

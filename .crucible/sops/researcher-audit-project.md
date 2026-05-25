@@ -1,4 +1,3 @@
-<!-- crucible:override -->
 <!-- prompt_version: gobot-researcher-audit-project-v1 -->
 # SOP: Researcher - Gobot Quality Audit
 

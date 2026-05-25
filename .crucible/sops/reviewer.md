@@ -1,5 +1,3 @@
-﻿<!-- crucible:override — replaces sops/reviewer.md from the framework -->
-<!-- What this adds: Gobot-specific Step 5 quality checks (Telegram patterns, Go idioms, SQLite safety) -->
 <!-- prompt_version: reviewer-sop-gobot-v1 -->
 # SOP: Reviewer — Gobot
 
