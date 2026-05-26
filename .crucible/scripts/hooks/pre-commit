@@ -1,0 +1,45 @@
+#!/bin/sh
+# Crucible framework pre-commit hook
+# Runs policy-drift checks, mojibake checks, Go lints, and merge conflict marker checks.
+# A non-zero exit from any check aborts the commit.
+
+set -e
+
+# Resolve top-level directory
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "--- Crucible pre-commit verification started"
+
+# 1. Policy Drift check
+echo "Running policy drift check..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-policy-drift.ps1
+
+# 2. Mojibake check
+echo "Running mojibake check..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1
+
+# 3. Go Factory Lint check
+echo "Running factory lint checks..."
+go run powershell/tests/factory_lint.go
+
+# 4. Unresolved Merge Conflict check
+echo "Scanning staged files for unresolved merge conflict markers..."
+STAGED_FILES=$(git diff --cached --name-only)
+if [ -n "$STAGED_FILES" ]; then
+    # Filter files that exist to avoid grep errors on deleted staged files
+    EXISTING_STAGED_FILES=""
+    for file in $STAGED_FILES; do
+        if [ -f "$file" ]; then
+            EXISTING_STAGED_FILES="$EXISTING_STAGED_FILES $file"
+        fi
+    done
+    if [ -n "$EXISTING_STAGED_FILES" ]; then
+        if grep -E '^(<{7}|={7}$|>{7})' $EXISTING_STAGED_FILES >/dev/null 2>&1; then
+            echo "ERROR: Unresolved merge conflicts detected in staged files. Please fix them before committing."
+            exit 1
+        fi
+    fi
+fi
+
+echo "--- Pre-commit: all verification tests passed!"

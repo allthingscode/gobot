@@ -49,7 +49,7 @@ function New-FrameworkFixture {
 {
   "scaffold_source": "templates/project/.crucible",
   "root_files": ["install-manifest.json"],
-  "copied_dirs": ["docs", "powershell"],
+  "copied_dirs": ["docs", "powershell", "templates"],
   "adopter_owned_excludes": ["config.yaml", "backlog/**", "session/**", "research/**", ".gemini/**", ".private/**", ".agent-workspaces/**"]
 }
 '@
@@ -109,6 +109,7 @@ try {
         Assert-Result -Name "safe reported" -Condition ($result.Output -match 'safe-overwrite:\s+1') -FailureMessage $result.Output
         $updated = Get-Content -LiteralPath (Join-Path $adopter ".crucible/powershell/tool.ps1") -Raw -Encoding UTF8
         Assert-Result -Name "file updated" -Condition ($updated -match 'head') -FailureMessage "safe-overwrite did not copy head content"
+        Assert-Result -Name "scaffold snapshot present" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/templates/project/.crucible/README.md")) -FailureMessage "scaffold snapshot was not installed"
         $config = Get-Content -LiteralPath (Join-Path $adopter ".crucible/config.yaml") -Raw -Encoding UTF8
         Assert-Result -Name "commit updated" -Condition ($config -match [regex]::Escape($commitB)) -FailureMessage "install commit was not advanced"
     }
@@ -177,10 +178,30 @@ try {
 
         $result = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe"
         Assert-Result -Name "exit ok" -Condition ($result.ExitCode -eq 0) -FailureMessage $result.Output
-        Assert-Result -Name "add reported" -Condition ($result.Output -match 'add:\s+1') -FailureMessage $result.Output
+        Assert-Result -Name "add reported" -Condition ($result.Output -match 'add:\s+4') -FailureMessage $result.Output
         Assert-Result -Name "new file copied" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/new.md")) -FailureMessage "added file was not copied"
         $config = Get-Content -LiteralPath (Join-Path $adopter ".crucible/config.yaml") -Raw -Encoding UTF8
         Assert-Result -Name "commit updated" -Condition ($config -match [regex]::Escape($commitB)) -FailureMessage "install commit was not advanced after add"
+    }
+
+    $results += Run-Test -Name "Missing scaffold snapshot is restored during update" -Body {
+        $framework = Join-Path $tempRoot "snapshot-framework"
+        $commitA = New-FrameworkFixture -Root $framework
+        $adopter = Join-Path $tempRoot "snapshot-adopter"
+        Copy-FrameworkToAdopter -Framework $framework -Adopter $adopter -Commit $commitA
+        $snapshotPath = Join-Path $adopter ".crucible/templates/project/.crucible/README.md"
+        $ignoredSnapshotPath = Join-Path $adopter ".crucible/templates/project/.crucible/backlog/F-000.md"
+        git -C $adopter init --quiet | Out-Null
+        Write-Utf8File -Path (Join-Path $adopter ".gitignore") -Content ".crucible/templates/project/.crucible/backlog/"
+
+        $result = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe"
+        Assert-Result -Name "exit ok" -Condition ($result.ExitCode -eq 0) -FailureMessage $result.Output
+        Assert-Result -Name "snapshot add reported" -Condition ($result.Output -match 'add:\s+3') -FailureMessage $result.Output
+        Assert-Result -Name "snapshot copied" -Condition (Test-Path -LiteralPath $snapshotPath) -FailureMessage "missing scaffold snapshot was not copied"
+        Assert-Result -Name "ignored snapshot copied" -Condition (Test-Path -LiteralPath $ignoredSnapshotPath) -FailureMessage "gitignored scaffold snapshot was not copied"
+        $expected = (git -C $framework show ($commitA + ":templates/project/.crucible/README.md")) -join "`n"
+        $actual = Get-Content -LiteralPath $snapshotPath -Raw -Encoding UTF8
+        Assert-Result -Name "snapshot content" -Condition (($actual.TrimEnd("`r", "`n")) -eq $expected) -FailureMessage "scaffold snapshot content did not match framework source"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

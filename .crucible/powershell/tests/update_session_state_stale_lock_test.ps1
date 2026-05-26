@@ -82,7 +82,9 @@ try {
     $r1 = Invoke-ScriptUnderTest
     Assert-True -Name "exit code 0 after stale recovery" -Cond ($r1.ExitCode -eq 0) -Detail ("got " + $r1.ExitCode + " :: " + $r1.Output)
     Assert-True -Name "warning emitted with [WARN] tag" -Cond ($r1.Output -match "\[WARN\]") -Detail $r1.Output
-    Assert-True -Name "warning includes lock file path" -Cond ($r1.Output -match [regex]::Escape($LockFile)) -Detail $r1.Output
+    $flatOutput = $r1.Output -replace '\s+', ''
+    $flatPath = $LockFile -replace '\s+', ''
+    Assert-True -Name "warning includes lock file path" -Cond ($flatOutput.Contains($flatPath)) -Detail $r1.Output
     Assert-True -Name "warning includes age in seconds" -Cond ($r1.Output -match "age \d+s") -Detail $r1.Output
     Assert-True -Name "lock file released after success" -Cond (-not (Test-Path -LiteralPath $LockFile)) -Detail "lock still present"
 

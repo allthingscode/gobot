@@ -1,0 +1,48 @@
+#!/bin/sh
+# Crucible framework pre-push hook
+# Runs all verification, scaffolding, and integration tests before code is pushed to remote.
+# A non-zero exit from any test suite aborts the push.
+
+set -e
+
+# Resolve top-level directory
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "--- Crucible pre-push verification started"
+
+# 1. Project Scaffolding unit tests
+echo "Running project scaffolding tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/init-project.tests.ps1
+
+# 2. Config Validation unit tests
+echo "Running config validation tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/validate-config.tests.ps1
+
+# 3. Adopter Smoke tests
+echo "Running adopter smoke tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/adopter-smoke.tests.ps1
+
+# 4. File Affinity tests
+echo "Running file affinity tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-file-affinity.tests.ps1
+
+# 5. Core Factory Routing test suite
+echo "Running core factory routing tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/factory_test.ps1
+
+# 6. E2E Adopter Onboarding Bootstrap tests
+echo "Running adopter onboarding E2E bootstrap tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/adopter-bootstrap.tests.ps1
+
+# 7. Pre-push hook coverage tests
+echo "Running pre-push hook tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/pre-push-hook.tests.ps1
+
+# Clean up temporary test artifacts on successful verification
+if [ -d ".crucible" ]; then
+    echo "Cleaning up temporary test artifacts..."
+    rm -rf .crucible
+fi
+
+echo "--- Pre-push: all verification and integration tests passed!"

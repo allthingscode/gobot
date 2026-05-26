@@ -1,7 +1,7 @@
 {
   "scaffold_source": "templates/project/.crucible",
-  "root_files": ["install-manifest.json"],
-  "copied_dirs": ["docs", "personas", "sops", "prompts", "schemas", "powershell", "templates"],
+  "root_files": ["install-manifest.json", "VERSION"],
+  "copied_dirs": ["docs", "personas", "sops", "prompts", "schemas", "powershell", "templates", "scripts"],
   "adopter_owned_excludes": [
     "config.yaml",
     "backlog/**",

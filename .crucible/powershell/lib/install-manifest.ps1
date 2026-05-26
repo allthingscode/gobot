@@ -119,6 +119,27 @@ function Convert-FrameworkPathToAdopter {
     throw "Path is not framework-owned according to install manifest: $SourcePath"
 }
 
+function Get-AdopterPathsForSource {
+    param(
+        [Parameter(Mandatory=$true)][string]$SourcePath,
+        [Parameter(Mandatory=$true)]$Manifest
+    )
+
+    $paths = @()
+    $adopterPath = Convert-FrameworkPathToAdopter -SourcePath $SourcePath -Manifest $Manifest
+    if (-not [string]::IsNullOrWhiteSpace($adopterPath)) {
+        $paths += $adopterPath
+    }
+
+    $source = ConvertTo-ManifestRelativePath -Path $SourcePath
+    $scaffold = (ConvertTo-ManifestRelativePath -Path ([string]$Manifest.scaffold_source)).TrimEnd("/")
+    if ($source.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $paths += $source
+    }
+
+    return @($paths | Sort-Object -Unique)
+}
+
 function Test-AdopterOwnedPath {
     param(
         [Parameter(Mandatory=$true)][string]$RelativePath,

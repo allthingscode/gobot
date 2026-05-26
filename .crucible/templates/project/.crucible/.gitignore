@@ -1,0 +1,27 @@
+# Crucible runtime state
+session/
+.agent-workspaces/
+locks/
+tmp/
+cache/
+
+# Generated handoffs, logs, and eval output
+handoffs/
+logs/
+eval/
+*.log
+*.jsonl
+
+# Raw or historical artifacts
+archive/
+archived/
+history/
+research/
+dev-logs/
+
+# Backlog is data, not structure — see docs/git-policy.md.
+# Uncomment the next line if you want to commit your backlog (e.g. public roadmap).
+backlog/
+
+# Keep this policy file committed.
+!.gitignore

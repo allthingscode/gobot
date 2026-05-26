@@ -1,0 +1,43 @@
+# Project-level Crucible configuration.
+# Copy this directory to <project-root>/.crucible and adjust values for the project.
+
+# Crucible bundle root directory for this project.
+# This must point to the folder containing the installed Crucible framework bundle.
+crucible_root: ".crucible"
+
+# Optional: stamped by init-project.ps1 at install time. Lets you see at a glance
+# which Crucible version/commit this project was installed from, and reason about
+# drift when pulling upstream updates. Safe to delete if you don't want this metadata.
+crucible_version: "REPLACE_WITH_VERSION"
+crucible_install_commit: "REPLACE_WITH_COMMIT"
+
+project:
+  name: "Example Project"
+  description: "Replace with a short description of the target project."
+  default_branch: "main"
+
+roles:
+  researcher:
+    model_tier: fast
+  groomer:
+    model_tier: fast
+  architect:
+    model_tier: high-capability
+  reviewer:
+    model_tier: high-capability
+  operator:
+    model_tier: fast
+
+verification:
+  quick:
+    - name: test
+      command: replace-with-project-quick-test-command
+  full:
+    - name: test
+      command: replace-with-project-full-test-command
+
+project_mandates:
+  - Replace with project-specific engineering rules.
+
+file_affinity_examples:
+  - src/

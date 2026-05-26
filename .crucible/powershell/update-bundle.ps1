@@ -106,6 +106,16 @@ function Test-CrucibleGitIgnored {
     return ($LASTEXITCODE -eq 0)
 }
 
+function Test-ScaffoldSnapshotPath {
+    param(
+        [Parameter(Mandatory=$true)][string]$RelativePath,
+        [Parameter(Mandatory=$true)]$Manifest
+    )
+    $path = ConvertTo-RelativeSlashPath -Path $RelativePath
+    $scaffold = (ConvertTo-RelativeSlashPath -Path ([string]$Manifest.scaffold_source)).TrimEnd("/")
+    return $path.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function New-ClassificationResult {
     return [ordered]@{
         "no-op" = New-Object System.Collections.Generic.List[object]
@@ -202,39 +212,42 @@ function Invoke-UpdateBundle {
     $results = New-ClassificationResult
 
     foreach ($sourcePath in $sourcePaths) {
-        $adopterPath = Convert-FrameworkPathToAdopter -SourcePath $sourcePath -Manifest $manifest
-        if ([string]::IsNullOrWhiteSpace($adopterPath)) { continue }
-        if (Test-AdopterOwnedPath -RelativePath $adopterPath -Manifest $manifest) { continue }
-        if (Test-CrucibleGitIgnored -AdopterRoot $adopterRootResolved -RelativePath $adopterPath) { continue }
-
-        $adopterFile = Join-Path $adopterCrucibleRoot $adopterPath
-        $hAdopter = Get-FileNormalizedHash -Path $adopterFile
-        $hBaseline = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath
-        $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
-
-        if ($null -eq $hHead) {
-            if ($null -ne $hAdopter) {
-                Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath $sourcePath -AdopterPath $adopterPath
+        foreach ($adopterPath in @(Get-AdopterPathsForSource -SourcePath $sourcePath -Manifest $manifest)) {
+            if ([string]::IsNullOrWhiteSpace($adopterPath)) { continue }
+            if (Test-AdopterOwnedPath -RelativePath $adopterPath -Manifest $manifest) { continue }
+            if (-not (Test-ScaffoldSnapshotPath -RelativePath $adopterPath -Manifest $manifest)) {
+                if (Test-CrucibleGitIgnored -AdopterRoot $adopterRootResolved -RelativePath $adopterPath) { continue }
             }
-            continue
-        }
-        if ($null -eq $hAdopter) {
-            Add-ClassifiedItem -Results $results -Category "add" -SourcePath $sourcePath -AdopterPath $adopterPath
-            continue
-        }
-        if ($hAdopter -eq $hHead) {
-            Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
-            continue
-        }
-        if ($null -eq $hBaseline) {
+
+            $adopterFile = Join-Path $adopterCrucibleRoot $adopterPath
+            $hAdopter = Get-FileNormalizedHash -Path $adopterFile
+            $hBaseline = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath
+            $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
+
+            if ($null -eq $hHead) {
+                if ($null -ne $hAdopter) {
+                    Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath $sourcePath -AdopterPath $adopterPath
+                }
+                continue
+            }
+            if ($null -eq $hAdopter) {
+                Add-ClassifiedItem -Results $results -Category "add" -SourcePath $sourcePath -AdopterPath $adopterPath
+                continue
+            }
+            if ($hAdopter -eq $hHead) {
+                Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
+                continue
+            }
+            if ($null -eq $hBaseline) {
+                Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
+                continue
+            }
+            if ($hAdopter -eq $hBaseline -and $hBaseline -ne $hHead) {
+                Add-ClassifiedItem -Results $results -Category "safe-overwrite" -SourcePath $sourcePath -AdopterPath $adopterPath
+                continue
+            }
             Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
-            continue
         }
-        if ($hAdopter -eq $hBaseline -and $hBaseline -ne $hHead) {
-            Add-ClassifiedItem -Results $results -Category "safe-overwrite" -SourcePath $sourcePath -AdopterPath $adopterPath
-            continue
-        }
-        Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
     }
 
     $sessionDir = Join-Path $adopterCrucibleRoot "session"
