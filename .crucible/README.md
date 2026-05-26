@@ -1,8 +1,8 @@
 # Crucible Install
 
-This directory is this application's installed Crucible dev factory. It is self-contained.
+This directory is this application's installed Crucible dev factory. It must be self-contained.
 
-Nothing in this application should directly reference a separate Crucible product checkout, a developer's personal filesystem path, or any Crucible file outside this installed `.crucible/` directory.
+Nothing in this application should reference external paths outside the repository. Crucible files, settings, docs, prompts, personas, SOPs, schemas, and scripts must be self-contained within this directory.
 
 ## Runtime Root
 
@@ -23,7 +23,7 @@ Agents and scripts then read:
 - `{{crucible_root}}/schemas/`
 - `{{crucible_root}}/powershell/`
 
-## What Belongs Here
+## Commit By Default
 
 Commit durable Crucible behavior and configuration:
 
@@ -38,21 +38,19 @@ Commit durable Crucible behavior and configuration:
 - `powershell/`
 - `agent-instructions/`, if present
 
-Project-specific edits to personas, SOPs, or prompts are made in these installed files. They are self-contained within this directory.
-
-## Product Repo Boundary
-
-The Crucible product repo is used to develop and package Crucible itself. It is not an application runtime dependency.
-
-If a needed manual, prompt, persona, SOP, schema, or script is missing from this directory, treat that as an installation packaging bug.
-
-## What Stays Runtime-Only
+## Ignore By Default
 
 The nested `.gitignore` excludes runtime state and generated artifacts by default:
 
-- `backlog/` - task data, unless Gobot deliberately chooses to publish it
+- `backlog/` - task data, unless the application deliberately chooses to publish it
 - `session/` - scratchpads, handoffs, event logs
 - `.agent-workspaces/` - git worktrees
 - `locks/`, `tmp/`, `cache/`
 - `research/`, `dev-logs/`
 - generated logs, JSONL files, handoffs, and eval output
+
+## Crucible Framework Files
+
+Crucible is designed to run in a self-contained manner directly from this directory. No external installations or checkouts are required at runtime.
+
+If a needed manual, prompt, persona, SOP, schema, or script is missing from this directory, please check your installation package.

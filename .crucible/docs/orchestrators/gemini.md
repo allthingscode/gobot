@@ -72,7 +72,7 @@ invoke_subagent(
         "Groomer: Next Item\n\n"
         "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
         "and .crucible/sops/groomer.md. Select the next eligible backlog item, write or "
-        "update its spec, write the groomer → architect handoff, then run" + ":\n\n"
+        "update its spec, write the groomer → architect handoff, then run:\n\n"
         "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
         "-Init -TaskId <selected_task_id> -Quiet\n\n"
         "Follow your SOP checkpoint mandate. Do not write the handoff until required "
@@ -92,7 +92,7 @@ invoke_agent(
     "Groomer: Next Item\n\n"
     "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
     "and .crucible/sops/groomer.md. Select the next eligible backlog item, write or "
-    "update its spec, write the groomer → architect handoff, then run" + ":\n\n"
+    "update its spec, write the groomer → architect handoff, then run:\n\n"
     "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
     "-Init -TaskId <selected_task_id> -Quiet\n\n"
     "Follow your SOP checkpoint mandate. Do not write the handoff until required "
@@ -138,3 +138,4 @@ All gate presentation formats (Research Gate, Human Gate, Circuit Breaker Gate) 
 
 **Status**: ACTIVE
 **Owner**: Gemini / Antigravity CLI Agent
+

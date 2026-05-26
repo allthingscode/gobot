@@ -16,7 +16,7 @@ $HasErrors = $false
 # 1. Check for specific PII
 $PIIPatterns = @(
     "<user>",
-    ("C:" + "\\Users\\[^\\]+")
+    "C:\\Users\\[^\\]+"
 )
 
 foreach ($Pattern in $PIIPatterns) {

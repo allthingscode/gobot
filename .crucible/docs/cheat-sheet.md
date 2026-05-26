@@ -1,4 +1,4 @@
-﻿# Dev Factory — Quick Start Cheat Sheet
+# Dev Factory — Quick Start Cheat Sheet
 
 This document summarizes the **Human <-> Agent** loop for the robust orchestration protocol.
 
@@ -38,6 +38,13 @@ Your role is to provide **high-level direction and approval**. You are the "Pilo
 | **Architect** | Implementer. Performs the coding in an isolated worktree. | *Code & Tests* |
 | **Reviewer** | Quality Gate. Validates Architect's work against the spec and project mandates. | *Approval/Strike* |
 | **Operator** | Deployment & Health. Merges code to master and performs final cleanup. | *Git Commit* |
+
+### Initial Task Bootstrapping
+
+When starting a task from the backlog using `factory.ps1 -Init -TaskId {id}`, if no active session folder exists, the factory automatically bootstraps the task:
+*   It parses the task's frontmatter in the backlog spec file (`{task_id}_{title}.md`).
+*   It extracts the `target_specialist` field (typically `"Groomer"` or `"Researcher"`), which specifies the first specialist to receive the task.
+*   It automatically generates an initial book-end handoff from `operator` to that `target_specialist`, scaffolds the workspace directories, and prepares the next specialist prompt.
 
 ---
 

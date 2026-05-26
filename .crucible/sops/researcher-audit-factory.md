@@ -1,4 +1,4 @@
-﻿<!-- prompt_version: researcher-audit-factory-v1 -->
+<!-- prompt_version: researcher-audit-factory-v1 -->
 # SOP: Researcher — Dev Factory Quality Audit
 
 **Use when:** Asked to run a structured quality audit of the Dev Factory multi-agent system.
@@ -20,8 +20,8 @@
 | Factory script | `{{crucible_root}}/powershell/factory.ps1` | Category 4 |
 | Recent handoff files | `.crucible/session/handoffs/` (last 3–5 files) | Categories 1, 6 |
 | Recent session task files | `.crucible/session/` (last completed task) | Categories 2, 3, 6, 7 |
-| Backlog | `.crucible/backlog/BACKLOG.md` | Category 8 |
-| Specialist prompt definitions | `{{crucible_root}}/prompts/`, `{{crucible_root}}/personas/`, and project overrides under `.crucible/` | Categories 3, 6 |
+| Backlog | `{{backlog_dir}}/BACKLOG.md` | Category 8 |
+| Specialist prompt definitions | `{{crucible_root}}/prompts/`, `{{crucible_root}}/personas/`, and `{{crucible_root}}/sops/` | Categories 3, 6 |
 | SOPs directory | `.crucible/sops/` | Category 3 |
 - Live framework research | Web (GitHub, docs, release notes) | Category 10 only |
 

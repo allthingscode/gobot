@@ -51,6 +51,12 @@ if (Test-Path $promptLib) {
     }
 }
 
+# 3. Verify no stray .crucible directory exists in the source repository root (Test Pollution check)
+$strayCrucible = Join-Path $REPO_ROOT ".crucible"
+if (Test-Path -LiteralPath $strayCrucible) {
+    $errors += "Test pollution detected: A stray '.crucible' directory exists at the repository root ($strayCrucible). Ensure tests run in isolated temp directories and clean up properly."
+}
+
 if ($errors.Count -gt 0) {
     Write-Host "POLICY DRIFT DETECTED:" -ForegroundColor Red
     $errors | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }

@@ -14,7 +14,7 @@
 | Task context | `.crucible/session/{task_id}/operator/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` (must be from Reviewer, status `Ready for Deploy`) |
 | Deployment plan | `.crucible/session/{task_id}/architect/deployment_plan.md` |
-| Backlog | `.crucible/backlog/BACKLOG.md` |
+| Backlog | `{{backlog_dir}}/BACKLOG.md` |
 
 ---
 
@@ -111,7 +111,7 @@ $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_i
 
 ### Step 8 — Update Backlog & Archive
 - Update `BACKLOG.md` status to `Production` (or `Resolved` for chores/bugs).
-- **Atomic Resolution**: Physically move the task's spec file from `.crucible/backlog/{type}/active/` to `.crucible/backlog/{type}/archived/`.
+- **Atomic Resolution**: Physically move the task's spec file from `{{backlog_dir}}/{type}/active/` to `{{backlog_dir}}/{type}/archived/`.
 - Update `BACKLOG.md` summary table: `powershell.exe -File {{crucible_root}}/powershell/validate-backlog.ps1 -FixSummary`
 - Move pipeline log: `.crucible/session/{task_id}/pipeline.log.jsonl` → `.crucible/session/archived/pipeline-{task_id}-{timestamp}.log.jsonl`
 

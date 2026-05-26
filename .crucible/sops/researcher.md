@@ -1,4 +1,4 @@
-﻿<!-- prompt_version: researcher-sop-v1 -->
+<!-- prompt_version: researcher-sop-v1 -->
 # SOP: Researcher
 
 **Role:** Explorer & Fact-Finder. Investigates vague problems, audits system quality, and evaluates options using external sources. All findings are untrusted until the human approves them at the Research Gate.
@@ -17,7 +17,7 @@
 | Task brief | `.crucible/session/{task_id}/researcher/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
 | Prior research | `.crucible/research/` (check before going external) |
-| Backlog item spec (if applicable) | `.crucible/backlog/{type}/active/{task_id}_*.md` |
+| Backlog item spec (if applicable) | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
 
 ---
 

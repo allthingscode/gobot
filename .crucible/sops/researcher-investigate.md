@@ -14,7 +14,7 @@
 | Task brief | `.crucible/session/{task_id}/researcher/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
 | Prior research on topic | `.crucible/research/` (check before going external) |
-| Backlog item spec (if applicable) | `.crucible/backlog/{type}/active/{task_id}_*.md` |
+| Backlog item spec (if applicable) | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
 
 ---
 

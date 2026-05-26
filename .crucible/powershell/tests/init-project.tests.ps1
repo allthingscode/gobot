@@ -366,11 +366,14 @@ try {
 
         $configPath = Join-Path $stampRoot ".crucible/config.yaml"
         $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $configBytes = [System.IO.File]::ReadAllBytes($configPath)
 
         Assert-Result -Name "version stamped" -Condition ($config -match '(?m)^crucible_version:\s+"\d+\.\d+\.\d+') -FailureMessage "crucible_version was not stamped with a semver value"
         Assert-Result -Name "commit stamped" -Condition ($config -match '(?m)^crucible_install_commit:\s+"[0-9a-f]{40}"') -FailureMessage "crucible_install_commit was not stamped with a 40-char SHA"
         Assert-Result -Name "no version placeholder" -Condition ($config -notmatch 'REPLACE_WITH_VERSION') -FailureMessage "REPLACE_WITH_VERSION placeholder remained"
         Assert-Result -Name "no commit placeholder" -Condition ($config -notmatch 'REPLACE_WITH_COMMIT') -FailureMessage "REPLACE_WITH_COMMIT placeholder remained"
+        Assert-Result -Name "config has no UTF-8 BOM" -Condition (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) -FailureMessage "config.yaml was written with a UTF-8 BOM"
+        Assert-Result -Name "manifest installed" -Condition (Test-Path -LiteralPath (Join-Path $stampRoot ".crucible/install-manifest.json")) -FailureMessage "install-manifest.json was not installed into .crucible"
     }
 
     $results += Run-Test -Name "StampVersionOnly stamps pre-existing config without scaffolding" -Body {
@@ -392,10 +395,12 @@ custom_value: "preserve me"
         Assert-Result -Name "stamp-only exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
 
         $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $configBytes = [System.IO.File]::ReadAllBytes($configPath)
         $head = ((git -C $REPO_ROOT rev-parse HEAD) | Out-String).Trim()
         Assert-Result -Name "version stamped" -Condition ($config -match '(?m)^crucible_version:\s+"\d+\.\d+\.\d+') -FailureMessage "crucible_version was not stamped"
         Assert-Result -Name "commit stamped" -Condition ($config -match ('(?m)^crucible_install_commit:\s+"' + [regex]::Escape($head) + '"')) -FailureMessage "crucible_install_commit did not match HEAD"
         Assert-Result -Name "custom key preserved" -Condition ($config -match 'custom_value: "preserve me"') -FailureMessage "custom config content was not preserved"
+        Assert-Result -Name "stamp-only config has no UTF-8 BOM" -Condition (-not ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF)) -FailureMessage "StampVersionOnly wrote config.yaml with a UTF-8 BOM"
         Assert-Result -Name "no scaffold copied" -Condition (-not (Test-Path -LiteralPath (Join-Path $stampOnlyRoot ".crucible/powershell"))) -FailureMessage "StampVersionOnly copied scaffold files"
 
         $previousPreference = $ErrorActionPreference

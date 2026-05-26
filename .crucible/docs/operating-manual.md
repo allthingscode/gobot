@@ -15,7 +15,7 @@ When you see a `{{double-braced}}` token in any persona, SOP, prompt, or doc, su
 | `{{crucible_root}}` | `.crucible/config.yaml` -> top-level `crucible_root:` field | `.crucible` |
 | `{task_id}` | The current task you're working on | `F-042`, `B-017`, `C-103` |
 
-Framework scripts live at `{{crucible_root}}/powershell/`. In an adopter project, `{{crucible_root}}` must resolve to that project's Crucible framework directory.
+Framework scripts live at `{{crucible_root}}/powershell/`. In an adopter project, `{{crucible_root}}` must resolve to that project's installed `.crucible/` bundle directory.
 
 The first thing an agent does at session start is read `.crucible/config.yaml` to resolve `{{crucible_root}}` for all subsequent commands.
 
@@ -38,7 +38,7 @@ RESEARCHER -> [RESEARCH GATE] -> GROOMER -> ARCHITECT -> REVIEWER -> OPERATOR ->
 
 All agents: your `task.md` contains a `## Resolved Paths` section with pre-computed paths for the current task. Read that first — do not glob or search for paths that are already there.
 
-**Two roots**: the project lives at the working directory; the installed Crucible bundle lives at `{{crucible_root}}` (read from `.crucible/config.yaml`, typically `.crucible`).
+**Two roots**: the project lives at the working directory; the installed Crucible bundle lives at `{{crucible_root}}` (read from `.crucible/config.yaml`, normally `.crucible`).
 
 ### Project tree (your working directory)
 
@@ -70,7 +70,7 @@ All agents: your `task.md` contains a `## Resolved Paths` section with pre-compu
   prompts/                           ← installed prompt templates
 ```
 
-### Framework tree (`{{crucible_root}}/`)
+### Installed Crucible bundle tree (`{{crucible_root}}/`)
 
 ```
 {{crucible_root}}/
@@ -89,7 +89,7 @@ All agents: your `task.md` contains a `## Resolved Paths` section with pre-compu
   docs/                              ← this manual and policy docs
 ```
 
-A project-local file in `.crucible/personas/`, `.crucible/sops/`, or `.crucible/prompts/` overrides the framework default for that role. Override only what you need to change.
+The files in `.crucible/personas/`, `.crucible/sops/`, and `.crucible/prompts/` are the active definitions for this project. Edit them in place to customize behavior.
 
 **Naming conventions**:
 - `F-NNN` = Feature, `B-NNN` = Bug, `C-NNN` = Chore, `R-NNN` = Research
@@ -511,7 +511,7 @@ The factory supports explicit task ordering via a dependency system. This ensure
 ## Prompt Version Tracking ({task_id})
 To ensure an accurate audit trail of agent behavior over time, each session records the specific prompt template version that drove it. 
 
-1. **Versioning Convention**: Every framework prompt template in `prompts/` MUST begin with a version comment header: `<!-- prompt_version: {role}-v1 -->`. Project-specific prompt overrides live under `.crucible/prompts/`.
+1. **Versioning Convention**: Every framework prompt template in `prompts/` MUST begin with a version comment header: `<!-- prompt_version: {role}-v1 -->`. Project prompts live under `.crucible/prompts/`. Edit them directly to customize prompt content.
 2. **Bumping Versions**: Whenever you modify the text or instructions inside a prompt template, you MUST increment its version suffix (e.g., from `-v1` to `-v2`).
 3. **Handoff Requirement**: When writing `handoff.json` at the end of a session, agents MUST include a `"prompt_version"` field indicating the version of the template they operated under (e.g., `"prompt_version": "architect-v1"`).
 4. **Validation**: The `factory.ps1` script validates this field. If it is missing, the handoff will be rejected. Additionally, `factory.ps1` will display the incoming prompt version in the console output when assembling the next agent's command.

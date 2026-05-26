@@ -20,8 +20,8 @@ A complete installed `.crucible/` contains:
 - `config.yaml` - project-specific commands, paths, roles, and mandates.
 - `.gitignore` - commit policy for durable behavior vs. runtime data.
 - `docs/` - operating manual, policies, runbooks, and quick references.
-- `personas/` - default specialist role definitions, with project edits allowed.
-- `sops/` - default specialist workflows, with project edits allowed.
+- `personas/` - specialist role definitions for this project; edit in place to customize.
+- `sops/` - specialist workflows for this project; edit in place to customize.
 - `prompts/` - prompt templates and prompt README.
 - `schemas/` - handoff and config validation schemas.
 - `powershell/` - current executable runtime.
@@ -46,7 +46,7 @@ crucible_root: ".crucible"
 
 Re-running against an existing scaffold refuses to overwrite files unless `-Force` is passed.
 
-You can also copy [../templates/project/.crucible](../templates/project/.crucible) manually when packaging a custom installer.
+
 
 ## Configure
 
@@ -93,10 +93,18 @@ Project-specific work belongs in the adopter project's installed `.crucible/`.
 For a new human or agent, read:
 
 1. [../README.md](../README.md) - what Crucible is and why it exists.
-2. [GET_STARTED.md](GET_STARTED.md) - step-by-step first task walkthrough.
-3. [operating-manual.md](operating-manual.md) - end-to-end workflow.
-4. [policy.md](policy.md) - canonical gates and circuit breakers.
-5. [handoff-protocol.md](handoff-protocol.md) - handoff shape and session lifecycle.
-6. [agent-instructions.md](agent-instructions.md) - what to add to adopter instruction files.
-7. [git-policy.md](git-policy.md) - what belongs in git under `.crucible/`.
-8. [cheat-sheet.md](cheat-sheet.md) - compact operational summary.
+2. [QUICKSTART.md](QUICKSTART.md) - single-screen first-run guide.
+3. [GET_STARTED.md](GET_STARTED.md) - step-by-step first task walkthrough.
+4. [operating-manual.md](operating-manual.md) - end-to-end workflow.
+5. [policy.md](policy.md) - canonical gates and circuit breakers.
+6. [handoff-protocol.md](handoff-protocol.md) - handoff shape and session lifecycle.
+7. [agent-instructions.md](agent-instructions.md) - what to add to adopter instruction files.
+8. [git-policy.md](git-policy.md) - what belongs in git under `.crucible/`.
+9. [cheat-sheet.md](cheat-sheet.md) - compact operational summary.
+10. [uninstall.md](uninstall.md) - how to cleanly remove Crucible.
+
+## Advanced: Custom Installers
+
+If you are packaging Crucible into a custom installer or running inside a specialized configuration framework, you can copy the [../templates/project/.crucible](../templates/project/.crucible) template directory manually instead of using `init-project.ps1`.
+
+

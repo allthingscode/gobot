@@ -37,7 +37,7 @@ $currentName = ""
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
 
 foreach ($line in $lines) {
-    if ($line -match "^verification[:]\s*$") {
+    if ($line -match "^verification:\s*$") {
         $inVerification = $true
         continue
     }
@@ -53,10 +53,10 @@ foreach ($line in $lines) {
             $inMode = $false
         }
         if ($inMode) {
-            if ($line -match "^\s{4}-\s*name[:]\s*(.+?)\s*$") {
+            if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
                 $currentName = $Matches[1].Trim("`"' ")
             }
-            if ($line -match "^\s{6}command[:]\s*(.+?)\s*$") {
+            if ($line -match "^\s{6}command:\s*(.+?)\s*$") {
                 $commands += @{
                     Name = $currentName
                     Command = $Matches[1].Trim("`"' ")

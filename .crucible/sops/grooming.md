@@ -33,8 +33,8 @@ Follow the Groomer SOP (`.crucible/personas/groomer.md`) strictly.
 2. **Resume from state** (per grooming SOP): Read `.crucible/session/global/session_state.json` → `personas.groomer`. If there is active state, resume from the saved phase and last item. If idle, start a fresh session.
 
 3. **Pass 1 — Inventory & Deduplication**:
-   - Scan `.crucible/backlog/` root — count active items by prefix (F-XXX, B-XXX, C-XXX)
-   - Read `.crucible/backlog/BACKLOG.md` master index
+   - Scan `{{backlog_dir}}/` root — count active items by prefix (F-XXX, B-XXX, C-XXX)
+   - Read `{{backlog_dir}}/BACKLOG.md` master index
    - Find semantic duplicates (same problem, different IDs). Merge context into the older item, set the duplicate to `status: "Archived"`
    - Detect rot: items referencing paths/files that no longer exist. Update or archive them.
 
@@ -48,7 +48,7 @@ Follow the Groomer SOP (`.crucible/personas/groomer.md`) strictly.
    - Flag items that have been Draft for a long time with no updates
 
 6. **Pass 4 — Index reconciliation**:
-   - Ensure `.crucible/backlog/BACKLOG.md` tables match the actual files and their current frontmatter
+   - Ensure `{{backlog_dir}}/BACKLOG.md` tables match the actual files and their current frontmatter
    - Production/Resolved items should be moved to the Archived section of the index
    - **Never delete files.** Move Production/Resolved items from root to `archived/` directory, then update each file's frontmatter `status` to `"Production"` or `"Resolved"`.
 

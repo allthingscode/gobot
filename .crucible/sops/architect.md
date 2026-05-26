@@ -13,7 +13,7 @@
 |---|---|
 | Task context | `.crucible/session/{task_id}/architect/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
-| Backlog spec | `.crucible/backlog/{type}/active/{task_id}_*.md` |
+| Backlog spec | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
 | Worktree | `.crucible/.agent-workspaces/architect-{task_id}/` (created by factory.ps1) |
 | Review fix spec (if from Reviewer) | `.crucible/session/{task_id}/reviewer/review_report.md` and `task.md` |
 

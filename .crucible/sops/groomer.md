@@ -1,4 +1,4 @@
-﻿<!-- prompt_version: groomer-sop-v1 -->
+<!-- prompt_version: groomer-sop-v1 -->
 # SOP: Groomer
 
 **Role:** De-risk backlog items and prepare complete technical specifications for the Architect.
@@ -16,8 +16,8 @@
 |---|---|
 | Task context | `.crucible/session/{task_id}/groomer/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
-| Backlog master index | `.crucible/backlog/BACKLOG.md` |
-| Backlog spec files | `.crucible/backlog/{type}/active/` |
+| Backlog master index | `{{backlog_dir}}/BACKLOG.md` |
+| Backlog spec files | `{{backlog_dir}}/{type}/active/` |
 | Research artifacts (if Researcher was involved) | `.crucible/research/R-NNN_*.md` |
 
 ---
@@ -28,7 +28,7 @@
 Scan `BACKLOG.md` for items marked `Production` or `Resolved`. Verify their corresponding `.md` files have been moved from `active/` to `archived/`. If any remain in `active/`, perform the move and update the frontmatter status. Run `{{crucible_root}}/powershell/validate-backlog.ps1 -FixSummary` to sync Priority Summary counts and item IDs.
 
 ### Pass 2: Inventory & Deduplication
-Scan `.crucible/backlog/` for new or untracked items. Deduplicate entries. Refine item titles and descriptions for clarity. Update state after this pass.
+Scan `{{backlog_dir}}/` for new or untracked items. Deduplicate entries. Refine item titles and descriptions for clarity. Update state after this pass.
 
 ### Pass 3: Priority Triage
 Identify the highest priority (`P0` → `P1` → `P2` → `P3`) items. Confirm status transitions are accurate. Flag any items blocked on external dependencies. Update state after this pass.
@@ -118,7 +118,7 @@ Write the handoff with `target_specialist: "reviewer"` and **omit** `file_affini
   "budget_tier": "low",
   "prompt_version": "groomer-sop-v1",
   "reason": "Pattern C: stub rows filed, parent task closed — no implementation work",
-  "artifacts": [".crucible/backlog/BACKLOG.md", ".crucible/backlog/{type}/active/{task_id}_*.md"],
+  "artifacts": ["{{backlog_dir}}/BACKLOG.md", "{{backlog_dir}}/{type}/active/{task_id}_*.md"],
   "suspicious_content": null
 }
 ```

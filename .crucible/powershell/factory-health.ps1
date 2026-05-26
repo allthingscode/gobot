@@ -55,7 +55,8 @@ try {
         Write-Quiet 'Checking for orphaned worktrees...' -ForegroundColor Gray
         $worktrees = @(git worktree list --porcelain | Where-Object { $_ -match '^worktree ' } | ForEach-Object { $_ -replace '^worktree ', '' })
         $orphanedWorktrees = @()
-        $backlogPath = ".crucible/backlog/BACKLOG.md"
+        $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+        $backlogPath = Join-Path $backlogDir "BACKLOG.md"
         $backlogContent = ""
         if (Test-Path $backlogPath) { $backlogContent = Get-Content $backlogPath -Raw -Encoding UTF8 }
     
@@ -85,8 +86,9 @@ try {
         Write-Quiet ' '
         Write-Quiet 'Checking for unresolved blocked tasks...' -ForegroundColor Gray
         $blockedTasks = @()
-        if (Test-Path ".crucible/backlog/blocked") {
-            $blockedTasks = @(Get-ChildItem -Path ".crucible/backlog/blocked" -Filter "*.json" | Where-Object { $_.PSIsContainer -eq $false })
+        $blockedDir = Join-Path $backlogDir "blocked"
+        if (Test-Path $blockedDir) {
+            $blockedTasks = @(Get-ChildItem -Path $blockedDir -Filter "*.json" | Where-Object { $_.PSIsContainer -eq $false })
         }
         $btColor = "White"
         if ($blockedTasks.Count -gt 0) { $btColor = "Yellow" }
@@ -285,7 +287,7 @@ try {
             $archiveTs = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
             $staleTaskArchiveRoot = ".crucible/session/archived/stale-task-sessions"
             $handoffArchiveDir = ".crucible/session/handoffs/archived"
-            $blockedArchiveDir = ".crucible/backlog/blocked/archived"
+            $blockedArchiveDir = Join-Path $backlogDir "blocked/archived"
             if ($Force) {
                 if (-not (Test-Path $staleTaskArchiveRoot)) { New-Item -ItemType Directory -Path $staleTaskArchiveRoot -Force | Out-Null }
                 if (-not (Test-Path $handoffArchiveDir)) { New-Item -ItemType Directory -Path $handoffArchiveDir -Force | Out-Null }

@@ -39,7 +39,8 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 	$tid = $null; $archSessions = 0; $degraded = 0; $budgetPct = $null; $budgetCeiling = $null
 	Get-Content $_.FullName | ForEach-Object {
 		try {
-			$e = $_ | ConvertFrom-Json
+			$cleaned = $_ -replace "^$([char]0xFEFF)", ""
+			$e = $cleaned | ConvertFrom-Json
 			if (-not $tid -and $e.task_id) { $tid = $e.task_id }
 			
 			if ($e.event -eq "session_end") {

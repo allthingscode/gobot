@@ -10,10 +10,16 @@ if (-not (Test-Path -LiteralPath $scriptUnderTest)) {
     throw "Missing script under test: $scriptUnderTest"
 }
 
-$LockFile = ".crucible/session/global/session_state.lock"
-$StateFile = ".crucible/session/global/session_state.json"
-$StateBackup = ".crucible/session/global/session_state.c223-test-backup.json"
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-stale-lock-test-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+$LockFile = Join-Path $tempRoot ".crucible/session/global/session_state.lock"
+$StateFile = Join-Path $tempRoot ".crucible/session/global/session_state.json"
+$StateBackup = Join-Path $tempRoot ".crucible/session/global/session_state.c223-test-backup.json"
 $TaskId = "{task_id}"
+
+# Ensure lock directory exists
+New-Item -ItemType Directory -Path (Split-Path -Parent $LockFile) -Force | Out-Null
 
 function Backup-State {
     if (Test-Path -LiteralPath $StateFile) {
@@ -38,7 +44,8 @@ function Invoke-ScriptUnderTest {
         "-File", $scriptUnderTest,
         "-Specialist", "architect",
         "-TaskId", $TaskId,
-        "-UpdateJsonFile", $payloadFile
+        "-UpdateJsonFile", $payloadFile,
+        "-ProjectRoot", $tempRoot
     )
     # Wrap in try so a non-zero exit doesn't trip $ErrorActionPreference=Stop in the
     # parent harness. We assert exit codes explicitly in each test.
@@ -97,6 +104,9 @@ try {
 finally {
     Restore-State
     Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $tempRoot) {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+    }
 }
 
 $failed = $results -contains $false

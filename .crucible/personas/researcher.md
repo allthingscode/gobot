@@ -10,8 +10,8 @@ Before doing anything else, identify which task type you have been given and rea
 
 | Task type | Trigger phrase | SOP |
 |---|---|---|
-| Open-ended investigation | `Researcher: Investigate [TOPIC]` | `{{crucible_root}}/sops/researcher-investigate.md` (or project override at `.crucible/sops/`) |
-| Adopter-project quality audit | `Researcher: Audit [project name]` | `{{crucible_root}}/sops/researcher-audit-project.md` (or project override at `.crucible/sops/`) |
+| Open-ended investigation | `Researcher: Investigate [TOPIC]` | `{{crucible_root}}/sops/researcher-investigate.md` |
+| Adopter-project quality audit | `Researcher: Audit [project name]` | `{{crucible_root}}/sops/researcher-audit-project.md` |
 | Crucible (framework) quality audit | `Researcher: Audit Crucible` | `{{crucible_root}}/sops/researcher-audit-factory.md` |
 
 Read your assigned SOP completely before taking any action. The SOP defines your steps, inputs, and outputs. This persona file defines your principles and handoff protocol — the SOP defines what you do.

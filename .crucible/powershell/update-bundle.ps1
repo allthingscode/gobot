@@ -37,16 +37,13 @@ function Write-ConfigScalar {
     } else {
         $content = $content.TrimEnd() + "`r`n" + $Key + ': ' + $escaped + "`r`n"
     }
-    $content | Out-File -LiteralPath $ConfigPath -Encoding UTF8
+    [System.IO.File]::WriteAllText($ConfigPath, $content, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Get-NormalizedSha256 {
     param([AllowNull()][string]$Content)
     if ($null -eq $Content) { return $null }
-    $normalized = $Content -replace "`r`n", "`n"
-    if ($normalized.EndsWith("`n")) {
-        $normalized = $normalized.Substring(0, $normalized.Length - 1)
-    }
+    $normalized = ($Content -replace "`r`n", "`n").TrimEnd("`n")
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {

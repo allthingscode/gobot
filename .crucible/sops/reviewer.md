@@ -1,5 +1,5 @@
-<!-- prompt_version: reviewer-sop-gobot-v1 -->
-# SOP: Reviewer — Gobot
+<!-- prompt_version: reviewer-sop-v1 -->
+# SOP: Reviewer
 
 **Role:** Quality gate before code reaches production. Validate the Architect's implementation against the spec and project standards. Approve or send back with a precise fix specification.
 
@@ -13,7 +13,7 @@
 |---|---|
 | Task context | `.crucible/session/{task_id}/reviewer/task.md` (contains scope boundary) |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
-| Backlog spec | `.crucible/backlog/{type}/active/{task_id}_*.md` |
+| Backlog spec | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
 | Architect's work | `task/{task_id}` git branch in the worktree |
 | Architect's output summary | `.crucible/session/{task_id}/architect/output.md` |
 
@@ -39,55 +39,22 @@ Run the canonical isolated checks. Every check MUST pass before proceeding to ma
 powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full
 ```
 
-The full mode runs `go vet`, `golangci-lint`, `gotestsum`, and `go run scripts/doc_lint.go` with isolated caches. All must exit 0.
+> **Shortcut**: `bash scripts/ci_check.sh` runs the CI parity checks with isolated caches/tmp and exits non-zero on first failure.
 
 ### Step 4 — Acceptance Criteria Review
 Read every checkbox in the spec's `Acceptance Criteria` section. Confirm each is implemented. Mark `acceptance_criteria_met: true` only when every item is checked off.
 
-### Step 5 — Quality Review (Gobot-Specific)
-
-Review the diff for all of the following. Each item marked **BLOCKER** is an automatic rejection if violated.
-
-#### 5a. Go Idioms & Project Mandates
-
-- [ ] **[BLOCKER]** No CGO — `import "C"` is forbidden
-- [ ] **[BLOCKER]** All durable state goes through `internal/store/` — no direct `database/sql` calls in `internal/app/` or `internal/agent/`
-- [ ] **[BLOCKER]** No `fmt.Print*` or `log.Print*` in production paths — use `slog` with structured attributes
-- [ ] **[BLOCKER]** Errors are wrapped: `fmt.Errorf("context: %w", err)` — no bare `errors.New` where context is missing
-- [ ] **[BLOCKER]** No `panic()` in `internal/` packages
-- [ ] **[BLOCKER]** Functions doing I/O accept `context.Context` as first argument
-- [ ] Business logic in `internal/app/` uses the `platform.Client` interface — not the concrete Telegram client directly
-- [ ] `go.mod` / `go.sum` are consistent (`go mod tidy` produces no diff)
-
-#### 5b. Telegram API Patterns
-
-- [ ] **[BLOCKER]** Bot token never appears in logs, error strings, test fixtures, or output
-- [ ] **[BLOCKER]** Every `CallbackQuery` handler calls `AnswerCallbackQuery` — even on the error path
-- [ ] Message handlers are idempotent — processing the same update twice produces the same visible result
-- [ ] New message sends do not occur in tight loops without using the rate limiter in `internal/platform/`
-- [ ] No webhook code added (long polling only; webhook support requires a new spec)
-
-#### 5c. Concurrency & Safety
-
-- [ ] **[BLOCKER]** `go test -race` passes (run-isolated-checks handles this; verify it ran)
-- [ ] Shared state is protected: `sync.Mutex` or `sync.Map`, not raw maps under concurrent access
-- [ ] No `time.Sleep` in tests — use channels or `sync.WaitGroup`
-- [ ] Goroutines are bounded and have an exit path; no goroutine leaks
-
-#### 5d. SQLite & Persistence
-
-- [ ] Schema changes have a corresponding migration file in `internal/store/migrations/`
-- [ ] SQL queries use parameterized statements — no string interpolation in queries
-- [ ] Transactions are closed (committed or rolled back) on every exit path, including errors
-
-#### 5e. Test Quality
-
-- [ ] New functions have table-driven tests
-- [ ] Test coverage ≥ 80% for new code (check Architect's `output.md` for the coverage report)
-- [ ] No test-only dependencies in production code paths
+### Step 5 — Quality Review
+Review the diff for:
+- Project language idioms and repository mandates declared in `.crucible/config.yaml` and agent instructions
+- Security (no hardcoded secrets, parameterized SQL, input validation at boundaries)
+- Test quality (table-driven, no `time.Sleep`, race detector would pass)
+- No regressions outside the stated scope
 
 ### Mid-Session Progress (Checkpointing)
-Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing each step above.
+Specialists MUST log their progress mid-session to ensure state recovery in case of failure.
+- **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major step (e.g., "Step 3: Automated Verification Complete").
+- **Example**: `### CHECKPOINT Step 4: Acceptance Criteria Verified`
 
 ### Step 6 — Write Review Report
 Document findings in `.crucible/session/{task_id}/reviewer/review_report.md`.
@@ -133,7 +100,7 @@ Format findings as:
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "...",
-  "prompt_version": "reviewer-sop-gobot-v1",
+  "prompt_version": "reviewer-sop-v1",
   "reason": "Review approved — no blockers",
   "suspicious_content": null
 }
@@ -149,15 +116,67 @@ Format findings as:
 # Code Review Fixes — {task_id} [{Feature Name}]
 
 ## Required Changes (BLOCKERS — must fix)
-- [ ] `internal/app/handler.go:42` — specific fix description
-- [ ] `internal/store/repo.go:88` — specific fix description
+- [ ] `src/pkg/file.go:42` — specific fix description
+- [ ] `src/pkg/file.go:88` — specific fix description
+
+## Recommended Changes (CRITICAL — should fix)
+- [ ] `src/pkg/file.go:10` — specific fix description
+
+## Acceptance Criteria Not Met
+- [ ] AC item that was not implemented
 
 ## On Completion
 Write `handoffs/{task_id}-{timestamp}.json` with `target_specialist: "reviewer"` for re-review.
 ```
 
-3. Write handoff.json with `"target_specialist": "architect"` and incremented `review_strike_count`
+3. Write handoff.json:
+```json
+{
+  "task_id": "F-XXX",
+  "source_specialist": "reviewer",
+  "target_specialist": "architect",
+  "handoff_retry_count": 0,
+  "review_strike_count": N,
+  "cumulative_handoff_count": N,
+  "budget_tier": "...",
+  "prompt_version": "reviewer-sop-v1",
+  "reason": "Changes requested — N blockers",
+  "suspicious_content": null
+}
+```
 4. Run factory and present output to human
+
+---
+
+---
+
+## Pattern C Close-Out (Groomer → Reviewer shortcut)
+
+When the incoming handoff has `source_specialist: groomer` and **no** Architect worktree exists (i.e., this is a pure data-grooming pass with no implementation), run this abbreviated checklist instead of the full code-review workflow above.
+
+### Pattern C Checklist
+1. **BACKLOG.md structure** — run `validate-backlog.ps1` and confirm it exits 0.
+2. **Stub-row convention** — verify every new stub row has: `item_id`, `title`, `type`, `priority`, `status: Stub`, and a link to its spec file.
+3. **Parent-task closure** — confirm the parent task's spec frontmatter `status` matches its BACKLOG.md row, and that the closure reason is recorded in the spec.
+4. **No orphaned specs** — every stub row in BACKLOG.md has a corresponding spec file in `backlog/{type}/active/`.
+
+### Pattern C Handoff (to Operator)
+When all four checks pass, write the handoff with `reviewer_checks_passed` populated using the standard six checks (mark any code-specific checks satisfied by N/A equivalence — the backlog is the artifact being reviewed):
+
+```json
+{
+  "task_id": "...",
+  "source_specialist": "reviewer",
+  "target_specialist": "operator",
+  "handoff_retry_count": 0,
+  "cumulative_handoff_count": N,
+  "budget_tier": "...",
+  "prompt_version": "reviewer-sop-v1",
+  "reason": "Pattern C close-out verified — BACKLOG.md well-formed, stubs correct, parent closed",
+  "reviewer_checks_passed": ["tests_pass", "vet_pass", "acceptance_criteria_met", "scope_bounded", "no_regressions", "no_hard_mandates_violated"],
+  "suspicious_content": null
+}
+```
 
 ---
 
@@ -166,7 +185,6 @@ Write `handoffs/{task_id}-{timestamp}.json` with `target_specialist: "reviewer"`
 Before writing handoff.json, confirm:
 - [ ] Routing to: `operator` (approved) or `architect` (changes requested) — not to myself
 - [ ] `review_report.md` has the mandatory YAML header
-- [ ] All Step 5 Gobot-specific checks completed
 - [ ] If CHANGES_REQUESTED: fix spec written to `{task_id}/architect/task.md`
 - [ ] If APPROVED: backlog status updated to `Ready for Deploy`
 - [ ] `task_id` in handoff matches the task I was given

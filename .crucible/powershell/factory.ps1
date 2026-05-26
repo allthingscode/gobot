@@ -260,6 +260,12 @@ function Write-Quiet {
     }
 }
 
+function Get-PrimaryBranchName {
+    git show-ref --verify --quiet refs/heads/main
+    if ($LASTEXITCODE -eq 0) { return "main" }
+    return "master"
+}
+
 function Write-NextStep {
     param(
         [string]$Command,
@@ -319,7 +325,7 @@ function Get-TaskChecklistGateResult {
 
     function Is-PostSessionFactoryChecklistItem {
         param([string]$ChecklistLine)
-        return $ChecklistLine -match '^\s*-\s+\[( |x|X)\]\s*Run\s+factory\.ps1\s+-Init\s+-TaskId\b'
+        return $ChecklistLine -match '^\s*-\s+\[( |/|x|X)\]\s*Run\s+factory\.ps1\s+-Init\s+-TaskId\b'
     }
 
     for ($idx = 0; $idx -lt $lines.Count; $idx++) {
@@ -336,7 +342,7 @@ function Get-TaskChecklistGateResult {
             }
         }
 
-        if ($line -match '^\s*-\s+\[\s\]') {
+        if ($line -match '^\s*-\s+\[( |/)\]') {
             if (Is-PostSessionFactoryChecklistItem -ChecklistLine $line) {
                 continue
             }
@@ -350,7 +356,7 @@ function Get-TaskChecklistGateResult {
         }
 
         # Preserve strict blocking for malformed checklist markers in the required section.
-        if ($inRequiredSection -and $line -match '^\s*-\s+\[' -and $line -notmatch '^\s*-\s+\[( |x|X)\]') {
+        if ($inRequiredSection -and $line -match '^\s*-\s+\[' -and $line -notmatch '^\s*-\s+\[( |/|x|X)\]') {
             if (Is-PostSessionFactoryChecklistItem -ChecklistLine $line) {
                 continue
             }
@@ -599,6 +605,110 @@ function Write-BlockedTaskRecord {
 
     $updateJson = @{ status = "blocked"; circuit_breaker = $CircuitBreaker } | ConvertTo-Json -Compress
     & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist $LastSpecialist -TaskId $TaskId -UpdateJson $updateJson -Merge $true 2>$null
+}
+
+function Get-HandoffTextForSecurityScan {
+    param($HandoffObj)
+
+    $parts = @()
+    foreach ($propertyName in @("reason", "summary", "notes", "suspicious_content")) {
+        if ($HandoffObj.PSObject.Properties[$propertyName] -and $null -ne $HandoffObj.$propertyName) {
+            $parts += [string]$HandoffObj.$propertyName
+        }
+    }
+    foreach ($propertyName in @("artifacts", "file_affinity", "reviewer_checks_passed")) {
+        if ($HandoffObj.PSObject.Properties[$propertyName] -and $null -ne $HandoffObj.$propertyName) {
+            $parts += @($HandoffObj.$propertyName | ForEach-Object { [string]$_ })
+        }
+    }
+    return ($parts -join "`n")
+}
+
+function Normalize-RepoRelativePath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $normalized = $Path.Replace("\", "/").Trim()
+    while ($normalized.StartsWith("./")) {
+        $normalized = $normalized.Substring(2)
+    }
+    return $normalized.TrimStart("/")
+}
+
+function Test-PathMatchesAffinity {
+    param(
+        [Parameter(Mandatory=$true)][string]$ChangedPath,
+        [Parameter(Mandatory=$true)][string]$Affinity
+    )
+
+    $changed = Normalize-RepoRelativePath -Path $ChangedPath
+    $scope = Normalize-RepoRelativePath -Path $Affinity
+    if ([string]::IsNullOrWhiteSpace($changed) -or [string]::IsNullOrWhiteSpace($scope)) {
+        return $false
+    }
+
+    if ($scope -match '[\*\?]') {
+        return [System.Management.Automation.WildcardPattern]::Get($scope, [System.Management.Automation.WildcardOptions]::IgnoreCase).IsMatch($changed)
+    }
+
+    $scopePrefix = $scope.TrimEnd("/")
+    return ($changed -eq $scopePrefix -or $changed.StartsWith($scopePrefix + "/", [System.StringComparison]::OrdinalIgnoreCase))
+}
+
+function Get-ArchitectChangedFiles {
+    param(
+        [Parameter(Mandatory=$true)][string]$WorktreePath,
+        [Parameter(Mandatory=$true)][string]$TaskId
+    )
+
+    $candidateBaseRefs = @("main", "master", "origin/main", "origin/master")
+    $baseRef = $null
+    foreach ($candidate in $candidateBaseRefs) {
+        $null = git -C $WorktreePath rev-parse --verify --quiet $candidate 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $baseRef = $candidate
+            break
+        }
+    }
+
+    $changed = @()
+    if ($null -ne $baseRef) {
+        $committed = @(git -C $WorktreePath diff --name-only "$baseRef...HEAD" 2>$null)
+        if ($LASTEXITCODE -ne 0 -or @($committed).Count -eq 0) {
+            $committed = @(git -C $WorktreePath diff --name-only "$baseRef..task/$TaskId" 2>$null)
+        }
+        $changed += $committed
+    }
+
+    $changed += @(git -C $WorktreePath diff --name-only --cached 2>$null)
+    $changed += @(git -C $WorktreePath diff --name-only 2>$null)
+    $changed += @(git -C $WorktreePath ls-files --others --exclude-standard 2>$null)
+
+    return @($changed |
+        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+        ForEach-Object { Normalize-RepoRelativePath -Path ([string]$_) } |
+        Sort-Object -Unique)
+}
+
+function Get-OutOfScopeArchitectFiles {
+    param(
+        [Parameter(Mandatory=$true)][string]$WorktreePath,
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][object[]]$FileAffinity
+    )
+
+    $changedFiles = @(Get-ArchitectChangedFiles -WorktreePath $WorktreePath -TaskId $TaskId)
+    if ($changedFiles.Count -eq 0) { return @() }
+
+    $affinity = @($FileAffinity |
+        ForEach-Object { Normalize-RepoRelativePath -Path ([string]$_) } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    if ($affinity.Count -eq 0) { return $changedFiles }
+
+    return @($changedFiles | Where-Object {
+        $changedPath = $_
+        -not (@($affinity | Where-Object { Test-PathMatchesAffinity -ChangedPath $changedPath -Affinity $_ }).Count -gt 0)
+    })
 }
 
 function Get-HandoffDedupeKey {
@@ -937,14 +1047,25 @@ if ($preflightExit -ne 0 -or -not $preflightOk) {
         }
     }
 
-    $handoffFileName = Split-Path -Leaf $handoffFile
-    Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "factory" `
-        -Outcome $reasonCode -Notes ("reason_code=" + $reasonCode + "; handoff_file=" + $handoffFileName + "; message=" + $errorMessage)
-    Write-Host "`n[PREFLIGHT VALIDATION FAILED]" -ForegroundColor Red
-    Write-Host ("reason_code=" + $reasonCode) -ForegroundColor Yellow
-    Write-Host ("handoff_file=" + $handoffFileName) -ForegroundColor Yellow
-    Write-Host ("message=" + $errorMessage) -ForegroundColor Yellow
-    exit 2
+    $allowRuntimeCommitHashVerification = $false
+    if ($handoff.source_specialist -eq "operator" -and
+        $reasonCode -eq "missing_required_field" -and
+        $errorMessage -match "commit_hash") {
+        $allowRuntimeCommitHashVerification = $true
+    }
+
+    if ($allowRuntimeCommitHashVerification) {
+        Write-Quiet "[PREFLIGHT] Deferring operator commit_hash enforcement to merge-verification gate." -ForegroundColor DarkGray
+    } else {
+        $handoffFileName = Split-Path -Leaf $handoffFile
+        Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "factory" `
+            -Outcome $reasonCode -Notes ("reason_code=" + $reasonCode + "; handoff_file=" + $handoffFileName + "; message=" + $errorMessage)
+        Write-Host "`n[PREFLIGHT VALIDATION FAILED]" -ForegroundColor Red
+        Write-Host ("reason_code=" + $reasonCode) -ForegroundColor Yellow
+        Write-Host ("handoff_file=" + $handoffFileName) -ForegroundColor Yellow
+        Write-Host ("message=" + $errorMessage) -ForegroundColor Yellow
+        exit 2
+    }
 }
 
 # Construct the standard session-end command
@@ -1078,6 +1199,19 @@ if (-not $lastEnd -or $lastEndHandoffCount -lt $handoff.cumulative_handoff_count
 
 # --- 2. Runtime Validation (complements schema preflight) ---
 
+# Git Hook Bypass Prevention
+$handoffSecurityText = Get-HandoffTextForSecurityScan -HandoffObj $handoff
+if ($handoffSecurityText -match '(?i)(^|\s)--no-verify(\s|$)' -or $handoffSecurityText -match '(?i)\bno[- ]verify\b') {
+    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_specialist `
+        -Outcome "git_hook_bypass" -Notes "Handoff reported or referenced a git hook bypass attempt."
+    Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
+        -LastSpecialist $handoff.source_specialist -Summary "Handoff reported or referenced use of --no-verify, which bypasses required git hooks."
+    Write-Host "`n[CIRCUIT BREAKER] Git hook bypass attempt detected." -ForegroundColor Red
+    Write-Host "  '--no-verify' and equivalent hook bypasses require human review." -ForegroundColor Red
+    Write-Host "`n[STOP] HUMAN INTERVENTION REQUIRED. Fix the hook failure instead of bypassing it." -ForegroundColor Red
+    exit 2
+}
+
 # A-3: Verify listed artifacts actually exist
 if ($handoff.psobject.Properties["artifacts"] -and $handoff.artifacts -ne $null) {
     $missingArtifacts = @()
@@ -1131,6 +1265,30 @@ if ($handoff.psobject.Properties["file_affinity"] -and $handoff.file_affinity -n
     }
 }
 
+# --- 2.1b Architect Scope Boundary Check ---
+if ($handoff.source_specialist -eq "architect" -and $handoff.target_specialist -eq "reviewer") {
+    $wtPath = Join-Path $workspacesDir ("architect-" + $handoff.task_id)
+    if (Test-Path $wtPath) {
+        $declaredAffinity = @()
+        if ($handoff.psobject.Properties["file_affinity"] -and $null -ne $handoff.file_affinity) {
+            $declaredAffinity = @($handoff.file_affinity)
+        }
+
+        $outOfScopeFiles = @(Get-OutOfScopeArchitectFiles -WorktreePath $wtPath -TaskId $handoff.task_id -FileAffinity $declaredAffinity)
+        if ($outOfScopeFiles.Count -gt 0) {
+            $joined = ($outOfScopeFiles -join ", ")
+            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
+                -Outcome "scope_violation" -Notes ("Architect modified files outside file_affinity: " + $joined)
+            Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "scope_violation" -AttemptCount $handoff.cumulative_handoff_count `
+                -LastSpecialist $handoff.source_specialist -Summary ("Architect modified files outside declared file_affinity: " + $joined) -Artifacts $outOfScopeFiles
+            Write-Host "`n[CIRCUIT BREAKER] Scope boundary violation detected." -ForegroundColor Red
+            Write-Host ("  Out-of-scope files: " + $joined) -ForegroundColor Red
+            Write-Host "`n[STOP] HUMAN INTERVENTION REQUIRED. Expand file_affinity or revert out-of-scope changes." -ForegroundColor Red
+            exit 2
+        }
+    }
+}
+
 # --- 2.2 Completion Artifact Verification ---
 if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
     $verificationPassed = $true
@@ -1152,7 +1310,8 @@ if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
                     $verificationPassed = $false
                     $errorMsg = "Architect worktree is not on mandatory task branch 'task/$($handoff.task_id)' (found '$branchCheck')."
                 } else {
-                    $commits = git -C $wtPath log master..task/$($handoff.task_id) --oneline 2>&1
+                    $mainBranch = Get-PrimaryBranchName
+                    $commits = git -C $wtPath log "$mainBranch..task/$($handoff.task_id)" --oneline 2>&1
                     if ([string]::IsNullOrWhiteSpace($commits) -or $commits -match "fatal") {
                         # Workaround for factory tasks (ignored files in .crucible/ cannot be committed easily)
                         $status = git status --ignored --porcelain .crucible/ 2>&1
@@ -1214,15 +1373,16 @@ if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
                     $verificationPassed = $false
                     $errorMsg = "Handoff is missing 'commit_hash' metadata. Merge to master/main is mandatory."
                 } else {
+                    $previousPreference = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
                     $commitExists = git rev-parse --verify "$($handoff.commit_hash)^{commit}" 2>&1
-                    if ($LASTEXITCODE -ne 0 -or $commitExists -match "fatal") {
+                    $commitExistsExitCode = $LASTEXITCODE
+                    $ErrorActionPreference = $previousPreference
+                    if ($commitExistsExitCode -ne 0 -or $commitExists -match "fatal") {
                         $verificationPassed = $false
                         $errorMsg = "Commit hash $($handoff.commit_hash) specified in handoff does not exist."
                     } else {
-                        # Resolve main branch name dynamically
-                        $mainBranch = "master"
-                        git show-ref --verify --quiet refs/heads/main
-                        if ($LASTEXITCODE -eq 0) { $mainBranch = "main" }
+                        $mainBranch = Get-PrimaryBranchName
 
                         git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
                         if ($LASTEXITCODE -ne 0) {
@@ -1247,15 +1407,16 @@ if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
                     $verificationPassed = $false
                     $errorMsg = "Handoff is missing 'commit_hash' metadata. Merge to master/main is mandatory."
                 } else {
+                    $previousPreference = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
                     $commitExists = git rev-parse --verify "$($handoff.commit_hash)^{commit}" 2>&1
-                    if ($LASTEXITCODE -ne 0 -or $commitExists -match "fatal") {
+                    $commitExistsExitCode = $LASTEXITCODE
+                    $ErrorActionPreference = $previousPreference
+                    if ($commitExistsExitCode -ne 0 -or $commitExists -match "fatal") {
                         $verificationPassed = $false
                         $errorMsg = "Commit hash $($handoff.commit_hash) specified in handoff does not exist."
                     } else {
-                        # Resolve main branch name dynamically
-                        $mainBranch = "master"
-                        git show-ref --verify --quiet refs/heads/main
-                        if ($LASTEXITCODE -eq 0) { $mainBranch = "main" }
+                        $mainBranch = Get-PrimaryBranchName
 
                         git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
                         if ($LASTEXITCODE -ne 0) {
@@ -1273,6 +1434,8 @@ if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
         Write-Host "Reason: $errorMsg" -ForegroundColor Red
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
             -Outcome "artifact_verification_failed" -Notes ("Artifact verification failed: " + $errorMsg)
+        Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "artifact_verification_failed" -AttemptCount $handoff.cumulative_handoff_count `
+            -LastSpecialist $handoff.source_specialist -Summary $errorMsg
         exit 1
     }
 }
@@ -1481,7 +1644,13 @@ if ($handoff.source_specialist -eq "reviewer" -and $handoff.target_specialist -e
             exit 2
         }
         Write-Quiet "`n[VERIFY] Running independent isolated test verification in worktree before accepting APPROVED..." -ForegroundColor Cyan
-        $testOutput = & powershell.exe -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode test 2>&1
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $testOutput = & powershell.exe -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode test 2>&1
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" -Outcome "reviewer_verification_failed" -Notes "Independent verification failed after Reviewer APPROVED"
             Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "reviewer_verification_failed" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "reviewer" -Summary "Verification command failed in worktree after Reviewer self-reported APPROVED. Review checklist not reliably completed."
@@ -2070,7 +2239,18 @@ if ($handoff.target_specialist -eq "architect") {
 
         if (-not (Test-Path $wtPath)) {
             Write-Quiet ("[INIT] Creating git worktree at " + $wtPath + "...") -ForegroundColor Yellow
-            git worktree add $wtPath -b ("task/" + $handoff.task_id) master
+            $mainBranch = Get-PrimaryBranchName
+            $taskBranch = "task/" + $handoff.task_id
+            git show-ref --verify --quiet ("refs/heads/" + $taskBranch)
+            if ($LASTEXITCODE -eq 0) {
+                git worktree add $wtPath $taskBranch
+            } else {
+                git worktree add $wtPath -b $taskBranch $mainBranch
+            }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host ("Error: Failed to create architect worktree at " + $wtPath) -ForegroundColor Red
+                exit 1
+            }
             # Resolve absolute path for architect hooks and ensure it exists
             $adopterHook = Join-Path $PSScriptRoot "..\..\scripts\hooks\architect"
             $repoHook = Join-Path $REPO_ROOT "scripts/hooks/architect"
@@ -2227,7 +2407,8 @@ if ($Init) {
 $ghAvailable = $null -ne (Get-Command gh -ErrorAction SilentlyContinue)
 if ($ghAvailable) {
     try {
-        $ghOutput = Invoke-NativeCommand -Command "gh" -Arguments "run", "list", "--branch=master", "--limit", "1", "--json", "conclusion,status,url"
+        $ciBranch = Get-PrimaryBranchName
+        $ghOutput = Invoke-NativeCommand -Command "gh" -Arguments "run", "list", "--branch=$ciBranch", "--limit", "1", "--json", "conclusion,status,url"
         $ciJson = $ghOutput | ConvertFrom-Json
         if ($ciJson -and $ciJson.Count -gt 0) {
             $run = $ciJson[0]
@@ -2235,17 +2416,17 @@ if ($ghAvailable) {
             $ciConclusion = $run.conclusion
             $ciUrl = $run.url
             if ($ciStatus -eq "in_progress" -or $ciStatus -eq "queued") {
-                Write-Quiet "[CI] master: RUNNING - $ciUrl" -ForegroundColor Yellow
+                Write-Quiet "[CI] ${ciBranch}: RUNNING - $ciUrl" -ForegroundColor Yellow
             } elseif ($ciConclusion -eq "success") {
-                Write-Quiet "[CI] master: GREEN" -ForegroundColor Green
+                Write-Quiet "[CI] ${ciBranch}: GREEN" -ForegroundColor Green
             } elseif ($ciConclusion -eq "failure") {
-                Write-Quiet "[CI] master: FAILING - $ciUrl" -ForegroundColor Red
+                Write-Quiet "[CI] ${ciBranch}: FAILING - $ciUrl" -ForegroundColor Red
                 Write-Quiet "     Fix CI before starting new work, or verify this task IS the fix." -ForegroundColor Red
             } else {
-                Write-Quiet ("[CI] master: " + $ciConclusion + " / " + $ciStatus) -ForegroundColor Gray
+                Write-Quiet ("[CI] " + $ciBranch + ": " + $ciConclusion + " / " + $ciStatus) -ForegroundColor Gray
             }
         } else {
-            Write-Quiet "[CI] master: no recent runs found" -ForegroundColor Gray
+            Write-Quiet "[CI] ${ciBranch}: no recent runs found" -ForegroundColor Gray
         }
     } catch {
         Write-Quiet "[CI] status check failed (gh error)" -ForegroundColor Gray
@@ -2276,4 +2457,3 @@ if ($Recover) {
         Write-EventLog -Event "session_start" -TaskId $handoff.task_id -Specialist $handoff.target_specialist -HandoffCount $handoff.cumulative_handoff_count
     }
 }
-

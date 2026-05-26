@@ -48,6 +48,7 @@ function New-FrameworkFixture {
     Write-Utf8File -Path (Join-Path $Root "install-manifest.json") -Content @'
 {
   "scaffold_source": "templates/project/.crucible",
+  "root_files": ["install-manifest.json"],
   "copied_dirs": ["docs", "powershell"],
   "adopter_owned_excludes": ["config.yaml", "backlog/**", "session/**", "research/**", ".gemini/**", ".private/**", ".agent-workspaces/**"]
 }
@@ -67,7 +68,7 @@ function Copy-FrameworkToAdopter {
         [Parameter(Mandatory=$true)][string]$Commit
     )
     New-Item -ItemType Directory -Path (Join-Path $Adopter ".crucible") -Force | Out-Null
-    foreach ($source in @("templates/project/.crucible/README.md", "docs/guide.md", "powershell/tool.ps1")) {
+    foreach ($source in @("install-manifest.json", "templates/project/.crucible/README.md", "docs/guide.md", "powershell/tool.ps1")) {
         $content = (git -C $Framework show ($Commit + ":" + $source))
         $relative = $source
         if ($source.StartsWith("templates/project/.crucible/")) {

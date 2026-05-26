@@ -44,6 +44,14 @@ function ConvertTo-YamlScalar {
     return '"' + $escaped + '"'
 }
 
+function Write-Utf8NoBomFile {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Content
+    )
+    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+}
+
 function Get-CrucibleSourceStamp {
     $versionFile = Join-Path $REPO_ROOT "VERSION"
     $crucibleVersion = ""
@@ -108,7 +116,7 @@ function Set-CrucibleConfigStamp {
         $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
     }
 
-    $config | Out-File -LiteralPath $ConfigPath -Encoding UTF8
+    Write-Utf8NoBomFile -Path $ConfigPath -Content $config
 }
 
 function Copy-TemplateDirectory {
@@ -206,6 +214,22 @@ foreach ($dirName in @($installManifest.copied_dirs)) {
     Copy-TemplateDirectory -Source $srcDir -Destination $destDir -AllowOverwrite ([bool]$Force)
 }
 
+foreach ($fileName in @($installManifest.root_files)) {
+    $srcFile = Join-Path $REPO_ROOT $fileName
+    $destFile = Join-Path $targetCrucible $fileName
+    if (-not (Test-Path -LiteralPath $srcFile -PathType Leaf)) {
+        throw "Install manifest root file not found: $srcFile"
+    }
+    $destDir = Split-Path -Parent $destFile
+    if (-not (Test-Path -LiteralPath $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    }
+    if ((Test-Path -LiteralPath $destFile) -and -not $Force) {
+        throw "Refusing to overwrite existing file: $destFile. Re-run with -Force to overwrite framework-managed files."
+    }
+    Copy-Item -LiteralPath $srcFile -Destination $destFile -Force:$Force
+}
+
 if (-not (Test-Path -LiteralPath $configPath)) {
     throw "Bootstrap failed: expected config file was not created at $configPath"
 }
@@ -256,7 +280,7 @@ if (![string]::IsNullOrEmpty($finalBacklogDir)) {
     $config += $pathsBlock
 }
 
-$config | Out-File -LiteralPath $configPath -Encoding UTF8
+Write-Utf8NoBomFile -Path $configPath -Content $config
 
 # Resolve custom backlog directory
 $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot

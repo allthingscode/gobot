@@ -13,7 +13,7 @@ function Get-InstallManifest {
     }
 
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($property in "scaffold_source", "copied_dirs", "adopter_owned_excludes") {
+    foreach ($property in "scaffold_source", "root_files", "copied_dirs", "adopter_owned_excludes") {
         if (-not $manifest.PSObject.Properties[$property]) {
             throw "Install manifest missing required property: $property"
         }
@@ -23,6 +23,11 @@ function Get-InstallManifest {
     }
     if (@($manifest.copied_dirs).Count -eq 0) {
         throw "Install manifest copied_dirs must not be empty."
+    }
+    foreach ($rootFile in @($manifest.root_files)) {
+        if ([string]::IsNullOrWhiteSpace([string]$rootFile)) {
+            throw "Install manifest root_files must not contain empty entries."
+        }
     }
     return $manifest
 }
@@ -46,6 +51,7 @@ function Get-FrameworkOwnedFiles {
     $manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
     $roots = @()
     $roots += ConvertTo-ManifestRelativePath -Path ([string]$manifest.scaffold_source)
+    $roots += @($manifest.root_files | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) })
     $roots += @($manifest.copied_dirs | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) })
 
     if (-not [string]::IsNullOrWhiteSpace($AtCommit)) {
@@ -64,6 +70,12 @@ function Get-FrameworkOwnedFiles {
     foreach ($root in $roots) {
         $absoluteRoot = Join-Path $FrameworkRoot $root
         if (-not (Test-Path -LiteralPath $absoluteRoot)) {
+            continue
+        }
+        if (Test-Path -LiteralPath $absoluteRoot -PathType Leaf) {
+            $resolvedFile = (Resolve-Path -LiteralPath $absoluteRoot).Path
+            $relative = $resolvedFile.Substring($FrameworkRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+            $files += ConvertTo-ManifestRelativePath -Path $relative
             continue
         }
         $resolvedRoot = (Resolve-Path -LiteralPath $absoluteRoot).Path
@@ -88,6 +100,13 @@ function Convert-FrameworkPathToAdopter {
     }
     if ($source.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)) {
         return $source.Substring($scaffold.Length + 1)
+    }
+
+    foreach ($rootFile in @($Manifest.root_files)) {
+        $normalizedFile = ConvertTo-ManifestRelativePath -Path ([string]$rootFile)
+        if ($source -eq $normalizedFile) {
+            return $source
+        }
     }
 
     foreach ($dir in @($Manifest.copied_dirs)) {

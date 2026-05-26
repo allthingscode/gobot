@@ -4,14 +4,24 @@
   "title": "Crucible Project Configuration",
   "description": "Schema for .crucible/config.yaml — the project-local configuration file that tells Crucible how to run against a specific project.",
   "type": "object",
-  "required": ["crucible_root", "project", "paths", "roles", "verification", "project_mandates"],
+  "required": ["crucible_root", "project", "roles", "verification", "project_mandates"],
   "additionalProperties": false,
   "properties": {
     "crucible_root": {
       "type": "string",
-      "description": "Path to this project's installed Crucible bundle. Must point inside the application repo, typically .crucible. The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory.",
+      "description": "Path to this project's installed Crucible bundle. Must point inside the application repo, normally .crucible. The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory.",
       "minLength": 1,
       "pattern": "^\\.crucible($|[\\\\/])"
+    },
+    "crucible_version": {
+      "type": "string",
+      "description": "Optional. Semver string identifying the version of the Crucible upstream that was installed into this project. Stamped by init-project.ps1 at install time. Useful for tracking drift against upstream.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+    },
+    "crucible_install_commit": {
+      "type": "string",
+      "description": "Optional. Full 40-character SHA of the Crucible upstream commit that was installed into this project. Stamped by init-project.ps1 at install time alongside crucible_version.",
+      "pattern": "^[0-9a-f]{40}$"
     },
     "project": {
       "type": "object",
@@ -45,7 +55,6 @@
         "backlog": {
           "type": "string",
           "description": "Backlog directory (BACKLOG.md, features/, bugs/, chores/, blocked/).",
-          "pattern": "^\\.crucible/",
           "default": ".crucible/backlog"
         },
         "session": {

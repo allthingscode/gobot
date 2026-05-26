@@ -25,6 +25,7 @@
 ## Session Start (Always in This Order)
 
 0. **Resolve `crucible_root`**. Read `.crucible/config.yaml` and capture the `crucible_root:` value (which can be a relative path like `.crucible` or an absolute path to the Crucible installation folder). Every `{{crucible_root}}` placeholder below — and in every persona, SOP, and prompt you subsequently load — substitutes to this value (resolved to an absolute path if relative). If the field is missing or empty, stop and escalate to the human: the project hasn't been bootstrapped correctly (`powershell/init-project.ps1` was not run, or `config.yaml` was hand-edited and the field deleted).
+0b. **Resolve `backlog_dir`**. Read `paths.backlog` from `.crucible/config.yaml`. If it is not configured, default to `.crucible/backlog`. Every `{{backlog_dir}}` placeholder in every persona, SOP, and prompt you subsequently load — substitutes to this resolved value.
 1. Read **`{{crucible_root}}/docs/operating-manual.md`** — the operating rules of the pipeline you are driving.
 2. Read **`{{crucible_root}}/docs/policy.md`** — the canonical authority you enforce. Know it before you touch anything.
 3. Read the tool-specific orchestrator doc for your environment (Claude / Gemini / Codex).

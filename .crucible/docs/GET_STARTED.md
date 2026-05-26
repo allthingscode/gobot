@@ -247,3 +247,9 @@ Make sure the agent's working directory is your project root where the installed
 
 **Worktree already exists error**
 Run `powershell\factory.ps1 -Health` to find and clean up orphaned worktrees from previous runs.
+
+---
+
+## Keeping your bundle up to date
+
+When you want to pull improvements from the upstream Crucible source into your project, see [updating.md](updating.md) for the selective-copy workflow.

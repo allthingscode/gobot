@@ -18,7 +18,7 @@ project:
   description: A Node/TypeScript REST API # required
   default_branch: main                    # required
 
-paths:                                    # all required; all must start with .crucible/
+paths:                                    # optional; if specified, all keys are required and must start with .crucible/
   backlog:    .crucible/backlog
   session:    .crucible/session
   workspaces: .crucible/.agent-workspaces
@@ -61,7 +61,7 @@ file_affinity_examples:                   # optional; illustrative only
 
 ### `crucible_root` (required)
 
-Path to the installed Crucible bundle for this project. In a typical install this is `.crucible`.
+Path to the installed Crucible bundle for this project. In a normal install this is `.crucible`.
 
 This value must point to the project's own `.crucible` framework folder. Applications that use Crucible must use their own installed `.crucible/` directory, rather than referencing absolute or external directories.
 
@@ -90,9 +90,9 @@ Identity and metadata for the target project.
 
 ---
 
-### `paths` (required)
+### `paths` (optional)
 
-All paths are relative to the project root and must begin with `.crucible/`. The defaults shown are the standard layout; change only if you have a structural reason to.
+If omitted, default paths are automatically resolved by the framework. If specified, all paths must be relative to the project root. While session and framework assets (prompts, personas, sops, workspaces) must be rooted under `.crucible/` to prevent repository pollution, the `backlog` directory may be placed anywhere in the repository (e.g. at the root level as `backlog/`).
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -177,7 +177,7 @@ verification:
   full:
     - { name: vet,  command: "go vet ./..." }
     - { name: lint, command: "golangci-lint run ./..." }
-    - { name: test, command: "gotestsum ./..." }
+    - { name: test, command: "go test ./..." }
 
 # Python
 verification:
