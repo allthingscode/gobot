@@ -77,7 +77,7 @@ Path: `.crucible/session/handoffs/{task_id}-{timestamp}.json`
 }
 ```
 
-`file_affinity` is **REQUIRED**. Derive it from the spec's affected files using package-level paths. `factory.ps1` will block the handoff and log a circuit breaker event if an overlap is detected with another active task.
+`file_affinity` is **REQUIRED**. Derive it from the spec's affected files using package-level paths. For audit, report, or documentation tasks, make sure to include the deliverable's own directory path (e.g. `docs/`) in the `file_affinity` list so that scope gates do not block the documentation outputs. `factory.ps1` will block the handoff and log a circuit breaker event if an overlap is detected with another active task.
 
 ### Step 3 — Run validation
 Run `{{crucible_root}}/powershell/validate-backlog.ps1`. A failing validation blocks the handoff — fix `BACKLOG.md` before proceeding.

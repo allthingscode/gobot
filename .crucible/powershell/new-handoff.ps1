@@ -205,16 +205,20 @@ $resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
 
 $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $REPO_ROOT
 $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+
+$resolvedWtPath = if (Test-Path $wtPath) { (Resolve-Path $wtPath).Path } else { $wtPath }
+$resolvedRepoRoot = if (Test-Path $REPO_ROOT) { (Resolve-Path $REPO_ROOT).Path } else { $REPO_ROOT }
+
 $normalizedArtifacts = @()
 foreach ($art in $resolvedArtifacts) {
     if ([string]::IsNullOrWhiteSpace($art)) { continue }
     $fullArtPath = $art
     if (-not [System.IO.Path]::IsPathRooted($art)) {
-        $wtCheck = Join-Path $wtPath $art
+        $wtCheck = Join-Path $resolvedWtPath $art
         if (Test-Path $wtCheck) {
             $fullArtPath = (Resolve-Path $wtCheck).Path
         } else {
-            $repoCheck = Join-Path $REPO_ROOT $art
+            $repoCheck = Join-Path $resolvedRepoRoot $art
             if (Test-Path $repoCheck) {
                 $fullArtPath = (Resolve-Path $repoCheck).Path
             }
@@ -226,10 +230,15 @@ foreach ($art in $resolvedArtifacts) {
     }
     $relPath = $art
     if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
-        if ($fullArtPath.StartsWith($wtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $relPath = $fullArtPath.Substring($wtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
-        } elseif ($fullArtPath.StartsWith($REPO_ROOT, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $relPath = $fullArtPath.Substring($REPO_ROOT.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+        if ($fullArtPath.StartsWith($resolvedWtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $relPath = $fullArtPath.Substring($resolvedWtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+        } elseif ($fullArtPath.StartsWith($resolvedRepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+        }
+    } else {
+        $wtRelPattern = "(\.crucible/)?\.agent-workspaces/implementation-[^/]+/(.+)"
+        if ($relPath.Replace("\", "/") -match $wtRelPattern) {
+            $relPath = $Matches[2]
         }
     }
     $relPath = $relPath.Replace("\", "/").Trim()

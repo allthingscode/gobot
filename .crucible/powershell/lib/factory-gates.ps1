@@ -455,12 +455,15 @@ function Invoke-HandoffPreflightValidation {
         $specFile = Get-BacklogItemPathForTask -Task $handoff.task_id
         if ($specFile -and (Test-Path $specFile)) {
             $specContent = Get-Content $specFile -Raw -Encoding UTF8
-            $affectedSection = ""
+            $hasAffectedSection = $false
             if ($specContent -match '(?sm)^##+\s+.*affected.*?\r?\n(.*?)(\r?\n##+\s+|\z)') {
                 $affectedSection = $Matches[1]
+                if (-not [string]::IsNullOrWhiteSpace($affectedSection)) {
+                    $hasAffectedSection = $true
+                }
             }
             
-            if (-not [string]::IsNullOrWhiteSpace($affectedSection)) {
+            if ($hasAffectedSection) {
                 $mentionedPaths = @()
                 $backtickMatches = [regex]::Matches($affectedSection, '`([^`\r\n]+)`')
                 foreach ($m in $backtickMatches) {
@@ -498,9 +501,16 @@ function Invoke-HandoffPreflightValidation {
                         $joinedSpec = $specTopLevels -join ", "
                         Write-Host "[WARN] Handoff file_affinity ($joinedOverbroad) lists top-level directories absent from the spec's 'affected files' section ($joinedSpec)." -ForegroundColor Yellow
                         Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
-                            -Outcome "warned" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec ($joinedSpec)"
+                            -Outcome "warned" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec ($joinedSpec)" `
+                            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                     }
                 }
+            } else {
+                # D23: Spec has no affected-files/packages section to validate file_affinity against
+                Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
+                Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
+                    -Outcome "warned" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             }
         }
     }
@@ -702,9 +712,6 @@ function Invoke-FactoryRuntimeValidation {
             }
 
             if (-not (Test-Path $resolvedPath)) {
-                Write-EventLog -Event "security_warning" -TaskId $handoff.task_id `
-                    -Specialist $handoff.source_phase -Outcome "warned" `
-                    -Notes ("Fabricated artifact path in handoff: " + $artifact)
                 Write-Host "[WARN] Artifact listed in handoff does not exist: $artifact" -ForegroundColor Yellow
                 $missingArtifacts += $artifact
             } elseif ((Test-Path $resolvedPath) -and (Get-Item $resolvedPath).Length -eq 0) {
@@ -713,12 +720,45 @@ function Invoke-FactoryRuntimeValidation {
         }
         if ($missingArtifacts.Count -gt 0) {
             $joined = ($missingArtifacts -join ", ")
-            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-                -Outcome "blocked" -Notes ("Fabricated artifact path(s) in handoff: " + $joined)
-            Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "fabricated_artifacts" -AttemptCount $handoff.cumulative_handoff_count `
-                -LastSpecialist $handoff.source_phase -Summary ("Handoff listed artifact paths that do not exist: " + $joined) -Artifacts $missingArtifacts
-            Write-Host "[STOP] Artifact integrity gate failed. Fabricated artifact paths must be corrected before handoff can proceed." -ForegroundColor Red
-            exit 2
+
+            # Check if this is a retry (prior missing-artifact quality_gate_retry in event log)
+            $hasPriorRetry = $false
+            if (Test-Path $LOG_FILE) {
+                $lines = @(Get-Content $LOG_FILE -Tail 200 -Encoding UTF8)
+                for ($i = $lines.Length - 1; $i -ge 0; $i--) {
+                    try {
+                        $cleanedLine = $lines[$i] -replace "^$([char]0xFEFF)", ""
+                        $entry = $cleanedLine | ConvertFrom-Json
+                        $logPhase = if ($entry.PSObject.Properties["phase"]) { $entry.phase } else { $entry.specialist }
+                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -ne $handoff.source_phase) {
+                            break
+                        }
+                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "session_end" -and $entry.outcome -eq "success") {
+                            break
+                        }
+                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "quality_gate_retry" -and $entry.notes -like "*artifact*") {
+                            $hasPriorRetry = $true
+                            break
+                        }
+                    } catch { continue }
+                }
+            }
+
+            if ($hasPriorRetry) {
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                    -Outcome "blocked" -Notes ("Fabricated artifact path(s) in handoff: " + $joined)
+                Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "fabricated_artifacts" -AttemptCount $handoff.cumulative_handoff_count `
+                    -LastSpecialist $handoff.source_phase -Summary ("Handoff listed artifact paths that do not exist: " + $joined) -Artifacts $missingArtifacts
+                Write-Host "[STOP] Artifact integrity gate failed. Fabricated artifact paths must be corrected before handoff can proceed." -ForegroundColor Red
+                exit 2
+            } else {
+                Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                    -Outcome "retry_required" -Notes ("Required artifact missing: " + $joined) `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                Write-Host "[STOP] Artifact integrity gate failed: some artifact paths do not exist (missing: $joined)." -ForegroundColor Red
+                Write-Host "Please ensure the files exist in the implementation worktree or repo root and are spelled correctly before handoff." -ForegroundColor Red
+                exit 2
+            }
         }
     }
 
@@ -990,6 +1030,81 @@ function Normalize-FactoryInputState {
 
     $handoffFile = $latestHandoff.FullName
     $handoffRaw = Get-Content $handoffFile -Raw -Encoding UTF8
+
+    # --- Artifact Path Normalization (D25) ---
+    if ($handoff.psobject.Properties["artifacts"] -and $null -ne $handoff.artifacts -and @($handoff.artifacts).Count -gt 0) {
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+        $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
+        $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir
+
+        $resolvedWtPath = if (Test-Path $wtPath) { (Resolve-Path $wtPath).Path } else { $wtPath }
+        $resolvedRepoRoot = if (Test-Path $repoRoot) { (Resolve-Path $repoRoot).Path } else { $repoRoot }
+
+        $normalizedArtifacts = @()
+        foreach ($art in $handoff.artifacts) {
+            if ([string]::IsNullOrWhiteSpace($art)) { continue }
+            $fullArtPath = $art
+            if (-not [System.IO.Path]::IsPathRooted($art)) {
+                $wtCheck = Join-Path $resolvedWtPath $art
+                if (Test-Path $wtCheck) {
+                    $fullArtPath = (Resolve-Path $wtCheck).Path
+                } else {
+                    $repoCheck = Join-Path $resolvedRepoRoot $art
+                    if (Test-Path $repoCheck) {
+                        $fullArtPath = (Resolve-Path $repoCheck).Path
+                    }
+                }
+            } else {
+                if (Test-Path $art) {
+                    $fullArtPath = (Resolve-Path $art).Path
+                }
+            }
+
+            $relPath = $art
+            if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
+                if ($fullArtPath.StartsWith($resolvedWtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $relPath = $fullArtPath.Substring($resolvedWtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+                } elseif ($fullArtPath.StartsWith($resolvedRepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+                }
+            } else {
+                $wtRelPattern = "(\.crucible/)?\.agent-workspaces/implementation-[^/]+/(.+)"
+                if ($relPath.Replace("\", "/") -match $wtRelPattern) {
+                    $relPath = $Matches[2]
+                }
+            }
+
+            $relPath = $relPath.Replace("\", "/").Trim()
+            while ($relPath.StartsWith("./")) {
+                $relPath = $relPath.Substring(2)
+            }
+            $relPath = $relPath.TrimStart("/")
+
+            if (-not [string]::IsNullOrWhiteSpace($relPath)) {
+                $normalizedArtifacts += $relPath
+            }
+        }
+
+        $originalArtifacts = @($handoff.artifacts)
+        $hasChanged = $false
+        if ($originalArtifacts.Count -ne $normalizedArtifacts.Count) {
+            $hasChanged = $true
+        } else {
+            for ($k = 0; $k -lt $originalArtifacts.Count; $k++) {
+                if ($originalArtifacts[$k] -ne $normalizedArtifacts[$k]) {
+                    $hasChanged = $true
+                    break
+                }
+            }
+        }
+
+        if ($hasChanged) {
+            $handoff.artifacts = [string[]]$normalizedArtifacts
+            # Serialize cleanly with no unrolling/scalar conversions (explicitly cast $handoff if needed)
+            $handoffJson = $handoff | ConvertTo-Json -Depth 100
+            [System.IO.File]::WriteAllText($handoffFile, $handoffJson, (New-Object System.Text.UTF8Encoding $false))
+        }
+    }
 
     # --- 2a. Sanitize Inputs ---
     # Prevent prompt injection or confusing formatting in the reason
@@ -1264,14 +1379,22 @@ function Invoke-HumanGateAction {
         }
     } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
         $currentHead = (git rev-parse HEAD).Trim()
-        Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
+        $parents = (git log --pretty=%P -n 1 $currentHead).Trim()
+        $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
+
+        $resetTarget = "origin/$primaryBranch"
+        if ($parentList.Count -ge 2) {
+            $resetTarget = $parentList[0]
+            Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
+        } else {
+            Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
+        }
+
         git checkout $primaryBranch
-        git reset --hard "origin/$primaryBranch"
+        git reset --hard $resetTarget
         
         if ($Outcome -eq "rejected") {
             if (-not (git show-ref --quiet "refs/heads/task/$TaskId")) {
-                $parents = (git log --pretty=%P -n 1 $currentHead).Trim()
-                $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
                 if ($parentList.Count -ge 2) {
                     git branch "task/$TaskId" $parentList[1]
                 } else {

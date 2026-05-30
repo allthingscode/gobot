@@ -945,6 +945,289 @@ try {
         $anomalyVal2 = if ($sessionEnd2.metrics.PSObject.Properties["duration_anomaly"]) { $sessionEnd2.metrics.duration_anomaly } else { $null }
         Assert-Result -Name "negative_duration anomaly detected" -Condition ($anomalyVal2 -eq "negative_duration") -FailureMessage ("expected negative_duration anomaly, got: " + $anomalyVal2)
     }
+
+    $results += Run-Test -Name "D26: missing artifact recoverable retry first, then hard circuit breaker" -Body {
+        $caseRoot = Join-Path $tempRoot "d26-test"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-042"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        
+        $ctx.Handoff = [PSCustomObject]@{
+            task_id = "F-042"
+            source_phase = "implementation"
+            target_phase = "verification"
+            cumulative_handoff_count = 1
+            artifacts = @("docs/NON_EXISTENT_FILE.md")
+        }
+
+        # First occurrence: should exit 2 with quality_gate_retry logged (not circuit_breaker)
+        $exitCode = 0
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
+                LogFile = '$($ctx.LogFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-042'
+                    source_phase = 'implementation'
+                    target_phase = 'verification'
+                    cumulative_handoff_count = 1
+                    artifacts = @('docs/NON_EXISTENT_FILE.md')
+                }
+            }
+            Invoke-FactoryRuntimeValidation -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+        Assert-Result -Name "D26 retry exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+
+        # Check log file
+        $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
+        Assert-Result -Name "D26 logs quality_gate_retry" -Condition ($logContent -match "quality_gate_retry") -FailureMessage "expected quality_gate_retry logged"
+        Assert-Result -Name "D26 does not log circuit_breaker" -Condition ($logContent -notmatch "circuit_breaker") -FailureMessage "should not log circuit_breaker"
+
+        # Write a session_start to simulate retry session
+        $startEvent = @{
+            event = "session_start"
+            task_id = "F-042"
+            phase = "implementation"
+            handoff_count = 2
+        } | ConvertTo-Json -Compress
+        [System.IO.File]::AppendAllText($ctx.LogFile, $startEvent + "`n")
+
+        # Second occurrence: should exit 2 with circuit_breaker logged
+        $exitCode2 = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
+                LogFile = '$($ctx.LogFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-042'
+                    source_phase = 'implementation'
+                    target_phase = 'verification'
+                    cumulative_handoff_count = 2
+                    artifacts = @('docs/NON_EXISTENT_FILE.md')
+                }
+            }
+            Invoke-FactoryRuntimeValidation -Context `$ctx
+"@ 2>&1
+        $exitCode2 = $LASTEXITCODE
+        Assert-Result -Name "D26 retry block exit code is 2" -Condition ($exitCode2 -eq 2) -FailureMessage "expected exit code 2, got $exitCode2"
+
+        # Check circuit breaker history and log
+        $logContent2 = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
+        Assert-Result -Name "D26 logs circuit_breaker on retry" -Condition ($logContent2 -match "circuit_breaker") -FailureMessage "expected circuit_breaker logged on retry"
+    }
+
+    $results += Run-Test -Name "D25: absolute worktree path normalized to repo-root-relative" -Body {
+        $caseRoot = Join-Path $tempRoot "d25-test"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-043"
+
+        $workspacesDir = Join-Path $caseRoot "workspaces"
+        $wtPath = Join-Path $workspacesDir "implementation-F-043"
+        $wtArtifactDir = Join-Path $wtPath "docs"
+        New-Item -ItemType Directory -Path $wtArtifactDir -Force | Out-Null
+        $artFile = Join-Path $wtArtifactDir "METRICS.md"
+        "Metric details" | Set-Content -LiteralPath $artFile -Encoding UTF8
+
+        # Create dummy handoff file containing absolute worktree path
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-043-20260530T120000Z.json"
+        
+        $handoffObj = @{
+            task_id = "F-043"
+            source_phase = "implementation"
+            target_phase = "verification"
+            cumulative_handoff_count = 1
+            reason = "test normalization"
+            artifacts = @($artFile.Replace("\", "/"))
+        }
+        $handoffObj | ConvertTo-Json | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+        $ctx.WorkspacesDir = $workspacesDir
+        $ctx.RepoRoot = $caseRoot
+
+        # Run normalization
+        Normalize-FactoryInputState -Context $ctx
+
+        # Verify handoff file on disk is normalized to relative
+        $savedHandoff = Get-Content $handoffPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $savedArtifact = $savedHandoff.artifacts[0]
+        Assert-Result -Name "D25 normalized to relative" -Condition ($savedArtifact -eq "docs/METRICS.md") -FailureMessage "expected docs/METRICS.md, got $savedArtifact"
+    }
+
+    $results += Run-Test -Name "D23: warning degraded event on missing affected files/packages section in spec" -Body {
+        $caseRoot = Join-Path $tempRoot "d23-test"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-044"
+
+        # Initialize Git repo so that Assert-CrucibleFrameworkIntegrity does not fail
+        Push-Location $caseRoot
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        # Setup spec file with NO affected section
+        $backlogDir = Join-Path $caseRoot ".crucible/backlog"
+        $activeDir = Join-Path $backlogDir "features/active"
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+        $specPath = Join-Path $activeDir "F-044_test.md"
+        $specContent = @"
+---
+item_id: "F-044"
+status: "Ready"
+---
+## Title
+No affected files list here.
+"@
+        $specContent | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        # Create mock validate-handoff.ps1
+        $frameworkDir = Join-Path $caseRoot "powershell"
+        New-Item -ItemType Directory -Path $frameworkDir -Force | Out-Null
+        @'
+param([string]$HandoffFile, [string]$SchemaPath)
+Write-Output '{"ok":true}'
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $frameworkDir "validate-handoff.ps1") -Encoding UTF8
+
+        # Setup handoff file on disk and set LatestHandoff
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-044-20260530T120000Z.json"
+        
+        $handoffObj = @{
+            task_id = "F-044"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            file_affinity = @("cmd/")
+            budget_tier = "low"
+            reason = "test"
+            prompt_version = "1.0.0"
+        }
+        $handoffObj | ConvertTo-Json -Compress | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+
+        $ctx.TaskId = "F-044"
+        $ctx.BacklogDir = $backlogDir
+        $ctx.FrameworkPowerShell = $frameworkDir
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $caseRoot
+        try {
+            Invoke-HandoffPreflightValidation -Context $ctx
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+        }
+
+        # Check log file for degraded warning event
+        $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
+        Assert-Result -Name "D23 warning logged" -Condition ($logContent -match "Spec file does not declare an affected files/packages section") -FailureMessage "expected spec missing affected warning in log"
+    }
+
+    $results += Run-Test -Name "D22 follow-up: unwind merge resets to pre-merge tip, preserving unrelated commit" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d22-followup"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+        
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+        
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+        
+        # Create an unrelated local commit on master that is unpushed
+        "unrelated" | Set-Content -LiteralPath (Join-Path $localRepo "unrelated.md") -Encoding UTF8
+        git -C $localRepo add unrelated.md 2>$null | Out-Null
+        git -C $localRepo commit -m "unrelated commit" 2>$null | Out-Null
+        $unrelatedHash = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Create and commit on a task branch
+        git -C $localRepo checkout -b task/F-998 origin/master 2>$null | Out-Null
+        "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        git -C $localRepo add feature.md 2>$null | Out-Null
+        git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+        
+        # Merge task branch into master (where master has the unrelated commit)
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-998 2>$null | Out-Null
+        
+        # Set up human gate decision folder
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Run unwind human gate rejected
+        $scriptPath = Join-Path $caseRoot "run-d22-followup.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'unwind test'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-998'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} catch {}
+finally {
+    Pop-Location
+}
+"@
+        $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+
+        # Check that master head has been reset back to $unrelatedHash, NOT origin/master!
+        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        Assert-Result -Name "D22 follow-up: master reset back to unrelated commit" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

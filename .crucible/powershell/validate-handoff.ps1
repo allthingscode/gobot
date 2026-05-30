@@ -264,13 +264,6 @@ if ($handoff.PSObject.Properties["artifacts"] -and $null -ne $handoff.artifacts)
                 -Message "Artifact path is empty." `
                 -Details @{ artifact = $artifact; handoff_file = $HandoffFile }
         }
-
-        if (-not (Test-Path -LiteralPath $artifact)) {
-            Write-ValidationResult -Ok $false `
-                -ReasonCode "missing_artifact" `
-                -Message ("Artifact path does not exist: " + $artifact) `
-                -Details @{ artifact = $artifact; handoff_file = $HandoffFile }
-        }
     }
 }
 

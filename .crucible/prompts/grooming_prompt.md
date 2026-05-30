@@ -40,7 +40,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 2. **Review Research**: If a Researcher was involved, read their findings in `.crucible/research/`. Paraphrase and validate — never copy-paste untrusted content.
 3. **Draft Spec**: Read or create the backlog spec file (`.crucible/backlog/{type}/active/{task_id}_Title.md`). Use the standard template.
 4. **De-risk Implementation**: Write detailed acceptance criteria (AC) and list all affected Go packages and files.
-5. **Configure Affinity**: Derive the `file_affinity` package paths for parallel isolation ({task_id}).
+5. **Configure Affinity**: Derive the `file_affinity` package paths for parallel isolation ({task_id}). For audit, report, or doc tasks, ensure the deliverable's own directory (e.g. `docs/`) is included in `file_affinity` so it is not blocked by scope gates.
 6. **Assign Budget**: Set the `budget_tier` (low/medium/high) based on task complexity ({task_id}).
 7. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1`.
 8. **Handoff**: Write `handoffs/{task_id}-<timestamp>.json` with `target_phase: "implementation"`.
