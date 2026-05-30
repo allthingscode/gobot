@@ -23,7 +23,8 @@ function Run-Test {
         Write-Host "PASSED" -ForegroundColor Green
         return $true
     } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
+        Write-Host "ERROR: $_" -ForegroundColor Red
+        Write-Host $_.ScriptStackTrace -ForegroundColor Red
         return $false
     }
 }
@@ -459,6 +460,377 @@ Complete-FactorySourceSession -Context `$ctx
         Assert-Result -Name "retry event logged" -Condition ($logText -match '"event":"quality_gate_retry"') -FailureMessage ("missing quality_gate_retry. Log: " + $logText)
         Assert-Result -Name "no circuit breaker event" -Condition ($logText -notmatch '"event":"circuit_breaker"') -FailureMessage ("unexpected circuit_breaker. Log: " + $logText)
         Assert-Result -Name "no breaker history" -Condition (-not (Test-Path -LiteralPath (Join-Path $caseRoot "session/global/circuit_breakers.jsonl"))) -FailureMessage "circuit breaker history should not be written"
+    }
+
+    $results += Run-Test -Name "Test-CompletionArtifactGate D21 regression: YAML parsing and quote relaxation" -Body {
+        $caseRoot = Join-Path $tempRoot "d21-regression"
+        $scriptPath = Join-Path $caseRoot "run-d21.ps1"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$sessionDir = Join-Path '$caseRoot' 'session'
+`$verifyDir = Join-Path `$sessionDir 'F-004/verification'
+New-Item -ItemType Directory -Path `$verifyDir -Force | Out-Null
+`$reportPath = Join-Path `$verifyDir 'review_report.md'
+
+`$ctx = @{
+    BacklogDir = Join-Path '$caseRoot' 'backlog'
+    SessionDir = `$sessionDir
+    LogFile = Join-Path `$sessionDir 'F-004/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = Join-Path `$sessionDir 'global/circuit_breakers.jsonl'
+    RepoRoot = '$caseRoot'
+    WorkspacesDir = Join-Path '$caseRoot' 'workspaces'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-004'
+        source_phase = 'verification'
+        target_phase = 'deployment'
+        cumulative_handoff_count = 1
+        file_affinity = @()
+        commit_hash = 'dummy_hash'
+    }
+}
+
+# Sub-test 1: unquoted APPROVED and true
+`$yaml = "---`nreview_decision: APPROVED`nacceptance_criteria_met: true`n---`nAPPROVED. Unquoted values work!"
+`$yaml | Set-Content -LiteralPath `$reportPath -Encoding UTF8
+
+Test-CompletionArtifactGate -Context `$ctx
+# Verify that no fallback degraded log is written
+`$logContent = if (Test-Path `$ctx.LogFile) { Get-Content -LiteralPath `$ctx.LogFile -Raw -Encoding UTF8 } else { "" }
+if (`$logContent -match "accepted plain-text APPROVED") {
+    Write-Host "FAILED_FALLBACK"
+} else {
+    Write-Host "PASSED_UNQUOTED"
+}
+
+# Sub-test 2: YAML CHANGES_REQUESTED with APPROVED in prose - should block (exit 1)
+try {
+    `$yaml2 = "---`nreview_decision: CHANGES_REQUESTED`nacceptance_criteria_met: false`n---`nProse has APPROVED somewhere in it."
+    `$yaml2 | Set-Content -LiteralPath `$reportPath -Encoding UTF8
+
+    Test-CompletionArtifactGate -Context `$ctx
+    Write-Host "FAILED_SHOULD_HAVE_BLOCKED"
+} catch {
+    Write-Host "PASSED_BLOCKED"
+}
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "D21: unquoted YAML parses without fallback warning" -Condition ($output -match "PASSED_UNQUOTED") -FailureMessage ("expected PASSED_UNQUOTED, got: " + $output)
+        Assert-Result -Name "D21: CHANGES_REQUESTED YAML blocks even if APPROVED in prose" -Condition ($output -match "PASSED_BLOCKED") -FailureMessage ("expected PASSED_BLOCKED, got: " + $output)
+    }
+
+    $results += Run-Test -Name "Invoke-FactoryRuntimeValidation D20 regression: artifact resolution inside worktree" -Body {
+        $caseRoot = Join-Path $tempRoot "d20-regression"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        
+        $workspacesDir = Join-Path $caseRoot "workspaces"
+        $wtPath = Join-Path $workspacesDir "implementation-F-009"
+        $wtArtifactDir = Join-Path $wtPath "docs"
+        New-Item -ItemType Directory -Path $wtArtifactDir -Force | Out-Null
+        
+        # Create artifact in worktree but NOT in repo root
+        $artFile = Join-Path $wtArtifactDir "METRICS.md"
+        "Metric details" | Set-Content -LiteralPath $artFile -Encoding UTF8
+        
+        $ctx = @{
+            RepoRoot = $caseRoot
+            WorkspacesDir = $workspacesDir
+            LogFile = Join-Path $caseRoot "pipeline.log.jsonl"
+            CircuitBreakerHistoryFile = Join-Path $caseRoot "circuit_breakers.jsonl"
+            Handoff = [PSCustomObject]@{
+                task_id = "F-009"
+                source_phase = "implementation"
+                target_phase = "verification"
+                cumulative_handoff_count = 1
+                file_affinity = @()
+                artifacts = @("docs/METRICS.md")
+            }
+        }
+        
+        $scriptPath = Join-Path $caseRoot "run-d20.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    RepoRoot = '$caseRoot'
+    WorkspacesDir = '$workspacesDir'
+    LogFile = Join-Path '$caseRoot' 'pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = Join-Path '$caseRoot' 'circuit_breakers.jsonl'
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-009'
+        source_phase = 'implementation'
+        target_phase = 'verification'
+        cumulative_handoff_count = 1
+        file_affinity = @()
+        artifacts = @('docs/METRICS.md')
+    }
+}
+
+try {
+    Invoke-FactoryRuntimeValidation -Context `$ctx
+    Write-Host "PASSED_RESOLVED"
+} catch {
+    Write-Host "FAILED_ERROR: `$(_)"
+}
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "D20: artifacts resolve relative to implementation worktree path" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
+    }
+
+    $results += Run-Test -Name "Invoke-HandoffPreflightValidation D19: warn when file_affinity is overbroad relative to spec" -Body {
+        $caseRoot = Join-Path $tempRoot "d19-regression"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        
+        # Initialize Git repo so that Assert-CrucibleFrameworkIntegrity does not fail
+        Push-Location $caseRoot
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+        
+        # 1. Setup mock backlog dir with a spec that has "Affected Files"
+        $backlogDir = Join-Path $caseRoot "backlog"
+        $activeDir = Join-Path $backlogDir "features/active"
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+        
+        $crucibleActiveDir = Join-Path $caseRoot ".crucible/backlog/features/active"
+        New-Item -ItemType Directory -Path $crucibleActiveDir -Force | Out-Null
+
+        $specPath = Join-Path $activeDir "F-020_test.md"
+        $specPath2 = Join-Path $crucibleActiveDir "F-020_test.md"
+        $specContent = @"
+---
+item_id: "F-020"
+status: "Ready"
+---
+## Affected Files
+- ``docs/METRICS.md``
+- ``AGENTS.md``
+"@
+        $specContent | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $specContent | Set-Content -LiteralPath $specPath2 -Encoding UTF8
+
+        # 2. Setup mock validate-handoff.ps1 script
+        $frameworkDir = Join-Path $caseRoot "powershell"
+        New-Item -ItemType Directory -Path $frameworkDir -Force | Out-Null
+        @'
+param([string]$HandoffFile, [string]$SchemaPath)
+Write-Output '{"ok":true}'
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $frameworkDir "validate-handoff.ps1") -Encoding UTF8
+
+        # 3. Setup context with overbroad file_affinity
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-020-20260526T120000Z.json"
+        
+        $handoffObj = @{
+            task_id = "F-020"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            file_affinity = @("cmd/gobot/", "docs/")
+            budget_tier = "low"
+            reason = "test"
+            prompt_version = "1.0.0"
+        }
+        $handoffObj | ConvertTo-Json -Compress | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+
+        $ctx = @{
+            TaskId = "F-020"
+            SessionDir = Join-Path $caseRoot "session"
+            Init = $false
+            Quiet = $true
+            RepoRoot = $caseRoot
+            BacklogDir = $backlogDir
+            HandoffDir = $handoffDir
+            LogFile = Join-Path $caseRoot "pipeline.log.jsonl"
+            CircuitBreakerHistoryFile = Join-Path $caseRoot "circuit_breakers.jsonl"
+            FrameworkPowerShell = $frameworkDir
+            CrucibleRoot = "powershell"
+            LatestHandoff = Get-Item $handoffPath
+            Handoff = [PSCustomObject]$handoffObj
+        }
+
+        # Clear log file first
+        Set-Content -LiteralPath $ctx.LogFile -Value "" -Encoding UTF8
+        
+        # Invoke validation - it should warning but not exit
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $caseRoot
+        try {
+            Invoke-HandoffPreflightValidation -Context $ctx
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+        }
+        
+        # Verify that warning degraded event is written in log file
+        $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
+        Assert-Result -Name "D19 warning logged" -Condition ($logContent -match "Handoff file_affinity contains paths.*not mentioned in spec") -FailureMessage ("expected degraded warning in log, got: " + $logContent)
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate D22 regression: gate push and reset behavior" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d22-regression"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        
+        # 1. Setup a fake git repository structure
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+        
+        # Initialize origin repo
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        
+        # Initialize local repo
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+        
+        # Create a commit on origin
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+        
+        # 2. Simulate local merge on task branch
+        git -C $localRepo checkout -b task/F-999 2>$null | Out-Null
+        "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        git -C $localRepo add feature.md 2>$null | Out-Null
+        git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+        
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-999 2>$null | Out-Null
+        
+        $localCommits = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: local master ahead of origin before gate" -Condition ($localCommits.Count -gt 0) -FailureMessage "expected local master to be ahead of origin"
+        
+        # 3. Setup context structure
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+        
+        $scriptPath = Join-Path $caseRoot "run-d22.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        
+        # Test Case 1: Accepted outcome -> should push changes to origin
+        $scriptContentAccept = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'work looks beautiful'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-999'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_ACCEPT"
+} catch {
+    Write-Host "FAILED: `$_"
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContentAccept | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCode = $LASTEXITCODE
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "D22: human gate accepted exits successfully" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
+        
+        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: git push succeeded on accept" -Condition ($behindCommits.Count -eq 0) -FailureMessage "origin/master is still behind master after acceptance"
+        
+        # Test Case 2: Rejected outcome -> should unwind local merge and restore task branch
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo reset --hard HEAD~1 2>$null | Out-Null
+        git -C $originRepo update-ref refs/heads/master HEAD~1 2>$null | Out-Null
+        git -C $localRepo fetch origin master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-999 2>$null | Out-Null
+        
+        $behindCommits2 = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: local master ahead before reject" -Condition ($behindCommits2.Count -gt 0) -FailureMessage "expected master to be ahead again"
+        
+        git -C $localRepo branch -D task/F-999 2>$null | Out-Null
+        
+        $scriptContentReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'needs rework'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-999'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REJECT"
+} catch {
+    Write-Host "FAILED: `$_"
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContentReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        
+        $outputLines2 = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCode2 = $LASTEXITCODE
+        $output2 = $outputLines2 -join "`n"
+        Assert-Result -Name "D22: human gate rejected exits successfully" -Condition ($exitCode2 -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode2 + ". Output: " + $output2)
+        
+        $behindCommits3 = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: local merge was unwound on reject" -Condition ($behindCommits3.Count -eq 0) -FailureMessage "master is still ahead of origin/master after reject"
+        
+        git -C $localRepo show-ref --quiet refs/heads/task/F-999
+        Assert-Result -Name "D22: task branch was restored on reject" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch task/F-999 was not restored"
     }
 
     $results += Run-Test -Name "Resolve-FactoryTransition handles valid and invalid transitions" -Body {

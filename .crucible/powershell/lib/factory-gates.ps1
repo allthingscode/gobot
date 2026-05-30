@@ -450,6 +450,61 @@ function Invoke-HandoffPreflightValidation {
         }
     }
 
+    # D19: Cross-check file_affinity in handoff against spec's affected files section
+    if ($handoff.psobject.Properties["file_affinity"] -and $handoff.file_affinity -ne $null -and @($handoff.file_affinity).Count -gt 0) {
+        $specFile = Get-BacklogItemPathForTask -Task $handoff.task_id
+        if ($specFile -and (Test-Path $specFile)) {
+            $specContent = Get-Content $specFile -Raw -Encoding UTF8
+            $affectedSection = ""
+            if ($specContent -match '(?sm)^##+\s+.*affected.*?\r?\n(.*?)(\r?\n##+\s+|\z)') {
+                $affectedSection = $Matches[1]
+            }
+            
+            if (-not [string]::IsNullOrWhiteSpace($affectedSection)) {
+                $mentionedPaths = @()
+                $backtickMatches = [regex]::Matches($affectedSection, '`([^`\r\n]+)`')
+                foreach ($m in $backtickMatches) {
+                    $mentionedPaths += $m.Groups[1].Value.Trim()
+                }
+                $listMatches = [regex]::Matches($affectedSection, '(?m)^\s*-\s+([^\r\n]+)')
+                foreach ($m in $listMatches) {
+                    $val = $m.Groups[1].Value.Trim() -replace '`','' -replace '\*',''
+                    $mentionedPaths += $val
+                }
+                
+                $specTopLevels = @()
+                foreach ($p in $mentionedPaths) {
+                    $parts = $p -split '[/\\]'
+                    if ($parts.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
+                        $specTopLevels += $parts[0].Trim()
+                    }
+                }
+                $specTopLevels = @($specTopLevels | Select-Object -Unique)
+                
+                if ($specTopLevels.Count -gt 0) {
+                    $overbroad = @()
+                    foreach ($aff in @($handoff.file_affinity)) {
+                        $affTrimmed = $aff.Trim().Trim('/') -split '[/\\]'
+                        if ($affTrimmed.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($affTrimmed[0])) {
+                            $top = $affTrimmed[0]
+                            if ($specTopLevels -notcontains $top) {
+                                $overbroad += $aff
+                            }
+                        }
+                    }
+                    
+                    if ($overbroad.Count -gt 0) {
+                        $joinedOverbroad = $overbroad -join ", "
+                        $joinedSpec = $specTopLevels -join ", "
+                        Write-Host "[WARN] Handoff file_affinity ($joinedOverbroad) lists top-level directories absent from the spec's 'affected files' section ($joinedSpec)." -ForegroundColor Yellow
+                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
+                            -Outcome "warned" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec ($joinedSpec)"
+                    }
+                }
+            }
+        }
+    }
+
     # Construct the standard session-end command. Use absolute paths so orchestrators can drive
     # specialists from outside the adopter repository without depending on their current directory.
     $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $Context.RepoRoot $crucibleRoot }
@@ -633,14 +688,26 @@ function Invoke-FactoryRuntimeValidation {
     # A-3: Verify listed artifacts actually exist
     if ($handoff.psobject.Properties["artifacts"] -and $handoff.artifacts -ne $null) {
         $missingArtifacts = @()
+
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+        $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
+        $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir
+        $baseArtifactDir = if (Test-Path $wtPath) { $wtPath } else { $repoRoot }
+
         foreach ($artifact in $handoff.artifacts) {
-            if (-not (Test-Path $artifact)) {
+            if ([string]::IsNullOrWhiteSpace($artifact)) { continue }
+            $resolvedPath = $artifact
+            if (-not [System.IO.Path]::IsPathRooted($artifact)) {
+                $resolvedPath = Join-Path $baseArtifactDir $artifact
+            }
+
+            if (-not (Test-Path $resolvedPath)) {
                 Write-EventLog -Event "security_warning" -TaskId $handoff.task_id `
                     -Specialist $handoff.source_phase -Outcome "warned" `
                     -Notes ("Fabricated artifact path in handoff: " + $artifact)
                 Write-Host "[WARN] Artifact listed in handoff does not exist: $artifact" -ForegroundColor Yellow
                 $missingArtifacts += $artifact
-            } elseif ((Test-Path $artifact) -and (Get-Item $artifact).Length -eq 0) {
+            } elseif ((Test-Path $resolvedPath) -and (Get-Item $resolvedPath).Length -eq 0) {
                 Write-Host "[WARN] Artifact is empty: $artifact" -ForegroundColor Yellow
             }
         }
@@ -794,17 +861,17 @@ function Test-CompletionArtifactGate {
                         $errorMsg = "Review report must contain 'APPROVED' for transition to Operator."
                     } else {
                         # Regex uses [\r\n]+ to handle both Windows (\r\n) and Unix (\n) line endings.
-                        if ($content -match "(sm)^\s*---\s*[\r\n]+(.*)[\r\n]+\s*---") {
+                        if ($content -match "(?sm)^\s*---\s*[\r\n]+(.*)[\r\n]+\s*---") {
                             $yaml = $matches[1]
                             $decision = ""
-                            if ($yaml -match '(m)^\s*review_decision:\s*["''](APPROVED|CHANGES_REQUESTED|BLOCKED)["'']\s*$') { $decision = $matches[1] }
+                            if ($yaml -match '(?m)^\s*review_decision:\s*["'']?(APPROVED|CHANGES_REQUESTED|BLOCKED)["'']?\s*$') { $decision = $matches[1] }
 
                             if ($decision -ne "APPROVED") {
                                 $verificationPassed = $false
                                 $errorMsg = "Review report YAML 'review_decision' must be 'APPROVED' (found '$decision')."
                             }
 
-                            if ($yaml -match '(m)^\s*acceptance_criteria_met:\s*false\s*$' -or $yaml -notmatch '(m)^\s*acceptance_criteria_met:\s*true\s*$') {
+                            if ($yaml -match '(?m)^\s*acceptance_criteria_met:\s*["'']?false["'']?\s*$' -or $yaml -notmatch '(?m)^\s*acceptance_criteria_met:\s*["'']?true["'']?\s*$') {
                                  $verificationPassed = $false
                                  $errorMsg = "Review report YAML must have 'acceptance_criteria_met: true'."
                             }
@@ -1019,7 +1086,7 @@ function Normalize-FactoryInputState {
             $recoveryMarker = $checkpointMatches[$checkpointMatches.Count - 1].Groups[1].Value
         } else {
             # Check for last completed item
-            $taskMatches = [regex]::Matches($taskContent, '(m)^\s*-\s*\[x\]\s*(.+)')
+            $taskMatches = [regex]::Matches($taskContent, '(?m)^\s*-\s*\[x\]\s*(.+)')
             if ($taskMatches.Count -gt 0) {
                 $recoveryMarker = $taskMatches[$taskMatches.Count - 1].Groups[1].Value.Trim()
             }
@@ -1177,6 +1244,45 @@ function Invoke-CircuitBreakerGates {
     }
 }
 
+function Invoke-HumanGateAction {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$Outcome
+    )
+    $primaryBranch = Get-PrimaryBranchName
+    if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
+        $remotes = @(git remote 2>$null)
+        if ($remotes -contains "origin") {
+            Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
+            git push origin $primaryBranch
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                exit 1
+            }
+        } else {
+            Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
+        }
+    } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
+        $currentHead = (git rev-parse HEAD).Trim()
+        Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
+        git checkout $primaryBranch
+        git reset --hard "origin/$primaryBranch"
+        
+        if ($Outcome -eq "rejected") {
+            if (-not (git show-ref --quiet "refs/heads/task/$TaskId")) {
+                $parents = (git log --pretty=%P -n 1 $currentHead).Trim()
+                $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
+                if ($parentList.Count -ge 2) {
+                    git branch "task/$TaskId" $parentList[1]
+                } else {
+                    git branch "task/$TaskId" $currentHead
+                }
+                Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
+            }
+        }
+    }
+}
+
 function Invoke-HumanGate {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -1249,6 +1355,9 @@ function Invoke-HumanGate {
             Write-Host ("`n[HUMAN GATE] Decision recorded via CLI flag: " + $GateOutcome) -ForegroundColor Green
             Write-Host ("Reason: " + $trimmedGateReason) -ForegroundColor Gray
 
+            # Execute push or reset based on automated CLI decision
+            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome
+
             if ($GateOutcome -eq "abandoned") {
                 Write-Host "[ABANDONED] Pipeline stopped per human request." -ForegroundColor Gray
                 exit 0
@@ -1320,6 +1429,9 @@ function Invoke-HumanGate {
                             
                             exit 0
                         } else {
+                            # Execute push or reset based on manual decision
+                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome
+
                             # Archive the decision
                             $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
                             $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
@@ -1328,6 +1440,10 @@ function Invoke-HumanGate {
                             
                             # Cleanup machine-readable signal
                             if (Test-Path $GATE_PENDING_FILE) { Remove-Item $GATE_PENDING_FILE -Force }
+
+                            if ($gateData.outcome -eq "rejected" -or $gateData.outcome -eq "abandoned") {
+                                exit 0
+                            }
                         }
                     } catch {
                         Write-Host "Error parsing gate decision template." -ForegroundColor Red

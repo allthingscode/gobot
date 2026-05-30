@@ -52,9 +52,10 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     }
 }
 $REPO_ROOT = $ProjectRoot
-
-$factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
-. $factoryLibPath
+Push-Location $REPO_ROOT
+try {
+    $factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
+    . $factoryLibPath
 
 # Default schema location: framework's own schemas/ directory (one level up from powershell/).
 if ([string]::IsNullOrWhiteSpace($SchemaPath)) {
@@ -202,6 +203,46 @@ $resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
     @()
 })
 
+$workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $REPO_ROOT
+$wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+$normalizedArtifacts = @()
+foreach ($art in $resolvedArtifacts) {
+    if ([string]::IsNullOrWhiteSpace($art)) { continue }
+    $fullArtPath = $art
+    if (-not [System.IO.Path]::IsPathRooted($art)) {
+        $wtCheck = Join-Path $wtPath $art
+        if (Test-Path $wtCheck) {
+            $fullArtPath = (Resolve-Path $wtCheck).Path
+        } else {
+            $repoCheck = Join-Path $REPO_ROOT $art
+            if (Test-Path $repoCheck) {
+                $fullArtPath = (Resolve-Path $repoCheck).Path
+            }
+        }
+    } else {
+        if (Test-Path $art) {
+            $fullArtPath = (Resolve-Path $art).Path
+        }
+    }
+    $relPath = $art
+    if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
+        if ($fullArtPath.StartsWith($wtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $relPath = $fullArtPath.Substring($wtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+        } elseif ($fullArtPath.StartsWith($REPO_ROOT, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $relPath = $fullArtPath.Substring($REPO_ROOT.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+        }
+    }
+    $relPath = $relPath.Replace("\", "/").Trim()
+    while ($relPath.StartsWith("./")) {
+        $relPath = $relPath.Substring(2)
+    }
+    $relPath = $relPath.TrimStart("/")
+    if (-not [string]::IsNullOrWhiteSpace($relPath)) {
+        $normalizedArtifacts += $relPath
+    }
+}
+$resolvedArtifacts = $normalizedArtifacts
+
 [string[]]$resolvedFileAffinity = @(if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
     @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["file_affinity"] -and $null -ne $latest.file_affinity) {
@@ -293,4 +334,7 @@ try {
         Remove-Item -LiteralPath $tempOutputPath -Force -ErrorAction SilentlyContinue
     }
     throw
+}
+} finally {
+    Pop-Location
 }

@@ -8,15 +8,15 @@ Deployment: {task_id}
 See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 - **Successor**: Only `grooming`.
 - **Merge Protocol**: Simulation MUST pass before real merge.
-- **Deployment**: `git push` MUST succeed before handoff.
+- **Deployment**: Merge to the default branch (`master` or `main`) MUST succeed locally before handoff.
 - **Cleanup**: Delete worktree and task branch.
 ---
 
 ---
 > ### HARD RULES — Read Before Anything Else
 > 1. **You MUST run `factory.ps1` at session end.** Do not write your own `gemini "..."` command. The pipeline command comes from factory output only — copy it verbatim.
-> 2. **Push MUST succeed before writing the handoff.** Verify with `git log origin/master --oneline -1`. If the hash doesn't match, you are not done.
-> 3. **Do NOT mark an item `Production` until it is actually merged and pushed.** Updating BACKLOG.md before the push is complete is a false completion.
+> 2. **Local merge MUST succeed before writing the handoff.** Verify with `git log master --oneline -1`.
+> 3. **Do NOT mark an item `Production` until it is actually merged locally.** Updating BACKLOG.md before the merge is complete is a false completion.
 > 4. **Your session ends after presenting the single `[NEXT SESSION COMMAND]` command line.** Do not pick the next backlog item or start a new task.
 ---
 
@@ -63,11 +63,11 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
      - Prompt: Instruct implementation to rebase `task/{task_id}` onto `master`.
    - **If it passes**: Proceed to Step 4.
 
-4. **Commit & Push**:
-   - Merge `task/{task_id}` into `master`.
-   - Tag the release if applicable.
-   - Push to origin (`git push origin master`).
-   - **Verify**: Run `git log origin/master --oneline -1` and confirm the commit hash matches your local `master`. If push failed or the hashes differ, STOP — do NOT proceed to Step 5 or write a handoff until push succeeds.
+4. **Commit & Local Merge**:
+   - Merge `task/{task_id}` into `master` locally.
+   - Tag the release locally if applicable.
+   - Do NOT run `git push`. The factory's Human Gate will perform the push to origin automatically once accepted.
+   - **Verify**: Run `git log master --oneline -1` and confirm the merge succeeded locally.
 
 5. **Dev Log Generation ({task_id})**:
    - Draft a narrative update for this completed task using `.crucible/dev-logs/TEMPLATE.md` and append it to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.

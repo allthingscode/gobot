@@ -45,18 +45,19 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 - **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major step (e.g., "Step 4: Merge to Master Complete").
 - **Example**: `### CHECKPOINT Step 5: Dev Log Generated`
 
-### Step 4 — Commit & Push
+### Step 4 — Local Merge
 ```bash
 git checkout master
 git merge --no-edit task/{task_id}
-git push origin master
 ```
 
-**Verify push succeeded:**
+Do NOT run `git push`. The factory's Human Gate will perform the push to origin automatically once accepted.
+
+**Verify merge succeeded:**
 ```bash
-git log origin/master --oneline -1
+git log master --oneline -1
 ```
-Confirm the commit hash matches your local `master`. If hashes differ or push failed: STOP. Do NOT write a handoff until push is verified.
+Confirm the merge commit succeeded locally. If the merge failed or has conflicts: STOP. Do NOT write a handoff until merge is verified.
 
 ### Step 5 — Dev Log Generation ({task_id})
 Draft a narrative update using `.crucible/dev-logs/TEMPLATE.md` and append to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.
@@ -200,12 +201,12 @@ When production issues are discovered that meet the circuit breaker threshold (P
 ## Quality Bar
 
 Pre-flight gate — confirm all are true before writing handoff:
-- [ ] `git log origin/master --oneline -1` shows the merge commit (push succeeded)
+- [ ] `git log master --oneline -1` shows the merge commit (merge succeeded locally)
 - [ ] `BACKLOG.md` entry for `{task_id}` shows `Production` or `Resolved`
 - [ ] Worktree and task branch have been deleted
 - [ ] Pipeline log archived
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
 - [ ] Routing to: `done` (or `grooming` if production issue threshold met)
 - [ ] `task_id` in handoff matches the task I was given
-- [ ] `commit_hash` in handoff matches the pushed merge commit
+- [ ] `commit_hash` in handoff matches the local merge commit hash
 - [ ] Eval record written to `.crucible/session/eval/eval-{task_id}.json`

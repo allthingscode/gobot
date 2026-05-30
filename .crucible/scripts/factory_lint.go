@@ -46,6 +46,7 @@ func main() {
 	failures = append(failures, lintPolicyDrift(frameworkRoot)...)
 	failures = append(failures, lintDebugPrints(frameworkRoot)...)
 	failures = append(failures, lintFactorySelfReference(frameworkRoot)...)
+	failures = append(failures, lintRegexHygiene(frameworkRoot)...)
 
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "\n--- factory_lint: %d issue(s) found ---\n", len(failures))
@@ -605,6 +606,46 @@ func lintFactorySelfReference(root string) []string {
 		if strings.Contains(line, "powershell/factory.ps1") && !strings.Contains(line, "crucibleRoot") {
 			out = append(out, fmt.Sprintf("powershell/factory.ps1:%d: hardcoded \"powershell/factory.ps1\" path detected. Prepend with crucible_root configuration instead", i+1))
 		}
+	}
+	return out
+}
+
+// lintRegexHygiene ensures no script file contains literal '(m) or "(m) regex flags.
+func lintRegexHygiene(root string) []string {
+	var out []string
+	searchDirs := []string{
+		filepath.Join(root, "powershell"),
+		filepath.Join(root, "scripts"),
+	}
+
+	for _, dir := range searchDirs {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".ps1" && ext != ".go" {
+				return nil
+			}
+			if filepath.Base(path) == "regex-hygiene.tests.ps1" || filepath.Base(path) == "factory_lint.go" {
+				return nil
+			}
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			content := string(data)
+			containsM1 := "'" + "(" + "m" + ")"
+			containsM2 := "\"" + "(" + "m" + ")"
+			if strings.Contains(content, containsM1) || strings.Contains(content, containsM2) {
+				relFile, _ := filepath.Rel(root, path)
+				out = append(out, fmt.Sprintf("%s: contains literal '(m) or \"(m) regex flag", relFile))
+			}
+			return nil
+		})
 	}
 	return out
 }
