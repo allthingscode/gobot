@@ -1,6 +1,6 @@
-﻿# Codex Strategic Orchestrator Protocol
+# Codex Strategic Orchestrator Protocol
 
-This document defines **Codex CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/personas/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Codex CLI environment.
+This document defines **Codex CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Codex CLI environment.
 
 ## The "Orchestrate" Directive
 
@@ -21,7 +21,7 @@ Boundary rules:
 
 ## Core Mandates (Codex-Specific)
 
-1. **Zero-Implementation Policy**: Covered in `.crucible/personas/orchestrator.md`. Codex adds: never run `gemini`, `claude`, or another `agent` CLI process from inside Codex to create a specialist session - use Codex subagents exclusively.
+1. **Zero-Implementation Policy**: Covered in `.crucible/docs/orchestrator.md`. Codex adds: never run `gemini`, `claude`, or another `agent` CLI process from inside Codex to create a specialist session - use Codex subagents exclusively.
 2. **Delegation via Subagents**: Every specialist role is executed with `spawn_agent`.
 3. **Context Isolation**: Spawn specialist subagents with `fork_context: false`. Pass only the generated specialist prompt or a short bootstrap prompt that tells the subagent which files to read.
 4. **Parent-Owned Routing**: Subagents MUST NOT spawn successor agents. The parent session waits for completion, runs or verifies `factory.ps1`, checks gates, asks the human for confirmation, and then spawns the next subagent.
@@ -55,7 +55,7 @@ The parent session must do the following for every specialist subagent:
    handoff until the required checkpoints and task checklist are complete.
    ```
 
-2. After the subagent returns, inspect `.crucible/session/{TASK_ID}/{role}/task.md`.
+2. After the subagent returns, inspect `.crucible/session/{TASK_ID}/{phase}/task.md`.
 3. Confirm the file contains at least one `### CHECKPOINT` marker for non-trivial work.
 4. Confirm the required `## Task List` has no unchecked required items before accepting the handoff.
 5. If checkpoints are missing, do not advance the pipeline. Re-dispatch the same specialist with a repair prompt, or ask the human for direction if the work cannot be verified.
@@ -71,13 +71,13 @@ Checkpoint verification is not a replacement for `factory.ps1` gates. It is an a
    ```text
    Groomer: Next Item
 
-   Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md,
-   and .crucible/sops/groomer.md. Select the next eligible backlog item, write or
-   update its spec, write the groomer -> architect handoff, run factory.ps1
-   -Init -TaskId <selected_task_id> -Quiet, then stop and report the task ID and
-   factory output. Follow your SOP checkpoint mandate: append `### CHECKPOINT`
-   entries to task.md after each major pass, and do not write the handoff until
-   required checklist items are complete.
+    Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md,
+    and .crucible/sops/grooming.md. Select the next eligible backlog item, write or
+    update its spec, write the grooming -> implementation handoff, run factory.ps1
+    -Init -TaskId <selected_task_id> -Quiet, then stop and report the task ID and
+    factory output. Follow your SOP checkpoint mandate: append `### CHECKPOINT`
+    entries to task.md after each major pass, and do not write the handoff until
+    required checklist items are complete.
    ```
 
 2. Parent waits for the Groomer subagent to finish.
@@ -94,14 +94,14 @@ powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/facto
 
 Then it reads:
 
-- `.crucible/session/{TASK_ID}/{ROLE}/prompt.md`
-- `.crucible/session/{TASK_ID}/{ROLE}/next_step.txt`
+- `.crucible/session/{TASK_ID}/{PHASE}/prompt.md`
+- `.crucible/session/{TASK_ID}/{PHASE}/next_step.txt`
 - `.crucible/session/{TASK_ID}/gate_pending.txt` if present
 
 If no gate or circuit breaker is active, the parent spawns the next specialist subagent with:
 
 ```text
-{Role}: {TASK_ID} - read and follow all instructions in .crucible/session/{TASK_ID}/{role}/prompt.md
+{Role}: {TASK_ID} - read and follow all instructions in .crucible/session/{TASK_ID}/{phase}/prompt.md
 
 Follow your SOP checkpoint mandate. Append `### CHECKPOINT [brief summary]`
 to task.md after every major phase. Do not write the final handoff until the

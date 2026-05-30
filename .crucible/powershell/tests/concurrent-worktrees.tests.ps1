@@ -75,7 +75,7 @@ function Initialize-WorktreeProject {
                 "item_id: `"$taskId`"",
                 "priority: `"P3`"",
                 "status: `"Ready`"",
-                "specialist: `"Groomer`"",
+                "target_phase: `"grooming`"",
                 "budget_tier: `"low`"",
                 "file_affinity: [`"src/$taskId.txt`"]",
                 "created_at: `"2026-05-25`"",
@@ -124,8 +124,8 @@ function Write-GroomerHandoff {
     $handoffPath = Join-Path $handoffDir ("${TaskId}-${timestamp}.json")
     $handoff = [ordered]@{
         task_id                  = $TaskId
-        source_specialist        = "groomer"
-        target_specialist        = "architect"
+        source_phase             = "grooming"
+        target_phase             = "implementation"
         reason                   = "Ready for isolated implementation"
         handoff_retry_count      = 0
         review_strike_count      = 0
@@ -171,8 +171,8 @@ $mainSupported = Test-GitInitMainSupported
 $baseBranch = if ($mainSupported) { "main" } else { "master" }
 $taskA = "C-WT-A"
 $taskB = "C-WT-B"
-$wtA = Join-Path $projectRoot ".crucible/.agent-workspaces/architect-$taskA"
-$wtB = Join-Path $projectRoot ".crucible/.agent-workspaces/architect-$taskB"
+$wtA = Join-Path $projectRoot ".crucible/.agent-workspaces/implementation-$taskA"
+$wtB = Join-Path $projectRoot ".crucible/.agent-workspaces/implementation-$taskB"
 
 try {
     if (-not $mainSupported) {

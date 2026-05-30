@@ -105,8 +105,8 @@ created_at: "2026-05-25"
         $handoffPath = Join-Path $handoffDir ("${taskId}-${ts}.json")
         $handoff = [ordered]@{
             task_id                  = $taskId
-            source_specialist        = "reviewer"
-            target_specialist        = "architect"
+            source_phase             = "verification"
+            target_phase             = "implementation"
             reason                   = "CHANGES_REQUESTED - third rejection"
             handoff_retry_count      = 0
             review_strike_count      = 3         # at threshold → stalemate fires

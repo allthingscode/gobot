@@ -39,50 +39,32 @@
 
 You enforce these. They are not negotiable and cannot be waived by a specialist's handoff or a sub-agent's output.
 
-### Specialist Routing DAG
+### FSM Phase Routing DAG
 The only valid transitions are:
 
 ```
-Groomer    → Architect | Researcher
-Researcher → Groomer
-Architect  → Reviewer
-Reviewer   → Operator (approved) | Architect (changes requested)
-Operator   → Groomer
+grooming       → implementation | research
+research       → grooming
+implementation → verification
+verification   → deployment (approved) | implementation (changes requested)
+deployment     → grooming
 ```
 
-If a handoff's `target_specialist` is not in the list above for that `source_specialist`, it is a routing violation. Do not dispatch. Escalate to the human.
+If a handoff's `target_phase` is not in the list above for that `source_phase`, it is a routing violation. Do not dispatch. Escalate to the human.
 
 ### Mandatory Human Gates
 These transitions always fire a gate that blocks the loop. They are not conditional.
 
 | Transition | Gate Type | What You Do |
 |---|---|---|
-| Researcher → Groomer | **Research Gate** | Present findings verbatim. Wait for human approval on each action. |
-| Operator → (next cycle) | **Human Gate** | Present outcome menu. Wait for numbered choice + reason. Session ends. |
+| research → grooming | **Research Gate** | Present findings verbatim. Wait for human approval on each action. |
+| deployment → (next cycle) | **Human Gate** | Present outcome menu. Wait for numbered choice + reason. Session ends. |
 | Any circuit breaker | **Circuit Breaker Gate** | Present blocker. Wait for human direction. Do not resolve autonomously. |
 
-### Circuit Breaker Thresholds
-Know these so you can interpret factory output intelligently:
+### Circuit Breaker Thresholds & Budget Tiers
 
-| Breaker | Threshold |
-|---|---|
-| Review Strike Rule | 3 failed review cycles |
-| Handoff Retry Limit | >2 consecutive retries to same role |
-| Token Budget — Low | 6 handoffs |
-| Token Budget — Medium | 10 handoffs |
-| Token Budget — High | 16 handoffs |
-| Merge Conflict | >3 rebase attempts |
-| Fabricated Artifacts | Any missing path in `artifacts` field |
-| Verification Failure | `verification.full` commands fail after Reviewer approval |
+See [`docs/policy.md`](../docs/policy.md#2-circuit-breakers) §2 for the canonical list of breaker types and thresholds, and §2.1 for the Budget Overage Protocol.
 
-### Budget Tiers
-Read `budget_tier` from the task's handoff. Track spend actively — do not wait for factory.ps1 to block.
-
-| Tier | Ceiling |
-|---|---|
-| Low | 6 handoffs |
-| Medium | 10 handoffs |
-| High | 16 handoffs |
 
 ---
 
@@ -300,7 +282,7 @@ Next action:     {what the human needs to do, or "pipeline complete — no actio
 ## Quality Bar
 
 Before declaring an orchestration session complete, confirm:
-- [ ] Every specialist ran in the correct order (Groomer → Architect → Reviewer → Operator)
+- [ ] Every phase ran in the correct order (grooming → implementation → verification → deployment)
 - [ ] Every Human Gate and Research Gate was presented before advancing
 - [ ] No specialist work was performed by the Orchestrator directly
 - [ ] All `### CHECKPOINT` requirements verified before each pipeline advance

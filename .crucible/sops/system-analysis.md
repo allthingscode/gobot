@@ -41,7 +41,7 @@ Write these down — you'll reference them again in Phase 2.
 agent "Researcher: Audit Dev Factory"
 ```
 
-The agent reads `.crucible/sops/researcher-audit-factory.md` and `.crucible/research/scorecard-devfactory.md`, audits all 10 categories (including live framework research for category 10), and writes a report to `.crucible/research/`.
+The agent reads `.crucible/sops/research-audit-factory.md` and `.crucible/research/scorecard-devfactory.md`, audits all 10 categories (including live framework research for category 10), and writes a report to `.crucible/research/`.
 
 **Research Gate fires at the end of this session.** Review the findings. Approve, defer, or reject each recommendation before the agent hands off. The agent will not exit the session until you respond.
 
@@ -55,7 +55,7 @@ After Phase 1a is complete:
 agent "Researcher: Audit [project name]"
 ```
 
-The agent reads `.crucible/sops/researcher-audit-project.md` and the project's scorecard (e.g. `.crucible/research/scorecard-{project}.md`), audits all categories (including live competitor discovery), and writes a report to `.crucible/research/`.
+The agent reads `.crucible/sops/research-audit-project.md` and the project's scorecard (e.g. `.crucible/research/scorecard-{project}.md`), audits all categories (including live competitor discovery), and writes a report to `.crucible/research/`.
 
 **Research Gate fires at the end of this session.** Same as above — respond before the agent exits.
 

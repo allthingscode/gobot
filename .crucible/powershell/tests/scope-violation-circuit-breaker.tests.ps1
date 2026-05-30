@@ -106,12 +106,12 @@ try {
         Push-Location $projectRoot
         try {
             git branch "task/$taskId" master
-            git worktree add ".crucible/.agent-workspaces/architect-$taskId" "task/$taskId" --quiet
+            git worktree add ".crucible/.agent-workspaces/implementation-$taskId" "task/$taskId" --quiet
         } finally {
             Pop-Location
         }
 
-        $wtPath = Join-Path $projectRoot ".crucible/.agent-workspaces/architect-$taskId"
+        $wtPath = Join-Path $projectRoot ".crucible/.agent-workspaces/implementation-$taskId"
         Set-Content -Path (Join-Path $wtPath "src/b.txt") -Value "out-of-scope change"
         Push-Location $wtPath
         try {
@@ -128,8 +128,8 @@ try {
         $handoffPath = Join-Path $handoffDir ("${taskId}-${ts}.json")
         $handoff = [ordered]@{
             task_id                  = $taskId
-            source_specialist        = "architect"
-            target_specialist        = "reviewer"
+            source_phase             = "implementation"
+            target_phase             = "verification"
             reason                   = "Implementation complete"
             handoff_retry_count      = 0
             review_strike_count      = 0

@@ -3,13 +3,13 @@ param(
     [string]$TaskId,
 
     [Parameter(Mandatory = $true)]
-    # Keep synchronized with $script:FACTORY_SPECIALISTS in factory-lib.ps1.
-    [ValidateSet("researcher", "groomer", "architect", "reviewer", "operator")]
+    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
+    [ValidateSet("research", "grooming", "implementation", "verification", "deployment")]
     [string]$Source,
 
     [Parameter(Mandatory = $true)]
-    # Keep synchronized with $script:FACTORY_SPECIALISTS in factory-lib.ps1.
-    [ValidateSet("researcher", "groomer", "architect", "reviewer", "operator", "done")]
+    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
+    [ValidateSet("research", "grooming", "implementation", "verification", "deployment", "done")]
     [string]$Target,
 
     [Parameter(Mandatory = $true)]
@@ -220,8 +220,8 @@ $resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
 
 $payload = [ordered]@{
     task_id                  = $TaskId
-    source_specialist        = $Source
-    target_specialist        = $Target
+    source_phase             = $Source
+    target_phase             = $Target
     reason                   = $Reason
     handoff_retry_count      = $resolvedHandoffRetry
     review_strike_count      = $resolvedReviewStrike
@@ -236,7 +236,7 @@ $payload = [ordered]@{
     artifacts                = $resolvedArtifacts
 }
 
-if ($Source -eq "groomer" -or @($resolvedFileAffinity).Count -gt 0) {
+if ($Source -eq "grooming" -or @($resolvedFileAffinity).Count -gt 0) {
     $payload.file_affinity = $resolvedFileAffinity
 }
 if (@($resolvedStubSpecsCreated).Count -gt 0) {

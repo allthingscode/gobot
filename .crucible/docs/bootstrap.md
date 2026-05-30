@@ -93,15 +93,14 @@ Project-specific work belongs in the adopter project's installed `.crucible/`.
 For a new human or agent, read:
 
 1. [../README.md](../README.md) - what Crucible is and why it exists.
-2. [QUICKSTART.md](QUICKSTART.md) - single-screen first-run guide.
-3. [GET_STARTED.md](GET_STARTED.md) - step-by-step first task walkthrough.
-4. [operating-manual.md](operating-manual.md) - end-to-end workflow.
-5. [policy.md](policy.md) - canonical gates and circuit breakers.
-6. [handoff-protocol.md](handoff-protocol.md) - handoff shape and session lifecycle.
-7. [agent-instructions.md](agent-instructions.md) - what to add to adopter instruction files.
-8. [git-policy.md](git-policy.md) - what belongs in git under `.crucible/`.
-9. [cheat-sheet.md](cheat-sheet.md) - compact operational summary.
-10. [uninstall.md](uninstall.md) - how to cleanly remove Crucible.
+2. [GET_STARTED.md](GET_STARTED.md) - step-by-step first task walkthrough and 10-minute quickstart.
+3. [operating-manual.md](operating-manual.md) - end-to-end workflow.
+4. [policy.md](policy.md) - canonical gates and circuit breakers.
+5. [handoff-protocol.md](handoff-protocol.md) - handoff shape and session lifecycle.
+6. [agent-instructions.md](agent-instructions.md) - what to add to adopter instruction files.
+7. [git-policy.md](git-policy.md) - what belongs in git under `.crucible/`.
+8. [cheat-sheet.md](cheat-sheet.md) - compact operational summary.
+9. [uninstall.md](uninstall.md) - how to cleanly remove Crucible.
 
 ## Advanced: Custom Installers
 

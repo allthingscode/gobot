@@ -50,7 +50,7 @@ item_id: "$ItemId"
 type: "Chore"
 status: "$Status"
 priority: "$Priority"
-target_specialist: "Architect"
+target_phase: "implementation"
 created_at: "2026-05-25"
 ---
 

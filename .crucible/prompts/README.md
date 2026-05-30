@@ -11,7 +11,7 @@ Ultra-short prompts for common tasks. Use these instead of verbose commands.
 1. Recognize it as a **minimalist trigger** for your specialist workflow.
 2. Immediately read `.crucible/session/handoffs/` and your specialist's `task.md`.
 3. Understand that **all technical details, reasons, and objectives** are in the data files, not the prompt.
-4. Follow the workflow defined in your specialist's **machine template** (e.g., `architect_prompt.md`). Note that documentation files (e.g., `ARCHITECT.md`) are for human reference and non-factory manual invocations only; do not rely on them for operating instructions in the automated pipeline.
+4. Follow the workflow defined in your specialist's **machine template** (e.g., `implementation_prompt.md`). Note that documentation files (e.g., `docs/implementation-phase-reference.md`) are for human reference and non-factory manual invocations only; do not rely on them for operating instructions in the automated pipeline.
 
 The prompt's only job is to trigger the correct persona and target ID. All context is "pulled" by the agent from the file system, not "pushed" through the prompt.
 
@@ -45,12 +45,11 @@ agent "[PROMPT]"
 ### Implementation
 - `Architect: Design F-XXX` - Create implementation plan for feature/bug
 - `Architect: Implement F-XXX` - Design + code a feature
-- `Coder: Implement task.md` - Follow task.md spec (delegated from Architect)
 - `Controller: Research + Groom [TOPIC]` - Batch research and grooming
 
 ### Review & Validation
 - `Reviewer: Review F-XXX` - Full code review of implementation
-- `Reviewer: Review output.md` - Review Coder's output
+- `Reviewer: Review output.md` - Review implementation output
 - `Operator: Deploy F-XXX` - Deploy approved code to production
 
 ### System Operations
@@ -60,10 +59,10 @@ agent "[PROMPT]"
 - `Checkpoints` - List all session checkpoints
 
 ### Handoffs (Structured Protocol)
-- `Architect -> Reviewer: F-XXX` - Implementation ready for review
-- `Reviewer -> Architect: Fix CRITICAL issues` - Changes requested
-- `Reviewer -> Operator: Deploy F-XXX` - Code approved for production
-- `Operator -> Researcher: Review operator_report.md` - Production issues found
+- `implementation -> verification: F-XXX` - Implementation ready for review
+- `verification -> implementation: Fix CRITICAL issues` - Changes requested
+- `verification -> deployment: Deploy F-XXX` - Code approved for production
+- `deployment -> research: Review operator_report.md` - Production issues found
 
 ## Pattern: "Specialist: Action TARGET"
 

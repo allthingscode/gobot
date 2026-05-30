@@ -9,7 +9,8 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$worktree = Join-Path ".crucible/.agent-workspaces" ("architect-" + $TaskId)
+$worktreeRoot = ".crucible/.agent-workspaces"
+$worktree = Join-Path $worktreeRoot ("implementation-" + $TaskId)
 if (-not (Test-Path $worktree)) {
     Write-Error ("Worktree missing: {0}" -f $worktree)
 }

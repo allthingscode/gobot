@@ -9,14 +9,14 @@ Formal definition: `schemas/handoff.schema.json`
 ```json
 {
   "task_id": "F-XXX",
-  "source_specialist": "architect",
-  "target_specialist": "reviewer",
+  "source_phase": "implementation",
+  "target_phase": "verification",
   "reason": "Implementation complete, ready for validation",
   "handoff_retry_count": 0,
   "review_strike_count": 0,
   "budget_tier": "low",
   "cumulative_handoff_count": 3,
-  "prompt_version": "architect_prompt-v20",
+  "prompt_version": "implementation_prompt-v27",
   "suspicious_content": null,
   "session_cycle_id": "{cycle_id from task.md}",
   "artifacts": ["src/agent/agent.go"]
@@ -25,34 +25,30 @@ Formal definition: `schemas/handoff.schema.json`
 
 Path: `.crucible/session/handoffs/{task_id}-{timestamp}.json`
 
-## Mandatory Persona Sequence
+## Mandatory Phase Sequence
 
-1. **Groomer** → Triage & spec
-2. **Architect** → Design & implementation
-3. **Reviewer** → Validation (MUST approve before deploy)
-4. **Operator** → Deployment (final gate)
+1. **grooming** → Triage & spec
+2. **implementation** → Design & implementation
+3. **verification** → Validation (MUST approve before deploy)
+4. **deployment** → Deployment (final gate)
 
 **Standard Handoffs**:
-- `Groomer` → `Architect` (implementation)
-- `Architect` → `Reviewer` (review required)
-- `Reviewer` → `Operator` (approved for deploy)
-- `Reviewer` → `Architect` (fix blockers)
-- `Operator` → `Done` (pipeline resolved) or `Groomer` (if production issue threshold met)
+- `grooming` → `implementation` (implementation)
+- `implementation` → `verification` (review required)
+- `verification` → `deployment` (approved for deploy)
+- `verification` → `implementation` (fix blockers)
+- `deployment` → `done` (pipeline resolved) or `grooming` (if production issue threshold met)
 
 ## Circuit Breaker Rules (Canonical in POLICY.md)
 
-1. **Review Strike Rule**: 3 failed review cycles → BLOCK.
-2. **Handoff Retry Limit**: > 2 consecutive retries to same role → BLOCK.
-3. **Token Budget Enforcement**: 6/10/16 handoffs based on `budget_tier`.
-4. **Merge Conflict Limit**: > 3 rebase attempts → BLOCK.
-5. **Verification Failure**: `go test` failure after Reviewer approval → BLOCK.
+See [`docs/policy.md`](policy.md#2-circuit-breakers) §2 for the canonical list of breaker types, thresholds, and rules.
 
 ## Universal Handoff Output Template
 
 Every specialist MUST end their response with this format:
 
 ```markdown
-### [SPECIALIST ROLE] TASK COMPLETE
+### [FSM PHASE] TASK COMPLETE
 
 - **Item**: [Task ID] - [Brief Title]
 - **Status**: [Current Status]
@@ -67,11 +63,11 @@ Run `{{crucible_root}}/powershell/factory.ps1 -Init -TaskId {task_id}` to genera
 
 ## Git Ownership & Boundaries (MANDATORY)
 
-To prevent accidental state pollution and ensure proper review cycles, Git operations are strictly partitioned by persona:
+To prevent accidental state pollution and ensure proper review cycles, Git operations are strictly partitioned by phase:
 
-- **ARCHITECT / RESEARCHER / GROOMER**: YOU ARE STRICTLY FORBIDDEN FROM RUNNING `git commit` OR `git push`. You must implement changes and leave them in the working directory (uncommitted). Your turn ends with uncommitted modifications.
-- **REVIEWER**: You review the uncommitted changes in the working directory. Do not commit.
-- **OPERATOR**: Only the Operator persona (or the human) is authorized to stage (`git add`), commit (`git commit`), and push (`git push`) code changes.
+- **implementation / research / grooming**: YOU ARE STRICTLY FORBIDDEN FROM RUNNING `git commit` OR `git push`. You must implement changes and leave them in the working directory (uncommitted). Your turn ends with uncommitted modifications.
+- **verification**: You review the uncommitted changes in the working directory. Do not commit.
+- **deployment**: Only the deployment phase (or the human) is authorized to stage (`git add`), commit (`git commit`), and push (`git push`) code changes.
 
 ## Agent Execution Boundaries
 
@@ -84,11 +80,11 @@ Agents **construct and write `handoff.json`** but do **not** generate the next c
    ```bash
    powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id}
    ```
-4. Agent presents the factory output to the human (summary of what was done, verbatim `[NEXT SESSION COMMAND]` block, recommended model) and **waits for human confirmation** before the next specialist session begins. The human may continue in this session or take the command to a different session.
+4. Agent presents the factory output to the human (summary of what was done, verbatim `[NEXT SESSION COMMAND]` block, recommended model) and **waits for human confirmation** before the next phase session begins. The human may continue in this session or take the command to a different session.
 
 ## Session State Management
 
-- All specialists update `session/global/session_state.json` after each phase
+- All FSM phases update `session/global/session_state.json` after each phase
 - Write `handoffs/{task_id}-{timestamp}.json` before ending session
 - Read `handoff.schema.json` and validate before handoff
 - Do NOT manually delete `task.md` — `factory.ps1 -Init` handles stale file cleanup automatically

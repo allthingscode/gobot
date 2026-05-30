@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$FrameworkSource,
     [Parameter(Mandatory=$false)][string]$AdopterRoot = (Get-Location).Path,
     [Parameter(Mandatory=$false)][switch]$DryRun,
-    [Parameter(Mandatory=$false)][ValidateSet("interactive", "auto-safe", "report-only")][string]$Mode = "interactive"
+    [Parameter(Mandatory=$false)][ValidateSet("interactive", "auto-safe", "report-only")][string]$Mode = "interactive",
+    [Parameter(Mandatory=$false)][switch]$Prune
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,14 +74,30 @@ function Get-GitFileContent {
         if ($LASTEXITCODE -ne 0) {
             return $null
         }
-        $output = @(git -C $Repo show $object 2>$null)
     } finally {
         $ErrorActionPreference = $previousPreference
     }
-    if ($LASTEXITCODE -ne 0) {
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "git"
+    $psi.Arguments = "-C ""$Repo"" show ""$object"""
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $output = $proc.StandardOutput.ReadToEnd()
+        $proc.WaitForExit()
+        if ($proc.ExitCode -ne 0) {
+            return $null
+        }
+        return $output
+    } catch {
         return $null
     }
-    return ($output -join "`n")
 }
 
 function Get-GitFileNormalizedHash {
@@ -130,7 +147,7 @@ function Add-ClassifiedItem {
     param(
         [Parameter(Mandatory=$true)]$Results,
         [Parameter(Mandatory=$true)][string]$Category,
-        [Parameter(Mandatory=$true)][string]$SourcePath,
+        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$SourcePath,
         [Parameter(Mandatory=$true)][string]$AdopterPath
     )
     $Results[$Category].Add([pscustomobject]@{
@@ -250,6 +267,40 @@ function Invoke-UpdateBundle {
         }
     }
 
+    # Build the set of expected adopter-relative paths that should exist (framework-owned at HEAD)
+    $expected = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($src in $headFiles) {
+        foreach ($ap in @(Get-AdopterPathsForSource -SourcePath $src -Manifest $manifest)) {
+            if (-not [string]::IsNullOrWhiteSpace($ap)) {
+                [void]$expected.Add((ConvertTo-RelativeSlashPath -Path $ap))
+            }
+        }
+    }
+
+    $classifiedAdopterPaths = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($category in $results.Keys) {
+        foreach ($item in $results[$category]) {
+            [void]$classifiedAdopterPaths.Add((ConvertTo-RelativeSlashPath -Path $item.AdopterPath))
+        }
+    }
+
+    $scanRoots = @($manifest.copied_dirs | ForEach-Object { ($_ -replace '\\','/').TrimEnd('/') })
+    foreach ($root in $scanRoots) {
+        $abs = Join-Path $adopterCrucibleRoot $root
+        if (-not (Test-Path -LiteralPath $abs)) { continue }
+        foreach ($f in Get-ChildItem -LiteralPath $abs -Recurse -File -Force) {
+            $rel = ConvertTo-RelativeSlashPath -Path ($f.FullName.Substring($adopterCrucibleRoot.Length))
+            if ($expected.Contains($rel)) { continue }
+            if ($classifiedAdopterPaths.Contains($rel)) { continue }
+            if (Test-AdopterOwnedPath -RelativePath $rel -Manifest $manifest) { continue }
+            if (-not (Test-ScaffoldSnapshotPath -RelativePath $rel -Manifest $manifest)) {
+                if (Test-CrucibleGitIgnored -AdopterRoot $adopterRootResolved -RelativePath $rel) { continue }
+            }
+            Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath "" -AdopterPath $rel
+            [void]$classifiedAdopterPaths.Add($rel)
+        }
+    }
+
     $sessionDir = Join-Path $adopterCrucibleRoot "session"
     if (-not (Test-Path -LiteralPath $sessionDir)) {
         New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
@@ -278,14 +329,46 @@ function Invoke-UpdateBundle {
         }
     }
 
+    $appliedCount = 0
     if ($shouldApply) {
         foreach ($item in $applyItems) {
             Copy-FrameworkFileToAdopter -FrameworkRoot $frameworkRoot -AdopterCrucibleRoot $adopterCrucibleRoot -Item $item
+            $appliedCount++
         }
-        if ($results["needs-merge"].Count -eq 0 -and $results["review-removal"].Count -eq 0) {
+        Write-Host ("Applied " + $appliedCount + " update(s).")
+    }
+
+    $pruneItems = @($results["review-removal"].ToArray())
+    $shouldPrune = $false
+    if ($Prune -and -not $effectiveDryRun -and $pruneItems.Count -gt 0) {
+        if ($Mode -eq "auto-safe") {
+            $shouldPrune = $true
+        } elseif ($Mode -eq "interactive") {
+            $answer = Read-Host ("Prune " + $pruneItems.Count + " obsolete framework file(s)? [y/N]")
+            $shouldPrune = ($answer -match '^(?i)y(es)?$')
+        }
+    }
+
+    $prunedCount = 0
+    if ($shouldPrune) {
+        foreach ($item in $pruneItems) {
+            $pathToDelete = Join-Path $adopterCrucibleRoot $item.AdopterPath
+            if (Test-Path -LiteralPath $pathToDelete -PathType Leaf) {
+                Remove-Item -LiteralPath $pathToDelete -Force
+                $prunedCount++
+            }
+        }
+        Write-Host ("Pruned " + $prunedCount + " obsolete file(s).")
+    }
+
+    if ($shouldApply -or $shouldPrune) {
+        $remainingRemovals = $results["review-removal"].Count
+        if ($shouldPrune) {
+            $remainingRemovals -= $prunedCount
+        }
+        if ($results["needs-merge"].Count -eq 0 -and $remainingRemovals -eq 0) {
             Write-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit" -Value $frameworkHead
         }
-        Write-Host ("Applied " + $applyItems.Count + " update(s).")
     }
 
     if ($results["needs-merge"].Count -gt 0) {

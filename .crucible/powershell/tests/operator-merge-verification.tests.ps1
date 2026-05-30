@@ -94,7 +94,7 @@ function Write-OperatorHandoff {
     param(
         [string]$ProjectRoot,
         [string]$TaskId,
-        [string]$Target = "groomer",
+        [string]$Target = "grooming",
         [AllowNull()][string]$CommitHash,
         [string[]]$FileAffinity = @("src/app.txt")
     )
@@ -104,8 +104,8 @@ function Write-OperatorHandoff {
     $handoffPath = Join-Path $handoffDir ("${TaskId}-${timestamp}.json")
     $handoff = [ordered]@{
         task_id                  = $TaskId
-        source_specialist        = "operator"
-        target_specialist        = $Target
+        source_phase             = "deployment"
+        target_phase             = $Target
         reason                   = "Operator merge verification test"
         handoff_retry_count      = 0
         review_strike_count      = 0

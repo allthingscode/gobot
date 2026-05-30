@@ -1,6 +1,6 @@
-﻿# Gemini / Antigravity Strategic Orchestrator Protocol
+# Gemini / Antigravity Strategic Orchestrator Protocol
 
-This document defines **Gemini / Antigravity CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/personas/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Gemini / Antigravity CLI environments.
+This document defines **Gemini / Antigravity CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Gemini / Antigravity CLI environments.
 
 ## The "Orchestrate" Directive
 
@@ -23,7 +23,7 @@ invoke_subagent(
       "Role": "{Role}",
       "Prompt": (
         f"{Role}: {TASK_ID} — read and follow all instructions in "
-        f".crucible/session/{TASK_ID}/{role}/prompt.md\n\n"
+        f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
         "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
         "to task.md after each major phase. Do not write the final handoff until all "
         "required task checklist items are complete.\n\n"
@@ -44,7 +44,7 @@ invoke_agent(
   agent_name="generalist",
   prompt=(
     f"{Role}: {TASK_ID} — read and follow all instructions in "
-    f".crucible/session/{TASK_ID}/{role}/prompt.md\n\n"
+    f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
     "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
     "to task.md after each major phase. Do not write the final handoff until all "
     "required task checklist items are complete.\n\n"
@@ -71,8 +71,8 @@ invoke_subagent(
       "Prompt": (
         "Groomer: Next Item\n\n"
         "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
-        "and .crucible/sops/groomer.md. Select the next eligible backlog item, write or "
-        "update its spec, write the groomer → architect handoff, then run:\n\n"
+        "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
+        "update its spec, write the grooming -> implementation handoff, then run:\n\n"
         "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
         "-Init -TaskId <selected_task_id> -Quiet\n\n"
         "Follow your SOP checkpoint mandate. Do not write the handoff until required "
@@ -91,8 +91,8 @@ invoke_agent(
   prompt=(
     "Groomer: Next Item\n\n"
     "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
-    "and .crucible/sops/groomer.md. Select the next eligible backlog item, write or "
-    "update its spec, write the groomer → architect handoff, then run:\n\n"
+    "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
+    "update its spec, write the grooming -> implementation handoff, then run:\n\n"
     "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
     "-Init -TaskId <selected_task_id> -Quiet\n\n"
     "Follow your SOP checkpoint mandate. Do not write the handoff until required "

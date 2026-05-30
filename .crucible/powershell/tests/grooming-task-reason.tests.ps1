@@ -1,4 +1,4 @@
-# Regression test for scoped Groomer init reason handling.
+# Regression test for scoped grooming phase init reason handling.
 # A researcher->groomer handoff must keep its own reason even when another Ready item exists.
 
 $ErrorActionPreference = "Stop"
@@ -61,7 +61,7 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
     $projectRoot = Join-Path $tempRoot "groomer-reason-app"
 
-    $results += Run-Test -Name "Groomer task.md keeps scoped handoff reason" -Body {
+    $results += Run-Test -Name "Grooming task.md keeps scoped handoff reason" -Body {
         New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
         Push-Location $projectRoot
         try {
@@ -90,7 +90,7 @@ item_id: C-200
 title: Ready Item
 status: Ready
 priority: P1
-target_specialist: Groomer
+target_phase: grooming
 budget_tier: low
 created_at: 2026-05-23
 ---
@@ -131,8 +131,8 @@ Separate ready item that must not rewrite another task's handoff reason.
         New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
         $handoff = [ordered]@{
             task_id                  = "C-100"
-            source_specialist        = "researcher"
-            target_specialist        = "groomer"
+            source_phase             = "research"
+            target_phase             = "grooming"
             reason                   = "Research Gate approved C-100 scope"
             handoff_retry_count      = 0
             review_strike_count      = 0
@@ -165,8 +165,8 @@ Separate ready item that must not rewrite another task's handoff reason.
         }
         Assert-Result -Name "factory -Init exit" -Condition ($factoryCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $factoryCmd.ExitCode + ". Output: " + ($factoryCmd.Output -join "`n"))
 
-        $taskFile = Join-Path $projectRoot ".crucible/session/C-100/groomer/task.md"
-        Assert-Result -Name "groomer task.md exists" -Condition (Test-Path -LiteralPath $taskFile) -FailureMessage "expected groomer/task.md to exist"
+        $taskFile = Join-Path $projectRoot ".crucible/session/C-100/grooming/task.md"
+        Assert-Result -Name "grooming task.md exists" -Condition (Test-Path -LiteralPath $taskFile) -FailureMessage "expected grooming/task.md to exist"
 
         $taskContent = Get-Content -LiteralPath $taskFile -Raw -Encoding UTF8
         Assert-Result -Name "reason keeps research gate text" -Condition ($taskContent -match "Reason: Research Gate approved C-100 scope") -FailureMessage ("unexpected task.md content: " + $taskContent)

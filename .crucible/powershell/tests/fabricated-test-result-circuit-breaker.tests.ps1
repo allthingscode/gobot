@@ -106,7 +106,7 @@ verification:
 item_id: "C-FABRICATED"
 priority: "P3"
 status: "Ready"
-specialist: "Groomer"
+target_phase: "grooming"
 budget_tier: "low"
 file_affinity: ["src/"]
 created_at: "2026-05-08"
@@ -124,13 +124,13 @@ created_at: "2026-05-08"
         Push-Location $projectRoot
         try {
             git branch task/C-FABRICATED master
-            git worktree add .crucible/.agent-workspaces/architect-C-FABRICATED task/C-FABRICATED --quiet
+            git worktree add .crucible/.agent-workspaces/implementation-C-FABRICATED task/C-FABRICATED --quiet
         } finally {
             Pop-Location
         }
 
         # 6. Write Reviewer APPROVED report
-        $reportDir = Join-Path $projectRoot ".crucible/session/C-FABRICATED/reviewer"
+        $reportDir = Join-Path $projectRoot ".crucible/session/C-FABRICATED/verification"
         New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
         $reportContent = @"
 ---
@@ -148,8 +148,8 @@ APPROVED
         $handoffPath = Join-Path $handoffDir ("C-FABRICATED-" + $timestamp + ".json")
         $handoffData = [ordered]@{
             task_id                  = "C-FABRICATED"
-            source_specialist        = "reviewer"
-            target_specialist        = "operator"
+            source_phase             = "verification"
+            target_phase             = "deployment"
             reason                   = "APPROVED"
             handoff_retry_count      = 0
             review_strike_count      = 0

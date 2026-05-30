@@ -1,4 +1,0 @@
-#!/bin/sh
-# Architect worktree pre-commit — delegates to the canonical hook
-# with any architect-specific overrides applied first.
-exec "$(git rev-parse --show-toplevel)/../../../scripts/hooks/pre-commit" "$@"

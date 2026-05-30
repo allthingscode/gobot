@@ -35,7 +35,7 @@ if ($state.tasks) {
         
         # Check if task is active (not resolved/archived). We can check if operator has finished.
         $operatorDone = $false
-        $opSpec = if ($otherTask.specialists -and $otherTask.specialists.PSObject.Properties["operator"]) { $otherTask.specialists.operator } else { $null }
+        $opSpec = if ($otherTask.phases -and $otherTask.phases.PSObject.Properties["deployment"]) { $otherTask.phases.deployment } else { $null }
         if ($opSpec) {
             if ($opSpec.PSObject.Properties["status"] -and ($opSpec.status -eq "Complete" -or $opSpec.status -eq "idle")) {
                 if ($opSpec.PSObject.Properties["phase"] -and ($opSpec.phase -eq "Production" -or $opSpec.phase -eq "Complete")) {
@@ -46,11 +46,11 @@ if ($state.tasks) {
         
         if ($operatorDone) { continue }
 
-        # Extract affinity for the other task (from groomer or architect state)
+        # Extract affinity for the other task (from grooming or implementation state)
         $otherAffinity = @()
-        if ($otherTask.specialists) {
-            $archSpec = if ($otherTask.specialists.PSObject.Properties["architect"]) { $otherTask.specialists.architect } else { $null }
-            $groomSpec = if ($otherTask.specialists.PSObject.Properties["groomer"]) { $otherTask.specialists.groomer } else { $null }
+        if ($otherTask.phases) {
+            $archSpec = if ($otherTask.phases.PSObject.Properties["implementation"]) { $otherTask.phases.implementation } else { $null }
+            $groomSpec = if ($otherTask.phases.PSObject.Properties["grooming"]) { $otherTask.phases.grooming } else { $null }
             if ($archSpec -and $archSpec.PSObject.Properties["file_affinity"]) {
                 $otherAffinity = $archSpec.file_affinity
             } elseif ($groomSpec -and $groomSpec.PSObject.Properties["file_affinity"]) {

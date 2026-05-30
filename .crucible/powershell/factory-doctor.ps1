@@ -73,9 +73,16 @@ function Invoke-ToolCheck {
         [string[]]$Arguments = @()
     )
 
-    $output = & $Command @Arguments 2>&1
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $Command @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
     return [PSCustomObject]@{
-        ExitCode = $LASTEXITCODE
+        ExitCode = $exitCode
         Output   = ($output | Out-String).Trim()
     }
 }

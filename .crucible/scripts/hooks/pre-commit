@@ -5,40 +5,96 @@
 
 set -e
 
-# Resolve top-level directory
+# Resolve hooks directory from the location of this hook script
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve the framework root relative to the hook's directory (always 2 levels up)
+FRAMEWORK_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+# Resolve the repository root where the commit is occurring
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPO_ROOT"
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
 echo "--- Crucible pre-commit verification started"
 
-# 1. Policy Drift check
-echo "Running policy drift check..."
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-policy-drift.ps1
+if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
+    # FRAMEWORK REPO CONTEXT
+    cd "$REPO_ROOT"
 
-# 2. Mojibake check
-echo "Running mojibake check..."
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1
+    # 1. Policy Drift check
+    echo "Running policy drift check..."
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-policy-drift.ps1
 
-# 3. Go Factory Lint check
-echo "Running factory lint checks..."
-go run powershell/tests/factory_lint.go
+    # 2. Mojibake check
+    echo "Running mojibake check..."
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1
 
-# 4. Unresolved Merge Conflict check
-echo "Scanning staged files for unresolved merge conflict markers..."
-STAGED_FILES=$(git diff --cached --name-only)
-if [ -n "$STAGED_FILES" ]; then
-    # Filter files that exist to avoid grep errors on deleted staged files
-    EXISTING_STAGED_FILES=""
-    for file in $STAGED_FILES; do
-        if [ -f "$file" ]; then
-            EXISTING_STAGED_FILES="$EXISTING_STAGED_FILES $file"
+    # 3. Go Factory Lint check
+    echo "Running factory lint checks..."
+    go run scripts/factory_lint.go
+
+    # 4. Unresolved Merge Conflict check
+    echo "Scanning staged files for unresolved merge conflict markers..."
+    STAGED_FILES=$(git diff --cached --name-only)
+    if [ -n "$STAGED_FILES" ]; then
+        # Filter files that exist to avoid grep errors on deleted staged files
+        EXISTING_STAGED_FILES=""
+        for file in $STAGED_FILES; do
+            if [ -f "$file" ]; then
+                EXISTING_STAGED_FILES="$EXISTING_STAGED_FILES $file"
+            fi
+        done
+        if [ -n "$EXISTING_STAGED_FILES" ]; then
+            if grep -E '^(<{7}|={7}$|>{7})' $EXISTING_STAGED_FILES >/dev/null 2>&1; then
+                echo "ERROR: Unresolved merge conflicts detected in staged files. Please fix them before committing."
+                exit 1
+            fi
         fi
-    done
-    if [ -n "$EXISTING_STAGED_FILES" ]; then
-        if grep -E '^(<{7}|={7}$|>{7})' $EXISTING_STAGED_FILES >/dev/null 2>&1; then
-            echo "ERROR: Unresolved merge conflicts detected in staged files. Please fix them before committing."
-            exit 1
+    fi
+else
+    # ADOPTER REPO CONTEXT
+    # Run only adopter-appropriate checks
+    cd "$REPO_ROOT"
+
+    # 1. Unresolved Merge Conflict check of staged files
+    echo "Scanning staged files for unresolved merge conflict markers..."
+    STAGED_FILES=$(git diff --cached --name-only)
+    if [ -n "$STAGED_FILES" ]; then
+        # Filter files that exist to avoid grep errors on deleted staged files
+        EXISTING_STAGED_FILES=""
+        for file in $STAGED_FILES; do
+            if [ -f "$file" ]; then
+                EXISTING_STAGED_FILES="$EXISTING_STAGED_FILES $file"
+            fi
+        done
+        if [ -n "$EXISTING_STAGED_FILES" ]; then
+            if grep -E '^(<{7}|={7}$|>{7})' $EXISTING_STAGED_FILES >/dev/null 2>&1; then
+                echo "ERROR: Unresolved merge conflicts detected in staged files. Please fix them before committing."
+                exit 1
+            fi
         fi
+    fi
+
+    # 2. Mojibake check of the adopter's staged files
+    # Only scan staged .md and .ps1 files that exist
+    STAGED_FILES_MOJIBAKE=""
+    if [ -n "$STAGED_FILES" ]; then
+        for file in $STAGED_FILES; do
+            if [ -f "$file" ]; then
+                case "$file" in
+                    *.md|*.ps1)
+                        STAGED_FILES_MOJIBAKE="$STAGED_FILES_MOJIBAKE $file"
+                        ;;
+                esac
+            fi
+        done
+    fi
+
+    if [ -n "$STAGED_FILES_MOJIBAKE" ]; then
+        echo "Running mojibake check on staged files..."
+        # Pass files positionally (not via -Paths): in powershell.exe -File mode a named
+        # array param binds only the first token; ValueFromRemainingArguments collects all
+        # positional args. Regression: check-mojibake.tests.ps1.
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/tests/check-mojibake.ps1" $STAGED_FILES_MOJIBAKE
     fi
 fi
 

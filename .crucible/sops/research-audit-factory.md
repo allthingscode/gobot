@@ -1,4 +1,4 @@
-<!-- prompt_version: researcher-audit-factory-v1 -->
+<!-- prompt_version: research-audit-factory-v1 -->
 # SOP: Researcher — Dev Factory Quality Audit
 
 **Use when:** Asked to run a structured quality audit of the Dev Factory multi-agent system.

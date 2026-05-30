@@ -1,4 +1,4 @@
-<!-- prompt_version: researcher-investigate-v1 -->
+<!-- prompt_version: research-investigate-v1 -->
 # SOP: Researcher — Investigation
 
 **Use when:** Asked to investigate a specific topic, evaluate a library, analyze a gap, or produce a research artifact that the Groomer will convert into backlog items. This is open-ended research with a defined subject but no fixed scorecard.

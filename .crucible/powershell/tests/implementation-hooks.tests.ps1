@@ -1,4 +1,4 @@
-# Updated Architect Hooks Verification Test
+# Implementation Phase Hooks Verification Test
 # This test creates a temporary repo, enables worktreeConfig, adds the architect worktree, and verifies the hooksPath.
 
 $ErrorActionPreference = "Stop"
@@ -20,7 +20,7 @@ try {
 
     $CurrentBranch = git rev-parse --abbrev-ref HEAD
     $TaskId = "ARCH-001"
-    $wtPath = Join-Path (Get-Location) ".crucible/.agent-workspaces/architect-$TaskId"
+    $wtPath = Join-Path (Get-Location) ".crucible/.agent-workspaces/implementation-$TaskId"
     git worktree add $wtPath -b "task/$TaskId" $CurrentBranch
     # Ensure architect hooks directory exists and set absolute path
     $hookDir = Join-Path $TempRoot "scripts/hooks/architect"
@@ -33,7 +33,7 @@ try {
     }
 
 
-    Write-Host "ARCHITECT HOOKS TEST PASSED" -ForegroundColor Green
+    Write-Host "IMPLEMENTATION HOOKS TEST PASSED" -ForegroundColor Green
     exit 0
 } finally {
     Pop-Location

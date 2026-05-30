@@ -82,13 +82,13 @@ function Get-MatchingContractClauses {
 
         if ($ifNode.PSObject.Properties["properties"] -and $null -ne $ifNode.properties) {
             $props = $ifNode.properties
-            if ($props.PSObject.Properties["source_specialist"] -and $props.source_specialist.PSObject.Properties["const"]) {
-                if ($Source -ne ([string]$props.source_specialist.const).Trim().ToLowerInvariant()) {
+            if ($props.PSObject.Properties["source_phase"] -and $props.source_phase.PSObject.Properties["const"]) {
+                if ($Source -ne ([string]$props.source_phase.const).Trim().ToLowerInvariant()) {
                     $isMatch = $false
                 }
             }
-            if ($props.PSObject.Properties["target_specialist"] -and $props.target_specialist.PSObject.Properties["const"]) {
-                if ($Target -ne ([string]$props.target_specialist.const).Trim().ToLowerInvariant()) {
+            if ($props.PSObject.Properties["target_phase"] -and $props.target_phase.PSObject.Properties["const"]) {
+                if ($Target -ne ([string]$props.target_phase.const).Trim().ToLowerInvariant()) {
                     $isMatch = $false
                 }
             }
@@ -124,7 +124,7 @@ function Assert-SchemaContract {
                     Write-ValidationResult -Ok $false `
                         -ReasonCode $reasonCode `
                         -Message ("Missing required field: " + $field) `
-                        -Details @{ field = $field; source_specialist = $Source; target_specialist = $Target; handoff_file = $HandoffFile }
+                        -Details @{ field = $field; source_phase = $Source; target_phase = $Target; handoff_file = $HandoffFile }
                 }
             }
         }
@@ -138,7 +138,7 @@ function Assert-SchemaContract {
                         Write-ValidationResult -Ok $false `
                             -ReasonCode "invalid_field" `
                             -Message ("Field is not allowed for this transition: " + $field) `
-                            -Details @{ field = $field; source_specialist = $Source; target_specialist = $Target; handoff_file = $HandoffFile }
+                            -Details @{ field = $field; source_phase = $Source; target_phase = $Target; handoff_file = $HandoffFile }
                     }
                 }
             }
@@ -151,7 +151,7 @@ function Assert-SchemaContract {
                                 Write-ValidationResult -Ok $false `
                                     -ReasonCode "invalid_field" `
                                     -Message ("Field is not allowed for this transition: " + $field) `
-                                    -Details @{ field = $field; source_specialist = $Source; target_specialist = $Target; handoff_file = $HandoffFile }
+                                    -Details @{ field = $field; source_phase = $Source; target_phase = $Target; handoff_file = $HandoffFile }
                             }
                         }
                     }
@@ -210,25 +210,25 @@ foreach ($field in $requiredFields) {
 }
 
 $validTransitions = @{
-    groomer    = @("architect", "researcher", "reviewer")
-    architect  = @("reviewer")
-    reviewer   = @("operator", "architect")
-    operator   = @("groomer", "done")
-    researcher = @("groomer")
+    grooming       = @("implementation", "research", "verification")
+    implementation = @("verification")
+    verification   = @("deployment", "implementation")
+    deployment     = @("grooming", "done")
+    research       = @("grooming")
 }
 
-$source = ([string]$handoff.source_specialist).Trim().ToLowerInvariant()
-$target = ([string]$handoff.target_specialist).Trim().ToLowerInvariant()
-$validSpecialists = @($script:FACTORY_SPECIALISTS)
+$source = ([string]$handoff.source_phase).Trim().ToLowerInvariant()
+$target = ([string]$handoff.target_phase).Trim().ToLowerInvariant()
+$validPhases = @($script:FACTORY_PHASES)
 
-if ($validSpecialists -notcontains $source -or
-    ($validSpecialists -notcontains $target -and $target -ne "done") -or
+if ($validPhases -notcontains $source -or
+    ($validPhases -notcontains $target -and $target -ne "done") -or
     -not $validTransitions.ContainsKey($source) -or
     -not ($validTransitions[$source] -contains $target)) {
     Write-ValidationResult -Ok $false `
         -ReasonCode "invalid_transition" `
-        -Message ("Invalid specialist transition: " + $source + " -> " + $target) `
-        -Details @{ source_specialist = $source; target_specialist = $target; handoff_file = $HandoffFile }
+        -Message ("Invalid phase transition: " + $source + " -> " + $target) `
+        -Details @{ source_phase = $source; target_phase = $target; handoff_file = $HandoffFile }
 }
 
 Assert-SchemaContract -Handoff $handoff -Schema $schema -HandoffFile $HandoffFile -Source $source -Target $target

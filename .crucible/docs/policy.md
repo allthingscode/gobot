@@ -2,15 +2,15 @@
 
 > **Source of Truth**: This file is the authoritative definition of Dev Factory operational policies. Documentation and prompt templates must be synchronized with this file.
 
-## 1. Specialist Sequence (The DAG)
+## 1. FSM Phase Sequence (The DAG)
 
 The factory operates as a strict Directed Acyclic Graph (DAG). Self-loops and out-of-order transitions are prohibited.
 
-- **Groomer** → `Architect` | `Researcher`
-- **Researcher** → `Groomer`
-- **Architect** → `Reviewer`
-- **Reviewer** → `Operator` (Approved) | `Architect` (Changes Requested)
-- **Operator** → `Done` | `Groomer` (if production issue threshold met)
+- **grooming** → `implementation` | `research`
+- **research** → `grooming`
+- **implementation** → `verification`
+- **verification** → `deployment` (Approved) | `implementation` (Changes Requested)
+- **deployment** → `done` | `grooming` (if production issue threshold met)
 
 ## 2. Circuit Breakers
 
@@ -19,13 +19,14 @@ Circuit breakers prevent "infinite loops" and budget escalation by blocking task
 | Breaker Type | Threshold / Trigger | Action |
 |--------------|---------------------|--------|
 | **Review Strike Rule** | 3 failed review cycles | BLOCK task; route to Human |
-| **Handoff Retry Limit** | > 2 consecutive retries to same role | BLOCK task; route to Human |
+| **Handoff Retry Limit** | > 2 consecutive retries to same phase | BLOCK task; route to Human |
 | **Token Budget (Low)** | 6 handoffs | BLOCK task; route to Human |
 | **Token Budget (Medium)** | 10 handoffs | BLOCK task; route to Human |
 | **Token Budget (High)** | 24 handoffs | BLOCK task; route to Human |
 | **Merge Conflict** | > 3 rebase attempts | BLOCK task; route to Human |
 | **Fabricated Artifacts** | Missing paths in `artifacts` field | BLOCK task; route to Human |
-| **Verification Failure** | `go test` fails after Reviewer approval | BLOCK task; route to Architect |
+| **Verification Failure** | `go test` fails after verification approval | BLOCK task; route to implementation |
+| **Git Hook Bypass** | Reports or references `--no-verify` or equivalent hook bypass | BLOCK task; route to Human |
 
 ### 2.1 Budget Overage Protocol
 
@@ -34,7 +35,12 @@ When a circuit breaker for **Token Budget** is triggered:
 2. **Justification**: The agent MUST provide a concise justification for why the initial budget was insufficient and what remains to be done.
 3. **Approval**: A budget increase MUST be explicitly approved by a human. Agents are prohibited from "auto-increasing" or silently adjusting tiers to keep the pipeline moving.
 
+### 2.2 Strike-2 DEGRADED Signal
+
+When `review_strike_count` reaches 2, `factory.ps1` emits a visible DEGRADED warning and logs a `degraded` event. The Architect MUST treat this as a directive to reduce scope — split the task, defer the contentious part, or simplify — rather than attempting a full re-implementation. If the blocker requires human input, escalate before consuming the last strike.
+
 ## 3. Human Gates
+
 
 Transitions across the "Trust Boundary" require a formal human decision.
 
@@ -119,3 +125,13 @@ Blocked          → Ready              (human resolution + factory -Recover)
 - **Prompt Injection Defense**: Handoffs are scanned for patterns (e.g., "ignore previous instructions"). Researcher handoffs trigger an automatic block if patterns are found.
 - **File Affinity**: Groomers define the scope boundary. Specialists must not edit files outside this boundary.
 - **No Push/Commit Shortcuts**: Only the Operator may merge to `master` and push to origin.
+
+## 7. Handoff Validation & Quality Gates
+
+In addition to circuit breakers, `factory.ps1` enforces runtime validation gates before accepting handoffs:
+
+- **Unchecked task.md Quality Gate**: `factory.ps1` blocks any handoff where the source specialist's `task.md` still contains unchecked `- [ ]` items.
+- **Budget Tier Cross-Validation**: `factory.ps1` reads the backlog spec frontmatter at task initialization and overrides the handoff's `budget_tier` if it mismatches. Specialists cannot escalate their own budget tier.
+- **Log-Derived Handoff Count**: `factory.ps1` counts `session_end` events in the task-scoped pipeline log and overrides the agent-reported `cumulative_handoff_count` if it is lower (preventing budget under-reporting).
+- **Scan Limit**: `factory.ps1` auto-kickoff scans at most 5 items in a single run.
+

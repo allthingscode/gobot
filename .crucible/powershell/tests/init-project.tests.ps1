@@ -528,7 +528,7 @@ project_mandates:
         Assert-Result -Name "custom config validation exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validate-config exit 0, got " + $LASTEXITCODE + ". Output: " + ($valResult -join "`n"))
 
         # 4. Assert factory_lint passes in the custom app root context (dynamic linter check)
-        $linterScript = Join-Path $REPO_ROOT "powershell/tests/factory_lint.go"
+        $linterScript = Join-Path $REPO_ROOT "scripts/factory_lint.go"
         $origCwd = Get-Location
         Set-Location -LiteralPath $customAppRoot
         $lintResult = @(go run $linterScript $REPO_ROOT 2>&1)

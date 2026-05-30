@@ -99,8 +99,8 @@ created_at: "2026-05-25"
         $handoffPath = Join-Path $handoffDir ("${taskId}-${ts}.json")
         $handoff = [ordered]@{
             task_id                  = $taskId
-            source_specialist        = "architect"
-            target_specialist        = "reviewer"
+            source_phase             = "implementation"
+            target_phase             = "verification"
             reason                   = "Implementation committed with git commit --no-verify after hook failure."
             handoff_retry_count      = 0
             review_strike_count      = 0

@@ -44,19 +44,20 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 			if (-not $tid -and $e.task_id) { $tid = $e.task_id }
 			
 			if ($e.event -eq "session_end") {
-				if ($e.specialist -eq "architect") { $archSessions++ }
+				$logPhase = if ($e.PSObject.Properties["phase"]) { $e.phase } else { $e.specialist }
+				if ($logPhase -eq "implementation" -or $logPhase -eq "architect") { $archSessions++ }
 				
 				# Capture duration ({task_id})
 				if ($null -ne $e.duration_seconds) {
-					if (-not $durationStats[$e.specialist]) { $durationStats[$e.specialist] = @() }
-					$durationStats[$e.specialist] += $e.duration_seconds
+					if (-not $durationStats[$logPhase]) { $durationStats[$logPhase] = @() }
+					$durationStats[$logPhase] += $e.duration_seconds
 				}
 
 				# Capture anomalies ({task_id})
 				if ($e.metrics -and $e.metrics.duration_anomaly) {
 					$anomalies += [PSCustomObject]@{
 						task_id    = $e.task_id
-						specialist = $e.specialist
+						specialist = $logPhase
 						type       = $e.metrics.duration_anomaly
 						duration   = $e.duration_seconds
 					}
@@ -108,8 +109,27 @@ foreach ($dir in $HandoffDirs) {
 			$h = Get-Content -LiteralPath $_.FullName -Raw -ErrorAction Stop | ConvertFrom-Json
 			$handoffRecords += [PSCustomObject]@{
 				task_id                  = $h.task_id
-				source_specialist        = $h.source_specialist
-				target_specialist        = $h.target_specialist
+				source_phase             = if ($h.PSObject.Properties["source_phase"]) { $h.source_phase } else {
+					# legacy compat read of pre-rename event log
+					$legacy = $h.source_specialist.ToLowerInvariant()
+					if ($legacy -eq "groomer") { "grooming" }
+					elseif ($legacy -eq "architect") { "implementation" }
+					elseif ($legacy -eq "reviewer") { "verification" }
+					elseif ($legacy -eq "operator") { "deployment" }
+					elseif ($legacy -eq "researcher") { "research" }
+					else { $legacy }
+				}
+				target_phase             = if ($h.PSObject.Properties["target_phase"]) { $h.target_phase } else {
+					# legacy compat read of pre-rename event log
+					$legacy = $h.target_specialist.ToLowerInvariant()
+					if ($legacy -eq "groomer") { "grooming" }
+					elseif ($legacy -eq "architect") { "implementation" }
+					elseif ($legacy -eq "reviewer") { "verification" }
+					elseif ($legacy -eq "operator") { "deployment" }
+					elseif ($legacy -eq "researcher") { "research" }
+					elseif ($legacy -eq "done") { "done" }
+					else { $legacy }
+				}
 				handoff_retry_count      = if ($h.PSObject.Properties["handoff_retry_count"] -and $null -ne $h.handoff_retry_count) { [int]$h.handoff_retry_count } else { 0 }
 				review_strike_count      = if ($h.PSObject.Properties["review_strike_count"] -and $null -ne $h.review_strike_count) { [int]$h.review_strike_count } else { 0 }
 				rebase_count             = if ($h.PSObject.Properties["rebase_count"] -and $null -ne $h.rebase_count) { [int]$h.rebase_count } else { 0 }
@@ -123,16 +143,16 @@ foreach ($dir in $HandoffDirs) {
 	}
 }
 
-# Use latest non-superseded handoff per (task_id, source_specialist) pair
+# Use latest non-superseded handoff per (task_id, source_phase) pair
 $handoffsByTask = @{}
 foreach ($record in ($handoffRecords | Sort-Object last_write_time -Descending)) {
-	if (-not $record.task_id -or -not $record.source_specialist -or -not $record.prompt_version) { continue }
+	if (-not $record.task_id -or -not $record.source_phase -or -not $record.prompt_version) { continue }
 	if ($record.superseded) { continue }
-	$key = "$($record.task_id)|$($record.source_specialist)"
+	$key = "$($record.task_id)|$($record.source_phase)"
 	if (-not $handoffsByTask[$key]) { $handoffsByTask[$key] = $record }
 }
 
-# Build per-task prompt version map: task_id -> { architect: "v1", reviewer: "v1", ... }
+# Build per-task prompt version map: task_id -> { implementation: "v1", verification: "v1", ... }
 $taskPromptVersions = @{}
 foreach ($entry in $handoffsByTask.GetEnumerator()) {
 	$parts   = $entry.Key -split '\|'
@@ -143,10 +163,10 @@ foreach ($entry in $handoffsByTask.GetEnumerator()) {
 	$taskPromptVersions[$tid][$role] = $version
 }
 
-# Group tasks by architect prompt_version, compute avg review_cycles for each
+# Group tasks by implementation prompt_version, compute avg review_cycles for each
 $versionStats = @{}
 foreach ($tid in $taskPromptVersions.Keys) {
-	$archVer = $taskPromptVersions[$tid]["architect"]
+	$archVer = $taskPromptVersions[$tid]["implementation"]
 	if ($archVer -and $pipelineMetrics[$tid]) {
 		if (-not $versionStats[$archVer]) { $versionStats[$archVer] = @() }
 		$versionStats[$archVer] += $pipelineMetrics[$tid].review_cycles
@@ -159,10 +179,10 @@ $versionSummary = $versionStats.GetEnumerator() | ForEach-Object {
 
 # Duplicate/Superseded Handoff Metrics
 $dedupeCandidates = @($handoffRecords | Where-Object {
-	$_.task_id -and $_.source_specialist -and $_.target_specialist
+	$_.task_id -and $_.source_phase -and $_.target_phase
 })
 $dedupeGroups = @($dedupeCandidates | Group-Object -Property {
-	"{0}|{1}|{2}|{3}|{4}|{5}" -f $_.task_id, $_.source_specialist, $_.target_specialist, [string]$_.review_strike_count, [string]$_.rebase_count, [string]$_.handoff_retry_count
+	"{0}|{1}|{2}|{3}|{4}|{5}" -f $_.task_id, $_.source_phase, $_.target_phase, [string]$_.review_strike_count, [string]$_.rebase_count, [string]$_.handoff_retry_count
 })
 $duplicateGroups = @($dedupeGroups | Where-Object { $_.Count -gt 1 })
 $duplicateGroupCount = $duplicateGroups.Count
@@ -186,28 +206,28 @@ $topDuplicateTransitionKeys = @(
 		}
 )
 
-$duplicatesBySpecialist = @(
+$duplicatesByPhase = @(
 	$duplicateGroups |
 		ForEach-Object {
-			$src = ($_.Group | Select-Object -First 1).source_specialist
-			[PSCustomObject]@{ specialist = $src; duplicate_count = $_.Count - 1 }
+			$src = ($_.Group | Select-Object -First 1).source_phase
+			[PSCustomObject]@{ phase = $src; duplicate_count = $_.Count - 1 }
 		} |
-		Group-Object specialist |
+		Group-Object phase |
 		ForEach-Object {
 			[PSCustomObject]@{
-				specialist = $_.Name
+				phase = $_.Name
 				duplicate_count = (@($_.Group | ForEach-Object { $_.duplicate_count }) | Measure-Object -Sum).Sum
 			}
 		} |
 		Sort-Object duplicate_count -Descending
 )
 
-$duplicatesBySpecialistPair = @(
+$duplicatesByPhasePair = @(
 	$duplicateGroups |
 		ForEach-Object {
 			$first = $_.Group | Select-Object -First 1
 			[PSCustomObject]@{
-				pair            = ("{0}->{1}" -f $first.source_specialist, $first.target_specialist)
+				pair            = ("{0}->{1}" -f $first.source_phase, $first.target_phase)
 				duplicate_count = $_.Count - 1
 			}
 		} |
@@ -258,8 +278,8 @@ if ($Json) {
 			supersede_rate_pct        = $supersedeRate
 			unsuperseded_duplicate_incidents = $unsupersededDuplicateIncidents
 			top_duplicate_transition_keys = @($topDuplicateTransitionKeys)
-			duplicates_by_specialist  = @($duplicatesBySpecialist)
-			duplicates_by_specialist_pair = @($duplicatesBySpecialistPair)
+			duplicates_by_phase       = @($duplicatesByPhase)
+			duplicates_by_phase_pair  = @($duplicatesByPhasePair)
 		}
 		eval_records         = $evalResults.Count
 		prompt_version_stats = @($versionSummary)
@@ -363,17 +383,17 @@ $report += "- Total handoffs analyzed: **$($handoffRecords.Count)**"
 $report += "- Duplicate handoffs: **$duplicateHandoffsTotal** across **$duplicateGroupCount** duplicate transition groups"
 $report += "- Superseded handoffs: **$supersededHandoffsTotal** (**$supersedeRate%**)"
 $report += "- Unsuperseded duplicate incidents: **$unsupersededDuplicateIncidents**"
-if ($duplicatesBySpecialist.Count -gt 0) {
+if ($duplicatesByPhase.Count -gt 0) {
 	$report += ""
-	$report += "### Duplicates by Source Specialist"
-	$duplicatesBySpecialist | ForEach-Object {
-		$report += "- **$($_.specialist)**: $($_.duplicate_count)"
+	$report += "### Duplicates by Source Phase"
+	$duplicatesByPhase | ForEach-Object {
+		$report += "- **$($_.phase)**: $($_.duplicate_count)"
 	}
 }
-if ($duplicatesBySpecialistPair.Count -gt 0) {
+if ($duplicatesByPhasePair.Count -gt 0) {
 	$report += ""
-	$report += "### Duplicates by Specialist Pair"
-	$duplicatesBySpecialistPair | ForEach-Object {
+	$report += "### Duplicates by Phase Pair"
+	$duplicatesByPhasePair | ForEach-Object {
 		$report += "- **$($_.pair)**: $($_.duplicate_count)"
 	}
 }

@@ -81,7 +81,7 @@ try {
 item_id: "$taskId"
 priority: "P3"
 status: "Ready"
-specialist: "Groomer"
+target_phase: "grooming"
 budget_tier: "low"
 file_affinity: ["src/"]
 created_at: "2026-05-25"
@@ -104,8 +104,8 @@ created_at: "2026-05-25"
         $handoffPath = Join-Path $handoffDir ("${taskId}-${ts}.json")
         $handoff = [ordered]@{
             task_id                  = $taskId
-            source_specialist        = "groomer"
-            target_specialist        = "architect"
+            source_phase             = "grooming"
+            target_phase             = "implementation"
             reason                   = "Implement"
             handoff_retry_count      = 0
             review_strike_count      = 0

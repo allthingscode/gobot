@@ -74,29 +74,32 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     $taskState = $sessionState.tasks.$taskId
     $meta = $taskMeta[$taskId]
     
-    # Determine active specialist
-    $activeSpec = $taskState.active_specialist
+    # Determine active phase/specialist
+    $activeSpec = if ($taskState.PSObject.Properties["active_phase"]) { $taskState.active_phase } else { $taskState.active_specialist }
     $isFinished = $true
     
-    # Check if any specialist is still active
+    # Check if any phase is still active
     $currentSpec = "N/A"
     $latestTs = [DateTime]::MinValue
     
-    foreach ($specName in $taskState.specialists.PSObject.Properties.Name) {
-        $spec = $taskState.specialists.$specName
-        $specStatus = $spec.status
-        
-        # If any spec is not idle/Complete/deployed/Resolved, it's in-flight
-        if ($specStatus -and $specStatus -notmatch "idle|Complete|deployed|Resolved") {
-            $isFinished = $false
-        }
-        
-        # Track latest specialist by timestamp
-        if ($spec.timestamp) {
-            $ts = [DateTime]::Parse($spec.timestamp)
-            if ($ts -gt $latestTs) {
-                $latestTs = $ts
-                $currentSpec = $specName
+    $phasesMap = if ($taskState.PSObject.Properties["phases"]) { $taskState.phases } else { $taskState.specialists }
+    if ($phasesMap) {
+        foreach ($specName in $phasesMap.PSObject.Properties.Name) {
+            $spec = $phasesMap.$specName
+            $specStatus = $spec.status
+            
+            # If any spec is not idle/Complete/deployed/Resolved, it's in-flight
+            if ($specStatus -and $specStatus -notmatch "idle|Complete|deployed|Resolved") {
+                $isFinished = $false
+            }
+            
+            # Track latest specialist/phase by timestamp
+            if ($spec.timestamp) {
+                $ts = [DateTime]::Parse($spec.timestamp)
+                if ($ts -gt $latestTs) {
+                    $latestTs = $ts
+                    $currentSpec = $specName
+                }
             }
         }
     }
@@ -136,8 +139,9 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     }
 
     $affinity = ""
-    if ($taskState.specialists.groomer -and $taskState.specialists.groomer.file_affinity) {
-        $affinity = $taskState.specialists.groomer.file_affinity -join ", "
+    $groomState = if ($taskState.phases -and $taskState.phases.PSObject.Properties["grooming"]) { $taskState.phases.grooming } elseif ($taskState.specialists -and $taskState.specialists.PSObject.Properties["groomer"]) { $taskState.specialists.groomer } else { $null }
+    if ($groomState -and $groomState.file_affinity) {
+        $affinity = $groomState.file_affinity -join ", "
     }
     
     $dependencies = ""

@@ -118,7 +118,7 @@ Is the task spec clear?
 
 ## Breaker 4 — Token Budget Exceeded
 
-**Trigger**: `cumulative_handoff_count` exceeds the tier ceiling (Low=6, Medium=10, High=16).
+**Trigger**: `cumulative_handoff_count` exceeds the tier ceiling (Low=6, Medium=10, High=24).
 
 **What it means**: The task consumed more pipeline cycles than estimated. This is not necessarily a failure — complex tasks legitimately need more cycles — but it requires explicit human approval to continue.
 
@@ -132,8 +132,8 @@ Is the remaining work clearly defined and bounded?
     ├── No → Abandon or reduce scope.
     └── Yes → Approve a tier escalation.
         Current tier is Low (6)?  → Escalate to Medium (10).
-        Current tier is Medium (10)? → Escalate to High (16).
-        Current tier is High (16)?  → Split the task or abandon.
+        Current tier is Medium (10)? → Escalate to High (24).
+        Current tier is High (24)?  → Split the task or abandon.
 ```
 
 **Resolution steps**:
@@ -188,7 +188,7 @@ Were the files supposed to be created?
 ```
 
 **Resolution steps**:
-1. List what actually exists in the worktree: `git -C .crucible\.agent-workspaces\architect-{task_id} status`
+1. List what actually exists in the worktree: `git -C .crucible\.agent-workspaces\implementation-{task_id} status`
 2. Compare against the spec's acceptance criteria.
 3. If work is genuinely missing: re-dispatch the Architect with "Your handoff lists {file} as an artifact but it does not exist. Create it."
 4. If the handoff just listed the wrong path: have the agent correct the handoff JSON and re-run `factory.ps1 -Init -TaskId {task_id}`.

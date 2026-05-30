@@ -1,4 +1,4 @@
-﻿# When To Use Crucible
+# When To Use Crucible
 
 > *Last refreshed: 2026-05-21*
 
@@ -51,21 +51,9 @@ The factory does not trust the agent's word. It independently re-verifies:
 - **Unchecked task.md quality gate** — handoff is blocked if the source `task.md` still has unchecked `[ ]` items.
 - **Backlog integrity validator** — runs automatically on Groomer/Operator handoffs.
 
-### Circuit Breakers (11 active)
+### Circuit Breakers
 
-Mandatory limits that prevent runaway processes and budget escalation:
-
-1. **3-Strike Review Rule** — 3 failed Architect↔Reviewer cycles = `review_stalemate` block
-2. **Strike-2 DEGRADED Signal** — at strike 2, factory emits a visible warning; Architect must reduce scope
-3. **Handoff Retry Limit** — >2 self-handoffs = `Persistent Task Failure`
-4. **Token Budget Enforcement** — handoff count ceiling per tier (Low=6, Medium=10, High=16)
-5. **Reviewer Verification Failure** — factory's independent `go test` after Reviewer APPROVED
-6. **Artifact Integrity** — fabricated/missing artifact paths
-7. **Recurring Merge Conflicts** — `rebase_count ≥ 3`
-8. **Git Hook Bypass Prevention** — `--no-verify` triggers a security-violation breaker
-9. **Scope Boundary Violation** — Architect modifying files outside declared `file_affinity`
-10. **Operator Threshold** — Researcher feedback only triggers on P0 or batch (5+) reports
-11. **Auto-Kickoff Scan Limit** — max 5 items scanned for next-ready
+Mandatory limits that prevent runaway processes and budget escalation. See [`docs/policy.md`](policy.md#2-circuit-breakers) §2 for the canonical list of active breaker types, thresholds, and rules.
 
 Every breaker writes a structured blocked-task record to `.crucible/backlog/blocked/{task_id}-{ts}.json` with circuit_breaker type, attempt_count, summary, and required human decision.
 
@@ -98,9 +86,9 @@ Process metadata, handoff data, agent state. Tracks **what** is being done and *
 ```
 
 ### 2. Code Isolation Layer — `.crucible/.agent-workspaces/`
-Each Architect runs in its own `git worktree` at `.crucible/.agent-workspaces/architect-{task_id}/`. Validation runs through `run-isolated-checks.ps1` with task-scoped `GOCACHE`, `GOLANGCI_LINT_CACHE`, `GOTMPDIR`, `TMP`, `TEMP` — so concurrent workspaces never poison each other.
+Each Architect runs in its own `git worktree` at `.crucible/.agent-workspaces/implementation-{task_id}/`. Validation runs through `run-isolated-checks.ps1` with task-scoped `GOCACHE`, `GOLANGCI_LINT_CACHE`, `GOTMPDIR`, `TMP`, `TEMP` — so concurrent workspaces never poison each other.
 
-**Rule of thumb**: read instructions from `.crucible/session/`, perform edits in `.crucible/.agent-workspaces/architect-{task_id}/`.
+**Rule of thumb**: read instructions from `.crucible/session/`, perform edits in `.crucible/.agent-workspaces/implementation-{task_id}/`.
 
 ---
 
@@ -163,7 +151,7 @@ Every prompt template carries `<!-- prompt_version: {role}-v1 -->`. Handoffs inc
 4. Scope bounded — changes limited to spec-named files and declared `file_affinity`
 5. No regressions — diff reviewed for behavior changes outside scope
 6. No hard mandates violated — AGENTS.md (pure Go, no panic, wrapped errors, slog, etc.)
-7. Backlog status updated to `Ready for Deploy` with `target_specialist: Operator`
+7. Backlog status updated to `Ready for Deploy` with `target_phase: deployment`
 8. Structured `review_report.md` with YAML frontmatter (`review_decision: APPROVED`, `acceptance_criteria_met: true`)
 
 A YAML mismatch hard-blocks the Operator handoff. After step 8, factory **independently** re-runs `go test` (circuit breaker 5).
@@ -234,7 +222,15 @@ Strict per-specialist read rules (full matrix in OPERATING_MANUAL.md):
 | Lost work in worktree | Architect must commit in worktree (lessons learned 2026-05-07) |
 | Untraceable agent behavior over time | Prompt version tracking + JSONL event log |
 
----
+## Agent-Native Orchestration Model
+
+Unlike traditional multi-agent systems (e.g., CrewAI, LangGraph Cloud, Temporal) that require external databases, Docker containers, API servers, background queue workers, or complex web UI dashboards, Crucible uses a zero-overhead **Agent-Native Orchestration** model:
+
+- **Zero-Infra Overhead (No Docker, No DB, No Python):** There is no database setup, no Docker images to pull, and no Python runtime dependencies to configure. The entire orchestrator runs on native shell commands and local files.
+- **Single-Session Interactive Loop:** The orchestration state machine runs entirely within your active, interactive agent coding session (such as Claude Code, Gemini CLI, or Codex). When you run the orchestrator, you don't start external daemon processes or background threads; the parent session guides the entire process.
+- **Agent-as-Orchestrator Pattern:** The parent agent session adopts the Strategic Orchestrator role. It leverages the client terminal's native sub-agent tools (`invoke_subagent` or `Agent()`) to spawn ephemeral specialists. This keeps all logic, reasoning, and failure handling within a single interactive chat context.
+- **Coprocessor Architecture:** Execution is split cleanly between the LLM and the local filesystem scripts. The agent does what LLMs do best (planning, prompting, reasoning, code review), while a simple local script (`factory.ps1`) does what code does best (git worktree manipulation, schema validation, budget tracking, test runs).
+- **Zero-Infrastructure Persistence:** State is stored directly in the workspace directory using simple, schema-validated JSON files (`session_state.json`, `.json` handoffs). If the terminal session is closed or crashes, the state is persisted naturally; restarting the orchestrator simply resumes the state machine from disk.
 
 ## Toolchain Requirements
 

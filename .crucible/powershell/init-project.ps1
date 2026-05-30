@@ -381,6 +381,19 @@ if ($AppendInstructions) {
     Install-CrucibleInstructions -ProjectRoot $resolvedProjectRoot -Quiet:$Quiet
 }
 
+# Set git hooks path for the adopter
+if (Test-Path -LiteralPath (Join-Path $resolvedProjectRoot ".git")) {
+    Push-Location $resolvedProjectRoot
+    try {
+        git config core.hooksPath ".crucible/scripts/hooks"
+        Write-Info "Set git core.hooksPath to '.crucible/scripts/hooks'" -ForegroundColor Green
+    } catch {
+        Write-Warning "Failed to set git core.hooksPath: $_"
+    } finally {
+        Pop-Location
+    }
+}
+
 Write-Info ""
 Write-Info "[CRUCIBLE] Project scaffold installed" -ForegroundColor Green
 Write-Info ("Project root: " + $resolvedProjectRoot)

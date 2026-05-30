@@ -9,15 +9,15 @@
       "minLength": 1,
       "description": "The unique ID of the task (e.g., {task_id}, {task_id})"
     },
-    "source_specialist": {
+    "source_phase": {
       "type": "string",
-      "enum": ["researcher", "groomer", "architect", "reviewer", "operator"],
-      "description": "The specialist role handing off the task"
+      "enum": ["research", "grooming", "implementation", "verification", "deployment"],
+      "description": "The FSM phase handing off the task"
     },
-    "target_specialist": {
+    "target_phase": {
       "type": "string",
-      "enum": ["researcher", "groomer", "architect", "reviewer", "operator", "done"],
-      "description": "The specialist role receiving the task"
+      "enum": ["research", "grooming", "implementation", "verification", "deployment", "done"],
+      "description": "The FSM phase receiving the task"
     },
     "reason": {
       "type": "string",
@@ -27,12 +27,12 @@
     "handoff_retry_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "Count of consecutive handoffs to the same specialist for the same task"
+      "description": "Count of consecutive handoffs to the same phase for the same task"
     },
     "review_strike_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "Count of times the Architect has failed the Reviewer's validation"
+      "description": "Count of times the implementation has failed verification validation"
     },
     "rebase_count": {
       "type": "integer",
@@ -42,12 +42,12 @@
     "budget_tier": {
       "type": "string",
       "enum": ["low", "medium", "high"],
-      "description": "The token budget tier assigned by the Groomer"
+      "description": "The token budget tier assigned during grooming"
     },
     "cumulative_handoff_count": {
       "type": "integer",
       "minimum": 1,
-      "description": "Total number of handoffs across all specialists for this session"
+      "description": "Total number of handoffs across all phases for this session"
     },
     "prompt_version": {
       "type": "string",
@@ -91,7 +91,7 @@
         "type": "string",
         "enum": ["tests_pass", "vet_pass", "acceptance_criteria_met", "scope_bounded", "no_regressions", "no_hard_mandates_violated"]
       },
-      "description": "List of Reviewer Verification Checklist steps that were verified and passed"
+      "description": "List of Verification Checklist steps that were verified and passed"
     },
     "artifacts": {
       "type": "array",
@@ -129,14 +129,14 @@
       "description": "Paths of newly-created stub spec files during a Pattern C grooming shortcut"
     }
   },
-  "required": ["task_id", "source_specialist", "target_specialist", "reason", "handoff_retry_count", "budget_tier", "cumulative_handoff_count", "prompt_version"],
+  "required": ["task_id", "source_phase", "target_phase", "reason", "handoff_retry_count", "budget_tier", "cumulative_handoff_count", "prompt_version"],
   "allOf": [
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "researcher" }
+          "source_phase": { "const": "research" }
         },
-        "required": ["source_specialist"]
+        "required": ["source_phase"]
       },
       "then": {
         "required": ["human_decisions", "artifacts"],
@@ -146,9 +146,9 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "groomer" }
+          "source_phase": { "const": "grooming" }
         },
-        "required": ["source_specialist"]
+        "required": ["source_phase"]
       },
       "then": {
         "required": ["artifacts"],
@@ -163,10 +163,10 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "groomer" },
-          "target_specialist": { "const": "architect" }
+          "source_phase": { "const": "grooming" },
+          "target_phase": { "const": "implementation" }
         },
-        "required": ["source_specialist", "target_specialist"]
+        "required": ["source_phase", "target_phase"]
       },
       "then": {
         "required": ["file_affinity"]
@@ -175,10 +175,10 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "groomer" },
-          "target_specialist": { "const": "reviewer" }
+          "source_phase": { "const": "grooming" },
+          "target_phase": { "const": "verification" }
         },
-        "required": ["source_specialist", "target_specialist"]
+        "required": ["source_phase", "target_phase"]
       },
       "then": {
         "required": ["stub_specs_created"],
@@ -193,9 +193,9 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "architect" }
+          "source_phase": { "const": "implementation" }
         },
-        "required": ["source_specialist"]
+        "required": ["source_phase"]
       },
       "then": {
         "required": ["session_cycle_id", "artifacts"],
@@ -210,9 +210,9 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "reviewer" }
+          "source_phase": { "const": "verification" }
         },
-        "required": ["source_specialist"]
+        "required": ["source_phase"]
       },
       "then": {
         "required": ["session_cycle_id", "artifacts"],
@@ -222,9 +222,9 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "operator" }
+          "source_phase": { "const": "deployment" }
         },
-        "required": ["source_specialist"]
+        "required": ["source_phase"]
       },
       "then": {
         "required": ["session_cycle_id", "artifacts", "commit_hash"],
@@ -239,10 +239,10 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "reviewer" },
-          "target_specialist": { "const": "operator" }
+          "source_phase": { "const": "verification" },
+          "target_phase": { "const": "deployment" }
         },
-        "required": ["source_specialist", "target_specialist"]
+        "required": ["source_phase", "target_phase"]
       },
       "then": {
         "required": ["reviewer_checks_passed"],
@@ -265,10 +265,10 @@
     {
       "if": {
         "properties": {
-          "source_specialist": { "const": "reviewer" },
-          "target_specialist": { "const": "architect" }
+          "source_phase": { "const": "verification" },
+          "target_phase": { "const": "implementation" }
         },
-        "required": ["source_specialist", "target_specialist"]
+        "required": ["source_phase", "target_phase"]
       },
       "then": {
         "not": { "required": ["reviewer_checks_passed"] }

@@ -3,8 +3,8 @@ item_id: "F-001"
 title: "Hello World Smoke Test"
 status: "Ready"
 priority: "P1"
-# target_specialist: The first specialist to receive the task (typically Groomer or Researcher)
-target_specialist: "Groomer"
+# target_phase: The first activity phase to receive the task (typically grooming or research)
+target_phase: "grooming"
 # budget_tier: The token budget category (low, medium, high)
 budget_tier: "low"
 ---

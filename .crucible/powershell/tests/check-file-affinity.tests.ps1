@@ -43,38 +43,37 @@ try {
     New-Item -ItemType Directory -Path $sessionGlobalDir -Force | Out-Null
     $stateFilePath = Join-Path $sessionGlobalDir "session_state.json"
 
-    # Define mock session state
     $mockState = @{
         tasks = @{
             "TASK-1" = @{
-                specialists = @{
-                    operator = @{
+                phases = @{
+                    deployment = @{
                         status = "In Progress"
                         phase  = "Development"
                     }
-                    groomer = @{
+                    grooming = @{
                         file_affinity = @("src/main.go", "internal/utils/")
                     }
                 }
             }
             "TASK-2" = @{
-                specialists = @{
-                    operator = @{
+                phases = @{
+                    deployment = @{
                         status = "Complete"
                         phase  = "Production"
                     }
-                    architect = @{
+                    implementation = @{
                         file_affinity = @("src/db/")
                     }
                 }
             }
             "TASK-3" = @{
-                specialists = @{
-                    operator = @{
+                phases = @{
+                    deployment = @{
                         status = "In Progress"
                         phase  = "Testing"
                     }
-                    architect = @{
+                    implementation = @{
                         file_affinity = @("config/*.yaml")
                     }
                 }

@@ -6,9 +6,46 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
 }
 . $helpersPath
 
-# Canonical runtime specialist list. PowerShell ValidateSet attributes still need
+$taskChecklistPath = Join-Path $PSScriptRoot "lib/task-checklist.ps1"
+if (-not (Test-Path -LiteralPath $taskChecklistPath)) {
+    throw "Required helper script not found at $taskChecklistPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $taskChecklistPath
+
+# Canonical runtime FSM phase list. PowerShell ValidateSet attributes still need
 # string literals, so keep those literals synchronized with this constant.
-$script:FACTORY_SPECIALISTS = @("groomer", "architect", "reviewer", "operator", "researcher")
+$script:FACTORY_PHASES = @("research", "grooming", "implementation", "verification", "deployment")
+
+# Map FSM phase to assigned actor persona
+$script:PHASE_ROLE_MAP = @{
+    "research"       = "researcher"
+    "grooming"       = "groomer"
+    "implementation" = "architect"
+    "verification"   = "reviewer"
+    "deployment"     = "operator"
+}
+
+function Write-Quiet {
+    param(
+        [Parameter(Mandatory=$true)][string]$Message,
+        [string]$ForegroundColor = "White"
+    )
+    if (-not $Quiet) {
+        Write-Host $Message -ForegroundColor $ForegroundColor
+    }
+}
+
+function Invoke-NativeCommand {
+    param(
+        [Parameter(Mandatory=$true)][string]$Command,
+        [Parameter(ValueFromRemainingArguments=$true)]$Arguments
+    )
+    $output = & $Command @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "[$Command] command failed with exit code $LASTEXITCODE. Output: $output"
+    }
+    return $output
+}
 
 function Get-BacklogItemPathForTask {
     param([Parameter(Mandatory = $true)][string]$Task)
@@ -109,3 +146,39 @@ function Invoke-FileLock {
         }
     }
 }
+
+$eventLogPath = Join-Path $PSScriptRoot "lib/event-log.ps1"
+if (-not (Test-Path -LiteralPath $eventLogPath)) {
+    throw "Required helper script not found at $eventLogPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $eventLogPath
+
+$blockedPath = Join-Path $PSScriptRoot "lib/blocked.ps1"
+if (-not (Test-Path -LiteralPath $blockedPath)) {
+    throw "Required helper script not found at $blockedPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $blockedPath
+
+$handoffPath = Join-Path $PSScriptRoot "lib/handoff.ps1"
+if (-not (Test-Path -LiteralPath $handoffPath)) {
+    throw "Required helper script not found at $handoffPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $handoffPath
+
+$worktreePath = Join-Path $PSScriptRoot "lib/worktree.ps1"
+if (-not (Test-Path -LiteralPath $worktreePath)) {
+    throw "Required helper script not found at $worktreePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $worktreePath
+
+$factoryGatesPath = Join-Path $PSScriptRoot "lib/factory-gates.ps1"
+if (-not (Test-Path -LiteralPath $factoryGatesPath)) {
+    throw "Required helper script not found at $factoryGatesPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $factoryGatesPath
+
+$sessionOutputPath = Join-Path $PSScriptRoot "lib/session-output.ps1"
+if (-not (Test-Path -LiteralPath $sessionOutputPath)) {
+    throw "Required helper script not found at $sessionOutputPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $sessionOutputPath

@@ -109,7 +109,7 @@ $results += Run-Test -Name "Pre-push hook runs the expected verification suites"
     $preCommitOnlyScripts = @(
         "powershell/tests/check-policy-drift.ps1",
         "powershell/tests/check-mojibake.ps1",
-        "powershell/tests/factory_lint.go"
+        "scripts/factory_lint.go"
     )
 
     foreach ($script in $preCommitOnlyScripts) {

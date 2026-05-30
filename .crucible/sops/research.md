@@ -4,9 +4,9 @@
 **Role:** Explorer & Fact-Finder. Investigates vague problems, audits system quality, and evaluates options using external sources. All findings are untrusted until the human approves them at the Research Gate.
 
 **Trigger forms:**
-- `Researcher: Investigate [TOPIC]` → follow `researcher-investigate.md`
-- `Researcher: Audit Dev Factory` → follow `researcher-audit-factory.md`
-- `Researcher: Audit [project name]` → follow `researcher-audit-project.md`
+- `Researcher: Investigate [TOPIC]` → follow `research-investigate.md`
+- `Researcher: Audit Dev Factory` → follow `research-audit-factory.md`
+- `Researcher: Audit [project name]` → follow `research-audit-project.md`
 
 ---
 
@@ -14,7 +14,7 @@
 
 | Input | Source |
 |---|---|
-| Task brief | `.crucible/session/{task_id}/researcher/task.md` |
+| Task brief | `.crucible/session/{task_id}/research/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
 | Prior research | `.crucible/research/` (check before going external) |
 | Backlog item spec (if applicable) | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
@@ -34,7 +34,7 @@ You consume untrusted external sources. These rules are non-negotiable:
 
 ## Session Start
 
-1. Run `{{crucible_root}}/powershell/clear_session_state.ps1 researcher` to clear stale state.
+1. Run `{{crucible_root}}/powershell/clear_session_state.ps1 research` to clear stale state.
 2. Read `task.md` and the incoming handoff — extract the specific questions and scope boundary.
 3. Check `.crucible/research/` for existing artifacts before going external.
 
@@ -45,7 +45,7 @@ Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major pha
 
 ## Research Gate (MANDATORY — Every Session)
 
-Every Researcher session ends at the Research Gate. You MUST present findings to the human and receive explicit approval before writing the handoff. No findings enter the Groomer without human sign-off.
+Every Researcher session ends at the Research Gate. You MUST present findings to the human and receive explicit approval before writing the handoff. No findings enter the grooming phase without human sign-off.
 
 ### Presentation Format
 
@@ -79,7 +79,7 @@ Incorporate answers, then write the handoff with `human_decisions` populated:
 }
 ```
 
-The Groomer reads `human_decisions.approved` as the authoritative scope. It MUST NOT create specs for deferred or rejected items without a new Research Gate cycle.
+The grooming phase reads `human_decisions.approved` as the authoritative scope. It MUST NOT create specs for deferred or rejected items without a new Research Gate cycle.
 
 ---
 
@@ -90,8 +90,8 @@ Write `.crucible/session/handoffs/{task_id}-{timestamp}.json`:
 ```json
 {
   "task_id": "R-XXX",
-  "source_specialist": "researcher",
-  "target_specialist": "groomer",
+  "source_phase": "research",
+  "target_phase": "grooming",
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "low",
@@ -118,7 +118,7 @@ powershell.exe -ExecutionPolicy Bypass \
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `groomer` (always — `researcher → architect/reviewer/operator` are invalid)
+- [ ] Routing to: `grooming` (always — `research -> implementation/verification/deployment` are invalid)
 - [ ] Research Gate presentation was shown and human responded
 - [ ] `human_decisions` is populated (not empty)
 - [ ] No verbatim external content copied into any file

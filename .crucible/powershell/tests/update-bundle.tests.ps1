@@ -83,9 +83,14 @@ function Invoke-UpdateBundle {
     param(
         [Parameter(Mandatory=$true)][string]$Framework,
         [Parameter(Mandatory=$true)][string]$Adopter,
-        [string]$Mode = "report-only"
+        [string]$Mode = "report-only",
+        [switch]$Prune
     )
-    $output = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT -FrameworkSource $Framework -AdopterRoot $Adopter -Mode $Mode 2>&1)
+    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-FrameworkSource", $Framework, "-AdopterRoot", $Adopter, "-Mode", $Mode)
+    if ($Prune) {
+        $args += "-Prune"
+    }
+    $output = @(powershell.exe @args 2>&1)
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = ($output -join "`n")
@@ -202,6 +207,86 @@ try {
         $expected = (git -C $framework show ($commitA + ":templates/project/.crucible/README.md")) -join "`n"
         $actual = Get-Content -LiteralPath $snapshotPath -Raw -Encoding UTF8
         Assert-Result -Name "snapshot content" -Condition (($actual.TrimEnd("`r", "`n")) -eq $expected) -FailureMessage "scaffold snapshot content did not match framework source"
+    }
+
+    $results += Run-Test -Name "Classification of non-ASCII characters behaves as no-op" -Body {
+        $framework = Join-Path $tempRoot "nonascii-framework"
+        $commitA = New-FrameworkFixture -Root $framework
+        $adopter = Join-Path $tempRoot "nonascii-adopter"
+        Copy-FrameworkToAdopter -Framework $framework -Adopter $adopter -Commit $commitA
+
+        # Add a non-ASCII file (with an em-dash, section sign, and smart quotes) to both framework and adopter
+        $nonAsciiContent = "Non-ASCII content: em-dash " + [char]0x2014 + " section " + [char]0x00a7 + " smart-quotes " + [char]0x201c + "hello" + [char]0x201d
+        Write-Utf8File -Path (Join-Path $framework "docs/nonascii.md") -Content $nonAsciiContent
+        $commitB = Invoke-GitCommit -Repo $framework -Message "add nonascii doc"
+
+        # Now, update the install commit in config.yaml so B is the baseline commit
+        Write-Utf8File -Path (Join-Path $adopter ".crucible/config.yaml") -Content ("project: adopter`r`ncrucible_install_commit: `"" + $commitB + "`"")
+        # And write the exact same content to the adopter file
+        Write-Utf8File -Path (Join-Path $adopter ".crucible/docs/nonascii.md") -Content $nonAsciiContent
+
+        # Now check that running update-bundle classifies the file as no-op, not needs-merge
+        $result = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "report-only"
+        Assert-Result -Name "exit ok" -Condition ($result.ExitCode -eq 0) -FailureMessage $result.Output
+        Assert-Result -Name "no needs-merge" -Condition ($result.Output -match 'needs-merge:\s+0') -FailureMessage $result.Output
+        Assert-Result -Name "no-op count includes nonascii" -Condition ($result.Output -match 'no-op:\s+5') -FailureMessage $result.Output
+    }
+
+    $results += Run-Test -Name "Prune removes obsolete orphans but preserves adopter-owned and gitignored files" -Body {
+        $framework = Join-Path $tempRoot "prune-framework"
+        # Create framework baseline using New-FrameworkFixture
+        $commitA = New-FrameworkFixture -Root $framework
+
+        # Add stale.md and commit as Commit B
+        Write-Utf8File -Path (Join-Path $framework "docs/stale.md") -Content 'to be deleted'
+        $commitB = Invoke-GitCommit -Repo $framework -Message "commit B with stale"
+
+        # Delete stale.md and commit as Commit C (HEAD)
+        Remove-Item -LiteralPath (Join-Path $framework "docs/stale.md") -Force
+        $commitC = Invoke-GitCommit -Repo $framework -Message "commit C deleting stale"
+
+        # Create adopter using Copy-FrameworkToAdopter from Commit C (meaning stale.md won't be copied from framework)
+        $adopter = Join-Path $tempRoot "prune-adopter"
+        Copy-FrameworkToAdopter -Framework $framework -Adopter $adopter -Commit $commitC
+
+        # Manually introduce orphan, adopter-owned, and gitignored files to the adopter
+        # 1. An orphan that should be pruned
+        Write-Utf8File -Path (Join-Path $adopter ".crucible/docs/stale.md") -Content 'lingering orphan'
+        
+        # 2. An adopter-owned file (e.g. in backlog/) which must NEVER be flagged/removed
+        Write-Utf8File -Path (Join-Path $adopter ".crucible/backlog/user-backlog.md") -Content 'user backlog'
+
+        # 3. A gitignored orphan file which must NEVER be flagged/removed
+        # We need git init on adopter for check-ignore to work
+        git -C $adopter init --quiet | Out-Null
+        Write-Utf8File -Path (Join-Path $adopter ".gitignore") -Content ".crucible/docs/ignored_orphan.md"
+        Write-Utf8File -Path (Join-Path $adopter ".crucible/docs/ignored_orphan.md") -Content 'ignored orphan'
+
+        # Run first: report-only without -Prune
+        $result1 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "report-only"
+        Assert-Result -Name "report ok" -Condition ($result1.ExitCode -eq 0) -FailureMessage $result1.Output
+        Assert-Result -Name "stale reported for removal" -Condition ($result1.Output -match 'review-removal:\s+1') -FailureMessage $result1.Output
+        Assert-Result -Name "stale filename printed" -Condition ($result1.Output -match 'docs/stale.md') -FailureMessage $result1.Output
+        Assert-Result -Name "ignored orphan not reported" -Condition ($result1.Output -notmatch 'ignored_orphan.md') -FailureMessage $result1.Output
+        Assert-Result -Name "backlog not reported" -Condition ($result1.Output -notmatch 'user-backlog') -FailureMessage $result1.Output
+
+        Assert-Result -Name "stale exists before prune" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/stale.md")) -FailureMessage "stale.md was deleted prematurely"
+        Assert-Result -Name "ignored orphan exists before prune" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/ignored_orphan.md")) -FailureMessage "ignored orphan was deleted"
+
+        # Run auto-safe without -Prune: stale should still exist
+        $result2 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe"
+        Assert-Result -Name "auto-safe ok" -Condition ($result2.ExitCode -eq 0) -FailureMessage $result2.Output
+        Assert-Result -Name "stale still exists" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/stale.md")) -FailureMessage "stale.md was pruned without -Prune flag"
+
+        # Run auto-safe with -Prune: stale should be deleted
+        $result3 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe" -Prune
+        Assert-Result -Name "auto-safe prune ok" -Condition ($result3.ExitCode -eq 0) -FailureMessage $result3.Output
+        Assert-Result -Name "stale deleted" -Condition (-not (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/stale.md"))) -FailureMessage "stale.md was not pruned"
+        Assert-Result -Name "ignored orphan preserved" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/ignored_orphan.md")) -FailureMessage "ignored orphan was deleted during prune"
+        Assert-Result -Name "backlog preserved" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/backlog/user-backlog.md")) -FailureMessage "backlog was deleted during prune"
+
+        $config = Get-Content -LiteralPath (Join-Path $adopter ".crucible/config.yaml") -Raw -Encoding UTF8
+        Assert-Result -Name "commit updated after prune" -Condition ($config -match [regex]::Escape($commitC)) -FailureMessage "install commit did not advance after successful prune"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

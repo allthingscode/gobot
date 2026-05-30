@@ -1,9 +1,9 @@
 <!-- prompt_version: operator-sop-v3 -->
-# SOP: Operator
+# SOP: Deployment
 
 **Role:** Merge approved code, verify production health, clean up artifacts, and hand off to the Groomer for the next cycle.
 
-**Trigger form:** `Operator: {task_id}`
+**Trigger form:** `Deployment: {task_id}`
 
 ---
 
@@ -11,9 +11,9 @@
 
 | Input | Source |
 |---|---|
-| Task context | `.crucible/session/{task_id}/operator/task.md` |
-| Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` (must be from Reviewer, status `Ready for Deploy`) |
-| Deployment plan | `.crucible/session/{task_id}/architect/deployment_plan.md` |
+| Task context | `.crucible/session/{task_id}/deployment/task.md` |
+| Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` (must be from verification, status `Ready for Deploy`) |
+| Deployment plan | `.crucible/session/{task_id}/implementation/deployment_plan.md` |
 | Backlog | `{{backlog_dir}}/BACKLOG.md` |
 
 ---
@@ -22,10 +22,10 @@
 
 ### Step 1 — Verify Task Dependencies ({task_id})
 - Confirm `factory.ps1 -Init` did not emit a blocking dependency error
-- If it blocked due to unsatisfied dependencies: STOP. Hand off to Groomer or wait for prerequisites to reach `Production`
+- If it blocked due to unsatisfied dependencies: STOP. Hand off to grooming or wait for prerequisites to reach `Production`
 
 ### Step 2 — Verify Approval
-Confirm the latest Reviewer handoff for `{task_id}` has `status: "Ready for Deploy"`. Do not proceed if the Reviewer has not approved.
+Confirm the latest verification handoff for `{task_id}` has `status: "Ready for Deploy"`. Do not proceed if verification has not approved.
 
 ### Step 3 — Merge Simulation ({task_id})
 Before touching `master`, run the merge simulation:
@@ -35,8 +35,8 @@ Before touching `master`, run the merge simulation:
 
 **If simulation fails:**
 - Set task status to `"Ready for Rebase"`
-- Write handoff to **Architect** with reason: "Merge conflict detected during simulation. See conflict_report.json."
-- Instruct Architect to rebase `task/{task_id}` onto `master`
+- Write handoff to **implementation** with reason: "Merge conflict detected during simulation. See conflict_report.json."
+- Instruct implementation to rebase `task/{task_id}` onto `master`
 
 - If simulation passes: Proceed to Step 4.
 
@@ -70,7 +70,7 @@ Validate before continuing:
 
 ### Step 6 — Cleanup
 ```bash
-git worktree remove .crucible/.agent-workspaces/architect-{task_id}
+git worktree remove .crucible/.agent-workspaces/implementation-{task_id}
 git branch -d task/{task_id}
 git status --short
 ```
@@ -84,7 +84,7 @@ Write a structured eval record before archiving the pipeline log. This feeds `{{
 ```powershell
 # Replace {task_id} with the actual task ID
 $log = Get-Content ".crucible/session/{task_id}/pipeline.log.jsonl" | ForEach-Object { $_ | ConvertFrom-Json }
-$archSessions = @($log | Where-Object { $_.event -eq "session_end" -and $_.specialist -eq "architect" }).Count
+$archSessions = @($log | Where-Object { $_.event -eq "session_end" -and $_.phase -eq "implementation" }).Count
 $degraded     = @($log | Where-Object { $_.event -eq "degraded" }).Count
 $finalMetrics = ($log | Where-Object { $_.event -eq "session_end" -and $_.metrics } | Select-Object -Last 1).metrics
 
@@ -116,16 +116,16 @@ $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_i
 - Move pipeline log: `.crucible/session/{task_id}/pipeline.log.jsonl` → `.crucible/session/archived/pipeline-{task_id}-{timestamp}.log.jsonl`
 
 ### Step 9 — Write Handoff & Advance Pipeline
-Write handoff.json (set target_specialist to "done" and commit_hash to the merged master/main commit hash):
+Write handoff.json (set target_phase to "done" and commit_hash to the merged master/main commit hash):
 ```json
 {
   "task_id": "F-XXX",
-  "source_specialist": "operator",
-  "target_specialist": "done",
+  "source_phase": "deployment",
+  "target_phase": "done",
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "...",
-  "prompt_version": "operator-sop-v3",
+  "prompt_version": "deployment-sop-v3",
   "commit_hash": "MERGE_COMMIT_HASH",
   "reason": "Deployment complete. Pipeline resolved."
 }
@@ -176,24 +176,24 @@ Present factory output to the human. Wait for confirmation before ending your se
 
 When production issues are discovered that meet the circuit breaker threshold (P0 crash/data loss, OR 5+ occurrences of a minor issue):
 
-1. Document findings in `.crucible/session/{task_id}/operator/operator_report.md`
-2. Route to **Groomer** (the only valid Operator successor). Include a clear reason that tells the Groomer this is a production issue requiring research:
+1. Document findings in `.crucible/session/{task_id}/deployment/deployment_report.md`
+2. Route to **grooming** (the only valid deployment successor). Include a clear reason that tells grooming this is a production issue requiring research:
 ```json
 {
   "task_id": "F-XXX",
-  "source_specialist": "operator",
-  "target_specialist": "groomer",
+  "source_phase": "deployment",
+  "target_phase": "grooming",
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "...",
-  "prompt_version": "operator-sop-v3",
-  "reason": "Production issues detected — see operator_report.md. Groomer should dispatch Researcher.",
+  "prompt_version": "deployment-sop-v3",
+  "reason": "Production issues detected — see deployment_report.md. grooming should dispatch Researcher.",
   "suspicious_content": null
 }
 ```
 3. Run factory and present output to human
 
-> **Note**: `operator → researcher` is NOT a valid pipeline transition. The Operator can only route to the Groomer. The Groomer can then dispatch the Researcher if a research task is warranted.
+> **Note**: `deployment → research` is NOT a valid pipeline transition. The deployment phase can only route to grooming. The grooming phase can then dispatch the Researcher if a research task is warranted.
 
 ---
 
@@ -205,7 +205,7 @@ Pre-flight gate — confirm all are true before writing handoff:
 - [ ] Worktree and task branch have been deleted
 - [ ] Pipeline log archived
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
-- [ ] Routing to: `done` (or `groomer` if production issue threshold met)
+- [ ] Routing to: `done` (or `grooming` if production issue threshold met)
 - [ ] `task_id` in handoff matches the task I was given
 - [ ] `commit_hash` in handoff matches the pushed merge commit
 - [ ] Eval record written to `.crucible/session/eval/eval-{task_id}.json`

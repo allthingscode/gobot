@@ -1,8 +1,8 @@
 param (
     [Parameter(Mandatory=$true)]
-    # Keep synchronized with $script:FACTORY_SPECIALISTS in factory-lib.ps1.
+    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
     # "coder" remains accepted here for legacy state cleanup calls.
-    [ValidateSet("groomer", "architect", "reviewer", "coder", "operator", "researcher", "done")]
+    [ValidateSet("research", "grooming", "implementation", "verification", "deployment", "coder", "done")]
     [string]$Specialist,
 
     [Parameter(Mandatory=$false)]
@@ -117,19 +117,19 @@ try {
             }
             $targetTask = $state.tasks.$TaskId
             
-            # New formalized schema uses 'specialists' sub-property
-            if (-not $targetTask.PSObject.Properties["specialists"]) {
-                $targetTask | Add-Member -MemberType NoteProperty -Name "specialists" -Value ([PSCustomObject]@{})
+            # New formalized schema uses 'phases' sub-property
+            if (-not $targetTask.PSObject.Properties["phases"]) {
+                $targetTask | Add-Member -MemberType NoteProperty -Name "phases" -Value ([PSCustomObject]@{})
             }
-            $targetStateMap = $targetTask.specialists
+            $targetStateMap = $targetTask.phases
         }
     } else {
         # Legacy fallback
-        if (-not $state.PSObject.Properties["specialists"]) {
-            $state | Add-Member -MemberType NoteProperty -Name "specialists" -Value ([PSCustomObject]@{})
-            $targetStateMap = $state.specialists
+        if (-not $state.PSObject.Properties["phases"]) {
+            $state | Add-Member -MemberType NoteProperty -Name "phases" -Value ([PSCustomObject]@{})
+            $targetStateMap = $state.phases
         } else {
-            $targetStateMap = $state.specialists
+            $targetStateMap = $state.phases
         }
     }
 

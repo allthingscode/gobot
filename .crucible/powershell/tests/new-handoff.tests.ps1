@@ -67,14 +67,14 @@ function Track-HandoffFile {
 }
 
 try {
-    Invoke-Test -Name "groomer->architect success" -Script {
+    Invoke-Test -Name "grooming->implementation success" -Script {
         $taskId = New-TestTaskId "GA"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "groomer"
-            Target = "architect"
+            Source = "grooming"
+            Target = "implementation"
             Reason = "groomer handoff test"
-            PromptVersion = "architect_prompt-v21"
+            PromptVersion = "implementation_prompt-v21"
             Artifacts = @("powershell/factory.ps1")
             FileAffinity = @("powershell/", "schemas/handoff.schema.json")
             SchemaPath = $schemaPath
@@ -85,7 +85,7 @@ try {
         $path = Track-HandoffFile -TaskId $taskId
         if (-not $path) { throw "No handoff file created for $taskId" }
         $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        if ($obj.source_specialist -ne "groomer" -or $obj.target_specialist -ne "architect") {
+        if ($obj.source_phase -ne "grooming" -or $obj.target_phase -ne "implementation") {
             throw "Unexpected transition payload in $path"
         }
         if (-not $obj.PSObject.Properties["file_affinity"]) {
@@ -97,8 +97,8 @@ try {
         $taskId = New-TestTaskId "RO"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "reviewer"
-            Target = "operator"
+            Source = "verification"
+            Target = "deployment"
             Reason = "review complete"
             PromptVersion = "reviewer_prompt-v1"
             SessionCycleId = "cycle-test"
@@ -121,8 +121,8 @@ try {
         $taskId = New-TestTaskId "RH"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "researcher"
-            Target = "groomer"
+            Source = "research"
+            Target = "grooming"
             Reason = "research complete with human decisions"
             PromptVersion = "researcher_prompt-v1"
             Artifacts = @("powershell/factory.ps1")
@@ -135,7 +135,7 @@ try {
         $path = Track-HandoffFile -TaskId $taskId
         if (-not $path) { throw "No handoff file created for $taskId" }
         $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        if ($obj.source_specialist -ne "researcher" -or $obj.target_specialist -ne "groomer") { throw "Unexpected transition payload in $path" }
+        if ($obj.source_phase -ne "research" -or $obj.target_phase -ne "grooming") { throw "Unexpected transition payload in $path" }
         if (-not $obj.human_decisions) { throw "Expected human_decisions object" }
         if ($obj.human_decisions.approved.Count -ne 2) { throw "Expected 2 approved entries" }
     }
@@ -144,8 +144,8 @@ try {
         $taskId = New-TestTaskId "FAIL"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "researcher"
-            Target = "groomer"
+            Source = "research"
+            Target = "grooming"
             Reason = "research complete"
             PromptVersion = "researcher_prompt-v1"
             Artifacts = @("docs/operating-manual.md")
@@ -168,7 +168,7 @@ try {
 item_id: "$taskId"
 type: "Chore"
 status: "Ready"
-target_specialist: "Architect"
+target_phase: "implementation"
 priority: "P2"
 created_at: "2026-04-28"
 budget_tier: "low"
@@ -178,8 +178,8 @@ budget_tier: "low"
 
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "groomer"
-            Target = "architect"
+            Source = "grooming"
+            Target = "implementation"
             Reason = "budget default test"
             PromptVersion = "groomer_prompt-v16"
             Artifacts = @($specPath)
@@ -201,8 +201,8 @@ budget_tier: "low"
         $taskId = New-TestTaskId "GR"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "groomer"
-            Target = "reviewer"
+            Source = "grooming"
+            Target = "verification"
             Reason = "Pattern C: stub rows filed, parent task closed - no implementation work"
             PromptVersion = "groomer-sop-v1"
             Artifacts = @("powershell/factory.ps1")
@@ -215,7 +215,7 @@ budget_tier: "low"
         $path = Track-HandoffFile -TaskId $taskId
         if (-not $path) { throw "No handoff file created for $taskId" }
         $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        if ($obj.source_specialist -ne "groomer" -or $obj.target_specialist -ne "reviewer") {
+        if ($obj.source_phase -ne "grooming" -or $obj.target_phase -ne "verification") {
             throw "Unexpected transition in $path"
         }
         if ($null -eq $obj.stub_specs_created -or $obj.stub_specs_created.Count -eq 0 -or $obj.stub_specs_created[0] -ne "backlog/features/active/F-001_Stub.md") {
@@ -234,8 +234,8 @@ budget_tier: "low"
         $taskId = New-TestTaskId "GR-MISSING-STUB"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "groomer"
-            Target = "reviewer"
+            Source = "grooming"
+            Target = "verification"
             Reason = "should fail - stub_specs_created is required"
             PromptVersion = "groomer-sop-v1"
             Artifacts = @("powershell/factory.ps1")
@@ -254,8 +254,8 @@ budget_tier: "low"
         $taskId = New-TestTaskId "GR-INVALID"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "groomer"
-            Target = "reviewer"
+            Source = "grooming"
+            Target = "verification"
             Reason = "should fail - reviewer_checks_passed not allowed from groomer"
             PromptVersion = "groomer-sop-v1"
             Artifacts = @("powershell/factory.ps1")
@@ -281,7 +281,7 @@ budget_tier: "low"
 item_id: "$taskId"
 type: "Chore"
 status: "Ready"
-target_specialist: "Architect"
+target_phase: "implementation"
 priority: "P2"
 created_at: "2026-04-28"
 budget_tier: "low"
@@ -291,8 +291,8 @@ budget_tier: "low"
 
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
-            Source = "groomer"
-            Target = "architect"
+            Source = "grooming"
+            Target = "implementation"
             Reason = "budget mismatch test"
             PromptVersion = "groomer_prompt-v16"
             BudgetTier = "high"

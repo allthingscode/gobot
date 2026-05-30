@@ -61,7 +61,7 @@ try {
         if (Test-Path $backlogPath) { $backlogContent = Get-Content $backlogPath -Raw -Encoding UTF8 }
     
         foreach ($wt in $worktrees) {
-            if ($wt -match 'architect-([A-Z0-9\-]+)$') {
+            if ($wt -match 'implementation-([A-Z0-9\-]+)$') {
                 $taskId = $matches[1]
                 $pattern = '\|\s*' + $taskId + '\s*\|.*\|\s*(Ready|In Progress|Planning|Draft|Ready for Review|Ready for Deploy)\s*\|'
                 $pendingGateFile = Join-Path ".crucible/session/global/gate_decisions" "gate_decision_$taskId`_pending.json"
@@ -130,7 +130,7 @@ try {
         $staleTaskDirs = @()
         
         # 4a. Legacy role-scoped paths
-        foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher") {
+        foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher", "grooming", "implementation", "verification", "deployment", "research") {
             $taskPath = ".crucible/session/" + $specialist + "/task.md"
             if (Test-Path $taskPath) {
                 $staleScratchpads += $taskPath
@@ -185,13 +185,13 @@ try {
             $issueCount += $staleLocks.Count
         }
     
-        # Check 6: Architect Hook Configuration ({task_id})
+        # Check 6: Implementation Hook Configuration ({task_id})
         Write-Quiet ' '
-        Write-Quiet 'Checking for architect hook configuration...' -ForegroundColor Gray
+        Write-Quiet 'Checking for implementation hook configuration...' -ForegroundColor Gray
         $misconfiguredWorktrees = @()
-        $archWtPaths = @(git worktree list --porcelain | Where-Object { $_ -match '^worktree .*architect-' } | ForEach-Object { $_ -replace '^worktree ', '' })
+        $implementationWtPaths = @(git worktree list --porcelain | Where-Object { $_ -match '^worktree .*implementation-' } | ForEach-Object { $_ -replace '^worktree ', '' })
         
-        foreach ($wt in $archWtPaths) {
+        foreach ($wt in $implementationWtPaths) {
             $hooksPath = git -C $wt config core.hooksPath
             if ($hooksPath -ne "../../scripts/hooks/architect") {
                 $misconfiguredWorktrees += $wt
@@ -200,7 +200,7 @@ try {
     
         $mcColor = "White"
         if ($misconfiguredWorktrees.Count -gt 0) { $mcColor = "Yellow" }
-        $mcMsg = "Misconfigured Architect Worktrees (hooksPath): " + $misconfiguredWorktrees.Count
+        $mcMsg = "Misconfigured Implementation Worktrees (hooksPath): " + $misconfiguredWorktrees.Count
         Write-Quiet $mcMsg -ForegroundColor $mcColor
         if ($misconfiguredWorktrees.Count -eq 0) {
             Write-Quiet "  None." -ForegroundColor Gray
@@ -343,7 +343,7 @@ try {
             }
             
             # 3. Scratchpads (legacy)
-            foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher") {
+            foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher", "grooming", "implementation", "verification", "deployment", "research") {
                 $taskPath = ".crucible/session/" + $specialist + "/task.md"
                 if (Test-Path $taskPath) {
                     if ($Force) {
@@ -371,7 +371,7 @@ try {
             }
     
             # 4c. Role-scoped prompt.md (P-1)
-            foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher") {
+            foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher", "grooming", "implementation", "verification", "deployment", "research") {
                 $pPath = ".crucible/session/" + $specialist + "/prompt.md"
                 if (Test-Path $pPath) {
                     if ($Force) {

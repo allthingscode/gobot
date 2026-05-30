@@ -60,9 +60,9 @@ function Initialize-Repo {
     }
 }
 
-function Add-ArchitectWorktree {
+function Add-ImplementationWorktree {
     param([string]$ProjectRoot, [string]$TaskId)
-    $worktreePath = Join-Path $ProjectRoot ".crucible/.agent-workspaces/architect-$TaskId"
+    $worktreePath = Join-Path $ProjectRoot ".crucible/.agent-workspaces/implementation-$TaskId"
     New-Item -ItemType Directory -Path (Split-Path -Parent $worktreePath) -Force | Out-Null
     git -C $ProjectRoot worktree add -b "task/$TaskId" $worktreePath --quiet
     return $worktreePath
@@ -80,11 +80,11 @@ $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-run-isolated-
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 $projectRoot = Join-Path $tempRoot "project"
 $taskId = "T-001"
-$worktreePath = Join-Path $projectRoot ".crucible/.agent-workspaces/architect-$taskId"
+$worktreePath = Join-Path $projectRoot ".crucible/.agent-workspaces/implementation-$taskId"
 
 try {
     Initialize-Repo -ProjectRoot $projectRoot
-    Add-ArchitectWorktree -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
+    Add-ImplementationWorktree -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
 
     $results += Run-Test -Name "Executes configured quick check in worktree" -Body {
         Push-Location $projectRoot

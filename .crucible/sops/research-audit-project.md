@@ -1,11 +1,11 @@
-<!-- prompt_version: researcher-audit-project-v2 -->
+<!-- prompt_version: research-audit-project-v2 -->
 # SOP: Researcher - Adopter-Project Quality Audit
 
 **Use when:** Asked to run a structured quality audit of the adopter project.
 
 **Trigger form:** `Researcher: Audit [project name]`
 
-**Project override:** Projects with language-, runtime-, or domain-specific audit needs may replace this SOP at `.crucible/sops/researcher-audit-project.md`.
+**Project override:** Projects with language-, runtime-, or domain-specific audit needs may replace this SOP at `.crucible/sops/research-audit-project.md`.
 
 **Scorecard:** `.crucible/research/scorecard-{project}.md` - read this before proceeding. It defines the audit categories, standards, signals, and report template. This SOP describes the process; the scorecard describes the content.
 

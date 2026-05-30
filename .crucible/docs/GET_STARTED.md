@@ -6,6 +6,39 @@ For reference documentation, see [operating-manual.md](operating-manual.md). For
 
 ---
 
+## Quickstart
+
+Get from clone to a running first task in under 10 minutes.
+
+### Prerequisites
+- Windows + PowerShell 5.1+ (current runtime; Go cross-platform rewrite planned)
+- Git
+- One of: Go, Node, Python, or Rust toolchain (matching the `-Language` flag below)
+
+### Install
+1. Clone the Crucible framework repository to a stable directory outside your project (e.g., `C:\src\crucible`):
+```powershell
+git clone https://github.com/allthingscode/crucible.git C:\src\crucible
+cd C:\src\crucible
+```
+*(Note: The source clone is only needed at install or update time, never at runtime.)*
+
+2. Run the project initializer against your project root:
+```powershell
+.\powershell\init-project.ps1 -ProjectRoot <your-project-path> -Language <go|node|python|rust> -WithSampleTask -AppendInstructions
+```
+This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md.
+
+### Run the sample task
+```powershell
+cd <your-project-path>
+.\.crucible\powershell\factory.ps1 -Init -TaskId F-001
+```
+Follow the prompts. The factory will scaffold a Groomer session and tell you the next agent command.
+
+---
+
+
 ## Prerequisites
 
 - Windows (PowerShell runtime is the current implementation; see [ROADMAP.md](../ROADMAP.md) for the planned cross-platform Go rewrite)
@@ -89,7 +122,7 @@ item_id: F-001
 title: Add Health Endpoint
 status: Ready
 priority: P1
-target_specialist: Groomer
+target_phase: grooming
 budget_tier: low
 ---
 
@@ -132,12 +165,12 @@ Expected output:
 ```
 [FACTORY] Validating environment...
 [FACTORY] No incoming handoff found for F-001. Bootstrapping Groomer session.
-[FACTORY] Scaffolded: .crucible\session\F-001\groomer\task.md
-[FACTORY] Scaffolded: .crucible\session\F-001\groomer\prompt.md
+[FACTORY] Scaffolded: .crucible\session\F-001\grooming\task.md
+[FACTORY] Scaffolded: .crucible\session\F-001\grooming\prompt.md
 
 [NEXT SESSION COMMAND]
 Start a Groomer agent session. Tell it:
-  Groomer: F-001 — read and follow all instructions in .crucible\session\F-001\groomer\prompt.md
+  Groomer: F-001 — read and follow all instructions in .crucible\session\F-001\grooming\prompt.md
   Recommended model: fast/cost-effective
 ```
 
@@ -148,7 +181,7 @@ Start a Groomer agent session. Tell it:
 Open an AI agent session (Claude Code, Gemini CLI, Codex, etc.) in your project directory. Paste the command the factory produced:
 
 ```
-Groomer: F-001 — read and follow all instructions in .crucible\session\F-001\groomer\prompt.md
+Groomer: F-001 — read and follow all instructions in .crucible\session\F-001\grooming\prompt.md
 ```
 
 The Groomer will:

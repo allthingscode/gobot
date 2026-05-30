@@ -42,7 +42,7 @@ function Invoke-ScriptUnderTest {
     $args = @(
         "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", $scriptUnderTest,
-        "-Specialist", "architect",
+        "-Specialist", "implementation",
         "-TaskId", $TaskId,
         "-UpdateJsonFile", $payloadFile,
         "-ProjectRoot", $tempRoot
@@ -57,7 +57,10 @@ function Invoke-ScriptUnderTest {
     } finally {
         $ErrorActionPreference = $prevPref
     }
-    return @{ Output = ($output -join "`n"); ExitCode = $exit }
+    # Explicitly stringify each element (WarningRecord, ErrorRecord, etc.)
+    # so console-formatting artifacts don't leak into the joined text.
+    $stringified = @($output | ForEach-Object { "$_" })
+    return @{ Output = ($stringified -join "`n"); ExitCode = $exit }
 }
 
 $results = @()
@@ -82,8 +85,8 @@ try {
     $r1 = Invoke-ScriptUnderTest
     Assert-True -Name "exit code 0 after stale recovery" -Cond ($r1.ExitCode -eq 0) -Detail ("got " + $r1.ExitCode + " :: " + $r1.Output)
     Assert-True -Name "warning emitted with [WARN] tag" -Cond ($r1.Output -match "\[WARN\]") -Detail $r1.Output
-    $flatOutput = $r1.Output -replace '\s+', ''
-    $flatPath = $LockFile -replace '\s+', ''
+    $flatOutput = [regex]::Replace($r1.Output, '[\r\n\t ]+', '')
+    $flatPath   = [regex]::Replace($LockFile,   '[\r\n\t ]+', '')
     Assert-True -Name "warning includes lock file path" -Cond ($flatOutput.Contains($flatPath)) -Detail $r1.Output
     Assert-True -Name "warning includes age in seconds" -Cond ($r1.Output -match "age \d+s") -Detail $r1.Output
     Assert-True -Name "lock file released after success" -Cond (-not (Test-Path -LiteralPath $LockFile)) -Detail "lock still present"

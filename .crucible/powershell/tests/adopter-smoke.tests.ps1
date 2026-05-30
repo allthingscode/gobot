@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
-$LINT_SCRIPT = Join-Path $REPO_ROOT "powershell/tests/factory_lint.go"
+$LINT_SCRIPT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
 
 $results = @()
 

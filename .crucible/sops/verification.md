@@ -1,9 +1,9 @@
 <!-- prompt_version: reviewer-sop-v1 -->
-# SOP: Reviewer
+# SOP: Verification
 
-**Role:** Quality gate before code reaches production. Validate the Architect's implementation against the spec and project standards. Approve or send back with a precise fix specification.
+**Role:** Quality gate before code reaches production. Validate the implementation phase against the spec and project standards. Approve or send back with a precise fix specification.
 
-**Trigger form:** `Reviewer: {task_id}`
+**Trigger form:** `Verification: {task_id}`
 
 ---
 
@@ -11,27 +11,27 @@
 
 | Input | Source |
 |---|---|
-| Task context | `.crucible/session/{task_id}/reviewer/task.md` (contains scope boundary) |
+| Task context | `.crucible/session/{task_id}/verification/task.md` (contains scope boundary) |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
 | Backlog spec | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
 | Architect's work | `task/{task_id}` git branch in the worktree |
-| Architect's output summary | `.crucible/session/{task_id}/architect/output.md` |
+| Architect's output summary | `.crucible/session/{task_id}/implementation/output.md` |
 
 ---
 
 ## Review Workflow
 
 ### Step 1 — Pre-Review Setup
-1. Run `{{crucible_root}}/powershell/clear_session_state.ps1 reviewer` to clear stale state safely
+1. Run `{{crucible_root}}/powershell/clear_session_state.ps1 verification` to clear stale state safely
 2. Read the backlog spec for `{task_id}` — understand what was supposed to be built
-3. Enter the assigned task worktree at `.crucible/.agent-workspaces/architect-{task_id}` and review there. Do not check out task branches from the main checkout.
+3. Enter the assigned task worktree at `.crucible/.agent-workspaces/implementation-{task_id}` and review there. Do not check out task branches from the main checkout.
 
 ### Step 2 — Scope Check (File Affinity)
 Read your `task.md` — it contains a `## Scope Boundary (File Affinity)` section. Run:
 ```bash
 git diff master...task/{task_id} --name-only
 ```
-Verify every modified file falls within the declared package paths. Any file outside scope is an automatic **BLOCKER** unless the Architect explicitly documented an escalation reason in their `task.md`.
+Verify every modified file falls within the declared package paths. Any file outside scope is an automatic **BLOCKER** unless the implementation phase explicitly documented an escalation reason in their `task.md`.
 
 ### Step 3 — Automated Verification
 Run the canonical isolated checks. Every check MUST pass before proceeding to manual review:
@@ -57,7 +57,7 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 - **Example**: `### CHECKPOINT Step 4: Acceptance Criteria Verified`
 
 ### Step 6 — Write Review Report
-Document findings in `.crucible/session/{task_id}/reviewer/review_report.md`.
+Document findings in `.crucible/session/{task_id}/verification/review_report.md`.
 
 **MANDATORY**: Include a YAML header at the top:
 ```yaml
@@ -95,8 +95,8 @@ Format findings as:
 ```json
 {
   "task_id": "F-XXX",
-  "source_specialist": "reviewer",
-  "target_specialist": "operator",
+  "source_phase": "verification",
+  "target_phase": "deployment",
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "...",
@@ -110,7 +110,7 @@ Format findings as:
 ### If CHANGES_REQUESTED or BLOCKED
 
 1. Document required changes in `review_report.md`
-2. Write a concise fix specification to `.crucible/session/{task_id}/architect/task.md`:
+2. Write a concise fix specification to `.crucible/session/{task_id}/implementation/task.md`:
 
 ```markdown
 # Code Review Fixes — {task_id} [{Feature Name}]
@@ -126,15 +126,15 @@ Format findings as:
 - [ ] AC item that was not implemented
 
 ## On Completion
-Write `handoffs/{task_id}-{timestamp}.json` with `target_specialist: "reviewer"` for re-review.
+Write `handoffs/{task_id}-{timestamp}.json` with `target_phase: "verification"` for re-review.
 ```
 
 3. Write handoff.json:
 ```json
 {
   "task_id": "F-XXX",
-  "source_specialist": "reviewer",
-  "target_specialist": "architect",
+  "source_phase": "verification",
+  "target_phase": "implementation",
   "handoff_retry_count": 0,
   "review_strike_count": N,
   "cumulative_handoff_count": N,
@@ -150,9 +150,9 @@ Write `handoffs/{task_id}-{timestamp}.json` with `target_specialist: "reviewer"`
 
 ---
 
-## Pattern C Close-Out (Groomer → Reviewer shortcut)
+## Pattern C Close-Out (grooming → verification shortcut)
 
-When the incoming handoff has `source_specialist: groomer` and **no** Architect worktree exists (i.e., this is a pure data-grooming pass with no implementation), run this abbreviated checklist instead of the full code-review workflow above.
+When the incoming handoff has `source_phase: grooming` and **no** Architect worktree exists (i.e., this is a pure data-grooming pass with no implementation), run this abbreviated checklist instead of the full code-review workflow above.
 
 ### Pattern C Checklist
 1. **BACKLOG.md structure** — run `validate-backlog.ps1` and confirm it exits 0.
@@ -160,14 +160,14 @@ When the incoming handoff has `source_specialist: groomer` and **no** Architect 
 3. **Parent-task closure** — confirm the parent task's spec frontmatter `status` matches its BACKLOG.md row, and that the closure reason is recorded in the spec.
 4. **No orphaned specs** — every stub row in BACKLOG.md has a corresponding spec file in `backlog/{type}/active/`.
 
-### Pattern C Handoff (to Operator)
+### Pattern C Handoff (to deployment)
 When all four checks pass, write the handoff with `reviewer_checks_passed` populated using the standard six checks (mark any code-specific checks satisfied by N/A equivalence — the backlog is the artifact being reviewed):
 
 ```json
 {
   "task_id": "...",
-  "source_specialist": "reviewer",
-  "target_specialist": "operator",
+  "source_phase": "verification",
+  "target_phase": "deployment",
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "...",
@@ -183,8 +183,8 @@ When all four checks pass, write the handoff with `reviewer_checks_passed` popul
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `operator` (approved) or `architect` (changes requested) — not to myself
+- [ ] Routing to: `deployment` (approved) or `implementation` (changes requested) — not to myself
 - [ ] `review_report.md` has the mandatory YAML header
-- [ ] If CHANGES_REQUESTED: fix spec written to `{task_id}/architect/task.md`
+- [ ] If CHANGES_REQUESTED: fix spec written to `{task_id}/implementation/task.md`
 - [ ] If APPROVED: backlog status updated to `Ready for Deploy`
 - [ ] `task_id` in handoff matches the task I was given

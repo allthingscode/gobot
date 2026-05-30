@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $false, ValueFromRemainingArguments = $true)]
     [string[]]$Paths = @(
         "prompts",
         ".crucible/personas",
@@ -22,8 +22,14 @@ $markers = @(
 $targetFiles = @()
 foreach ($path in $Paths) {
     if (-not (Test-Path -LiteralPath $path)) { continue }
-    $targetFiles += Get-ChildItem -Path $path -Recurse -File |
-        Where-Object { $_.Extension -in @(".md", ".ps1") }
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        if ($path -match '\.(md|ps1)$') {
+            $targetFiles += Get-Item -LiteralPath $path
+        }
+    } else {
+        $targetFiles += Get-ChildItem -Path $path -Recurse -File |
+            Where-Object { $_.Extension -in @(".md", ".ps1") }
+    }
 }
 
 $hits = @()

@@ -1,6 +1,6 @@
-﻿# Claude Code Strategic Orchestrator Protocol
+# Claude Code Strategic Orchestrator Protocol
 
-This document defines **Claude Code-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/personas/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop and gate protocols. This document covers only how to invoke sub-agents and run factory commands in the Claude Code environment.
+This document defines **Claude Code-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop and gate protocols. This document covers only how to invoke sub-agents and run factory commands in the Claude Code environment.
 
 ## The "Orchestrate" Directive
 
@@ -28,9 +28,9 @@ Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are disp
 Agent({
   subagent_type: "general-purpose",
   model: "{model-from-table-above}",
-  description: "{Role} session for {task_id}",
+  description: "{Phase} session for {task_id}",
   prompt: `{Role}: {task_id} — read and follow all instructions in
-.crucible/session/{task_id}/{role}/prompt.md
+.crucible/session/{task_id}/{phase}/prompt.md
 
 Follow your SOP checkpoint mandate: append \`### CHECKPOINT [brief summary]\`
 to task.md after each major phase. Do not write the final handoff until all
@@ -51,9 +51,9 @@ Use `Explore` (not `general-purpose`) to enforce read-only tool access and the t
 Agent({
   subagent_type: "Explore",
   model: "opus",
-  description: "Researcher session for {task_id}",
+  description: "Research session for {task_id}",
   prompt: `Researcher: {task_id} — read and follow all instructions in
-.crucible/session/{task_id}/researcher/prompt.md
+.crucible/session/{task_id}/research/prompt.md
 
 Follow your SOP checkpoint mandate: append \`### CHECKPOINT [brief summary]\`
 to task.md after each major phase. Do not write the final handoff until all
@@ -77,12 +77,12 @@ Agent({
   prompt: `Groomer: Next Item
 
 Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, and
-.crucible/sops/groomer.md. Select the next eligible backlog item. Once you have
+.crucible/sops/grooming.md. Select the next eligible backlog item. Once you have
 selected a task ID, create your scratchpad at
-.crucible/session/<selected_task_id>/groomer/task.md (create the directory if
+.crucible/session/<selected_task_id>/grooming/task.md (create the directory if
 needed) and use it for all ### CHECKPOINT entries throughout your session.
 
-Write or update the item's spec, write the groomer → architect handoff, then run:
+Write or update the item's spec, write the grooming -> implementation handoff, then run:
 
   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId <selected_task_id> -Quiet
 

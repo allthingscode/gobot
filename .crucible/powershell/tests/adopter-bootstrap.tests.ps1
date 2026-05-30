@@ -11,7 +11,7 @@ $VALIDATE_BACKLOG = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
 $VALIDATE_CONFIG = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
-$FACTORY_LINT = Join-Path $REPO_ROOT "powershell/tests/factory_lint.go"
+$FACTORY_LINT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
 
 $results = @()
 
@@ -105,7 +105,7 @@ item_id: F-001
 title: Add Health Endpoint
 status: Ready
 priority: P1
-target_specialist: Groomer
+target_phase: grooming
 budget_tier: low
 ---
 
@@ -172,8 +172,8 @@ Add a health endpoint.
                 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                     -NewHandoff `
                     -TaskId "F-001" `
-                    -HandoffSource "groomer" `
-                    -HandoffTarget "architect" `
+                    -HandoffSource "grooming" `
+                    -HandoffTarget "implementation" `
                     -HandoffReason "Bootstrap tests" `
                     -HandoffArtifacts ".crucible/backlog/features/active/F-001_Add_Health.md" `
                     -HandoffFileAffinity "README.md"
@@ -205,10 +205,45 @@ Add a health endpoint.
         Assert-Result -Name "factory -Init exit" -Condition ($factoryInitCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $factoryInitCmd.ExitCode + ". Output: " + ($factoryInitCmd.Output -join "`n"))
 
         # Verify prompt and task folders scaffolded
-        $architectPrompt = Join-Path $projectRoot ".crucible/session/F-001/architect/prompt.md"
-        $architectTask = Join-Path $projectRoot ".crucible/session/F-001/architect/task.md"
-        Assert-Result -Name "Architect prompt scaffolded" -Condition (Test-Path -LiteralPath $architectPrompt) -FailureMessage "expected architect/prompt.md to exist"
-        Assert-Result -Name "Architect task scaffolded" -Condition (Test-Path -LiteralPath $architectTask) -FailureMessage "expected architect/task.md to exist"
+        $architectPrompt = Join-Path $projectRoot ".crucible/session/F-001/implementation/prompt.md"
+        $architectTask = Join-Path $projectRoot ".crucible/session/F-001/implementation/task.md"
+        Assert-Result -Name "Architect prompt scaffolded" -Condition (Test-Path -LiteralPath $architectPrompt) -FailureMessage "expected implementation/prompt.md to exist"
+        Assert-Result -Name "Architect task scaffolded" -Condition (Test-Path -LiteralPath $architectTask) -FailureMessage "expected implementation/task.md to exist"
+
+        # 9. Verify hooksPath is set and hooks work for adopter (testing TODO #31)
+        Push-Location $projectRoot
+        try {
+            $hooksPathConfig = (git config core.hooksPath).Trim()
+            Assert-Result -Name "core.hooksPath config is set" -Condition ($hooksPathConfig -eq ".crucible/scripts/hooks") -FailureMessage "expected core.hooksPath config to be '.crucible/scripts/hooks'"
+
+            # Verify that a commit runs the hooks and passes
+            $testCommitFile = "test-hook-file.md"
+            Set-Content -Path $testCommitFile -Value "# Test Commit File" -Encoding UTF8
+            git add $testCommitFile
+            $commitCmd = Invoke-ExternalCommand {
+                git commit -m "Testing adopter pre-commit hook"
+            }
+            Assert-Result -Name "adopter commit with hook passes" -Condition ($commitCmd.ExitCode -eq 0) -FailureMessage ("expected commit exit 0, got " + $commitCmd.ExitCode + ". Output: " + ($commitCmd.Output -join "`n"))
+
+            # Create a file with mojibake markers and verify the pre-commit hook catches it
+            $mojibakeFile = "mojibake-test.md"
+            $mojibakeMarker = [string]([char]0x00C3)
+            Set-Content -Path $mojibakeFile -Value "# Mojibake $mojibakeMarker test" -Encoding UTF8
+            git add $mojibakeFile
+            $commitMojiCmd = Invoke-ExternalCommand {
+                git commit -m "Testing adopter pre-commit hook mojibake failure"
+            }
+            Assert-Result -Name "adopter commit with mojibake hook fails" -Condition ($commitMojiCmd.ExitCode -ne 0) -FailureMessage "expected commit to fail due to mojibake markers, but it succeeded"
+            Assert-Result -Name "mojibake failure output contains marker info" -Condition (($commitMojiCmd.Output -join "`n") -match "Mojibake markers detected") -FailureMessage ("expected output to indicate mojibake detection, got: " + ($commitMojiCmd.Output -join "`n"))
+
+            # Clean up the staged/committed mojibake file to leave the test repo clean
+            git reset HEAD $mojibakeFile | Out-Null
+            if (Test-Path $mojibakeFile) {
+                Remove-Item -Path $mojibakeFile -Force | Out-Null
+            }
+        } finally {
+            Pop-Location
+        }
     }
 }
 finally {

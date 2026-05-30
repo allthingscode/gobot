@@ -210,7 +210,7 @@ func lintBacklogStatus(root string) []string {
 
 // handoffRequiredFields lists mandatory keys in handoff JSON files.
 var handoffRequiredFields = []string{
-	"task_id", "source_specialist", "target_specialist",
+	"task_id", "source_phase", "target_phase",
 	"prompt_version", "cumulative_handoff_count",
 }
 
@@ -307,8 +307,8 @@ func lintHandoffSchemaContracts(root string) []string {
 			continue
 		}
 
-		source := readConstFromProps(props, "source_specialist")
-		target := readConstFromProps(props, "target_specialist")
+		source := readConstFromProps(props, "source_phase")
+		target := readConstFromProps(props, "target_phase")
 
 		if source != "" {
 			roleClauseSeen[source] = true
@@ -316,27 +316,27 @@ func lintHandoffSchemaContracts(root string) []string {
 
 		required := readStringArray(thenNode["required"])
 		switch source {
-		case "researcher":
+		case "research":
 			if !slices.Contains(required, "human_decisions") {
-				out = append(out, "schemas/handoff.schema.json: researcher clause must require human_decisions")
+				out = append(out, "schemas/handoff.schema.json: research clause must require human_decisions")
 			}
-		case "groomer":
-			// file_affinity is required only for groomer->architect (Pattern C omits it).
-			// Check that a dedicated groomer->architect clause requiring file_affinity exists.
-			if target == "architect" && !slices.Contains(required, "file_affinity") {
-				out = append(out, "schemas/handoff.schema.json: groomer->architect clause must require file_affinity")
+		case "grooming":
+			// file_affinity is required only for grooming->implementation (Pattern C omits it).
+			// Check that a dedicated grooming->implementation clause requiring file_affinity exists.
+			if target == "implementation" && !slices.Contains(required, "file_affinity") {
+				out = append(out, "schemas/handoff.schema.json: grooming->implementation clause must require file_affinity")
 			}
-		case "architect", "operator":
+		case "implementation", "deployment":
 			if !slices.Contains(required, "session_cycle_id") {
 				out = append(out, fmt.Sprintf("schemas/handoff.schema.json: %s clause must require session_cycle_id", source))
 			}
-		case "reviewer":
+		case "verification":
 			if slices.Contains(required, "session_cycle_id") {
 				reviewerSessionCycleRequired = true
 			}
 		}
 
-		if source == "reviewer" && target == "operator" {
+		if source == "verification" && target == "deployment" {
 			reviewerApprovalClause = true
 			if slices.Contains(required, "reviewer_checks_passed") {
 				reviewerContractField = true
@@ -344,18 +344,18 @@ func lintHandoffSchemaContracts(root string) []string {
 		}
 	}
 
-	for _, role := range []string{"researcher", "groomer", "architect", "reviewer", "operator"} {
+	for _, role := range []string{"research", "grooming", "implementation", "verification", "deployment"} {
 		if !roleClauseSeen[role] {
-			out = append(out, fmt.Sprintf("schemas/handoff.schema.json: missing role-conditional clause for source_specialist=%s", role))
+			out = append(out, fmt.Sprintf("schemas/handoff.schema.json: missing phase-conditional clause for source_phase=%s", role))
 		}
 	}
 	if !reviewerApprovalClause {
-		out = append(out, "schemas/handoff.schema.json: missing reviewer->operator contract clause")
+		out = append(out, "schemas/handoff.schema.json: missing verification->deployment contract clause")
 	} else if !reviewerContractField {
-		out = append(out, "schemas/handoff.schema.json: reviewer->operator clause must require reviewer_checks_passed")
+		out = append(out, "schemas/handoff.schema.json: verification->deployment clause must require reviewer_checks_passed")
 	}
 	if !reviewerSessionCycleRequired {
-		out = append(out, "schemas/handoff.schema.json: reviewer contract must require session_cycle_id")
+		out = append(out, "schemas/handoff.schema.json: verification contract must require session_cycle_id")
 	}
 
 	return out
@@ -370,7 +370,7 @@ func lintHandoffValidationFixtures(root string) []string {
 
 	roleRequired := collectRoleRequiredFields(root)
 
-	roles := []string{"researcher", "groomer", "architect", "reviewer", "operator"}
+	roles := []string{"research", "grooming", "implementation", "verification", "deployment"}
 	for _, role := range roles {
 		required := roleRequired[role]
 		for _, suffix := range []string{"valid", "invalid"} {
@@ -389,11 +389,11 @@ func lintHandoffValidationFixtures(root string) []string {
 			}
 
 			var srcStr string
-			if raw, ok := fixture["source_specialist"]; ok {
+			if raw, ok := fixture["source_phase"]; ok {
 				_ = json.Unmarshal(raw, &srcStr)
 			}
 			if srcStr != role {
-				out = append(out, fmt.Sprintf(".crucible/session/fixtures/handoff-validation/%s: source_specialist must be %q", name, role))
+				out = append(out, fmt.Sprintf(".crucible/session/fixtures/handoff-validation/%s: source_phase must be %q", name, role))
 			}
 
 			if suffix == "valid" {
@@ -491,7 +491,7 @@ func lintPolicyDrift(root string) []string {
 	return out
 }
 
-// collectRoleRequiredFields reads the schema and returns, per source_specialist,
+// collectRoleRequiredFields reads the schema and returns, per source_phase,
 // the list of fields that the allOf conditional clauses declare as required.
 func collectRoleRequiredFields(root string) map[string][]string {
 	result := map[string][]string{}
@@ -519,7 +519,7 @@ func collectRoleRequiredFields(root string) map[string][]string {
 		if props == nil {
 			continue
 		}
-		source := readConstFromProps(props, "source_specialist")
+		source := readConstFromProps(props, "source_phase")
 		if source == "" {
 			continue
 		}

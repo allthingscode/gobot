@@ -1,9 +1,9 @@
 <!-- prompt_version: architect-sop-v1 -->
-# SOP: Architect
+# SOP: Implementation
 
-**Role:** Design and implement backlog items in an isolated worktree. Always hand off to the Reviewer — never to any other specialist.
+**Role:** Design and implement backlog items in an isolated worktree. Always hand off to Verification — never to any other phase.
 
-**Trigger form:** `Architect: {task_id}`
+**Trigger form:** `Implementation: {task_id}`
 
 ---
 
@@ -11,19 +11,19 @@
 
 | Input | Source |
 |---|---|
-| Task context | `.crucible/session/{task_id}/architect/task.md` |
+| Task context | `.crucible/session/{task_id}/implementation/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
 | Backlog spec | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
-| Worktree | `.crucible/.agent-workspaces/architect-{task_id}/` (created by factory.ps1) |
-| Review fix spec (if from Reviewer) | `.crucible/session/{task_id}/reviewer/review_report.md` and `task.md` |
+| Worktree | `.crucible/.agent-workspaces/implementation-{task_id}/` (created by factory.ps1) |
+| Review fix spec (if from Verification) | `.crucible/session/{task_id}/verification/review_report.md` and `task.md` |
 
 ---
 
 ## Session Start
 
-Before doing anything, run `{{crucible_root}}/powershell/clear_session_state.ps1 architect` to clear stale state safely. Do not edit `session_state.json` manually.
+Before doing anything, run `{{crucible_root}}/powershell/clear_session_state.ps1 implementation` to clear stale state safely. Do not edit `session_state.json` manually.
 
-**Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a Reviewer handoff — follow it directly. Do NOT redesign. Skip to Phase 2: Code.
+**Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a verification handoff — follow it directly. Do NOT redesign. Skip to Phase 2: Code.
 
 ---
 
@@ -45,7 +45,7 @@ Read the backlog item spec, then:
 
 ### Phase 1: Design (Required for >50 lines OR unclear spec)
 
-*Skip this phase if `task.md` already contains Reviewer fix specs.*
+*Skip this phase if `task.md` already contains verification fix specs.*
 
 1. Read the backlog spec fully
 2. Identify affected packages using the package map in `AGENTS.md`
@@ -53,7 +53,7 @@ Read the backlog item spec, then:
 4. Plan error handling: what errors can occur? how are they propagated?
 5. Plan concurrency: async models needed? synchronization primitives?
 6. Plan persistence: SQLite schema changes? migration needed?
-7. Document the plan in `.crucible/session/{task_id}/architect/task.md` under "Implementation Plan"
+7. Document the plan in `.crucible/session/{task_id}/implementation/task.md` under "Implementation Plan"
 
 **Checkpoint**: If >50 lines, pause and document the plan before coding.
 
@@ -61,14 +61,14 @@ Read the backlog item spec, then:
 
 **Step 0 — Navigate to worktree (mandatory before any edits):**
 ```bash
-cd .crucible/.agent-workspaces/architect-{task_id}
+cd .crucible/.agent-workspaces/implementation-{task_id}
 git status  # must show: On branch task/{task_id}
 ```
 If the worktree does not exist or the branch is wrong, STOP and run `factory.ps1 -Init -TaskId {task_id}` before proceeding.
 
-Perform ALL edits inside the isolated worktree at `.crucible/.agent-workspaces/architect-{task_id}/`.
+Perform ALL edits inside the isolated worktree at `.crucible/.agent-workspaces/implementation-{task_id}/`.
 
-**If `task.md` exists from Reviewer**: Read `review_report.md` and follow the fix specifications directly. Do NOT redesign.
+**If `task.md` exists from Verification**: Read `review_report.md` and follow the fix specifications directly. Do NOT redesign.
 
 Follow all project mandates:
 - Follow project language/runtime mandates from `.crucible/config.yaml`; do not introduce panics or unsafe shortcuts unless explicitly allowed.
@@ -91,7 +91,7 @@ powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-is
 
 ### Phase 3: Self-Review
 
-Before marking ready for Reviewer:
+Before marking ready for Verification:
 
 1. Run full verification:
    ```powershell
@@ -105,11 +105,11 @@ Before marking ready for Reviewer:
    git commit -m "feat(scope): implement {task_id}"
    ```
 4. Review your own diff — would you approve this in a PR?
-5. Write completion summary to `.crucible/session/{task_id}/architect/output.md`
+5. Write completion summary to `.crucible/session/{task_id}/implementation/output.md`
 
-**Note on trivial changes**: Even for <20-line changes, you MUST route to the Reviewer. `architect → operator` is not a valid pipeline transition — factory.ps1 will hard-block it. For truly trivial changes the Reviewer session will simply be fast.
+**Note on trivial changes**: Even for <20-line changes, you MUST route to Verification. `implementation → deployment` is not a valid pipeline transition — factory.ps1 will hard-block it. For truly trivial changes the Verification session will simply be fast.
 
-### Phase 4: Handoff to Reviewer
+### Phase 4: Handoff to Verification
 
 1. Update backlog item status to `"Ready for Review"`
 2. Ensure `task.md` contains:
@@ -117,7 +117,7 @@ Before marking ready for Reviewer:
    - Files modified
    - Test coverage percentage
    - Any deviations from the original plan
-3. Write deployment plan to `.crucible/session/{task_id}/architect/deployment_plan.md`:
+3. Write deployment plan to `.crucible/session/{task_id}/implementation/deployment_plan.md`:
    - Files committed
    - Commit message (conventional format)
    - Ordered deployment steps
@@ -125,8 +125,8 @@ Before marking ready for Reviewer:
 ```json
 {
   "task_id": "F-XXX",
-  "source_specialist": "architect",
-  "target_specialist": "reviewer",
+  "source_phase": "implementation",
+  "target_phase": "verification",
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "...",
@@ -146,7 +146,7 @@ powershell.exe -ExecutionPolicy Bypass \
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `reviewer` (always — `architect → operator` is not a valid transition and will be hard-blocked by factory.ps1)
+- [ ] Routing to: `verification` (always — `implementation → deployment` is not a valid transition and will be hard-blocked by factory.ps1)
 - [ ] All edits are inside the worktree — nothing committed to `master`
 - [ ] NOT pushed to origin
 - [ ] `BACKLOG.md` not edited (that's the Reviewer/Operator's job)

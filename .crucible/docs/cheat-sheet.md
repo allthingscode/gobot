@@ -43,15 +43,15 @@ Your role is to provide **high-level direction and approval**. You are the "Pilo
 
 When starting a task from the backlog using `factory.ps1 -Init -TaskId {id}`, if no active session folder exists, the factory automatically bootstraps the task:
 *   It parses the task's frontmatter in the backlog spec file (`{task_id}_{title}.md`).
-*   It extracts the `target_specialist` field (typically `"Groomer"` or `"Researcher"`), which specifies the first specialist to receive the task.
-*   It automatically generates an initial book-end handoff from `operator` to that `target_specialist`, scaffolds the workspace directories, and prepares the next specialist prompt.
+*   It extracts the `target_phase` field (typically `"grooming"` or `"research"`), which specifies the first activity phase to receive the task.
+*   It automatically generates an initial book-end handoff from `deployment` to that `target_phase`, scaffolds the workspace directories, and prepares the next phase prompt.
 
 ---
 
 ## The Human Gates (Where you step in)
 
-1.  **Research Gate**: researcher -> groomer. You MUST approve the researcher's findings and select which "path" to take before the Groomer starts.
-2.  **Human Gate**: operator -> pause. Mandatory final approval of the implemented work; choose Redirect only when you want the pipeline to continue to a specific next item.
+1.  **Research Gate**: research -> grooming. You MUST approve the researcher's findings and select which "path" to take before the Groomer starts.
+2.  **Human Gate**: deployment -> pause. Mandatory final approval of the implemented work; choose Redirect only when you want the pipeline to continue to a specific next item.
 3.  **Circuit Breaker Gate**: If a task fails verification 3 times or exceeds its token budget, the pipeline blocks. You decide whether to reduce scope, abandon, or provide new direction.
 
 ---
@@ -60,7 +60,7 @@ When starting a task from the backlog using `factory.ps1 -Init -TaskId {id}`, if
 
 These are invoked **by the agent**, not by you. Listed here for reference only.
 
-*   **`"Orchestrate the next task in the backlog."`**: High-level directive to drive a task through the pipeline using isolated sub-agents. All orchestrators share the same persona (`.crucible/personas/orchestrator.md`) and SOP (`.crucible/sops/orchestrator.md`). Tool-specific mechanics: Claude Code → `.crucible/CLAUDE_ORCHESTRATOR.md`; Gemini/Antigravity CLI → `.crucible/GEMINI_ORCHESTRATOR.md`; Codex CLI → `.crucible/CODEX_ORCHESTRATOR.md`.
+*   **`"Orchestrate the next task in the backlog."`**: High-level directive to drive a task through the pipeline using isolated sub-agents. All orchestrators share the same meta-role definition (`.crucible/docs/orchestrator.md`) and SOP (`.crucible/sops/orchestrator.md`). Tool-specific mechanics: Claude Code → `.crucible/CLAUDE_ORCHESTRATOR.md`; Gemini/Antigravity CLI → `.crucible/GEMINI_ORCHESTRATOR.md`; Codex CLI → `.crucible/CODEX_ORCHESTRATOR.md`.
 *   **`factory.ps1 -Init -TaskId {task_id}`**: Dual-purpose — at session START it validates the incoming handoff and scaffolds the workspace; at session END it routes the pipeline to the next specialist. Run by agent via Bash after every handoff.
 *   **`factory.ps1 -Init -TaskId {task_id} -AutoAdvance`**: Orchestrator mode — emits `[AUTO-ADVANCE]` for non-gate transitions so the orchestrator chains specialists without waiting for human confirmation. Gate transitions (Researcher→Groomer, Operator→*) always pause.
 *   **`factory.ps1 -Health`**: System health check — orphaned worktrees, stale locks, blocked tasks, oversized scratchpads. The only command that does not require `-TaskId`.
