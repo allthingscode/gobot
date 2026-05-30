@@ -279,7 +279,7 @@ That's normal on a first run. The factory creates the Groomer session automatica
 Make sure the agent's working directory is your project root where the installed `.crucible/` lives.
 
 **Worktree already exists error**
-Run `powershell\factory.ps1 -Health` to find and clean up orphaned worktrees from previous runs.
+Run `powershell\factory.ps1 -Health` to find orphaned worktrees from previous runs, then `powershell\factory.ps1 -Cleanup` to preview cleanup or `powershell\factory.ps1 -Cleanup -Force` to execute it.
 
 ---
 

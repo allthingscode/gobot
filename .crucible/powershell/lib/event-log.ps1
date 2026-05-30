@@ -74,7 +74,7 @@ function Get-LastEntry {
     if (-not (Test-Path $LogFile)) { return $null }
     
     # Use a wider tail window so matching start events are still found in noisy task logs.
-    $lines = Get-Content $LogFile -Tail 200 -Encoding UTF8
+    $lines = @(Get-Content $LogFile -Tail 200 -Encoding UTF8)
     for ($i = $lines.Length - 1; $i -ge 0; $i--) {
         try {
             $cleanedLine = $lines[$i] -replace "^$([char]0xFEFF)", ""

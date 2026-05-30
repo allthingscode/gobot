@@ -211,7 +211,7 @@ $event = @{ event="circuit_breaker"; task_id="TASK-ID"; cycle_id="CYCLE-ID"; spe
 
 ### Querying the Log
 Use `jq` to analyze the pipeline (run against the relevant task log):
-- **Average session duration by specialist role**: `jq -s '[.[] | select(.event == "session_end" and .metrics != null)] | group_by(.specialist) | map({specialist: .[0].specialist, avg_duration: (map(.metrics.duration_seconds) | add / length)})' .crucible/session/TASK-ID/pipeline.log.jsonl`
+- **Average phase-open wall time by specialist role**: `jq -s '[.[] | select(.event == "session_end" and .metrics.phase_wall_seconds != null)] | group_by(.phase) | map({phase: .[0].phase, avg_phase_wall: (map(.metrics.phase_wall_seconds) | add / length)})' .crucible/session/TASK-ID/pipeline.log.jsonl`
 - **Tasks that used >80% of their budget**: `jq 'select(.event == "session_end" and .metrics.budget_pct_used > 80)' .crucible/session/TASK-ID/pipeline.log.jsonl`
 - **All circuit breaker events**: `jq 'select(.event == "circuit_breaker")' .crucible/session/TASK-ID/pipeline.log.jsonl`
 - **Find all budget failures**: `jq 'select(.outcome == "budget_exceeded")' .crucible/session/TASK-ID/pipeline.log.jsonl`

@@ -170,6 +170,29 @@ try {
         $output = $outputLines -join "`n"
         Assert-Result -Name "own task exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got " + $exitCode + ". Output: " + $output)
     }
+
+    $results += Run-Test -Name "Handles empty and missing tasks state shapes" -Body {
+        Push-Location $projectRoot
+        try {
+            '{}' | Set-Content -LiteralPath $stateFilePath -Encoding UTF8
+            $missingOutputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+                -TaskId "TASK-4" `
+                -Affinity @("src/main.go") 2>&1)
+            $missingExitCode = $LASTEXITCODE
+
+            '{"tasks":{}}' | Set-Content -LiteralPath $stateFilePath -Encoding UTF8
+            $emptyOutputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+                -TaskId "TASK-4" `
+                -Affinity @("src/main.go") 2>&1)
+            $emptyExitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        $missingOutput = $missingOutputLines -join "`n"
+        $emptyOutput = $emptyOutputLines -join "`n"
+        Assert-Result -Name "missing tasks exit" -Condition ($missingExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $missingExitCode + ". Output: " + $missingOutput)
+        Assert-Result -Name "empty tasks exit" -Condition ($emptyExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $emptyExitCode + ". Output: " + $emptyOutput)
+    }
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {

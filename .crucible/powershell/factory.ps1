@@ -115,7 +115,7 @@ function Get-CrucibleRoot {
     if (Test-Path -LiteralPath $configPath) {
         try {
             $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-            if ($content -match '(m)^crucible_root:\s*["'']([^"''\r\n]+)["'']\s*$') {
+            if ($content -match '(?m)^crucible_root:\s*["'']([^"''\r\n]+)["'']\s*$') {
                 return $Matches[1].Trim()
             }
         } catch {}
@@ -147,10 +147,10 @@ if (-not $Quiet) {
             $bannerContent = Get-Content -LiteralPath $bannerCfg -Raw -Encoding UTF8
             $bannerVersion = $null
             $bannerCommit = $null
-            if ($bannerContent -match '(m)^crucible_version:\s+["'']([^"''\r\n]+)["'']\s*$') {
+            if ($bannerContent -match '(?m)^crucible_version:\s+["'']([^"''\r\n]+)["'']\s*$') {
                 $bannerVersion = $Matches[1].Trim()
             }
-            if ($bannerContent -match '(m)^crucible_install_commit:\s+["'']([^"''\r\n]+)["'']\s*$') {
+            if ($bannerContent -match '(?m)^crucible_install_commit:\s+["'']([^"''\r\n]+)["'']\s*$') {
                 $bannerCommit = $Matches[1].Trim()
             }
             if ($bannerVersion -and $bannerVersion -match '^[0-9]+\.[0-9]+\.[0-9]+') {

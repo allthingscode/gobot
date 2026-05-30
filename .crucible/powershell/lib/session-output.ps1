@@ -55,7 +55,7 @@ function New-FactoryPromptText {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
     Assert-FactorySessionOutputContext -Context $Context -RequiredKeys @(
-        "Handoff", "LatestHandoff", "PromptLib", "SessionDir", "TaskId", "Ceiling", "LogFile", "CircuitBreakerHistoryFile", "WorkspacesDir"
+        "Handoff", "LatestHandoff", "PromptLib", "SessionDir", "TaskId", "Ceiling", "LogFile", "CircuitBreakerHistoryFile", "WorkspacesDir", "CrucibleRoot", "RepoRoot"
     )
 
     $handoff = $Context.Handoff
@@ -67,6 +67,9 @@ function New-FactoryPromptText {
     $LOG_FILE = $Context.LogFile
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
     $workspacesDir = $Context.WorkspacesDir
+    $crucibleRoot = $Context.CrucibleRoot
+    $repoRoot = $Context.RepoRoot
+    $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $repoRoot $crucibleRoot }
     $Recover = [bool]$Context.Recover
 
     # --- 5. Template Assembly ---
@@ -97,6 +100,7 @@ function New-FactoryPromptText {
         }
 
         # Simple placeholder replacement
+        $promptText = $promptText.Replace("{{crucible_root}}", $resolvedCrucibleRoot)
         $promptText = $promptText.Replace("{task_id}", $handoff.task_id)
         $promptText = $promptText.Replace("{worktree}", (Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir))
         
@@ -323,6 +327,7 @@ function Initialize-FactoryTargetSession {
     $backlogDir = $Context.BacklogDir
     $REPO_ROOT = $Context.RepoRoot
     $crucibleRoot = $Context.CrucibleRoot
+    $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $REPO_ROOT $crucibleRoot }
     $FRAMEWORK_POWERSHELL = $Context.FrameworkPowerShell
     $TaskId = $Context.TaskId
     $Init = [bool]$Context.Init
@@ -341,7 +346,7 @@ function Initialize-FactoryTargetSession {
             
             $candidates = @()
             foreach ($item in $readyItems) {
-                if ($item -match '\|\s*([FBC]-[0-9]+)\s*\|') {
+                if ($item -match '\|\s*\[?([FBC]-[0-9]+)') {
                     $tid = $matches[1]
                     $type = if ($tid -match "^F-") { "features" } elseif ($tid -match "^B-") { "bugs" } else { "chores" }
                     $specFiles = Get-ChildItem -Path (Join-Path $backlogDir "$type/active") -Filter "$($tid)_*.md" -ErrorAction SilentlyContinue
@@ -501,7 +506,7 @@ function Initialize-FactoryTargetSession {
             $selectedTaskList = $selectedTaskList.Replace("{worktree}", $wtPath)
             $selectedTaskList = $selectedTaskList.Replace("{session_dir}", $sessionPath + "/" + $handoff.target_phase)
 
-            $sessionEndCmd = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -Quiet"
+            $sessionEndCmd = "powershell.exe -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"$REPO_ROOT`" -Quiet"
 
             $roleVal = $script:PHASE_ROLE_MAP[$handoff.target_phase]
             $taskContent = "# Task: $($handoff.task_id)`n" +

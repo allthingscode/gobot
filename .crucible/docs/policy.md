@@ -121,7 +121,7 @@ Blocked          → Ready              (human resolution + factory -Recover)
 
 ## 6. Security & Isolation
 
-- **Architect Worktrees**: Every task MUST run in an isolated `git worktree` at `.crucible/.agent-workspaces/architect-{id}`.
+- **Implementation Worktrees**: Every task MUST run in an isolated `git worktree` at `.crucible/.agent-workspaces/implementation-{id}`.
 - **Prompt Injection Defense**: Handoffs are scanned for patterns (e.g., "ignore previous instructions"). Researcher handoffs trigger an automatic block if patterns are found.
 - **File Affinity**: Groomers define the scope boundary. Specialists must not edit files outside this boundary.
 - **No Push/Commit Shortcuts**: Only the Operator may merge to `master` and push to origin.

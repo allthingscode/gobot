@@ -47,7 +47,7 @@ grooming       → implementation | research
 research       → grooming
 implementation → verification
 verification   → deployment (approved) | implementation (changes requested)
-deployment     → grooming
+deployment     → done | grooming
 ```
 
 If a handoff's `target_phase` is not in the list above for that `source_phase`, it is a routing violation. Do not dispatch. Escalate to the human.

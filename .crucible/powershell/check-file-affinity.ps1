@@ -27,8 +27,9 @@ $state = $raw | ConvertFrom-Json
 
 $overlapFound = $false
 
-if ($state.tasks) {
-    foreach ($otherTaskId in $state.tasks.PSObject.Properties.Name) {
+if ($state.PSObject.Properties["tasks"] -and $null -ne $state.tasks) {
+    $taskNames = @($state.tasks.PSObject.Properties | Select-Object -ExpandProperty Name)
+    foreach ($otherTaskId in $taskNames) {
         if ($otherTaskId -eq $TaskId) { continue }
         
         $otherTask = $state.tasks.$otherTaskId

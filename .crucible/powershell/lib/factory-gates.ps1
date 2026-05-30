@@ -114,7 +114,11 @@ function Resolve-FactoryInputHandoff {
                 }
                 # Log session_start for operator bootstrap to prevent "missing_start_event" anomaly
                 Write-EventLog -Event "session_start" -TaskId $TaskId -Phase "deployment" -HandoffCount 1 -CycleId "initial" -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                $bootstrapHandoff | ConvertTo-Json -Depth 12 | Set-Content -Path $bootstrapFile -Encoding UTF8
+                [System.IO.File]::WriteAllText(
+                    $bootstrapFile,
+                    ($bootstrapHandoff | ConvertTo-Json -Depth 12),
+                    (New-Object System.Text.UTF8Encoding $false)
+                )
 
                 $latestHandoff = Get-Item $bootstrapFile
                 $Context.IsBootstrap = $true
@@ -135,6 +139,117 @@ function Resolve-FactoryInputHandoff {
     }
 
     $Context.LatestHandoff = $latestHandoff
+}
+
+function Test-CrucibleAdopterOwnedPath {
+    param(
+        [Parameter(Mandatory=$true)][string]$RelativePath,
+        [Parameter(Mandatory=$true)][string[]]$AdopterOwnedExcludes
+    )
+
+    $normalized = $RelativePath.Replace("\", "/").TrimStart("/")
+    foreach ($exclude in $AdopterOwnedExcludes) {
+        $pattern = $exclude.Replace("\", "/").TrimStart("/")
+        if ($pattern.EndsWith("/**")) {
+            $prefix = $pattern.Substring(0, $pattern.Length - 3).TrimEnd("/")
+            if ($normalized -eq $prefix -or $normalized.StartsWith($prefix + "/")) {
+                return $true
+            }
+        } elseif ($normalized -eq $pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-CrucibleFrameworkStatusChanges {
+    param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    $repoRoot = $Context.RepoRoot
+    $crucibleRoot = $Context.CrucibleRoot
+    if ([string]::IsNullOrWhiteSpace($repoRoot) -or [string]::IsNullOrWhiteSpace($crucibleRoot)) {
+        return @()
+    }
+
+    $cruciblePath = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) {
+        $crucibleRoot
+    } else {
+        Join-Path $repoRoot $crucibleRoot
+    }
+    if (-not (Test-Path -LiteralPath $cruciblePath)) {
+        return @()
+    }
+
+    $manifestPath = Join-Path $cruciblePath "install-manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        $manifestPath = Join-Path $repoRoot "install-manifest.json"
+    }
+
+    $adopterOwnedExcludes = @("config.yaml", "backlog/**", "session/**", "research/**", ".gemini/**", ".private/**", ".agent-workspaces/**")
+    if (Test-Path -LiteralPath $manifestPath) {
+        try {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($manifest.PSObject.Properties["adopter_owned_excludes"] -and $null -ne $manifest.adopter_owned_excludes) {
+                $adopterOwnedExcludes = @($manifest.adopter_owned_excludes)
+            }
+        } catch {
+            Write-Quiet ("[INTEGRITY] Warning: Could not parse install manifest at " + $manifestPath + "; using built-in adopter-owned excludes.") -ForegroundColor Yellow
+        }
+    }
+
+    $statusLines = @(git -C $repoRoot status --porcelain -- $crucibleRoot 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        return @()
+    }
+
+    $changes = @()
+    $cruciblePrefix = $crucibleRoot.Replace("\", "/").TrimEnd("/") + "/"
+    foreach ($line in $statusLines) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -lt 4) { continue }
+        $statusCode = $line.Substring(0, 2)
+        $pathText = $line.Substring(3).Trim()
+        if ($pathText -match ' -> ') {
+            $pathText = ($pathText -split ' -> ')[-1].Trim()
+        }
+        $pathText = $pathText.Trim('"').Replace("\", "/")
+        if (-not $pathText.StartsWith($cruciblePrefix)) { continue }
+
+        $relative = $pathText.Substring($cruciblePrefix.Length)
+        if ([string]::IsNullOrWhiteSpace($relative)) {
+            continue
+        }
+        if (Test-CrucibleAdopterOwnedPath -RelativePath $relative -AdopterOwnedExcludes $adopterOwnedExcludes) {
+            continue
+        }
+
+        $changes += ("$statusCode $pathText")
+    }
+
+    return @($changes)
+}
+
+function Assert-CrucibleFrameworkIntegrity {
+    param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    $changes = @(Get-CrucibleFrameworkStatusChanges -Context $Context)
+    if ($changes.Count -eq 0) {
+        return
+    }
+
+    $handoff = $Context.Handoff
+    $joined = $changes -join ", "
+    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
+        -Outcome "framework_integrity_violation" -Notes ("Framework-owned .crucible files changed before handoff: " + $joined) `
+        -LogFile $Context.LogFile -CircuitBreakerHistoryFile $Context.CircuitBreakerHistoryFile
+
+    Write-Host "`n[CIRCUIT BREAKER] Framework integrity violation detected." -ForegroundColor Red
+    Write-Host "Specialists may not modify framework-owned files under .crucible/." -ForegroundColor Red
+    foreach ($change in $changes) {
+        Write-Host ("  - " + $change) -ForegroundColor Yellow
+    }
+    Write-Host "`n[STOP] Revert framework-owned bundle edits or commit a deliberate bundle update before continuing." -ForegroundColor Red
+    exit 2
 }
 
 function Read-FactoryHandoffContext {
@@ -237,6 +352,8 @@ function Invoke-HandoffPreflightValidation {
     $handoff = $Context.Handoff
     $handoffFile = $latestHandoff.FullName
 
+    Assert-CrucibleFrameworkIntegrity -Context $Context
+
     # Agents sometimes write handoff.json to local session paths instead of $HANDOFF_DIR.
     # Scan known misplaced locations and warn if any are newer than the handoff we found.
     if (-not [string]::IsNullOrEmpty($TaskId)) {
@@ -333,8 +450,10 @@ function Invoke-HandoffPreflightValidation {
         }
     }
 
-    # Construct the standard session-end command
-    $Context.NextFactoryCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -Quiet"
+    # Construct the standard session-end command. Use absolute paths so orchestrators can drive
+    # specialists from outside the adopter repository without depending on their current directory.
+    $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $Context.RepoRoot $crucibleRoot }
+    $Context.NextFactoryCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$($Context.RepoRoot)`" -Quiet"
 
     if ($handoff.psobject.Properties["cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.cycle_id)) {
         $env:FACTORY_CYCLE_ID = $handoff.cycle_id
@@ -354,7 +473,7 @@ function Invoke-HandoffPreflightValidation {
             foreach ($stale in $otherPending) {
                 if ($stale.Name -match 'gate_decision_([A-Z0-9\-]+)_pending\.json') {
                     $otherTaskId = $matches[1]
-                    Write-Quiet ("[GATE] Warning: Stale gate pending file detected for $($otherTaskId). Run -Health to clean up.") -ForegroundColor Yellow
+                    Write-Quiet ("[GATE] Warning: Stale gate pending file detected for $($otherTaskId). Run -Cleanup to preview cleanup or -Cleanup -Force to remove it.") -ForegroundColor Yellow
                 }
             }
         }
@@ -401,21 +520,20 @@ function Complete-FactorySourceSession {
             $startTime = [DateTimeOffset]::Parse($effectiveStart.timestamp).UtcDateTime
             $duration = [int](([DateTime]::UtcNow - $startTime).TotalSeconds)
 
-            # Guard rails for missing/out-of-order events or excessive duration
+            # Guard rails for missing/out-of-order events
             if ($duration -lt 0) {
                 $anomaly = "negative_duration"
                 $duration = 0
-            } elseif ($duration -gt 14400) { # 4 hours
-                $anomaly = "excessive_duration"
             }
         } else {
             $anomaly = "missing_start_event"
         }
 
-        # Build metrics block
+        # This is phase-open wall time, not specialist active work time. Keep it out of the
+        # top-level duration_seconds field so eval consumers do not treat idle time as runtime.
         $pctUsed = if ($ceiling -gt 0) { [math]::Min(100, [math]::Round(($handoff.cumulative_handoff_count / $ceiling) * 100)) } else { 0 }
         $metricsBlock = @{
-            duration_seconds = $duration
+            phase_wall_seconds = $duration
             budget_tier      = $handoff.budget_tier
             budget_ceiling   = $ceiling
             handoff_count    = $handoff.cumulative_handoff_count
@@ -424,7 +542,7 @@ function Complete-FactorySourceSession {
         if ($anomaly) { $metricsBlock.duration_anomaly = $anomaly }
 
         Write-EventLog -Event "session_end" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-            -Outcome "success" -DurationSeconds $duration `
+            -Outcome "success" `
             -Notes ("Handoff to " + $handoff.target_phase) `
             -HandoffCount $handoff.cumulative_handoff_count `
             -Metrics $metricsBlock `
@@ -464,8 +582,8 @@ function Complete-FactorySourceSession {
             }
 
             if ($requiredFailureCount -gt 0) {
-                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-                    -Outcome "blocked" -Notes ("Required task.md checklist quality gate failed: unchecked=" + $requiredUncheckedCount + "; malformed=" + $requiredMalformedCount) `
+                Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                    -Outcome "retry_required" -Notes ("Required task.md checklist quality gate failed: unchecked=" + $requiredUncheckedCount + "; malformed=" + $requiredMalformedCount) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-Host ("[STOP] Quality gate failed: " + $handoff.source_phase + " has required checklist issues (unchecked: " + $requiredUncheckedCount + ", malformed: " + $requiredMalformedCount + "). Complete required Task List items before handoff.") -ForegroundColor Red
                 exit 2
@@ -1454,4 +1572,3 @@ function Resolve-FactoryTransition {
         IsBootstrap = $isBootstrap
     }
 }
-

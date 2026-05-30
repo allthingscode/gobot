@@ -48,11 +48,9 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     echo "Running pre-push hook tests..."
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/pre-push-hook.tests.ps1
 
-    # Clean up temporary test artifacts on successful verification
-    if [ -d ".crucible" ]; then
-        echo "Cleaning up temporary test artifacts..."
-        rm -rf .crucible
-    fi
+    # NOTE: This hook intentionally does not delete any working-tree files. Test
+    # suites isolate into temp dirs and clean up after themselves; a verification
+    # gate must never rm the repo (a stray ".crucible" here could be a real install).
 else
     # ADOPTER REPO CONTEXT
     echo "Pre-push: Bypassed framework-specific self-tests for adopter project."

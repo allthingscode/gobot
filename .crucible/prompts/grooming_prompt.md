@@ -42,7 +42,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 4. **De-risk Implementation**: Write detailed acceptance criteria (AC) and list all affected Go packages and files.
 5. **Configure Affinity**: Derive the `file_affinity` package paths for parallel isolation ({task_id}).
 6. **Assign Budget**: Set the `budget_tier` (low/medium/high) based on task complexity ({task_id}).
-7. **Validation**: Update `BACKLOG.md` status and run `.\.crucible\\scripts\validate-backlog.ps1`.
+7. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1`.
 8. **Handoff**: Write `handoffs/{task_id}-<timestamp>.json` with `target_phase: "implementation"`.
 
 ## Dependency Identification ({task_id})

@@ -227,7 +227,7 @@ try {
                     $orphanedGateFiles += $pf
                 } elseif ($pf.Name -match 'gate_decision_([A-Z0-9\-]+)_pending\.json') {
                     $taskId = $matches[1]
-                    $pattern = '\|\s*' + $taskId + '\s*\|.*\|\s*(Ready|In Progress|Planning|Draft|Ready for Review|Production|Resolved)\s*\|'
+                    $pattern = '\|\s*' + $taskId + '\s*\|.*\|\s*(Ready|In Progress|Planning|Draft|Ready for Review|Ready for Deploy)\s*\|'
                     if ($backlogContent -notmatch $pattern) {
                         $orphanedGateFiles += $pf
                     }
@@ -420,7 +420,7 @@ try {
             if ($issueCount -eq 0) {
                 Write-Quiet "[HEALTH] All clear. No orphaned artifacts detected." -ForegroundColor Green
             } else {
-                $finalMsg = "[HEALTH] Action needed for " + $issueCount + " item or items. Review above and clean up manually."
+                $finalMsg = "[HEALTH] Action needed for " + $issueCount + " item or items. Review above, then run -Cleanup to preview cleanup or -Cleanup -Force to execute supported cleanup."
                 Write-Quiet $finalMsg -ForegroundColor Yellow
             }
         }
@@ -429,4 +429,3 @@ try {
 } finally {
     Pop-Location
 }
-

@@ -190,6 +190,47 @@ exit 0
         }
     }
 
+    $results += Run-Test -Name "Framework integrity guard flags framework-owned bundle edits only" -Body {
+        $repo = Join-Path $tempRoot "framework-integrity"
+        $crucible = Join-Path $repo ".crucible"
+        New-Item -ItemType Directory -Path (Join-Path $crucible "powershell"), (Join-Path $crucible "session"), (Join-Path $crucible "backlog") -Force | Out-Null
+        @'
+{
+  "adopter_owned_excludes": [
+    "config.yaml",
+    "backlog/**",
+    "session/**",
+    "research/**",
+    ".gemini/**",
+    ".private/**",
+    ".agent-workspaces/**"
+  ]
+}
+'@ | Set-Content -LiteralPath (Join-Path $crucible "install-manifest.json") -Encoding UTF8
+        "version: 1" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
+        "framework" | Set-Content -LiteralPath (Join-Path $crucible "powershell/factory.ps1") -Encoding UTF8
+        "state" | Set-Content -LiteralPath (Join-Path $crucible "session/state.txt") -Encoding UTF8
+
+        git -C $repo init | Out-Null
+        git -C $repo config user.email "test@example.com" | Out-Null
+        git -C $repo config user.name "Test User" | Out-Null
+        git -C $repo add . | Out-Null
+        git -C $repo commit -m "baseline" | Out-Null
+
+        "changed config" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
+        "changed state" | Set-Content -LiteralPath (Join-Path $crucible "session/state.txt") -Encoding UTF8
+
+        $ctx = New-TestContext -TempRoot $repo -TaskId "F-020"
+        $ctx.RepoRoot = $repo
+        $ctx.CrucibleRoot = ".crucible"
+        $excluded = @(Get-CrucibleFrameworkStatusChanges -Context $ctx)
+        Assert-Result -Name "adopter changes excluded" -Condition ($excluded.Count -eq 0) -FailureMessage ("expected no framework changes, got: " + ($excluded -join ", "))
+
+        "changed framework" | Set-Content -LiteralPath (Join-Path $crucible "powershell/factory.ps1") -Encoding UTF8
+        $flagged = @(Get-CrucibleFrameworkStatusChanges -Context $ctx)
+        Assert-Result -Name "framework change flagged" -Condition (($flagged -join "`n") -match "\.crucible/powershell/factory\.ps1") -FailureMessage ("expected framework file to be flagged, got: " + ($flagged -join ", "))
+    }
+
     $results += Run-Test -Name "Extracted functions enforce required context keys" -Body {
         # Test null context
         try {
@@ -350,6 +391,76 @@ APPROVED. Looks great!
         Invoke-CircuitBreakerGates -Context $ctx
     }
 
+    $results += Run-Test -Name "Complete-FactorySourceSession separates phase wall time from duration_seconds" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "phase-wall") -TaskId "F-030"
+        $taskDir = Join-Path $ctx.SessionDir "F-030/grooming"
+        New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        @"
+## Task List
+- [x] Complete required work
+"@ | Set-Content -LiteralPath (Join-Path $taskDir "task.md") -Encoding UTF8
+
+        $ctx.Handoff = [PSCustomObject]@{
+            task_id = "F-030"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            budget_tier = "low"
+        }
+        $ctx.Ceiling = 6
+        Write-EventLog -Event "session_start" -TaskId "F-030" -Phase "grooming" -HandoffCount 1 -LogFile $ctx.LogFile -CircuitBreakerHistoryFile $ctx.CircuitBreakerHistoryFile
+
+        Complete-FactorySourceSession -Context $ctx
+
+        $entries = @(Get-Content -LiteralPath $ctx.LogFile -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json })
+        $sessionEnd = @($entries | Where-Object { $_.event -eq "session_end" })[-1]
+        Assert-Result -Name "no top-level duration" -Condition (-not $sessionEnd.PSObject.Properties["duration_seconds"]) -FailureMessage ("duration_seconds should not be populated: " + ($sessionEnd | ConvertTo-Json -Compress))
+        Assert-Result -Name "phase wall metric" -Condition ($null -ne $sessionEnd.metrics.PSObject.Properties["phase_wall_seconds"]) -FailureMessage ("phase_wall_seconds missing: " + ($sessionEnd | ConvertTo-Json -Compress))
+    }
+
+    $results += Run-Test -Name "Required task checklist failure logs retry event, not circuit breaker" -Body {
+        $caseRoot = Join-Path $tempRoot "quality-retry"
+        $scriptPath = Join-Path $caseRoot "run-quality-retry.ps1"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$sessionDir = Join-Path '$caseRoot' 'session'
+`$taskDir = Join-Path `$sessionDir 'F-031/grooming'
+New-Item -ItemType Directory -Path `$taskDir -Force | Out-Null
+"## Task List`n- [ ] Complete required work" | Set-Content -LiteralPath (Join-Path `$taskDir 'task.md') -Encoding UTF8
+`$ctx = @{
+    SessionDir = `$sessionDir
+    LogFile = Join-Path `$sessionDir 'F-031/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = Join-Path `$sessionDir 'global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-031'
+        source_phase = 'grooming'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Write-EventLog -Event 'session_start' -TaskId 'F-031' -Phase 'grooming' -HandoffCount 1 -LogFile `$ctx.LogFile -CircuitBreakerHistoryFile `$ctx.CircuitBreakerHistoryFile
+Complete-FactorySourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCode = $LASTEXITCODE
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "quality gate exits 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
+
+        $logFile = Join-Path $caseRoot "session/F-031/pipeline.log.jsonl"
+        $logText = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "retry event logged" -Condition ($logText -match '"event":"quality_gate_retry"') -FailureMessage ("missing quality_gate_retry. Log: " + $logText)
+        Assert-Result -Name "no circuit breaker event" -Condition ($logText -notmatch '"event":"circuit_breaker"') -FailureMessage ("unexpected circuit_breaker. Log: " + $logText)
+        Assert-Result -Name "no breaker history" -Condition (-not (Test-Path -LiteralPath (Join-Path $caseRoot "session/global/circuit_breakers.jsonl"))) -FailureMessage "circuit breaker history should not be written"
+    }
+
     $results += Run-Test -Name "Resolve-FactoryTransition handles valid and invalid transitions" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "routing-gates") -TaskId "F-006"
         
@@ -389,6 +500,78 @@ APPROVED. Looks great!
         $decision = Resolve-FactoryTransition -Context $ctx
         Assert-Result -Name "done path ShouldExit" -Condition ($decision.ShouldExit -eq $true) -FailureMessage "ShouldExit was false on done transition"
         Assert-Result -Name "done path ExitCode" -Condition ($decision.ExitCode -eq 0) -FailureMessage "Incorrect exit code on done transition"
+    }
+
+    $results += Run-Test -Name "Complete-FactorySourceSession duration anomaly logic" -Body {
+        # Test 1: Excessive duration (5 hours ago) - should NOT generate excessive_duration anomaly
+        $caseRoot = Join-Path $tempRoot "excessive-dur"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-040"
+        $taskDir = Join-Path $ctx.SessionDir "F-040/grooming"
+        New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        "## Task List`n- [x] Done" | Set-Content -LiteralPath (Join-Path $taskDir "task.md") -Encoding UTF8
+
+        $ctx.Handoff = [PSCustomObject]@{
+            task_id = "F-040"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            budget_tier = "low"
+        }
+        $ctx.Ceiling = 6
+        
+        # Write session_start with timestamp 5 hours in the past
+        $pastTime = [DateTime]::UtcNow.AddHours(-5).ToString("o")
+        $startEvent = @{
+            event = "session_start"
+            timestamp = $pastTime
+            task_id = "F-040"
+            phase = "grooming"
+            handoff_count = 1
+        } | ConvertTo-Json -Compress
+        $startEvent | Set-Content -LiteralPath $ctx.LogFile -Encoding UTF8
+
+        Complete-FactorySourceSession -Context $ctx
+
+        $entries = @(Get-Content -LiteralPath $ctx.LogFile -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json })
+        $sessionEnd = @($entries | Where-Object { $_.event -eq "session_end" })[-1]
+        $anomalyVal1 = if ($sessionEnd.metrics.PSObject.Properties["duration_anomaly"]) { $sessionEnd.metrics.duration_anomaly } else { $null }
+        Assert-Result -Name "no excessive_duration anomaly" -Condition ($null -eq $anomalyVal1) -FailureMessage ("expected no duration anomaly for >4h wall time, got: " + $anomalyVal1)
+
+        # Test 2: Negative duration (start in future) - should generate negative_duration anomaly
+        $caseRoot2 = Join-Path $tempRoot "negative-dur"
+        New-Item -ItemType Directory -Path $caseRoot2 -Force | Out-Null
+        $ctx2 = New-TestContext -TempRoot $caseRoot2 -TaskId "F-041"
+        $taskDir2 = Join-Path $ctx2.SessionDir "F-041/grooming"
+        New-Item -ItemType Directory -Path $taskDir2 -Force | Out-Null
+        "## Task List`n- [x] Done" | Set-Content -LiteralPath (Join-Path $taskDir2 "task.md") -Encoding UTF8
+
+        $ctx2.Handoff = [PSCustomObject]@{
+            task_id = "F-041"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            budget_tier = "low"
+        }
+        $ctx2.Ceiling = 6
+
+        # Write session_start with timestamp 1 hour in the future
+        $futureTime = [DateTime]::UtcNow.AddHours(1).ToString("o")
+        $startEvent2 = @{
+            event = "session_start"
+            timestamp = $futureTime
+            task_id = "F-041"
+            phase = "grooming"
+            handoff_count = 1
+        } | ConvertTo-Json -Compress
+        $startEvent2 | Set-Content -LiteralPath $ctx2.LogFile -Encoding UTF8
+
+        Complete-FactorySourceSession -Context $ctx2
+
+        $entries2 = @(Get-Content -LiteralPath $ctx2.LogFile -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json })
+        $sessionEnd2 = @($entries2 | Where-Object { $_.event -eq "session_end" })[-1]
+        $anomalyVal2 = if ($sessionEnd2.metrics.PSObject.Properties["duration_anomaly"]) { $sessionEnd2.metrics.duration_anomaly } else { $null }
+        Assert-Result -Name "negative_duration anomaly detected" -Condition ($anomalyVal2 -eq "negative_duration") -FailureMessage ("expected negative_duration anomaly, got: " + $anomalyVal2)
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -110,9 +110,9 @@ The factory supports running multiple backlog items concurrently by scoping all 
 `.crucible/session/{task_id}/pipeline.log.jsonl` — JSONL, one event per line. Auto-written by `factory.ps1` (`session_start`, `session_end`, `degraded`, `circuit_breaker`, `gate_decision`). Queryable with `jq`:
 
 ```bash
-# Avg session duration by role
-jq -s '[.[] | select(.event == "session_end")] | group_by(.specialist)
-  | map({specialist: .[0].specialist, avg: (map(.metrics.duration_seconds) | add / length)})' \
+# Avg phase-open wall time by role
+jq -s '[.[] | select(.event == "session_end" and .metrics.phase_wall_seconds != null)] | group_by(.phase)
+  | map({phase: .[0].phase, avg: (map(.metrics.phase_wall_seconds) | add / length)})' \
   .crucible/session/{task_id}/pipeline.log.jsonl
 
 # All circuit-breaker events

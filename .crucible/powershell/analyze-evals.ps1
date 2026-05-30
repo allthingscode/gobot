@@ -32,7 +32,8 @@ $total     = $decisions.Count
 
 # ?? Pipeline Logs ?????????????????????????????????????????????????????????????
 $pipelineMetrics = @{}
-$durationStats   = @{} # specialist -> [durations]
+$durationStats   = @{} # specialist -> [active durations, when explicitly logged]
+$phaseWallStats  = @{} # specialist -> [phase-open wall times]
 $anomalies       = @() # {tid, specialist, type, duration}
 
 Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | ForEach-Object {
@@ -52,6 +53,10 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 					if (-not $durationStats[$logPhase]) { $durationStats[$logPhase] = @() }
 					$durationStats[$logPhase] += $e.duration_seconds
 				}
+				if ($e.metrics -and $null -ne $e.metrics.phase_wall_seconds) {
+					if (-not $phaseWallStats[$logPhase]) { $phaseWallStats[$logPhase] = @() }
+					$phaseWallStats[$logPhase] += $e.metrics.phase_wall_seconds
+				}
 
 				# Capture anomalies ({task_id})
 				if ($e.metrics -and $e.metrics.duration_anomaly) {
@@ -59,7 +64,7 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 						task_id    = $e.task_id
 						specialist = $logPhase
 						type       = $e.metrics.duration_anomaly
-						duration   = $e.duration_seconds
+						duration   = if ($null -ne $e.duration_seconds) { $e.duration_seconds } else { $e.metrics.phase_wall_seconds }
 					}
 				}
 
@@ -86,6 +91,11 @@ $specialistDurationSummary = $durationStats.GetEnumerator() | ForEach-Object {
 	$avg = if ($_.Value.Count) { [math]::Round(($_.Value | Measure-Object -Average).Average / 60, 1) } else { 0 }
 	$confidence = if ($_.Value.Count -ge 5) { "High" } elseif ($_.Value.Count -ge 3) { "Medium" } else { "Low" }
 	[PSCustomObject]@{ specialist = $_.Key; avg_minutes = $avg; count = $_.Value.Count; confidence = $confidence }
+} | Sort-Object avg_minutes -Descending
+
+$phaseWallSummary = $phaseWallStats.GetEnumerator() | ForEach-Object {
+	$avg = if ($_.Value.Count) { [math]::Round(($_.Value | Measure-Object -Average).Average / 60, 1) } else { 0 }
+	[PSCustomObject]@{ specialist = $_.Key; avg_minutes = $avg; count = $_.Value.Count }
 } | Sort-Object avg_minutes -Descending
 
 # ?? Operator Eval Records ?????????????????????????????????????????????????????
@@ -267,6 +277,7 @@ if ($Json) {
 		signal_quality       = @{ with_qualitative_reason = $withSignal; auto_placeholder = $noSignal; coverage_pct = $signalPct }
 		avg_budget_pct       = $avgBudget
 		avg_duration_minutes = @($specialistDurationSummary)
+		avg_phase_wall_minutes = @($phaseWallSummary)
 		duration_anomalies   = @($anomalies)
 		multi_cycle_tasks    = $multiCycle
 		high_degraded        = $highDegraded
@@ -347,6 +358,18 @@ if ($specialistDurationSummary.Count -gt 0) {
 	}
 } else {
 	$report += "(no duration data available)"
+}
+
+$report += ""
+$report += "### Average Phase-Open Wall Time (minutes)"
+if ($phaseWallSummary.Count -gt 0) {
+	$report += "| Specialist | Avg Minutes | Count |"
+	$report += "|------------|-------------|-------|"
+	foreach ($s in $phaseWallSummary) {
+		$report += "| $($s.specialist) | $($s.avg_minutes) | $($s.count) |"
+	}
+} else {
+	$report += "(no phase wall-time data available)"
 }
 
 if ($anomalies.Count -gt 0) {

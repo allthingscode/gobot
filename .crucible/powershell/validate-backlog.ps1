@@ -446,8 +446,14 @@ try {
                 $newContent += $line
             }
         }
-        $newContent | Set-Content -Path $BacklogPath
-        Write-Quiet "BACKLOG.md updated successfully."
+        $oldText = ($content -join "`n")
+        $newText = ($newContent -join "`n")
+        if ($oldText -ne $newText) {
+            [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
+            Write-Quiet "BACKLOG.md updated successfully."
+        } else {
+            Write-Quiet "BACKLOG.md Priority Summary already current; no changes written."
+        }
         $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
     }
 
