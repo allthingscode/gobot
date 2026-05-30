@@ -5,6 +5,8 @@ This guide provides instructions for deploying Gobot as a persistent background 
 ## Overview
 Gobot is designed to be an "always-on" assistant. To ensure it remains active across system reboots and survives unexpected crashes, it should be managed by a service manager or task scheduler.
 
+> **Zero-maintenance note:** Even with restart-on-failure configured, scheduled (cron) jobs whose trigger time elapsed while Gobot was offline are **not** automatically replayed when it comes back up. This is intended behavior. See [Cron Job Scheduling & Missed Job Behavior](#cron-job-scheduling--missed-job-behavior) before relying on time-sensitive jobs in an unattended deployment.
+
 ---
 
 ## Linux Deployment (systemd)
@@ -200,6 +202,82 @@ You can use the provided script to check for errors:
 ```powershell
 .\scripts\get_logs.ps1
 ```
+
+---
+
+## Cron Job Scheduling & Missed Job Behavior
+
+Gobot can run scheduled background jobs (for example, a daily morning briefing). These are evaluated by the internal scheduler on a short polling interval while Gobot is running. This section explains what happens to a scheduled job when Gobot is **not** running at the job's scheduled time, and how to run such a job on demand.
+
+### Missed jobs are NOT replayed on startup
+
+**Cron jobs that are missed — that is, whose scheduled time occurs while the bot is offline — are NOT automatically replayed on startup.** When Gobot restarts, the scheduler computes each job's *next* run time going forward from the current moment; it does not "catch up" by re-running every occurrence that was skipped while the process was down.
+
+Concretely, if your morning briefing is scheduled for 07:00 and the machine was asleep or the service was stopped from 06:00 to 09:00, you will **not** receive a 07:00 briefing at 09:00. The job's next delivery will be at the next scheduled occurrence (07:00 the following day).
+
+### Design rationale
+
+**This follows standard Unix cron semantics and is acceptable for most use cases.** A traditional `cron` daemon behaves the same way: jobs that were due while the daemon was not running are simply skipped, not backfilled. This is the right default for a personal assistant because:
+
+- **No surprise floods.** After a long outage (an overnight shutdown, a multi-day trip with the laptop closed), you do not want a burst of stale briefings, reminders, and digests all firing at once on startup.
+- **Stale work is usually not worth doing late.** A "good morning" briefing delivered at 3 PM, or a reminder for a meeting that already happened, is noise rather than signal.
+- **Deterministic, predictable behavior.** Each job has exactly one well-defined next run time, which keeps scheduling easy to reason about and avoids duplicate or out-of-order deliveries.
+
+For the common zero-maintenance scenarios (daily briefings, periodic summaries, recurring digests), waiting until the next scheduled time is the desired outcome.
+
+### When you need a missed job to run anyway: manual trigger
+
+**If your job must run on startup when it was missed, use the manual-trigger workaround below.** Because a cron job in Gobot is simply a saved instruction that is dispatched to the agent at its scheduled time, you can reproduce that dispatch on demand by asking the agent to perform the same task now.
+
+#### Option A — Ask the bot to run it now (recommended)
+
+The simplest and safest way to recover a missed job is to ask Gobot to do the work immediately, either from Telegram or from a local CLI chat session:
+
+```bash
+# Start a local chat session (no Telegram required)
+gobot chat
+```
+
+Then send a message describing the job, for example:
+
+```text
+Run my morning briefing now.
+```
+
+This dispatches the same kind of request the scheduler would have sent at 07:00, and the result is delivered back to you in the current session. It does not alter the job's recurring schedule — the next automatic run still happens at its normal time.
+
+#### Option B — Force the next scheduled run to be "due" (advanced)
+
+Scheduled jobs are persisted in `jobs.json` under your `GOBOT_STORAGE` directory (`<GOBOT_STORAGE>/workspace/jobs.json`). Each job tracks its next fire time in `state.nextRunAtMs` (a Unix timestamp in **milliseconds**). With Gobot stopped, you can set this value to a time in the past; on the next poll after startup the scheduler will see the job as due and run it once, then advance it to the next scheduled occurrence.
+
+```jsonc
+{
+  "jobs": [
+    {
+      "id": "morning_briefing",
+      "name": "Morning Briefing",
+      "enabled": true,
+      "schedule": { "kind": "cron", "expr": "0 7 * * *", "tz": "America/New_York" },
+      "payload": { "channel": "email", "message": "Generate my morning briefing." },
+      "state": {
+        "nextRunAtMs": 0   // set to 0 (or any past millisecond timestamp) to force one run
+      }
+    }
+  ]
+}
+```
+
+Setting `nextRunAtMs` to `0` causes the scheduler to recompute and immediately schedule the job; a past timestamp causes it to fire once on the next poll. Use this only if you are comfortable editing the store file directly, and edit it while Gobot is stopped to avoid racing the scheduler's own writes.
+
+### Example scenario: a missed morning briefing
+
+You run Gobot on a laptop that is asleep overnight. Your `morning_briefing` job is scheduled for 07:00, but you do not open the laptop until 09:30.
+
+1. **What happens by default:** At 09:30 the service restarts (via your login task / systemd / launchd). The scheduler sees that 07:00 has already passed and schedules the *next* run for 07:00 tomorrow. **No briefing arrives for today** — this is the intended no-replay behavior described above.
+2. **Recovering the missed run:** Open a chat with Gobot (Telegram, or `gobot chat`) and send "Run my morning briefing now." Gobot generates and delivers today's briefing immediately.
+3. **No further action needed:** Tomorrow's 07:00 run is unaffected and will fire normally. You did not need to recreate, re-enable, or reconfigure the job — it was never misconfigured; it simply followed standard cron semantics.
+
+> **Tip:** If you regularly start your machine after a job's scheduled time and always want that job to run on first start, prefer Option A as a quick habit, or schedule the job for a time you know the machine is reliably awake.
 
 ---
 
