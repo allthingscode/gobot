@@ -64,8 +64,7 @@ try {
             if ($wt -match 'implementation-([A-Z0-9\-]+)$') {
                 $taskId = $matches[1]
                 $pattern = '\|\s*' + $taskId + '\s*\|.*\|\s*(Ready|In Progress|Planning|Draft|Ready for Review|Ready for Deploy)\s*\|'
-                $pendingGateFile = Join-Path ".crucible/session/global/gate_decisions" "gate_decision_$taskId`_pending.json"
-                if ($backlogContent -notmatch $pattern -and -not (Test-Path $pendingGateFile)) {
+                if ($backlogContent -notmatch $pattern) {
                     $orphanedWorktrees += $wt
                 }
             }
@@ -143,8 +142,7 @@ try {
             foreach ($td in $taskDirs) {
                 $taskId = $td.Name
                 $pattern = '\|\s*' + $taskId + '\s*\|.*\|\s*(Ready|In Progress|Planning|Draft|Ready for Review|Ready for Deploy)\s*\|'
-                $pendingGateFile = Join-Path ".crucible/session/global/gate_decisions" "gate_decision_$taskId`_pending.json"
-                if ($backlogContent -notmatch $pattern -and -not (Test-Path $pendingGateFile)) {
+                if ($backlogContent -notmatch $pattern) {
                     # Task is not active, any task.md inside is stale
                     $staleTaskDirs += $td.FullName
                     $taskFiles = @(Get-ChildItem -Path $td.FullName -Filter "task.md" -Recurse)

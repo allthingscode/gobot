@@ -1229,8 +1229,9 @@ function Normalize-FactoryInputState {
         Write-Quiet "[RECOVERY] Last progress: $recoveryMarker" -ForegroundColor Green
 
         # Update state to 'recovering'
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
         $updateJson = @{ status = "recovering" } | ConvertTo-Json -Compress
-        & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist $handoff.target_phase -TaskId $handoff.task_id -UpdateJson $updateJson -Merge $true
+        & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist $handoff.target_phase -TaskId $handoff.task_id -UpdateJson $updateJson -Merge $true -ProjectRoot $repoRoot
 
         # Log recovery_start for recoverable sessions.
         Write-EventLog -Event "recovery_start" -TaskId $handoff.task_id -Phase $handoff.target_phase -Notes "Recovering from: $recoveryMarker"
@@ -1803,7 +1804,8 @@ function Resolve-FactoryTransition {
         Write-Host "====================================================`n" -ForegroundColor Green
 
         # Update state to remove the completed task
-        & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist done -TaskId $handoff.task_id -UpdateJson "{}" -Merge $false
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+        & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist done -TaskId $handoff.task_id -UpdateJson "{}" -Merge $false -ProjectRoot $repoRoot
 
         # Log session_end/pipeline_complete
         Write-EventLog -Event "session_end" -TaskId $handoff.task_id -Phase "deployment" -Notes "Pipeline complete" `

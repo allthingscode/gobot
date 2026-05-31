@@ -31,6 +31,35 @@ function Write-BlockedTaskRecord {
     $record | ConvertTo-Json | Set-Content -Path $recordPath -Encoding UTF8
     Write-Quiet ("[BLOCKED] Record written to $recordPath") -ForegroundColor Cyan
 
+    $actualProjectRoot = ""
+    if (Test-Path "variable:Context") {
+        $localContext = Get-Variable "Context" -ValueOnly -ErrorAction SilentlyContinue
+        if ($null -ne $localContext -and $localContext.ContainsKey("RepoRoot")) {
+            $actualProjectRoot = $localContext.RepoRoot
+        }
+    }
+    if ([string]::IsNullOrEmpty($actualProjectRoot) -and (Test-Path "variable:repoRoot")) {
+        $localRepoRoot = Get-Variable "repoRoot" -ValueOnly -ErrorAction SilentlyContinue
+        if ($null -ne $localRepoRoot) {
+            $actualProjectRoot = $localRepoRoot
+        }
+    }
+    if ([string]::IsNullOrEmpty($actualProjectRoot)) {
+        try {
+            $resolvedBacklog = (Resolve-Path $BacklogDir).Path
+            $dir = Split-Path -Parent $resolvedBacklog
+            while (-not [string]::IsNullOrEmpty($dir)) {
+                if (Test-Path (Join-Path $dir ".crucible")) {
+                    $actualProjectRoot = $dir
+                    break
+                }
+                $nextDir = Split-Path -Parent $dir
+                if ($nextDir -eq $dir) { break }
+                $dir = $nextDir
+            }
+        } catch {}
+    }
+
     $updateJson = @{ status = "blocked"; circuit_breaker = $CircuitBreaker } | ConvertTo-Json -Compress
-    & "$FrameworkPowerShell/update_session_state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true 2>$null
+    & "$FrameworkPowerShell/update_session_state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null
 }
