@@ -111,8 +111,7 @@ $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_i
 ```
 
 ### Step 8 — Update Backlog & Archive
-- Update `BACKLOG.md` status to `Production` (or `Resolved` for chores/bugs).
-- **Atomic Resolution**: Physically move the task's spec file from `{{backlog_dir}}/{type}/active/` to `{{backlog_dir}}/{type}/archived/`.
+- **Atomic Resolution**: Run `powershell.exe -File {{crucible_root}}/powershell/archive-task.ps1 -BacklogPath {{backlog_dir}}/BACKLOG.md -SpecPath {{backlog_dir}}/{type}/active/{task_id}_*.md`. This updates the `BACKLOG.md` row to `Production` for features or `Resolved` for chores/bugs, moves the spec to `{{backlog_dir}}/{type}/archived/`, and rewrites the archived spec frontmatter `status` to the same terminal value.
 - Update `BACKLOG.md` summary table: `powershell.exe -File {{crucible_root}}/powershell/validate-backlog.ps1 -FixSummary`
 - Move pipeline log: `.crucible/session/{task_id}/pipeline.log.jsonl` → `.crucible/session/archived/pipeline-{task_id}-{timestamp}.log.jsonl`
 

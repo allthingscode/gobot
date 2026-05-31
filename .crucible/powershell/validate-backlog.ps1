@@ -2,7 +2,8 @@
 # Check 1: Counts and item IDs match Priority Summary table
 # Check 2 (Orphaned Files): Catch when a .md file exists in active directories but has no entry in BACKLOG.md
 # Check 3 (Broken Links): Catch when BACKLOG.md has a table entry pointing to a missing file
-# Check 4 (Archived Status): Catch when archived files have incorrect frontmatter status (not "Production" or "Resolved")
+# Check 4 (Archived Status): Repair stale archived frontmatter when BACKLOG.md is already terminal;
+#                            otherwise catch archived files with incorrect or missing frontmatter status
 # Check 5 (Stub Convention): Catch Pattern C drift — BACKLOG.md Status='Stub' rows whose spec
 #                            frontmatter doesn't say status='Stub' (mislabeled stub), and active specs
 #                            with status='Stub' that aren't listed as Stub in BACKLOG.md (orphan stub).
@@ -41,6 +42,11 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
     throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
 }
 . $helpersPath
+$archiveHelpersPath = Join-Path $PSScriptRoot "lib/archive-task.ps1"
+if (-not (Test-Path -LiteralPath $archiveHelpersPath)) {
+    throw "Required helper script not found at $archiveHelpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $archiveHelpersPath
 
 if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
     $backlogDir = Get-ConfiguredPath -Key "backlog"
@@ -64,6 +70,23 @@ try {
     if (-not (Test-Path $BacklogPath)) { throw "Backlog file not found at $BacklogPath" }
     $content = Get-Content -Path $BacklogPath
     if (-not $content) { throw "Backlog file content is null" }
+    $contentArray = [string[]]$content
+
+    $archivedBacklogStatuses = @{}
+    for ($i = 0; $i -lt $contentArray.Count; $i++) {
+        if ($contentArray[$i] -notmatch '^\s*\|') { continue }
+        $statusColumn = Get-MarkdownTableStatusColumn -Lines $contentArray -RowIndex $i
+        if ($statusColumn -lt 0) { continue }
+        $linkMatches = [regex]::Matches($contentArray[$i], '\]\(((features|bugs|chores)/archived/[^)]+\.md)\)')
+        if ($linkMatches.Count -eq 0) { continue }
+
+        $cells = @($contentArray[$i].Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
+        if ($statusColumn -ge $cells.Count) { continue }
+        $rowStatus = $cells[$statusColumn]
+        foreach ($m in $linkMatches) {
+            $archivedBacklogStatuses[$m.Groups[1].Value] = $rowStatus
+        }
+    }
 
     # Initialize actual counts using simple variables
     $actualP0_features = 0
@@ -207,15 +230,29 @@ try {
         if (Test-Path $dir) {
             $archivedFiles = Get-ChildItem -Path $dir -Filter "*.md"
             foreach ($file in $archivedFiles) {
-                $frontmatter = Get-Content -Path $file.FullName -Head 10
+                $frontmatter = Get-Content -Path $file.FullName -Head 20
                 $frontmatterStr = [string]$frontmatter
-                if ($frontmatter -and $frontmatterStr -match 'status:\s*"?([^"\s\r\n]+)"?') {
-                    $status = $matches[1]
-                    if ($status -ne "Production" -and $status -ne "Resolved" -and $status -ne "Abandoned") {
-                        $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
-                        $relPath = $relPath -replace '\\', '/'
-                        $errors += "Archived file has incorrect status: $relPath has status '$status' (expected 'Production' or 'Resolved')"
+                $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
+                $relPath = $relPath -replace '\\', '/'
+                if ($frontmatter -and $frontmatterStr -match 'status:\s*"?([^"\r\n]+)"?') {
+                    $status = $matches[1].Trim()
+                    if ($status -eq "Production" -or $status -eq "Resolved" -or $status -eq "Abandoned") {
+                        continue
                     }
+
+                    $backlogStatus = $null
+                    if ($archivedBacklogStatuses.ContainsKey($relPath)) {
+                        $backlogStatus = [string]$archivedBacklogStatuses[$relPath]
+                    }
+                    if ($backlogStatus -eq "Production" -or $backlogStatus -eq "Resolved" -or $backlogStatus -eq "Abandoned") {
+                        Set-BacklogSpecFrontmatterStatus -Path $file.FullName -Status $backlogStatus
+                        Write-Quiet "Repaired archived spec status: $relPath frontmatter '$status' -> '$backlogStatus'" "Yellow"
+                        continue
+                    }
+
+                    $errors += "Archived file has incorrect status: $relPath has status '$status' (expected 'Production', 'Resolved', or 'Abandoned')"
+                } else {
+                    $errors += "Archived file has missing status frontmatter: $relPath"
                 }
             }
         }

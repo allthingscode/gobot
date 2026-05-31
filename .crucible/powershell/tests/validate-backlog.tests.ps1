@@ -259,6 +259,116 @@ try {
         Assert-Result -Name "orphan error labeled" -Condition ($r.Output -match "Stub-row convention") -FailureMessage ("expected 'Stub-row convention' in output. Output: " + $r.Output)
         Assert-Result -Name "orphan mentions spec path" -Condition ($r.Output -match "C-001_Orphan\.md") -FailureMessage ("expected the spec path in the error. Output: " + $r.Output)
     }
+
+    # --- Test 7 (REGRESSION): stale archived spec status is repaired when BACKLOG row is terminal ---
+    $results += Run-Test -Name "REGRESSION: stale archived status is repaired from terminal BACKLOG row" -Body {
+        $root = Join-Path $tempRoot "archived-stale-terminal"
+        New-MinimalBacklogTree -Root $root
+        $specPath = Join-Path $root "chores/archived/C-304_Multi_Model_Routing_Audit.md"
+        New-SpecFile -Root $root -RelPath "chores/archived/C-304_Multi_Model_Routing_Audit.md" -ItemId "C-304" -Priority "P2" -Title "Multi Model Routing Audit" -Status "Ready for Deploy"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 0 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-304](chores/archived/C-304_Multi_Model_Routing_Audit.md) | P2 | Resolved | Multi Model Routing Audit | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog
+        $updated = Get-Content -LiteralPath $specPath -Raw
+        Assert-Result -Name "stale terminal exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 after auto-repair, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "stale terminal repaired" -Condition ($updated -match 'status:\s*"Resolved"') -FailureMessage ("expected archived spec status to be repaired to Resolved. Content: " + $updated)
+        Assert-Result -Name "stale terminal output warns" -Condition ($r.Output -match "Repaired archived spec status") -FailureMessage ("expected repair warning in output. Output: " + $r.Output)
+    }
+
+    # --- Test 8: stale archived spec status still fails when BACKLOG row is not terminal ---
+    $results += Run-Test -Name "Archived stale status fails when BACKLOG row is not terminal" -Body {
+        $root = Join-Path $tempRoot "archived-stale-nonterminal"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/archived/C-305_Still_In_Flight.md" -ItemId "C-305" -Priority "P2" -Title "Still In Flight" -Status "Ready for Deploy"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 0 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-305](chores/archived/C-305_Still_In_Flight.md) | P2 | Ready for Deploy | Still In Flight | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog
+        Assert-Result -Name "stale nonterminal exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "stale nonterminal error" -Condition ($r.Output -match "Archived file has incorrect status") -FailureMessage ("expected archived status error. Output: " + $r.Output)
+    }
+
+    # --- Test 9: archived file with missing status remains malformed and fails ---
+    $results += Run-Test -Name "Archived file with missing status frontmatter is caught" -Body {
+        $root = Join-Path $tempRoot "archived-missing-status"
+        New-MinimalBacklogTree -Root $root
+        $specPath = Join-Path $root "features/archived/F-101_Missing_Status.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+@"
+---
+item_id: "F-101"
+type: "Feature"
+priority: "P1"
+target_phase: "done"
+---
+
+# Missing Status
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 0 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-101](features/archived/F-101_Missing_Status.md) | P1 | Production | Missing Status | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog
+        Assert-Result -Name "missing status exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "missing status error" -Condition ($r.Output -match "missing status frontmatter") -FailureMessage ("expected missing status error. Output: " + $r.Output)
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
