@@ -28,6 +28,12 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+// Version is the build version surfaced on the dashboard home page. It defaults
+// to "dev" and is overridden at build time via -ldflags (F-139).
+//
+//nolint:gochecknoglobals // build-time injection point, treated as immutable at runtime
+var Version = "dev"
+
 // RunAgent is the high-level entry point for the strategic agent.
 func RunAgent(ctx context.Context, cfg *config.Config) error {
 	// F-133: Record project root from where we were started.
@@ -109,7 +115,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 
 	gateHandler := SetupGateHandler(store, handler)
 	if cfg.Gateway.Enabled {
-		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, &wg)
+		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg)
 	}
 
 	if cfg.Gateway.WebAddr != "" && hub != nil {
@@ -327,12 +333,17 @@ func SetupGateHandler(store agent.CheckpointStore, handler *DispatchHandler) bot
 }
 
 // StartGateway starts the HTTP gateway server in a separate goroutine.
-func StartGateway(ctx context.Context, cfg *config.Config, store agent.CheckpointStore, memStore *memory.MemoryStore, gateHandler bot.Handler, wg *sync.WaitGroup) {
+func StartGateway(ctx context.Context, cfg *config.Config, store agent.CheckpointStore, memStore *memory.MemoryStore, gateHandler bot.Handler, hub *dashboard.Hub, wg *sync.WaitGroup) {
 	mgr, _ := store.(*agentctx.CheckpointManager)
 	res := dash.Resources{
 		Config:      cfg,
 		Checkpoints: mgr,
 		Memory:      memStore,
+		Cron:        NewSchedulerCronProvider(cfg.StorageRoot()),
+		Version:     Version,
+	}
+	if hub != nil {
+		res.Hub = hub
 	}
 	srv := gateway.NewServer(cfg.Gateway, gateHandler, res)
 	wg.Add(1)

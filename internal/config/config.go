@@ -754,5 +754,19 @@ func decode(r io.Reader) (*Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("config: invalid field or syntax: %w", err)
 	}
+	applyGatewayDefaults(&cfg)
 	return &cfg, nil
+}
+
+// applyGatewayDefaults enforces local-safe binding defaults (F-139).
+// An empty host binds to all interfaces (0.0.0.0); for a single-user local
+// assistant we default to loopback. Explicit values (including 0.0.0.0) are
+// preserved so an operator can still opt in to external binding.
+func applyGatewayDefaults(cfg *Config) {
+	if cfg.Gateway.Host == "" {
+		cfg.Gateway.Host = "127.0.0.1"
+	}
+	if cfg.Gateway.WebAddr == "" && cfg.Gateway.DashboardEnabled {
+		cfg.Gateway.WebAddr = "127.0.0.1:0"
+	}
 }

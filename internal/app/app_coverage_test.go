@@ -124,7 +124,7 @@ func TestStartGateway_Shutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	StartGateway(ctx, cfg, nil, nil, nil, &wg)
+	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg)
 	cancel()
 
 	done := make(chan struct{})

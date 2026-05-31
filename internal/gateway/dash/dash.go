@@ -257,12 +257,57 @@ func (h *Handler) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	h.render(w, "layout.html", "memory.html", data)
 }
 
+type cronTaskView struct {
+	Name      string
+	Schedule  string
+	LastRunMS int64
+	NextRunMS int64
+	Status    string
+	Live      bool
+}
+
 func (h *Handler) handleCron(w http.ResponseWriter, _ *http.Request) {
-	type cronTaskView struct {
-		Name      string
-		Schedule  string
-		NextRunMS int64
+	tasks := h.liveCronTasks()
+	live := tasks != nil
+	if !live {
+		tasks = h.configCronTasks()
 	}
+
+	data := struct {
+		ActiveNav string
+		Live      bool
+		Tasks     []cronTaskView
+	}{
+		ActiveNav: "cron",
+		Live:      live,
+		Tasks:     tasks,
+	}
+	h.render(w, "layout.html", "cron.html", data)
+}
+
+// liveCronTasks returns the running scheduler's jobs with live state, or nil
+// when no CronProvider is wired (in which case the caller falls back to the
+// statically configured tasks).
+func (h *Handler) liveCronTasks() []cronTaskView {
+	if h.res.Cron == nil {
+		return nil
+	}
+	jobs := h.res.Cron.Jobs()
+	tasks := make([]cronTaskView, 0, len(jobs))
+	for _, job := range jobs {
+		tasks = append(tasks, cronTaskView{
+			Name:      job.Name,
+			Schedule:  describeSchedule(job.Schedule),
+			LastRunMS: job.State.LastRunAtMS,
+			NextRunMS: job.State.NextRunAtMS,
+			Status:    jobStatus(job),
+			Live:      true,
+		})
+	}
+	return tasks
+}
+
+func (h *Handler) configCronTasks() []cronTaskView {
 	nowMS := time.Now().UnixMilli()
 	tasks := make([]cronTaskView, 0, len(h.res.Config.Cron.Tasks))
 	for _, task := range h.res.Config.Cron.Tasks {
@@ -271,25 +316,59 @@ func (h *Handler) handleCron(w http.ResponseWriter, _ *http.Request) {
 			Name:      task.Name,
 			Schedule:  task.Schedule,
 			NextRunMS: nextRun,
+			Status:    "configured",
 		})
 	}
-
-	data := struct {
-		ActiveNav string
-		Tasks     []cronTaskView
-	}{
-		ActiveNav: "cron",
-		Tasks:     tasks,
-	}
-	h.render(w, "layout.html", "cron.html", data)
+	return tasks
 }
 
+// jobStatus summarizes a job's last outcome from its run counters.
+func jobStatus(job cron.Job) string {
+	if !job.Enabled {
+		return "disabled"
+	}
+	if job.State.RunCount == 0 {
+		return "pending"
+	}
+	if job.State.LastRunAtMS > 0 && job.State.FailureCount > job.State.SuccessCount {
+		return "failed"
+	}
+	return "ok"
+}
+
+// describeSchedule renders a human-readable schedule for the dashboard.
+func describeSchedule(s cron.Schedule) string {
+	switch s.Kind {
+	case cron.KindCron:
+		return s.Expr
+	case cron.KindEvery:
+		if s.EveryMS != nil {
+			return "every " + (time.Duration(*s.EveryMS) * time.Millisecond).String()
+		}
+		return "every"
+	case cron.KindAt:
+		if s.AtMS != nil {
+			return "at " + time.UnixMilli(*s.AtMS).Format("2006-01-02 15:04:05")
+		}
+		return "at"
+	default:
+		return string(s.Kind)
+	}
+}
+
+const logTailLines = 200
+
 func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
-	logPath := h.res.Config.LogPath("gobot.log")
-	content, err := tailFileLines(logPath, 200)
-	if err != nil {
-		slog.Warn("dash: failed to read logs", "path", logPath, "err", err)
-		content = "log file unavailable"
+	content := h.hubLogTail(logTailLines)
+	if content == "" {
+		// No live hub wired (or empty buffer): fall back to the rotated log file.
+		logPath := h.res.Config.LogPath("gobot.log")
+		tail, err := tailFileLines(logPath, logTailLines)
+		if err != nil {
+			slog.Warn("dash: failed to read logs", "path", logPath, "err", err)
+			tail = "log file unavailable"
+		}
+		content = tail
 	}
 
 	data := struct {
@@ -313,6 +392,38 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.render(w, "layout.html", "logs.html", data)
+}
+
+// hubLogTail reads the last maxLines entries from the live log hub's ring
+// buffer and formats them for display. It returns "" when no hub is wired so
+// the caller can fall back to file tailing.
+func (h *Handler) hubLogTail(maxLines int) string {
+	if h.res.Hub == nil {
+		return ""
+	}
+	sub, backlog := h.res.Hub.Subscribe()
+	if sub != nil {
+		h.res.Hub.Unsubscribe(sub)
+	}
+	if len(backlog) == 0 {
+		return ""
+	}
+	if len(backlog) > maxLines {
+		backlog = backlog[len(backlog)-maxLines:]
+	}
+	var sb strings.Builder
+	for _, e := range backlog {
+		if e == nil {
+			continue
+		}
+		sb.WriteString(e.Timestamp.Format("2006-01-02 15:04:05"))
+		sb.WriteByte(' ')
+		sb.WriteString(e.Level)
+		sb.WriteByte(' ')
+		sb.WriteString(e.Message)
+		sb.WriteByte('\n')
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (h *Handler) render(w http.ResponseWriter, layout, content string, data any) {

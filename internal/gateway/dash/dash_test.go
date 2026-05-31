@@ -10,9 +10,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/cron"
+	"github.com/allthingscode/gobot/internal/dashboard"
 )
+
+// mockCronProvider implements CronProvider.
+type mockCronProvider struct {
+	jobs []cron.Job
+}
+
+func (m *mockCronProvider) Jobs() []cron.Job { return m.jobs }
+
+// mockLogHub implements LogHub with a fixed backlog.
+type mockLogHub struct {
+	backlog []*dashboard.LogEntry
+}
+
+func (m *mockLogHub) Subscribe() (chan *dashboard.LogEntry, []*dashboard.LogEntry) {
+	return make(chan *dashboard.LogEntry, 1), m.backlog
+}
+
+func (m *mockLogHub) Unsubscribe(_ chan *dashboard.LogEntry) {}
 
 // mockMemoryStats implements MemoryProvider.
 type mockMemoryStats struct {
@@ -206,6 +227,112 @@ func TestCronUsesConfigTasks(t *testing.T) {
 	}
 	if !strings.Contains(body, "0 9 * * *") {
 		t.Fatalf("body missing config schedule: %s", body)
+	}
+}
+
+func TestCronUsesLiveProviderState(t *testing.T) {
+	t.Parallel()
+	everyMS := int64(3600000)
+	provider := &mockCronProvider{jobs: []cron.Job{
+		{
+			Name:     "Live Daily",
+			Enabled:  true,
+			Schedule: cron.Schedule{Kind: cron.KindCron, Expr: "0 9 * * *"},
+			State:    cron.JobState{LastRunAtMS: 1700000000000, NextRunAtMS: 1700003600000, RunCount: 3, SuccessCount: 3},
+		},
+		{
+			Name:     "Recurring",
+			Enabled:  true,
+			Schedule: cron.Schedule{Kind: cron.KindEvery, EveryMS: &everyMS},
+			State:    cron.JobState{RunCount: 0},
+		},
+		{
+			Name:     "Broken",
+			Enabled:  true,
+			Schedule: cron.Schedule{Kind: cron.KindCron, Expr: "*/5 * * * *"},
+			State:    cron.JobState{LastRunAtMS: 1700000000000, RunCount: 2, FailureCount: 2},
+		},
+	}}
+
+	h := NewHandler(Resources{Config: &config.Config{}, Cron: provider})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/cron", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"Live Daily", "Recurring", "every 1h0m0s", "ok", "pending", "failed"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestCronProviderNilJobsSafe(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(Resources{Config: &config.Config{}, Cron: &mockCronProvider{jobs: nil}})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/cron", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "No scheduled jobs configured.") {
+		t.Fatalf("expected empty-state message, got: %s", w.Body.String())
+	}
+}
+
+func TestLogsUsesHub(t *testing.T) {
+	t.Parallel()
+	hub := &mockLogHub{backlog: []*dashboard.LogEntry{
+		{Timestamp: time.UnixMilli(1700000000000), Level: "INFO", Message: "hub-entry-alpha"},
+		{Timestamp: time.UnixMilli(1700000001000), Level: "WARN", Message: "hub-entry-beta"},
+	}}
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = t.TempDir() // no log file present; must use hub
+
+	h := NewHandler(Resources{Config: cfg, Hub: hub})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "hub-entry-alpha") || !strings.Contains(body, "hub-entry-beta") {
+		t.Fatalf("expected hub entries in log output, got: %s", body)
+	}
+	if strings.Contains(body, "log file unavailable") {
+		t.Fatalf("should not fall back to file tail when hub has entries")
+	}
+}
+
+func TestLogsFallsBackToFileWhenHubEmpty(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = dir
+	logDir := filepath.Join(dir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "gobot.log"), []byte("file-tail-line\n"), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	h := NewHandler(Resources{Config: cfg, Hub: &mockLogHub{backlog: nil}})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "file-tail-line") {
+		t.Fatalf("expected file tail fallback, got: %s", w.Body.String())
 	}
 }
 

@@ -170,6 +170,70 @@ func TestGatewayConfig(t *testing.T) {
 	}
 }
 
+func TestGatewayDefaultsLoopback(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		input       string
+		wantHost    string
+		wantWebAddr string
+	}{
+		{
+			name:        "empty host defaults to loopback",
+			input:       `{"gateway":{"enabled":true}}`,
+			wantHost:    "127.0.0.1",
+			wantWebAddr: "",
+		},
+		{
+			name:        "explicit host preserved",
+			input:       `{"gateway":{"enabled":true,"host":"0.0.0.0"}}`,
+			wantHost:    "0.0.0.0",
+			wantWebAddr: "",
+		},
+		{
+			name:        "dashboard enabled defaults web_addr to loopback",
+			input:       `{"gateway":{"enabled":true,"dashboard_enabled":true}}`,
+			wantHost:    "127.0.0.1",
+			wantWebAddr: "127.0.0.1:0",
+		},
+		{
+			name:        "explicit web_addr preserved",
+			input:       `{"gateway":{"enabled":true,"dashboard_enabled":true,"web_addr":"0.0.0.0:9000"}}`,
+			wantHost:    "127.0.0.1",
+			wantWebAddr: "0.0.0.0:9000",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := decode(bytes.NewReader([]byte(tc.input)))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if cfg.Gateway.Host != tc.wantHost {
+				t.Errorf("host: got %q, want %q", cfg.Gateway.Host, tc.wantHost)
+			}
+			if cfg.Gateway.WebAddr != tc.wantWebAddr {
+				t.Errorf("web_addr: got %q, want %q", cfg.Gateway.WebAddr, tc.wantWebAddr)
+			}
+		})
+	}
+}
+
+func TestGatewayDefaultsNoAllInterfacesBinding(t *testing.T) {
+	t.Parallel()
+	cfg, err := decode(bytes.NewReader([]byte(`{"gateway":{"enabled":true,"dashboard_enabled":true}}`)))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if strings.HasPrefix(cfg.Gateway.Host, "0.0.0.0") {
+		t.Errorf("default host must not bind all interfaces, got %q", cfg.Gateway.Host)
+	}
+	if strings.HasPrefix(cfg.Gateway.WebAddr, "0.0.0.0") {
+		t.Errorf("default web_addr must not bind all interfaces, got %q", cfg.Gateway.WebAddr)
+	}
+}
+
 func TestLogsRoot(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "logs_root"}}
