@@ -134,6 +134,8 @@ Separate ready item that must not rewrite another task's handoff reason.
             source_phase             = "research"
             target_phase             = "grooming"
             reason                   = "Research Gate approved C-100 scope"
+            generated_by             = "new-handoff.ps1"
+            tool_version             = "1.0.0"
             handoff_retry_count      = 0
             review_strike_count      = 0
             rebase_count             = 0

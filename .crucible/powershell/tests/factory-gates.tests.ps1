@@ -35,6 +35,13 @@ function Write-TestHandoff {
         [Parameter(Mandatory=$true)][hashtable]$Values
     )
 
+    if (-not $Values.ContainsKey("generated_by")) {
+        $Values.generated_by = "new-handoff.ps1"
+    }
+    if (-not $Values.ContainsKey("tool_version")) {
+        $Values.tool_version = "1.0.0"
+    }
+
     $Values | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
@@ -1305,6 +1312,83 @@ finally {
         # Check that master head has been reset back to $unrelatedHash, NOT origin/master!
         $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
         Assert-Result -Name "D22 follow-up: master reset back to unrelated commit" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
+    }
+
+    $results += Run-Test -Name "D31: missing optional counters defaulted without StrictMode crash" -Body {
+        $frameworkDir = Join-Path $tempRoot "powershell"
+        $sessionDir = Join-Path $tempRoot "session"
+        # Setup context
+        $ctx = New-TestContext -TempRoot $tempRoot -TaskId "F-310"
+        # Create a handoff lacking optional counters
+        $handoffPath = Join-Path $ctx.HandoffDir "F-310-20260526T120000Z.json"
+        $base = @{
+            task_id = "F-310"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            budget_tier = "low"
+            reason = "test"
+            prompt_version = "1.0.0"
+        }
+        Write-TestHandoff -Path $handoffPath -Values $base
+
+        $ctx.LatestHandoff = Get-Item $handoffPath
+
+        # Check Read-FactoryHandoffContext completes without StrictMode crash and defaults are applied
+        Read-FactoryHandoffContext -Context $ctx
+
+        Assert-Result -Name "D31: review_strike_count defaulted to 0" -Condition ($ctx.Handoff.review_strike_count -eq 0) -FailureMessage "review_strike_count should be 0"
+        Assert-Result -Name "D31: rebase_count defaulted to 0" -Condition ($ctx.Handoff.rebase_count -eq 0) -FailureMessage "rebase_count should be 0"
+        Assert-Result -Name "D31: handoff_retry_count defaulted to 0" -Condition ($ctx.Handoff.handoff_retry_count -eq 0) -FailureMessage "handoff_retry_count should be 0"
+        Assert-Result -Name "D31: cumulative_handoff_count defaulted to 1" -Condition ($ctx.Handoff.cumulative_handoff_count -eq 1) -FailureMessage "cumulative_handoff_count should be 1"
+
+        # Check Invoke-CircuitBreakerGates completes without StrictMode crash
+        $ctx.Ceiling = 10
+        $ctx.LogFile = Join-Path $tempRoot "logs/pipeline.log.jsonl"
+        $ctx.CircuitBreakerHistoryFile = Join-Path $tempRoot "logs/circuit_breakers.jsonl"
+        $ctx.FrameworkPowerShell = $frameworkDir
+        $ctx.RepoRoot = $tempRoot
+        $ctx.WorkspacesDir = Join-Path $tempRoot "workspaces"
+        $ctx.SessionDir = $sessionDir
+
+        Invoke-CircuitBreakerGates -Context $ctx
+        # If we got here without throwing an exception, D31 check succeeded!
+    }
+
+    $results += Run-Test -Name "D30: handoff selection is robust to timestamp inversion" -Body {
+        # Create two handoffs for same task.
+        # Handoff 1: earlier timestamp but later FSM phase (verification->deployment)
+        # Handoff 2: later timestamp but earlier FSM phase (implementation->verification)
+        $handoffDirForD30 = Join-Path $tempRoot "d30-handoffs"
+        New-Item -ItemType Directory -Path $handoffDirForD30 -Force | Out-Null
+        
+        $path1 = Join-Path $handoffDirForD30 "F-300-20260526T120000Z.json"
+        $val1 = @{
+            task_id = "F-300"
+            source_phase = "verification"
+            target_phase = "deployment"
+            cumulative_handoff_count = 3
+            budget_tier = "low"
+            reason = "test-later-phase"
+            prompt_version = "1.0.0"
+        }
+        $val1 | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path1 -Encoding UTF8
+
+        $path2 = Join-Path $handoffDirForD30 "F-300-20260526T130000Z.json"
+        $val2 = @{
+            task_id = "F-300"
+            source_phase = "implementation"
+            target_phase = "verification"
+            cumulative_handoff_count = 2
+            budget_tier = "low"
+            reason = "test-earlier-phase"
+            prompt_version = "1.0.0"
+        }
+        $val2 | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path2 -Encoding UTF8
+
+        $files = @(Get-Item $path1, $path2)
+        $sorted = Sort-HandoffFiles -Files $files
+
+        Assert-Result -Name "D30 Winner is path1" -Condition ($sorted[0].FullName -eq $path1) -FailureMessage ("Expected path1 to be sorted first, got " + $sorted[0].Name)
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -78,7 +78,17 @@ If any of these are not true, complete the missing steps first. Do NOT write the
 
 When the pre-flight gate passes:
 
-1. Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` (use current UTC timestamp).
+1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly).
+   For standard successful deployment:
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -CommitHash <merged_commit_hash> -Reason "Deployment complete. Pipeline resolved."
+   ```
+   If production issues were detected requiring grooming/research:
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected — see deployment_report.md."
+   ```
 2. Run the factory to advance the pipeline:
    ```bash
    powershell.exe -ExecutionPolicy Bypass \
@@ -105,8 +115,8 @@ Do NOT ask the human to run this command. You run it via your Bash tool.
 Timestamp format: `yyyyMMddTHHmmssZ` (UTC) — e.g., `{task_id}-20260418T143022Z.json`
 
 ---
-## Final Check — Before Writing Handoff
-Re-confirm before you write handoff.json:
-- [ ] I am routing to: grooming (not to myself, not to another phase)
+## Final Check — Before Running new-handoff.ps1
+Re-confirm before you run new-handoff.ps1:
+- [ ] I am routing to: done (or grooming if production issue threshold met)
 - [ ] I have NOT edited BACKLOG.md outside my permitted scope
 - [ ] The task_id in my handoff matches the task I was given

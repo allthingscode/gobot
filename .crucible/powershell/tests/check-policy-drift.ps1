@@ -63,6 +63,33 @@ if (Test-Path -LiteralPath $strayCrucible) {
     $errors += "Test pollution detected: A stray '.crucible' directory exists at the repository root ($strayCrucible). Ensure tests run in isolated temp directories and clean up properly."
 }
 
+# 4. Assert no phase prompt/SOP instructs to write handoff JSON directly and each references new-handoff.ps1
+$phaseDocs = @(
+    "prompts/research_prompt.md",
+    "prompts/grooming_prompt.md",
+    "prompts/implementation_prompt.md",
+    "prompts/verification_prompt.md",
+    "prompts/deployment_prompt.md",
+    "sops/research.md",
+    "sops/grooming.md",
+    "sops/implementation.md",
+    "sops/verification.md",
+    "sops/deployment.md"
+)
+foreach ($relPath in $phaseDocs) {
+    $fullPath = Join-Path $REPO_ROOT $relPath
+    if (Test-Path $fullPath) {
+        $content = Get-Content $fullPath -Raw
+        # Search for pattern "Write `.crucible/...`" or similar JSON writing instructions
+        if ($content -match '(?i)Write\s+`[^`]*handoffs/[^`]*\.json`' -or $content -match '(?i)Write\s+`[^`]*handoff\.json`') {
+            $errors += "File instructs writing JSON handoff directly instead of using tool: $relPath"
+        }
+        if ($content -notmatch "new-handoff\.ps1") {
+            $errors += "File missing reference to new-handoff.ps1: $relPath"
+        }
+    }
+}
+
 if ($errors.Count -gt 0) {
     Write-Host "POLICY DRIFT DETECTED:" -ForegroundColor Red
     $errors | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }

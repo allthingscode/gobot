@@ -164,3 +164,69 @@ function Mark-DuplicateHandoffsAsSuperseded {
         Write-EventLog -Event "degraded" -TaskId $TaskId -Specialist "factory" -Outcome "warned" -Notes ("Duplicate candidates: " + $duplicateCandidateCount + "; supersede operations: " + $supersedeOps)
     }
 }
+
+function Sort-HandoffFiles {
+    param(
+        [Parameter(Mandatory=$false)]
+        [object[]]$Files
+    )
+
+    if ($null -eq $Files -or $Files.Length -eq 0) { return @() }
+    if ($Files.Length -le 1) { return $Files }
+
+    $phaseWeights = @{
+        "research"       = 1
+        "grooming"       = 2
+        "implementation" = 3
+        "verification"   = 4
+        "deployment"     = 5
+        "done"           = 6
+    }
+
+    $candidates = @()
+    foreach ($file in $Files) {
+        $name = $file.Name
+        $ts = Get-HandoffTimestampFromFileName -Name $name
+        $sourcePhase = ""
+        $cumulativeCount = 0
+        try {
+            $obj = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($obj.PSObject.Properties["source_phase"]) {
+                $sourcePhase = [string]$obj.source_phase
+            }
+            if ($obj.PSObject.Properties["cumulative_handoff_count"]) {
+                $cumulativeCount = [int]$obj.cumulative_handoff_count
+            }
+        } catch {}
+
+        $weight = 0
+        if ($phaseWeights.ContainsKey($sourcePhase.ToLowerInvariant())) {
+            $weight = $phaseWeights[$sourcePhase.ToLowerInvariant()]
+        }
+
+        $candidates += [PSCustomObject]@{
+            File            = $file
+            Ts              = $ts
+            PhaseWeight     = $weight
+            CumulativeCount = $cumulativeCount
+        }
+    }
+
+    # Sort primarily by:
+    # 1. CumulativeCount descending
+    # 2. PhaseWeight descending
+    # 3. Ts descending
+    # 4. Name descending
+    $sortedCandidates = @($candidates | Sort-Object `
+        @{ Expression = { $_.CumulativeCount }; Descending = $true }, `
+        @{ Expression = { $_.PhaseWeight }; Descending = $true }, `
+        @{ Expression = { $_.Ts }; Descending = $true }, `
+        @{ Expression = { $_.File.Name }; Descending = $true })
+
+    $result = @()
+    foreach ($c in $sortedCandidates) {
+        $result += $c.File
+    }
+    return $result
+}
+

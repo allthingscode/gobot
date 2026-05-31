@@ -127,9 +127,18 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Paths of newly-created stub spec files during a Pattern C grooming shortcut"
+    },
+    "generated_by": {
+      "type": "string",
+      "enum": ["new-handoff.ps1"],
+      "description": "Identifier of the tool that generated this handoff"
+    },
+    "tool_version": {
+      "type": "string",
+      "description": "Version of the new-handoff.ps1 tool that generated this handoff"
     }
   },
-  "required": ["task_id", "source_phase", "target_phase", "reason", "handoff_retry_count", "budget_tier", "cumulative_handoff_count", "prompt_version"],
+  "required": ["task_id", "source_phase", "target_phase", "reason", "handoff_retry_count", "budget_tier", "cumulative_handoff_count", "prompt_version", "generated_by", "tool_version"],
   "allOf": [
     {
       "if": {

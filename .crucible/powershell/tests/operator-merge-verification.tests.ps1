@@ -107,6 +107,8 @@ function Write-OperatorHandoff {
         source_phase             = "deployment"
         target_phase             = $Target
         reason                   = "Operator merge verification test"
+        generated_by             = "new-handoff.ps1"
+        tool_version             = "1.0.0"
         handoff_retry_count      = 0
         review_strike_count      = 0
         rebase_count             = 0

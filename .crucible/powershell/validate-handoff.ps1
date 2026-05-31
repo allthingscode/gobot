@@ -195,6 +195,21 @@ try {
         -Details @{ schema_path = $SchemaPath }
 }
 
+# Provenance verification (Part B)
+if ($null -eq $handoff.PSObject.Properties["generated_by"] -or $handoff.generated_by -ne "new-handoff.ps1") {
+    Write-ValidationResult -Ok $false `
+        -ReasonCode "handoff_not_tool_generated" `
+        -Message "Handoff must be generated using new-handoff.ps1. Direct hand-authoring is forbidden." `
+        -Details @{ handoff_file = $HandoffFile }
+}
+$allowedToolVersions = @("1.0.0")
+if ($null -eq $handoff.PSObject.Properties["tool_version"] -or $allowedToolVersions -notcontains $handoff.tool_version) {
+    Write-ValidationResult -Ok $false `
+        -ReasonCode "handoff_not_tool_generated" `
+        -Message ("Handoff tool_version '" + $handoff.tool_version + "' is not recognized. Allowed versions: " + ($allowedToolVersions -join ", ")) `
+        -Details @{ handoff_file = $HandoffFile; tool_version = $handoff.tool_version }
+}
+
 $requiredFields = @()
 if ($schema.PSObject.Properties["required"] -and $null -ne $schema.required) {
     $requiredFields = @($schema.required)
@@ -229,6 +244,87 @@ if ($validPhases -notcontains $source -or
         -ReasonCode "invalid_transition" `
         -Message ("Invalid phase transition: " + $source + " -> " + $target) `
         -Details @{ source_phase = $source; target_phase = $target; handoff_file = $HandoffFile }
+}
+
+# Phase-specific transition required fields check (Part C)
+if ($source -eq "research") {
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "human_decisions")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Research handoff requires human_decisions." -Details @{ field = "human_decisions"; handoff_file = $HandoffFile }
+    }
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "artifacts")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Research handoff requires artifacts." -Details @{ field = "artifacts"; handoff_file = $HandoffFile }
+    }
+    if ($null -ne $handoff.PSObject.Properties["reviewer_checks_passed"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Research handoff must not contain reviewer_checks_passed." -Details @{ field = "reviewer_checks_passed"; handoff_file = $HandoffFile }
+    }
+}
+elseif ($source -eq "grooming") {
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "artifacts")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Grooming handoff requires artifacts." -Details @{ field = "artifacts"; handoff_file = $HandoffFile }
+    }
+    if ($target -eq "implementation") {
+        if (-not (Test-RequiredField -Handoff $handoff -FieldName "file_affinity")) {
+            Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Grooming to implementation handoff requires file_affinity." -Details @{ field = "file_affinity"; handoff_file = $HandoffFile }
+        }
+    }
+    elseif ($target -eq "verification") {
+        if (-not (Test-RequiredField -Handoff $handoff -FieldName "stub_specs_created")) {
+            Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Grooming shortcut to verification requires stub_specs_created." -Details @{ field = "stub_specs_created"; handoff_file = $HandoffFile }
+        }
+    }
+    if ($null -ne $handoff.PSObject.Properties["reviewer_checks_passed"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Grooming handoff must not contain reviewer_checks_passed." -Details @{ field = "reviewer_checks_passed"; handoff_file = $HandoffFile }
+    }
+    if ($null -ne $handoff.PSObject.Properties["human_decisions"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Grooming handoff must not contain human_decisions." -Details @{ field = "human_decisions"; handoff_file = $HandoffFile }
+    }
+}
+elseif ($source -eq "implementation") {
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "session_cycle_id")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Implementation handoff requires session_cycle_id." -Details @{ field = "session_cycle_id"; handoff_file = $HandoffFile }
+    }
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "artifacts")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Implementation handoff requires artifacts." -Details @{ field = "artifacts"; handoff_file = $HandoffFile }
+    }
+    if ($null -ne $handoff.PSObject.Properties["reviewer_checks_passed"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Implementation handoff must not contain reviewer_checks_passed." -Details @{ field = "reviewer_checks_passed"; handoff_file = $HandoffFile }
+    }
+    if ($null -ne $handoff.PSObject.Properties["human_decisions"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Implementation handoff must not contain human_decisions." -Details @{ field = "human_decisions"; handoff_file = $HandoffFile }
+    }
+}
+elseif ($source -eq "verification") {
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "session_cycle_id")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Verification handoff requires session_cycle_id." -Details @{ field = "session_cycle_id"; handoff_file = $HandoffFile }
+    }
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "artifacts")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Verification handoff requires artifacts." -Details @{ field = "artifacts"; handoff_file = $HandoffFile }
+    }
+    if ($target -eq "deployment") {
+        if (-not (Test-RequiredField -Handoff $handoff -FieldName "reviewer_checks_passed")) {
+            Write-ValidationResult -Ok $false -ReasonCode "reviewer_contract_failed" -Message "Verification approval handoff requires reviewer_checks_passed." -Details @{ field = "reviewer_checks_passed"; handoff_file = $HandoffFile }
+        }
+    }
+    if ($null -ne $handoff.PSObject.Properties["human_decisions"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Verification handoff must not contain human_decisions." -Details @{ field = "human_decisions"; handoff_file = $HandoffFile }
+    }
+}
+elseif ($source -eq "deployment") {
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "session_cycle_id")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment handoff requires session_cycle_id." -Details @{ field = "session_cycle_id"; handoff_file = $HandoffFile }
+    }
+    if (-not (Test-RequiredField -Handoff $handoff -FieldName "artifacts")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment handoff requires artifacts." -Details @{ field = "artifacts"; handoff_file = $HandoffFile }
+    }
+    if ($target -eq "done" -and -not (Test-RequiredField -Handoff $handoff -FieldName "commit_hash")) {
+        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment completed handoff requires commit_hash." -Details @{ field = "commit_hash"; handoff_file = $HandoffFile }
+    }
+    if ($null -ne $handoff.PSObject.Properties["reviewer_checks_passed"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Deployment handoff must not contain reviewer_checks_passed." -Details @{ field = "reviewer_checks_passed"; handoff_file = $HandoffFile }
+    }
+    if ($null -ne $handoff.PSObject.Properties["human_decisions"]) {
+        Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Deployment handoff must not contain human_decisions." -Details @{ field = "human_decisions"; handoff_file = $HandoffFile }
+    }
 }
 
 Assert-SchemaContract -Handoff $handoff -Schema $schema -HandoffFile $HandoffFile -Source $source -Target $target

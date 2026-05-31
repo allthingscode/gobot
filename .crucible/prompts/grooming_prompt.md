@@ -43,7 +43,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 5. **Configure Affinity**: Derive the `file_affinity` package paths for parallel isolation ({task_id}). For audit, report, or doc tasks, ensure the deliverable's own directory (e.g. `docs/`) is included in `file_affinity` so it is not blocked by scope gates.
 6. **Assign Budget**: Set the `budget_tier` (low/medium/high/extended) based on task complexity ({task_id}).
 7. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1`.
-8. **Handoff**: Write `handoffs/{task_id}-<timestamp>.json` with `target_phase: "implementation"`.
+8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 ## Dependency Identification ({task_id})
 When creating or updating a feature/chore specification, identify if it depends on other active or recently completed tasks.
@@ -60,7 +60,11 @@ If there are no active items in the backlog to implement:
 
 **Condition B: Next Task Identified**
 If you have identified and specified the *next* task to be implemented:
-1. Write `.crucible/session/handoffs/<next_task_id>-<timestamp>.json` (use current UTC timestamp) targeting `implementation` (`target_phase: "implementation"`). Ensure the `task_id` in the JSON is the NEW task's ID (e.g. `{task_id}`).
+1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId <next_task_id> -Source grooming -Target <implementation|research|verification> -Reason "Ready for next phase" [-FileAffinity "<paths>"] [-BudgetTier <low|medium|high|extended>]
+   ```
 2. Run the factory to advance the pipeline for the NEW task:
    ```bash
    powershell.exe -ExecutionPolicy Bypass \
@@ -74,8 +78,8 @@ Do NOT ask the human to run this command. You run it via your Bash tool.
 Timestamp format: `yyyyMMddTHHmmssZ` (UTC) — e.g., `{task_id}.json`
 
 ---
-## Final Check — Before Writing Handoff
-Re-confirm before you write handoff.json:
+## Final Check — Before Running new-handoff.ps1
+Re-confirm before you run new-handoff.ps1:
 - [ ] I am routing to: implementation or research (not to myself, not to another phase)
 - [ ] I have NOT edited BACKLOG.md outside my permitted scope
 - [ ] The task_id in my handoff matches the task I was given (or the next task identified)

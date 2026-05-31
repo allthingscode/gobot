@@ -354,6 +354,8 @@ budget_tier: "low"
             source_phase = "grooming"
             target_phase = "implementation"
             reason = "invalid budget test"
+            generated_by = "new-handoff.ps1"
+            tool_version = "1.0.0"
             handoff_retry_count = 0
             review_strike_count = 0
             rebase_count = 0
@@ -378,6 +380,66 @@ budget_tier: "low"
         }
         if ($result.Output -match "budget_tier_mismatch") {
             throw "Invalid tier should not depend on spec mismatch, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "validate-handoff rejects hand-authored handoff lacking provenance" -Script {
+        $taskId = New-TestTaskId "NO-PROVENANCE"
+        $handoffPath = [System.IO.Path]::Combine($handoffDir, "$taskId-20260526T120000Z.json")
+        @{
+            task_id = $taskId
+            source_phase = "grooming"
+            target_phase = "implementation"
+            reason = "hand-authored"
+            handoff_retry_count = 0
+            budget_tier = "low"
+            cumulative_handoff_count = 1
+            prompt_version = "1.0.0"
+            artifacts = @("powershell/factory.ps1")
+            file_affinity = @("powershell/")
+        } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $script:createdFiles += $handoffPath
+
+        $result = Invoke-ExternalCommand {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
+        }
+
+        if ($result.ExitCode -eq 0) {
+            throw "Expected provenance failure but validator passed"
+        }
+        if ($result.Output -notmatch "handoff_not_tool_generated") {
+            throw "Expected handoff_not_tool_generated, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "validate-handoff rejects invalid tool_version" -Script {
+        $taskId = New-TestTaskId "BAD-TOOL-VERSION"
+        $handoffPath = [System.IO.Path]::Combine($handoffDir, "$taskId-20260526T120000Z.json")
+        @{
+            task_id = $taskId
+            source_phase = "grooming"
+            target_phase = "implementation"
+            reason = "bad version"
+            generated_by = "new-handoff.ps1"
+            tool_version = "2.0.0"
+            handoff_retry_count = 0
+            budget_tier = "low"
+            cumulative_handoff_count = 1
+            prompt_version = "1.0.0"
+            artifacts = @("powershell/factory.ps1")
+            file_affinity = @("powershell/")
+        } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $script:createdFiles += $handoffPath
+
+        $result = Invoke-ExternalCommand {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
+        }
+
+        if ($result.ExitCode -eq 0) {
+            throw "Expected tool_version failure but validator passed"
+        }
+        if ($result.Output -notmatch "handoff_not_tool_generated") {
+            throw "Expected handoff_not_tool_generated, got: $($result.Output)"
         }
     }
 

@@ -89,7 +89,8 @@ function Get-PromptVersionFromPromptFile {
 
 function Get-LatestActiveHandoffForTask {
     param([string]$HandoffDir, [string]$Task)
-    $candidates = @(Get-ChildItem -Path $HandoffDir -Filter ($Task + "-*.json") -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    $candidates = @(Get-ChildItem -Path $HandoffDir -Filter ($Task + "-*.json") -ErrorAction SilentlyContinue)
+    $candidates = @(Sort-HandoffFiles -Files $candidates)
     foreach ($file in $candidates) {
         try {
             $obj = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
@@ -274,6 +275,8 @@ $payload = [ordered]@{
     source_phase             = $Source
     target_phase             = $Target
     reason                   = $Reason
+    generated_by             = "new-handoff.ps1"
+    tool_version             = "1.0.0"
     handoff_retry_count      = $resolvedHandoffRetry
     review_strike_count      = $resolvedReviewStrike
     rebase_count             = $resolvedRebase

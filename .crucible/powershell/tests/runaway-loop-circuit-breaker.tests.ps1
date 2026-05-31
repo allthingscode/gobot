@@ -108,6 +108,8 @@ created_at: "2026-05-25"
             source_phase             = "verification"
             target_phase             = "implementation"
             reason                   = "CHANGES_REQUESTED - third rejection"
+            generated_by             = "new-handoff.ps1"
+            tool_version             = "1.0.0"
             handoff_retry_count      = 0
             review_strike_count      = 3         # at threshold → stalemate fires
             rebase_count             = 0

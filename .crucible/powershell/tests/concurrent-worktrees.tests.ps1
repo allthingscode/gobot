@@ -127,6 +127,8 @@ function Write-GroomerHandoff {
         source_phase             = "grooming"
         target_phase             = "implementation"
         reason                   = "Ready for isolated implementation"
+        generated_by             = "new-handoff.ps1"
+        tool_version             = "1.0.0"
         handoff_retry_count      = 0
         review_strike_count      = 0
         rebase_count             = 0

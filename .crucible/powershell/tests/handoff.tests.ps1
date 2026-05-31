@@ -34,6 +34,13 @@ function Write-TestHandoff {
         [Parameter(Mandatory=$true)][hashtable]$Values
     )
 
+    if (-not $Values.ContainsKey("generated_by")) {
+        $Values.generated_by = "new-handoff.ps1"
+    }
+    if (-not $Values.ContainsKey("tool_version")) {
+        $Values.tool_version = "1.0.0"
+    }
+
     $Values | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 

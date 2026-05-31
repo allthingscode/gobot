@@ -147,6 +147,8 @@ function Get-BaseHandoff {
         source_phase             = "grooming"
         target_phase             = "implementation"
         reason                   = "Implement"
+        generated_by             = "new-handoff.ps1"
+        tool_version             = "1.0.0"
         handoff_retry_count      = 0
         review_strike_count      = 0
         rebase_count             = 0
@@ -166,7 +168,7 @@ function Write-HandoffFixture {
         [string]$TaskId,
         [hashtable]$Handoff
     )
-    Remove-Item -LiteralPath (Join-Path $HANDOFF_DIR ($TaskId + "-*.json")) -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $HANDOFF_DIR ($TaskId + "-*.json")) -ErrorAction SilentlyContinue
     $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
     $handoffFile = Join-Path $HANDOFF_DIR ($TaskId + "-" + $timestamp + ".json")
     $Handoff | ConvertTo-Json -Depth 12 | Out-File -LiteralPath $handoffFile -Encoding UTF8

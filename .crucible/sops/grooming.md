@@ -59,25 +59,16 @@ Tier ceilings are defined in `{{crucible_root}}/docs/policy.md` Section 2 (canon
 - **Medium**: Standard features, multi-file refactors
 - **High**: New packages, complex architectural changes
 
-### Step 2 — Write handoff.json
-Path: `.crucible/session/handoffs/{task_id}-{timestamp}.json`
+### Step 2 — Run new-handoff.ps1
 
-```json
-{
-  "task_id": "F-XXX",
-  "source_phase": "grooming",
-  "target_phase": "implementation",
-  "handoff_retry_count": 0,
-  "cumulative_handoff_count": 1,
-  "budget_tier": "low|medium|high|extended",
-  "prompt_version": "groomer-sop-v1",
-  "reason": "Ready for implementation",
-  "file_affinity": ["src/context/", "cmd/app/"],
-  "suspicious_content": null
-}
+Do NOT hand-author or hand-edit the handoff JSON. You must use the `new-handoff.ps1` tool.
+
+Run `new-handoff.ps1` to write the handoff JSON:
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source grooming -Target <implementation|research|verification> -Reason "Ready for next phase" [-FileAffinity "<paths>"] [-BudgetTier <low|medium|high|extended>]
 ```
-
-`file_affinity` is **REQUIRED**. Derive it from the spec's affected files using package-level paths. For audit, report, or documentation tasks, make sure to include the deliverable's own directory path (e.g. `docs/`) in the `file_affinity` list so that scope gates do not block the documentation outputs. `factory.ps1` will block the handoff and log a circuit breaker event if an overlap is detected with another active task.
+(The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats fields like `file_affinity`.)
 
 ### Step 3 — Run validation
 Run `{{crucible_root}}/powershell/validate-backlog.ps1`. A failing validation blocks the handoff — fix `BACKLOG.md` before proceeding.

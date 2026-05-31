@@ -85,26 +85,14 @@ The grooming phase reads `human_decisions.approved` as the authoritative scope. 
 
 ## Handoff
 
-Write `.crucible/session/handoffs/{task_id}-{timestamp}.json`:
+Do NOT hand-author or hand-edit the handoff JSON. You must use the `new-handoff.ps1` tool.
 
-```json
-{
-  "task_id": "R-XXX",
-  "source_phase": "research",
-  "target_phase": "grooming",
-  "handoff_retry_count": 0,
-  "cumulative_handoff_count": N,
-  "budget_tier": "low",
-  "prompt_version": "researcher-sop-v1",
-  "reason": "Research complete — findings approved at Research Gate",
-  "suspicious_content": null,
-  "human_decisions": {
-    "approved": [],
-    "deferred": [],
-    "rejected": []
-  }
-}
+Run `new-handoff.ps1` to write the handoff JSON:
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete — findings approved at Research Gate" -HumanApproved "<approved actions>" -HumanDeferred "<deferred actions>" -HumanRejected "<rejected actions>"
 ```
+(The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats `human_decisions`.)
 
 Run factory and present output to human:
 

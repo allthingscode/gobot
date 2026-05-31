@@ -121,20 +121,12 @@ Before marking ready for Verification:
    - Files committed
    - Commit message (conventional format)
    - Ordered deployment steps
-4. Write handoff.json:
-```json
-{
-  "task_id": "F-XXX",
-  "source_phase": "implementation",
-  "target_phase": "verification",
-  "handoff_retry_count": 0,
-  "cumulative_handoff_count": N,
-  "budget_tier": "...",
-  "session_cycle_id": "{cycle_id from task.md}",
-  "prompt_version": "architect-sop-v1",
-  "reason": "Implementation complete — ready for review"
-}
+4. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the handoff JSON file directly):
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete — ready for review"
 ```
+(The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 5. Run factory and present output to human:
 ```bash
 powershell.exe -ExecutionPolicy Bypass \

@@ -115,21 +115,13 @@ $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_i
 - Update `BACKLOG.md` summary table: `powershell.exe -File {{crucible_root}}/powershell/validate-backlog.ps1 -FixSummary`
 - Move pipeline log: `.crucible/session/{task_id}/pipeline.log.jsonl` → `.crucible/session/archived/pipeline-{task_id}-{timestamp}.log.jsonl`
 
-### Step 9 — Write Handoff & Advance Pipeline
-Write handoff.json (set target_phase to "done" and commit_hash to the merged master/main commit hash):
-```json
-{
-  "task_id": "F-XXX",
-  "source_phase": "deployment",
-  "target_phase": "done",
-  "handoff_retry_count": 0,
-  "cumulative_handoff_count": N,
-  "budget_tier": "...",
-  "prompt_version": "deployment-sop-v3",
-  "commit_hash": "MERGE_COMMIT_HASH",
-  "reason": "Deployment complete. Pipeline resolved."
-}
+### Step 9 — Run new-handoff.ps1 & Advance Pipeline
+Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done" and pass the merged master/main commit hash to `-CommitHash`:
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -CommitHash "MERGE_COMMIT_HASH" -Reason "Deployment complete. Pipeline resolved."
 ```
+(The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 
 Run factory:
 ```bash
@@ -177,20 +169,12 @@ Present factory output to the human. Wait for confirmation before ending your se
 When production issues are discovered that meet the circuit breaker threshold (P0 crash/data loss, OR 5+ occurrences of a minor issue):
 
 1. Document findings in `.crucible/session/{task_id}/deployment/deployment_report.md`
-2. Route to **grooming** (the only valid deployment successor). Include a clear reason that tells grooming this is a production issue requiring research:
-```json
-{
-  "task_id": "F-XXX",
-  "source_phase": "deployment",
-  "target_phase": "grooming",
-  "handoff_retry_count": 0,
-  "cumulative_handoff_count": N,
-  "budget_tier": "...",
-  "prompt_version": "deployment-sop-v3",
-  "reason": "Production issues detected — see deployment_report.md. grooming should dispatch Researcher.",
-  "suspicious_content": null
-}
+2. Run `new-handoff.ps1` to write the handoff JSON targeting grooming (do NOT hand-author or hand-edit the JSON file directly):
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected — see deployment_report.md. grooming should dispatch Researcher."
 ```
+(The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 3. Run factory and present output to human
 
 > **Note**: `deployment → research` is NOT a valid pipeline transition. The deployment phase can only route to grooming. The grooming phase can then dispatch the Researcher if a research task is warranted.

@@ -91,19 +91,10 @@ Format findings as:
 
 1. Update backlog item YAML frontmatter `status` to `"Ready for Deploy"`
 2. Update `BACKLOG.md` status to `Ready for Deploy`
-3. Write handoff.json:
-```json
-{
-  "task_id": "F-XXX",
-  "source_phase": "verification",
-  "target_phase": "deployment",
-  "handoff_retry_count": 0,
-  "cumulative_handoff_count": N,
-  "budget_tier": "...",
-  "prompt_version": "reviewer-sop-v1",
-  "reason": "Review approved — no blockers",
-  "suspicious_content": null
-}
+3. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Review approved — no blockers" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths>
 ```
 4. Run factory and present output to human
 
@@ -126,23 +117,13 @@ Format findings as:
 - [ ] AC item that was not implemented
 
 ## On Completion
-Write `handoffs/{task_id}-{timestamp}.json` with `target_phase: "verification"` for re-review.
+Run `new-handoff.ps1` targeting `verification` for re-review.
 ```
 
-3. Write handoff.json:
-```json
-{
-  "task_id": "F-XXX",
-  "source_phase": "verification",
-  "target_phase": "implementation",
-  "handoff_retry_count": 0,
-  "review_strike_count": N,
-  "cumulative_handoff_count": N,
-  "budget_tier": "...",
-  "prompt_version": "reviewer-sop-v1",
-  "reason": "Changes requested — N blockers",
-  "suspicious_content": null
-}
+3. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target implementation -Reason "Changes requested"
 ```
 4. Run factory and present output to human
 
@@ -161,21 +142,10 @@ When the incoming handoff has `source_phase: grooming` and **no** Architect work
 4. **No orphaned specs** — every stub row in BACKLOG.md has a corresponding spec file in `backlog/{type}/active/`.
 
 ### Pattern C Handoff (to deployment)
-When all four checks pass, write the handoff with `reviewer_checks_passed` populated using the standard six checks (mark any code-specific checks satisfied by N/A equivalence — the backlog is the artifact being reviewed):
-
-```json
-{
-  "task_id": "...",
-  "source_phase": "verification",
-  "target_phase": "deployment",
-  "handoff_retry_count": 0,
-  "cumulative_handoff_count": N,
-  "budget_tier": "...",
-  "prompt_version": "reviewer-sop-v1",
-  "reason": "Pattern C close-out verified — BACKLOG.md well-formed, stubs correct, parent closed",
-  "reviewer_checks_passed": ["tests_pass", "vet_pass", "acceptance_criteria_met", "scope_bounded", "no_regressions", "no_hard_mandates_violated"],
-  "suspicious_content": null
-}
+When all four checks pass, run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
+```bash
+powershell.exe -ExecutionPolicy Bypass \
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Pattern C close-out verified" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths>
 ```
 
 ---

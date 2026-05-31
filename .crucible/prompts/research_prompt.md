@@ -37,7 +37,11 @@ See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 
 When your work is complete:
 
-1. Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` (use current UTC timestamp).
+1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete — findings approved at Research Gate"
+   ```
 2. Run the factory to advance the pipeline:
    ```bash
    powershell.exe -ExecutionPolicy Bypass \

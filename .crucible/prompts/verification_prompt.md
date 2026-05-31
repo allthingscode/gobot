@@ -63,7 +63,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
      ```
      Use `review_decision: CHANGES_REQUESTED` and `acceptance_criteria_met: false` when sending back to implementation.
 7. **CHANGES_REQUESTED**: If code requires fixes, write a concise fix spec to `.crucible/session/{task_id}/implementation/task.md`.
-8. **Handoff**: Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` with `target_phase: "deployment"` (approved) or `target_phase: "implementation"` (fixes needed).
+8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 ### Pattern C: Pure Data-Grooming Review (grooming → verification Shortcut)
 (Use this workflow if the incoming handoff has `source_phase: grooming` and no implementation worktree/code changes exist.)
@@ -74,7 +74,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
    Paste the validator output into your session response. If the exit code is non-zero, you MUST reject the handoff (set `review_decision: CHANGES_REQUESTED` and write a handoff to `implementation` so the grooming phase can repair the backlog structure).
 2. **Stub-Row and Spec Consistency**: Verify every new stub row in `BACKLOG.md` has a corresponding spec file in `backlog/{type}/active/` and matches the stub-row convention (refer to `{{crucible_root}}/sops/verification.md` Pattern C Checklist).
 3. **Documentation**: Write findings to `.crucible/session/{task_id}/verification/review_report.md` with the mandatory YAML header.
-4. **Handoff**: Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` with `target_phase: "deployment"` (approved) or `target_phase: "implementation"` (fixes needed). If approved, include `reviewer_checks_passed` populated with all standard six checks satisfied by N/A equivalence (refer to `{{crucible_root}}/sops/verification.md`).
+4. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 {rebase_section}
 
@@ -82,7 +82,17 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 
 When your work is complete:
 
-1. Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` (use current UTC timestamp).
+1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly).
+   If approved (transition to deployment):
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Review approved — no blockers" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths>
+   ```
+   If changes requested (transition back to implementation):
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target implementation -Reason "Changes requested"
+   ```
 2. Run the factory to advance the pipeline:
    ```bash
    powershell.exe -ExecutionPolicy Bypass \
@@ -98,8 +108,8 @@ Do NOT ask the human to run this command. You run it via your Bash tool.
 Timestamp format: `yyyyMMddTHHmmssZ` (UTC) — e.g., `{task_id}-20260418T143022Z.json`
 
 ---
-## Final Check — Before Writing Handoff
-Re-confirm before you write handoff.json:
+## Final Check — Before Running new-handoff.ps1
+Re-confirm before you run new-handoff.ps1:
 - [ ] I am routing to: deployment or implementation (not to myself, not to another phase)
 - [ ] My `review_report.md` has the mandatory YAML header
 - [ ] The task_id in my handoff matches the task I was given

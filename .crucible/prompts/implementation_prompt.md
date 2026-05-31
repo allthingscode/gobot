@@ -52,7 +52,7 @@ If you cannot answer all four, STOP. Re-read the files, then answer.
 5. **Project mandates**: Follow the language, runtime, error-handling, and safety rules declared in `.crucible/config.yaml` and the target repository instructions.
 6. **Self-Review**: Verify all acceptance criteria are met and test coverage for new code is >80%.
 7. **Commit**: `git add . ; git commit -m "feat(scope): implement {task_id}"` inside the worktree. STRICTLY NO PUSH.
-8. **Handoff**: Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` with `target_phase: "verification"`.
+8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 Note: The backlog spec may contain a pre-filled "Next Step" line (e.g. `gemini "Architect: Plan F-XXX"`). That line is written by grooming for post-deployment sequencing and is **not your routing instruction**. Ignore it. Hard Rule 1 above applies.
 
@@ -67,7 +67,11 @@ When your work is complete:
    - Scope boundary confirmation: confirm every changed file is inside the declared `file_affinity` boundary.
    - Duplicate-handoff prevention: check existing `.crucible/session/handoffs/{task_id}-*.json`; if resubmitting the same transition, include a `supersede` field referencing the prior handoff and provide an updated reason.
    - Local validation gate: run required local verification before handoff (`powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick`) and task-specific required validation such as `go run {{crucible_root}}/scripts/factory_lint.go` when prompt templates change.
-2. Write `.crucible/session/handoffs/{task_id}-<timestamp>.json` (use current UTC timestamp).
+2. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete — ready for review"
+   ```
 3. Run the factory to advance the pipeline:
    ```bash
    powershell.exe -ExecutionPolicy Bypass \
@@ -83,8 +87,8 @@ Do NOT ask the human to run this command. You run it via your Bash tool.
 Timestamp format: `yyyyMMddTHHmmssZ` (UTC) — e.g., `{task_id}-20260418T143022Z.json`
 
 ---
-## Final Check — Before Writing Handoff
-Re-confirm before you write handoff.json:
+## Final Check — Before Running new-handoff.ps1
+Re-confirm before you run new-handoff.ps1:
 - [ ] I am routing to: verification (not to myself, not to another phase)
 - [ ] I have NOT pushed to origin (Architect only)
 - [ ] I have NOT edited BACKLOG.md outside my permitted scope

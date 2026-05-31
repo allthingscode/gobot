@@ -115,6 +115,8 @@ created_at: "2026-05-25"
             prompt_version           = "test-v1"
             session_cycle_id         = "test-cycle"
             cycle_id                 = "test-cycle"
+            generated_by             = "new-handoff.ps1"
+            tool_version             = "1.0.0"
             artifacts                = @($specPath)
             file_affinity            = @("src/")
         }

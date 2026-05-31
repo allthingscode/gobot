@@ -16,7 +16,8 @@ function Resolve-FactoryInputHandoff {
 
     if (-not [string]::IsNullOrEmpty($TaskId)) {
         # Scoped: find the latest non-superseded handoff for THIS task only
-        $taskCandidates = @(Get-ChildItem -Path $HANDOFF_DIR -Filter ($TaskId + "-*.json") | Sort-Object Name -Descending)
+        $taskCandidates = @(Get-ChildItem -Path $HANDOFF_DIR -Filter ($TaskId + "-*.json"))
+        $taskCandidates = @(Sort-HandoffFiles -Files $taskCandidates)
         $latestHandoff = $null
         foreach ($candidate in $taskCandidates) {
             try {
@@ -111,6 +112,8 @@ function Resolve-FactoryInputHandoff {
                     prompt_version           = "1.0.0"
                     session_cycle_id         = "initial"
                     commit_hash              = $currentCommit
+                    generated_by             = "new-handoff.ps1"
+                    tool_version             = "1.0.0"
                 }
                 # Log session_start for operator bootstrap to prevent "missing_start_event" anomaly
                 Write-EventLog -Event "session_start" -TaskId $TaskId -Phase "deployment" -HandoffCount 1 -CycleId "initial" -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
@@ -269,6 +272,14 @@ function Read-FactoryHandoffContext {
     try {
         $handoffRaw = Get-Content $handoffFile -Raw -Encoding UTF8
         $handoff = $handoffRaw | ConvertFrom-Json
+
+        # Default missing optional counters to prevent StrictMode crash (Part C)
+        foreach ($counter in @("review_strike_count", "rebase_count", "handoff_retry_count", "cumulative_handoff_count")) {
+            if ($null -eq $handoff.PSObject.Properties[$counter]) {
+                $defaultVal = if ($counter -eq "cumulative_handoff_count") { 1 } else { 0 }
+                $handoff | Add-Member -MemberType NoteProperty -Name $counter -Value $defaultVal -Force
+            }
+        }
 
         # legacy compat read of pre-rename event log / handoff
         if (-not $handoff.PSObject.Properties["source_phase"] -and $handoff.PSObject.Properties["source_specialist"]) {
@@ -551,8 +562,8 @@ function Invoke-HandoffPreflightValidation {
             }
         }
 
-        # 2. Check for unprocessed handoff from PREVIOUS session
-        $allTaskHandoffs = @(Get-ChildItem -Path $HANDOFF_DIR -Filter ($handoff.task_id + "-*.json") | Sort-Object Name -Descending)
+        $allTaskHandoffs = @(Get-ChildItem -Path $HANDOFF_DIR -Filter ($handoff.task_id + "-*.json"))
+        $allTaskHandoffs = @(Sort-HandoffFiles -Files $allTaskHandoffs)
         if ($allTaskHandoffs.Count -gt 1) {
             Write-Quiet ("[HANDOFF] Warning: Found $($allTaskHandoffs.Count - 1) previous handoff files for $($handoff.task_id) that may be stale.") -ForegroundColor Yellow
         }
@@ -1250,6 +1261,13 @@ function Invoke-CircuitBreakerGates {
     }
 
     $handoff = $Context.Handoff
+    # Default missing optional counters to prevent StrictMode crash (Part C)
+    foreach ($counter in @("review_strike_count", "rebase_count", "handoff_retry_count", "cumulative_handoff_count")) {
+        if ($null -eq $handoff.PSObject.Properties[$counter]) {
+            $defaultVal = if ($counter -eq "cumulative_handoff_count") { 1 } else { 0 }
+            $handoff | Add-Member -MemberType NoteProperty -Name $counter -Value $defaultVal -Force
+        }
+    }
     $ceiling = $Context.Ceiling
     $LOG_FILE = $Context.LogFile
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
