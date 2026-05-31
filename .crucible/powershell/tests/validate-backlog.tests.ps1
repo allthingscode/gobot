@@ -260,11 +260,12 @@ try {
         Assert-Result -Name "orphan mentions spec path" -Condition ($r.Output -match "C-001_Orphan\.md") -FailureMessage ("expected the spec path in the error. Output: " + $r.Output)
     }
 
-    # --- Test 7 (REGRESSION): stale archived spec status is repaired when BACKLOG row is terminal ---
-    $results += Run-Test -Name "REGRESSION: stale archived status is repaired from terminal BACKLOG row" -Body {
+    # --- Test 7 (REGRESSION): stale archived spec status is repaired when a non-first BACKLOG row is terminal ---
+    $results += Run-Test -Name "REGRESSION: stale archived status is repaired from non-first terminal BACKLOG row" -Body {
         $root = Join-Path $tempRoot "archived-stale-terminal"
         New-MinimalBacklogTree -Root $root
         $specPath = Join-Path $root "chores/archived/C-304_Multi_Model_Routing_Audit.md"
+        New-SpecFile -Root $root -RelPath "chores/archived/C-303_Previous_Resolved.md" -ItemId "C-303" -Priority "P2" -Title "Previous Resolved" -Status "Resolved"
         New-SpecFile -Root $root -RelPath "chores/archived/C-304_Multi_Model_Routing_Audit.md" -ItemId "C-304" -Priority "P2" -Title "Multi Model Routing Audit" -Status "Ready for Deploy"
         $backlog = Join-Path $root "BACKLOG.md"
 @"
@@ -285,6 +286,7 @@ try {
 
 | ID | Priority | Status | Title | Target |
 |---|---|---|---|---|
+| [C-303](chores/archived/C-303_Previous_Resolved.md) | P2 | Resolved | Previous Resolved | Operator |
 | [C-304](chores/archived/C-304_Multi_Model_Routing_Audit.md) | P2 | Resolved | Multi Model Routing Audit | Operator |
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 

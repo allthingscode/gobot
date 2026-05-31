@@ -3,7 +3,9 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 $SCRIPT = Join-Path $REPO_ROOT "powershell/archive-task.ps1"
+$LIB = Join-Path $REPO_ROOT "powershell/lib/archive-task.ps1"
 $results = @()
+. $LIB
 
 function Assert-Result {
     param([string]$Name, [bool]$Condition, [string]$FailureMessage)
@@ -55,14 +57,40 @@ created_at: "2026-05-25"
 
 function Invoke-ArchiveTask {
     param([string]$BacklogPath, [string]$SpecPath)
-    $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT -BacklogPath $BacklogPath -SpecPath $SpecPath 2>&1)
-    return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT -BacklogPath $BacklogPath -SpecPath $SpecPath 2>&1)
+        return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-archive-task-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
 try {
+    $results += Run-Test -Name "Status-column resolver handles non-first rows and table boundaries" -Body {
+        $lines = @(
+            "# Backlog",
+            "",
+            "| ID | Status | Title |",
+            "|---|---|---|",
+            "| [C-100](chores/active/C-100_First.md) | Ready | First |",
+            "| [C-101](chores/active/C-101_Second.md) | Ready for Deploy | Second |",
+            "",
+            "| ID | Title |",
+            "|---|---|",
+            "| [C-200](chores/active/C-200_No_Status.md) | No Status Column |"
+        )
+
+        $statusColumn = Get-MarkdownTableStatusColumn -Lines $lines -RowIndex 5
+        $boundaryStatusColumn = Get-MarkdownTableStatusColumn -Lines $lines -RowIndex 9
+        Assert-Result -Name "non-first row status column" -Condition ($statusColumn -eq 1) -FailureMessage ("expected Status column index 1, got " + $statusColumn)
+        Assert-Result -Name "boundary does not bind prior table" -Condition ($boundaryStatusColumn -eq -1) -FailureMessage ("expected no Status column across table boundary, got " + $boundaryStatusColumn)
+    }
+
     $results += Run-Test -Name "Archives chore with Resolved frontmatter and BACKLOG row" -Body {
         $root = Join-Path $tempRoot "chore"
         New-MinimalBacklogTree -Root $root
@@ -88,6 +116,7 @@ try {
 
 | ID | Priority | Status | Title | Target |
 |---|---|---|---|---|
+| [C-100](chores/active/C-100_Previous.md) | P2 | Ready | Previous | Operator |
 | [C-101]($activeRel) | P2 | Ready for Deploy | Close The Loop | Operator |
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
@@ -100,6 +129,36 @@ try {
         Assert-Result -Name "chore archived exists" -Condition (Test-Path -LiteralPath $archivedPath) -FailureMessage "archived chore spec not found"
         Assert-Result -Name "chore status resolved" -Condition ($specContent -match 'status:\s*"Resolved"') -FailureMessage ("expected Resolved frontmatter. Content: " + $specContent)
         Assert-Result -Name "chore backlog row resolved" -Condition ($backlogContent -match '\[C-101\]\(chores/archived/C-101_Close_The_Loop\.md\)\s*\|\s*P2\s*\|\s*Resolved') -FailureMessage ("expected archived Resolved BACKLOG row. Content: " + $backlogContent)
+    }
+
+    $results += Run-Test -Name "Rollback restores active spec when BACKLOG row has no Status column" -Body {
+        $root = Join-Path $tempRoot "rollback-no-status"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "chores/active/C-150_No_Status_Column.md"
+        $archivedRel = "chores/archived/C-150_No_Status_Column.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "C-150" -Type "Chore" -Priority "P2" -Title "No Status Column"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Active Items
+
+| ID | Status | Title | Target |
+|---|---|---|---|
+| [C-149](chores/active/C-149_Previous.md) | Ready | Previous | Operator |
+
+## Other Items
+
+| ID | Priority | Title | Target |
+|---|---|---|---|
+| [C-150]($activeRel) | P2 | No Status Column | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel)
+        Assert-Result -Name "rollback exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "rollback active restored" -Condition (Test-Path -LiteralPath (Join-Path $root $activeRel)) -FailureMessage "active spec was not restored"
+        Assert-Result -Name "rollback archived absent" -Condition (-not (Test-Path -LiteralPath (Join-Path $root $archivedRel))) -FailureMessage "archived spec remained after failure"
+        Assert-Result -Name "rollback error mentions status column" -Condition ($r.Output -match "Unable to locate Status column") -FailureMessage ("expected status-column error. Output: " + $r.Output)
     }
 
     $results += Run-Test -Name "Archives feature with Production frontmatter and BACKLOG row" -Body {

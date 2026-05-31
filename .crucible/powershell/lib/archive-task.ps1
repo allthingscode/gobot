@@ -71,9 +71,17 @@ function Get-MarkdownTableStatusColumn {
 
     for ($i = $RowIndex - 1; $i -ge 0; $i--) {
         $line = $Lines[$i]
-        if ($line -notmatch '^\s*\|') { continue }
-        if ($line -match '^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$') { continue }
-        $cells = @($line.Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
+        if ($line -notmatch '^\s*\|') { return -1 }
+        if ($line -notmatch '^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$') { continue }
+
+        $headerIndex = $i - 1
+        if ($headerIndex -lt 0) { return -1 }
+
+        $headerLine = $Lines[$headerIndex]
+        if ($headerLine -notmatch '^\s*\|') { return -1 }
+        if ($headerLine -match '^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$') { return -1 }
+
+        $cells = @($headerLine.Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
         for ($j = 0; $j -lt $cells.Count; $j++) {
             if ($cells[$j] -eq "Status") { return $j }
         }
