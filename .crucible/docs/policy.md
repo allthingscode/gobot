@@ -23,6 +23,7 @@ Circuit breakers prevent "infinite loops" and budget escalation by blocking task
 | **Token Budget (Low)** | 6 handoffs | BLOCK task; route to Human |
 | **Token Budget (Medium)** | 10 handoffs | BLOCK task; route to Human |
 | **Token Budget (High)** | 24 handoffs | BLOCK task; route to Human |
+| **Token Budget (Extended)** | 32 handoffs | BLOCK task; route to Human |
 | **Merge Conflict** | > 3 rebase attempts | BLOCK task; route to Human |
 | **Fabricated Artifacts** | Missing paths in `artifacts` field | BLOCK task; route to Human |
 | **Verification Failure** | `go test` fails after verification approval | BLOCK task; route to implementation |
@@ -134,4 +135,3 @@ In addition to circuit breakers, `factory.ps1` enforces runtime validation gates
 - **Budget Tier Cross-Validation**: `factory.ps1` reads the backlog spec frontmatter at task initialization and overrides the handoff's `budget_tier` if it mismatches. Specialists cannot escalate their own budget tier.
 - **Log-Derived Handoff Count**: `factory.ps1` counts `session_end` events in the task-scoped pipeline log and overrides the agent-reported `cumulative_handoff_count` if it is lower (preventing budget under-reporting).
 - **Scan Limit**: `factory.ps1` auto-kickoff scans at most 5 items in a single run.
-

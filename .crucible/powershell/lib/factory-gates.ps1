@@ -259,9 +259,11 @@ function Read-FactoryHandoffContext {
     $handoffFile = $latestHandoff.FullName
     $budgetCeilings = $Context.BudgetCeilings
     if ($null -eq $budgetCeilings) {
-        $budgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+        $budgetCeilings = Get-BudgetCeilings
     }
-    $ceiling = 0
+    $ceiling = $null
+    $invalidBudgetTier = ""
+    $tierKey = ""
     $LOG_FILE = $Context.LogFile
 
     try {
@@ -305,8 +307,12 @@ function Read-FactoryHandoffContext {
 
     # Compute $ceiling unconditionally so prompt assembly never shows "unknown" on re-runs (Fix 8)
     if ($handoff.psobject.Properties["budget_tier"] -and $handoff.budget_tier) {
-        $tierKey = $handoff.budget_tier.ToLower()
-        if ($budgetCeilings.ContainsKey($tierKey)) { $ceiling = $budgetCeilings[$tierKey] }
+        $tierKey = ([string]$handoff.budget_tier).Trim().ToLowerInvariant()
+        if ($budgetCeilings.ContainsKey($tierKey)) {
+            $ceiling = $budgetCeilings[$tierKey]
+        } else {
+            $invalidBudgetTier = $tierKey
+        }
     }
 
     # Server-side handoff count - agent-reported values cannot be trusted for circuit breakers (Fix 2)
@@ -328,6 +334,8 @@ function Read-FactoryHandoffContext {
     $Context.Handoff = $handoff
     $Context.BudgetCeilings = $budgetCeilings
     $Context.Ceiling = $ceiling
+    $Context.BudgetTierKey = $tierKey
+    $Context.InvalidBudgetTier = $invalidBudgetTier
     $Context.CumulativeHandoffCount = [int]$handoff.cumulative_handoff_count
     $resolvedRoot = (Resolve-Path -LiteralPath $Context.RepoRoot).Path.TrimEnd("\", "/")
     $resolvedPath = (Resolve-Path -LiteralPath $handoffFile).Path
@@ -1248,6 +1256,12 @@ function Invoke-CircuitBreakerGates {
     $FRAMEWORK_POWERSHELL = $Context.FrameworkPowerShell
     $workspacesDir = $Context.WorkspacesDir
     $sessionDir = $Context.SessionDir
+    $invalidBudgetTier = ""
+    if ($Context.ContainsKey("InvalidBudgetTier") -and -not [string]::IsNullOrWhiteSpace([string]$Context.InvalidBudgetTier)) {
+        $invalidBudgetTier = [string]$Context.InvalidBudgetTier
+    } elseif ($handoff.PSObject.Properties["budget_tier"] -and $handoff.budget_tier -and $null -eq $ceiling) {
+        $invalidBudgetTier = ([string]$handoff.budget_tier).Trim().ToLowerInvariant()
+    }
 
     # --- 3. Circuit Breakers ---
     # Suspicious Content (Prompt Injection Defense - {task_id})
@@ -1295,8 +1309,8 @@ function Invoke-CircuitBreakerGates {
 
     # Token Budget Enforcement
     if ($handoff.budget_tier) {
-        if ($null -eq $ceiling) {
-            Write-Host ("Error: Invalid budget_tier " + $handoff.budget_tier) -ForegroundColor Red
+        if (-not [string]::IsNullOrWhiteSpace($invalidBudgetTier)) {
+            Write-Host ("Error: Invalid budget_tier '" + $handoff.budget_tier + "'. Allowed values: " + ((Get-BudgetTierList) -join ", ")) -ForegroundColor Red
             exit 1
         }
 

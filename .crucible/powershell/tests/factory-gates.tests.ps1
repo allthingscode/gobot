@@ -72,6 +72,8 @@ function New-TestContext {
         GateReason = $null
         BudgetCeilings = $null
         Ceiling = $null
+        BudgetTierKey = ""
+        InvalidBudgetTier = ""
         Handoff = $null
         LatestHandoff = $null
         RelativeHandoffPath = $null
@@ -154,6 +156,82 @@ budget_tier: medium
         Assert-Result -Name "source mapped" -Condition ($ctx.Handoff.source_phase -eq "implementation") -FailureMessage "source_specialist was not mapped"
         Assert-Result -Name "target mapped" -Condition ($ctx.Handoff.target_phase -eq "verification") -FailureMessage "target_specialist was not mapped"
         Assert-Result -Name "ceiling mapped" -Condition ($ctx.Ceiling -eq 24) -FailureMessage "budget ceiling was not derived"
+    }
+
+    $results += Run-Test -Name "Read-FactoryHandoffContext maps extended budget ceiling" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "extended-budget") -TaskId "F-002X"
+        $handoffPath = Join-Path $ctx.HandoffDir "F-002X-20260526T120000Z.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "F-002X"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 3
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "extended"
+            reason = "extended budget"
+            artifacts = @()
+            file_affinity = @()
+            prompt_version = "1.0.0"
+            session_cycle_id = "cycle-extended"
+        }
+        $ctx.LatestHandoff = Get-Item $handoffPath
+
+        Read-FactoryHandoffContext -Context $ctx
+
+        Assert-Result -Name "extended ceiling" -Condition ($ctx.Ceiling -eq 32) -FailureMessage "extended budget ceiling was not 32"
+        Assert-Result -Name "no invalid tier" -Condition ([string]::IsNullOrWhiteSpace($ctx.InvalidBudgetTier)) -FailureMessage "extended was marked invalid"
+    }
+
+    $results += Run-Test -Name "Invalid budget tier is rejected before budget_exceeded breaker" -Body {
+        $caseRoot = Join-Path $tempRoot "invalid-budget"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $scriptPath = Join-Path $caseRoot "run-invalid-budget.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $repoRoot = $caseRoot.Replace("'", "''")
+        $script = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-INVALID'
+        source_phase = 'grooming'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 5
+        handoff_retry_count = 0
+        review_strike_count = 0
+        rebase_count = 0
+        budget_tier = 'standard'
+        reason = 'invalid tier'
+    }
+    Ceiling = `$null
+    InvalidBudgetTier = 'standard'
+    LogFile = (Join-Path '$repoRoot' 'pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$repoRoot' 'circuit_breakers.jsonl')
+    FrameworkPowerShell = (Join-Path '$repoRoot' 'powershell')
+    RepoRoot = '$repoRoot'
+    WorkspacesDir = (Join-Path '$repoRoot' 'workspaces')
+    SessionDir = (Join-Path '$repoRoot' 'session')
+}
+Invoke-CircuitBreakerGates -Context `$ctx
+"@
+        $script | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit 1, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "invalid tier message" -Condition ($outputText -match "Invalid budget_tier") -FailureMessage "missing invalid tier message. Output:`n$outputText"
+        Assert-Result -Name "no budget breaker" -Condition ($outputText -notmatch "budget_exceeded|Token Budget Exceeded") -FailureMessage "invalid tier was reported as budget breaker. Output:`n$outputText"
     }
 
     $results += Run-Test -Name "Invoke-HandoffPreflightValidation restores cycle id" -Body {

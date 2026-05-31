@@ -16,6 +16,27 @@ if (-not (Test-Path -LiteralPath $taskChecklistPath)) {
 # string literals, so keep those literals synchronized with this constant.
 $script:FACTORY_PHASES = @("research", "grooming", "implementation", "verification", "deployment")
 
+$script:BUDGET_TIERS = @("low", "medium", "high", "extended")
+$script:BUDGET_CEILINGS = @{ low = 6; medium = 10; high = 24; extended = 32 }
+
+function Get-BudgetCeilings {
+    return $script:BUDGET_CEILINGS.Clone()
+}
+
+function Test-BudgetTier {
+    param([AllowNull()][string]$BudgetTier)
+
+    if ([string]::IsNullOrWhiteSpace($BudgetTier)) {
+        return $false
+    }
+
+    return $script:BUDGET_CEILINGS.ContainsKey($BudgetTier.Trim().ToLowerInvariant())
+}
+
+function Get-BudgetTierList {
+    return [string[]]$script:BUDGET_TIERS
+}
+
 # Map FSM phase to assigned actor persona
 $script:PHASE_ROLE_MAP = @{
     "research"       = "researcher"

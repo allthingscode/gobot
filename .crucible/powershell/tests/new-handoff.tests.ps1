@@ -54,6 +54,19 @@ function Invoke-Generator {
     }
 }
 
+function Invoke-ExternalCommand {
+    param([Parameter(Mandatory=$true)][scriptblock]$Command)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $Command 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    return [PSCustomObject]@{ Output = ($output -join "`n"); ExitCode = $exitCode }
+}
+
 function Track-HandoffFile {
     param([string]$TaskId)
     $latest = Get-ChildItem -Path $handoffDir -Filter ($TaskId + "-*.json") -ErrorAction SilentlyContinue |
@@ -197,6 +210,30 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "extended budget tier is accepted by generator" -Script {
+        $taskId = New-TestTaskId "BUDGET-EXTENDED"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "extended budget test"
+            PromptVersion = "groomer_prompt-v16"
+            BudgetTier = "extended"
+            Artifacts = @("powershell/factory.ps1")
+            FileAffinity = @("powershell/")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ($obj.budget_tier -ne "extended") {
+            throw "Expected budget_tier=extended, got: $($obj.budget_tier)"
+        }
+    }
+
     Invoke-Test -Name "groomer->reviewer success (Pattern C stub-only pass)" -Script {
         $taskId = New-TestTaskId "GR"
         $result = Invoke-Generator -InputArgs @{
@@ -305,6 +342,42 @@ budget_tier: "low"
         }
         if ($result.Output -notmatch "budget_tier_mismatch") {
             throw "Expected budget_tier_mismatch, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "invalid budget tier is rejected without spec lookup" -Script {
+        $taskId = New-TestTaskId "BUDGET-INVALID"
+        $handoffPath = Join-Path $handoffDir "$taskId-20260530T120000Z.json"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $handoffPath) -Force | Out-Null
+        [ordered]@{
+            task_id = $taskId
+            source_phase = "grooming"
+            target_phase = "implementation"
+            reason = "invalid budget test"
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "standard"
+            cumulative_handoff_count = 2
+            prompt_version = "groomer_prompt-v16"
+            session_cycle_id = "cycle-invalid"
+            artifacts = @("powershell/factory.ps1")
+            file_affinity = @("powershell/")
+        } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $script:createdFiles += $handoffPath
+
+        $result = Invoke-ExternalCommand {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
+        }
+
+        if ($result.ExitCode -eq 0) {
+            throw "Expected invalid budget tier failure but validator passed"
+        }
+        if ($result.Output -notmatch "invalid_budget_tier") {
+            throw "Expected invalid_budget_tier, got: $($result.Output)"
+        }
+        if ($result.Output -match "budget_tier_mismatch") {
+            throw "Invalid tier should not depend on spec mismatch, got: $($result.Output)"
         }
     }
 

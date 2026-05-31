@@ -69,7 +69,7 @@ Path: `.crucible/session/handoffs/{task_id}-{timestamp}.json`
   "target_phase": "implementation",
   "handoff_retry_count": 0,
   "cumulative_handoff_count": 1,
-  "budget_tier": "low|medium|high",
+  "budget_tier": "low|medium|high|extended",
   "prompt_version": "groomer-sop-v1",
   "reason": "Ready for implementation",
   "file_affinity": ["src/context/", "cmd/app/"],

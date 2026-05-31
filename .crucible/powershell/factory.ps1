@@ -230,7 +230,7 @@ $backlogDir = Get-ConfiguredPath -Key "backlog"
 $workspacesDir = Get-ConfiguredPath -Key "workspaces"
 $HANDOFF_DIR = Join-Path $sessionDir "handoffs"
 $PROMPT_LIB = Get-ConfiguredPath -Key "prompts"
-$budgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+$budgetCeilings = Get-BudgetCeilings
 $ceiling = 0
 $promptText = ""
 

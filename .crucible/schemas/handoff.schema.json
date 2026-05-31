@@ -41,7 +41,7 @@
     },
     "budget_tier": {
       "type": "string",
-      "enum": ["low", "medium", "high"],
+      "enum": ["low", "medium", "high", "extended"],
       "description": "The token budget tier assigned during grooming"
     },
     "cumulative_handoff_count": {

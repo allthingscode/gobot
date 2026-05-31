@@ -13,28 +13,34 @@ if (-not (Test-Path $POLICY_FILE)) {
 $policyContent = Get-Content $POLICY_FILE -Raw
 $errors = @()
 
-# 1. Verify Budget Tiers in factory.ps1
-$factoryPath = Join-Path $REPO_ROOT "powershell/factory.ps1"
-if (Test-Path $factoryPath) {
-    $factoryContent = Get-Content $factoryPath -Raw
+# 1. Verify Budget Tiers in factory-lib.ps1
+$factoryLibPath = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+if (Test-Path $factoryLibPath) {
+    $factoryLibContent = Get-Content $factoryLibPath -Raw
     
     # Extract budgets from POLICY.md
     if ($policyContent -match 'Token Budget \(Low\)\s*\|\s*(\d+)') {
         $low = $Matches[1]
-        if ($factoryContent -notmatch "`$budgetCeilings = @\{ low = $low;") {
-            $errors += "Budget mismatch: POLICY.md says Low=$low, but factory.ps1 differs"
+        if ($factoryLibContent -notmatch "low = $low") {
+            $errors += "Budget mismatch: POLICY.md says Low=$low, but factory-lib.ps1 differs"
         }
     }
     if ($policyContent -match 'Token Budget \(Medium\)\s*\|\s*(\d+)') {
         $med = $Matches[1]
-        if ($factoryContent -notmatch "medium = $med;") {
-            $errors += "Budget mismatch: POLICY.md says Medium=$med, but factory.ps1 differs"
+        if ($factoryLibContent -notmatch "medium = $med") {
+            $errors += "Budget mismatch: POLICY.md says Medium=$med, but factory-lib.ps1 differs"
         }
     }
     if ($policyContent -match 'Token Budget \(High\)\s*\|\s*(\d+)') {
         $high = $Matches[1]
-        if ($factoryContent -notmatch "high = $high \}") {
-            $errors += "Budget mismatch: POLICY.md says High=$high, but factory.ps1 differs"
+        if ($factoryLibContent -notmatch "high = $high") {
+            $errors += "Budget mismatch: POLICY.md says High=$high, but factory-lib.ps1 differs"
+        }
+    }
+    if ($policyContent -match 'Token Budget \(Extended\)\s*\|\s*(\d+)') {
+        $extended = $Matches[1]
+        if ($factoryLibContent -notmatch "extended = $extended") {
+            $errors += "Budget mismatch: POLICY.md says Extended=$extended, but factory-lib.ps1 differs"
         }
     }
 }

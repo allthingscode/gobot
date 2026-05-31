@@ -18,7 +18,8 @@ param(
     [int]$HandoffRetryCount = -1,
     [int]$ReviewStrikeCount = -1,
     [int]$RebaseCount = -1,
-    [ValidateSet("low", "medium", "high")]
+    # Keep synchronized with $script:BUDGET_TIERS in factory-lib.ps1.
+    [ValidateSet("low", "medium", "high", "extended")]
     [string]$BudgetTier = "",
     [int]$CumulativeHandoffCount = -1,
     [string]$PromptVersion = "",

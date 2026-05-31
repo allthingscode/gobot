@@ -239,6 +239,18 @@ if ($handoff.PSObject.Properties["budget_tier"] -and $null -ne $handoff.budget_t
     $handoffBudgetTier = ([string]$handoff.budget_tier).Trim().ToLowerInvariant()
 }
 
+if (-not [string]::IsNullOrWhiteSpace($handoffBudgetTier) -and -not (Test-BudgetTier -BudgetTier $handoffBudgetTier)) {
+    Write-ValidationResult -Ok $false `
+        -ReasonCode "invalid_budget_tier" `
+        -Message ("Invalid budget_tier: " + $handoffBudgetTier + ". Allowed values: " + ((Get-BudgetTierList) -join ", ")) `
+        -Details @{
+            handoff_file = $HandoffFile
+            task_id = $taskId
+            handoff_budget_tier = $handoffBudgetTier
+            allowed_budget_tiers = Get-BudgetTierList
+        }
+}
+
 if (-not [string]::IsNullOrWhiteSpace($taskId) -and -not [string]::IsNullOrWhiteSpace($handoffBudgetTier)) {
     $specBudget = Get-SpecBudgetTier -Task $taskId -IncludePath
     $specBudgetTier = [string]$specBudget.Tier

@@ -5,7 +5,7 @@ status: "Ready"
 priority: "P1"
 # target_phase: The first activity phase to receive the task (typically grooming or research)
 target_phase: "grooming"
-# budget_tier: The token budget category (low, medium, high)
+# budget_tier: The token budget category (low, medium, high, extended)
 budget_tier: "low"
 ---
 
