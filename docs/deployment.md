@@ -203,6 +203,45 @@ You can use the provided script to check for errors:
 .\scripts\get_logs.ps1
 ```
 
+### 5. Environment Variable Inheritance (Important)
+
+**Windows Task Scheduler does not inherit environment variables from your interactive shell session.** A variable you set in your PowerShell profile or current session — including `GOBOT_STORAGE` — is **not** visible to a scheduled task unless it is explicitly baked into the task at registration time.
+
+**Why this matters for `GOBOT_STORAGE`:** Gobot resolves its storage root in this order (`internal/config/config.go`, `StorageRoot()`):
+
+1. `config.json` → `strategic_edition.storage_root`
+2. The `GOBOT_STORAGE` environment variable
+3. `~/gobot_data` (default)
+
+If you rely on `GOBOT_STORAGE` (rather than `config.json`) to point at a custom path such as `D:\GobotData`, a scheduled task that does not see that variable falls back to `~/gobot_data`. The result is a **split-brain layout**: your interactive runs use `D:\GobotData` while the scheduled run uses `~/gobot_data`, so databases, logs, the secrets vault, and cron jobs end up in two locations.
+
+**Automatic capture via `install_task.ps1`:** The provided `scripts\install_task.ps1` registration script handles this for you. At registration time it reads the current session's `GOBOT_STORAGE` and, if set, bakes it directly into the task's command line (`-Command "$env:GOBOT_STORAGE='<value>'; & '<start_gobot.ps1>'"`). After registration it prints a confirmation, e.g. `Task created with GOBOT_STORAGE=D:\GobotData`. If `GOBOT_STORAGE` is unset, it tells you the task will use the default storage root.
+
+```powershell
+# Set your custom path, then register the task so it is captured:
+$env:GOBOT_STORAGE = "D:\GobotData"
+.\scripts\install_task.ps1
+```
+
+> **Tip:** Setting `strategic_edition.storage_root` in `config.json` is the most robust option, because it takes priority over the environment variable and applies to every run — interactive, manual, or scheduled — regardless of how the process was launched.
+
+#### Updating `GOBOT_STORAGE` on an existing task
+
+The capture happens **at registration time only**; changing `$env:GOBOT_STORAGE` afterward does not update an already-registered task. To change the storage path for an existing task, re-run the installer with the new value (it removes and re-registers the task):
+
+```powershell
+$env:GOBOT_STORAGE = "E:\NewGobotData"
+.\scripts\install_task.ps1
+```
+
+Alternatively, edit the task's action by hand in **Task Scheduler** (Actions tab → Edit) and update the `-Command` argument so the `$env:GOBOT_STORAGE='...'` assignment reflects the new path, or remove the assignment entirely to fall back to the default. You can inspect the current command with:
+
+```powershell
+(Get-ScheduledTask -TaskName "Gobot Strategic Edition").Actions.Arguments
+```
+
+If you manage the storage root through `config.json` instead, no task change is needed — just update `strategic_edition.storage_root` and restart the task.
+
 ---
 
 ## Cron Job Scheduling & Missed Job Behavior
