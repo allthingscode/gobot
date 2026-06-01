@@ -1388,6 +1388,19 @@ function Invoke-CircuitBreakerGates {
     }
 }
 
+function Invoke-GitChecked {
+    param(
+        [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock
+    )
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $ScriptBlock
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
 function Invoke-HumanGateAction {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -1395,10 +1408,10 @@ function Invoke-HumanGateAction {
     )
     $primaryBranch = Get-PrimaryBranchName
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
-        $remotes = @(git remote 2>$null)
+        $remotes = @(Invoke-GitChecked { git remote 2>$null })
         if ($remotes -contains "origin") {
             Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
-            git push origin $primaryBranch
+            Invoke-GitChecked { git push origin $primaryBranch }
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
                 exit 1
@@ -1407,8 +1420,8 @@ function Invoke-HumanGateAction {
             Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
         }
     } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
-        $currentHead = (git rev-parse HEAD).Trim()
-        $parents = (git log --pretty=%P -n 1 $currentHead).Trim()
+        $currentHead = (Invoke-GitChecked { git rev-parse HEAD }).Trim()
+        $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
         $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
 
         $resetTarget = "origin/$primaryBranch"
@@ -1419,15 +1432,16 @@ function Invoke-HumanGateAction {
             Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
         }
 
-        git checkout $primaryBranch
-        git reset --hard $resetTarget
+        Invoke-GitChecked { git checkout $primaryBranch }
+        Invoke-GitChecked { git reset --hard $resetTarget }
         
         if ($Outcome -eq "rejected") {
-            if (-not (git show-ref --quiet "refs/heads/task/$TaskId")) {
+            Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
+            if ($LASTEXITCODE -ne 0) {
                 if ($parentList.Count -ge 2) {
-                    git branch "task/$TaskId" $parentList[1]
+                    Invoke-GitChecked { git branch "task/$TaskId" $parentList[1] }
                 } else {
-                    git branch "task/$TaskId" $currentHead
+                    Invoke-GitChecked { git branch "task/$TaskId" $currentHead }
                 }
                 Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
             }

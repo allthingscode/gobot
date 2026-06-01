@@ -973,6 +973,275 @@ try {
         Assert-Result -Name "D22: task branch was restored on reject" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch task/F-999 was not restored"
     }
 
+    $results += Run-Test -Name "Invoke-HumanGate D37: push behavior with benign git stderr and failures" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d37-testing"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        
+        # 1. Setup origin & local repo
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+        
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+        
+        # Initial commit
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+
+        # Setup context structure
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        $pendingFile = Join-Path $sessionDir "F-100/gate_pending.txt"
+        $legacyPendingFile = Join-Path $gateDir "gate_decision_F-100_pending.json"
+        
+        # Helper to re-create pending files
+        function Reset-PendingFiles {
+            New-Item -ItemType Directory -Path $gateDir, (Join-Path $sessionDir "F-100") -Force | Out-Null
+            "pending" | Set-Content -LiteralPath $pendingFile -Encoding UTF8
+            "legacy-pending" | Set-Content -LiteralPath $legacyPendingFile -Encoding UTF8
+        }
+        
+        $scriptPath = Join-Path $caseRoot "run-d37.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Test Case 1: Accept with no-op push
+        Reset-PendingFiles
+        $scriptAcceptNoOp = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'verification of acceptance criteria passed'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_ACCEPT"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptAcceptNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        
+        Assert-Result -Name "D37: no-op accept push exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: new pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
+        Assert-Result -Name "D37: legacy pending file removed" -Condition (-not (Test-Path $legacyPendingFile)) -FailureMessage "legacy pending file still exists"
+        
+        # Test Case 2: Redirect with no-op push
+        Reset-PendingFiles
+        $scriptRedirectNoOp = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'redirected'
+    GateReason = 'redirect to new'
+    GateRedirectTarget = 'F-101'
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REDIRECT"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptRedirectNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        
+        Assert-Result -Name "D37: no-op redirect push exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: redirected new pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
+        Assert-Result -Name "D37: redirected legacy pending file removed" -Condition (-not (Test-Path $legacyPendingFile)) -FailureMessage "legacy pending file still exists"
+
+        # Test Case 3: Real successful push (1 commit ahead)
+        git -C $localRepo checkout master 2>$null | Out-Null
+        "update" | Set-Content -LiteralPath (Join-Path $localRepo "update.txt") -Encoding UTF8
+        git -C $localRepo add update.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "second commit" 2>$null | Out-Null
+        
+        Reset-PendingFiles
+        $scriptRealPush = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'commit push verification'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REAL_PUSH"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptRealPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        
+        Assert-Result -Name "D37: real successful push exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: real push pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
+        
+        # Verify remote origin now matches local master
+        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D37: push landed on origin" -Condition ($behindCommits.Count -eq 0) -FailureMessage "origin/master did not catch up"
+
+        # Test Case 4: Failing push (invalid remote / remote ref)
+        git -C $localRepo remote set-url origin "https://example.invalid/repo.git"
+        Reset-PendingFiles
+        $scriptFailedPush = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'this should fail push'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_UNEXPECTED"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptFailedPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        
+        # Check that it exited 1 due to push failure
+        Assert-Result -Name "D37: failed push exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit code 1, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: failed push keeps pending files" -Condition (Test-Path $pendingFile) -FailureMessage "pending file was cleaned up on failure"
+
+        # Test Case 5: Reject/Abandon branch unwinding
+        # Restore a valid remote origin
+        git -C $localRepo remote set-url origin $originRepo
+        
+        # Simulate local merge on task branch
+        git -C $localRepo checkout -b task/F-100 2>$null | Out-Null
+        "rwork" | Set-Content -LiteralPath (Join-Path $localRepo "rwork.txt") -Encoding UTF8
+        git -C $localRepo add rwork.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "rework commit" 2>$null | Out-Null
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-100 2>$null | Out-Null
+        
+        # Remove task branch first to test restoration
+        git -C $localRepo branch -D task/F-100 2>$null | Out-Null
+        
+        Reset-PendingFiles
+        $scriptReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'needs rework'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REJECT"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        
+        Assert-Result -Name "D37: reject unwinds merge and exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0 on reject, got $exitCode. Output:`n$outputText"
+        # Confirm branch task/F-100 exists
+        git -C $localRepo show-ref --quiet refs/heads/task/F-100
+        Assert-Result -Name "D37: reject restored task branch" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task/F-100 branch was not restored"
+    }
+
     $results += Run-Test -Name "Resolve-FactoryTransition handles valid and invalid transitions" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "routing-gates") -TaskId "F-006"
         
