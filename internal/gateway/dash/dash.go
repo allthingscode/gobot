@@ -444,19 +444,31 @@ func (h *Handler) hubLogTail(maxLines int, level string) string {
 	if len(backlog) == 0 {
 		return ""
 	}
-	filter := levelFilter(level)
-	if filter != "" {
-		filtered := backlog[:0:0]
-		for _, e := range backlog {
-			if e != nil && levelMatches(e.Level, filter) {
-				filtered = append(filtered, e)
-			}
-		}
-		backlog = filtered
-	}
+	backlog = filterByLevel(backlog, levelFilter(level))
 	if len(backlog) > maxLines {
 		backlog = backlog[len(backlog)-maxLines:]
 	}
+	return formatLogEntries(backlog)
+}
+
+// filterByLevel returns only the entries whose level matches filter, skipping
+// nil entries. When filter is "" the input is returned unchanged.
+func filterByLevel(backlog []*dashboard.LogEntry, filter string) []*dashboard.LogEntry {
+	if filter == "" {
+		return backlog
+	}
+	filtered := backlog[:0:0]
+	for _, e := range backlog {
+		if e != nil && levelMatches(e.Level, filter) {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
+
+// formatLogEntries renders entries as newline-separated "ts level message"
+// lines, skipping nil entries, with no trailing newline.
+func formatLogEntries(backlog []*dashboard.LogEntry) string {
 	var sb strings.Builder
 	for _, e := range backlog {
 		if e == nil {
