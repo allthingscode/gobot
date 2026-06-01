@@ -310,6 +310,72 @@ func TestLogsUsesHub(t *testing.T) {
 	}
 }
 
+func TestLogsLevelFilter(t *testing.T) {
+	t.Parallel()
+	backlog := []*dashboard.LogEntry{
+		{Timestamp: time.UnixMilli(1700000000000), Level: "INFO", Message: "entry-info"},
+		{Timestamp: time.UnixMilli(1700000001000), Level: "WARN", Message: "entry-warn"},
+		{Timestamp: time.UnixMilli(1700000002000), Level: "ERROR", Message: "entry-error"},
+	}
+	tests := []struct {
+		name    string
+		query   string
+		want    []string
+		notWant []string
+	}{
+		{
+			name:    "filtered subset (case-insensitive)",
+			query:   "?partial=true&level=warn",
+			want:    []string{"entry-warn"},
+			notWant: []string{"entry-info", "entry-error"},
+		},
+		{
+			name:    "no filter passthrough",
+			query:   "?partial=true",
+			want:    []string{"entry-info", "entry-warn", "entry-error"},
+			notWant: nil,
+		},
+		{
+			name:    "empty level shows all",
+			query:   "?partial=true&level=",
+			want:    []string{"entry-info", "entry-warn", "entry-error"},
+			notWant: nil,
+		},
+		{
+			name:    "unknown level falls back to all",
+			query:   "?partial=true&level=bogus",
+			want:    []string{"entry-info", "entry-warn", "entry-error"},
+			notWant: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &config.Config{}
+			cfg.Strategic.StorageRoot = t.TempDir()
+			h := NewHandler(Resources{Config: cfg, Hub: &mockLogHub{backlog: backlog}})
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs"+tt.query, http.NoBody)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+			}
+			body := w.Body.String()
+			for _, exp := range tt.want {
+				if !strings.Contains(body, exp) {
+					t.Errorf("body missing %q:\n%s", exp, body)
+				}
+			}
+			for _, exp := range tt.notWant {
+				if strings.Contains(body, exp) {
+					t.Errorf("body should not contain %q:\n%s", exp, body)
+				}
+			}
+		})
+	}
+}
+
 func TestLogsFallsBackToFileWhenHubEmpty(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
