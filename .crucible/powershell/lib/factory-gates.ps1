@@ -65,21 +65,9 @@ function Resolve-FactoryInputHandoff {
                 $targetPhase = "grooming"
                 $budgetTier = "low"
 
-                # Read target_phase/target_specialist and budget_tier from frontmatter
+                # Read budget_tier from frontmatter
                 $frontmatter = Get-Content -LiteralPath $specPath -Head 20
                 foreach ($line in $frontmatter) {
-                    if ($line -match '^\s*target_phase:\s*"?(\w+)"?\s*$') {
-                        $targetPhase = $matches[1].ToLowerInvariant()
-                    } elseif ($line -match '^\s*target_specialist:\s*"?(\w+)"?\s*$') {
-                        # legacy compat read of pre-rename frontmatter
-                        $legacy = $matches[1].ToLowerInvariant()
-                        $targetPhase = if ($legacy -eq "groomer") { "grooming" }
-                                       elseif ($legacy -eq "architect") { "implementation" }
-                                       elseif ($legacy -eq "reviewer") { "verification" }
-                                       elseif ($legacy -eq "operator") { "deployment" }
-                                       elseif ($legacy -eq "researcher") { "research" }
-                                       else { $legacy }
-                    }
                     if ($line -match '^\s*budget_tier:\s*"?(\w+)"?\s*$') {
                         $budgetTier = $matches[1].ToLowerInvariant()
                     }
@@ -725,15 +713,23 @@ function Invoke-FactoryRuntimeValidation {
 
         foreach ($artifact in $handoff.artifacts) {
             if ([string]::IsNullOrWhiteSpace($artifact)) { continue }
-            $resolvedPath = $artifact
-            if (-not [System.IO.Path]::IsPathRooted($artifact)) {
-                $resolvedPath = Join-Path $baseArtifactDir $artifact
+
+            $exists = $false
+            $matchedPath = $null
+            foreach ($base in @($wtPath, $repoRoot)) {
+                if ([string]::IsNullOrWhiteSpace($base)) { continue }
+                $candidate = if ([System.IO.Path]::IsPathRooted($artifact)) { $artifact } else { Join-Path $base $artifact }
+                if (Test-Path $candidate) {
+                    $exists = $true
+                    $matchedPath = $candidate
+                    break
+                }
             }
 
-            if (-not (Test-Path $resolvedPath)) {
+            if (-not $exists) {
                 Write-Host "[WARN] Artifact listed in handoff does not exist: $artifact" -ForegroundColor Yellow
                 $missingArtifacts += $artifact
-            } elseif ((Test-Path $resolvedPath) -and (Get-Item $resolvedPath).Length -eq 0) {
+            } elseif ((Get-Item $matchedPath).Length -eq 0) {
                 Write-Host "[WARN] Artifact is empty: $artifact" -ForegroundColor Yellow
             }
         }

@@ -536,6 +536,160 @@ created_at: "2026-05-08"
         $results += $false
     }
 
+    # --- D36: Dependency Check regex and block/warn validation ---
+    Write-Host "`nTest: D36 Dependency Check regex and block/warn validation" -ForegroundColor Cyan
+    $depTaskId = "F-TEST-DEPENDENCY"
+
+    # Clean up any active/archived spec files from previous tests to avoid orphan/broken link issues in backlog validation
+    Get-ChildItem -Path (Join-Path $tempRoot ".crucible/backlog") -Recurse -Include "*.md" -ErrorAction SilentlyContinue | Remove-Item -Force
+    
+    # 1. Setup BACKLOG.md with a table having Status column
+    $backlogPath = Join-Path $tempRoot ".crucible/backlog/BACKLOG.md"
+    $backlogContent = @"
+# Backlog
+
+## Priority 3 (P3)
+
+| ID | Title | Status |
+|---|---|---|
+| [F-TEST-DEPENDENCY](features/active/F-TEST-DEPENDENCY_spec.md) | Test Task | Ready for Deploy |
+| [DEP-OK](features/archived/DEP-OK.md) | Satisfied Dependency | Production |
+| [DEP-PEND](features/active/DEP-PEND.md) | Non-terminal Dependency | Ready |
+"@
+    $backlogContent | Out-File -LiteralPath $backlogPath -Encoding UTF8
+
+    # Create the files referenced in BACKLOG.md so there are no broken links or orphans
+    $depOkFile = Join-Path $tempRoot ".crucible/backlog/features/archived/DEP-OK.md"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $depOkFile) -Force | Out-Null
+    @"
+---
+item_id: "DEP-OK"
+status: "Production"
+---
+# Spec
+"@ | Out-File -LiteralPath $depOkFile -Encoding UTF8
+
+    $depPendFile = Join-Path $tempRoot ".crucible/backlog/features/active/DEP-PEND.md"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $depPendFile) -Force | Out-Null
+    @"
+---
+item_id: "DEP-PEND"
+status: "Ready"
+---
+# Spec
+"@ | Out-File -LiteralPath $depPendFile -Encoding UTF8
+
+    # Create mock review_report.md in the session dir to pass the completion artifact gate
+    $sessionVerificationDir = Join-Path $tempRoot ".crucible/session/$depTaskId/verification"
+    New-Item -ItemType Directory -Path $sessionVerificationDir -Force | Out-Null
+    $reviewReportFile = Join-Path $sessionVerificationDir "review_report.md"
+    @"
+---
+review_decision: APPROVED
+acceptance_criteria_met: true
+---
+# Review Report
+"@ | Out-File -LiteralPath $reviewReportFile -Encoding UTF8
+
+    # 2. Write spec file with satisfied dependency for deployment (should PASS)
+    $specPath = Join-Path $tempRoot ".crucible/backlog/features/active/F-TEST-DEPENDENCY_spec.md"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+    $specContent = @"
+---
+item_id: "$depTaskId"
+priority: "P3"
+status: "Ready for Deploy"
+target_phase: "deployment"
+budget_tier: "low"
+depends_on: ["DEP-OK"]
+---
+# Spec
+"@
+    $specContent | Out-File -LiteralPath $specPath -Encoding UTF8
+    $script:tempArtifacts += $specPath
+
+    # Write handoff for verification -> deployment (deployment phase initialization)
+    $handoffDep = Get-BaseHandoff $depTaskId
+    $handoffDep.source_phase = "verification"
+    $handoffDep.target_phase = "deployment"
+    $handoffDep.budget_tier = "low"
+    $handoffDep.reviewer_checks_passed = @("tests_pass","vet_pass","acceptance_criteria_met","scope_bounded","no_regressions","no_hard_mandates_violated")
+    [void](Write-HandoffFixture -TaskId $depTaskId -Handoff $handoffDep)
+
+    $depOutputLinesOk = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot 2>&1)
+    $depOutputOk = $depOutputLinesOk -join "`n"
+    $depExitCodeOk = $LASTEXITCODE
+
+    try {
+        Assert-Result -Name "D36 Satisfied Dep does not block" -Condition ($depExitCodeOk -eq 0 -or $depOutputOk -match "Initial task bootstrap") -FailureMessage ("expected success/bootstrap, got exit code " + $depExitCodeOk + ". Output: " + $depOutputOk)
+        Write-Host "PASSED - Satisfied Dependency" -ForegroundColor Green
+        $results += $true
+    } catch {
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $results += $false
+    }
+
+    # 3. Write spec file with unsatisfied dependency for deployment (should exit code 2)
+    $specContentUnsatisfied = @"
+---
+item_id: "$depTaskId"
+priority: "P3"
+status: "Ready for Deploy"
+target_phase: "deployment"
+budget_tier: "low"
+depends_on: ["DEP-PEND"]
+---
+# Spec
+"@
+    $specContentUnsatisfied | Out-File -LiteralPath $specPath -Encoding UTF8
+    
+    # Remove previous handoff files to force bootstrap/re-eval if needed, or re-run
+    Get-ChildItem -Path $HANDOFF_DIR -Filter "$depTaskId-*.json" -ErrorAction SilentlyContinue | Remove-Item -Force
+    [void](Write-HandoffFixture -TaskId $depTaskId -Handoff $handoffDep)
+
+    $depOutputLinesFail = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot 2>&1)
+    $depOutputFail = $depOutputLinesFail -join "`n"
+    $depExitCodeFail = $LASTEXITCODE
+
+    try {
+        Assert-Result -Name "D36 Unsatisfied Dep blocks deployment (exit 2)" -Condition ($depExitCodeFail -eq 2) -FailureMessage ("expected exit code 2, got " + $depExitCodeFail + ". Output: " + $depOutputFail)
+        Assert-Result -Name "D36 Blocks with proper message" -Condition ($depOutputFail -match "Unsatisfied dependencies detected") -FailureMessage "expected unsatisfied message in output"
+        Write-Host "PASSED - Unsatisfied Dependency Blocks" -ForegroundColor Green
+        $results += $true
+    } catch {
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $results += $false
+    }
+
+    # 4. Write spec file with unsatisfied dependency for non-deployment (should WARN, exit code 0 or bootstrap success)
+    $specContentWarn = @"
+---
+item_id: "$depTaskId"
+priority: "P3"
+status: "Ready"
+target_phase: "grooming"
+budget_tier: "low"
+depends_on: ["DEP-PEND"]
+---
+# Spec
+"@
+    $specContentWarn | Out-File -LiteralPath $specPath -Encoding UTF8
+    Get-ChildItem -Path $HANDOFF_DIR -Filter "$depTaskId-*.json" -ErrorAction SilentlyContinue | Remove-Item -Force
+
+    $depOutputLinesWarn = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot 2>&1)
+    $depOutputWarn = $depOutputLinesWarn -join "`n"
+    $depExitCodeWarn = $LASTEXITCODE
+
+    try {
+        Assert-Result -Name "D36 Unsatisfied Dep only warns for grooming" -Condition ($depExitCodeWarn -eq 0) -FailureMessage ("expected exit code 0, got " + $depExitCodeWarn + ". Output: " + $depOutputWarn)
+        Assert-Result -Name "D36 Warns with proper message" -Condition ($depOutputWarn -match "Unsatisfied dependencies detected" -and $depOutputWarn -match "Proceeding - only the Operator phase is blocked") -FailureMessage "expected warning message in output"
+        Write-Host "PASSED - Unsatisfied Dependency Warns" -ForegroundColor Green
+        $results += $true
+    } catch {
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $results += $false
+    }
+
     Write-Host "`nTest: Health Mode Smoke" -ForegroundColor Cyan
     $healthOutputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Health -Quiet -ProjectRoot $tempRoot 2>&1)
     $healthOutput = $healthOutputLines -join "`n"

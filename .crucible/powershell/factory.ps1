@@ -1,4 +1,4 @@
-﻿# Factory Orchestrator Script
+# Factory Orchestrator Script
 # Validates handoff.json, routes pipeline in code, assembles next prompt from template.
 # Usage: .\.crucible\\factory.ps1 [-Target agent|gemini|claude] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>]
 #
@@ -362,7 +362,7 @@ function Check-Dependencies {
                 }
                 if ($line -match '^\|\s*[-: ]+\|') { continue }
 
-                if ($line -match "^\|\s*(:\[$escapedDep\]\([^)]+\)|$escapedDep)\s*\|") {
+                if ($line -match "^\|\s*(:?\[$escapedDep\]\([^)]+\)|$escapedDep)\s*\|") {
                     $rowCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
                     if ($statusColumnIndex -ge 0 -and $statusColumnIndex -lt $rowCols.Count) {
                         $depStatus = $rowCols[$statusColumnIndex]

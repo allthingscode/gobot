@@ -136,7 +136,8 @@ budget_tier: medium
         Assert-Result -Name "bootstrap flag" -Condition ($ctx.IsBootstrap -eq $true) -FailureMessage "IsBootstrap was not set"
         Assert-Result -Name "bootstrap file" -Condition ($null -ne $ctx.LatestHandoff -and (Test-Path -LiteralPath $ctx.LatestHandoff.FullName)) -FailureMessage "bootstrap handoff was not created"
         $handoff = Get-Content -LiteralPath $ctx.LatestHandoff.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        Assert-Result -Name "target from spec" -Condition ($handoff.target_phase -eq "verification") -FailureMessage "target_phase was not read from spec"
+        Assert-Result -Name "target is unconditionally grooming" -Condition ($handoff.target_phase -eq "grooming") -FailureMessage "target_phase was not set to grooming"
+        Assert-Result -Name "budget_tier is read from spec" -Condition ($handoff.budget_tier -eq "medium") -FailureMessage "budget_tier was not read from spec"
     }
 
     $results += Run-Test -Name "Read-FactoryHandoffContext maps legacy specialist fields" -Body {
@@ -671,6 +672,60 @@ try {
         $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "D20: artifacts resolve relative to implementation worktree path" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
+    }
+
+    $results += Run-Test -Name "Invoke-FactoryRuntimeValidation D35 regression: artifact resolution checks both worktree and repo root" -Body {
+        $caseRoot = Join-Path $tempRoot "d35-regression"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        
+        $workspacesDir = Join-Path $caseRoot "workspaces"
+        $wtPath = Join-Path $workspacesDir "implementation-F-009"
+        $wtArtifactDir = Join-Path $wtPath "docs"
+        New-Item -ItemType Directory -Path $wtArtifactDir -Force | Out-Null
+        
+        # Artifact A in worktree
+        $artFileA = Join-Path $wtArtifactDir "METRICS.md"
+        "Metric details" | Set-Content -LiteralPath $artFileA -Encoding UTF8
+        
+        # Artifact B in repo root
+        $repoArtifactDir = Join-Path $caseRoot ".crucible/session/F-009/verification"
+        New-Item -ItemType Directory -Path $repoArtifactDir -Force | Out-Null
+        $artFileB = Join-Path $repoArtifactDir "review_report.md"
+        "Review report content" | Set-Content -LiteralPath $artFileB -Encoding UTF8
+        
+        $scriptPath = Join-Path $caseRoot "run-d35.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    RepoRoot = '$caseRoot'
+    WorkspacesDir = '$workspacesDir'
+    LogFile = Join-Path '$caseRoot' 'pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = Join-Path '$caseRoot' 'circuit_breakers.jsonl'
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-009'
+        source_phase = 'implementation'
+        target_phase = 'verification'
+        cumulative_handoff_count = 1
+        file_affinity = @()
+        artifacts = @('docs/METRICS.md', '.crucible/session/F-009/verification/review_report.md')
+    }
+}
+
+try {
+    Invoke-FactoryRuntimeValidation -Context `$ctx
+    Write-Host "PASSED_RESOLVED"
+} catch {
+    Write-Host "FAILED_ERROR: `$(_)"
+}
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "D35: artifacts resolve from both worktree and repo root" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
     }
 
     $results += Run-Test -Name "Invoke-HandoffPreflightValidation D19: warn when file_affinity is overbroad relative to spec" -Body {
