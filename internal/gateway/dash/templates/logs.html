@@ -35,5 +35,5 @@
 {{end}}
 
 {{define "log_tail"}}
-<pre class="mb-0 p-3 bg-dark text-light small" style="max-height: 70vh; overflow-y: auto; white-space: pre-wrap;">{{.LogTail}}</pre>
+{{if .LogTail}}<pre class="mb-0 p-3 bg-dark text-light small" style="max-height: 70vh; overflow-y: auto; white-space: pre-wrap;">{{.LogTail}}</pre>{{else}}<div class="p-4 text-center text-muted small">{{if .Level}}No log entries at level {{.Level}}.{{else}}No log entries to display.{{end}}</div>{{end}}
 {{end}}

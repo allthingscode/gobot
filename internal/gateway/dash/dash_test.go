@@ -416,6 +416,85 @@ func TestLogsFallsBackToFileWhenHubEmpty(t *testing.T) {
 	}
 }
 
+func writeLogFile(t *testing.T, cfg *config.Config, contents string) {
+	t.Helper()
+	logDir := filepath.Join(cfg.Strategic.StorageRoot, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "gobot.log"), []byte(contents), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+}
+
+func TestLogsEmptyStateNoFilter(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = t.TempDir()
+	writeLogFile(t, cfg, "")
+
+	h := NewHandler(Resources{Config: cfg})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "No log entries to display.") {
+		t.Fatalf("expected neutral empty-state message, got: %s", body)
+	}
+	if strings.Contains(body, "<pre") {
+		t.Fatalf("empty state should not render the <pre> block: %s", body)
+	}
+}
+
+func TestLogsEmptyStateActiveFilter(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = t.TempDir()
+	writeLogFile(t, cfg, "2026-01-01 00:00:00 INFO unrelated\n")
+
+	h := NewHandler(Resources{Config: cfg})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true&level=warn", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "No log entries at level WARN.") {
+		t.Fatalf("expected level-named empty-state message, got: %s", body)
+	}
+}
+
+func TestLogsNonEmptyPassthrough(t *testing.T) {
+	t.Parallel()
+	hub := &mockLogHub{backlog: []*dashboard.LogEntry{
+		{Timestamp: time.UnixMilli(1700000000000), Level: "INFO", Message: "render-me"},
+	}}
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = t.TempDir()
+
+	h := NewHandler(Resources{Config: cfg, Hub: hub})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "render-me") {
+		t.Fatalf("expected log content to render: %s", body)
+	}
+	if strings.Contains(body, "No log entries") {
+		t.Fatalf("non-empty output should not show empty-state message: %s", body)
+	}
+}
+
 func TestLogsTailPartial(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
