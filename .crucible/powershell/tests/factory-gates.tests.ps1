@@ -1137,6 +1137,7 @@ try {
         $outputText = $output -join "`n"
         
         Assert-Result -Name "D37: real successful push exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: real successful push does not emit error records" -Condition ($outputText -notlike "*NativeCommandError*" -and $outputText -notlike "*WriteErrorException*") -FailureMessage "successful push emitted error record. Output:`n$outputText"
         Assert-Result -Name "D37: real push pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
         
         # Verify remote origin now matches local master
@@ -1183,6 +1184,7 @@ try {
         
         # Check that it exited 1 due to push failure
         Assert-Result -Name "D37: failed push exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit code 1, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: failed push surfaces git error text" -Condition ($outputText -like "*fatal:*" -or $outputText -like "*error:*") -FailureMessage "failed push did not surface git error. Output:`n$outputText"
         Assert-Result -Name "D37: failed push keeps pending files" -Condition (Test-Path $pendingFile) -FailureMessage "pending file was cleaned up on failure"
 
         # Test Case 5: Reject/Abandon branch unwinding

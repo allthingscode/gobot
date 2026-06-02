@@ -1459,9 +1459,36 @@ function Invoke-GitChecked {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $ScriptBlock
+        $stdout = @()
+        $stderr = @()
+        
+        $pipeline = & $ScriptBlock 2>&1
+        
+        foreach ($item in $pipeline) {
+            if ($item -is [System.Management.Automation.ErrorRecord]) {
+                $stderr += $item.ToString()
+            } else {
+                $stdout += $item
+            }
+        }
+        
+        $exitCode = $LASTEXITCODE
+        
+        if ($stderr.Count -gt 0) {
+            $errMessage = $stderr -join "`n"
+            if ($exitCode -eq 0) {
+                Write-Quiet $errMessage.Trim()
+            } else {
+                Write-Error -Message $errMessage.Trim() -ErrorAction Continue
+            }
+        }
+        
+        if ($stdout.Count -gt 0) {
+            $stdout
+        }
     } finally {
         $ErrorActionPreference = $prevEAP
+        $global:LASTEXITCODE = $exitCode
     }
 }
 
