@@ -171,6 +171,29 @@ APPROVED
         # Set env FACTORY_CYCLE_ID to match session_cycle_id / cycle_id
         $env:FACTORY_CYCLE_ID = "test-cycle"
 
+        # Pre-seed log file with quality_gate_retry to simulate a prior retry, triggering the circuit breaker on this run
+        $logDir = Join-Path $projectRoot ".crucible/session/C-FABRICATED"
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        $logFile = Join-Path $logDir "pipeline.log.jsonl"
+        $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $retryEvent = @{
+            event = "quality_gate_retry"
+            task_id = "C-FABRICATED"
+            phase = "verification"
+            handoff_count = 1
+            timestamp = $now
+            notes = "Verification check failed in worktree: Failing Test Full"
+        } | ConvertTo-Json -Compress
+        [System.IO.File]::AppendAllText($logFile, $retryEvent + "`n")
+        $startEvent = @{
+            event = "session_start"
+            task_id = "C-FABRICATED"
+            phase = "verification"
+            timestamp = $now
+            handoff_count = 2
+        } | ConvertTo-Json -Compress
+        [System.IO.File]::AppendAllText($logFile, $startEvent + "`n")
+
         # 8. Run factory safely using Invoke-ExternalCommand helper
         $res = Invoke-ExternalCommand {
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `

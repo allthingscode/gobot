@@ -745,6 +745,9 @@ function Invoke-FactoryRuntimeValidation {
                         $cleanedLine = $lines[$i] -replace "^$([char]0xFEFF)", ""
                         $entry = $cleanedLine | ConvertFrom-Json
                         $logPhase = if ($entry.PSObject.Properties["phase"]) { $entry.phase } else { $entry.specialist }
+                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq "factory") {
+                            continue
+                        }
                         if ($entry.task_id -eq $handoff.task_id -and $logPhase -ne $handoff.source_phase) {
                             break
                         }
@@ -1360,25 +1363,77 @@ function Invoke-CircuitBreakerGates {
                 Write-Host "[STOP] HUMAN INTERVENTION REQUIRED. Restore script and rerun." -ForegroundColor Red
                 exit 2
             }
-            Write-Quiet "`n[VERIFY] Running independent isolated test verification in worktree before accepting APPROVED..." -ForegroundColor Cyan
+            Write-Quiet "`n[VERIFY] Running independent isolated full verification in worktree before accepting APPROVED..." -ForegroundColor Cyan
             $previousPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
             try {
-                $testOutput = & powershell.exe -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode test 2>&1
+                $testOutput = & powershell.exe -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode full 2>&1
             } finally {
                 $ErrorActionPreference = $previousPreference
             }
             if ($LASTEXITCODE -ne 0) {
-                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" -Outcome "reviewer_verification_failed" -Notes "Independent verification failed after Reviewer APPROVED"
-                Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "reviewer_verification_failed" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary "Verification command failed in worktree after Reviewer self-reported APPROVED. Review checklist not reliably completed."
-                Write-Host "`n[CIRCUIT BREAKER] Independent test verification FAILED." -ForegroundColor Red
-                Write-Host "  Reviewer self-reported APPROVED but isolated verification command exits non-zero." -ForegroundColor Red
+                # Identify which named check failed (e.g. golangci-lint)
+                $failedCheck = "unknown"
                 if ($testOutput) {
-                    Write-Host "  Isolated check output:" -ForegroundColor Yellow
-                    $testOutput | ForEach-Object { Write-Host ("    " + $_) }
+                    foreach ($line in $testOutput) {
+                        if ($line -match "Check failed:\s*(.+)") {
+                            $failedCheck = $Matches[1].Trim()
+                            break
+                        }
+                    }
                 }
-                Write-Host "`n[STOP] HUMAN INTERVENTION REQUIRED. Route back to Architect." -ForegroundColor Red
-                exit 2
+
+                # Check if this is a retry (prior quality_gate_retry in event log)
+                $hasPriorRetry = $false
+                if (Test-Path $LOG_FILE) {
+                    $lines = @(Get-Content $LOG_FILE -Tail 200 -Encoding UTF8)
+                    for ($i = $lines.Length - 1; $i -ge 0; $i--) {
+                        try {
+                            $cleanedLine = $lines[$i] -replace "^$([char]0xFEFF)", ""
+                            $entry = $cleanedLine | ConvertFrom-Json
+                            $logPhase = if ($entry.PSObject.Properties["phase"]) { $entry.phase } else { $entry.specialist }
+                             if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq "factory") {
+                                 continue
+                             }
+                             if ($entry.task_id -eq $handoff.task_id -and $logPhase -ne $handoff.source_phase) {
+                                break
+                            }
+                            if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "session_end" -and $entry.outcome -eq "success") {
+                                $entryHandoffCount = if ($entry.PSObject.Properties["handoff_count"]) { $entry.handoff_count } else { 0 }
+                                if ($entryHandoffCount -lt $handoff.cumulative_handoff_count) {
+                                    break
+                                }
+                            }
+                            if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "quality_gate_retry" -and $entry.notes -like "*verification*check*") {
+                                $hasPriorRetry = $true
+                                break
+                            }
+                        } catch { continue }
+                    }
+                }
+
+                if ($hasPriorRetry) {
+                    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" -Outcome "reviewer_verification_failed" -Notes "Independent verification failed after Reviewer APPROVED again: $failedCheck"
+                    Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "reviewer_verification_failed" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary "Verification command failed in worktree after Reviewer self-reported APPROVED: $failedCheck"
+                    Write-Host "`n[CIRCUIT BREAKER] Independent verification check failed on retry: $failedCheck" -ForegroundColor Red
+                    if ($testOutput) {
+                        Write-Host "  Check output:" -ForegroundColor Yellow
+                        $testOutput | ForEach-Object { Write-Host ("    " + $_) }
+                    }
+                    Write-Host "`n[STOP] HUMAN INTERVENTION REQUIRED. Route back to Architect." -ForegroundColor Red
+                    exit 2
+                } else {
+                    Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                        -Outcome "retry_required" -Notes ("Verification check failed in worktree: " + $failedCheck) `
+                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                    Write-Host "[STOP] Verification quality gate failed: $failedCheck exits non-zero." -ForegroundColor Red
+                    if ($testOutput) {
+                        Write-Host "  Check output:" -ForegroundColor Yellow
+                        $testOutput | ForEach-Object { Write-Host ("    " + $_) }
+                    }
+                    Write-Host "Please fix the failing check in the implementation worktree and re-submit the verification handoff." -ForegroundColor Red
+                    exit 2
+                }
             }
             Write-Quiet "[VERIFY] isolated verification passed independently. APPROVED handoff accepted." -ForegroundColor Green
             Write-EventLog -Event "verified" -TaskId $handoff.task_id -Specialist "factory" -Outcome "tests_passed" -Notes "Independent isolated verification passed before Operator handoff"

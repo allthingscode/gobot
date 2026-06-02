@@ -1714,6 +1714,284 @@ finally {
 
         Assert-Result -Name "D30 Winner is path1" -Condition ($sorted[0].FullName -eq $path1) -FailureMessage ("Expected path1 to be sorted first, got " + $sorted[0].Name)
     }
+
+    $results += Run-Test -Name "D38: Verification check failure logs quality_gate_retry on first run" -Body {
+        $caseRoot = Join-Path $tempRoot "d38-test-fail-first"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Set up mock config.yaml under $caseRoot
+        $crucibleDir = Join-Path $caseRoot ".crucible"
+        New-Item -ItemType Directory -Path $crucibleDir -Force | Out-Null
+        $configContent = @"
+project_name: "D38 App"
+verification:
+  full:
+    - name: failing-lint
+      command: cmd.exe /c exit 1
+"@
+        [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+
+        # Set up worktree containing same config.yaml
+        $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-038"
+        $wtCrucibleDir = Join-Path $wtPath ".crucible"
+        New-Item -ItemType Directory -Path $wtCrucibleDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $wtCrucibleDir "config.yaml"), $configContent)
+        
+        Push-Location $wtPath
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            git checkout -b task/F-038 --quiet
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+
+        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-038'
+                    source_phase = 'verification'
+                    target_phase = 'deployment'
+                    cumulative_handoff_count = 1
+                    budget_tier = 'low'
+                    reason = 'test'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D38 first failure exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+
+        # Check log file for quality_gate_retry
+        $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "D38 logs quality_gate_retry" -Condition ($logContent -match "quality_gate_retry") -FailureMessage "expected quality_gate_retry logged"
+        Assert-Result -Name "D38 contains failed check name" -Condition ($logContent -match "failing-lint") -FailureMessage "expected notes to name failing-lint"
+        Assert-Result -Name "D38 does not log circuit_breaker" -Condition ($logContent -notmatch "circuit_breaker") -FailureMessage "should not log circuit_breaker yet"
+    }
+
+    $results += Run-Test -Name "D38: Verification check failure trips circuit breaker on retry" -Body {
+        $caseRoot = Join-Path $tempRoot "d38-test-fail-second"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Set up mock config.yaml under $caseRoot
+        $crucibleDir = Join-Path $caseRoot ".crucible"
+        New-Item -ItemType Directory -Path $crucibleDir -Force | Out-Null
+        $configContent = @"
+project_name: "D38 App"
+verification:
+  full:
+    - name: failing-lint
+      command: cmd.exe /c exit 1
+"@
+        [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+
+        # Set up worktree containing same config.yaml
+        $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-038"
+        $wtCrucibleDir = Join-Path $wtPath ".crucible"
+        New-Item -ItemType Directory -Path $wtCrucibleDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $wtCrucibleDir "config.yaml"), $configContent)
+        
+        Push-Location $wtPath
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            git checkout -b task/F-038 --quiet
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+
+        # Pre-seed log with the quality_gate_retry event from the first attempt
+        $retryEvent = @{
+            event = "quality_gate_retry"
+            task_id = "F-038"
+            phase = "verification"
+            handoff_count = 1
+            notes = "Verification check failed in worktree: failing-lint"
+        } | ConvertTo-Json -Compress
+        New-Item -ItemType File -Path $logFile -Force | Out-Null
+        [System.IO.File]::AppendAllText($logFile, $retryEvent + "`n")
+
+        # Also write a session_start to simulate the second session
+        $startEvent = @{
+            event = "session_start"
+            task_id = "F-038"
+            phase = "verification"
+            handoff_count = 2
+        } | ConvertTo-Json -Compress
+        [System.IO.File]::AppendAllText($logFile, $startEvent + "`n")
+
+        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-038'
+                    source_phase = 'verification'
+                    target_phase = 'deployment'
+                    cumulative_handoff_count = 2
+                    budget_tier = 'low'
+                    reason = 'test'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D38 second failure exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+
+        # Check log file for circuit_breaker
+        $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "D38 logs circuit_breaker" -Condition ($logContent -match "circuit_breaker") -FailureMessage "expected circuit_breaker logged"
+    }
+
+    $results += Run-Test -Name "D38: Verification checks green passes" -Body {
+        $caseRoot = Join-Path $tempRoot "d38-test-pass"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Set up mock config.yaml under $caseRoot
+        $crucibleDir = Join-Path $caseRoot ".crucible"
+        New-Item -ItemType Directory -Path $crucibleDir -Force | Out-Null
+        $configContent = @"
+project_name: "D38 App"
+verification:
+  full:
+    - name: passing-lint
+      command: cmd.exe /c exit 0
+"@
+        [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+
+        # Set up worktree containing same config.yaml
+        $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-038"
+        $wtCrucibleDir = Join-Path $wtPath ".crucible"
+        New-Item -ItemType Directory -Path $wtCrucibleDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $wtCrucibleDir "config.yaml"), $configContent)
+        
+        Push-Location $wtPath
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            git checkout -b task/F-038 --quiet
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+
+        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-038'
+                    source_phase = 'verification'
+                    target_phase = 'deployment'
+                    cumulative_handoff_count = 1
+                    budget_tier = 'low'
+                    reason = 'test'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D38 success exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
+    }
+
+    $results += Run-Test -Name "D38: Pattern C no worktree passes without checks" -Body {
+        $caseRoot = Join-Path $tempRoot "d38-test-no-wt"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+
+        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-038'
+                    source_phase = 'verification'
+                    target_phase = 'deployment'
+                    cumulative_handoff_count = 1
+                    budget_tier = 'low'
+                    reason = 'test'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D38 no-worktree exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
