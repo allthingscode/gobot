@@ -1557,6 +1557,139 @@ exit 0
         Assert-Result -Name "D23 warning logged" -Condition ($logContent -match "Spec file does not declare an affected files/packages section") -FailureMessage "expected spec missing affected warning in log"
     }
 
+    $results += Run-Test -Name "D40: spec with multiple affected sections and trailing prose containing affected" -Body {
+        $caseRoot = Join-Path $tempRoot "d40-test"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-045"
+
+        # Initialize Git repo
+        Push-Location $caseRoot
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        # Setup spec file with BOTH sections and trailing prose containing "affected"
+        $backlogDir = Join-Path $caseRoot ".crucible/backlog"
+        $activeDir = Join-Path $backlogDir "features/active"
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+        $specPath = Join-Path $activeDir "F-045_test.md"
+        $specContent = @"
+---
+item_id: "F-045"
+status: "Ready"
+---
+## Affected Packages
+- ``pkg1``
+
+## Affected Files
+- ``cmd/gobot/main.go``
+
+### Linter Thresholds
+This is trailing prose. It mentions that some rules are affected by this.
+"@
+        $specContent | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        # Create mock validate-handoff.ps1
+        $frameworkDir = Join-Path $caseRoot "powershell"
+        New-Item -ItemType Directory -Path $frameworkDir -Force | Out-Null
+        @'
+param([string]$HandoffFile, [string]$SchemaPath)
+Write-Output '{"ok":true}'
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $frameworkDir "validate-handoff.ps1") -Encoding UTF8
+
+        # Setup handoff file on disk and set LatestHandoff
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-045-20260530T120000Z.json"
+        
+        $handoffObj = @{
+            task_id = "F-045"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            file_affinity = @("cmd/gobot/")
+            budget_tier = "low"
+            reason = "test"
+            prompt_version = "1.0.0"
+        }
+        $handoffObj | ConvertTo-Json -Compress | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+
+        $ctx.TaskId = "F-045"
+        $ctx.BacklogDir = $backlogDir
+        $ctx.FrameworkPowerShell = $frameworkDir
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $caseRoot
+        try {
+            Invoke-HandoffPreflightValidation -Context $ctx
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+        }
+
+        # Check log file: there should be NO degraded warning event saying "does not declare an affected"
+        $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
+        Assert-Result -Name "D40 warning NOT logged" -Condition ($logContent -notmatch "Spec file does not declare an affected files/packages section") -FailureMessage "expected spec missing affected warning NOT to be in log"
+    }
+
+    $results += Run-Test -Name "D39: concurrent Groomer warning filters archived and terminal tasks" -Body {
+        $caseRoot = Join-Path $tempRoot "d39-test"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-101"
+
+        # Create session directories
+        $sessionDir = $ctx.SessionDir
+        $activeGroomerSessionDir = Join-Path $sessionDir "F-102/grooming"
+        $archivedGroomerSessionDir = Join-Path $sessionDir "archived/stale-task-sessions/F-103/grooming"
+        $terminalGroomerSessionDir = Join-Path $sessionDir "F-104/grooming"
+        
+        New-Item -ItemType Directory -Path $activeGroomerSessionDir, $archivedGroomerSessionDir, $terminalGroomerSessionDir -Force | Out-Null
+        
+        # Create task.md files
+        "task" | Set-Content -Path (Join-Path $activeGroomerSessionDir "task.md") -Encoding UTF8
+        "task" | Set-Content -Path (Join-Path $archivedGroomerSessionDir "task.md") -Encoding UTF8
+        "task" | Set-Content -Path (Join-Path $terminalGroomerSessionDir "task.md") -Encoding UTF8
+        
+        # Create BACKLOG.md with F-104 as terminal, F-101 and F-102 as active
+        $backlogDir = $ctx.BacklogDir
+        $backlogFile = Join-Path $backlogDir "BACKLOG.md"
+        @"
+| ID | Title | Status |
+|---|---|---|
+| [F-101](features/active/F-101_test.md) | Test 1 | Ready |
+| [F-102](features/active/F-102_test.md) | Test 2 | Ready |
+| [F-104](features/active/F-104_test.md) | Test 4 | Production |
+"@ | Set-Content -Path $backlogFile -Encoding UTF8
+
+        # 1. First test: we are transitioning to grooming for F-101.
+        # F-102 is active and not terminal, so it SHOULD warn about F-102.
+        # F-103 is under archived/ and F-104 is terminal in BACKLOG.md, so they should NOT be warned about.
+        $ctx.Handoff = [PSCustomObject]@{
+            task_id = "F-101"
+            source_phase = "research"
+            target_phase = "grooming"
+        }
+        $ctx.NextFactoryCommand = "powershell.exe factory.ps1"
+        $ctx.IsBootstrap = $false
+
+        $logOutput = & { Resolve-FactoryTransition -Context $ctx } 6>&1
+        $logText = $logOutput -join "`n"
+        
+        Assert-Result -Name "Warning emitted for active task F-102" -Condition ($logText -match "F-102[/\\]grooming[/\\]task\.md") -FailureMessage "expected warning for F-102, got: $logText"
+        Assert-Result -Name "No warning for archived task F-103" -Condition ($logText -notmatch "F-103") -FailureMessage "unexpected warning for archived task F-103, got: $logText"
+        Assert-Result -Name "No warning for terminal task F-104" -Condition ($logText -notmatch "F-104") -FailureMessage "unexpected warning for terminal task F-104, got: $logText"
+    }
+
     $results += Run-Test -Name "D22 follow-up: unwind merge resets to pre-merge tip, preserving unrelated commit" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "d22-followup"

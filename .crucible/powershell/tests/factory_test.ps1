@@ -89,7 +89,7 @@ function Ensure-TestBacklogArtifact {
     $backlogPath = Join-Path $tempRoot ".crucible/backlog/BACKLOG.md"
     if (-not (Test-Path -LiteralPath $backlogPath)) {
         New-Item -ItemType Directory -Path (Split-Path -Parent $backlogPath) -Force | Out-Null
-        "# Test Backlog" | Out-File -LiteralPath $backlogPath -Encoding UTF8
+        "# Test Backlog`n- C-FACTORY-TASK`n- C-FACTORY-INJECTION-WARN`n- C-FACTORY-CHECKLIST`n- {task_id}-HANDOFF`n- C-FACTORY-ISOLATED" | Out-File -LiteralPath $backlogPath -Encoding UTF8
         $script:tempArtifacts += $backlogPath
     }
 }

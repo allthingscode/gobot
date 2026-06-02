@@ -49,7 +49,13 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     if ($null -ne $repoRootVar) {
         $ProjectRoot = $repoRootVar.Value
     } else {
-        $ProjectRoot = (Get-Location).Path
+        $cwd = (Get-Location).Path
+        $cwdBacklog = Join-Path $cwd ".crucible/backlog"
+        $cwdConfig = Join-Path $cwd ".crucible/config.yaml"
+        if (-not (Test-Path -LiteralPath $cwdBacklog) -and -not (Test-Path -LiteralPath $cwdConfig)) {
+            throw "ProjectRoot is omitted, REPO_ROOT is not set, and the current working directory '$cwd' is not a valid Crucible project (missing .crucible/backlog or .crucible/config.yaml)."
+        }
+        $ProjectRoot = $cwd
     }
 }
 $REPO_ROOT = $ProjectRoot
@@ -57,6 +63,20 @@ Push-Location $REPO_ROOT
 try {
     $factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
     . $factoryLibPath
+
+    # D41: Validate that the resolved bundle actually owns the task
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $REPO_ROOT
+    if (-not (Test-Path -LiteralPath $backlogDir)) {
+        throw "Backlog directory not found at $backlogDir; please check ProjectRoot or REPO_ROOT."
+    }
+    $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+    if (-not (Test-Path -LiteralPath $backlogPath)) {
+        throw "BACKLOG.md not found at $backlogPath; please check ProjectRoot or REPO_ROOT."
+    }
+    $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+    if ($backlogContent -notmatch [regex]::Escape($TaskId)) {
+        throw "TaskId $TaskId not found in the bundle at $REPO_ROOT; pass -ProjectRoot pointing at the adopter repo."
+    }
 
 # Default schema location: framework's own schemas/ directory (one level up from powershell/).
 if ([string]::IsNullOrWhiteSpace($SchemaPath)) {

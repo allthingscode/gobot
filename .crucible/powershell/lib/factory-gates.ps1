@@ -463,9 +463,18 @@ function Invoke-HandoffPreflightValidation {
         if ($specFile -and (Test-Path $specFile)) {
             $specContent = Get-Content $specFile -Raw -Encoding UTF8
             $hasAffectedSection = $false
-            if ($specContent -match '(?sm)^##+\s+.*affected.*?\r?\n(.*?)(\r?\n##+\s+|\z)') {
-                $affectedSection = $Matches[1]
-                if (-not [string]::IsNullOrWhiteSpace($affectedSection)) {
+            $affectedSection = ""
+            $affectedMatches = [regex]::Matches($specContent, '(?ism)^##+\s+[^\r\n]*affected[^\r\n]*\r?\n(.*?)(\r?\n##+\s+|\z)')
+            if ($affectedMatches.Count -gt 0) {
+                $bodies = @()
+                foreach ($m in $affectedMatches) {
+                    $body = $m.Groups[1].Value
+                    if (-not [string]::IsNullOrWhiteSpace($body)) {
+                        $bodies += $body
+                    }
+                }
+                if ($bodies.Count -gt 0) {
+                    $affectedSection = $bodies -join "`n"
                     $hasAffectedSection = $true
                 }
             }
@@ -1893,7 +1902,75 @@ function Resolve-FactoryTransition {
     # Warn on concurrent Groomer dispatch - parallel Groomers write to the shared BACKLOG.md without locking (Fix 11)
     if ($handoff.target_phase -eq "grooming") {
         $otherGroomerSessions = @(Get-ChildItem -Path $sessionDir -Recurse -Filter "task.md" -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "[/\\]grooming[/\\]task\.md$" -and $_.FullName -notmatch [regex]::Escape($handoff.task_id) })
+            Where-Object {
+                $fullName = $_.FullName
+                # 1. Exclude anything under session/archived/
+                if ($fullName -match "[/\\]archived[/\\]") {
+                    return $false
+                }
+                # 2. Match only grooming/task.md
+                if ($fullName -notmatch "[/\\]grooming[/\\]task\.md$") {
+                    return $false
+                }
+                # 3. Exclude current task ID
+                if ($fullName -match [regex]::Escape($handoff.task_id)) {
+                    return $false
+                }
+                # 4. Exclude tasks whose BACKLOG row is terminal (Production/Resolved)
+                $otherTaskId = Split-Path -Parent (Split-Path -Parent $fullName) | Split-Path -Leaf
+                if ([string]::IsNullOrWhiteSpace($otherTaskId)) {
+                    return $false
+                }
+
+                $bDir = if ($Context.ContainsKey("BacklogDir")) { $Context.BacklogDir } else { "" }
+                if ([string]::IsNullOrWhiteSpace($bDir)) {
+                    $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+                    $bDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $repoRoot
+                }
+
+                $dependencySources = @(
+                    @{ Path = Join-Path $bDir "BACKLOG.md"; Name = "BACKLOG.md" },
+                    @{ Path = Join-Path $bDir "ARCHIVED.md"; Name = "ARCHIVED.md" }
+                )
+
+                $depStatus = ""
+                $found = $false
+                foreach ($source in $dependencySources) {
+                    if (-not (Test-Path $source.Path)) { continue }
+                    $lines = Get-Content -Path $source.Path -Encoding UTF8
+                    $statusColumnIndex = -1
+                    $escapedDep = [regex]::Escape($otherTaskId)
+                    
+                    foreach ($line in $lines) {
+                        if ($line -match '^\|\s*ID\s*\|') {
+                            $headerCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
+                            $statusColumnIndex = [Array]::IndexOf($headerCols, "Status")
+                            continue
+                        }
+                        if ($line -match '^\|\s*[-: ]+\|') { continue }
+                        
+                        if ($line -match "^\|\s*(:?\[$escapedDep\]\([^)]+\)|$escapedDep)\s*\|") {
+                            $rowCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
+                            if ($statusColumnIndex -ge 0 -and $statusColumnIndex -lt $rowCols.Count) {
+                                $depStatus = $rowCols[$statusColumnIndex]
+                            } elseif ($rowCols.Count -gt 0) {
+                                $depStatus = $rowCols[$rowCols.Count - 1]
+                            }
+                            $found = $true
+                            break
+                        }
+                    }
+                    if ($found) { break }
+                }
+
+                if ($found -and -not [string]::IsNullOrWhiteSpace($depStatus)) {
+                    $statusNormalized = $depStatus.Trim().ToLowerInvariant()
+                    if ($statusNormalized -eq "production" -or $statusNormalized -eq "resolved") {
+                        return $false
+                    }
+                }
+                return $true
+            })
         if ($otherGroomerSessions.Count -gt 0) {
             Write-Host "[WARN] Another Groomer task.md detected - running concurrent Groomers risks BACKLOG.md corruption:" -ForegroundColor Yellow
             $otherGroomerSessions | ForEach-Object { Write-Host "  - $($_.FullName)" -ForegroundColor Yellow }

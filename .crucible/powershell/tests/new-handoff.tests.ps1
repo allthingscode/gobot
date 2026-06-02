@@ -38,8 +38,28 @@ function New-TestTaskId {
     return "$testTaskPrefix-$Suffix"
 }
 
+function Register-TaskId {
+    param([string]$TaskId)
+    $backlogDir = Join-Path $tempRoot ".crucible/backlog"
+    if (-not (Test-Path -LiteralPath $backlogDir)) {
+        New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
+    }
+    $backlogFile = Join-Path $backlogDir "BACKLOG.md"
+    $content = ""
+    if (Test-Path -LiteralPath $backlogFile) {
+        $content = Get-Content -LiteralPath $backlogFile -Raw -Encoding UTF8
+    }
+    if ($content -notmatch [regex]::Escape($TaskId)) {
+        $content += "`n- $TaskId"
+        $content | Set-Content -LiteralPath $backlogFile -Encoding UTF8
+    }
+}
+
 function Invoke-Generator {
-    param([hashtable]$InputArgs)
+    param([hashtable]$InputArgs, [switch]$NoRegister)
+    if ($InputArgs.ContainsKey("TaskId") -and -not $NoRegister) {
+        Register-TaskId $InputArgs.TaskId
+    }
     try {
         $output = & $generator @InputArgs 2>&1
         return @{
@@ -440,6 +460,56 @@ budget_tier: "low"
         }
         if ($result.Output -notmatch "handoff_not_tool_generated") {
             throw "Expected handoff_not_tool_generated, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "fails when TaskId not in BACKLOG.md" -Script {
+        $taskId = New-TestTaskId "NOT-IN-BACKLOG"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "should fail because not in backlog"
+            SchemaPath = $schemaPath
+        } -NoRegister
+        if ($result.ExitCode -eq 0) {
+            throw "Expected failure for task not in backlog, but succeeded"
+        }
+        if ($result.Output -notmatch "not found in the bundle") {
+            throw "Expected backlog search failure message, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "fails when ProjectRoot is omitted and CWD has no backlog" -Script {
+        $taskId = New-TestTaskId "CWD-FAIL"
+        
+        # Temporarily switch to a completely fresh directory without backlog/config
+        $emptyTempDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), [System.IO.Path]::GetRandomFileName())
+        New-Item -ItemType Directory -Path $emptyTempDir -Force | Out-Null
+        $origLoc = Get-Location
+        Set-Location -LiteralPath $emptyTempDir
+        
+        try {
+            $result = Invoke-ExternalCommand {
+                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $generator `
+                    -TaskId $taskId `
+                    -Source "grooming" `
+                    -Target "implementation" `
+                    -Reason "should fail CWD fallback" `
+                    -SchemaPath $schemaPath
+            }
+        } finally {
+            Set-Location -LiteralPath $origLoc
+            if (Test-Path -LiteralPath $emptyTempDir) {
+                Remove-Item -Recurse -Force -LiteralPath $emptyTempDir -ErrorAction SilentlyContinue
+            }
+        }
+        
+        if ($result.ExitCode -eq 0) {
+            throw "Expected failure when ProjectRoot omitted and CWD has no backlog, but succeeded. Output: $($result.Output)"
+        }
+        if ($result.Output -notmatch "not a valid Crucible project") {
+            throw "Expected CWD validation failure message, got: $($result.Output)"
         }
     }
 
