@@ -965,6 +965,109 @@ func TestCheckSecretsRoundtrip_Mismatch(t *testing.T) {
 	}
 }
 
+// ── checkLivenessStaleness ───────────────────────────────────────────────────
+
+func cfgWithHeartbeat(root, interval string) *config.Config {
+	cfg := cfgWithRoot(root)
+	cfg.Heartbeat.Interval = interval
+	return cfg
+}
+
+func TestCheckLivenessStaleness_Missing(t *testing.T) {
+	t.Parallel()
+	r := checkLivenessStaleness(cfgWithRoot(t.TempDir()))
+	if !r.OK {
+		t.Errorf("expected OK=true when LIVENESS file is absent (cold start), got: %+v", r)
+	}
+	if r.Critical {
+		t.Error("liveness staleness check must be advisory (non-critical)")
+	}
+	if !strings.Contains(r.Detail, "cold start") {
+		t.Errorf("expected cold-start detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckLivenessStaleness_Fresh(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "LIVENESS")
+	if err := os.WriteFile(path, []byte("ok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkLivenessStaleness(cfgWithHeartbeat(root, "15m"))
+	if !r.OK {
+		t.Errorf("expected OK=true for fresh LIVENESS file, got: %+v", r)
+	}
+}
+
+func TestCheckLivenessStaleness_Stale(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "LIVENESS")
+	if err := os.WriteFile(path, []byte("ok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// With a 1m interval the threshold is 2m; set mtime 10m in the past.
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	r := checkLivenessStaleness(cfgWithHeartbeat(root, "1m"))
+	if r.OK {
+		t.Errorf("expected OK=false for stale LIVENESS file, got: %+v", r)
+	}
+	if r.Critical {
+		t.Error("liveness staleness check must be advisory (non-critical)")
+	}
+	if !strings.Contains(r.Detail, "threshold") {
+		t.Errorf("expected staleness detail to mention threshold, got: %s", r.Detail)
+	}
+	if r.Remediation == "" {
+		t.Error("expected a remediation hint for a stale heartbeat")
+	}
+}
+
+//nolint:paralleltest // mutates the package-global livenessStatFn seam; must not run concurrently with other liveness tests
+func TestCheckLivenessStaleness_StatError(t *testing.T) {
+	orig := livenessStatFn
+	t.Cleanup(func() { livenessStatFn = orig })
+	livenessStatFn = func(string) (os.FileInfo, error) {
+		return nil, errors.New("permission denied")
+	}
+
+	r := checkLivenessStaleness(cfgWithRoot(t.TempDir()))
+	if r.OK {
+		t.Errorf("expected OK=false when stat returns a non-NotExist error, got: %+v", r)
+	}
+	if r.Critical {
+		t.Error("liveness staleness check must be advisory (non-critical)")
+	}
+	if r.Remediation == "" {
+		t.Error("expected a remediation hint when LIVENESS cannot be read")
+	}
+}
+
+func TestGetResults_LivenessStalenessIsNonCritical(t *testing.T) {
+	t.Parallel()
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
+
+	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	found := false
+	for _, result := range results {
+		if result.Name == "liveness staleness" {
+			found = true
+			if result.Critical {
+				t.Fatal("expected liveness staleness check to be non-critical")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected liveness staleness check to be registered in GetResults")
+	}
+}
+
 func TestCheckSecretsRoundtrip_NonWindowsSkip(t *testing.T) {
 	t.Parallel()
 	// A failing store must NOT cause a failure on non-Windows: the check is skipped.
