@@ -118,6 +118,34 @@ try {
         Assert-Result -Name "no report" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session/$taskId/conflict_report.json"))) -FailureMessage "clean merge wrote a conflict report"
     }
 
+    $results += Run-Test -Name "Merge simulation runs from different CWD using -ProjectRoot" -Body {
+        $projectRoot = Join-Path $tempRoot "diff-cwd"
+        $taskId = "C-MERGE-DIFF-CWD"
+        Initialize-Repo -ProjectRoot $projectRoot
+        Push-Location $projectRoot
+        try {
+            git checkout -b "task/$taskId" --quiet
+            Set-Content -LiteralPath "feature.txt" -Value "task change" -Encoding UTF8
+            git add feature.txt
+            git commit -m "task change" --quiet
+            git checkout master --quiet
+        } finally {
+            Pop-Location
+        }
+
+        Push-Location $tempRoot
+        try {
+            $res = Invoke-ExternalCommand {
+                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $CHECK_SCRIPT -TaskId $taskId -ProjectRoot $projectRoot
+            }
+        } finally {
+            Pop-Location
+        }
+
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+    }
+
     $results += Run-Test -Name "Conflict detected and report written" -Body {
         $projectRoot = Join-Path $tempRoot "conflict"
         $taskId = "C-MERGE-CONFLICT"

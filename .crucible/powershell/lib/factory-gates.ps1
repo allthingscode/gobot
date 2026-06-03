@@ -1775,13 +1775,14 @@ function Invoke-RepositoryIntegrityGates {
     $sessionDir = $Context.SessionDir
     $LOG_FILE = $Context.LogFile
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
+    $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
 
     # --- 3b. Backlog Integrity Gate ---
     # Run automatically when Groomer or Operator hands off (they own BACKLOG.md).
     if ($handoff.source_phase -eq "grooming" -or $handoff.source_phase -eq "deployment") {
         Write-Quiet "`n[BACKLOG] Running backlog integrity check..." -ForegroundColor Cyan
         try {
-            $result = & "$FRAMEWORK_POWERSHELL/validate-backlog.ps1" -FixSummary -Quiet:$Quiet 2>&1
+            $result = & "$FRAMEWORK_POWERSHELL/validate-backlog.ps1" -FixSummary -Quiet:$Quiet -ProjectRoot $repoRoot 2>&1
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "[BACKLOG] VALIDATION FAILED:" -ForegroundColor Red
                 $result | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }

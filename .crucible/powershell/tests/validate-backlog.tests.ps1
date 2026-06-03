@@ -371,6 +371,39 @@ target_phase: "done"
         Assert-Result -Name "missing status exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "missing status error" -Condition ($r.Output -match "missing status frontmatter") -FailureMessage ("expected missing status error. Output: " + $r.Output)
     }
+
+    # --- Test 9: mojibake detection in BACKLOG.md fails validation ---
+    $results += Run-Test -Name "Mojibake detection in BACKLOG.md fails validation" -Body {
+        $root = Join-Path $tempRoot "mojibake"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Hello.md" -ItemId "C-001" -Priority "P2" -Title "Hello"
+        $backlog = Join-Path $root "BACKLOG.md"
+        $dirtyText = "bad " + [char]0x00C3 + [char]0x00A9 + " marker"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-001 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Hello.md) | P2 | Ready | $dirtyText | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog
+        Assert-Result -Name "mojibake exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "mojibake error message" -Condition ($r.Output -match "Mojibake detected in BACKLOG.md") -FailureMessage ("expected mojibake detection message. Output: " + $r.Output)
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -99,6 +99,20 @@ try {
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "check name" -Condition ($output -match "==> no-op") -FailureMessage "expected configured check to run. Output:`n$output"
     }
+
+    $results += Run-Test -Name "Executes when CWD is different using -ProjectRoot" -Body {
+        Push-Location $tempRoot
+        try {
+            $res = Invoke-ExternalCommand {
+                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "check name" -Condition ($output -match "==> no-op") -FailureMessage "expected configured check to run. Output:`n$output"
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath

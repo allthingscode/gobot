@@ -12,7 +12,8 @@
 param(
     [switch]$FixSummary,
     [string]$BacklogPath = "",
-    [switch]$Quiet
+    [switch]$Quiet,
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +50,7 @@ if (-not (Test-Path -LiteralPath $archiveHelpersPath)) {
 . $archiveHelpersPath
 
 if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
-    $backlogDir = Get-ConfiguredPath -Key "backlog"
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
     $BacklogPath = Join-Path $backlogDir "BACKLOG.md"
 } else {
     $backlogDir = Split-Path -Parent $BacklogPath
@@ -67,10 +68,35 @@ try {
     Write-Quiet "Backlog Path: $BacklogPath"
 
     # Parse BACKLOG.md
-    if (-not (Test-Path $BacklogPath)) { throw "Backlog file not found at $BacklogPath" }
-    $content = Get-Content -Path $BacklogPath
+    if (-not (Test-Path -LiteralPath $BacklogPath)) { throw "Backlog file not found at $BacklogPath" }
+    $content = Get-Content -LiteralPath $BacklogPath -Encoding UTF8
     if (-not $content) { throw "Backlog file content is null" }
     $contentArray = [string[]]$content
+
+    # Check for mojibake markers (D43)
+    $markers = @(
+        ([string]([char]0x00C3)),                                              # mojibake capital A-tilde
+        ([string]([char]0x00C2)),                                              # mojibake capital A-circumflex
+        ([string]::Concat([char]0x00E2, [char]0x2020, [char]0x2019)),          # mojibake capital A-circumflex?'
+        ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x201D)),          # mojibake capital A-circumflex?"
+        ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x201C)),          # mojibake capital A-circumflex?"
+        ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x0153)),          # mojibake capital A-circumflex??
+        ([string]::Concat([char]0x00E2, [char]0x20AC, [char]0x2122))           # mojibake capital A-circumflex??
+    )
+    $mojibakeHits = @()
+    for ($i = 0; $i -lt $contentArray.Count; $i++) {
+        $line = $contentArray[$i]
+        foreach ($marker in $markers) {
+            if ($line.Contains($marker)) {
+                $lineNumber = $i + 1
+                $mojibakeHits += "Line ${lineNumber}: '$($line.Trim())' (contains marker '$marker')"
+                break
+            }
+        }
+    }
+    if ($mojibakeHits.Count -gt 0) {
+        $errors += "Mojibake detected in BACKLOG.md:`n  " + ($mojibakeHits -join "`n  ")
+    }
 
     $archivedBacklogStatuses = @{}
     for ($i = 0; $i -lt $contentArray.Count; $i++) {

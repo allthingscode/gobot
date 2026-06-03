@@ -2,19 +2,30 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,
     [ValidateSet("quick", "full", "test")]
-    [string]$Mode = "full"
+    [string]$Mode = "full",
+    [Parameter(Mandatory = $false)]
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$worktreeRoot = ".crucible/.agent-workspaces"
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = (Get-Location).Path
+} else {
+    if (-not (Test-Path -LiteralPath $ProjectRoot)) {
+        Write-Error ("-ProjectRoot path does not exist: {0}" -f $ProjectRoot)
+    }
+    $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+}
+
+$worktreeRoot = Join-Path $ProjectRoot ".crucible/.agent-workspaces"
 $worktree = Join-Path $worktreeRoot ("implementation-" + $TaskId)
-if (-not (Test-Path $worktree)) {
+if (-not (Test-Path -LiteralPath $worktree)) {
     Write-Error ("Worktree missing: {0}" -f $worktree)
 }
-$worktree = (Resolve-Path $worktree).Path
+$worktree = (Resolve-Path -LiteralPath $worktree).Path
 
 $branch = (& git -C $worktree rev-parse --abbrev-ref HEAD 2>$null).Trim()
 $expectedBranch = "task/$TaskId"
@@ -22,13 +33,13 @@ if ($branch -ne $expectedBranch) {
     Write-Error ("Worktree branch mismatch. Expected '{0}', found '{1}'." -f $expectedBranch, $branch)
 }
 
-$configPath = ".crucible/config.yaml"
-if (-not (Test-Path $configPath)) {
+$configPath = Join-Path $ProjectRoot ".crucible/config.yaml"
+if (-not (Test-Path -LiteralPath $configPath)) {
     Write-Error ("Configuration file not found: {0}" -f $configPath)
 }
 
 # Parse config.yaml for verification commands manually to avoid external module dependencies
-$lines = Get-Content $configPath
+$lines = Get-Content -LiteralPath $configPath -Encoding UTF8
 $commands = @()
 $inVerification = $false
 $inMode = $false

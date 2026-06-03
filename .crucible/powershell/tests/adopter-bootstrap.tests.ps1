@@ -116,7 +116,7 @@ Add a health endpoint.
 
         # 4. Add the entry to BACKLOG.md
         $backlogFile = Join-Path $projectRoot ".crucible/backlog/BACKLOG.md"
-        $backlogLines = Get-Content -LiteralPath $backlogFile
+        $backlogLines = Get-Content -LiteralPath $backlogFile -Encoding UTF8
         $newBacklogLines = @()
         foreach ($line in $backlogLines) {
             $newBacklogLines += $line
@@ -124,7 +124,7 @@ Add a health endpoint.
                 $newBacklogLines += "| [F-001](features/active/F-001_Add_Health.md) | P1 | Ready | Add Health Endpoint | Groomer |"
             }
         }
-        $newBacklogLines | Set-Content -LiteralPath $backlogFile -Encoding UTF8
+        [System.IO.File]::WriteAllText($backlogFile, (($newBacklogLines) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 
         # 5. Validate Backlog (runs with -FixSummary to test F!)
         Push-Location $projectRoot
@@ -151,7 +151,7 @@ Add a health endpoint.
         Assert-Result -Name "factory_lint exit" -Condition ($factoryLintCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $factoryLintCmd.ExitCode + ". Output: " + ($factoryLintCmd.Output -join "`n"))
 
         # Check that BACKLOG.md priority summary counts were updated
-        $updatedBacklog = Get-Content -LiteralPath $backlogFile -Raw
+        $updatedBacklog = Get-Content -LiteralPath $backlogFile -Raw -Encoding UTF8
         if ($updatedBacklog -notmatch '\|\s*\*\*P1\*\*\s*\|\s*1\s*\|') {
             Write-Host "Updated BACKLOG.md content:" -ForegroundColor Yellow
             Write-Host $updatedBacklog -ForegroundColor Yellow

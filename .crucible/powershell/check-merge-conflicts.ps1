@@ -28,13 +28,13 @@ Write-Host "--- MERGE SIMULATION: $TaskId ---" -ForegroundColor Cyan
 
 # 1. Verify branches
 $mainBranch = "master"
-git show-ref --verify --quiet refs/heads/main
+git -C $REPO_ROOT show-ref --verify --quiet refs/heads/main
 if ($LASTEXITCODE -eq 0) { $mainBranch = "main" }
 
-$currentBranch = git rev-parse --abbrev-ref HEAD
+$currentBranch = git -C $REPO_ROOT rev-parse --abbrev-ref HEAD
 if ($currentBranch -ne $mainBranch) {
     Write-Host "Warning: Not on $mainBranch branch. Switching to $mainBranch..." -ForegroundColor Yellow
-    git checkout $mainBranch
+    git -C $REPO_ROOT checkout $mainBranch
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Error: Could not checkout $mainBranch." -ForegroundColor Red
         exit 1
@@ -45,11 +45,11 @@ if ($currentBranch -ne $mainBranch) {
 Write-Host "Updating $mainBranch..." -ForegroundColor Gray
 $previousPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$originUrl = git remote get-url origin 2>$null
+$originUrl = git -C $REPO_ROOT remote get-url origin 2>$null
 $remoteExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousPreference
 if ($remoteExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
-    git pull origin $mainBranch --quiet
+    git -C $REPO_ROOT pull origin $mainBranch --quiet
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Error: Could not pull origin/$mainBranch." -ForegroundColor Red
         exit 1
@@ -65,14 +65,14 @@ Write-Host "Simulating merge from task/$TaskId..." -ForegroundColor Gray
 
 $previousPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$mergeResult = git merge --no-commit --no-ff "task/$TaskId"
+$mergeResult = git -C $REPO_ROOT merge --no-commit --no-ff "task/$TaskId"
 $gitExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousPreference
 
 if ($gitExitCode -ne 0) {
     Write-Host "!!! CONFLICT DETECTED !!!" -ForegroundColor Red
     
-    $conflictingFiles = git diff --name-only --diff-filter=U
+    $conflictingFiles = git -C $REPO_ROOT diff --name-only --diff-filter=U
     Write-Host "Conflicting files:" -ForegroundColor White
     $conflictingFiles | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
 
@@ -93,11 +93,11 @@ if ($gitExitCode -ne 0) {
     Write-Host "Report written to $reportFile" -ForegroundColor Gray
 
     # Abort the merge to return to clean state
-    git merge --abort
+    git -C $REPO_ROOT merge --abort
     exit 1
 } else {
     Write-Host "CLEAN MERGE SIMULATED. No conflicts detected." -ForegroundColor Green
     # For a clean merge with --no-commit, we use reset --hard to return to clean state
-    git reset --hard HEAD --quiet
+    git -C $REPO_ROOT reset --hard HEAD --quiet
     exit 0
 }

@@ -103,6 +103,7 @@ function New-FactoryPromptText {
         $promptText = $promptText.Replace("{{crucible_root}}", $resolvedCrucibleRoot)
         $promptText = $promptText.Replace("{task_id}", $handoff.task_id)
         $promptText = $promptText.Replace("{worktree}", (Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir))
+        $promptText = $promptText.Replace("{project_root}", $repoRoot)
         
         $rebaseCount = if ($handoff.psobject.Properties["rebase_count"]) { $handoff.rebase_count } else { 0 }
         $promptText = $promptText.Replace("{rebase_count}", $rebaseCount)

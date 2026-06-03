@@ -19,7 +19,7 @@ function Set-BacklogSpecFrontmatterStatus {
     }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+    foreach ($line in [System.IO.File]::ReadAllLines($Path, [System.Text.Encoding]::UTF8)) {
         [void]$lines.Add($line)
     }
 
@@ -103,7 +103,7 @@ function Update-BacklogArchiveRow {
     }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath)) {
+    foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
         [void]$lines.Add($line)
     }
 
