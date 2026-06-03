@@ -869,3 +869,114 @@ func TestCheckEncryptionKey_Valid(t *testing.T) {
 		t.Errorf("expected 'AES-256' in detail, got: %s", r.Detail)
 	}
 }
+
+// ── checkSecretsRoundtrip ────────────────────────────────────────────────────
+
+// fakeStore is an in-memory secrets.Roundtripper for exercising the roundtrip
+// check without touching real DPAPI/AES storage.
+type fakeStore struct {
+	data      map[string]string
+	setErr    error
+	getErr    error
+	overrideR string // if non-empty, Get returns this instead of the stored value
+}
+
+func newFakeStore() *fakeStore { return &fakeStore{data: map[string]string{}} }
+
+func (f *fakeStore) Set(key, value string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.data[key] = value
+	return nil
+}
+
+func (f *fakeStore) Get(key string) (string, error) {
+	if f.getErr != nil {
+		return "", f.getErr
+	}
+	if f.overrideR != "" {
+		return f.overrideR, nil
+	}
+	return f.data[key], nil
+}
+
+func (f *fakeStore) Delete(key string) error {
+	delete(f.data, key)
+	return nil
+}
+
+func TestCheckSecretsRoundtrip_Success(t *testing.T) {
+	t.Parallel()
+	r := checkSecretsRoundtripFor("windows", newFakeStore())
+	if !r.OK {
+		t.Errorf("expected OK=true for successful roundtrip, got: %+v", r)
+	}
+	if r.Critical {
+		t.Error("secrets roundtrip check must be advisory (non-critical)")
+	}
+	if !strings.Contains(r.Detail, "OK") {
+		t.Errorf("expected success detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckSecretsRoundtrip_WriteFail(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	store.setErr = errors.New("dpapi protect failed")
+	r := checkSecretsRoundtripFor("windows", store)
+	if r.OK {
+		t.Errorf("expected OK=false on write failure, got: %+v", r)
+	}
+	if !strings.Contains(r.Detail, "write failed") {
+		t.Errorf("expected 'write failed' in detail, got: %s", r.Detail)
+	}
+	if r.Remediation == "" {
+		t.Error("expected a remediation on failure")
+	}
+}
+
+func TestCheckSecretsRoundtrip_ReadFail(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	store.getErr = errors.New("dpapi unprotect failed")
+	r := checkSecretsRoundtripFor("windows", store)
+	if r.OK {
+		t.Errorf("expected OK=false on read failure, got: %+v", r)
+	}
+	if !strings.Contains(r.Detail, "read failed") {
+		t.Errorf("expected 'read failed' in detail, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "Task Scheduler") {
+		t.Errorf("expected account-mismatch hint in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckSecretsRoundtrip_Mismatch(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	store.overrideR = "tampered-value"
+	r := checkSecretsRoundtripFor("windows", store)
+	if r.OK {
+		t.Errorf("expected OK=false on readback mismatch, got: %+v", r)
+	}
+	if !strings.Contains(r.Detail, "mismatch") {
+		t.Errorf("expected 'mismatch' in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckSecretsRoundtrip_NonWindowsSkip(t *testing.T) {
+	t.Parallel()
+	// A failing store must NOT cause a failure on non-Windows: the check is skipped.
+	store := newFakeStore()
+	store.setErr = errors.New("should never be called")
+	for _, goos := range []string{"linux", "darwin"} {
+		r := checkSecretsRoundtripFor(goos, store)
+		if !r.OK {
+			t.Errorf("[%s] expected OK=true (skipped), got: %+v", goos, r)
+		}
+		if !strings.Contains(r.Detail, "skipped") {
+			t.Errorf("[%s] expected 'skipped' in detail, got: %s", goos, r.Detail)
+		}
+	}
+}

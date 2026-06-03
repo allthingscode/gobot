@@ -128,6 +128,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkStorageRoot(cfg), true),
 		r(checkWorkspace(cfg), true),
 		r(checkSecurityStore(cfg), true),
+		r(checkSecretsRoundtrip(cfg), false),
 		r(checkEncryptionKey(), false),
 		r(checkPlaintextSecrets(cfg), false),
 		r(checkHITL(cfg), false),
@@ -638,6 +639,45 @@ func checkAuthorization(cfg *config.Config) Result {
 		Name:   "authorization",
 		OK:     true,
 		Detail: fmt.Sprintf("%d user(s) authorized", count),
+	}
+}
+
+// checkSecretsRoundtrip performs a Set→Get→Delete liveness check against the
+// secrets store, proving that secrets written by the current user account can be
+// decrypted by it. This catches account-mismatch failures (e.g. Task Scheduler
+// running under a different account than the one that ran 'gobot authorize') at
+// startup rather than mid-operation. It is advisory (non-critical).
+//
+// The check only runs on Windows, where DPAPI ties secrets to the user account.
+// On Linux/macOS the AES-256 key file is portable, so the roundtrip is skipped
+// and reported OK.
+func checkSecretsRoundtrip(cfg *config.Config) Result {
+	return checkSecretsRoundtripFor(runtime.GOOS, secrets.NewSecretsStore(cfg.StorageRoot()))
+}
+
+// checkSecretsRoundtripFor is the OS-injectable core of checkSecretsRoundtrip,
+// kept separate so tests can exercise both the Windows and non-Windows paths
+// against a fake store.
+func checkSecretsRoundtripFor(goos string, store secrets.Roundtripper) Result {
+	if goos != "windows" {
+		return Result{
+			Name:   "secrets roundtrip",
+			OK:     true,
+			Detail: "skipped (DPAPI is Windows-only)",
+		}
+	}
+	if err := secrets.RoundtripTest(store); err != nil {
+		return Result{
+			Name:        "secrets roundtrip",
+			OK:          false,
+			Detail:      err.Error(),
+			Remediation: "Ensure gobot runs under the same Windows account used for 'gobot authorize'/'gobot reauth'; re-run 'gobot reauth' if the account changed.",
+		}
+	}
+	return Result{
+		Name:   "secrets roundtrip",
+		OK:     true,
+		Detail: fmt.Sprintf("DPAPI Set→Get→Delete OK for user %q", secrets.CurrentUsername()),
 	}
 }
 

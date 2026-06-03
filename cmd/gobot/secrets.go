@@ -2,9 +2,7 @@ package main
 
 import (
 	"fmt"
-	"os/user"
 	"runtime"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -25,16 +23,6 @@ func cmdSecrets() *cobra.Command {
 		cmdSecretsTest(),
 	)
 	return cmd
-}
-
-const preflightTestKeyPrefix = "preflight.test"
-
-func currentUsername() string {
-	u, err := user.Current()
-	if err != nil || u == nil || u.Username == "" {
-		return "unknown-user"
-	}
-	return u.Username
 }
 
 func cmdSecretsSet() *cobra.Command {
@@ -138,33 +126,10 @@ func cmdSecretsTest() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 			store := secrets.NewSecretsStore(cfg.StorageRoot())
-			username := currentUsername()
-			testKey := fmt.Sprintf("%s.%d", preflightTestKeyPrefix, time.Now().UTC().UnixNano())
-			testValue := "gobot-secrets-preflight"
-
-			cleanupErr := store.Delete(testKey)
-			if cleanupErr != nil {
-				fmt.Printf("Pre-flight warning: failed cleanup for test key %q: %v\n", testKey, cleanupErr)
+			if err := secrets.RoundtripTest(store); err != nil {
+				return fmt.Errorf("%w", err)
 			}
-
-			if err := store.Set(testKey, testValue); err != nil {
-				return fmt.Errorf("secrets pre-flight failed for user %q on %s: write failed: %w", username, runtime.GOOS, err)
-			}
-			defer func() {
-				if err := store.Delete(testKey); err != nil {
-					fmt.Printf("Pre-flight warning: failed cleanup for test key %q: %v\n", testKey, err)
-				}
-			}()
-
-			got, err := store.Get(testKey)
-			if err != nil {
-				return fmt.Errorf("secrets pre-flight failed for user %q on %s: read failed: %w. On Windows, verify Task Scheduler runs under the same account used for gobot authorize/reauth", username, runtime.GOOS, err)
-			}
-			if got != testValue {
-				return fmt.Errorf("secrets pre-flight failed for user %q on %s: readback mismatch (got %q). On Windows, verify Task Scheduler runs under the same account used for gobot authorize/reauth", username, runtime.GOOS, got)
-			}
-
-			fmt.Printf("Secrets pre-flight PASS for user %q on %s.\n", username, runtime.GOOS)
+			fmt.Printf("Secrets pre-flight PASS for user %q on %s.\n", secrets.CurrentUsername(), runtime.GOOS)
 			return nil
 		},
 	}

@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"time"
 )
 
 // #nosec G101 - This is a filename, not a secret.
@@ -90,6 +93,63 @@ func (s *SecretsStore) Delete(key string) error {
 	}
 	delete(m, key)
 	return s.save(m)
+}
+
+// roundtripKeyPrefix is the key prefix used by the secrets pre-flight round-trip
+// test. Keys are suffixed with a timestamp to avoid collisions.
+const roundtripKeyPrefix = "preflight.test"
+
+// roundtripValue is the sentinel value written and read back during the
+// pre-flight round-trip test.
+const roundtripValue = "gobot-secrets-preflight"
+
+// Roundtripper is the minimal subset of *SecretsStore needed to perform a
+// Set→Get→Delete liveness check. It exists so callers (and tests) can supply a
+// fake store without touching real DPAPI/AES storage.
+type Roundtripper interface {
+	Set(key, value string) error
+	Get(key string) (string, error)
+	Delete(key string) error
+}
+
+// CurrentUsername returns the current OS user name, or "unknown-user" if it
+// cannot be determined.
+func CurrentUsername() string {
+	u, err := user.Current()
+	if err != nil || u == nil || u.Username == "" {
+		return "unknown-user"
+	}
+	return u.Username
+}
+
+// RoundtripTest performs a Set→Get→Delete liveness check against store using a
+// unique, self-cleaning key. It verifies that a freshly written secret can be
+// read back unchanged — proving the encryption store (DPAPI on Windows,
+// AES-256 on Linux/macOS) is usable by the current user account.
+//
+// On failure it returns an error identifying the current user and OS plus the
+// failure reason, matching the messages historically emitted by
+// `gobot secrets test`. It returns nil on success.
+func RoundtripTest(store Roundtripper) error {
+	username := CurrentUsername()
+	testKey := fmt.Sprintf("%s.%d", roundtripKeyPrefix, time.Now().UTC().UnixNano())
+
+	// Best-effort pre-clean in case a prior run left the key behind.
+	_ = store.Delete(testKey)
+
+	if err := store.Set(testKey, roundtripValue); err != nil {
+		return fmt.Errorf("secrets pre-flight failed for user %q on %s: write failed: %w", username, runtime.GOOS, err)
+	}
+	defer func() { _ = store.Delete(testKey) }()
+
+	got, err := store.Get(testKey)
+	if err != nil {
+		return fmt.Errorf("secrets pre-flight failed for user %q on %s: read failed: %w. On Windows, verify Task Scheduler runs under the same account used for gobot authorize/reauth", username, runtime.GOOS, err)
+	}
+	if got != roundtripValue {
+		return fmt.Errorf("secrets pre-flight failed for user %q on %s: readback mismatch (got %q). On Windows, verify Task Scheduler runs under the same account used for gobot authorize/reauth", username, runtime.GOOS, got)
+	}
+	return nil
 }
 
 // load reads the JSON file. Returns an empty map if the file does not exist.
