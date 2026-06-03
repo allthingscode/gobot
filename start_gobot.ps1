@@ -55,6 +55,31 @@ function Check-GobotLock {
     }
 }
 
+function Wait-ForNetwork {
+    # Bounded network-availability wait. The scheduled task no longer gates on
+    # -RunOnlyIfNetworkAvailable (C-314), so the bot may launch a few seconds
+    # before the network stack is ready at logon. Probe with a DNS resolve
+    # (more firewall-robust than ICMP/Test-Connection, which some environments
+    # block) up to 5 times at 3s intervals (~15s cap). Proceed on first success;
+    # fall through after the cap regardless so the bot always starts and lets its
+    # in-process resilience recover. Never throws — every probe is caught.
+    $maxAttempts = 5
+    $delaySeconds = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            [System.Net.Dns]::GetHostEntry("dns.google") | Out-Null
+            Write-StartupLog "Network check: reachable on attempt $attempt/$maxAttempts. Proceeding."
+            return
+        } catch {
+            Write-StartupLog "Network check: attempt $attempt/$maxAttempts failed ($($_.Exception.Message))."
+            if ($attempt -lt $maxAttempts) {
+                Start-Sleep -Seconds $delaySeconds
+            }
+        }
+    }
+    Write-StartupLog "Network check: not reachable after $maxAttempts attempts (~$($maxAttempts * $delaySeconds)s). Proceeding anyway; bot will recover in-process."
+}
+
 function Stop-GobotProcesses {
     if (Test-Path $LockFile) {
         $pidToStop = Get-Content $LockFile -ErrorAction SilentlyContinue
@@ -76,6 +101,10 @@ Write-Host ""
 
 # Check for existing instance before starting
 Check-GobotLock
+
+# Wait briefly for network at logon before pre-flight / startup (C-314).
+Write-Host "--- Waiting for network availability ---" -ForegroundColor Cyan
+Wait-ForNetwork
 
 Write-Host "--- Running secrets pre-flight (gobot secrets test) ---" -ForegroundColor Cyan
 & $GobotExe secrets test
