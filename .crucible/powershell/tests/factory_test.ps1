@@ -89,7 +89,20 @@ function Ensure-TestBacklogArtifact {
     $backlogPath = Join-Path $tempRoot ".crucible/backlog/BACKLOG.md"
     if (-not (Test-Path -LiteralPath $backlogPath)) {
         New-Item -ItemType Directory -Path (Split-Path -Parent $backlogPath) -Force | Out-Null
-        "# Test Backlog`n- C-FACTORY-TASK`n- C-FACTORY-INJECTION-WARN`n- C-FACTORY-CHECKLIST`n- {task_id}-HANDOFF`n- C-FACTORY-ISOLATED" | Out-File -LiteralPath $backlogPath -Encoding UTF8
+        $content = @"
+# Test Backlog
+
+## Active Items
+
+| ID | Title | Status |
+|---|---|---|
+| C-FACTORY-TASK | Test Task | Ready |
+| C-FACTORY-INJECTION-WARN | Test Task | Ready |
+| C-FACTORY-CHECKLIST | Test Task | Ready |
+| {task_id}-HANDOFF | Test Task | Ready |
+| C-FACTORY-ISOLATED | Test Task | Ready |
+"@
+        $content | Out-File -LiteralPath $backlogPath -Encoding UTF8
         $script:tempArtifacts += $backlogPath
     }
 }
@@ -201,7 +214,7 @@ scope: "dev-factory-only"
 
     $backlogPath = Join-Path $tempRoot ".crucible/backlog/BACKLOG.md"
     if (Test-Path -LiteralPath $backlogPath) {
-        $backlogLine = "| [$TaskId](chores/active/$($TaskId)_FactoryTest.md) | Test Title |"
+        $backlogLine = "| [$TaskId](chores/active/$($TaskId)_FactoryTest.md) | Test Title | Ready |"
         Add-Content -Path $backlogPath -Value $backlogLine -Encoding UTF8
     }
 }

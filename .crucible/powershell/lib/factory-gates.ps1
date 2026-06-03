@@ -629,6 +629,49 @@ function Complete-FactorySourceSession {
             -Metrics $metricsBlock `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
 
+        # Promote the deployment checklist item to a real gate: the BACKLOG.md entry shows Production/Resolved
+        if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -eq "done" -and -not [string]::IsNullOrEmpty($handoff.task_id)) {
+            $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+            $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $repoRoot
+            $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+            if (Test-Path -LiteralPath $backlogPath) {
+                $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+                if ($backlogContent -match [regex]::Escape($handoff.task_id)) {
+                    # Determine if the human gate has already passed.
+                    # We only enforce this finalization gate when transitioning to done (which requires the gate to have passed).
+                    $gateAlreadyPassed = $false
+                    if (-not [string]::IsNullOrEmpty($sessionDir)) {
+                        $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
+                        if (Test-Path $GATE_DIR) {
+                            $decisions = @(Get-ChildItem -Path $GATE_DIR -Filter ($handoff.task_id + "-*.json") |
+                                Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
+                                Sort-Object LastWriteTime -Descending)
+                            if ($decisions.Count -gt 0) {
+                                try {
+                                    $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                                    $advancingOutcomes = @("accepted", "redirected")
+                                    if ($advancingOutcomes -contains $latestDecision.outcome) {
+                                        $gateAlreadyPassed = $true
+                                    }
+                                } catch {}
+                            }
+                        }
+                    }
+
+                    if ($gateAlreadyPassed) {
+                        $finalization = Get-TaskFinalizationDetails -TaskId $handoff.task_id -ProjectRoot $repoRoot
+                        if (-not $finalization.IsFinalized) {
+                            Write-Host ("[STOP] Quality gate failed: deployment did not finalize the backlog: " + $handoff.task_id + " is still not terminal/archived. Run archive-task.ps1.") -ForegroundColor Red
+                            Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                                -Outcome "retry_required" -Notes "Deployment backlog finalization gate failed" `
+                                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                            exit 2
+                        }
+                    }
+                }
+            }
+        }
+
         # A-4: Task.md quality gate (required checklist section only)
         $taskMdPath = if (-not [string]::IsNullOrEmpty($handoff.task_id)) {
             Join-Path $sessionDir ("$($handoff.task_id)/$($handoff.source_phase)/task.md")
@@ -1492,13 +1535,255 @@ function Invoke-GitChecked {
     }
 }
 
+function Get-BacklogItemPathForTaskProjectRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Task,
+        [string]$ProjectRoot = ""
+    )
+
+    $typeDir = if ($Task -match "^F-") {
+        "features"
+    } elseif ($Task -match "^B-") {
+        "bugs"
+    } elseif ($Task -match "^C-") {
+        "chores"
+    } else {
+        ""
+    }
+
+    $typeDirs = if ([string]::IsNullOrWhiteSpace($typeDir)) {
+        @("features", "bugs", "chores")
+    } else {
+        @($typeDir)
+    }
+
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+    foreach ($dir in $typeDirs) {
+        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $activeMatch) {
+            return $activeMatch.FullName
+        }
+
+        $rootMatch = Get-ChildItem -Path (Join-Path $backlogDir $dir) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $rootMatch) {
+            return $rootMatch.FullName
+        }
+    }
+
+    return ""
+}
+
+function Get-TaskFinalizationDetails {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [string]$ProjectRoot = ""
+    )
+
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+    $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+
+    $result = [ordered]@{
+        IsFinalized = $false
+        BacklogStatus = ""
+        SpecExistsInActive = $false
+        SpecPathInActive = ""
+        SpecExistsInArchived = $false
+        SpecPathInArchived = ""
+        SpecStatusMatches = $false
+        Error = ""
+    }
+
+    if (-not (Test-Path -LiteralPath $backlogPath)) {
+        $result.Error = "BACKLOG.md not found at $backlogPath"
+        return [pscustomobject]$result
+    }
+
+    # Load archive-task helper if not loaded
+    $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+    if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+        if (Test-Path -LiteralPath $archiveLibPath) {
+            . $archiveLibPath
+        } else {
+            throw "archive-task helper not found at $archiveLibPath"
+        }
+    }
+
+    # 1. Parse BACKLOG.md to find status of TaskId
+    $lines = Get-Content -LiteralPath $backlogPath -Encoding UTF8
+    $taskRowIndex = -1
+    $statusColIndex = -1
+
+    # Locate Status column index
+    $activeItemsIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^##\s+Active Items\b') {
+            $activeItemsIdx = $i
+            break
+        }
+    }
+
+    if ($activeItemsIdx -ge 0) {
+        $headerIdx = -1
+        for ($i = $activeItemsIdx + 1; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            if ($line -match '^##\s') { break }
+            if ($line -match '^\s*\|') { $headerIdx = $i; break }
+        }
+        if ($headerIdx -ge 0) {
+            $headerCells = @($lines[$headerIdx].Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
+            for ($c = 0; $c -lt $headerCells.Count; $c++) {
+                if ($headerCells[$c] -ieq 'Status') { $statusColIndex = $c; break }
+            }
+        }
+    }
+
+    # Search for TaskId in the table rows
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ($line -match '^\s*\|\s*\[?' + [regex]::Escape($TaskId) + '\b') {
+            $taskRowIndex = $i
+            break
+        }
+    }
+
+    if ($taskRowIndex -lt 0) {
+        $result.Error = "TaskId $TaskId not found in BACKLOG.md"
+        return [pscustomobject]$result
+    }
+
+    # Extract Status
+    if ($statusColIndex -ge 0) {
+        $cells = @($lines[$taskRowIndex].Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
+        if ($cells.Count -gt $statusColIndex) {
+            $result.BacklogStatus = $cells[$statusColIndex]
+        }
+    }
+
+    if ([string]::IsNullOrEmpty($result.BacklogStatus)) {
+        $result.Error = "Unable to determine Status for task $TaskId in BACKLOG.md"
+        return [pscustomobject]$result
+    }
+
+    # 2. Check spec paths
+    $typeDirs = @("features", "bugs", "chores")
+    foreach ($dir in $typeDirs) {
+        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $activeMatch) {
+            $result.SpecExistsInActive = $true
+            $result.SpecPathInActive = $activeMatch.FullName
+        }
+
+        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $archivedMatch) {
+            $result.SpecExistsInArchived = $true
+            $result.SpecPathInArchived = $archivedMatch.FullName
+        }
+    }
+
+    # 3. Check frontmatter status matches and status is terminal
+    $isTerminalStatus = ($result.BacklogStatus -ieq "Production" -or $result.BacklogStatus -ieq "Resolved")
+    
+    $specToRead = if ($result.SpecExistsInArchived) { $result.SpecPathInArchived } else { $result.SpecPathInActive }
+    $specStatus = ""
+    if (-not [string]::IsNullOrEmpty($specToRead) -and (Test-Path -LiteralPath $specToRead)) {
+        $fmStr = [string](Get-Content -LiteralPath $specToRead -Head 15 -Encoding UTF8)
+        if ($fmStr -match 'status:\s*["'']?([^"''\s\r\n]+)"?') {
+            $specStatus = $matches[1]
+        }
+    }
+
+    $result.SpecStatusMatches = ($specStatus -ieq $result.BacklogStatus)
+    $result.IsFinalized = ($isTerminalStatus -and $result.SpecExistsInArchived -and -not $result.SpecExistsInActive -and $result.SpecStatusMatches)
+
+    return [pscustomobject]$result
+}
+
 function Invoke-HumanGateAction {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
-        [Parameter(Mandatory=$true)][string]$Outcome
+        [Parameter(Mandatory=$true)][string]$Outcome,
+        [string]$ProjectRoot = ""
     )
     $primaryBranch = Get-PrimaryBranchName
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
+        $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
+            $ProjectRoot
+        } else {
+            $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+            if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
+        }
+
+        $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
+        $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+
+        $finalizationOk = $true
+        if (Test-Path -LiteralPath $backlogPath) {
+            $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+            if ($backlogContent -match [regex]::Escape($TaskId)) {
+                $finalization = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $resolvedProjectRoot
+                if (-not $finalization.IsFinalized) {
+                    Write-Host "`n[D44] WARNING: Task $TaskId was not finalized before accept/push!" -ForegroundColor Yellow
+                    Write-Host "[D44] Auto-finalizing task $TaskId now..." -ForegroundColor Cyan
+
+                    # Locate active spec
+                    $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $resolvedProjectRoot
+                    if ([string]::IsNullOrEmpty($activeSpecPath) -or -not (Test-Path -LiteralPath $activeSpecPath)) {
+                        Write-Host "[D44] ERROR: Active spec path not found for task $TaskId. Auto-finalization failed." -ForegroundColor Red
+                        $finalizationOk = $false
+                    } else {
+                        # Load archive-task helper
+                        $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+                        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                            if (Test-Path -LiteralPath $archiveLibPath) {
+                                . $archiveLibPath
+                            } else {
+                                throw "archive-task helper not found at $archiveLibPath"
+                            }
+                        }
+
+                        # Perform archival
+                        try {
+                            $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath
+                            Write-Host ("[D44] SUCCESS: Auto-archived task as {0} (status {1}): {2}" -f $archiveResult.Type, $archiveResult.Status, $archiveResult.ArchivedRelPath) -ForegroundColor Green
+                        } catch {
+                            Write-Host ("[D44] ERROR: Archival failed for task $TaskId. Error: " + $_.Exception.Message) -ForegroundColor Red
+                            $finalizationOk = $false
+                        }
+
+                        # Re-verify after archiving
+                        if ($finalizationOk) {
+                            $reverify = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $resolvedProjectRoot
+                            if (-not $reverify.IsFinalized) {
+                                Write-Host "[D44] ERROR: Task $TaskId is still not finalized after archival attempt." -ForegroundColor Red
+                                $finalizationOk = $false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (-not $finalizationOk) {
+            Write-Host "[D44] STOP: Auto-finalization failed for $TaskId; refusing to push. The merge remains LOCAL only. Run archive-task.ps1 for $TaskId, then re-run the gate with -GateOutcome accepted." -ForegroundColor Red
+            
+            $logVar = Get-Variable -Name "LOG_FILE" -ErrorAction SilentlyContinue
+            $resolvedLogFile = if ($null -ne $logVar) { $logVar.Value } else { $null }
+
+            if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
+                try {
+                    $cbVar = Get-Variable -Name "CB_HISTORY_FILE" -ErrorAction SilentlyContinue
+                    $resolvedCBHistoryFile = if ($null -ne $cbVar) { $cbVar.Value } else { $null }
+                    
+                    Write-EventLog -Event "quality_gate_retry" -TaskId $TaskId -Phase "deployment" `
+                        -Outcome "retry_required" -Notes "Auto-finalization failed at human gate; push withheld" `
+                        -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
+                } catch {
+                    Write-Host "[D44] WARNING: Failed to write quality_gate_retry event: $_" -ForegroundColor Yellow
+                }
+            }
+            exit 2
+        }
+
         $remotes = @(Invoke-GitChecked { git remote 2>$null })
         if ($remotes -contains "origin") {
             Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
@@ -1561,6 +1846,7 @@ function Invoke-HumanGate {
     $GateRedirectTarget = $Context.GateRedirectTarget
     $crucibleRoot = $Context.CrucibleRoot
     $Quiet = [bool]$Context.Quiet
+    $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
 
     # --- 3a. Human Gate ---
     if ($handoff.source_phase -eq "deployment" -and -not $isBootstrap) {
@@ -1613,7 +1899,7 @@ function Invoke-HumanGate {
             Write-Host ("Reason: " + $trimmedGateReason) -ForegroundColor Gray
 
             # Execute push or reset based on automated CLI decision
-            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome
+            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot
 
             if ($GateOutcome -eq "abandoned") {
                 Write-Host "[ABANDONED] Pipeline stopped per human request." -ForegroundColor Gray
@@ -1687,7 +1973,7 @@ function Invoke-HumanGate {
                             exit 0
                         } else {
                             # Execute push or reset based on manual decision
-                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome
+                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot
 
                             # Archive the decision
                             $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
