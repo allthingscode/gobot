@@ -127,6 +127,22 @@ Blocked          → Ready              (human resolution + factory -Recover)
 - **File Affinity**: Groomers define the scope boundary. Specialists must not edit files outside this boundary.
 - **No Push/Commit Shortcuts**: Only the Operator may merge to `master` and push to origin.
 
+### 6.1 File Affinity — Design Model & Validation Strength
+
+`file_affinity` is a **forward-looking, deny-by-default allowlist** of the path prefixes a task is permitted to touch. It exists to **confine the blast radius** of an autonomous change (principle of least privilege / capability confinement; same posture as a firewall allowlist or GitHub `CODEOWNERS`).
+
+The blast-radius control is **not the list itself** — it is the **scope gate** that diffs the specialist's actual changes against the list. Enforcement strength is deliberately tiered, and this is settled design (do not re-litigate without a new, named failure mode):
+
+| Check | What it protects | Strength | Why |
+|---|---|---|---|
+| Actual diff ⊆ `file_affinity` | The real boundary | **Hard, fail-closed** (block) | This is the security property. If scope can't be determined, block. |
+| `file_affinity` not *over-broad* vs the spec's Affected Files | Least privilege (minimize blast radius) | **Warn** | Over-breadth is the real blast-radius risk; surface it for narrowing. |
+| Declared `file_affinity` paths *exist on disk* | Authoring hygiene (catch typos) | **Warn only — never hard-fail** | See below. |
+
+**Why path-existence is warn-only, by construction:** `file_affinity` is a *scope boundary*, not a *manifest of existing files*. Any task that **creates** a file or package legitimately lists a target that does not exist at grooming time. Hard-failing on non-existence would conflate "boundary" with "manifest" and break every file-creating task — a category error. (`CODEOWNERS` follows the same rule: a pattern matching no files is a warning, never a failure.) A non-existent allowlist entry is also **not a safety issue** — an entry that matches nothing grants nothing; only *over-broad* entries widen blast radius.
+
+**Implication for authors and reviewers:** keep `file_affinity` as **narrow as possible** (least privilege) and **consistent with reality** — a path that doesn't resolve usually means the *real* file is outside the declared scope, which will make the fail-closed gate correctly *block a legitimate edit*. Treat the existence `[WARN]` from `validate-backlog.ps1` as a signal to fix the scope, not noise. (History: finding D46 — `validate-backlog.ps1` warns on non-resolvable `file_affinity` entries, `-ProjectRoot`-aware; intentionally warn, not fail, per the reasoning above.)
+
 ## 7. Handoff Validation & Quality Gates
 
 In addition to circuit breakers, `factory.ps1` enforces runtime validation gates before accepting handoffs:

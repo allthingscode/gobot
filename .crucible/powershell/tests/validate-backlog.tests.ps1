@@ -40,16 +40,23 @@ function New-SpecFile {
         [string]$ItemId,
         [string]$Priority = "P2",
         [string]$Title = "Sample",
-        [string]$Status = "Ready"
+        [string]$Status = "Ready",
+        [string[]]$FileAffinity = @()
     )
     $full = Join-Path $Root $RelPath
     New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
+    
+    $affinityBlock = ""
+    if ($FileAffinity.Count -gt 0) {
+        $affinityBlock = "`nfile_affinity:`n" + (($FileAffinity | ForEach-Object { "  - " + $_ }) -join "`n")
+    }
+    
     @"
 ---
 item_id: "$ItemId"
 type: "Chore"
 status: "$Status"
-priority: "$Priority"
+priority: "$Priority"$affinityBlock
 target_phase: "implementation"
 created_at: "2026-05-25"
 ---
@@ -59,8 +66,12 @@ created_at: "2026-05-25"
 }
 
 function Invoke-Validator {
-    param([string]$BacklogPath)
-    $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT -BacklogPath $BacklogPath 2>&1)
+    param([string]$BacklogPath, [string]$ProjectRoot = "")
+    $cmdArgs = @("-BacklogPath", $BacklogPath)
+    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        $cmdArgs += @("-ProjectRoot", $ProjectRoot)
+    }
+    $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @cmdArgs 2>&1)
     return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
 }
 
@@ -403,6 +414,146 @@ target_phase: "done"
         $r = Invoke-Validator -BacklogPath $backlog
         Assert-Result -Name "mojibake exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "mojibake error message" -Condition ($r.Output -match "Mojibake detected in BACKLOG.md") -FailureMessage ("expected mojibake detection message. Output: " + $r.Output)
+    }
+
+    # --- Test 10: file_affinity path-existence check ---
+    $results += Run-Test -Name "file_affinity validation: valid, wildcard, and nonexistent paths" -Body {
+        $root = Join-Path $tempRoot "affinity-validation"
+        New-MinimalBacklogTree -Root $root
+        
+        # Create some real project files
+        $projDir = Join-Path $root "internal/doctor"
+        New-Item -ItemType Directory -Path $projDir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $projDir "helper.go") -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $root "root_script.ps1") -Force | Out-Null
+        
+        # Case A: Clean spec with valid file, directory, and wildcard affinities
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Good_Affinity.md" -ItemId "C-001" -Priority "P2" -Title "Good Affinity" -FileAffinity @(
+            "internal/doctor",
+            "root_script.ps1",
+            "internal/doctor/*.go"
+        )
+        
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-001 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Good_Affinity.md) | P2 | Ready | Good Affinity | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        # Run validation - should PASS
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "good affinity passes" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+
+        # Case B: Spec with a nonexistent literal path
+        New-SpecFile -Root $root -RelPath "chores/active/C-002_Bad_Affinity.md" -ItemId "C-002" -Priority "P2" -Title "Bad Affinity" -FileAffinity @(
+            "internal/doctor",
+            "scripts/nonexistent.ps1"
+        )
+        
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 2 | C-001, C-002 |
+| **P3** | 0 | - |
+
+**Status Overview**: 2 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Good_Affinity.md) | P2 | Ready | Good Affinity | Architect |
+| [C-002](chores/active/C-002_Bad_Affinity.md) | P2 | Ready | Bad Affinity | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        # Run validation - should PASS with warning
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "bad affinity warning passes" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 (warn-only), got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "bad affinity warning contains spec path" -Condition ($r.Output.Contains("C-002_Bad_Affinity.md")) -FailureMessage ("expected warning message referencing the bad spec file. Output: " + $r.Output)
+        Assert-Result -Name "bad affinity warning contains bad path" -Condition ($r.Output.Contains("scripts/nonexistent.ps1")) -FailureMessage ("expected warning message referencing the bad path. Output: " + $r.Output)
+
+        # Case C: Spec with a wildcard pattern matching nothing
+        New-SpecFile -Root $root -RelPath "chores/active/C-002_Bad_Affinity.md" -ItemId "C-002" -Priority "P2" -Title "Bad Affinity" -FileAffinity @(
+            "internal/doctor/*.py"
+        )
+        # Run validation - should PASS with warning
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "bad wildcard warning passes" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 (warn-only), got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "bad wildcard warning message" -Condition ($r.Output.Contains("internal/doctor/*.py")) -FailureMessage ("expected warning message referencing the bad wildcard path. Output: " + $r.Output)
+    }
+
+    # --- Test 11: file_affinity is ProjectRoot-aware from different CWD ---
+    $results += Run-Test -Name "file_affinity validation: ProjectRoot-aware from foreign CWD" -Body {
+        $root = Join-Path $tempRoot "project-root-aware"
+        New-MinimalBacklogTree -Root $root
+        
+        # Create a real project file
+        New-Item -ItemType File -Path (Join-Path $root "valid_root_file.ps1") -Force | Out-Null
+        
+        # Spec with file_affinity referencing the root file
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Root_Aware.md" -ItemId "C-001" -Priority "P2" -Title "Root Aware" -FileAffinity @(
+            "valid_root_file.ps1"
+        )
+        
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-001 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Root_Aware.md) | P2 | Ready | Root Aware | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        # Switch CWD to a completely different folder
+        $foreignDir = Join-Path $tempRoot "foreign-cwd"
+        New-Item -ItemType Directory -Path $foreignDir -Force | Out-Null
+        
+        $origCwd = (Get-Location).Path
+        try {
+            # Set CWD to foreign directory
+            Set-Location -LiteralPath $foreignDir
+            
+            # Run validator, passing -ProjectRoot targeting $root
+            $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+            Assert-Result -Name "resolves correctly from foreign CWD" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        } finally {
+            Set-Location -LiteralPath $origCwd
+        }
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
