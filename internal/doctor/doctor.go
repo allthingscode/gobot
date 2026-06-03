@@ -129,6 +129,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkWorkspace(cfg), true),
 		r(checkSecurityStore(cfg), true),
 		r(checkSecretsRoundtrip(cfg), false),
+		r(checkLivenessStaleness(cfg), false),
 		r(checkEncryptionKey(), false),
 		r(checkPlaintextSecrets(cfg), false),
 		r(checkHITL(cfg), false),
@@ -678,6 +679,60 @@ func checkSecretsRoundtripFor(goos string, store secrets.Roundtripper) Result {
 		Name:   "secrets roundtrip",
 		OK:     true,
 		Detail: fmt.Sprintf("DPAPI Set→Get→Delete OK for user %q", secrets.CurrentUsername()),
+	}
+}
+
+// livenessStatFn is the stat function used by checkLivenessStaleness. It is a
+// package-private seam so tests can deterministically inject a stat error on
+// any OS (Windows file-permission tricks via chmod do not work reliably).
+//
+//nolint:gochecknoglobals // Hook for testability; mirrors internal/app userHomeDir seam.
+var livenessStatFn = os.Stat
+
+// checkLivenessStaleness reports whether the heartbeat LIVENESS file at
+// {StorageRoot}/LIVENESS has gone stale. The heartbeat writes this file on every
+// tick; if its mtime is older than 2× the configured heartbeat interval, the
+// heartbeat goroutine is likely stalled (deadlock, panic, or runtime hang). This
+// surfaces the stall as a doctor warning instead of waiting for external Telegram
+// alerting. It is advisory (non-critical).
+//
+// A missing file is treated as OK: on a cold start or fresh restart the heartbeat
+// has not written LIVENESS yet, so there is no staleness to report.
+func checkLivenessStaleness(cfg *config.Config) Result {
+	livenessPath := filepath.Join(cfg.StorageRoot(), "LIVENESS")
+
+	info, err := livenessStatFn(livenessPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Result{
+				Name:   "liveness staleness",
+				OK:     true,
+				Detail: "no LIVENESS file yet (cold start)",
+			}
+		}
+		return Result{
+			Name:        "liveness staleness",
+			OK:          false,
+			Detail:      fmt.Sprintf("cannot stat %s: %v", livenessPath, err),
+			Remediation: "Check permissions on the storage root so gobot can read the LIVENESS heartbeat file.",
+		}
+	}
+
+	threshold := 2 * cfg.HeartbeatInterval()
+	age := time.Since(info.ModTime())
+	if age > threshold {
+		return Result{
+			Name:        "liveness staleness",
+			OK:          false,
+			Detail:      fmt.Sprintf("LIVENESS last updated %s ago, threshold is %s", age.Round(time.Second), threshold),
+			Remediation: "The heartbeat may be stalled; check gobot logs for a hung or panicked heartbeat goroutine and restart if needed.",
+		}
+	}
+
+	return Result{
+		Name:   "liveness staleness",
+		OK:     true,
+		Detail: fmt.Sprintf("LIVENESS updated %s ago (threshold %s)", age.Round(time.Second), threshold),
 	}
 }
 
