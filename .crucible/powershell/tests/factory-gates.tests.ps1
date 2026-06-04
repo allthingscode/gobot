@@ -1773,6 +1773,91 @@ finally {
         Assert-Result -Name "D22 follow-up: master reset back to unrelated commit" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
     }
 
+    $results += Run-Test -Name "D52: rejected unwind preserves unrelated un-pushed commits after fast-forward merge" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d52-unwind-ff"
+        $originRepo = Join-Path $caseRoot "origin"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+        
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+        
+        "initial content" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+        
+        # Create an unrelated commit on master locally (un-pushed)
+        "unrelated content" | Set-Content -LiteralPath (Join-Path $localRepo "unrelated.md") -Encoding UTF8
+        git -C $localRepo add unrelated.md 2>$null | Out-Null
+        git -C $localRepo commit -m "unrelated commit" 2>$null | Out-Null
+        $unrelatedHash = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Create task branch from the unrelated commit (since it is rebased/based on master)
+        git -C $localRepo checkout -b task/F-997 2>$null | Out-Null
+        "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        git -C $localRepo add feature.md 2>$null | Out-Null
+        git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+        
+        # Merge task branch into master using fast-forward (default behavior here since task branch is directly ahead of master)
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge task/F-997 2>$null | Out-Null
+        
+        # Verify it was indeed a fast-forward (no merge commit with 2 parents)
+        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        $parents = (git -C $localRepo log --pretty=%P -n 1 $currentHead).Trim()
+        $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
+        Assert-Result -Name "D52: verify merge was fast-forward" -Condition ($parentList.Count -lt 2) -FailureMessage "expected fast-forward merge (1 parent), but got merge commit"
+
+        # Set up human gate decision folder
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Run unwind human gate rejected
+        $scriptPath = Join-Path $caseRoot "run-d52-unwind.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'unwind FF test'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-997'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} catch {}
+finally {
+    Pop-Location
+}
+"@
+        $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+
+        # Check that master HEAD has been reset back to $unrelatedHash, preserving the unrelated commit!
+        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        Assert-Result -Name "D52: master reset back to unrelated commit after FF merge rejection" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
+    }
+
     $results += Run-Test -Name "D31: missing optional counters defaulted without StrictMode crash" -Body {
         $frameworkDir = Join-Path $tempRoot "powershell"
         $sessionDir = Join-Path $tempRoot "session"

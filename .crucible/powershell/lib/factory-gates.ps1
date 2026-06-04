@@ -1812,11 +1812,26 @@ function Invoke-HumanGateAction {
             $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
 
             $resetTarget = "origin/$primaryBranch"
-            if ($parentList.Count -ge 2) {
+            
+            # Derive pre-merge tip using reflog as primary defense in depth (for both merge and FF)
+            $reflogTip = (Invoke-GitChecked { git rev-parse --verify --quiet "${primaryBranch}@{1}" 2>$null }).Trim()
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
+                # Verify that $reflogTip is indeed an ancestor of $currentHead
+                git merge-base --is-ancestor $reflogTip $currentHead 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $resetTarget = $reflogTip
+                }
+            }
+
+            # If reflog check failed or wasn't ancestor, fall back to parent checking for merge commits
+            if ($resetTarget -eq "origin/$primaryBranch" -and $parentList.Count -ge 2) {
                 $resetTarget = $parentList[0]
-                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
-            } else {
+            }
+
+            if ($resetTarget -eq "origin/$primaryBranch") {
                 Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
+            } else {
+                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
             }
 
             Invoke-GitChecked { git checkout $primaryBranch }

@@ -133,6 +133,10 @@
           "items": {
             "$ref": "#/definitions/verification_step"
           }
+        },
+        "config_check": {
+          "$ref": "#/definitions/verification_step",
+          "description": "Optional custom command to check/validate project configurations, e.g. checking config file canonical formatting. If configured, runs as part of 'full' mode."
         }
       }
     },

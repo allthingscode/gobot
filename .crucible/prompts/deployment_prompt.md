@@ -64,10 +64,10 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
    - **If it passes**: Proceed to Step 4.
 
 4. **Commit & Local Merge**:
-   - Merge `task/{task_id}` into `master` locally.
+   - Merge `task/{task_id}` into `master` locally using `git merge --no-ff --no-edit task/{task_id}` (always force a merge commit, never fast-forward).
    - Tag the release locally if applicable.
    - Do NOT run `git push`. The factory's Human Gate will perform the push to origin automatically once accepted.
-   - **Verify**: Run `git log master --oneline -1` and confirm the merge succeeded locally.
+   - **Verify**: Run `git log master --oneline -1` and confirm the merge succeeded locally (it must be a 2-parent merge commit).
 
 5. **Dev Log Generation ({task_id})**:
    - Draft a narrative update for this completed task using `.crucible/dev-logs/TEMPLATE.md` and append it to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.

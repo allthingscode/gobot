@@ -160,6 +160,17 @@ verification:
       command: npm test
 ```
 
+#### `verification.config_check`
+
+Optional. Custom command to check/validate project configurations, e.g. checking config file canonical formatting. If configured, this runs as part of the `full` verification mode.
+
+```yaml
+verification:
+  config_check:
+    name: config check
+    command: go run -mod=readonly ./cmd/gobot config reformat --check config.sample.json
+```
+
 Each step:
 
 | Key | Type | Required | Description |

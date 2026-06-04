@@ -52,16 +52,17 @@ Transitions across the "Trust Boundary" require a formal human decision.
 
 ## 4. Reviewer Verification Checklist (MANDATORY)
 
-A Reviewer MUST verify these 6 steps in order. A failure at any step blocks approval.
+A Reviewer MUST verify these 7 steps in order. A failure at any step blocks approval.
 
 1. **Tests pass** — run the project's `verification.full` test command from `.crucible/config.yaml` (e.g. `go test`, `npm test`, `pytest`)
 2. **Vet / static analysis passes** — run the project's vet/lint commands from `.crucible/config.yaml` (e.g. `go vet`, `npm run lint`, `cargo clippy`)
 3. **Lint passes** — run the project's linter command from `.crucible/config.yaml` (e.g. `golangci-lint`, `ruff`, `eslint`)
 4. **Doc-lint passes** — run the project's doc-lint command if defined in `.crucible/config.yaml`
-5. **Acceptance Criteria met** (mapped 1:1 to spec)
-6. **Scope bounded** (strictly within `file_affinity`)
+5. **Config-format/validate check passes** — run the project's config-format/validate command if defined in `.crucible/config.yaml` (e.g. `config_check` command)
+6. **Acceptance Criteria met** (mapped 1:1 to spec)
+7. **Scope bounded** (strictly within `file_affinity`)
 
-> The specific commands in steps 1–4 come from the project's `.crucible/config.yaml`, not from Crucible itself. Crucible is language-agnostic; the examples in this repo use Go (`go test`, `go vet`, `golangci-lint`) because the reference application is written in Go.
+> The specific commands in steps 1–5 come from the project's `.crucible/config.yaml`, not from Crucible itself. Crucible is language-agnostic; the examples in this repo use Go (`go test`, `go vet`, `golangci-lint`) because the reference application is written in Go.
 
 ## 5. Pipeline State Machine
 

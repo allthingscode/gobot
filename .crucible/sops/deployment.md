@@ -48,7 +48,7 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 ### Step 4 — Local Merge
 ```bash
 git checkout master
-git merge --no-edit task/{task_id}
+git merge --no-ff --no-edit task/{task_id}
 ```
 
 Do NOT run `git push`. The factory's Human Gate will perform the push to origin automatically once accepted.

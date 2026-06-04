@@ -43,6 +43,9 @@ verification:
       command: gotestsum --format testdox -- -mod=readonly ./internal/... ./cmd/...
     - name: doc lint
       command: go run scripts/doc_lint.go
+  config_check:
+    name: config reformat check
+    command: go run -mod=readonly ./cmd/gobot config reformat --check config.sample.json
 
 project_mandates:
   - Pure Go only; no CGO.
@@ -56,5 +59,5 @@ file_affinity_examples:
   - internal/agent/
   - cmd/gobot/
 crucible_version: "0.1.0"
-crucible_install_commit: "8594dc610e9d20fec28e27e3e7254d0035d7f1d1"
+crucible_install_commit: "e87de6ef9dea293e772d2d6a5994ac711fa61257"
 

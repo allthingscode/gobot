@@ -60,6 +60,13 @@ try {
         Assert-Result -Name "empty changed rejected" -Condition (-not (Test-PathMatchesAffinity -ChangedPath " " -Affinity "src/")) -FailureMessage "empty changed path should not match"
         Assert-Result -Name "empty affinity rejected" -Condition (-not (Test-PathMatchesAffinity -ChangedPath "src/app.ps1" -Affinity " ")) -FailureMessage "empty affinity should not match"
     }
+
+    $results += Run-Test -Name "Test-PathMatchesAffinity auto-allows *_test.go sibling files under file-level affinity (D51)" -Body {
+        Assert-Result -Name "sibling test match" -Condition (Test-PathMatchesAffinity -ChangedPath "internal/config/vector_index_interval_test.go" -Affinity "internal/config/config.go") -FailureMessage "test sibling should match when affinity is file-level"
+        Assert-Result -Name "sibling test root match" -Condition (Test-PathMatchesAffinity -ChangedPath "main_test.go" -Affinity "main.go") -FailureMessage "test sibling in root should match"
+        Assert-Result -Name "different dir test mismatch" -Condition (-not (Test-PathMatchesAffinity -ChangedPath "internal/app/vector_index_interval_test.go" -Affinity "internal/config/config.go")) -FailureMessage "test file in different directory should not match"
+        Assert-Result -Name "sibling non-test mismatch" -Condition (-not (Test-PathMatchesAffinity -ChangedPath "internal/config/vector_index_interval.go" -Affinity "internal/config/config.go")) -FailureMessage "non-test sibling should not match file-level affinity"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

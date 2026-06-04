@@ -43,7 +43,10 @@ $lines = Get-Content -LiteralPath $configPath -Encoding UTF8
 $commands = @()
 $inVerification = $false
 $inMode = $false
+$inConfigCheck = $false
 $currentName = ""
+$configCheckName = ""
+$configCheckCommand = ""
 
 # Map "test" mode to "quick" if the framework calls it with "test" for backward compatibility
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
@@ -59,10 +62,17 @@ foreach ($line in $lines) {
     if ($inVerification) {
         if ($line -match "^\s{2}${targetMode}:\s*$") {
             $inMode = $true
+            $inConfigCheck = $false
             continue
         }
-        if ($inMode -and $line -match "^\s{2}[a-zA-Z]") {
+        if ($line -match "^\s{2}config_check:\s*$") {
+            $inConfigCheck = $true
             $inMode = $false
+            continue
+        }
+        if (($inMode -or $inConfigCheck) -and $line -match "^\s{2}[a-zA-Z]") {
+            $inMode = $false
+            $inConfigCheck = $false
         }
         if ($inMode) {
             if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
@@ -76,8 +86,24 @@ foreach ($line in $lines) {
                 $currentName = ""
             }
         }
+        if ($inConfigCheck) {
+            if ($line -match "^\s{4}name:\s*(.+?)\s*$") {
+                $configCheckName = $Matches[1].Trim("`"' ")
+            }
+            if ($line -match "^\s{4}command:\s*(.+?)\s*$") {
+                $configCheckCommand = $Matches[1].Trim("`"' ")
+            }
+        }
     }
 }
+
+if ($targetMode -eq "full" -and $configCheckName -and $configCheckCommand) {
+    $commands += @{
+        Name = $configCheckName
+        Command = $configCheckCommand
+    }
+}
+
 
 function Invoke-Check {
     param(

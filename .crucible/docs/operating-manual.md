@@ -458,7 +458,7 @@ To detect conflicts early, the factory performs a **Merge Simulation** during th
 
 ### 1. Simulation (Operator)
 The Operator runs `{{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id}`.
-- **Success**: Proceed with real merge to `master` using `git merge --no-edit task/{task_id}` — never omit `--no-edit`.
+- **Success**: Proceed with real merge to `master` using `git merge --no-ff --no-edit task/{task_id}` — never omit `--no-ff` or `--no-edit`.
 - **Failure**: Hand off back to the **Architect** with status `"Ready for Rebase"`.
 
 ### 2. Rebase (Architect)

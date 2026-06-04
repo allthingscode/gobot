@@ -25,6 +25,25 @@ function Test-PathMatchesAffinity {
     }
 
     $scopePrefix = $scope.TrimEnd("/")
+
+    if ($changed -like "*_test.go") {
+        $changedDir = ""
+        $lastSlash = $changed.LastIndexOf("/")
+        if ($lastSlash -ge 0) {
+            $changedDir = $changed.Substring(0, $lastSlash)
+        }
+
+        $scopeDir = ""
+        $lastScopeSlash = $scopePrefix.LastIndexOf("/")
+        if ($lastScopeSlash -ge 0) {
+            $scopeDir = $scopePrefix.Substring(0, $lastScopeSlash)
+        }
+
+        if ($changedDir -eq $scopeDir) {
+            return $true
+        }
+    }
+
     return ($changed -eq $scopePrefix -or $changed.StartsWith($scopePrefix + "/", [System.StringComparison]::OrdinalIgnoreCase))
 }
 

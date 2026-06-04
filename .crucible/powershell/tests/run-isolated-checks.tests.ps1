@@ -113,6 +113,90 @@ try {
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "check name" -Condition ($output -match "==> no-op") -FailureMessage "expected configured check to run. Output:`n$output"
     }
+
+    $results += Run-Test -Name "Configured config_check command runs in full mode and fails when exit code is non-zero (D53)" -Body {
+        Push-Location $projectRoot
+        try {
+            @(
+                "project: RunIsolatedChecksTest",
+                "verification:",
+                "  quick:",
+                "    - name: no-op",
+                "      command: cmd /c exit 0",
+                "  full:",
+                "    - name: no-op-full",
+                "      command: cmd /c exit 0",
+                "  config_check:",
+                "    name: test config check",
+                "    command: cmd /c exit 1"
+            ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            
+            $res = Invoke-ExternalCommand {
+                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -ne 0) -FailureMessage "expected failure (non-zero exit) due to config_check failing, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "config check run" -Condition ($output -match "==> test config check") -FailureMessage "expected config check to run in full mode. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Configured config_check command runs in full mode and passes when exit code is zero (D53)" -Body {
+        Push-Location $projectRoot
+        try {
+            @(
+                "project: RunIsolatedChecksTest",
+                "verification:",
+                "  quick:",
+                "    - name: no-op",
+                "      command: cmd /c exit 0",
+                "  full:",
+                "    - name: no-op-full",
+                "      command: cmd /c exit 0",
+                "  config_check:",
+                "    name: test config check pass",
+                "    command: cmd /c exit 0"
+            ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            
+            $res = Invoke-ExternalCommand {
+                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected success, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "config check run" -Condition ($output -match "==> test config check pass") -FailureMessage "expected config check to run and pass. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Configured config_check is skipped in quick/test mode (D53)" -Body {
+        Push-Location $projectRoot
+        try {
+            @(
+                "project: RunIsolatedChecksTest",
+                "verification:",
+                "  quick:",
+                "    - name: no-op",
+                "      command: cmd /c exit 0",
+                "  full:",
+                "    - name: no-op-full",
+                "      command: cmd /c exit 0",
+                "  config_check:",
+                "    name: test config check skip",
+                "    command: cmd /c exit 1"
+            ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            
+            $res = Invoke-ExternalCommand {
+                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected success (config_check should be skipped in quick mode), got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "config check skip" -Condition ($output -notmatch "==> test config check skip") -FailureMessage "config check should not run in quick mode. Output:`n$output"
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath
