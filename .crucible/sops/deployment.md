@@ -164,6 +164,25 @@ Present factory output to the human. Wait for confirmation before ending your se
 
 ---
 
+## Reject — Send Back for Rework Loop
+
+If a task is rejected during the Human Gate (e.g. choice 2: `rejected`), the following automatic and manual procedures apply to resume the task:
+
+1. **Automatic Unwind and Re-creation**:
+   - The factory automatically unwinds the local merge on the default branch, resetting it to the pre-merge tip.
+   - The task branch `task/{task_id}` is restored.
+   - The implementation worktree at `.crucible/.agent-workspaces/implementation-{task_id}` is automatically re-created from the restored branch.
+   - A sanctioned re-entry handoff targeting `implementation` is generated automatically under `.crucible/session/handoffs/` (with the strike/rework counter incremented and `generated_by=new-handoff.ps1`).
+
+2. **Orchestrator Resumption**:
+   - The orchestrator or operator resumes the task by executing the standard initialization:
+     ```bash
+     powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id}
+     ```
+   - This will boot the implementation phase, print the prompt, and output the command line for the next session under `[NEXT SESSION COMMAND]`.
+
+---
+
 ## Feedback Loop for Production Issues
 
 When production issues are discovered that meet the circuit breaker threshold (P0 crash/data loss, OR 5+ occurrences of a minor issue):

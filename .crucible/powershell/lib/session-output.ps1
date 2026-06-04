@@ -389,6 +389,9 @@ function Initialize-FactoryTargetSession {
                 git config extensions.worktreeConfig true
             }
 
+            # Prune stale worktrees first
+            git worktree prune
+
             if (-not (Test-Path $wtPath)) {
                 Write-Quiet ("[INIT] Creating git worktree at " + $wtPath + "...") -ForegroundColor Yellow
                 $mainBranch = Get-PrimaryBranchName

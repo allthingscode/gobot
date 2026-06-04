@@ -236,13 +236,25 @@
         "required": ["source_phase"]
       },
       "then": {
-        "required": ["session_cycle_id", "artifacts", "commit_hash"],
+        "required": ["session_cycle_id", "artifacts"],
         "not": {
           "anyOf": [
             { "required": ["reviewer_checks_passed"] },
             { "required": ["human_decisions"] }
           ]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_phase": { "const": "deployment" },
+          "target_phase": { "enum": ["done", "grooming"] }
+        },
+        "required": ["source_phase", "target_phase"]
+      },
+      "then": {
+        "required": ["commit_hash", "session_cycle_id"]
       }
     },
     {

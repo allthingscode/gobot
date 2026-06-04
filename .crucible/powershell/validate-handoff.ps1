@@ -82,14 +82,30 @@ function Get-MatchingContractClauses {
 
         if ($ifNode.PSObject.Properties["properties"] -and $null -ne $ifNode.properties) {
             $props = $ifNode.properties
-            if ($props.PSObject.Properties["source_phase"] -and $props.source_phase.PSObject.Properties["const"]) {
-                if ($Source -ne ([string]$props.source_phase.const).Trim().ToLowerInvariant()) {
-                    $isMatch = $false
+            if ($props.PSObject.Properties["source_phase"]) {
+                $spNode = $props.source_phase
+                if ($spNode.PSObject.Properties["const"]) {
+                    if ($Source -ne ([string]$spNode.const).Trim().ToLowerInvariant()) {
+                        $isMatch = $false
+                    }
+                } elseif ($spNode.PSObject.Properties["enum"]) {
+                    $enumList = @($spNode.enum | ForEach-Object { $_.Trim().ToLowerInvariant() })
+                    if ($enumList -notcontains $Source.Trim().ToLowerInvariant()) {
+                        $isMatch = $false
+                    }
                 }
             }
-            if ($props.PSObject.Properties["target_phase"] -and $props.target_phase.PSObject.Properties["const"]) {
-                if ($Target -ne ([string]$props.target_phase.const).Trim().ToLowerInvariant()) {
-                    $isMatch = $false
+            if ($props.PSObject.Properties["target_phase"]) {
+                $tpNode = $props.target_phase
+                if ($tpNode.PSObject.Properties["const"]) {
+                    if ($Target -ne ([string]$tpNode.const).Trim().ToLowerInvariant()) {
+                        $isMatch = $false
+                    }
+                } elseif ($tpNode.PSObject.Properties["enum"]) {
+                    $enumList = @($tpNode.enum | ForEach-Object { $_.Trim().ToLowerInvariant() })
+                    if ($enumList -notcontains $Target.Trim().ToLowerInvariant()) {
+                        $isMatch = $false
+                    }
                 }
             }
         }
@@ -224,11 +240,50 @@ foreach ($field in $requiredFields) {
     }
 }
 
+$deploymentSuccessors = [System.Collections.Generic.List[string]]::new()
+$deploymentSuccessors.Add("grooming")
+$deploymentSuccessors.Add("done")
+
+$resolvedProjectRoot = $null
+$repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+if ($null -ne $repoRootVar) {
+    $resolvedProjectRoot = $repoRootVar.Value
+}
+if ([string]::IsNullOrEmpty($resolvedProjectRoot)) {
+    $resolvedProjectRoot = (Get-Location).Path
+}
+
+$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $resolvedProjectRoot
+$gateDir = Join-Path $sessionDir "global/gate_decisions"
+$isRework = $false
+$taskId = ""
+if ($null -ne $handoff -and $null -ne $handoff.task_id) {
+    $taskId = ([string]$handoff.task_id).Trim()
+}
+
+if (-not [string]::IsNullOrEmpty($taskId) -and (Test-Path $gateDir)) {
+    $decisions = @(Get-ChildItem -Path $gateDir -Filter ($taskId + "-*.json") -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
+        Sort-Object LastWriteTime -Descending)
+    if ($decisions.Count -gt 0) {
+        try {
+            $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($latestDecision.outcome -eq "rejected" -and $latestDecision.rework_requested -eq $true) {
+                $isRework = $true
+            }
+        } catch {}
+    }
+}
+
+if ($isRework) {
+    $deploymentSuccessors.Add("implementation")
+}
+
 $validTransitions = @{
     grooming       = @("implementation", "research", "verification", "done")
     implementation = @("verification")
     verification   = @("deployment", "implementation")
-    deployment     = @("grooming", "done")
+    deployment     = $deploymentSuccessors.ToArray()
     research       = @("grooming")
 }
 

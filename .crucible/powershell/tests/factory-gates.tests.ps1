@@ -2799,6 +2799,245 @@ try {
         $afterOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
         Assert-Result -Name "D45-2: push did not occur" -Condition ($beforeOriginHead -eq $afterOriginHead) -FailureMessage ("expected origin master tip to remain " + $beforeOriginHead + ", but it advanced to " + $afterOriginHead)
     }
+
+    $results += Run-Test -Name "D55: fresh-gate guard - rejected and abandoned outcomes require fresh decisions" -Body {
+        $caseRoot = Join-Path $tempRoot "d55-fresh-gate-guard"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $sessionDir = Join-Path $caseRoot "session"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # 1. Seed a rejected decision
+        $decisionRejected = [ordered]@{
+            task_id = 'F-038'
+            outcome = 'rejected'
+            rework_requested = $true
+        }
+        $decisionRejected | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T120000Z.json") -Encoding UTF8
+
+        $scriptPath = Join-Path $caseRoot "run-guard-check.ps1"
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$caseRoot'
+    RepoRoot = '$caseRoot'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-038'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Invoke-HumanGate -Context `$ctx
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        # If gate is NOT bypassed, it writes gate_decision_F-038_pending.json and exits 0
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $pendingFile = Join-Path $gateDir "gate_decision_F-038_pending.json"
+        
+        Assert-Result -Name "D55: rejected decision does not bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-038_pending.json to be created, but it was bypassed"
+
+        # 2. Cleanup pending, seed an accepted decision
+        if (Test-Path $pendingFile) { Remove-Item $pendingFile -Force }
+        $decisionAccepted = [ordered]@{
+            task_id = 'F-038'
+            outcome = 'accepted'
+            rework_requested = $false
+        }
+        $decisionAccepted | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T130000Z.json") -Encoding UTF8
+
+        # Run guard check again
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        
+        Assert-Result -Name "D55: accepted decision bypasses gate" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "expected gate to be bypassed, but pending file was created"
+    }
+
+    $results += Run-Test -Name "D55: end-to-end reject -> rework re-entry" -Body {
+        # Stand up local + bare-origin repos
+        $caseRoot = Join-Path $tempRoot "d55-e2e-reject-rework"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "origin.git"
+        $localRepo = Join-Path $caseRoot "local"
+        
+        # Init origin bare repo
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        Invoke-GitChecked { git -C $originRepo init --bare --initial-branch master } | Out-Null
+        
+        # Clone local
+        Invoke-GitChecked { git clone $originRepo $localRepo } | Out-Null
+
+        # Seed master in local
+        "init" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add README.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "init" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo push origin master } | Out-Null
+
+        $beforeOriginHead = (Invoke-GitChecked { git -C $localRepo rev-parse origin/master }).Trim()
+
+        # Seed backlog configuration in local
+        $backlogDir = Join-Path $localRepo ".crucible/backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+        
+        $configContent = @"
+paths:
+  backlog: ".crucible/backlog"
+"@
+        $configContent | Set-Content -LiteralPath (Join-Path $localRepo ".crucible/config.yaml") -Encoding UTF8
+
+        # Create active spec file
+        $specContent = @"
+---
+item_id: "F-999"
+type: "Feature"
+status: "Ready for Deploy"
+priority: "P2"
+target_phase: "deployment"
+created_at: "2026-06-04"
+---
+
+# Test Spec F-999
+"@
+        $specContent | Set-Content -LiteralPath (Join-Path $backlogDir "features/active/F-999_Test_Spec.md") -Encoding UTF8
+
+        # Create BACKLOG.md
+        $backlogContent = @"
+# Backlog
+
+## Active Items
+
+| ID | Status | Title | Target |
+|---|---|---|---|
+| [F-999](features/active/F-999_Test_Spec.md) | Ready for Deploy | Test Spec F-999 | Operator |
+"@
+        $backlogContent | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+        # 1. Un-pushed commit on master to make sure it survives (the D52 pattern)
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        "unrelated" | Set-Content -LiteralPath (Join-Path $localRepo "unrelated.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add unrelated.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "unrelated commit" } | Out-Null
+        $unrelatedHash = (Invoke-GitChecked { git -C $localRepo rev-parse HEAD }).Trim()
+
+        # 2. Checkout task branch from the initial commit (master~1), and commit a change
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-999 HEAD~1 } | Out-Null
+        "feature content" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add feature.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "feature commit" } | Out-Null
+        
+        # 3. Checkout master and merge task branch locally
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        Invoke-GitChecked { git -C $localRepo merge --no-edit task/F-999 } | Out-Null
+
+        # Set up session folders
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Delete local implementation worktree (simulating Operator cleanup)
+        $wtPath = Join-Path $localRepo ".crucible/.agent-workspaces/implementation-F-999"
+        if (Test-Path $wtPath) { Remove-Item $wtPath -Recurse -Force }
+
+        $scriptPath = Join-Path $caseRoot "run-reject.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Script to run Invoke-HumanGate with rejected outcome
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'needs more polish'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-999'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        artifacts = @('feature.md')
+        session_cycle_id = 'cycle-999'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        # Run rejected outcome
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "E2E Reject: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
+
+        # 1. Assert master reset back to pre-merge tip (unrelated hash)
+        $currentHead = (Invoke-GitChecked { git -C $localRepo rev-parse HEAD }).Trim()
+        Assert-Result -Name "E2E Reject: master head restored to unrelated commit" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage ("expected master to be $unrelatedHash, got $currentHead")
+
+        # 2. Assert task branch task/F-999 is restored/present
+        Invoke-GitChecked { git -C $localRepo show-ref --quiet "refs/heads/task/F-999" } | Out-Null
+        $branchExists = ($LASTEXITCODE -eq 0)
+        Assert-Result -Name "E2E Reject: task branch restored" -Condition $branchExists -FailureMessage "expected branch task/F-999 to be present"
+
+        # 3. Assert implementation worktree was recreated
+        $worktreeExists = (Test-Path $wtPath)
+        Assert-Result -Name "E2E Reject: implementation worktree recreated" -Condition $worktreeExists -FailureMessage "expected worktree to exist at $wtPath"
+
+        # 4. Assert new-handoff was run and created the deployment -> implementation handoff
+        $handoffFiles = @(Get-ChildItem -Path (Join-Path $sessionDir "handoffs") -Filter "F-999-*.json")
+        Assert-Result -Name "E2E Reject: handoff JSON generated" -Condition ($handoffFiles.Count -gt 0) -FailureMessage "expected at least one handoff file to be generated"
+
+        $latestHandoff = Get-Content $handoffFiles[-1].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-Result -Name "E2E Reject: handoff target is implementation" -Condition ($latestHandoff.target_phase -eq "implementation") -FailureMessage ("expected handoff target to be implementation, got " + $latestHandoff.target_phase)
+        Assert-Result -Name "E2E Reject: strike count incremented" -Condition ($latestHandoff.review_strike_count -eq 1) -FailureMessage ("expected strike count 1, got " + $latestHandoff.review_strike_count)
+
+        # 5. Assert the artifact check is satisfied and doesn't fail when initializing
+        $initScriptPath = Join-Path $caseRoot "run-init.ps1"
+        $factoryPath = Join-Path $localRepo "powershell/factory.ps1"
+        # We need to copy powershell/ directory to localRepo to run factory.ps1 from it, or we can use $localRepo as ProjectRoot
+        New-Item -ItemType Directory -Path (Join-Path $localRepo "powershell") -Force | Out-Null
+        Copy-Item -Path (Join-Path $REPO_ROOT "powershell/*") -Destination (Join-Path $localRepo "powershell") -Recurse -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $localRepo "schemas") -Force | Out-Null
+        Copy-Item -Path (Join-Path $REPO_ROOT "schemas/*") -Destination (Join-Path $localRepo "schemas") -Recurse -Force | Out-Null
+
+        $initScriptContent = @"
+Push-Location '$localRepo'
+try {
+    powershell.exe -ExecutionPolicy Bypass -File '$localRepo/powershell/factory.ps1' -Init -TaskId 'F-999' -Quiet
+} finally {
+    Pop-Location
+}
+"@
+        $initScriptContent | Set-Content -LiteralPath $initScriptPath -Encoding UTF8
+
+        # Run factory init to see if it advances to implementation without tripping the artifact gate
+        $initOutput = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $initScriptPath 2>&1
+        $initExitCode = $LASTEXITCODE
+
+        Assert-Result -Name "E2E Reject: factory init succeeded" -Condition ($initExitCode -eq 0) -FailureMessage ("expected factory init to pass, got exit code $initExitCode. Output: " + $initOutput)
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

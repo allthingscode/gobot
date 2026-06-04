@@ -10,7 +10,7 @@ The factory operates as a strict Directed Acyclic Graph (DAG). Self-loops and ou
 - **research** → `grooming`
 - **implementation** → `verification`
 - **verification** → `deployment` (Approved) | `implementation` (Changes Requested)
-- **deployment** → `done` | `grooming` (if production issue threshold met)
+- **deployment** → `done` | `implementation` (if rejected/rework requested) | `grooming` (if production issue threshold met)
 
 ## 2. Circuit Breakers
 
@@ -118,6 +118,7 @@ Research Gate    → In Progress        (human approves Research Gate)
 Ready for Review → Ready for Deploy   (Reviewer APPROVED)
 Ready for Deploy → Production         (Operator merge complete)
 Ready for Deploy → In Progress        (Reviewer sent back to Architect — strike counted)
+Ready for Deploy → In Progress        (Operator Human Gate REJECTED — rework requested)
 Any              → Blocked            (circuit breaker)
 Blocked          → Ready              (human resolution + factory -Recover)
 ```

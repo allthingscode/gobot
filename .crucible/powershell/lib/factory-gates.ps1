@@ -779,9 +779,38 @@ function Invoke-FactoryRuntimeValidation {
             }
 
             if (-not $exists) {
+                # Check if the artifact exists on the task branch
+                $taskBranchName = "task/$($handoff.task_id)"
+                # First check if the branch itself exists
+                git show-ref --quiet "refs/heads/$taskBranchName"
+                if ($LASTEXITCODE -eq 0) {
+                    # Avoid backslashes in git paths, replace them with forward slashes
+                    $gitArtifactPath = $artifact.Replace('\', '/')
+                    # Check if file exists in the branch
+                    $previousPreference = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
+                    git cat-file -e "$($taskBranchName):$($gitArtifactPath)" 2>$null
+                    $gitExistsCode = $LASTEXITCODE
+                    $ErrorActionPreference = $previousPreference
+                    if ($gitExistsCode -eq 0) {
+                        $exists = $true
+                        # Check if empty in git
+                        $gitSizeStr = (git cat-file -s "$($taskBranchName):$($gitArtifactPath)" 2>$null)
+                        $gitSize = 0
+                        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($gitSizeStr)) {
+                            [int]::TryParse($gitSizeStr, [ref]$gitSize) | Out-Null
+                        }
+                        if ($gitSize -eq 0) {
+                            Write-Host "[WARN] Artifact is empty on branch $($taskBranchName): $artifact" -ForegroundColor Yellow
+                        }
+                    }
+                }
+            }
+
+            if (-not $exists) {
                 Write-Host "[WARN] Artifact listed in handoff does not exist: $artifact" -ForegroundColor Yellow
                 $missingArtifacts += $artifact
-            } elseif ((Get-Item $matchedPath).Length -eq 0) {
+            } elseif ($null -ne $matchedPath -and (Get-Item $matchedPath).Length -eq 0) {
                 Write-Host "[WARN] Artifact is empty: $artifact" -ForegroundColor Yellow
             }
         }
@@ -1703,16 +1732,18 @@ function Invoke-HumanGateAction {
         [Parameter(Mandatory=$true)][string]$TaskId,
         [Parameter(Mandatory=$true)][string]$Outcome,
         [string]$ProjectRoot = "",
-        [string]$SourcePhase = "deployment"
+        [string]$SourcePhase = "deployment",
+        [string]$GateReason = ""
     )
     $primaryBranch = Get-PrimaryBranchName
+    $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        $ProjectRoot
+    } else {
+        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+        if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
+    }
+
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
-        $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-            $ProjectRoot
-        } else {
-            $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-            if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
-        }
 
         $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
         $backlogPath = Join-Path $backlogDir "BACKLOG.md"
@@ -1847,6 +1878,102 @@ function Invoke-HumanGateAction {
                     }
                     Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
                 }
+
+                # Auto-recreate the implementation worktree from the restored branch
+                $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $resolvedProjectRoot
+                $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+                
+                # Prune stale worktrees first
+                Invoke-GitChecked { git worktree prune }
+
+                if (-not (Test-Path $wtPath)) {
+                    Invoke-GitChecked { git worktree add $wtPath "task/$TaskId" }
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host "Warning: Failed to recreate implementation worktree at $wtPath" -ForegroundColor Yellow
+                    } else {
+                        $prev = $ErrorActionPreference
+                        $ErrorActionPreference = 'Continue'
+                        $hasWorktreeConfig = (git config extensions.worktreeConfig 2>$null) -eq "true"
+                        $ErrorActionPreference = $prev
+                        if (-not $hasWorktreeConfig) {
+                            Invoke-GitChecked { git config extensions.worktreeConfig true }
+                        }
+                        $adopterHook = Join-Path $PSScriptRoot "..\..\scripts\hooks\architect"
+                        $repoHook = Join-Path $resolvedProjectRoot "scripts/hooks/architect"
+                        $hookDir = if (Test-Path $adopterHook) { $adopterHook } else { $repoHook }
+                        if (-not (Test-Path $hookDir)) {
+                            New-Item -ItemType Directory -Force -Path $hookDir | Out-Null
+                        }
+                        Invoke-GitChecked { git -C $wtPath config --worktree core.hooksPath $hookDir }
+                        Write-Quiet "[HUMAN GATE] Recreated implementation worktree at $wtPath"
+                    }
+                }
+
+                # Check if the task is present in the backlog before running new-handoff.ps1
+                $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
+                $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+                $hasTaskInBacklog = $false
+                if (Test-Path -LiteralPath $backlogPath) {
+                    try {
+                        $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+                        if ($backlogContent -match [regex]::Escape($TaskId)) {
+                            $hasTaskInBacklog = $true
+                        }
+                    } catch {}
+                }
+
+                if ($hasTaskInBacklog) {
+                    # Calculate next strike count
+                    $nextStrike = 1
+                    $handoffVar = Get-Variable -Name "handoff" -ErrorAction SilentlyContinue
+                    $activeHandoff = $null
+                    if ($null -ne $handoffVar -and $null -ne $handoffVar.Value) {
+                        $activeHandoff = $handoffVar.Value
+                        if ($activeHandoff.PSObject.Properties["review_strike_count"]) {
+                            $nextStrike = [int]$activeHandoff.review_strike_count + 1
+                        }
+                    }
+
+                    # Write a sanctioned re-entry handoff into implementation
+                    $generatorScript = Join-Path (Split-Path -Parent $PSScriptRoot) "new-handoff.ps1"
+                    if (Test-Path $generatorScript) {
+                        $reasonMsg = if ([string]::IsNullOrWhiteSpace($GateReason)) { "Deployment rejected. Rework requested." } else { "Deployment rejected: $GateReason" }
+                        Write-Quiet "[HUMAN GATE] Generating sanctioned re-entry handoff targeting implementation..."
+                        
+                        # Extract values from current handoff
+                        $sessionCycleId = ""
+                        $artifacts = @()
+                        if ($null -ne $activeHandoff) {
+                            if ($activeHandoff.PSObject.Properties["session_cycle_id"]) {
+                                $sessionCycleId = $activeHandoff.session_cycle_id
+                            } elseif ($activeHandoff.PSObject.Properties["cycle_id"]) {
+                                $sessionCycleId = $activeHandoff.cycle_id
+                            }
+                            if ($activeHandoff.PSObject.Properties["artifacts"]) {
+                                $artifacts = $activeHandoff.artifacts
+                            }
+                        }
+
+                        $handoffParams = @{
+                            TaskId = $TaskId
+                            Source = "deployment"
+                            Target = "implementation"
+                            Reason = $reasonMsg
+                            ReviewStrikeCount = $nextStrike
+                            ProjectRoot = $resolvedProjectRoot
+                        }
+                        if (-not [string]::IsNullOrEmpty($sessionCycleId)) {
+                            $handoffParams["SessionCycleId"] = $sessionCycleId
+                        }
+                        if ($artifacts.Count -gt 0) {
+                            $handoffParams["Artifacts"] = @($artifacts)
+                        }
+                        
+                        & $generatorScript @handoffParams
+                    }
+                } else {
+                    Write-Quiet "[HUMAN GATE] Task $TaskId not found in backlog; skipping handoff generation."
+                }
             }
         }
     }
@@ -1906,6 +2033,10 @@ function Invoke-HumanGate {
         }
 
         $GATE_PENDING_FILE = Join-Path $sessionDir ($handoff.task_id + "/gate_pending.txt")
+        $pendingDir = Split-Path -Parent $GATE_PENDING_FILE
+        if (-not (Test-Path $pendingDir)) {
+            New-Item -ItemType Directory -Force -Path $pendingDir | Out-Null
+        }
         $validOutcomes = @("accepted", "rejected", "redirected", "abandoned")
         $lowSignalGateReasons = @(
             "n/a", "na", "none", "ok", "looks good", "looks good.",
@@ -1949,7 +2080,7 @@ function Invoke-HumanGate {
             Write-Host ("Reason: " + $trimmedGateReason) -ForegroundColor Gray
 
             # Execute push or reset based on automated CLI decision
-            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase
+            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $trimmedGateReason
 
             if ($GateOutcome -eq "abandoned") {
                 Write-Host "[ABANDONED] Pipeline stopped per human request." -ForegroundColor Gray
@@ -2023,7 +2154,7 @@ function Invoke-HumanGate {
                             exit 0
                         } else {
                             # Execute push or reset based on manual decision
-                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase
+                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason
 
                             # Archive the decision
                             $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
@@ -2204,11 +2335,37 @@ function Resolve-FactoryTransition {
     $LOG_FILE = $Context.LogFile
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
 
+    $deploymentSuccessors = [System.Collections.Generic.List[string]]::new()
+    $deploymentSuccessors.Add("grooming")
+    $deploymentSuccessors.Add("done")
+
+    $isRework = $false
+    if (-not [string]::IsNullOrEmpty($handoff.task_id) -and -not [string]::IsNullOrEmpty($sessionDir)) {
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        if (Test-Path $gateDir) {
+            $decisions = @(Get-ChildItem -Path $gateDir -Filter ($handoff.task_id + "-*.json") -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
+                Sort-Object LastWriteTime -Descending)
+            if ($decisions.Count -gt 0) {
+                try {
+                    $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                    if ($latestDecision.outcome -eq "rejected" -and $latestDecision.rework_requested -eq $true) {
+                        $isRework = $true
+                    }
+                } catch {}
+            }
+        }
+    }
+
+    if ($isRework) {
+        $deploymentSuccessors.Add("implementation")
+    }
+
     $validTransitions = @{
         grooming       = @("implementation", "research", "verification", "done")
         implementation = @("verification")
         verification   = @("deployment", "implementation")
-        deployment     = @("grooming", "done")
+        deployment     = $deploymentSuccessors.ToArray()
         research       = @("grooming")
     }
 

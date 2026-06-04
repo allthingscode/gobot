@@ -103,7 +103,7 @@ When the pre-flight gate passes:
    powershell.exe -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> [-GateReason "Reason"] -Quiet
    ```
-   (Outcomes: 1=accepted/pause, 2=rejected/rework, 3=redirected/accept-and-next, 4=abandoned/do-not-accept). Always pass `-GateReason` with the captured one-line reason. Manual JSON edits are no longer required.
+   (Outcomes: 1=accepted/pause, 2=rejected/rework, 3=redirected/accept-and-next, 4=abandoned/do-not-accept). Always pass `-GateReason` with the captured one-line reason. If the outcome is 2 (rejected/rework), the factory will automatically unwind the merge, restore the task branch, recreate the implementation worktree, and generate a sanctioned rework handoff. Your session is then complete, and the orchestrator can resume implementation by running the factory.
 
 6. **Present a short summary to the human.** Your message must include:
    - A 2-3 sentence summary of what you deployed and the commit hash.
