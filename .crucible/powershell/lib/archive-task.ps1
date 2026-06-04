@@ -143,7 +143,8 @@ function Update-BacklogArchiveRow {
 function Invoke-BacklogTaskArchive {
     param(
         [Parameter(Mandatory=$true)][string]$BacklogPath,
-        [Parameter(Mandatory=$true)][string]$SpecPath
+        [Parameter(Mandatory=$true)][string]$SpecPath,
+        [ValidateSet("Production","Resolved")][string]$Status
     )
 
     $resolvedBacklog = (Resolve-Path -LiteralPath $BacklogPath).Path
@@ -165,7 +166,36 @@ function Invoke-BacklogTaskArchive {
     }
 
     $type = $Matches[1]
-    $terminalStatus = Get-BacklogTerminalStatus -Type $type
+    $terminalStatus = $Status
+    if ([string]::IsNullOrEmpty($terminalStatus)) {
+        # Check if the active spec's frontmatter status is already a terminal value ("Production" or "Resolved")
+        $specLines = [System.IO.File]::ReadAllLines($resolvedSpec, [System.Text.Encoding]::UTF8)
+        $frontmatterEnd = -1
+        if ($specLines.Count -gt 0 -and $specLines[0] -eq "---") {
+            for ($i = 1; $i -lt $specLines.Count; $i++) {
+                if ($specLines[$i] -eq "---") {
+                    $frontmatterEnd = $i
+                    break
+                }
+            }
+        }
+        if ($frontmatterEnd -gt 0) {
+            $specStatus = ""
+            for ($i = 1; $i -lt $frontmatterEnd; $i++) {
+                if ($specLines[$i] -match '^\s*status\s*:\s*["'']?([^"''\s\r\n]+)"?') {
+                    $specStatus = $Matches[1]
+                    break
+                }
+            }
+            if ($specStatus -eq "Production" -or $specStatus -eq "Resolved") {
+                $terminalStatus = $specStatus
+            }
+        }
+    }
+    if ([string]::IsNullOrEmpty($terminalStatus)) {
+        $terminalStatus = Get-BacklogTerminalStatus -Type $type
+    }
+
     $archivedRelPath = $relativeSpec -replace '/active/', '/archived/'
     $archivedPath = Join-Path $resolvedBacklogDir ($archivedRelPath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
     $archiveDir = Split-Path -Parent $archivedPath

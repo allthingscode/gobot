@@ -1702,7 +1702,8 @@ function Invoke-HumanGateAction {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
         [Parameter(Mandatory=$true)][string]$Outcome,
-        [string]$ProjectRoot = ""
+        [string]$ProjectRoot = "",
+        [string]$SourcePhase = "deployment"
     )
     $primaryBranch = Get-PrimaryBranchName
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
@@ -1743,7 +1744,14 @@ function Invoke-HumanGateAction {
 
                         # Perform archival
                         try {
-                            $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath
+                            $archiveParams = @{
+                                BacklogPath = $backlogPath
+                                SpecPath = $activeSpecPath
+                            }
+                            if ($SourcePhase -eq "grooming") {
+                                $archiveParams["Status"] = "Resolved"
+                            }
+                            $archiveResult = Invoke-BacklogTaskArchive @archiveParams
                             Write-Host ("[D44] SUCCESS: Auto-archived task as {0} (status {1}): {2}" -f $archiveResult.Type, $archiveResult.Status, $archiveResult.ArchivedRelPath) -ForegroundColor Green
                         } catch {
                             Write-Host ("[D44] ERROR: Archival failed for task $TaskId. Error: " + $_.Exception.Message) -ForegroundColor Red
@@ -1784,42 +1792,46 @@ function Invoke-HumanGateAction {
             exit 2
         }
 
-        $remotes = @(Invoke-GitChecked { git remote 2>$null })
-        if ($remotes -contains "origin") {
-            Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
-            Invoke-GitChecked { git push origin $primaryBranch }
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
-                exit 1
+        if ($SourcePhase -ne "grooming") {
+            $remotes = @(Invoke-GitChecked { git remote 2>$null })
+            if ($remotes -contains "origin") {
+                Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
+                Invoke-GitChecked { git push origin $primaryBranch }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                    exit 1
+                }
+            } else {
+                Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
             }
-        } else {
-            Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
         }
     } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
-        $currentHead = (Invoke-GitChecked { git rev-parse HEAD }).Trim()
-        $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
-        $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
+        if ($SourcePhase -ne "grooming") {
+            $currentHead = (Invoke-GitChecked { git rev-parse HEAD }).Trim()
+            $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
+            $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
 
-        $resetTarget = "origin/$primaryBranch"
-        if ($parentList.Count -ge 2) {
-            $resetTarget = $parentList[0]
-            Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
-        } else {
-            Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
-        }
+            $resetTarget = "origin/$primaryBranch"
+            if ($parentList.Count -ge 2) {
+                $resetTarget = $parentList[0]
+                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
+            } else {
+                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
+            }
 
-        Invoke-GitChecked { git checkout $primaryBranch }
-        Invoke-GitChecked { git reset --hard $resetTarget }
-        
-        if ($Outcome -eq "rejected") {
-            Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
-            if ($LASTEXITCODE -ne 0) {
-                if ($parentList.Count -ge 2) {
-                    Invoke-GitChecked { git branch "task/$TaskId" $parentList[1] }
-                } else {
-                    Invoke-GitChecked { git branch "task/$TaskId" $currentHead }
+            Invoke-GitChecked { git checkout $primaryBranch }
+            Invoke-GitChecked { git reset --hard $resetTarget }
+            
+            if ($Outcome -eq "rejected") {
+                Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
+                if ($LASTEXITCODE -ne 0) {
+                    if ($parentList.Count -ge 2) {
+                        Invoke-GitChecked { git branch "task/$TaskId" $parentList[1] }
+                    } else {
+                        Invoke-GitChecked { git branch "task/$TaskId" $currentHead }
+                    }
+                    Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
                 }
-                Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
             }
         }
     }
@@ -1849,7 +1861,30 @@ function Invoke-HumanGate {
     $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
 
     # --- 3a. Human Gate ---
-    if ($handoff.source_phase -eq "deployment" -and -not $isBootstrap) {
+    $isGroomingClosure = ($handoff.source_phase -eq "grooming" -and $handoff.target_phase -eq "done")
+    $shouldRunHumanGate = $false
+    if ($handoff.source_phase -eq "deployment") {
+        $shouldRunHumanGate = -not $isBootstrap
+    } elseif ($isGroomingClosure) {
+        # Check if research gate approved it
+        $researchGateApproved = $false
+        $handoffDir = $Context.HandoffDir
+        if (-not [string]::IsNullOrEmpty($handoffDir) -and (Test-Path $handoffDir)) {
+            $handoffFiles = @(Get-ChildItem -Path $handoffDir -Filter ($handoff.task_id + "-*.json") -ErrorAction SilentlyContinue)
+            foreach ($file in $handoffFiles) {
+                try {
+                    $hObj = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                    if ($hObj.source_phase -eq "research" -and $hObj.human_decisions -and $hObj.human_decisions.approved -and $hObj.human_decisions.approved.Count -gt 0) {
+                        $researchGateApproved = $true
+                        break
+                    }
+                } catch {}
+            }
+        }
+        $shouldRunHumanGate = -not $researchGateApproved
+    }
+
+    if ($shouldRunHumanGate) {
         $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
         if (-not (Test-Path $GATE_DIR)) {
             New-Item -ItemType Directory -Force -Path $GATE_DIR | Out-Null
@@ -1899,7 +1934,7 @@ function Invoke-HumanGate {
             Write-Host ("Reason: " + $trimmedGateReason) -ForegroundColor Gray
 
             # Execute push or reset based on automated CLI decision
-            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot
+            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase
 
             if ($GateOutcome -eq "abandoned") {
                 Write-Host "[ABANDONED] Pipeline stopped per human request." -ForegroundColor Gray
@@ -1973,7 +2008,7 @@ function Invoke-HumanGate {
                             exit 0
                         } else {
                             # Execute push or reset based on manual decision
-                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot
+                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase
 
                             # Archive the decision
                             $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
@@ -2155,7 +2190,7 @@ function Resolve-FactoryTransition {
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
 
     $validTransitions = @{
-        grooming       = @("implementation", "research", "verification")
+        grooming       = @("implementation", "research", "verification", "done")
         implementation = @("verification")
         verification   = @("deployment", "implementation")
         deployment     = @("grooming", "done")
@@ -2187,16 +2222,100 @@ function Resolve-FactoryTransition {
     }
 
     if ($handoff.target_phase -eq "done") {
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+
+        if ($handoff.source_phase -eq "grooming") {
+            # Check if Research Gate approved it or Human Gate approved it
+            $gateAlreadyPassed = $false
+            
+            # Check Research Gate approval first
+            $researchGateApproved = $false
+            $handoffDir = $Context.HandoffDir
+            if (-not [string]::IsNullOrEmpty($handoffDir) -and (Test-Path $handoffDir)) {
+                $handoffFiles = @(Get-ChildItem -Path $handoffDir -Filter ($handoff.task_id + "-*.json") -ErrorAction SilentlyContinue)
+                foreach ($file in $handoffFiles) {
+                    try {
+                        $hObj = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                        if ($hObj.source_phase -eq "research" -and $hObj.human_decisions -and $hObj.human_decisions.approved -and $hObj.human_decisions.approved.Count -gt 0) {
+                            $researchGateApproved = $true
+                            break
+                        }
+                    } catch {}
+                }
+            }
+            
+            if ($researchGateApproved) {
+                $gateAlreadyPassed = $true
+            } else {
+                # Check if Human Gate already passed
+                if (-not [string]::IsNullOrEmpty($sessionDir)) {
+                    $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
+                    if (Test-Path $GATE_DIR) {
+                        $decisions = @(Get-ChildItem -Path $GATE_DIR -Filter ($handoff.task_id + "-*.json") |
+                            Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
+                            Sort-Object LastWriteTime -Descending)
+                        if ($decisions.Count -gt 0) {
+                            try {
+                                $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                                $advancingOutcomes = @("accepted", "redirected")
+                                if ($advancingOutcomes -contains $latestDecision.outcome) {
+                                    $gateAlreadyPassed = $true
+                                }
+                            } catch {}
+                        }
+                    }
+                }
+            }
+            
+            if (-not $gateAlreadyPassed) {
+                Write-Host "[STOP] Refusing grooming closure: no recorded human decision (Research Gate approval or Human Gate acceptance) found for task $($handoff.task_id)." -ForegroundColor Red
+                return @{
+                    ShouldExit = $true
+                    ExitCode = 2
+                    Reason = "Refusing grooming closure: no recorded human decision found."
+                    Transition = $null
+                    NextFactoryCommand = $null
+                    IsBootstrap = $false
+                }
+            }
+
+            # Auto-finalize if not already finalized
+            $finalization = Get-TaskFinalizationDetails -TaskId $handoff.task_id -ProjectRoot $repoRoot
+            if (-not $finalization.IsFinalized) {
+                Write-Host "[D49] Auto-finalizing grooming closure task $($handoff.task_id)..." -ForegroundColor Cyan
+                $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $repoRoot
+                $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+                $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $handoff.task_id -ProjectRoot $repoRoot
+                
+                if ([string]::IsNullOrEmpty($activeSpecPath) -or -not (Test-Path -LiteralPath $activeSpecPath)) {
+                    throw "Active spec path not found for task $($handoff.task_id) during auto-finalization."
+                }
+                
+                # Load archive-task helper
+                $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+                if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                    if (Test-Path -LiteralPath $archiveLibPath) {
+                        . $archiveLibPath
+                    } else {
+                        throw "archive-task helper not found at $archiveLibPath"
+                    }
+                }
+                
+                $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status Resolved
+                Write-Host ("[D49] SUCCESS: Auto-archived task as {0} (status {1}): {2}" -f $archiveResult.Type, $archiveResult.Status, $archiveResult.ArchivedRelPath) -ForegroundColor Green
+            }
+        }
+
         Write-Host "`n====================================================" -ForegroundColor Green
         Write-Host "Pipeline Complete: Task $($handoff.task_id) is resolved!" -ForegroundColor Green
         Write-Host "====================================================`n" -ForegroundColor Green
 
         # Update state to remove the completed task
-        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
         & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist done -TaskId $handoff.task_id -UpdateJson "{}" -Merge $false -ProjectRoot $repoRoot
 
         # Log session_end/pipeline_complete
-        Write-EventLog -Event "session_end" -TaskId $handoff.task_id -Phase "deployment" -Notes "Pipeline complete" `
+        $logPhase = if ($handoff.source_phase -eq "grooming") { "grooming" } else { "deployment" }
+        Write-EventLog -Event "session_end" -TaskId $handoff.task_id -Phase $logPhase -Notes "Pipeline complete" `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
  
         # Cleanup any pending human gate files

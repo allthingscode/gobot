@@ -56,11 +56,15 @@ created_at: "2026-05-25"
 }
 
 function Invoke-ArchiveTask {
-    param([string]$BacklogPath, [string]$SpecPath)
+    param([string]$BacklogPath, [string]$SpecPath, [string]$Status)
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT -BacklogPath $BacklogPath -SpecPath $SpecPath 2>&1)
+        $cmdArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-BacklogPath", $BacklogPath, "-SpecPath", $SpecPath)
+        if (-not [string]::IsNullOrEmpty($Status)) {
+            $cmdArgs += @("-Status", $Status)
+        }
+        $outputLines = @(powershell.exe @cmdArgs 2>&1)
         return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -196,6 +200,56 @@ try {
         Assert-Result -Name "feature archive exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "feature status production" -Condition ($specContent -match 'status:\s*"Production"') -FailureMessage ("expected Production frontmatter. Content: " + $specContent)
         Assert-Result -Name "feature backlog row production" -Condition ($backlogContent -match '\[F-201\]\(features/archived/F-201_Ship_Feature\.md\)\s*\|\s*P1\s*\|\s*Production') -FailureMessage ("expected archived Production BACKLOG row. Content: " + $backlogContent)
+    }
+
+    $results += Run-Test -Name "Archives feature as Resolved via explicit -Status Resolved" -Body {
+        $root = Join-Path $tempRoot "feature-resolved-explicit"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "features/active/F-202_Close_No_Build.md"
+        $archivedRel = "features/archived/F-202_Close_No_Build.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "F-202" -Type "Feature" -Priority "P1" -Title "Close No Build"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-202]($activeRel) | P1 | Ready for Deploy | Close No Build | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root "features/active/F-202_*.md") -Status "Resolved"
+        $archivedPath = Join-Path $root $archivedRel
+        $specContent = Get-Content -LiteralPath $archivedPath -Raw
+        $backlogContent = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result -Name "feature status resolved explicit" -Condition ($specContent -match 'status:\s*"Resolved"') -FailureMessage ("expected Resolved frontmatter. Content: " + $specContent)
+        Assert-Result -Name "feature backlog row resolved explicit" -Condition ($backlogContent -match '\[F-202\]\(features/archived/F-202_Close_No_Build\.md\)\s*\|\s*P1\s*\|\s*Resolved') -FailureMessage ("expected archived Resolved BACKLOG row. Content: " + $backlogContent)
+    }
+
+    $results += Run-Test -Name "Archives feature honoring existing Resolved frontmatter status when -Status is omitted" -Body {
+        $root = Join-Path $tempRoot "feature-resolved-honor"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "features/active/F-203_Honor_Status.md"
+        $archivedRel = "features/archived/F-203_Honor_Status.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "F-203" -Type "Feature" -Priority "P1" -Title "Honor Status" -Status "Resolved"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-203]($activeRel) | P1 | Resolved | Honor Status | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root "features/active/F-203_*.md")
+        $archivedPath = Join-Path $root $archivedRel
+        $specContent = Get-Content -LiteralPath $archivedPath -Raw
+        $backlogContent = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result -Name "feature status resolved honored" -Condition ($specContent -match 'status:\s*"Resolved"') -FailureMessage ("expected Resolved frontmatter. Content: " + $specContent)
+        Assert-Result -Name "feature backlog row resolved honored" -Condition ($backlogContent -match '\[F-203\]\(features/archived/F-203_Honor_Status\.md\)\s*\|\s*P1\s*\|\s*Resolved') -FailureMessage ("expected archived Resolved BACKLOG row. Content: " + $backlogContent)
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

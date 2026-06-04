@@ -114,12 +114,26 @@ Write the handoff with `target_phase: "verification"` and **omit** `file_affinit
 }
 ```
 
+## Closure Routing (Grooming → Done)
+
+If a grooming session or task results in a closure with no code deliverable (e.g., closing an already-shipped or obsolete feature without deploying new code):
+- Run `new-handoff.ps1` with `-Target done` and `-Source grooming`.
+- The transition requires a recorded human decision (either a Research-Gate approval as in Pass 17, or a Human Gate).
+- If no prior Research Gate approval exists, the factory will trigger a Human Gate, requiring the human to approve it via `-GateOutcome accepted` before it can transition to `done`.
+- On transition, the factory will automatically archive and finalize the task status as `Resolved` in both the BACKLOG.md row and the spec frontmatter status. No code push is performed.
+
+## Routing to Research (Grooming → Research)
+
+When routing a task to the `research` phase, the Groomer defines the open questions, scope, and objectives of the investigation.
+- **Mandate**: The Groomer MUST NOT perform the investigation itself or write a pre-baked conclusion / closure recommendation into the spec.
+- The research acceptance criteria (AC) must be formulated as a neutral open question (e.g., "Investigate whether X is supported; classify outcome as shipped, partially-shipped, obsolete, or needed; cite concrete evidence on disk") rather than a pre-conclusion (e.g., "Confirm that X is shipped and recommend closure").
+
 ---
 
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `implementation`, `research`, or `verification` (Pattern C only) — not to myself
+- [ ] Routing to: `implementation`, `research`, `done` (closure path), or `verification` (Pattern C only) — not to myself
 - [ ] If routing to `implementation`: `file_affinity` is populated with package-level paths
 - [ ] If routing to `verification` (Pattern C): no `file_affinity` required; confirm no implementation spec was created
 - [ ] Spec file exists in `backlog/{type}/active/` with acceptance criteria (or stubs for Pattern C)

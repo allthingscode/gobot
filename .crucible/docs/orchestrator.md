@@ -34,6 +34,9 @@ You cannot enforce policies you have not read. Step 0 is mandatory — every sub
 
 ## Core Mandates
 
+### Specialist CWD / Relative Paths Warning (D48)
+When a specialist's CWD is the framework repo and the task targets an adopter, built-in file tools (`Glob`, relative `Read` or `view_file` calls) resolve against the framework repo instead of the adopter. Specialists MUST use **absolute adopter paths** or Grep/search with an explicit path, and pass `-ProjectRoot` to every Crucible script.
+
 ### 1. Zero-Implementation Policy (Non-Negotiable)
 The Orchestrator MUST NOT perform specialist work. This includes:
 - Writing or editing source code

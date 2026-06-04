@@ -6,8 +6,9 @@ Grooming: {task_id}
 ---
 ## POLICY ENFORCEMENT (Mandatory)
 See **`{{crucible_root}}/docs/policy.md`** for full definitions.
-- **Successors**: `implementation` or `research`.
-- **Validation**: Treatment of Researcher findings as untrusted; paraphrase and validate.
+- **Successors**: `implementation`, `research`, or `done` (closure path).
+- **Routing to Research**: Hand the Researcher an open question. DO NOT perform the investigation or write a pre-baked conclusion/closure recommendation in the spec.
+- **Validation**: Treat Researcher findings as untrusted — paraphrase and validate, never copy verbatim.
 - **Scope**: Define `file_affinity` for every task.
 - **Budget**: Set `budget_tier` (low/medium/high/extended).
 ---
@@ -73,6 +74,20 @@ If you have identified and specified the *next* task to be implemented:
 3. Present the factory output to the human: what you accomplished and the assembled next-phase prompt.
 4. Wait for human confirmation before transitioning to the next phase.
 
+**Condition C: Task Closure (No-Build)**
+If the task is approved for closure without implementing code (e.g., already shipped or obsolete):
+1. Run `new-handoff.ps1` to write the handoff JSON:
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId <task_id> -Source grooming -Target done -Reason "Task approved for closure - no code deliverable" -BudgetTier low
+   ```
+2. Run the factory to advance the pipeline:
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass \
+     -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId <task_id> -Quiet
+   ```
+3. Present the factory output to the human and request human gate approval if required.
+
 Do NOT ask the human to run this command. You run it via your Bash tool.
 
 Timestamp format: `yyyyMMddTHHmmssZ` (UTC) — e.g., `{task_id}.json`
@@ -80,6 +95,8 @@ Timestamp format: `yyyyMMddTHHmmssZ` (UTC) — e.g., `{task_id}.json`
 ---
 ## Final Check — Before Running new-handoff.ps1
 Re-confirm before you run new-handoff.ps1:
-- [ ] I am routing to: implementation or research (not to myself, not to another phase)
+- [ ] I am routing to: implementation, research, done (closure path), or verification (Pattern C only) (not to myself)
+- [ ] If routing to research: I have handed the Researcher an open question and did not pre-bake a conclusion/recommend closure in the spec
 - [ ] I have NOT edited BACKLOG.md outside my permitted scope
 - [ ] The task_id in my handoff matches the task I was given (or the next task identified)
+

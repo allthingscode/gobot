@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$BacklogPath,
     [Parameter(Mandatory=$true)][string]$SpecPath,
+    [ValidateSet("Production","Resolved")][string]$Status,
     [switch]$Quiet
 )
 
@@ -12,7 +13,15 @@ if (-not (Test-Path -LiteralPath $libPath)) {
 }
 . $libPath
 
-$result = Invoke-BacklogTaskArchive -BacklogPath $BacklogPath -SpecPath $SpecPath
+$params = @{
+    BacklogPath = $BacklogPath
+    SpecPath = $SpecPath
+}
+if ($PSBoundParameters.ContainsKey('Status')) {
+    $params['Status'] = $Status
+}
+
+$result = Invoke-BacklogTaskArchive @params
 if (-not $Quiet) {
     Write-Host ("Archived {0} as {1}: {2}" -f $result.Type, $result.Status, $result.ArchivedRelPath) -ForegroundColor Green
 }

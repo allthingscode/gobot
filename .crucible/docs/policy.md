@@ -6,7 +6,7 @@
 
 The factory operates as a strict Directed Acyclic Graph (DAG). Self-loops and out-of-order transitions are prohibited.
 
-- **grooming** → `implementation` | `research`
+- **grooming** → `implementation` | `research` | `done` (terminal; requires a recorded human decision)
 - **research** → `grooming`
 - **implementation** → `verification`
 - **verification** → `deployment` (Approved) | `implementation` (Changes Requested)
@@ -112,6 +112,7 @@ The factory tracks each task through a fixed set of states. Only `factory.ps1` t
 Ready            → In Progress        (factory on Groomer/Architect session start)
 In Progress      → Research Gate      (Researcher session complete)
 In Progress      → Ready for Review   (Architect session complete)
+In Progress      → Done               (Groomer closure session complete; requires a recorded human decision)
 Research Gate    → In Progress        (human approves Research Gate)
 Ready for Review → Ready for Deploy   (Reviewer APPROVED)
 Ready for Deploy → Production         (Operator merge complete)

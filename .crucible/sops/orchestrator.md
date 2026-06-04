@@ -43,7 +43,7 @@ You enforce these. They are not negotiable and cannot be waived by a specialist'
 The only valid transitions are:
 
 ```
-grooming       → implementation | research
+grooming       → implementation | research | done (terminal; requires a recorded human decision)
 research       → grooming
 implementation → verification
 verification   → deployment (approved) | implementation (changes requested)
@@ -51,6 +51,9 @@ deployment     → done | grooming
 ```
 
 If a handoff's `target_phase` is not in the list above for that `source_phase`, it is a routing violation. Do not dispatch. Escalate to the human.
+
+### Specialist CWD / Relative Paths Warning (D48)
+When a specialist's CWD is the framework repo and the task targets an adopter, built-in file tools (`Glob`, relative `Read` or `view_file` calls) resolve against the framework repo instead of the adopter. Specialists MUST use **absolute adopter paths** or Grep/search with an explicit path, and pass `-ProjectRoot` to every Crucible script.
 
 ### Mandatory Human Gates
 These transitions always fire a gate that blocks the loop. They are not conditional.

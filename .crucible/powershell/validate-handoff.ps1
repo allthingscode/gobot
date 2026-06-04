@@ -225,7 +225,7 @@ foreach ($field in $requiredFields) {
 }
 
 $validTransitions = @{
-    grooming       = @("implementation", "research", "verification")
+    grooming       = @("implementation", "research", "verification", "done")
     implementation = @("verification")
     verification   = @("deployment", "implementation")
     deployment     = @("grooming", "done")
