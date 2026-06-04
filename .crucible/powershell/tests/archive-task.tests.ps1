@@ -251,6 +251,93 @@ try {
         Assert-Result -Name "feature status resolved honored" -Condition ($specContent -match 'status:\s*"Resolved"') -FailureMessage ("expected Resolved frontmatter. Content: " + $specContent)
         Assert-Result -Name "feature backlog row resolved honored" -Condition ($backlogContent -match '\[F-203\]\(features/archived/F-203_Honor_Status\.md\)\s*\|\s*P1\s*\|\s*Resolved') -FailureMessage ("expected archived Resolved BACKLOG row. Content: " + $backlogContent)
     }
+
+    $results += Run-Test -Name "Reconciles Priority Summary on multi-item bucket archive" -Body {
+        $root = Join-Path $tempRoot "multi-item-reconcile"
+        New-MinimalBacklogTree -Root $root
+        $activeRel1 = "chores/active/C-305_Soak.md"
+        $activeRel2 = "chores/active/C-305a_Execute_Soak.md"
+        New-SpecFile -Root $root -RelPath $activeRel1 -ItemId "C-305" -Type "Chore" -Priority "P1" -Title "Author Soak Plan"
+        New-SpecFile -Root $root -RelPath $activeRel2 -ItemId "C-305a" -Type "Chore" -Priority "P1" -Title "Execute Soak Plan"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 2 | C-305, C-305a |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 2 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-305]($activeRel1) | P1 | Ready for Deploy | Author Soak Plan | Operator |
+| [C-305a]($activeRel2) | P1 | Ready for Deploy | Execute Soak Plan | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        # Archive one item: C-305
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel1)
+        Assert-Result -Name "archive multi-item exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        
+        # Verify BACKLOG content: Count updated to 1, C-305 removed, C-305a remains, status overview updated to 1
+        $backlogContent = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result -Name "reconciled P1 count" -Condition ($backlogContent -match '\|\s*\*\*P1\*\*\s*\|\s*1\s*\|\s*C-305a\s*\|') -FailureMessage ("expected reconciled P1 row. Content: " + $backlogContent)
+        Assert-Result -Name "reconciled Status Overview" -Condition ($backlogContent -match '\*\*Status Overview\*\*:\s*1\s*active\s*items\.') -FailureMessage ("expected Status Overview 1. Content: " + $backlogContent)
+        
+        # Validate backlog passes validation using validate-backlog.ps1 check
+        $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
+        $validateOutput = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        Assert-Result -Name "validate-backlog exit 0 post-archive" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
+    }
+
+    $results += Run-Test -Name "Reconciles Priority Summary when archiving the sole item in a bucket" -Body {
+        $root = Join-Path $tempRoot "sole-item-reconcile"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "chores/active/C-305_Soak.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "C-305" -Type "Chore" -Priority "P1" -Title "Author Soak Plan"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 1 | C-305 |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-305]($activeRel) | P1 | Ready for Deploy | Author Soak Plan | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        # Archive the sole item: C-305
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel)
+        Assert-Result -Name "archive sole-item exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        
+        # Verify BACKLOG content: Count updated to 0, Item IDs set to -, status overview updated to 0
+        $backlogContent = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result -Name "reconciled P1 count zero" -Condition ($backlogContent -match '\|\s*\*\*P1\*\*\s*\|\s*0\s*\|\s*-\s*\|') -FailureMessage ("expected reconciled empty P1 row. Content: " + $backlogContent)
+        Assert-Result -Name "reconciled Status Overview zero" -Condition ($backlogContent -match '\*\*Status Overview\*\*:\s*0\s*active\s*items\.') -FailureMessage ("expected Status Overview 0. Content: " + $backlogContent)
+
+        # Validate backlog passes validation using validate-backlog.ps1 check
+        $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
+        $validateOutput = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        Assert-Result -Name "validate-backlog exit 0 post-archive sole" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

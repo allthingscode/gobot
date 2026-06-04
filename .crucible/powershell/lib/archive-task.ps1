@@ -140,6 +140,107 @@ function Update-BacklogArchiveRow {
     [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Update-BacklogPrioritySummary {
+    param(
+        [Parameter(Mandatory=$true)][string]$BacklogPath,
+        [Parameter(Mandatory=$true)][string]$ItemId,
+        [string]$Priority
+    )
+
+    if (-not (Test-Path -LiteralPath $BacklogPath -PathType Leaf)) {
+        throw "Backlog file not found: $BacklogPath"
+    }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
+        [void]$lines.Add($line)
+    }
+
+    # If priority is not provided, try to find which priority bucket in the file contains ItemId
+    $detectedPriority = $Priority
+    if ([string]::IsNullOrEmpty($detectedPriority)) {
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            if ($line -match '^\s*\|\s*\*\*(P[0-3])\*\*\s*\|') {
+                $p = $Matches[1]
+                $parts = $line -split '\|'
+                if ($parts.Length -ge 4) {
+                    $itemIds = @($parts[3].Trim().Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+                    if ($itemIds -contains $ItemId) {
+                        $detectedPriority = $p
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    if ([string]::IsNullOrEmpty($detectedPriority)) {
+        # ItemId not found in any priority bucket, nothing to do (idempotent/safe)
+        return
+    }
+
+    # Now update the specific priority line in $lines
+    $modified = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ($line -match "^\s*\|\s*\*\*$detectedPriority\*\*\s*\|") {
+            $parts = $line -split '\|'
+            if ($parts.Length -ge 4) {
+                # Split item IDs
+                $itemIds = [System.Collections.Generic.List[string]]::new()
+                foreach ($id in ($parts[3].Trim().Split(','))) {
+                    $trimmedId = $id.Trim()
+                    if ($trimmedId -ne "" -and $trimmedId -ne "-") {
+                        [void]$itemIds.Add($trimmedId)
+                    }
+                }
+
+                if ($itemIds -contains $ItemId) {
+                    [void]$itemIds.Remove($ItemId)
+                    # Sort remaining items for consistency with validate-backlog
+                    $sortedItems = @($itemIds.ToArray() | Sort-Object)
+                    $newCount = $sortedItems.Count
+                    $newItemsText = if ($newCount -gt 0) { $sortedItems -join ", " } else { "-" }
+                    
+                    $lines[$i] = "| **$detectedPriority** | $newCount | $newItemsText |"
+                    $modified = $true
+                }
+            }
+            break
+        }
+    }
+
+    # Update Status Overview if we modified the priority bucket
+    if ($modified) {
+        # Let's count total active items across all P0-P3 lines in the newly updated $lines array
+        $totalActive = 0
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            if ($line -match '^\s*\|\s*\*\*(P[0-3])\*\*\s*\|') {
+                $parts = $line -split '\|'
+                if ($parts.Length -ge 3) {
+                    $countVal = 0
+                    if ([int]::TryParse($parts[2].Trim(), [ref]$countVal)) {
+                        $totalActive += $countVal
+                    }
+                }
+            }
+        }
+        
+        # Replace the Status Overview line: **Status Overview**: <total> active items.
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\*\*Status Overview\*\*:') {
+                $lines[$i] = "**Status Overview**: $totalActive active items."
+                break
+            }
+        }
+
+        # Write back to file as UTF-8 no-BOM
+        [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    }
+}
+
 function Invoke-BacklogTaskArchive {
     param(
         [Parameter(Mandatory=$true)][string]$BacklogPath,
@@ -196,6 +297,38 @@ function Invoke-BacklogTaskArchive {
         $terminalStatus = Get-BacklogTerminalStatus -Type $type
     }
 
+    # Read item_id and priority from active spec frontmatter before moving
+    $itemId = $null
+    $priority = $null
+    if (Test-Path -LiteralPath $resolvedSpec) {
+        $specLines = [System.IO.File]::ReadAllLines($resolvedSpec, [System.Text.Encoding]::UTF8)
+        $frontmatterEnd = -1
+        if ($specLines.Count -gt 0 -and $specLines[0] -eq "---") {
+            for ($i = 1; $i -lt $specLines.Count; $i++) {
+                if ($specLines[$i] -eq "---") {
+                    $frontmatterEnd = $i
+                    break
+                }
+            }
+        }
+        if ($frontmatterEnd -gt 0) {
+            for ($i = 1; $i -lt $frontmatterEnd; $i++) {
+                $line = $specLines[$i]
+                if ($line -match '^\s*item_id\s*:\s*["'']?([^"''\s\r\n]+)"?') {
+                    $itemId = $Matches[1]
+                }
+                elseif ($line -match '^\s*priority\s*:\s*["'']?([P][0-3])"?') {
+                    $priority = $Matches[1]
+                }
+            }
+        }
+    }
+    
+    if ([string]::IsNullOrEmpty($itemId)) {
+        $fileName = Split-Path -Leaf $resolvedSpec
+        $itemId = ($fileName -replace '_.*$', '') -replace '\.md$', ''
+    }
+
     $archivedRelPath = $relativeSpec -replace '/active/', '/archived/'
     $archivedPath = Join-Path $resolvedBacklogDir ($archivedRelPath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
     $archiveDir = Split-Path -Parent $archivedPath
@@ -210,6 +343,7 @@ function Invoke-BacklogTaskArchive {
     try {
         Set-BacklogSpecFrontmatterStatus -Path $archivedPath -Status $terminalStatus
         Update-BacklogArchiveRow -BacklogPath $resolvedBacklog -ActiveRelPath $relativeSpec -ArchivedRelPath $archivedRelPath -Status $terminalStatus
+        Update-BacklogPrioritySummary -BacklogPath $resolvedBacklog -ItemId $itemId -Priority $priority
     } catch {
         if ((Test-Path -LiteralPath $archivedPath) -and -not (Test-Path -LiteralPath $resolvedSpec)) {
             Move-Item -LiteralPath $archivedPath -Destination $resolvedSpec
