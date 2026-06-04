@@ -10,11 +10,20 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/reporter"
+)
+
+// F-142: identifiers for the automatically seeded workspace re-indexing job.
+// The payload mirrors the marker that app/cron.go's handleSystemJob matches on.
+const (
+	indexWorkspaceJobID   = "index_workspace"
+	indexWorkspaceJobName = "Automatic Workspace Vector Index"
+	indexWorkspacePayload = "[SYSTEM] INDEX_WORKSPACE"
 )
 
 // AgentStack holds the core components required to run the strategic agent.
@@ -48,6 +57,7 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.Tem
 	}
 	memStore, cleanup := InitMemory(cfg, runner)
 	vecStore, embedProv, vecCleanup := InitVectorStore(cfg, prov, runner)
+	SeedDefaultCronJobs(cfg)
 
 	sessionRoot := filepath.Join(cfg.StorageRoot(), "sessions")
 	registry := NewToolRegistry(sessionRoot)
@@ -168,6 +178,38 @@ func InitVectorStore(cfg *config.Config, prov provider.Provider, runner *AgentRu
 		_ = vs.Close()
 	}
 	return vecStore, embedProv, cleanup
+}
+
+// SeedDefaultCronJobs installs the default recurring workspace re-indexing job
+// (F-142) when vector search is enabled, so that the workspace vector index is
+// refreshed automatically without any manual operator cron wiring.
+//
+// When vector search is disabled the function is a no-op, leaving any
+// operator-created jobs untouched (backward compatible). Seeding is idempotent:
+// if a job with the same id already exists it is preserved, so restarts and
+// operator edits are never clobbered. It runs before the scheduler enters its
+// polling loop because BuildAgentStack completes before StartCron.
+func SeedDefaultCronJobs(cfg *config.Config) {
+	if !cfg.VectorSearchEnabled() {
+		return
+	}
+
+	interval := cfg.VectorIndexInterval()
+	if interval <= 0 {
+		return
+	}
+
+	storePath := filepath.Join(cfg.StorageRoot(), "workspace", "jobs.json")
+	job := cron.EveryJob(indexWorkspaceJobID, indexWorkspaceJobName, indexWorkspacePayload, interval.Milliseconds())
+
+	seeded, err := cron.SeedJob(storePath, job)
+	if err != nil {
+		slog.Warn("bootstrap: failed to seed default workspace index job", "err", err)
+		return
+	}
+	if seeded {
+		slog.Info("bootstrap: seeded automatic workspace index job", "id", indexWorkspaceJobID, "interval", interval)
+	}
 }
 
 // NewSessionManager initializes a new agent.SessionManager with standard gobot defaults.

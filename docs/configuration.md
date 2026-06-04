@@ -129,7 +129,8 @@ Settings for advanced agent features, including Google Workspace integration. Fo
 | `storage_root` | string | Root directory for databases, logs, and secrets. Falls back to `GOBOT_STORAGE` env, then `~/gobot_data`. |
 | `max_tool_iterations` | int | Override for maximum tool iterations (overrides `agents.defaults.maxToolIterations`). |
 | `idempotencyTTL` | string | TTL for side-effect idempotency keys (default `"24h"`). |
-| `vector_search_enabled` | bool | Enable semantic/hybrid memory search (requires embedding provider). |
+| `vector_search_enabled` | bool | Enable semantic/hybrid memory search (requires embedding provider). When `true`, gobot also seeds a default recurring `index_workspace` cron job so the workspace vector index is refreshed automatically (see `vector_index_interval`). |
+| `vector_index_interval` | string | Interval between automatic workspace re-indexing runs when `vector_search_enabled` is `true` (default `"24h"`). Parsed as a Go duration (e.g. `"6h"`, `"30m"`). Invalid values log a warning and fall back to the default. Ignored when vector search is disabled. |
 | `multi_user_enabled` | bool | Enable per-user workspace isolation. When true, workspaces are scoped to `{storage_root}/workspace/users/{userID}/`. |
 | `gmail_readonly` | bool | When `true`, registers `search_gmail` and `read_gmail` tools in addition to `send_email`. Set to `false` (default) to allow outbound notifications only. |
 | `google_scopes` | []string | OAuth2 scopes requested by `gobot reauth`. Omit to use the defaults: `https://mail.google.com/`, `https://www.googleapis.com/auth/calendar`, `https://www.googleapis.com/auth/tasks`. See [Google Cloud Setup Guide](google-setup.md#customizing-oauth-scopes). |

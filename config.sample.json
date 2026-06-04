@@ -67,6 +67,7 @@
         "user_chat_id": 0,
         "storage_root": "",
         "vector_search_enabled": false,
+        "vector_index_interval": "24h",
         "multi_user_enabled": false,
         "gmail_readonly": true,
         "google_scopes": [

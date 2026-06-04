@@ -239,6 +239,7 @@ type StrategicConfig struct {
 	Routing             RoutingConfig       `json:"routing"`                    // F-102
 	PolicyFilePath      string              `json:"policy_file_path,omitempty"` // F-103
 	EmbeddingModel      string              `json:"embedding_model,omitempty"`  // B-049
+	VectorIndexInterval string              `json:"vector_index_interval,omitempty"` // F-142, e.g. "24h"
 }
 
 type RoutingConfig struct {
@@ -263,6 +264,23 @@ func (c *Config) MultiUserEnabled() bool {
 // VectorSearchEnabled returns true if semantic hybrid search is enabled (F-030).
 func (c *Config) VectorSearchEnabled() bool {
 	return c.Strategic.VectorSearchEnabled
+}
+
+// VectorIndexInterval returns the interval for the automatic workspace
+// re-indexing job (F-142), defaulting to 24h. If the configured value cannot
+// be parsed as a Go duration, a warning is logged and the default is used.
+func (c *Config) VectorIndexInterval() time.Duration {
+	const defaultInterval = 24 * time.Hour
+	raw := c.Strategic.VectorIndexInterval
+	if raw == "" {
+		return defaultInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		slog.Warn("config: invalid vector_index_interval, using default", "value", raw, "default", defaultInterval)
+		return defaultInterval
+	}
+	return d
 }
 
 // TemplatesPath returns the custom directory for email templates, if configured.
