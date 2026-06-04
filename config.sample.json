@@ -67,7 +67,6 @@
         "user_chat_id": 0,
         "storage_root": "",
         "vector_search_enabled": false,
-        "vector_index_interval": "24h",
         "multi_user_enabled": false,
         "gmail_readonly": true,
         "google_scopes": [
@@ -85,7 +84,8 @@
         "routing": {
             "enabled": false,
             "manager_model": ""
-        }
+        },
+        "vector_index_interval": "24h"
     },
     "gateway": {
         "enabled": false,
