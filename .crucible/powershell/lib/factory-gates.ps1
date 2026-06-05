@@ -2006,7 +2006,11 @@ function Invoke-HumanGate {
     $isGroomingClosure = ($handoff.source_phase -eq "grooming" -and $handoff.target_phase -eq "done")
     $shouldRunHumanGate = $false
     if ($handoff.source_phase -eq "deployment") {
-        $shouldRunHumanGate = -not $isBootstrap
+        if (-not [string]::IsNullOrEmpty($GateOutcome)) {
+            $shouldRunHumanGate = -not $isBootstrap
+        } else {
+            $shouldRunHumanGate = -not $isBootstrap -and $handoff.target_phase -eq "done"
+        }
     } elseif ($isGroomingClosure) {
         # Check if research gate approved it
         $researchGateApproved = $false
@@ -2266,7 +2270,7 @@ function Invoke-RepositoryIntegrityGates {
 
     # --- 3c. Dev Log Integrity Gate ---
     # Run automatically when Operator hands off to ensure Dev Logs are clean before next cycle.
-    if ($handoff.source_phase -eq "deployment" -and $handoff.task_id -notmatch '^C-FACTORY-' -and -not $isBootstrap) {
+    if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -ne "implementation" -and $handoff.task_id -notmatch '^C-FACTORY-' -and -not $isBootstrap) {
         Write-Quiet "`n[DEV LOG] Running Dev Log security validation..." -ForegroundColor Cyan
         $devLogPath = Join-Path $sessionDir "../dev-logs/UNPUBLISHED_LOGS.md"
         if (-not (Test-Path $devLogPath)) {
@@ -2285,7 +2289,7 @@ function Invoke-RepositoryIntegrityGates {
 
     # --- 3d. Workspace Cleanliness Gate ---
     # Block Operator handoff if untracked files exist outside of private/ignored dirs.
-    if ($handoff.source_phase -eq "deployment" -and $handoff.task_id -notmatch '^C-FACTORY-' -and -not $isBootstrap) {
+    if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -ne "implementation" -and $handoff.task_id -notmatch '^C-FACTORY-' -and -not $isBootstrap) {
         $rawStatus = git status --porcelain 2>&1
         $strayFiles = @()
         foreach ($line in $rawStatus) {

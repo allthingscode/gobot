@@ -3037,6 +3037,110 @@ try {
         $initExitCode = $LASTEXITCODE
 
         Assert-Result -Name "E2E Reject: factory init succeeded" -Condition ($initExitCode -eq 0) -FailureMessage ("expected factory init to pass, got exit code $initExitCode. Output: " + $initOutput)
+
+        # Strengthened assertions for D56 target_phase checks
+        $pendingFile = Join-Path $gateDir "gate_decision_F-999_pending.json"
+        Assert-Result -Name "D56 E2E Reject: pending gate decision JSON does not exist" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "expected gate_decision_F-999_pending.json to not exist"
+        
+        $pendingTxt = Join-Path $sessionDir "F-999/gate_pending.txt"
+        Assert-Result -Name "D56 E2E Reject: gate_pending.txt does not exist" -Condition (-not (Test-Path $pendingTxt)) -FailureMessage "expected gate_pending.txt to not be created"
+
+        # Verify generated files for implementation phase
+        $promptFile = Join-Path $sessionDir "F-999/implementation/prompt.md"
+        Assert-Result -Name "D56 E2E Reject: prompt.md exists" -Condition (Test-Path $promptFile) -FailureMessage "expected prompt.md to exist at $promptFile"
+        
+        $promptContent = Get-Content $promptFile -Raw -Encoding UTF8
+        Assert-Result -Name "D56 E2E Reject: prompt.md references Architect" -Condition ($promptContent -match "Architect") -FailureMessage ("expected prompt.md to reference Architect, got: " + $promptContent)
+
+        $taskFile = Join-Path $sessionDir "F-999/implementation/task.md"
+        Assert-Result -Name "D56 E2E Reject: task.md exists" -Condition (Test-Path $taskFile) -FailureMessage "expected task.md to exist at $taskFile"
+
+        $taskContent = Get-Content $taskFile -Raw -Encoding UTF8
+        Assert-Result -Name "D56 E2E Reject: task.md references implementation phase" -Condition ($taskContent -match "Phase: implementation") -FailureMessage ("expected task.md to reference Phase: implementation, got: " + $taskContent)
+    }
+
+    $results += Run-Test -Name "D56: human-gate trigger target_phase checks" -Body {
+        $caseRoot = Join-Path $tempRoot "d56-gate-trigger-target"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $sessionDir = Join-Path $caseRoot "session"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # 1. Seed a rejected decision
+        $decisionRejected = [ordered]@{
+            task_id = 'F-039'
+            outcome = 'rejected'
+            rework_requested = $true
+        }
+        $decisionRejected | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-039-20260604T120000Z.json") -Encoding UTF8
+
+        # 2. Invoke-HumanGate with deployment -> implementation handoff. It should NOT fire the gate (so no pending file, exits normally/doesn't exit 0/doesn't create menu)
+        $scriptPath = Join-Path $caseRoot "run-rework-trigger.ps1"
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$caseRoot'
+    RepoRoot = '$caseRoot'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-039'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 2
+    }
+}
+Invoke-HumanGate -Context `$ctx
+Write-Host "SUCCESS_MARKER"
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputStr = $output -join "`n"
+        $pendingFile = Join-Path $gateDir "gate_decision_F-039_pending.json"
+        
+        Assert-Result -Name "D56: deployment -> implementation does not fire gate" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "expected gate_decision_F-039_pending.json to not be created"
+        Assert-Result -Name "D56: deployment -> implementation runs to completion" -Condition ($outputStr -match "SUCCESS_MARKER") -FailureMessage "expected script to run to completion, got: $outputStr"
+
+        # 3. Invoke-HumanGate with deployment -> done handoff. It SHOULD fire the gate (so it creates the pending file)
+        $scriptPathDone = Join-Path $caseRoot "run-done-trigger.ps1"
+        $scriptContentDone = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$caseRoot'
+    RepoRoot = '$caseRoot'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-039'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 2
+    }
+}
+Invoke-HumanGate -Context `$ctx
+Write-Host "SUCCESS_MARKER"
+"@
+        $scriptContentDone | Set-Content -LiteralPath $scriptPathDone -Encoding UTF8
+
+        $outputDone = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPathDone 2>&1
+        $outputDoneStr = $outputDone -join "`n"
+        
+        Assert-Result -Name "D56: deployment -> done fires gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-039_pending.json to be created"
+        Assert-Result -Name "D56: deployment -> done exits early" -Condition ($outputDoneStr -notmatch "SUCCESS_MARKER") -FailureMessage "expected script to exit early, got: $outputDoneStr"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
