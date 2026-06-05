@@ -110,10 +110,8 @@ New-Item -ItemType Directory -Force -Path ".crucible/session/eval" | Out-Null
 $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_id}.json" -Encoding utf8
 ```
 
-### Step 8 — Update Backlog & Archive
-- **Atomic Resolution**: Run `powershell.exe -File {{crucible_root}}/powershell/archive-task.ps1 -BacklogPath {{backlog_dir}}/BACKLOG.md -SpecPath {{backlog_dir}}/{type}/active/{task_id}_*.md`. This updates the `BACKLOG.md` row to `Production` for features or `Resolved` for chores/bugs, moves the spec to `{{backlog_dir}}/{type}/archived/`, and rewrites the archived spec frontmatter `status` to the same terminal value.
-- Update `BACKLOG.md` summary table: `powershell.exe -File {{crucible_root}}/powershell/validate-backlog.ps1 -FixSummary`
-- Move pipeline log: `.crucible/session/{task_id}/pipeline.log.jsonl` → `.crucible/session/archived/pipeline-{task_id}-{timestamp}.log.jsonl`
+### Step 8 — Backlog and Log Deferral
+No manual backlog update or log archiving is required here. The factory's Human Gate automatically archives the backlog spec, updates the `BACKLOG.md` status, reconciles the Priority-Summary, and archives the pipeline log once the human records an `accepted` or `redirected` decision.
 
 ### Step 9 — Run new-handoff.ps1 & Advance Pipeline
 Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done" and pass the merged master/main commit hash to `-CommitHash`:
@@ -183,6 +181,20 @@ If a task is rejected during the Human Gate (e.g. choice 2: `rejected`), the fol
 
 ---
 
+## Abandon — Stop the Pipeline
+
+If a task is abandoned during the Human Gate (choice 4: `abandoned`), the following procedures apply:
+
+1. **Automatic Unwind**:
+   - The factory automatically unwinds the local merge on the default branch, resetting it to the pre-merge tip.
+   - Unlike the reject path, no task branch is restored and no new implementation worktree is created.
+
+2. **Backlog End State**:
+   - Because backlog finalization is deferred to accept/redirect outcomes, the task's spec remains in the `active/` directory and is NOT marked as `Resolved` or `Production` in `BACKLOG.md`. This ensures the task does not mistakenly read as completed.
+   - The operator or human can manually mark the task row as `Abandoned` in `BACKLOG.md` and archive/delete the spec file as needed.
+
+---
+
 ## Feedback Loop for Production Issues
 
 When production issues are discovered that meet the circuit breaker threshold (P0 crash/data loss, OR 5+ occurrences of a minor issue):
@@ -204,9 +216,9 @@ powershell.exe -ExecutionPolicy Bypass \
 
 Pre-flight gate — confirm all are true before writing handoff:
 - [ ] `git log master --oneline -1` shows the merge commit (merge succeeded locally)
-- [ ] `BACKLOG.md` entry for `{task_id}` shows `Production` or `Resolved`
+- [ ] `BACKLOG.md` entry for `{task_id}` shows active status (e.g. `Ready for Deploy` or `In Progress`)
 - [ ] Worktree and task branch have been deleted
-- [ ] Pipeline log archived
+- [ ] Pipeline log is in `.crucible/session/{task_id}/` (will be archived by the factory on accept)
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
 - [ ] Routing to: `done` (or `grooming` if production issue threshold met)
 - [ ] `task_id` in handoff matches the task I was given

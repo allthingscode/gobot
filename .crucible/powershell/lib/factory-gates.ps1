@@ -1727,6 +1727,108 @@ function Get-TaskFinalizationDetails {
     return [pscustomobject]$result
 }
 
+function Restore-BacklogTask {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [string]$ProjectRoot = "",
+        [string]$ActiveStatus = "In Progress"
+    )
+    $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        $ProjectRoot
+    } else {
+        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+        if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
+    }
+    
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
+    $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+    if (-not (Test-Path -LiteralPath $backlogPath)) { return }
+
+    # Find the archived spec
+    $typeDirs = @("features", "bugs", "chores")
+    $archivedSpecPath = ""
+    $type = ""
+    foreach ($dir in $typeDirs) {
+        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $archivedMatch) {
+            $archivedSpecPath = $archivedMatch.FullName
+            $type = $dir
+            break
+        }
+    }
+
+    if ([string]::IsNullOrEmpty($archivedSpecPath)) {
+        # Not archived, nothing to restore
+        return
+    }
+
+    # Move back to active
+    $activeDir = Join-Path $backlogDir "$type/active"
+    if (-not (Test-Path $activeDir)) {
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+    }
+    $fileName = Split-Path -Leaf $archivedSpecPath
+    $activeSpecPath = Join-Path $activeDir $fileName
+    
+    Move-Item -LiteralPath $archivedSpecPath -Destination $activeSpecPath -Force
+
+    # Restore frontmatter status
+    $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+    if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+        if (Test-Path -LiteralPath $archiveLibPath) {
+            . $archiveLibPath
+        }
+    }
+    if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
+        Set-BacklogSpecFrontmatterStatus -Path $activeSpecPath -Status $ActiveStatus
+    }
+
+    # Restore BACKLOG.md row
+    $relativeActive = "$type/active/$fileName"
+    $relativeArchived = "$type/archived/$fileName"
+    
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
+        [void]$lines.Add($line)
+    }
+    $archivedLink = $relativeArchived.Replace("\", "/")
+    $activeLink = $relativeActive.Replace("\", "/")
+    $rowIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Contains("]($archivedLink)")) {
+            $rowIndex = $i
+            break
+        }
+    }
+    if ($rowIndex -ge 0) {
+        $lineArray = [string[]]$lines.ToArray()
+        if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+            if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
+        }
+        if (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue) {
+            $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $rowIndex
+            if ($statusColumn -ge 0) {
+                $row = $lines[$rowIndex].Replace("]($archivedLink)", "]($activeLink)")
+                $cells = [System.Collections.Generic.List[string]]::new()
+                foreach ($cell in $row.Trim().Trim("|").Split("|")) {
+                    [void]$cells.Add($cell.Trim())
+                }
+                if ($statusColumn -lt $cells.Count) {
+                    $cells[$statusColumn] = $ActiveStatus
+                    $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
+                    [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+                }
+            }
+        }
+    }
+
+    # Reconcile Priority-Summary
+    $validateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "validate-backlog.ps1"
+    if (Test-Path $validateScript) {
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot | Out-Null
+    }
+}
+
 function Invoke-HumanGateAction {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -1836,8 +1938,97 @@ function Invoke-HumanGateAction {
                 Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
             }
         }
+
+        # Move pipeline log to archived if it exists
+        $sessionDir = Join-Path $resolvedProjectRoot ".crucible/session"
+        $pipelineLogPath = Join-Path $sessionDir "$TaskId/pipeline.log.jsonl"
+        if (Test-Path -LiteralPath $pipelineLogPath) {
+            $archivedDir = Join-Path $sessionDir "archived"
+            if (-not (Test-Path $archivedDir)) {
+                New-Item -ItemType Directory -Force -Path $archivedDir | Out-Null
+            }
+            $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+            $destPath = Join-Path $archivedDir "pipeline-$TaskId-$timestamp.log.jsonl"
+            Move-Item -LiteralPath $pipelineLogPath -Destination $destPath -Force
+            Write-Quiet "[HUMAN GATE] Archived pipeline log to $destPath"
+        }
     } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
         if ($SourcePhase -ne "grooming") {
+            if ($Outcome -eq "rejected") {
+                # Restore backlog state if it was archived
+                Restore-BacklogTask -TaskId $TaskId -ProjectRoot $resolvedProjectRoot -ActiveStatus "In Progress"
+            } elseif ($Outcome -eq "abandoned") {
+                # Archive the abandoned task as Abandoned
+                $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
+                $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+                if (Test-Path -LiteralPath $backlogPath) {
+                    $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $resolvedProjectRoot
+                    if (-not [string]::IsNullOrEmpty($activeSpecPath) -and (Test-Path -LiteralPath $activeSpecPath)) {
+                        $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+                        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                            if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
+                        }
+                        if (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue) {
+                            try {
+                                $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status "Abandoned"
+                                Write-Host ("[D57] SUCCESS: Auto-archived abandoned task as $($archiveResult.Type) (status Abandoned): $($archiveResult.ArchivedRelPath)") -ForegroundColor Green
+                            } catch {
+                                Write-Host ("[D57] WARNING: Failed to archive abandoned task: " + $_.Exception.Message) -ForegroundColor Yellow
+                            }
+                        }
+                    } else {
+                        # If it was already archived (legacy flow), set frontmatter and BACKLOG.md row to Abandoned
+                        $typeDirs = @("features", "bugs", "chores")
+                        foreach ($dir in $typeDirs) {
+                            $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+                            if ($null -ne $archivedMatch) {
+                                $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+                                if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+                                    if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
+                                }
+                                if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
+                                    Set-BacklogSpecFrontmatterStatus -Path $archivedMatch.FullName -Status "Abandoned"
+                                }
+                                $relativeArchived = "$dir/archived/$($archivedMatch.Name)"
+                                $lines = [System.Collections.Generic.List[string]]::new()
+                                foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
+                                    [void]$lines.Add($line)
+                                }
+                                $archivedLink = $relativeArchived.Replace("\", "/")
+                                $rowIndex = -1
+                                for ($i = 0; $i -lt $lines.Count; $i++) {
+                                    if ($lines[$i].Contains("]($archivedLink)")) {
+                                        $rowIndex = $i
+                                        break
+                                    }
+                                }
+                                if ($rowIndex -ge 0) {
+                                    $lineArray = [string[]]$lines.ToArray()
+                                    if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+                                        if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
+                                    }
+                                    if (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue) {
+                                        $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $rowIndex
+                                        if ($statusColumn -ge 0) {
+                                            $cells = [System.Collections.Generic.List[string]]::new()
+                                            foreach ($cell in $lines[$rowIndex].Trim().Trim("|").Split("|")) {
+                                                [void]$cells.Add($cell.Trim())
+                                            }
+                                            if ($statusColumn -lt $cells.Count) {
+                                                $cells[$statusColumn] = "Abandoned"
+                                                $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
+                                                [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+                                            }
+                                        }
+                                    }
+                                }
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+
             $currentHead = (Invoke-GitChecked { git rev-parse HEAD }).Trim()
             $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
             $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })

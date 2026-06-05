@@ -3142,6 +3142,524 @@ Write-Host "SUCCESS_MARKER"
         Assert-Result -Name "D56: deployment -> done fires gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-039_pending.json to be created"
         Assert-Result -Name "D56: deployment -> done exits early" -Condition ($outputDoneStr -notmatch "SUCCESS_MARKER") -FailureMessage "expected script to exit early, got: $outputDoneStr"
     }
+
+    $results += Run-Test -Name "D57: end-to-end reject restores backlog if archived" -Body {
+        $FRAMEWORK_POWERSHELL = Join-Path $REPO_ROOT "powershell"
+        $caseRoot = Join-Path $tempRoot "d57-e2e-reject-restore"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "origin.git"
+        $localRepo = Join-Path $caseRoot "local"
+        
+        # Init origin bare repo
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        Invoke-GitChecked { git -C $originRepo init --bare --initial-branch master } | Out-Null
+        
+        # Clone local
+        Invoke-GitChecked { git clone $originRepo $localRepo } | Out-Null
+
+        # Seed master in local
+        "init" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add README.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "init" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo push origin master } | Out-Null
+
+        # Seed backlog config
+        $backlogDir = Join-Path $localRepo ".crucible/backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/archived") -Force | Out-Null
+        
+        $configContent = @"
+paths:
+  backlog: ".crucible/backlog"
+"@
+        $configContent | Set-Content -LiteralPath (Join-Path $localRepo ".crucible/config.yaml") -Encoding UTF8
+
+        # Create active spec file
+        $specContent = @"
+---
+item_id: "F-888"
+type: "Feature"
+status: "Ready for Deploy"
+priority: "P2"
+target_phase: "deployment"
+created_at: "2026-06-04"
+---
+
+# Test Spec F-888
+"@
+        $specContent | Set-Content -LiteralPath (Join-Path $backlogDir "features/active/F-888_Test_Spec.md") -Encoding UTF8
+
+        # Create BACKLOG.md
+        $backlogContent = @"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | F-888 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-888](features/active/F-888_Test_Spec.md) | P2 | Ready for Deploy | Test Spec F-888 | Operator |
+"@
+        $backlogContent | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+        # Initialize/reconcile Priority-Summary
+        $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+
+        # Checkout task branch and make commit
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-888 } | Out-Null
+        "feature content" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add feature.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "feature commit" } | Out-Null
+        
+        # Checkout master and merge locally
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        Invoke-GitChecked { git -C $localRepo merge --no-edit task/F-888 } | Out-Null
+
+        # Setup session folders
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Legacy/old behavior: archive the task BEFORE the gate runs
+        # Load archive-task helper
+        $archiveLibPath = Join-Path $FRAMEWORK_POWERSHELL "lib/archive-task.ps1"
+        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+            . $archiveLibPath
+        }
+        Invoke-BacklogTaskArchive -BacklogPath (Join-Path $backlogDir "BACKLOG.md") -SpecPath (Join-Path $backlogDir "features/active/F-888_Test_Spec.md") -Status "Production" | Out-Null
+
+        # Verify it is archived
+        Assert-Result -Name "D57 Test: spec is archived before reject" -Condition (Test-Path (Join-Path $backlogDir "features/archived/F-888_Test_Spec.md")) -FailureMessage "expected spec to be archived"
+
+        # Script to run Invoke-HumanGate with rejected outcome
+        $scriptPath = Join-Path $caseRoot "run-reject.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'needs work'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-888'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        artifacts = @('feature.md')
+        session_cycle_id = 'cycle-888'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        # Run rejected outcome
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D57 Reject Restore: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
+
+        # Assert: the spec is back under active/
+        $activeSpecExists = Test-Path (Join-Path $backlogDir "features/active/F-888_Test_Spec.md")
+        $archivedSpecExists = Test-Path (Join-Path $backlogDir "features/archived/F-888_Test_Spec.md")
+        Assert-Result -Name "D57 Reject Restore: active spec restored" -Condition ($activeSpecExists -and -not $archivedSpecExists) -FailureMessage "expected active spec to exist and archived spec to be removed"
+
+        # Assert: frontmatter status is non-terminal
+        $specLines = Get-Content (Join-Path $backlogDir "features/active/F-888_Test_Spec.md") -Raw
+        $statusMatches = ($specLines -match 'status:\s*"In Progress"')
+        Assert-Result -Name "D57 Reject Restore: status is In Progress" -Condition $statusMatches -FailureMessage "expected spec status to be 'In Progress'"
+
+        # Assert: BACKLOG.md row has active link and status In Progress
+        $backlogLines = Get-Content (Join-Path $backlogDir "BACKLOG.md") -Raw
+        $rowMatches = ($backlogLines -match '\[F-888\]\(features/active/F-888_Test_Spec.md\)\s*\|\s*P2\s*\|\s*In Progress')
+        Assert-Result -Name "D57 Reject Restore: BACKLOG.md row updated" -Condition $rowMatches -FailureMessage ("expected BACKLOG.md row to show active link and 'In Progress', got: " + $backlogLines)
+
+        # Assert: Priority-Summary counts are restored
+        $prioritySummaryMatches = ($backlogLines -match '\|\s*\*\*P2\*\*\s*\|\s*1\s*\|\s*F-888\s*\|')
+        Assert-Result -Name "D57 Reject Restore: Priority-Summary counts updated" -Condition $prioritySummaryMatches -FailureMessage ("expected P2 count 1, got BACKLOG.md: " + $backlogLines)
+    }
+
+    $results += Run-Test -Name "D57: end-to-end abandon archives as Abandoned" -Body {
+        $FRAMEWORK_POWERSHELL = Join-Path $REPO_ROOT "powershell"
+        $caseRoot = Join-Path $tempRoot "d57-e2e-abandon"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "origin.git"
+        $localRepo = Join-Path $caseRoot "local"
+        
+        # Init origin bare repo
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        Invoke-GitChecked { git -C $originRepo init --bare --initial-branch master } | Out-Null
+        
+        # Clone local
+        Invoke-GitChecked { git clone $originRepo $localRepo } | Out-Null
+
+        # Seed master in local
+        "init" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add README.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "init" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo push origin master } | Out-Null
+
+        # Seed backlog config
+        $backlogDir = Join-Path $localRepo ".crucible/backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/archived") -Force | Out-Null
+        
+        $configContent = @"
+paths:
+  backlog: ".crucible/backlog"
+"@
+        $configContent | Set-Content -LiteralPath (Join-Path $localRepo ".crucible/config.yaml") -Encoding UTF8
+
+        # Create active spec file
+        $specContent = @"
+---
+item_id: "F-777"
+type: "Feature"
+status: "Ready for Deploy"
+priority: "P2"
+target_phase: "deployment"
+created_at: "2026-06-04"
+---
+
+# Test Spec F-777
+"@
+        $specContent | Set-Content -LiteralPath (Join-Path $backlogDir "features/active/F-777_Test_Spec.md") -Encoding UTF8
+
+        # Create BACKLOG.md
+        $backlogContent = @"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | F-777 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-777](features/active/F-777_Test_Spec.md) | P2 | Ready for Deploy | Test Spec F-777 | Operator |
+"@
+        $backlogContent | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+        # Initialize/reconcile Priority-Summary
+        $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+
+        # Checkout task branch and commit
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-777 } | Out-Null
+        "feature content" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add feature.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "feature commit" } | Out-Null
+        
+        # Checkout master and merge locally
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        Invoke-GitChecked { git -C $localRepo merge --no-edit task/F-777 } | Out-Null
+
+        # Setup session folders
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Under Approach A, the spec is active (NOT archived) before the gate is run
+
+        # Script to run Invoke-HumanGate with abandoned outcome
+        $scriptPath = Join-Path $caseRoot "run-abandon.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'abandoned'
+    GateReason = 'canceled'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-777'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        artifacts = @('feature.md')
+        session_cycle_id = 'cycle-777'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        # Run abandoned outcome
+        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D57 Abandon: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
+
+        # Assert: the spec is archived
+        $activeSpecExists = Test-Path (Join-Path $backlogDir "features/active/F-777_Test_Spec.md")
+        $archivedSpecExists = Test-Path (Join-Path $backlogDir "features/archived/F-777_Test_Spec.md")
+        Assert-Result -Name "D57 Abandon: archived spec created" -Condition ($archivedSpecExists -and -not $activeSpecExists) -FailureMessage "expected archived spec to exist and active spec to be removed"
+
+        # Assert: frontmatter status is Abandoned
+        $specLines = Get-Content (Join-Path $backlogDir "features/archived/F-777_Test_Spec.md") -Raw
+        $statusMatches = ($specLines -match 'status:\s*"Abandoned"')
+        Assert-Result -Name "D57 Abandon: status is Abandoned in spec" -Condition $statusMatches -FailureMessage "expected spec status to be 'Abandoned'"
+
+        # Assert: BACKLOG.md row shows Abandoned
+        $backlogLines = Get-Content (Join-Path $backlogDir "BACKLOG.md") -Raw
+        $rowMatches = ($backlogLines -match '\[F-777\]\(features/archived/F-777_Test_Spec.md\)\s*\|\s*P2\s*\|\s*Abandoned')
+        Assert-Result -Name "D57 Abandon: BACKLOG.md row updated" -Condition $rowMatches -FailureMessage ("expected BACKLOG.md row to show archived link and 'Abandoned', got: " + $backlogLines)
+
+        # Assert: Priority-Summary counts are reconciled (F-777 removed)
+        $prioritySummaryMatches = ($backlogLines -match '\|\s*\*\*P2\*\*\s*\|\s*0\s*\|\s*-\s*\|')
+        Assert-Result -Name "D57 Abandon: Priority-Summary counts updated" -Condition $prioritySummaryMatches -FailureMessage ("expected P2 count 0, got BACKLOG.md: " + $backlogLines)
+    }
+
+    $results += Run-Test -Name "D57: full-loop reject -> rework -> accept" -Body {
+        $FRAMEWORK_POWERSHELL = Join-Path $REPO_ROOT "powershell"
+        $caseRoot = Join-Path $tempRoot "d57-full-loop"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "origin.git"
+        $localRepo = Join-Path $caseRoot "local"
+        
+        # Init origin bare repo
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        Invoke-GitChecked { git -C $originRepo init --bare --initial-branch master } | Out-Null
+        
+        # Clone local
+        Invoke-GitChecked { git clone $originRepo $localRepo } | Out-Null
+
+        # Seed master in local
+        "init" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add README.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "init" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo push origin master } | Out-Null
+
+        # Seed backlog config
+        $backlogDir = Join-Path $localRepo ".crucible/backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/archived") -Force | Out-Null
+        
+        $configContent = @"
+paths:
+  backlog: ".crucible/backlog"
+"@
+        $configContent | Set-Content -LiteralPath (Join-Path $localRepo ".crucible/config.yaml") -Encoding UTF8
+
+        # Create active spec file
+        $specContent = @"
+---
+item_id: "F-666"
+type: "Feature"
+status: "Ready for Deploy"
+priority: "P2"
+target_phase: "deployment"
+created_at: "2026-06-04"
+---
+
+# Test Spec F-666
+"@
+        $specContent | Set-Content -LiteralPath (Join-Path $backlogDir "features/active/F-666_Test_Spec.md") -Encoding UTF8
+
+        # Create BACKLOG.md
+        $backlogContent = @"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | F-666 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-666](features/active/F-666_Test_Spec.md) | P2 | Ready for Deploy | Test Spec F-666 | Operator |
+"@
+        $backlogContent | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+        # Initialize/reconcile Priority-Summary
+        $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+
+        # Checkout task branch and commit
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-666 } | Out-Null
+        "feature content" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add feature.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "feature commit" } | Out-Null
+        
+        # Checkout master and merge locally
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        Invoke-GitChecked { git -C $localRepo merge --no-edit task/F-666 } | Out-Null
+
+        # Setup session folders
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # 1. RUN REJECTED OUTCOME (using Invoke-HumanGate)
+        $scriptPathReject = Join-Path $caseRoot "run-reject.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContentReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'needs rework'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-666'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        artifacts = @('feature.md')
+        session_cycle_id = 'cycle-666'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContentReject | Set-Content -LiteralPath $scriptPathReject -Encoding UTF8
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPathReject 2>&1 | Out-Null
+
+        # Verify spec is active and status is In Progress
+        Assert-Result -Name "D57 Loop: active spec exists after reject" -Condition (Test-Path (Join-Path $backlogDir "features/active/F-666_Test_Spec.md")) -FailureMessage "expected active spec to exist after reject"
+
+        # 2. SIMULATE REWORK -> RE-DEPLOY
+        # Make a rework commit inside the implementation worktree
+        $wtPath = Join-Path $localRepo ".crucible/.agent-workspaces/implementation-F-666"
+        "reworked content" | Set-Content -LiteralPath (Join-Path $wtPath "reworked.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $wtPath add reworked.md } | Out-Null
+        Invoke-GitChecked { git -C $wtPath commit -m "rework commit" } | Out-Null
+
+        # Now merge task/F-666 into master
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        Invoke-GitChecked { git -C $localRepo merge --no-edit task/F-666 } | Out-Null
+
+        # 3. RUN ACCEPTED OUTCOME (using Invoke-HumanGate)
+        $scriptPathAccept = Join-Path $caseRoot "run-accept.ps1"
+        $scriptContentAccept = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'perfect now'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-666'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 2
+        artifacts = @('feature.md', 'reworked.md')
+        session_cycle_id = 'cycle-666'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContentAccept | Set-Content -LiteralPath $scriptPathAccept -Encoding UTF8
+        
+        $acceptOutput = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPathAccept 2>&1
+        $acceptExitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D57 Loop Accept: exit code is 0" -Condition ($acceptExitCode -eq 0) -FailureMessage ("expected exit code 0, got $acceptExitCode. Output: " + $acceptOutput)
+
+        # Assert: the spec is archived
+        $activeSpecExists = Test-Path (Join-Path $backlogDir "features/active/F-666_Test_Spec.md")
+        $archivedSpecExists = Test-Path (Join-Path $backlogDir "features/archived/F-666_Test_Spec.md")
+        Assert-Result -Name "D57 Loop: archived spec created" -Condition ($archivedSpecExists -and -not $activeSpecExists) -FailureMessage "expected archived spec to exist and active spec to be removed"
+
+        # Assert: frontmatter status is Production
+        $specLines = Get-Content (Join-Path $backlogDir "features/archived/F-666_Test_Spec.md") -Raw
+        $statusMatches = ($specLines -match 'status:\s*"Production"')
+        Assert-Result -Name "D57 Loop: status is Production in spec" -Condition $statusMatches -FailureMessage "expected spec status to be 'Production'"
+
+        # Assert: BACKLOG.md row shows Production
+        $backlogLines = Get-Content (Join-Path $backlogDir "BACKLOG.md") -Raw
+        $rowMatches = ($backlogLines -match '\[F-666\]\(features/archived/F-666_Test_Spec.md\)\s*\|\s*P2\s*\|\s*Production')
+        Assert-Result -Name "D57 Loop: BACKLOG.md row updated to Production" -Condition $rowMatches -FailureMessage ("expected BACKLOG.md row to show Production, got: " + $backlogLines)
+
+        # Assert: Priority-Summary counts are reconciled (F-666 removed)
+        $prioritySummaryMatches = ($backlogLines -match '\|\s*\*\*P2\*\*\s*\|\s*0\s*\|\s*-\s*\|')
+        Assert-Result -Name "D57 Loop: Priority-Summary counts updated" -Condition $prioritySummaryMatches -FailureMessage ("expected P2 count 0, got BACKLOG.md: " + $backlogLines)
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

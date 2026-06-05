@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$BacklogPath,
     [Parameter(Mandatory=$true)][string]$SpecPath,
-    [ValidateSet("Production","Resolved")][string]$Status,
+    [ValidateSet("Production","Resolved","Abandoned")][string]$Status,
     [switch]$Quiet
 )
 
