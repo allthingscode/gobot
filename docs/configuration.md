@@ -12,6 +12,19 @@ You can override the storage root with `gobot init --root <path>` or the `GOBOT_
 
 ---
 
+## Reformatting config.json
+
+`gobot` has a canonical on-disk form for `config.json`: pretty-printed JSON with 4-space indentation. Two commands manage it:
+
+- `gobot config reformat` rewrites `config.json` in that canonical 4-space-indented form. If no path is given, it operates on the default `config.json` (see [File Location](#file-location)).
+- `gobot config reformat --check` does not rewrite anything. It only reports whether the file already matches the canonical form (similar to `gofmt -l`). It prints a confirmation when the file matches, and exits non-zero with a message when it does not.
+
+A "not correctly formatted" result is a style-only signal, not a validity error. The check compares the file's exact bytes against gobot's freshly re-marshalled form, so a config that differs only in key ordering, indentation, or whitespace is reported as not correctly formatted even though it is still valid and is loaded normally at runtime. To bring a file into canonical form, run `gobot config reformat` (the same command without `--check`).
+
+This formatting check is opt-in. It is not run at application startup, in `gobot doctor`, or in preflight diagnostics; it runs only when you invoke `gobot config reformat --check` explicitly. To check whether a config is semantically valid (rather than canonically formatted), use `gobot config validate`.
+
+---
+
 ## Configuration Structure
 
 ### 1. Agents (`agents`)
