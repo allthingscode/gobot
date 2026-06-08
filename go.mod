@@ -88,7 +88,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260409153401-be6f6cb8b1fa // indirect
 	golang.org/x/term v0.43.0 // indirect
