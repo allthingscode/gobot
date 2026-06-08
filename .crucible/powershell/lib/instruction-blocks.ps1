@@ -10,6 +10,10 @@ function Get-CrucibleBlock {
         Returns a hashtable mapping filenames to their canonical Crucible block content.
         Content matches docs/agent-instructions.md and is wrapped with sentinel markers.
     #>
+    if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
+        . (Join-Path $PSScriptRoot "platform.ps1")
+    }
+    $pwshCmd = Get-PwshCommand
 
     $agentsBody = @'
 ## Crucible
@@ -53,7 +57,7 @@ Run the installed runtime from the project root:
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId <task-id>
 ```
-'@
+'@ -replace 'powershell.exe', $pwshCmd
 
     $claudeBody = @'
 # Claude Instructions

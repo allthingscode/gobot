@@ -14,6 +14,10 @@ FRAMEWORK_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
+# Resolve platform-appropriate PowerShell command. Prefer powershell.exe so
+# Windows runs Windows PowerShell 5.1; Linux/macOS fall through to pwsh 7+.
+PWSH="$(command -v powershell.exe || command -v pwsh)"
+
 echo "--- Crucible pre-commit verification started"
 
 if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
@@ -22,11 +26,11 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
 
     # 1. Policy Drift check
     echo "Running policy drift check..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-policy-drift.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-policy-drift.ps1
 
     # 2. Mojibake check
     echo "Running mojibake check..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1
 
     # 3. Go Factory Lint check
     echo "Running factory lint checks..."
@@ -94,7 +98,7 @@ else
         # Pass files positionally (not via -Paths): in powershell.exe -File mode a named
         # array param binds only the first token; ValueFromRemainingArguments collects all
         # positional args. Regression: check-mojibake.tests.ps1.
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/tests/check-mojibake.ps1" $STAGED_FILES_MOJIBAKE
+        "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/tests/check-mojibake.ps1" $STAGED_FILES_MOJIBAKE
     fi
 fi
 

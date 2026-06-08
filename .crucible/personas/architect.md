@@ -47,7 +47,7 @@ If verdict is PARTIAL or FAIL, silently correct before presenting the final solu
 - `.crucible/session/{task_id}/implementation/output.md` - completion summary
 - `.crucible/session/global/session_state.json` -> `phases.implementation`
 
-**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update_session_state.ps1 -Specialist implementation -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
+**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update-session-state.ps1 -Specialist implementation -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
 
 **Locking**: Follow the implementation SOP and factory task context for lock behavior.
 

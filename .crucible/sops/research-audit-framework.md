@@ -1,13 +1,13 @@
-<!-- prompt_version: research-audit-factory-v1 -->
-# SOP: Researcher — Dev Factory Quality Audit
+<!-- prompt_version: research-audit-framework-v1 -->
+# SOP: Researcher — Crucible Framework Quality Audit
 
-**Use when:** Asked to run a structured quality audit of the Dev Factory multi-agent system.
+**Use when:** Asked to run a structured quality audit of the Crucible multi-agent framework.
 
-**Trigger form:** `Researcher: Audit Dev Factory`
+**Trigger form:** `Researcher: Audit Crucible`
 
-**Scorecard:** `.crucible/research/scorecard-devfactory.md` — read this before proceeding. It defines every category, the standard being measured against, and the signals to audit. This SOP describes the process; the scorecard describes the content.
+**Scorecard:** `.crucible/research/scorecard-framework.md` — read this before proceeding. It defines every category, the standard being measured against, and the signals to audit. This SOP describes the process; the scorecard describes the content.
 
-**Near-term success criteria:** The audit is not evaluating whether the factory is fully autonomous. It is evaluating whether handoffs and human interaction steps are reliable, straightforward, and free of surprises. Weight your findings accordingly.
+**Near-term success criteria:** The audit is not evaluating whether the framework is fully autonomous. It is evaluating whether handoffs and human interaction steps are reliable, straightforward, and free of surprises. Weight your findings accordingly.
 
 ---
 
@@ -15,7 +15,7 @@
 
 | Input | Source | When needed |
 |---|---|---|
-| Scorecard | `.crucible/research/scorecard-devfactory.md` | Before starting |
+| Scorecard | `.crucible/research/scorecard-framework.md` | Before starting |
 | Operating manual | `{{crucible_root}}/docs/operating-manual.md` | All internal categories |
 | Factory script | `{{crucible_root}}/powershell/factory.ps1` | Category 4 |
 | Recent handoff files | `.crucible/session/handoffs/` (last 3–5 files) | Categories 1, 6 |
@@ -37,7 +37,7 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 ## Steps
 
 ### Step 1 — Load the Scorecard
-Read `.crucible/research/scorecard-devfactory.md` completely before beginning. Understand all 10 categories, the near-term success criteria, and what each rating means.
+Read `.crucible/research/scorecard-framework.md` completely before beginning. Understand all 10 categories, the near-term success criteria, and what each rating means.
 
 ### Step 2 — Load Internal Documents
 Read the following in parallel — you will reference them throughout the audit:
@@ -69,15 +69,15 @@ This is the live research phase. For each of the six reference products defined 
    - What does its human-in-the-loop protocol look like?
    - How does it recover from agent failure or bad output?
    - What observability does it provide during a session?
-3. Compare each answer to the Dev Factory's current approach (from what you read in Step 2)
-4. Note: where is the factory ahead? where is it behind? where is the gap deliberate?
+3. Compare each answer to the Crucible framework's current approach (from what you read in Step 2)
+4. Note: where is the framework ahead? where is it behind? where is the gap deliberate?
 
 Build the gap table from scratch — do not pre-fill it from training knowledge. These frameworks evolve rapidly.
 
 After covering the six named products, do a brief scan for any new multi-agent development frameworks that have gained significant traction in the last 6 months (GitHub star growth, Hacker News mentions, industry coverage). Add any worth tracking to the report.
 
 ### Step 5 — Produce the Audit Report
-Write the report to `.crucible/research/R-NNN_DevFactory_Quality_Audit_<YYYYMMDD>.md` using the output template from the scorecard.
+Write the report to `.crucible/research/R-NNN_Crucible_Quality_Audit_<YYYYMMDD>.md` using the output template from the scorecard.
 
 The report must include:
 - Summary table with all 10 categories rated

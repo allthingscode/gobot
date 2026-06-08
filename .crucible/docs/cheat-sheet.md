@@ -65,9 +65,10 @@ These are invoked **by the agent**, not by you. Listed here for reference only.
 *   **`factory.ps1 -Init -TaskId {task_id} -AutoAdvance`**: Orchestrator mode — emits `[AUTO-ADVANCE]` for non-gate transitions so the orchestrator chains specialists without waiting for human confirmation. Gate transitions (Researcher→Groomer, Operator→*) always pause.
 *   **`factory.ps1 -Health`**: System health check — orphaned worktrees, stale locks, blocked tasks, oversized scratchpads. The only command that does not require `-TaskId`.
 *   **`factory-status.ps1`**: Real-time pipeline dashboard — shows in-flight tasks, durations, and health stats.
+*   **`factory.ps1 -Doctor`** (or `factory-doctor.ps1`): Readiness check. In an installed bundle it verifies your config parses, the bundle resolves, a PowerShell host is available, the factory scripts are intact, and the tools your `verification` commands call are on PATH — exits non-zero only on a critical failure. Go / `golangci-lint` / `gh` are advisory for adopters (they matter only for the optional GitHub deployment gate).
 *   **`git worktree list`**: See which tasks currently have isolated workspaces.
  
-**Agent bash invocation** (how agents run the script from a bash shell):
+**Agent bash invocation** (how agents run the script from a bash shell; use `powershell.exe` on Windows, `pwsh` on Linux/macOS):
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/factory.ps1" -Init -Target agent -TaskId {task_id}

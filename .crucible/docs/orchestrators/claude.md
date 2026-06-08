@@ -2,6 +2,8 @@
 
 This document defines **Claude Code-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop and gate protocols. This document covers only how to invoke sub-agents and run factory commands in the Claude Code environment.
 
+> **Cross-platform.** The `powershell.exe` invocations below are the Windows form. On Linux/macOS, use `pwsh` (PowerShell 7+) in their place.
+
 ## The "Orchestrate" Directive
 
 When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in the backlog"`, this Claude Code session adopts the **Strategic Orchestrator** persona. The current session is the controller. It does not become Groomer, Architect, Reviewer, Operator, or Researcher.

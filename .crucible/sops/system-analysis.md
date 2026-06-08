@@ -38,10 +38,10 @@ Write these down — you'll reference them again in Phase 2.
 ## Phase 1a — Dev Factory Audit
 
 ```
-agent "Researcher: Audit Dev Factory"
+agent "Researcher: Audit Crucible"
 ```
 
-The agent reads `.crucible/sops/research-audit-factory.md` and `.crucible/research/scorecard-devfactory.md`, audits all 10 categories (including live framework research for category 10), and writes a report to `.crucible/research/`.
+The agent reads `.crucible/sops/research-audit-framework.md` and `.crucible/research/scorecard-framework.md`, audits all 10 categories (including live framework research for category 10), and writes a report to `.crucible/research/`.
 
 **Research Gate fires at the end of this session.** Review the findings. Approve, defer, or reject each recommendation before the agent hands off. The agent will not exit the session until you respond.
 

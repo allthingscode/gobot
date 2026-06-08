@@ -2,9 +2,11 @@
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
 $Quiet = $true
 . $FACTORY_LIB
+$pwshCmd = Get-PwshCommand
 
 $results = @()
 
@@ -230,7 +232,7 @@ Invoke-CircuitBreakerGates -Context `$ctx
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previous
@@ -301,6 +303,8 @@ exit 0
         git -C $repo init | Out-Null
         git -C $repo config user.email "test@example.com" | Out-Null
         git -C $repo config user.name "Test User" | Out-Null
+        git -C $repo config core.autocrlf false | Out-Null
+        git -C $repo config core.safecrlf false | Out-Null
         git -C $repo add . | Out-Null
         git -C $repo commit -m "baseline" | Out-Null
 
@@ -536,7 +540,7 @@ Write-EventLog -Event 'session_start' -TaskId 'F-031' -Phase 'grooming' -Handoff
 Complete-FactorySourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
         Assert-Result -Name "quality gate exits 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
@@ -605,7 +609,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "D21: unquoted YAML parses without fallback warning" -Condition ($output -match "PASSED_UNQUOTED") -FailureMessage ("expected PASSED_UNQUOTED, got: " + $output)
         Assert-Result -Name "D21: CHANGES_REQUESTED YAML blocks even if APPROVED in prose" -Condition ($output -match "PASSED_BLOCKED") -FailureMessage ("expected PASSED_BLOCKED, got: " + $output)
@@ -669,7 +673,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "D20: artifacts resolve relative to implementation worktree path" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
     }
@@ -723,7 +727,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "D35: artifacts resolve from both worktree and repo root" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
     }
@@ -736,6 +740,8 @@ try {
         Push-Location $caseRoot
         try {
             git init --quiet
+            git config core.autocrlf false
+            git config core.safecrlf false
             git config user.name "Test"
             git config user.email "test@example.com"
             git config commit.gpgSign false
@@ -908,7 +914,7 @@ try {
 "@
         $scriptContentAccept | Set-Content -LiteralPath $scriptPath -Encoding UTF8
         
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
         Assert-Result -Name "D22: human gate accepted exits successfully" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
@@ -961,7 +967,7 @@ try {
 "@
         $scriptContentReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
         
-        $outputLines2 = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $exitCode2 = $LASTEXITCODE
         $output2 = $outputLines2 -join "`n"
         Assert-Result -Name "D22: human gate rejected exits successfully" -Condition ($exitCode2 -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode2 + ". Output: " + $output2)
@@ -1045,7 +1051,7 @@ try {
 }
 "@
         $scriptAcceptNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         
@@ -1086,7 +1092,7 @@ try {
 }
 "@
         $scriptRedirectNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         
@@ -1132,7 +1138,7 @@ try {
 }
 "@
         $scriptRealPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         
@@ -1178,7 +1184,7 @@ try {
 }
 "@
         $scriptFailedPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         
@@ -1234,7 +1240,7 @@ try {
 }
 "@
         $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         
@@ -1247,8 +1253,8 @@ try {
     $results += Run-Test -Name "Resolve-FactoryTransition handles valid and invalid transitions" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "routing-gates") -TaskId "F-006"
         
-        # Write dummy update_session_state.ps1
-        "exit 0" | Set-Content -LiteralPath (Join-Path $ctx.FrameworkPowerShell "update_session_state.ps1") -Encoding UTF8
+        # Write dummy update-session-state.ps1
+        "exit 0" | Set-Content -LiteralPath (Join-Path $ctx.FrameworkPowerShell "update-session-state.ps1") -Encoding UTF8
 
         # 1. Valid transition: grooming -> implementation (happy path)
         $ctx.Handoff = [PSCustomObject]@{
@@ -1256,13 +1262,13 @@ try {
             source_phase = "grooming"
             target_phase = "implementation"
         }
-        $ctx.NextFactoryCommand = "powershell.exe factory.ps1"
+        $ctx.NextFactoryCommand = "$(Get-PwshCommand) factory.ps1"
         $ctx.IsBootstrap = $false
 
         $decision = Resolve-FactoryTransition -Context $ctx
         Assert-Result -Name "happy path ShouldExit" -Condition ($decision.ShouldExit -eq $false) -FailureMessage "ShouldExit was true on valid transition"
         Assert-Result -Name "happy path Transition" -Condition ($decision.Transition -eq "grooming -> implementation") -FailureMessage "Incorrect transition output"
-        Assert-Result -Name "happy path NextFactoryCommand" -Condition ($decision.NextFactoryCommand -eq "powershell.exe factory.ps1") -FailureMessage "Incorrect NextFactoryCommand"
+        Assert-Result -Name "happy path NextFactoryCommand" -Condition ($decision.NextFactoryCommand -eq "$(Get-PwshCommand) factory.ps1") -FailureMessage "Incorrect NextFactoryCommand"
 
         # 2. Invalid transition: implementation -> done
         $ctx.Handoff = [PSCustomObject]@{
@@ -1373,7 +1379,7 @@ try {
 
         # First occurrence: should exit 2 with quality_gate_retry logged (not circuit_breaker)
         $exitCode = 0
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
@@ -1411,7 +1417,7 @@ try {
         [System.IO.File]::AppendAllText($ctx.LogFile, $startEvent + "`n")
 
         # Second occurrence: should exit 2 with circuit_breaker logged
-        $exitCode2 = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode2 = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
@@ -1681,7 +1687,7 @@ exit 0
             source_phase = "research"
             target_phase = "grooming"
         }
-        $ctx.NextFactoryCommand = "powershell.exe factory.ps1"
+        $ctx.NextFactoryCommand = "$(Get-PwshCommand) factory.ps1"
         $ctx.IsBootstrap = $false
 
         $logOutput = & { Resolve-FactoryTransition -Context $ctx } 6>&1
@@ -1766,7 +1772,7 @@ finally {
 }
 "@
         $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
 
         # Check that master head has been reset back to $unrelatedHash, NOT origin/master!
         $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
@@ -1851,7 +1857,7 @@ finally {
 }
 "@
         $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
 
         # Check that master HEAD has been reset back to $unrelatedHash, preserving the unrelated commit!
         $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
@@ -1948,7 +1954,7 @@ project_name: "D38 App"
 verification:
   full:
     - name: failing-lint
-      command: cmd.exe /c exit 1
+      command: $pwshCmd -NoProfile -Command exit 1
 "@
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
 
@@ -1975,7 +1981,7 @@ verification:
         $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
 
-        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -2024,7 +2030,7 @@ project_name: "D38 App"
 verification:
   full:
     - name: failing-lint
-      command: cmd.exe /c exit 1
+      command: $pwshCmd -NoProfile -Command exit 1
 "@
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
 
@@ -2071,7 +2077,7 @@ verification:
         } | ConvertTo-Json -Compress
         [System.IO.File]::AppendAllText($logFile, $startEvent + "`n")
 
-        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -2118,7 +2124,7 @@ project_name: "D38 App"
 verification:
   full:
     - name: passing-lint
-      command: cmd.exe /c exit 0
+      command: $pwshCmd -NoProfile -Command exit 0
 "@
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
 
@@ -2145,7 +2151,7 @@ verification:
         $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
 
-        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -2183,7 +2189,7 @@ verification:
         $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
 
-        $exitCode = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -2330,7 +2336,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -2439,7 +2445,7 @@ Write-Host "AFTER_ARCHIVED: `$(`$resAfter.SpecExistsInArchived)"
         $outputLines = @()
         Push-Location $tempRoot
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -2554,7 +2560,7 @@ Complete-FactorySourceSession -Context `$ctx
 
         # Run script - it should exit with 2 because task is not finalized
         $exitCode = 0
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -2659,7 +2665,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -2787,7 +2793,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -2835,6 +2841,7 @@ try {
         source_phase = 'deployment'
         target_phase = 'done'
         cumulative_handoff_count = 1
+        session_cycle_id = 'cycle-A'
     }
 }
 Invoke-HumanGate -Context `$ctx
@@ -2842,24 +2849,42 @@ Invoke-HumanGate -Context `$ctx
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # If gate is NOT bypassed, it writes gate_decision_F-038_pending.json and exits 0
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $pendingFile = Join-Path $gateDir "gate_decision_F-038_pending.json"
-        
+
         Assert-Result -Name "D55: rejected decision does not bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-038_pending.json to be created, but it was bypassed"
 
-        # 2. Cleanup pending, seed an accepted decision
+        # 2. Cleanup pending, seed an accepted decision FROM THE CURRENT CYCLE
         if (Test-Path $pendingFile) { Remove-Item $pendingFile -Force }
         $decisionAccepted = [ordered]@{
             task_id = 'F-038'
             outcome = 'accepted'
             rework_requested = $false
+            session_cycle_id = 'cycle-A'
         }
         $decisionAccepted | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T130000Z.json") -Encoding UTF8
 
         # Run guard check again
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
-        
-        Assert-Result -Name "D55: accepted decision bypasses gate" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "expected gate to be bypassed, but pending file was created"
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+
+        Assert-Result -Name "D55: same-cycle accepted decision bypasses gate" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "expected gate to be bypassed, but pending file was created"
+
+        # 3. Stale-cycle bypass regression: an accepted decision from a PRIOR cycle
+        #    must NOT auto-advance a fresh gate encounter (re-opened task / rework
+        #    re-entry). The human must be re-prompted.
+        if (Test-Path $pendingFile) { Remove-Item $pendingFile -Force }
+        Get-ChildItem -Path $gateDir -Filter "F-038-*.json" | Remove-Item -Force
+        $decisionStale = [ordered]@{
+            task_id = 'F-038'
+            outcome = 'accepted'
+            rework_requested = $false
+            session_cycle_id = 'cycle-OLD'
+        }
+        $decisionStale | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T140000Z.json") -Encoding UTF8
+
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+
+        Assert-Result -Name "D55: stale-cycle accepted decision does NOT bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected stale-cycle accept to re-prompt (pending file created), but the gate was bypassed using a prior-cycle acceptance"
     }
 
     $results += Run-Test -Name "D55: end-to-end reject -> rework re-entry" -Body {
@@ -2987,7 +3012,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run rejected outcome
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "E2E Reject: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -3025,7 +3050,7 @@ try {
         $initScriptContent = @"
 Push-Location '$localRepo'
 try {
-    powershell.exe -ExecutionPolicy Bypass -File '$localRepo/powershell/factory.ps1' -Init -TaskId 'F-999' -Quiet
+    $((Get-PwshCommand)) -ExecutionPolicy Bypass -File '$localRepo/powershell/factory.ps1' -Init -TaskId 'F-999' -Quiet
 } finally {
     Pop-Location
 }
@@ -3033,7 +3058,7 @@ try {
         $initScriptContent | Set-Content -LiteralPath $initScriptPath -Encoding UTF8
 
         # Run factory init to see if it advances to implementation without tripping the artifact gate
-        $initOutput = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $initScriptPath 2>&1
+        $initOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $initScriptPath 2>&1
         $initExitCode = $LASTEXITCODE
 
         Assert-Result -Name "E2E Reject: factory init succeeded" -Condition ($initExitCode -eq 0) -FailureMessage ("expected factory init to pass, got exit code $initExitCode. Output: " + $initOutput)
@@ -3102,7 +3127,7 @@ Write-Host "SUCCESS_MARKER"
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $outputStr = $output -join "`n"
         $pendingFile = Join-Path $gateDir "gate_decision_F-039_pending.json"
         
@@ -3136,7 +3161,7 @@ Write-Host "SUCCESS_MARKER"
 "@
         $scriptContentDone | Set-Content -LiteralPath $scriptPathDone -Encoding UTF8
 
-        $outputDone = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPathDone 2>&1
+        $outputDone = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathDone 2>&1
         $outputDoneStr = $outputDone -join "`n"
         
         Assert-Result -Name "D56: deployment -> done fires gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-039_pending.json to be created"
@@ -3215,7 +3240,7 @@ created_at: "2026-06-04"
 
         # Initialize/reconcile Priority-Summary
         $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
 
         # Checkout task branch and make commit
         Invoke-GitChecked { git -C $localRepo checkout -b task/F-888 } | Out-Null
@@ -3281,7 +3306,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run rejected outcome
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Reject Restore: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -3378,7 +3403,7 @@ created_at: "2026-06-04"
 
         # Initialize/reconcile Priority-Summary
         $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
 
         # Checkout task branch and commit
         Invoke-GitChecked { git -C $localRepo checkout -b task/F-777 } | Out-Null
@@ -3435,7 +3460,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run abandoned outcome
-        $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Abandon: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -3532,7 +3557,7 @@ created_at: "2026-06-04"
 
         # Initialize/reconcile Priority-Summary
         $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
 
         # Checkout task branch and commit
         Invoke-GitChecked { git -C $localRepo checkout -b task/F-666 } | Out-Null
@@ -3585,7 +3610,7 @@ try {
 }
 "@
         $scriptContentReject | Set-Content -LiteralPath $scriptPathReject -Encoding UTF8
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPathReject 2>&1 | Out-Null
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathReject 2>&1 | Out-Null
 
         # Verify spec is active and status is In Progress
         Assert-Result -Name "D57 Loop: active spec exists after reject" -Condition (Test-Path (Join-Path $backlogDir "features/active/F-666_Test_Spec.md")) -FailureMessage "expected active spec to exist after reject"
@@ -3636,7 +3661,7 @@ try {
 "@
         $scriptContentAccept | Set-Content -LiteralPath $scriptPathAccept -Encoding UTF8
         
-        $acceptOutput = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPathAccept 2>&1
+        $acceptOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathAccept 2>&1
         $acceptExitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Loop Accept: exit code is 0" -Condition ($acceptExitCode -eq 0) -FailureMessage ("expected exit code 0, got $acceptExitCode. Output: " + $acceptOutput)
@@ -3659,6 +3684,123 @@ try {
         # Assert: Priority-Summary counts are reconciled (F-666 removed)
         $prioritySummaryMatches = ($backlogLines -match '\|\s*\*\*P2\*\*\s*\|\s*0\s*\|\s*-\s*\|')
         Assert-Result -Name "D57 Loop: Priority-Summary counts updated" -Condition $prioritySummaryMatches -FailureMessage ("expected P2 count 0, got BACKLOG.md: " + $backlogLines)
+    }
+
+    $results += Run-Test -Name "Research Read-Only Scope Check" -Body {
+        $caseRoot = Join-Path $tempRoot "rh3-scope-check"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        Push-Location $localRepo
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            
+            # Create a tracked project file
+            New-Item -ItemType Directory -Path "src" -Force | Out-Null
+            Set-Content -Path "src/x.txt" -Value "initial tracked file"
+            
+            # Create a tracked backlog spec file to test disallowed backlog writes
+            $backlogDir = Join-Path $localRepo ".crucible/backlog"
+            New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+            Set-Content -Path (Join-Path $backlogDir "features/active/R-123_Spec.md") -Value "initial backlog spec"
+
+            # git add and commit them to track them
+            git add .
+            git commit -m "init commit" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        # Setup session folders
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Setup standard context and handoff for the test script
+        $scriptPath = Join-Path $caseRoot "run-scope-check-test.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$false
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    FrameworkPowerShell = '$PSScriptRoot'
+    LogFile = (Join-Path '$sessionDir' 'global/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
+    BacklogDir = '$backlogDir'
+    WorkspacesDir = (Join-Path '$localRepo' '.crucible/.agent-workspaces')
+    Quiet = `$false
+    Handoff = [PSCustomObject]@{
+        task_id = 'R-123'
+        source_phase = 'research'
+        target_phase = 'grooming'
+        cumulative_handoff_count = 1
+        artifacts = @()
+        session_cycle_id = 'cycle-123'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-FactoryScopeGates -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        # --- Test case 1: Clean research handoff ---
+        # No modifications made (or only ignored/allowed writes). Let's write to .crucible/research/ (which is ignored/allowed)
+        $researchDir = Join-Path $localRepo ".crucible/research"
+        New-Item -ItemType Directory -Path $researchDir -Force | Out-Null
+        Set-Content -Path (Join-Path $researchDir "R-123_Findings.md") -Value "some research findings"
+
+        $outputClean = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        $exitCodeClean = $LASTEXITCODE
+
+        Assert-Result -Name "Clean research: exit code is 0" -Condition ($exitCodeClean -eq 0) -FailureMessage "expected clean research gate to run with exit code 0"
+        Assert-Result -Name "Clean research: no warning emitted" -Condition ($outputClean -notmatch "Research phase modified files outside the read-only boundary") -FailureMessage ("expected no warning for clean research, got: " + $outputClean)
+
+        # --- Test case 2: Research handoff with modified tracked file ---
+        # Modify the tracked project file src/x.txt
+        Set-Content -Path (Join-Path $localRepo "src/x.txt") -Value "modified tracked file"
+
+        $outputModified = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        $exitCodeModified = $LASTEXITCODE
+
+        Assert-Result -Name "Modified research: exit code is 0" -Condition ($exitCodeModified -eq 0) -FailureMessage "expected modified research gate to run with exit code 0 (WARN-only)"
+        Assert-Result -Name "Modified research: warning emitted" -Condition ($outputModified -match "Research phase modified files outside the read-only boundary") -FailureMessage ("expected warning for modified tracked file, got: " + $outputModified)
+        Assert-Result -Name "Modified research: lists modified file" -Condition ($outputModified -match "src/x.txt") -FailureMessage ("expected warning to list modified file, got: " + $outputModified)
+
+        # Revert change to src/x.txt so it doesn't affect the next sub-test
+        Push-Location $localRepo
+        try {
+            git checkout -- src/x.txt
+        } finally {
+            Pop-Location
+        }
+
+        # --- Test case 3: Research handoff with modified backlog file ---
+        # Modify the tracked backlog spec
+        Set-Content -Path (Join-Path $backlogDir "features/active/R-123_Spec.md") -Value "modified backlog spec"
+
+        $outputBacklog = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        $exitCodeBacklog = $LASTEXITCODE
+
+        Assert-Result -Name "Backlog modified: exit code is 0" -Condition ($exitCodeBacklog -eq 0) -FailureMessage "expected backlog modified research gate to run with exit code 0 (WARN-only)"
+        Assert-Result -Name "Backlog modified: warning emitted" -Condition ($outputBacklog -match "Research phase modified files outside the read-only boundary") -FailureMessage ("expected warning for modified backlog file, got: " + $outputBacklog)
+        Assert-Result -Name "Backlog modified: lists backlog file" -Condition ($outputBacklog -match "\.crucible/backlog/features/active/R-123_Spec\.md") -FailureMessage ("expected warning to list backlog file, got: " + $outputBacklog)
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

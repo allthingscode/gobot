@@ -1,10 +1,11 @@
-# Test for Scope Boundary Violation circuit breaker.
+﻿# Test for Scope Boundary Violation circuit breaker.
 #
 # This test modifies a file outside the spec file_affinity and asserts factory blocks
 # the handoff before it can proceed to Reviewer.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $INIT_SCRIPT    = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 
@@ -75,7 +76,7 @@ try {
         }
 
         # 2. Initialize Crucible
-        $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot -ProjectName "ScopeApp" -DefaultBranch "master" `
             -Language python -Quiet 2>&1
 
@@ -150,7 +151,7 @@ try {
 
         # 6. Run factory; expect exit 2 (block) because src/b.txt is out-of-scope
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                 -Init -TaskId $taskId -ProjectRoot $projectRoot
         }
         $output   = $res.Output -join "`n"

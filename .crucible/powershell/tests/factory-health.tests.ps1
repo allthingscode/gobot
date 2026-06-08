@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $HEALTH_SCRIPT = Join-Path $REPO_ROOT "powershell/factory-health.ps1"
 
 $results = @()
@@ -113,7 +114,7 @@ try {
         Push-Location $projectRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Health -ProjectRoot $projectRoot
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Health -ProjectRoot $projectRoot
             }
         } finally {
             Pop-Location
@@ -127,7 +128,7 @@ try {
         Push-Location $projectRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Cleanup -Force -ProjectRoot $projectRoot
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Cleanup -Force -ProjectRoot $projectRoot
             }
         } finally {
             Pop-Location
@@ -139,6 +140,37 @@ try {
         Assert-Result -Name "F-002 session dir archived" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session/F-002"))) -FailureMessage "expected F-002 session dir to be archived/removed"
         Assert-Result -Name "F-003 pending removed" -Condition (-not (Test-Path $pendingF3)) -FailureMessage "expected F-003 pending file to be removed"
         Assert-Result -Name "F-003 session dir archived" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session/F-003"))) -FailureMessage "expected F-003 session dir to be archived/removed"
+    }
+
+    $results += Run-Test -Name "Health validates worktree hooksPath by resolution, not a fixed literal" -Body {
+        Push-Location $projectRoot
+        try {
+            git config core.longpaths true *> $null
+            "seed" | Set-Content -LiteralPath (Join-Path $projectRoot "seed.txt") -Encoding UTF8
+            git add seed.txt *> $null
+            git commit -q -m "init" *> $null
+            $hookDir = Join-Path $projectRoot "scripts/hooks/architect"
+            New-Item -ItemType Directory -Path $hookDir -Force | Out-Null
+            $wtPath = Join-Path $projectRoot ".crucible/.agent-workspaces/implementation-F-009"
+            git worktree add -q -b task/F-009 $wtPath *> $null
+            # Setters write the resolved (absolute) architect hooks dir; that must pass.
+            git -C $wtPath config core.hooksPath $hookDir *> $null
+
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Health -ProjectRoot $projectRoot
+            }
+            $okOut = $res.Output -join "`n"
+            Assert-Result -Name "absolute architect hooksPath not flagged" -Condition ($okOut -match "Misconfigured Implementation Worktrees \(hooksPath\): 0") -FailureMessage "a correctly-configured worktree must not be flagged. Output:`n$okOut"
+
+            git -C $wtPath config core.hooksPath "totally/wrong/path" *> $null
+            $res2 = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Health -ProjectRoot $projectRoot
+            }
+            $badOut = $res2.Output -join "`n"
+            Assert-Result -Name "wrong hooksPath flagged" -Condition ($badOut -match "Misconfigured Implementation Worktrees \(hooksPath\): 1") -FailureMessage "a misconfigured worktree must be flagged. Output:`n$badOut"
+        } finally {
+            Pop-Location
+        }
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

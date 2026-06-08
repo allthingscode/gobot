@@ -32,13 +32,14 @@ Once you have made a decision:
 
 1. Move the blocked record to archive:
    ```powershell
-   Move-Item .crucible\backlog\blocked\{task_id}-*.json .crucible\backlog\blocked\archived\
+   Move-Item .crucible/backlog/blocked/{task_id}-*.json .crucible/backlog/blocked/archived/
    ```
 2. Update the backlog item status back to `Ready` in `BACKLOG.md` and the spec frontmatter.
 3. Resume the pipeline:
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File ".crucible\powershell\factory.ps1" -Init -TaskId {task_id} -Recover
+   powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory.ps1" -Init -TaskId {task_id} -Recover
    ```
+   *(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 
 The human is never required to edit session JSON directly. The agent handles all file operations after you give verbal direction.
 
@@ -188,7 +189,7 @@ Were the files supposed to be created?
 ```
 
 **Resolution steps**:
-1. List what actually exists in the worktree: `git -C .crucible\.agent-workspaces\implementation-{task_id} status`
+1. List what actually exists in the worktree: `git -C .crucible/.agent-workspaces/implementation-{task_id} status`
 2. Compare against the spec's acceptance criteria.
 3. If work is genuinely missing: re-dispatch the Architect with "Your handoff lists {file} as an artifact but it does not exist. Create it."
 4. If the handoff just listed the wrong path: have the agent correct the handoff JSON and re-run `factory.ps1 -Init -TaskId {task_id}`.

@@ -1,7 +1,8 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $realRepoRoot = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $realRepoRoot "powershell/lib/platform.ps1")
 $generator = Join-Path $realRepoRoot "powershell/new-handoff.ps1"
 $schemaPath = Join-Path $realRepoRoot "schemas/handoff.schema.json"
 
@@ -389,7 +390,7 @@ budget_tier: "low"
         $script:createdFiles += $handoffPath
 
         $result = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
         }
 
         if ($result.ExitCode -eq 0) {
@@ -421,7 +422,7 @@ budget_tier: "low"
         $script:createdFiles += $handoffPath
 
         $result = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
         }
 
         if ($result.ExitCode -eq 0) {
@@ -452,7 +453,7 @@ budget_tier: "low"
         $script:createdFiles += $handoffPath
 
         $result = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $handoffPath -SchemaPath $schemaPath
         }
 
         if ($result.ExitCode -eq 0) {
@@ -491,7 +492,7 @@ budget_tier: "low"
         
         try {
             $result = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $generator `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $generator `
                     -TaskId $taskId `
                     -Source "grooming" `
                     -Target "implementation" `

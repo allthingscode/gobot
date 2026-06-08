@@ -1,8 +1,9 @@
-# Adopter smoke tests for Crucible.
+﻿# Adopter smoke tests for Crucible.
 # Verifies that a new project can adopt Crucible, ignore data/runtime, validate configuration, and pass factory linting.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
 $LINT_SCRIPT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
@@ -52,7 +53,7 @@ try {
             Pop-Location
         }
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot `
             -ProjectName "Adopter App" `
             -Description "Smoke testing the adopter adoption path." `
@@ -157,7 +158,7 @@ try {
         $config = $config.Replace("Replace with project-specific engineering rules.", "Keep project-specific mandates current.")
         $config | Out-File -LiteralPath $configPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "validate-config exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
     }
@@ -171,6 +172,32 @@ try {
             Assert-Result -Name "factory_lint exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got " + $exitCode + ". Output: " + $output)
         } finally {
             Pop-Location
+        }
+    }
+
+    $results += Run-Test -Name "Install does not copy a framework dir's nested .crucible runtime leak" -Body {
+        # Seed a gitignored runtime leak under a framework source dir (as happens
+        # when the framework is exercised in place), then assert the installer
+        # does not drag it into the adopter bundle. The seed path is gitignored,
+        # so this does not dirty the source tree.
+        $seedDir = Join-Path $REPO_ROOT "powershell/.crucible/session/global"
+        $seedFile = Join-Path $seedDir "session_state.json"
+        $leakApp = Join-Path $tempRoot "leak-guard-app"
+        try {
+            New-Item -ItemType Directory -Path $seedDir -Force | Out-Null
+            Set-Content -LiteralPath $seedFile -Value '{"seeded":"leak"}' -Encoding UTF8
+
+            New-Item -ItemType Directory -Path $leakApp -Force | Out-Null
+            $out = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $leakApp -ProjectName "Leak Guard" -Quiet 2>&1)
+            Assert-Result -Name "init exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("init failed: " + ($out -join "`n"))
+
+            $nested = Join-Path $leakApp ".crucible/powershell/.crucible"
+            Assert-Result -Name "no nested .crucible copied" -Condition (-not (Test-Path -LiteralPath $nested)) -FailureMessage ("installer copied a nested .crucible leak into the bundle: " + $nested)
+        } finally {
+            $srcLeak = Join-Path $REPO_ROOT "powershell/.crucible"
+            if (Test-Path -LiteralPath $srcLeak) {
+                Remove-Item -LiteralPath $srcLeak -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 }

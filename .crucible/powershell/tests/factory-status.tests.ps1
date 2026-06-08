@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $STATUS_SCRIPT = Join-Path $REPO_ROOT "powershell/factory-status.ps1"
 
 $results = @()
@@ -86,7 +87,7 @@ try {
         Push-Location $projectRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -ExportJSON
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -ExportJSON
             }
         } finally {
             Pop-Location
@@ -102,7 +103,7 @@ try {
         Push-Location $projectRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -Summary
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -Summary
             }
         } finally {
             Pop-Location

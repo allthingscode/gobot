@@ -14,7 +14,6 @@ Human-initiated SOPs and procedures.
 |---|---|---|---|---|---|
 | health-check | System Health Check | daily | `Follow the procedure in .crucible/sops/health-check.md` | | |
 | grooming | Backlog Grooming Session | weekly | `Follow the procedure in .crucible/sops/grooming.md — Runbook Mode` | 2026-04-22 | success |
-| doc-lint | Doc Lint & Bug Filing | ad-hoc | `Follow the procedure in .crucible/sops/doc-lint.md` | 2026-04-22 | success |
 | eval-analysis | Quarterly Eval Analysis | quarterly (or every 10 tasks) | `Work the next item` (pick {task_id} from backlog) | | |
 
 ---
@@ -24,6 +23,6 @@ Human-initiated SOPs and procedures.
 | name | title | trigger (paste into Claude) | last_run | outcome |
 |---|---|---|---|---|
 | system-analysis | Full System Analysis | `Read .crucible/sops/system-analysis.md and start at Phase 0` | | |
-| research-audit-factory | Dev Factory Quality Audit | `You are the Researcher. Follow .crucible/sops/research-audit-factory.md` | | |
+| research-audit-framework | Crucible Framework Quality Audit | `You are the Researcher. Follow .crucible/sops/research-audit-framework.md` | | |
 | research-audit-project | Adopter-Project Quality Audit | `You are the Researcher. Follow .crucible/sops/research-audit-project.md` | | |
 | research-investigate | Ad-hoc Investigation | `You are the Researcher. Follow .crucible/sops/research-investigate.md — topic: [TOPIC]` | | |

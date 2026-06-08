@@ -1,4 +1,4 @@
-<!-- prompt_version: health_check-v1 -->
+<!-- prompt_version: health_check-v2 -->
 # Health check
 
 ```
@@ -7,7 +7,7 @@
 
 **What it does**: Quick system health scan:
 1. Git state (clean/dirty)
-2. Go tooling (`go vet`, `go build`)
+2. Language-appropriate build/lint tooling (the project's `verification` commands)
 3. Lock file scan (stale locks?)
 4. Handoff validation (handoff.json valid?)
 5. Session state check
@@ -24,8 +24,8 @@
 ```
 Health check results:
   Git: clean
-  Go vet: clean
-  Go build: clean
+  Lint: clean
+  Build: clean
   Stale locks: none
   Handoff: missing (no active task)
   Session state: valid

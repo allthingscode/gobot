@@ -1,0 +1,156 @@
+[
+  {
+    "id": "ignore-instructions",
+    "category": "instruction-override",
+    "severity": "block",
+    "pattern": "(?:ignore\\s+(?:all\\s+)?previous\\s+instructions?|disregard\\s+your\\s+instructions?)",
+    "description": "Matches common prompt injection override phrases like 'ignore previous instructions'"
+  },
+  {
+    "id": "forget-everything",
+    "category": "instruction-override",
+    "severity": "block",
+    "pattern": "forget\\s+everything",
+    "description": "Matches the instruction 'forget everything'"
+  },
+  {
+    "id": "new-instruction",
+    "category": "instruction-override",
+    "severity": "block",
+    "pattern": "new\\s+instruction:",
+    "description": "Matches the prefix 'new instruction:'"
+  },
+  {
+    "id": "system-override",
+    "category": "instruction-override",
+    "severity": "block",
+    "pattern": "system\\s+prompt\\s+override",
+    "description": "Matches the phrase 'system prompt override'"
+  },
+  {
+    "id": "you-must-now",
+    "category": "instruction-override",
+    "severity": "block",
+    "pattern": "you\\s+must\\s+now",
+    "description": "Matches the phrase 'you must now'"
+  },
+  {
+    "id": "role-manipulation-you-are-now",
+    "category": "role/identity manipulation",
+    "severity": "warn",
+    "pattern": "you\\s+are\\s+now",
+    "description": "Matches the phrase 'you are now'"
+  },
+  {
+    "id": "role-manipulation-act-as",
+    "category": "role/identity manipulation",
+    "severity": "warn",
+    "pattern": "act\\s+as(?:\\s+if|\\s+a|\\s+an)?",
+    "description": "Matches attempts to command the agent to act as something else"
+  },
+  {
+    "id": "role-manipulation-pretend-you-are",
+    "category": "role/identity manipulation",
+    "severity": "block",
+    "pattern": "pretend\\s+you\\s+are",
+    "description": "Matches the phrase 'pretend you are'"
+  },
+  {
+    "id": "role-manipulation-new-role",
+    "category": "role/identity manipulation",
+    "severity": "block",
+    "pattern": "your\\s+new\\s+role(?:\\s+is)?",
+    "description": "Matches the phrase 'your new role'"
+  },
+  {
+    "id": "tool-manipulation-call",
+    "category": "tool/function manipulation",
+    "severity": "warn",
+    "pattern": "call\\s+the\\s+[^.!?\\r\\n]+\\s+tool",
+    "description": "Matches commands to call a specific tool"
+  },
+  {
+    "id": "tool-manipulation-use",
+    "category": "tool/function manipulation",
+    "severity": "warn",
+    "pattern": "use\\s+your\\s+[^.!?\\r\\n]+\\s+tool\\s+to",
+    "description": "Matches commands to use a specific tool to do something"
+  },
+  {
+    "id": "exfiltration-send-http",
+    "category": "exfiltration",
+    "severity": "block",
+    "pattern": "send\\s+[^.!?\\r\\n]+\\s+to\\s+https?",
+    "description": "Matches instructions to send data to an external HTTP endpoint"
+  },
+  {
+    "id": "exfiltration-post",
+    "category": "exfiltration",
+    "severity": "block",
+    "pattern": "POST\\s+[^.!?\\r\\n]+\\s+to",
+    "description": "Matches instructions to POST data somewhere"
+  },
+  {
+    "id": "exfiltration-upload",
+    "category": "exfiltration",
+    "severity": "block",
+    "pattern": "upload\\s+[^.!?\\r\\n]+\\s+to",
+    "description": "Matches instructions to upload data"
+  },
+  {
+    "id": "exfiltration-email",
+    "category": "exfiltration",
+    "severity": "block",
+    "pattern": "email\\s+[^.!?\\r\\n]+\\s+to",
+    "description": "Matches instructions to email data"
+  },
+  {
+    "id": "secret-egress-print",
+    "category": "secret egress",
+    "severity": "block",
+    "pattern": "print\\s+[^.!?\\r\\n]+(?:api|secret|token|password|key)",
+    "description": "Matches instructions to print credentials/keys"
+  },
+  {
+    "id": "secret-egress-env-dump",
+    "category": "secret egress",
+    "severity": "block",
+    "pattern": "(?:env-var\\s+dumps?|printenv|dump\\s+env(?:ironment)?|\\$env:\\w+)",
+    "description": "Matches environment variable dump attempts"
+  },
+  {
+    "id": "hook-gate-bypass",
+    "category": "hook/gate bypass",
+    "severity": "block",
+    "pattern": "(?:--no-verify|skip\\s+the\\s+hook|bypass\\s+the\\s+gate)",
+    "description": "Matches attempts to skip verification/gates"
+  },
+  {
+    "id": "zero-width-control",
+    "category": "obfuscation",
+    "severity": "block",
+    "pattern": "[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]",
+    "description": "Matches zero-width, bidi, or unicode control characters"
+  },
+  {
+    "id": "base64-blob",
+    "category": "obfuscation",
+    "severity": "warn",
+    "pattern": "[a-zA-Z0-9+/=]{64,}",
+    "description": "Matches long base64-looking blobs"
+  },
+  {
+    "id": "link-credentials",
+    "category": "suspicious links",
+    "severity": "block",
+    "pattern": "https?://[^/\\s@]+@[^/\\s]+",
+    "description": "Matches HTTP URLs containing credentials"
+  },
+  {
+    "id": "link-ip-literal",
+    "category": "suspicious links",
+    "severity": "block",
+    "pattern": "https?://(?:\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|\\[[a-fA-F0-9:]+\\])",
+    "description": "Matches HTTP URLs with IP literal hosts"
+  }
+]

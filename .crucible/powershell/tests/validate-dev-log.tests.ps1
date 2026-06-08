@@ -1,6 +1,7 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
-$VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate_dev_log.ps1"
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+$VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-dev-log.ps1"
 
 $results = @()
 
@@ -48,7 +49,7 @@ try {
         ) | Set-Content -LiteralPath $logPath -Encoding UTF8
 
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -FileToPublish $logPath
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -FileToPublish $logPath
         }
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
@@ -60,7 +61,7 @@ try {
         Set-Content -LiteralPath $logPath -Value "Synthetic key: AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" -Encoding UTF8
 
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -FileToPublish $logPath
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -FileToPublish $logPath
         }
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected 1, got $($res.ExitCode). Output:`n$output"

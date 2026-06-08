@@ -34,6 +34,9 @@ param (
     [string]$TaskId = "",
 
     [Parameter(Mandatory=$false)]
+    [switch]$Status,
+
+    [Parameter(Mandatory=$false)]
     [switch]$NewHandoff,
 
     [Parameter(Mandatory=$false)]
@@ -294,6 +297,16 @@ if ($Health -or $Cleanup) {
         exit 1
     }
     & $healthScript -Health:$Health -Cleanup:$Cleanup -Force:$Force -Quiet:$Quiet -TaskId $TaskId
+    exit $LASTEXITCODE
+}
+
+if ($Status) {
+    $statusScript = "$FRAMEWORK_POWERSHELL/factory-status.ps1"
+    if (-not (Test-Path -LiteralPath $statusScript)) {
+        Write-Host ("Error: Status script not found at " + $statusScript) -ForegroundColor Red
+        exit 1
+    }
+    & $statusScript
     exit $LASTEXITCODE
 }
 

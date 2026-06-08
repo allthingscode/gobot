@@ -96,9 +96,10 @@ $results += Run-Test -Name "Pre-push hook runs the expected verification suites"
         "powershell/tests/validate-config.tests.ps1",
         "powershell/tests/adopter-smoke.tests.ps1",
         "powershell/tests/check-file-affinity.tests.ps1",
-        "powershell/tests/factory_test.ps1",
+        "powershell/tests/factory.tests.ps1",
         "powershell/tests/adopter-bootstrap.tests.ps1",
-        "powershell/tests/pre-push-hook.tests.ps1"
+        "powershell/tests/pre-push-hook.tests.ps1",
+        "powershell/tests/examples-mirror-sync.tests.ps1"
     )
 
     foreach ($script in $expectedScripts) {

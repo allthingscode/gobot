@@ -1,7 +1,8 @@
-# Smoke tests for powershell/validate-config.ps1.
+﻿# Smoke tests for powershell/validate-config.ps1.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
 $results = @()
@@ -39,14 +40,14 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
 try {
     $projectRoot = Join-Path $tempRoot "app"
-    $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $projectRoot -ProjectName "Config Test" -Quiet 2>&1)
+    $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $projectRoot -ProjectName "Config Test" -Quiet 2>&1)
     $configPath = Join-Path $projectRoot ".crucible/config.yaml"
 
     $results += Run-Test -Name "Template config fails until placeholders are replaced" -Body {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -63,7 +64,7 @@ try {
         $config = $config.Replace("Replace with project-specific engineering rules.", "Keep project-specific mandates current.")
         $config | Out-File -LiteralPath $configPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "configured exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "configured message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
@@ -78,7 +79,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -98,7 +99,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -117,7 +118,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -137,7 +138,7 @@ try {
         $testPath = Join-Path $projectRoot ".crucible/config-dev-factory.yaml"
         $configDevFactory | Out-File -LiteralPath $testPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "dev-factory exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "dev-factory message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
@@ -155,7 +156,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -170,7 +171,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $missingPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $missingPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -187,7 +188,7 @@ try {
         $testPath = Join-Path $projectRoot ".crucible/config-no-paths.yaml"
         $configNoPaths | Out-File -LiteralPath $testPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "no-paths exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "no-paths message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("expected pass message. Output: " + $output)
@@ -204,7 +205,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -222,7 +223,7 @@ try {
         $testPath = Join-Path $projectRoot ".crucible/config-custom-paths.yaml"
         $configCustomPaths | Out-File -LiteralPath $testPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
         $output = $outputLines -join "`n"
         Assert-Result -Name "custom-paths exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "custom-paths message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("expected pass message. Output: " + $output)
@@ -240,7 +241,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesAbs = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathAbs 2>&1)
+            $outputLinesAbs = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathAbs 2>&1)
             $exitCodeAbs = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -257,7 +258,7 @@ try {
 
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesEsc = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathEsc 2>&1)
+            $outputLinesEsc = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathEsc 2>&1)
             $exitCodeEsc = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference

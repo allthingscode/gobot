@@ -80,6 +80,7 @@ Agents **construct and write `handoff.json`** but do **not** generate the next c
    ```bash
    powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id}
    ```
+   *(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 4. Agent presents the factory output to the human (summary of what was done, verbatim `[NEXT SESSION COMMAND]` block, recommended model) and **waits for human confirmation** before the next phase session begins. The human may continue in this session or take the command to a different session.
 
 ## Session State Management

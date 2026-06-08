@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $DOCTOR_SCRIPT = Join-Path $REPO_ROOT "powershell/factory-doctor.ps1"
 
 $results = @()
@@ -59,7 +60,7 @@ function Write-DoctorFixture {
         'verification:',
         '  quick:',
         '    - name: test',
-        '      command: powershell.exe -NoProfile -Command "exit 0"'
+        "      command: " + (Get-PwshCommand) + " -NoProfile -Command `"exit 0`""
     ) | Set-Content -LiteralPath (Join-Path $ProjectRoot ".crucible/config.yaml") -Encoding UTF8
 
     @(
@@ -94,7 +95,7 @@ try {
         Write-DoctorFixture -ProjectRoot $projectRoot
 
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
         }
         $output = $res.Output -join "`n"
 
@@ -104,9 +105,35 @@ try {
         Assert-Result -Name "fail section" -Condition ($output -match "FAIL \(") -FailureMessage "doctor did not emit a FAIL section. Output:`n$output"
         Assert-Result -Name "at least one pass" -Condition ($output -match "PASS \([1-9]") -FailureMessage "doctor emitted no passing checks. Output:`n$output"
         Assert-Result -Name "result line" -Condition ($output -match "\[DOCTOR\] Result:") -FailureMessage "doctor did not run to completion. Output:`n$output"
+        Assert-Result -Name "adopter mode" -Condition ($output -match "Mode: adopter") -FailureMessage "doctor did not detect adopter mode for a project with .crucible/config.yaml. Output:`n$output"
+        Assert-Result -Name "valid adopter install is ready" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "valid adopter fixture should be READY. Output:`n$output"
     }
 
-    $results += Run-Test -Name "Doctor reports unauthenticated gh without aborting" -Body {
+    $results += Run-Test -Name "Adopter without framework toolchain is READY (no Go required)" -Body {
+        $projectRoot = Join-Path $tempRoot "python-project"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        @(
+            'crucible_root: ".crucible"',
+            'project:',
+            '  name: "Py"',
+            '  default_branch: "main"',
+            'verification:',
+            '  quick:',
+            '    - name: test',
+            '      command: pytest -q'
+        ) | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+        }
+        $output = $res.Output -join "`n"
+
+        Assert-Result -Name "python adopter is ready" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "a non-Go adopter project should be READY without the Go toolchain. Output:`n$output"
+        Assert-Result -Name "no Go critical check" -Condition (-not ($output -match "\[go\.(cli|version)\]")) -FailureMessage "adopter mode should not run the framework Go toolchain check. Output:`n$output"
+        Assert-Result -Name "no golangci critical check" -Condition (-not ($output -match "\[golangci-lint")) -FailureMessage "adopter mode should not run the framework golangci-lint check. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Doctor reports unauthenticated gh as advisory, stays READY" -Body {
         $projectRoot = Join-Path $tempRoot "unauth-project"
         $binDir = Join-Path $tempRoot "fake-bin"
         Write-DoctorFixture -ProjectRoot $projectRoot
@@ -116,7 +143,7 @@ try {
         try {
             $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $originalPath
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
             }
         } finally {
             $env:PATH = $originalPath
@@ -124,8 +151,8 @@ try {
         $output = $res.Output -join "`n"
 
         Assert-Result -Name "readiness header after gh failure" -Condition ($output -match "\[DOCTOR\] Factory Readiness Check") -FailureMessage "doctor aborted before reporting. Output:`n$output"
-        Assert-Result -Name "gh auth failure reported" -Condition ($output -match "\[gh\.auth\].*not authenticated") -FailureMessage "doctor did not report gh auth failure. Output:`n$output"
-        Assert-Result -Name "result line after gh failure" -Condition ($output -match "\[DOCTOR\] Result: NOT READY") -FailureMessage "doctor did not complete after gh auth failure. Output:`n$output"
+        Assert-Result -Name "gh auth surfaced" -Condition ($output -match "\[gh\.auth\].*not authenticated") -FailureMessage "doctor did not surface the gh auth state. Output:`n$output"
+        Assert-Result -Name "gh auth is advisory, not blocking" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "unauthenticated gh must not block an adopter install. Output:`n$output"
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

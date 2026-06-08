@@ -1,10 +1,11 @@
-# Test for Token Budget Exceeded circuit breaker.
+﻿# Test for Token Budget Exceeded circuit breaker.
 # Supplies a handoff with budget_tier="low" (ceiling=6) and cumulative_handoff_count=7,
 # which exceeds the ceiling.  Expects factory to write a "budget_exceeded" blocked record
 # and exit with code 2.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
 $results = @()
@@ -111,7 +112,7 @@ created_at: "2026-05-25"
             review_strike_count      = 0
             rebase_count             = 0
             budget_tier              = "low"          # ceiling = 6
-            cumulative_handoff_count = 7              # exceeds ceiling → breaker fires
+            cumulative_handoff_count = 7              # exceeds ceiling -> breaker fires
             prompt_version           = "test-v1"
             session_cycle_id         = "test-cycle"
             cycle_id                 = "test-cycle"
@@ -126,7 +127,7 @@ created_at: "2026-05-25"
 
         # 4. Run factory
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                 -Init -TaskId $taskId -ProjectRoot $projectRoot
         }
         $output   = $res.Output -join "`n"

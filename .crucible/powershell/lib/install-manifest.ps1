@@ -79,7 +79,12 @@ function Get-FrameworkOwnedFiles {
             continue
         }
         $resolvedRoot = (Resolve-Path -LiteralPath $absoluteRoot).Path
-        $files += Get-ChildItem -LiteralPath $resolvedRoot -Force -Recurse -File | ForEach-Object {
+        $files += Get-ChildItem -LiteralPath $resolvedRoot -Force -Recurse -File | Where-Object {
+            $rel = $_.FullName.Substring($FrameworkRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+            # Exclude gitignored runtime state that can accumulate under a
+            # framework source dir's own nested .crucible/ (e.g. powershell/.crucible/).
+            -not (($rel -split '[\\/]') -contains ".crucible")
+        } | ForEach-Object {
             $relative = $_.FullName.Substring($FrameworkRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
             ConvertTo-ManifestRelativePath -Path $relative
         }

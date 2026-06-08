@@ -11,6 +11,8 @@ New-Item -ItemType Directory -Path $TempRoot -Force | Out-Null
 Push-Location $TempRoot
 try {
     git init --quiet
+    git config core.autocrlf false
+    git config core.safecrlf false
     # Enable per‑worktree config extension
     git config extensions.worktreeConfig true
     # Add an initial commit so a worktree can be created

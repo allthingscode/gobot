@@ -30,7 +30,7 @@ Confirm the latest verification handoff for `{task_id}` has `status: "Ready for 
 ### Step 3 — Merge Simulation ({task_id})
 Before touching `master`, run the merge simulation:
 ```powershell
-{{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id}
+{{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id} -ProjectRoot "{project_root}"
 ```
 
 **If simulation fails:**
@@ -66,7 +66,7 @@ For strictly internal Dev Factory tasks with no public-facing changes: append an
 
 Validate before continuing:
 ```powershell
-{{crucible_root}}/powershell/validate_dev_log.ps1 -FileToPublish .crucible/dev-logs/UNPUBLISHED_LOGS.md
+{{crucible_root}}/powershell/validate-dev-log.ps1 -FileToPublish .crucible/dev-logs/UNPUBLISHED_LOGS.md
 ```
 
 ### Step 6 — Cleanup

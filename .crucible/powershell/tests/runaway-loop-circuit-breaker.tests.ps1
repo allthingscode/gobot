@@ -1,9 +1,10 @@
-# Test for Review Stalemate (runaway review loop) circuit breaker.
+﻿# Test for Review Stalemate (runaway review loop) circuit breaker.
 # Triggers by submitting a handoff with review_strike_count >= 3, targeting the Architect.
 # Expects factory to trip the 3-strike stalemate breaker (exit 2) and write a blocked record.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
 $results = @()
@@ -55,7 +56,7 @@ try {
     $projectRoot = Join-Path $tempRoot "app"
     New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
 
-    # ── Test: 3-strike stalemate trips ──────────────────────────────────────────
+    # -- Test: 3-strike stalemate trips ----------------------------------------
     $results += Run-Test -Name "Review stalemate trips at 3 strikes (runaway loop)" -Body {
         # 1. Git repo + initial commit
         Push-Location $projectRoot
@@ -111,7 +112,7 @@ created_at: "2026-05-25"
             generated_by             = "new-handoff.ps1"
             tool_version             = "1.0.0"
             handoff_retry_count      = 0
-            review_strike_count      = 3         # at threshold → stalemate fires
+            review_strike_count      = 3         # at threshold -> stalemate fires
             rebase_count             = 0
             budget_tier              = "low"
             cumulative_handoff_count = 4
@@ -127,7 +128,7 @@ created_at: "2026-05-25"
 
         # 4. Run factory
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                 -Init -TaskId $taskId -ProjectRoot $projectRoot
         }
         $output   = $res.Output -join "`n"

@@ -63,3 +63,30 @@ function Get-ConfiguredPath {
 
     return (Join-Path $root $defaults[$Key])
 }
+
+function Parse-SemVer {
+    param([string]$Raw)
+    if ([string]::IsNullOrWhiteSpace($Raw)) {
+        return $null
+    }
+    if ($Raw -match '(\d+)\.(\d+)\.(\d+)') {
+        return [int[]]@([int]$matches[1], [int]$matches[2], [int]$matches[3])
+    }
+    if ($Raw -match '(\d+)\.(\d+)') {
+        return [int[]]@([int]$matches[1], [int]$matches[2], 0)
+    }
+    return $null
+}
+
+function Compare-SemVer {
+    param(
+        [Parameter(Mandatory=$true)][int[]]$A,
+        [Parameter(Mandatory=$true)][int[]]$B
+    )
+
+    for ($i = 0; $i -lt 3; $i++) {
+        if ($A[$i] -gt $B[$i]) { return 1 }
+        if ($A[$i] -lt $B[$i]) { return -1 }
+    }
+    return 0
+}

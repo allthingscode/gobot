@@ -1,7 +1,8 @@
-# Tests for the shared install manifest helper.
+﻿# Tests for the shared install manifest helper.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $HELPER = Join-Path $REPO_ROOT "powershell/lib/install-manifest.ps1"
 . $HELPER
 
@@ -43,7 +44,7 @@ try {
     $results += Run-Test -Name "Framework-owned files map to files produced by a fresh install" -Body {
         $installRoot = Join-Path $tempRoot "manifest-install"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-        $output = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Manifest Test" -Quiet 2>&1)
+        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Manifest Test" -Quiet 2>&1)
         Assert-Result -Name "install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("install failed: " + ($output -join "`n"))
 
         $manifest = Get-InstallManifest -FrameworkRoot $REPO_ROOT

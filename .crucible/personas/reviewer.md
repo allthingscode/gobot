@@ -27,7 +27,7 @@ When assigned to the verification phase, read the activity SOP before taking any
 
 **State file**: `.crucible/session/global/session_state.json` -> `phases.verification`
 
-**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update_session_state.ps1 -Specialist verification -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
+**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update-session-state.ps1 -Specialist verification -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
 
 ---
 

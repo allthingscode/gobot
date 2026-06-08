@@ -29,7 +29,7 @@ Bump `VERSION` BEFORE tagging. The tag references the commit that contains the n
 
 ## Release checklist
 
-1. **Settle the work.** All planned changes for this release are merged to `main`. Tests pass: `powershell/run_all_tests.ps1`.
+1. **Settle the work.** All planned changes for this release are merged to `main`. Tests pass: `powershell/run-all-tests.ps1`.
 
 2. **Update `CHANGELOG.md`:**
    - Promote the `## [Unreleased]` section to a versioned section: `## [X.Y.Z] - YYYY-MM-DD`.
@@ -58,8 +58,9 @@ Bump `VERSION` BEFORE tagging. The tag references the commit that contains the n
 
 7. **Verify** that a fresh `init-project.ps1` run on the new commit stamps the new version into the adopter's config:
    ```powershell
-   .\powershell\init-project.ps1 -ProjectRoot $env:TEMP\release-smoke
-   Select-String -Path "$env:TEMP\release-smoke\.crucible\config.yaml" -Pattern "crucible_version"
+   # Windows uses $env:TEMP; on Linux/macOS run under pwsh and use [System.IO.Path]::GetTempPath()
+   ./powershell/init-project.ps1 -ProjectRoot $env:TEMP/release-smoke
+   Select-String -Path "$env:TEMP/release-smoke/.crucible/config.yaml" -Pattern "crucible_version"
    # Should show: crucible_version: "X.Y.Z"
    ```
 

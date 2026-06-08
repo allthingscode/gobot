@@ -27,7 +27,7 @@ When assigned to the deployment phase, read the activity SOP before taking any a
 
 **State file**: `.crucible/session/global/session_state.json` -> `phases.deployment`
 
-**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update_session_state.ps1 -Specialist deployment -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
+**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update-session-state.ps1 -Specialist deployment -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
 
 ---
 

@@ -1,7 +1,8 @@
-# Regression tests for powershell/archive-task.ps1.
+﻿# Regression tests for powershell/archive-task.ps1.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT = Join-Path $REPO_ROOT "powershell/archive-task.ps1"
 $LIB = Join-Path $REPO_ROOT "powershell/lib/archive-task.ps1"
 $results = @()
@@ -64,7 +65,7 @@ function Invoke-ArchiveTask {
         if (-not [string]::IsNullOrEmpty($Status)) {
             $cmdArgs += @("-Status", $Status)
         }
-        $outputLines = @(powershell.exe @cmdArgs 2>&1)
+        $outputLines = @(& (Get-PwshCommand) @cmdArgs 2>&1)
         return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -293,7 +294,7 @@ try {
         
         # Validate backlog passes validation using validate-backlog.ps1 check
         $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $validateOutput = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        $validateOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
         Assert-Result -Name "validate-backlog exit 0 post-archive" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
     }
 
@@ -335,7 +336,7 @@ try {
 
         # Validate backlog passes validation using validate-backlog.ps1 check
         $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $validateOutput = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        $validateOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
         Assert-Result -Name "validate-backlog exit 0 post-archive sole" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
     }
 } finally {

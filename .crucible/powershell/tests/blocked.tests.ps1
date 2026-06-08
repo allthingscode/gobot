@@ -36,7 +36,7 @@ $frameworkDir = Join-Path $tempRoot "powershell"
 New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
 New-Item -ItemType Directory -Path $frameworkDir -Force | Out-Null
 
-$stubScript = Join-Path $frameworkDir "update_session_state.ps1"
+$stubScript = Join-Path $frameworkDir "update-session-state.ps1"
 @'
 param(
     [string]$Specialist,
@@ -78,7 +78,7 @@ try {
 
     $results += Run-Test -Name "Update session state side effect uses supplied framework path" -Body {
         $calledPath = Join-Path $frameworkDir "update-called.json"
-        Assert-Result -Name "stub called" -Condition (Test-Path -LiteralPath $calledPath) -FailureMessage "update_session_state stub was not called"
+        Assert-Result -Name "stub called" -Condition (Test-Path -LiteralPath $calledPath) -FailureMessage "update-session-state stub was not called"
         $called = Get-Content -LiteralPath $calledPath -Raw | ConvertFrom-Json
         Assert-Result -Name "stub specialist" -Condition ($called.specialist -eq "verification") -FailureMessage "specialist argument changed"
         Assert-Result -Name "stub task" -Condition ($called.task_id -eq "F-010") -FailureMessage "task argument changed"

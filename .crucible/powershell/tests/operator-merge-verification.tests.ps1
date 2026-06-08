@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
 $results = @()
@@ -135,7 +136,7 @@ function Invoke-FactoryForTask {
         $factoryArgs += @("-GateOutcome", "accepted", "-GateReason", "Commit verification test accepted")
     }
     return Invoke-ExternalCommand {
-        powershell.exe @factoryArgs
+        & (Get-PwshCommand) @factoryArgs
     }
 }
 

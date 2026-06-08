@@ -330,12 +330,27 @@ function Invoke-UpdateBundle {
     }
 
     $appliedCount = 0
+    $skippedCount = 0
     if ($shouldApply) {
         foreach ($item in $applyItems) {
+            # Guard against an apply item whose framework source no longer exists on
+            # disk - e.g. a path that survives only in the baseline commit's file list
+            # because it was renamed/recased upstream. Skip it (with a warning) rather
+            # than letting one missing source abort the whole bundle update; the file's
+            # current name is handled as its own add/safe-overwrite item.
+            $sourceFull = Join-Path $frameworkRoot $item.SourcePath
+            if (-not (Test-Path -LiteralPath $sourceFull -PathType Leaf)) {
+                Write-Host ("  [skip] framework source missing (renamed upstream?): " + $item.SourcePath) -ForegroundColor Yellow
+                $skippedCount++
+                continue
+            }
             Copy-FrameworkFileToAdopter -FrameworkRoot $frameworkRoot -AdopterCrucibleRoot $adopterCrucibleRoot -Item $item
             $appliedCount++
         }
         Write-Host ("Applied " + $appliedCount + " update(s).")
+        if ($skippedCount -gt 0) {
+            Write-Host ("Skipped " + $skippedCount + " item(s) with a missing framework source (likely renamed upstream; their current names are applied separately).") -ForegroundColor Yellow
+        }
     }
 
     $pruneItems = @($results["review-removal"].ToArray())

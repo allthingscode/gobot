@@ -191,7 +191,22 @@ try {
         
         foreach ($wt in $implementationWtPaths) {
             $hooksPath = git -C $wt config core.hooksPath
-            if ($hooksPath -ne "../../scripts/hooks/architect") {
+            # The worktree hooksPath is set to the resolved scripts/hooks/architect
+            # directory (absolute for current installs, relative for legacy ones).
+            # Validate by resolution + existence, not by matching a fixed literal.
+            $ok = $false
+            if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
+                $resolved = $hooksPath.Trim()
+                if (-not [System.IO.Path]::IsPathRooted($resolved)) {
+                    $resolved = Join-Path $wt $resolved
+                }
+                try { $resolved = [System.IO.Path]::GetFullPath($resolved) } catch {}
+                $normalized = $resolved -replace '[\\/]+$', ''
+                if ((Test-Path -LiteralPath $resolved) -and ($normalized -match '[\\/]scripts[\\/]hooks[\\/]architect$')) {
+                    $ok = $true
+                }
+            }
+            if (-not $ok) {
                 $misconfiguredWorktrees += $wt
             }
         }

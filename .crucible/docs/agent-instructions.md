@@ -57,6 +57,8 @@ powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/facto
 <!-- crucible-instructions-end -->
 ````
 
+> `init-project.ps1 -AppendInstructions` writes this block with the correct host for the target OS (`powershell.exe` on Windows, `pwsh` on Linux/macOS). If you paste it by hand on Linux/macOS, change `powershell.exe` to `pwsh`.
+
 ## Optional Tool-Specific Files
 
 Some tools read their own root instruction files. Keep these small and make them defer to `AGENTS.md` plus the installed Crucible docs.

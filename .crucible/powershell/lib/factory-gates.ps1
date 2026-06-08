@@ -1,3 +1,23 @@
+. (Join-Path $PSScriptRoot "injection-detector.ps1")
+
+function Get-RootRelativePath {
+    # Cross-platform relative path of $Path under $Root. Avoids [System.Uri]/MakeRelativeUri:
+    # on Linux an absolute path (e.g. /tmp/x) has no drive letter, so [System.Uri] treats it
+    # as a relative URI and MakeRelativeUri throws "not supported for a relative URI".
+    param(
+        [Parameter(Mandatory=$true)][string]$Root,
+        [Parameter(Mandatory=$true)][string]$Path
+    )
+    $normRoot = $Root.TrimEnd("\", "/").Replace("\", "/")
+    $normPath = $Path.Replace("\", "/")
+    if ($normPath.Equals($normRoot, [System.StringComparison]::Ordinal)) { return "" }
+    $prefix = $normRoot + "/"
+    if ($normPath.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+        return $normPath.Substring($prefix.Length)
+    }
+    return $normPath
+}
+
 function Resolve-FactoryInputHandoff {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -338,9 +358,7 @@ function Read-FactoryHandoffContext {
     $Context.CumulativeHandoffCount = [int]$handoff.cumulative_handoff_count
     $resolvedRoot = (Resolve-Path -LiteralPath $Context.RepoRoot).Path.TrimEnd("\", "/")
     $resolvedPath = (Resolve-Path -LiteralPath $handoffFile).Path
-    $rootUri = [System.Uri]($resolvedRoot + [System.IO.Path]::DirectorySeparatorChar)
-    $pathUri = [System.Uri]$resolvedPath
-    $Context.RelativeHandoffPath = [System.Uri]::UnescapeDataString($rootUri.MakeRelativeUri($pathUri).ToString()).Replace("\", "/")
+    $Context.RelativeHandoffPath = Get-RootRelativePath -Root $resolvedRoot -Path $resolvedPath
 }
 
 function Invoke-HandoffPreflightValidation {
@@ -387,9 +405,7 @@ function Invoke-HandoffPreflightValidation {
                     $Context.Handoff = $handoff
                     $resolvedRoot = (Resolve-Path -LiteralPath $Context.RepoRoot).Path.TrimEnd("\", "/")
                     $resolvedPath = (Resolve-Path -LiteralPath $handoffFile).Path
-                    $rootUri = [System.Uri]($resolvedRoot + [System.IO.Path]::DirectorySeparatorChar)
-                    $pathUri = [System.Uri]$resolvedPath
-                    $Context.RelativeHandoffPath = [System.Uri]::UnescapeDataString($rootUri.MakeRelativeUri($pathUri).ToString()).Replace("\", "/")
+                    $Context.RelativeHandoffPath = Get-RootRelativePath -Root $resolvedRoot -Path $resolvedPath
                 }
             }
         }
@@ -534,7 +550,8 @@ function Invoke-HandoffPreflightValidation {
     # Construct the standard session-end command. Use absolute paths so orchestrators can drive
     # specialists from outside the adopter repository without depending on their current directory.
     $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $Context.RepoRoot $crucibleRoot }
-    $Context.NextFactoryCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$($Context.RepoRoot)`" -Quiet"
+    $pwshCmd = Get-PwshCommand
+    $Context.NextFactoryCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$($Context.RepoRoot)`" -Quiet"
 
     if ($handoff.psobject.Properties["cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.cycle_id)) {
         $env:FACTORY_CYCLE_ID = $handoff.cycle_id
@@ -580,54 +597,11 @@ function Complete-FactorySourceSession {
     $lastEnd = Get-LastEntry -TaskId $handoff.task_id -Specialist $handoff.source_phase -Event "session_end" -LogFile $LOG_FILE
     $lastEndHandoffCount = if ($lastEnd -and $lastEnd.PSObject.Properties['handoff_count']) { $lastEnd.handoff_count } else { 0 }
     if (-not $lastEnd -or $lastEndHandoffCount -lt $handoff.cumulative_handoff_count) {
-        # Compute duration from the source specialist's session_start or recovery_start.
-        $lastStart = Get-LastEntry -TaskId $handoff.task_id -Specialist $handoff.source_phase -Event "session_start" -LogFile $LOG_FILE
-        $lastRecovery = Get-LastEntry -TaskId $handoff.task_id -Specialist $handoff.source_phase -Event "recovery_start" -LogFile $LOG_FILE
-
-        $effectiveStart = $null
-        if ($lastStart -and $lastRecovery) {
-            if ([DateTimeOffset]::Parse($lastStart.timestamp) -gt [DateTimeOffset]::Parse($lastRecovery.timestamp)) {
-                $effectiveStart = $lastStart
-            } else {
-                $effectiveStart = $lastRecovery
-            }
-        } else {
-            $effectiveStart = if ($lastStart) { $lastStart } else { $lastRecovery }
-        }
-
-        $duration = 0
-        $anomaly = $null
-        if ($effectiveStart) {
-            $startTime = [DateTimeOffset]::Parse($effectiveStart.timestamp).UtcDateTime
-            $duration = [int](([DateTime]::UtcNow - $startTime).TotalSeconds)
-
-            # Guard rails for missing/out-of-order events
-            if ($duration -lt 0) {
-                $anomaly = "negative_duration"
-                $duration = 0
-            }
-        } else {
-            $anomaly = "missing_start_event"
-        }
-
-        # This is phase-open wall time, not specialist active work time. Keep it out of the
-        # top-level duration_seconds field so eval consumers do not treat idle time as runtime.
-        $pctUsed = if ($ceiling -gt 0) { [math]::Min(100, [math]::Round(($handoff.cumulative_handoff_count / $ceiling) * 100)) } else { 0 }
-        $metricsBlock = @{
-            phase_wall_seconds = $duration
-            budget_tier      = $handoff.budget_tier
-            budget_ceiling   = $ceiling
-            handoff_count    = $handoff.cumulative_handoff_count
-            budget_pct_used  = $pctUsed
-        }
-        if ($anomaly) { $metricsBlock.duration_anomaly = $anomaly }
-
-        Write-EventLog -Event "session_end" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-            -Outcome "success" `
-            -Notes ("Handoff to " + $handoff.target_phase) `
-            -HandoffCount $handoff.cumulative_handoff_count `
-            -Metrics $metricsBlock `
-            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+        # Quality gates for closing out the source session run BEFORE session_end
+        # is recorded. A failing gate exits 2 without logging session_end, so a
+        # re-run re-enters this block and re-evaluates the gate. If session_end were
+        # written first, a re-run would find it already logged, skip this whole
+        # block (handoff_count guard), and bypass the gate entirely.
 
         # Promote the deployment checklist item to a real gate: the BACKLOG.md entry shows Production/Resolved
         if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -eq "done" -and -not [string]::IsNullOrEmpty($handoff.task_id)) {
@@ -713,6 +687,56 @@ function Complete-FactorySourceSession {
                 exit 2
             }
         }
+
+        # All source-session quality gates passed: record session_end exactly once.
+        # Compute duration from the source specialist's session_start or recovery_start.
+        $lastStart = Get-LastEntry -TaskId $handoff.task_id -Specialist $handoff.source_phase -Event "session_start" -LogFile $LOG_FILE
+        $lastRecovery = Get-LastEntry -TaskId $handoff.task_id -Specialist $handoff.source_phase -Event "recovery_start" -LogFile $LOG_FILE
+
+        $effectiveStart = $null
+        if ($lastStart -and $lastRecovery) {
+            if ([DateTimeOffset]::Parse($lastStart.timestamp) -gt [DateTimeOffset]::Parse($lastRecovery.timestamp)) {
+                $effectiveStart = $lastStart
+            } else {
+                $effectiveStart = $lastRecovery
+            }
+        } else {
+            $effectiveStart = if ($lastStart) { $lastStart } else { $lastRecovery }
+        }
+
+        $duration = 0
+        $anomaly = $null
+        if ($effectiveStart) {
+            $startTime = [DateTimeOffset]::Parse($effectiveStart.timestamp).UtcDateTime
+            $duration = [int](([DateTime]::UtcNow - $startTime).TotalSeconds)
+
+            # Guard rails for missing/out-of-order events
+            if ($duration -lt 0) {
+                $anomaly = "negative_duration"
+                $duration = 0
+            }
+        } else {
+            $anomaly = "missing_start_event"
+        }
+
+        # This is phase-open wall time, not specialist active work time. Keep it out of the
+        # top-level duration_seconds field so eval consumers do not treat idle time as runtime.
+        $pctUsed = if ($ceiling -gt 0) { [math]::Min(100, [math]::Round(($handoff.cumulative_handoff_count / $ceiling) * 100)) } else { 0 }
+        $metricsBlock = @{
+            phase_wall_seconds = $duration
+            budget_tier      = $handoff.budget_tier
+            budget_ceiling   = $ceiling
+            handoff_count    = $handoff.cumulative_handoff_count
+            budget_pct_used  = $pctUsed
+        }
+        if ($anomaly) { $metricsBlock.duration_anomaly = $anomaly }
+
+        Write-EventLog -Event "session_end" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+            -Outcome "success" `
+            -Notes ("Handoff to " + $handoff.target_phase) `
+            -HandoffCount $handoff.cumulative_handoff_count `
+            -Metrics $metricsBlock `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
     }
 }
 
@@ -931,6 +955,49 @@ function Invoke-FactoryScopeGates {
                 Write-Host "`n[STOP] HUMAN INTERVENTION REQUIRED. Expand file_affinity or revert out-of-scope changes." -ForegroundColor Red
                 exit 2
             }
+        }
+    }
+
+    # --- 2.1c Research Scope Boundary Check ---
+    if ($handoff.source_phase -eq "research" -and $handoff.target_phase -eq "grooming") {
+        $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { (Get-Location).Path }
+        try {
+            $statusLines = @(git -C $repoRoot status --porcelain 2>$null)
+            $modifiedFiles = @()
+            foreach ($line in $statusLines) {
+                if ($line -match '^.{2}\s+(.*)$') {
+                    $filePath = $Matches[1].Trim()
+                    if ($filePath.StartsWith('"') -and $filePath.EndsWith('"')) {
+                        $filePath = $filePath.Substring(1, $filePath.Length - 2)
+                    }
+                    $normalizedPath = $filePath.Replace("\", "/")
+                    
+                    $isAllowed = $false
+                    foreach ($prefix in @(".crucible/research/", ".crucible/session/")) {
+                        if ($normalizedPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $isAllowed = $true
+                            break
+                        }
+                    }
+                    
+                    if (-not $isAllowed) {
+                        $modifiedFiles += $normalizedPath
+                    }
+                }
+            }
+            if ($modifiedFiles.Count -gt 0) {
+                $joined = ($modifiedFiles -join ", ")
+                Write-EventLog -Event "security_warning" -TaskId $handoff.task_id -Specialist "factory" `
+                    -Outcome "warned" -Notes ("research_scope_violation: " + $joined)
+                
+                Write-Quiet "`n[SECURITY WARNING] Research phase modified files outside the read-only boundary:" -ForegroundColor Yellow
+                foreach ($file in $modifiedFiles) {
+                    Write-Quiet "  - $file" -ForegroundColor Yellow
+                }
+                Write-Quiet "  Note: The Researcher is expected to write files only under `.crucible/research/`." -ForegroundColor Yellow
+            }
+        } catch {
+            # Skip silently, never throw from the gate
         }
     }
 }
@@ -1214,40 +1281,24 @@ function Normalize-FactoryInputState {
     }
 
     # --- 2b. Passive Injection Pattern Scan ---
-    $injectionPatterns = @(
-        "ignore previous instructions",
-        "ignore all previous",
-        "disregard your instructions",
-        "you must now",
-        "new instruction:",
-        "forget everything",
-        "act as if",
-        "pretend you are",
-        "your new role is",
-        "system prompt override"
-    )
-
-    $handoffRawLower = $handoffRaw.ToLower()
-    $detectedPatterns = @()
-    foreach ($pattern in $injectionPatterns) {
-        if ($handoffRawLower.Contains($pattern.ToLower())) {
-            $detectedPatterns += $pattern
-        }
-    }
-
-    if ($detectedPatterns.Count -gt 0) {
-        foreach ($detected in $detectedPatterns) {
-            Write-EventLog -Event "security_warning" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "warned" -Notes ("Injection pattern detected: " + $detected)
+    $detectedMatches = Get-InjectionMatches -Text $handoffRaw
+    if ($detectedMatches.Count -gt 0) {
+        foreach ($match in $detectedMatches) {
+            Write-EventLog -Event "security_warning" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "warned" -Notes ("Injection pattern detected: " + $match.RuleId)
             Write-Quiet "`n[SECURITY WARNING] Potential injection pattern detected in handoff from $($handoff.source_phase)." -ForegroundColor Yellow
-            Write-Quiet ("Pattern matched: " + $detected) -ForegroundColor Yellow
+            Write-Quiet ("Pattern matched: " + $match.RuleId) -ForegroundColor Yellow
             Write-Quiet ("Review handoff file: " + $handoffFile) -ForegroundColor White
         }
 
-        if ($handoff.source_phase -eq "research") {
+        # Only block-severity matches hard-stop a research handoff. warn-severity rules
+        # (FP-prone heuristics like base64/act-as) must not hard-block legitimate research;
+        # they warn and proceed, consistent with the artifact scan below.
+        $blockMatches = @($detectedMatches | Where-Object { $_.Severity -eq "block" })
+        if ($handoff.source_phase -eq "research" -and $blockMatches.Count -gt 0) {
             Write-Host "`n[STOP] Researcher handoffs with injection patterns require human review before proceeding." -ForegroundColor Red
             exit 2
         }
-        Write-Quiet "[WARN] Proceeding - non-Researcher source. Human should review console output above.`n" -ForegroundColor Yellow
+        Write-Quiet "[WARN] Proceeding - human should review console output above.`n" -ForegroundColor Yellow
     }
 
     # --- 2c. State Sanitization ---
@@ -1311,7 +1362,7 @@ function Normalize-FactoryInputState {
         # Update state to 'recovering'
         $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
         $updateJson = @{ status = "recovering" } | ConvertTo-Json -Compress
-        & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist $handoff.target_phase -TaskId $handoff.task_id -UpdateJson $updateJson -Merge $true -ProjectRoot $repoRoot
+        & "$FRAMEWORK_POWERSHELL/update-session-state.ps1" -Specialist $handoff.target_phase -TaskId $handoff.task_id -UpdateJson $updateJson -Merge $true -ProjectRoot $repoRoot
 
         # Log recovery_start for recoverable sessions.
         Write-EventLog -Event "recovery_start" -TaskId $handoff.task_id -Phase $handoff.target_phase -Notes "Recovering from: $recoveryMarker"
@@ -1363,6 +1414,119 @@ function Invoke-CircuitBreakerGates {
     }
 
     # --- 3. Circuit Breakers ---
+    # Scan research findings/artifacts (RH2)
+    if ($handoff.source_phase -eq "research") {
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+        if ($repoRoot -and (Test-Path -LiteralPath $repoRoot)) {
+            $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path
+        }
+        
+        $crucibleRoot = ".crucible"
+        $configPath = Join-Path $repoRoot ".crucible/config.yaml"
+        if (Test-Path -LiteralPath $configPath) {
+            try {
+                $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+                if ($content -match '(?m)^crucible_root:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
+                    $crucibleRoot = $Matches[1].Trim()
+                }
+            } catch {}
+        }
+        $researchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
+
+        $handoffText = ""
+        if ($Context.ContainsKey("LatestHandoff") -and $null -ne $Context["LatestHandoff"]) {
+            $handoffFile = $Context["LatestHandoff"].FullName
+            if (Test-Path -LiteralPath $handoffFile) {
+                $handoffText = Get-Content $handoffFile -Raw -Encoding UTF8
+            }
+        }
+        if ([string]::IsNullOrEmpty($handoffText)) {
+            $handoffText = $handoff | ConvertTo-Json -Depth 100
+        }
+
+        $detectedFile = ""
+        $detectedRule = ""
+        $hasBlockMatch = $false
+
+        # Scan handoff text
+        $handoffMatches = Get-InjectionMatches -Text $handoffText
+        foreach ($m in $handoffMatches) {
+            if ($m.Severity -eq "block") {
+                $hasBlockMatch = $true
+                $detectedFile = "handoff"
+                $detectedRule = $m.RuleId
+                break
+            }
+        }
+
+        # Scan artifacts
+        if (-not $hasBlockMatch -and $null -ne $handoff.artifacts) {
+            foreach ($art in $handoff.artifacts) {
+                if ([string]::IsNullOrWhiteSpace($art)) { continue }
+                $fullPath = Join-Path $repoRoot $art
+                if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+                    $resolvedPath = (Resolve-Path -LiteralPath $fullPath).Path
+                    $resolvedResearchDir = $researchDir
+                    if (Test-Path -LiteralPath $researchDir) {
+                        $resolvedResearchDir = (Resolve-Path -LiteralPath $researchDir).Path
+                    }
+                    if ($resolvedPath.StartsWith($resolvedResearchDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        try {
+                            $artContent = Get-Content -LiteralPath $resolvedPath -Raw -Encoding UTF8
+                            $artMatches = Get-InjectionMatches -Text $artContent
+                            foreach ($m in $artMatches) {
+                                if ($m.Severity -eq "block") {
+                                    $hasBlockMatch = $true
+                                    $detectedFile = $art
+                                    $detectedRule = $m.RuleId
+                                    break
+                                }
+                            }
+                        } catch {}
+                    }
+                }
+                if ($hasBlockMatch) { break }
+            }
+        }
+
+        # Scan session research task.md
+        if (-not $hasBlockMatch -and -not [string]::IsNullOrEmpty($sessionDir)) {
+            $sessionTaskMd = Join-Path $sessionDir "$($handoff.task_id)/research/task.md"
+            if (Test-Path -LiteralPath $sessionTaskMd -PathType Leaf) {
+                try {
+                    $taskContent = Get-Content -LiteralPath $sessionTaskMd -Raw -Encoding UTF8
+                    $taskMatches = Get-InjectionMatches -Text $taskContent
+                    foreach ($m in $taskMatches) {
+                        if ($m.Severity -eq "block") {
+                            $hasBlockMatch = $true
+                            $detectedFile = Get-RootRelativePath -Root $repoRoot -Path $sessionTaskMd
+                            if ([string]::IsNullOrEmpty($detectedFile)) {
+                                $detectedFile = ".crucible/session/$($handoff.task_id)/research/task.md"
+                            }
+                            $detectedRule = $m.RuleId
+                            break
+                        }
+                    }
+                } catch {}
+            }
+        }
+
+        if ($hasBlockMatch) {
+            if ($null -eq $handoff.psobject.Properties["suspicious_content"] -or $handoff.suspicious_content -eq "") {
+                $distinctNotes = "researcher_silent_detector_hit: ${detectedFile}:$detectedRule"
+                $summaryMsg = "Silent injection match in ${detectedFile}: $detectedRule (researcher silent detector hit)"
+
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes $distinctNotes
+                Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $summaryMsg
+                Write-Quiet "`n[CIRCUIT BREAKER] Suspicious Content detected." -ForegroundColor Yellow
+                Write-Quiet "Prompt injection check failed silently in research artifact/findings."
+                Write-Quiet "Details: File '${detectedFile}' triggered rule '$detectedRule'."
+                Write-Host "`n[STOP] HUMAN INTERVENTION REQUIRED. Review external sources. File: ${detectedFile}, Rule: $detectedRule, Reason: Silent corroboration." -ForegroundColor Red
+                exit 2
+            }
+        }
+    }
+
     # Suspicious Content (Prompt Injection Defense - {task_id})
     if ($null -ne $handoff.psobject.Properties["suspicious_content"] -and $null -ne $handoff.suspicious_content -and $handoff.suspicious_content -ne "") {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes ("Suspicious Content Flagged: " + $handoff.suspicious_content)
@@ -1448,7 +1612,7 @@ function Invoke-CircuitBreakerGates {
             $previousPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
             try {
-                $testOutput = & powershell.exe -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode full 2>&1
+                $testOutput = & (Get-PwshCommand) -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode full 2>&1
             } finally {
                 $ErrorActionPreference = $previousPreference
             }
@@ -1825,7 +1989,7 @@ function Restore-BacklogTask {
     # Reconcile Priority-Summary
     $validateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "validate-backlog.ps1"
     if (Test-Path $validateScript) {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot | Out-Null
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot | Out-Null
     }
 }
 
@@ -2237,7 +2401,18 @@ function Invoke-HumanGate {
             "n/a", "na", "none", "ok", "looks good", "looks good.",
             "approved", "accept", "accepted", "done", "ship it", "auto"
         )
-        
+
+        # Cycle that this gate is firing in. An advancing decision is only honored
+        # as "already passed" on a re-run within the SAME cycle, so a stale accept
+        # from a prior cycle cannot silently bypass a fresh human gate encounter.
+        $currentGateCycle = if ($handoff.PSObject.Properties["session_cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.session_cycle_id)) {
+            [string]$handoff.session_cycle_id
+        } elseif (-not [string]::IsNullOrEmpty($env:FACTORY_CYCLE_ID)) {
+            [string]$env:FACTORY_CYCLE_ID
+        } else {
+            ""
+        }
+
         # --- Handle automated gate outcome from CLI flag ---
         if (-not [string]::IsNullOrEmpty($GateOutcome)) {
             # Support numeric mapping (1-4)
@@ -2266,6 +2441,7 @@ function Invoke-HumanGate {
                 reason = $trimmedGateReason
                 rework_requested = ($GateOutcome -eq "rejected")
                 redirect_target = $GateRedirectTarget
+                session_cycle_id = $currentGateCycle
             }
             
             $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
@@ -2303,7 +2479,16 @@ function Invoke-HumanGate {
                     # "rejected" and "abandoned" require a fresh human decision on the reworked item.
                     $advancingOutcomes = @("accepted", "redirected")
                     if ($advancingOutcomes -contains $latestDecision.outcome) {
-                        $gateAlreadyPassed = $true
+                        # Scope the bypass to the current cycle: an advancing decision
+                        # only counts as "already passed" if it was recorded in the same
+                        # cycle as this handoff. A stale accept from a prior cycle (e.g. a
+                        # re-opened task or a rework re-entry) must NOT auto-advance; the
+                        # human is re-prompted. Unstamped (legacy) decisions fail safe the
+                        # same way. Empty current cycle also fails safe (re-prompt).
+                        $decisionCycle = if ($latestDecision.PSObject.Properties["session_cycle_id"]) { [string]$latestDecision.session_cycle_id } else { "" }
+                        if (-not [string]::IsNullOrEmpty($currentGateCycle) -and $decisionCycle -eq $currentGateCycle) {
+                            $gateAlreadyPassed = $true
+                        }
                     }
                 } catch {
                     Write-Quiet ("[GATE] Warning: Could not parse gate decision file " + $decisions[0].Name) -ForegroundColor Yellow
@@ -2343,7 +2528,8 @@ function Invoke-HumanGate {
                             $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
                             
                             # Construct gate-specific command for next_step.txt
-                            $gateCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
+                            $pwshCmd = Get-PwshCommand
+                            $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
                         Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                             
                             exit 0
@@ -2351,10 +2537,14 @@ function Invoke-HumanGate {
                             # Execute push or reset based on manual decision
                             Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason
 
-                            # Archive the decision
+                            # Archive the decision, stamping the firing cycle so a
+                            # same-cycle re-run is recognized as already-passed while a
+                            # later cycle is not (see gateAlreadyPassed scoping above).
                             $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
                             $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
-                            Move-Item -Path $gateTemplatePath -Destination $archivePath -Force
+                            $gateData | Add-Member -NotePropertyName "session_cycle_id" -NotePropertyValue $currentGateCycle -Force
+                            $gateData | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
+                            Remove-Item -Path $gateTemplatePath -Force
                             Write-Host ("`n[HUMAN GATE] Decision recorded: " + $gateData.outcome) -ForegroundColor Green
                             
                             # Cleanup machine-readable signal
@@ -2404,7 +2594,8 @@ function Invoke-HumanGate {
                     Write-Host "4. Stop after recording the decision unless the human explicitly starts another task." -ForegroundColor White
                     
                     # Construct gate-specific command for next_step.txt
-                    $gateCommand = "powershell.exe -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
+                    $pwshCmd = Get-PwshCommand
+                    $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
                 Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                     
                     exit 0
@@ -2470,7 +2661,7 @@ function Invoke-RepositoryIntegrityGates {
             exit 2
         }
         
-        & "$FRAMEWORK_POWERSHELL/validate_dev_log.ps1" -FileToPublish $devLogPath
+        & "$FRAMEWORK_POWERSHELL/validate-dev-log.ps1" -FileToPublish $devLogPath
         if ($LASTEXITCODE -ne 0) {
             Write-Host "`n[STOP] [NEXT SESSION COMMAND]: YOU must fix the Dev Log PII/secrets before proceeding." -ForegroundColor Red
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "blocked" -Notes "Dev Log validation failed before handoff" -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
@@ -2678,7 +2869,7 @@ function Resolve-FactoryTransition {
         Write-Host "====================================================`n" -ForegroundColor Green
 
         # Update state to remove the completed task
-        & "$FRAMEWORK_POWERSHELL/update_session_state.ps1" -Specialist done -TaskId $handoff.task_id -UpdateJson "{}" -Merge $false -ProjectRoot $repoRoot
+        & "$FRAMEWORK_POWERSHELL/update-session-state.ps1" -Specialist done -TaskId $handoff.task_id -UpdateJson "{}" -Merge $false -ProjectRoot $repoRoot
 
         # Log session_end/pipeline_complete
         $logPhase = if ($handoff.source_phase -eq "grooming") { "grooming" } else { "deployment" }

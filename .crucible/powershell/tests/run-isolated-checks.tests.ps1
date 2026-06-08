@@ -1,6 +1,8 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $RUN_CHECKS_SCRIPT = Join-Path $REPO_ROOT "powershell/run-isolated-checks.ps1"
+$pwshCmd = Get-PwshCommand
 
 $results = @()
 
@@ -50,7 +52,7 @@ function Initialize-Repo {
             "verification:",
             "  quick:",
             "    - name: no-op",
-            "      command: cmd /c exit 0"
+            "      command: $pwshCmd -NoProfile -Command exit 0"
         ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
         Set-Content -LiteralPath "README.md" -Value "# run isolated checks test" -Encoding UTF8
         git add README.md .crucible/config.yaml
@@ -90,7 +92,7 @@ try {
         Push-Location $projectRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick
             }
         } finally {
             Pop-Location
@@ -104,7 +106,7 @@ try {
         Push-Location $tempRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot
             }
         } finally {
             Pop-Location
@@ -122,17 +124,17 @@ try {
                 "verification:",
                 "  quick:",
                 "    - name: no-op",
-                "      command: cmd /c exit 0",
+                "      command: $pwshCmd -NoProfile -Command exit 0",
                 "  full:",
                 "    - name: no-op-full",
-                "      command: cmd /c exit 0",
+                "      command: $pwshCmd -NoProfile -Command exit 0",
                 "  config_check:",
                 "    name: test config check",
-                "    command: cmd /c exit 1"
+                "    command: $pwshCmd -NoProfile -Command exit 1"
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
             
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
             }
         } finally {
             Pop-Location
@@ -150,17 +152,17 @@ try {
                 "verification:",
                 "  quick:",
                 "    - name: no-op",
-                "      command: cmd /c exit 0",
+                "      command: $pwshCmd -NoProfile -Command exit 0",
                 "  full:",
                 "    - name: no-op-full",
-                "      command: cmd /c exit 0",
+                "      command: $pwshCmd -NoProfile -Command exit 0",
                 "  config_check:",
                 "    name: test config check pass",
-                "    command: cmd /c exit 0"
+                "    command: $pwshCmd -NoProfile -Command exit 0"
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
             
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
             }
         } finally {
             Pop-Location
@@ -178,17 +180,17 @@ try {
                 "verification:",
                 "  quick:",
                 "    - name: no-op",
-                "      command: cmd /c exit 0",
+                "      command: $pwshCmd -NoProfile -Command exit 0",
                 "  full:",
                 "    - name: no-op-full",
-                "      command: cmd /c exit 0",
+                "      command: $pwshCmd -NoProfile -Command exit 0",
                 "  config_check:",
                 "    name: test config check skip",
-                "    command: cmd /c exit 1"
+                "    command: $pwshCmd -NoProfile -Command exit 1"
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
             
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick
             }
         } finally {
             Pop-Location

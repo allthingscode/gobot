@@ -134,6 +134,15 @@ function Copy-TemplateDirectory {
     $entries = Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse
     foreach ($entry in $entries) {
         $relative = $entry.FullName.Substring($sourceRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+
+        # Never copy a nested .crucible directory. Framework source dirs (e.g.
+        # powershell/) can accumulate gitignored runtime state under their own
+        # .crucible/ when the framework is exercised in place; -Recurse -Force
+        # would otherwise drag that stale state into every adopter install.
+        if (($relative -split '[\\/]') -contains ".crucible") {
+            continue
+        }
+
         $target = Join-Path $Destination $relative
 
         if ($entry.PSIsContainer) {
@@ -378,7 +387,7 @@ if ($WithSampleTask) {
 }
 
 if ($AppendInstructions) {
-    Install-CrucibleInstructions -ProjectRoot $resolvedProjectRoot -Quiet:$Quiet
+    Install-CrucibleInstructions -ProjectRoot $resolvedProjectRoot -Quiet:$Quiet | Out-Null
 }
 
 # Set git hooks path for the adopter

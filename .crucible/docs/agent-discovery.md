@@ -44,7 +44,7 @@ The Researcher has multiple task types, each with its own SOP:
 |---|---|
 | `Researcher: Investigate [TOPIC]` | `{{crucible_root}}/sops/research-investigate.md` |
 | `Researcher: Audit [project name]` | `{{crucible_root}}/sops/research-audit-project.md` |
-| `Researcher: Audit Dev Factory` | `{{crucible_root}}/sops/research-audit-factory.md` |
+| `Researcher: Audit Crucible` | `{{crucible_root}}/sops/research-audit-framework.md` |
 
 The research activity SOP (`.crucible/sops/research.md`) owns task-type dispatch and phase routing. The Researcher persona stays focused on identity, trust boundaries, and research judgment.
 

@@ -1,7 +1,8 @@
-# Smoke tests for powershell/check-file-affinity.ps1.
+﻿# Smoke tests for powershell/check-file-affinity.ps1.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT = Join-Path $REPO_ROOT "powershell/check-file-affinity.ps1"
 $results = @()
 
@@ -87,7 +88,7 @@ try {
         New-Item -ItemType Directory -Path $nonExistentRoot -Force | Out-Null
         Push-Location $nonExistentRoot
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
                 -Affinity @("src/main.go") 2>&1)
             $exitCode = $LASTEXITCODE
@@ -101,7 +102,7 @@ try {
     $results += Run-Test -Name "Detects overlap with active groomer task" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
                 -Affinity @("src/main.go") 2>&1)
             $exitCode = $LASTEXITCODE
@@ -116,7 +117,7 @@ try {
     $results += Run-Test -Name "Ignores overlaps with completed tasks" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
                 -Affinity @("src/db/query.go") 2>&1)
             $exitCode = $LASTEXITCODE
@@ -130,7 +131,7 @@ try {
     $results += Run-Test -Name "Detects prefix overlap with glob pattern" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
                 -Affinity @("config/app.yaml") 2>&1)
             $exitCode = $LASTEXITCODE
@@ -145,7 +146,7 @@ try {
     $results += Run-Test -Name "Succeeds when there is no overlap" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
                 -Affinity @("src/auth/") 2>&1)
             $exitCode = $LASTEXITCODE
@@ -160,7 +161,7 @@ try {
         Push-Location $projectRoot
         try {
             # TASK-1 checking its own affinity list (src/main.go)
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-1" `
                 -Affinity @("src/main.go") 2>&1)
             $exitCode = $LASTEXITCODE
@@ -175,13 +176,13 @@ try {
         Push-Location $projectRoot
         try {
             '{}' | Set-Content -LiteralPath $stateFilePath -Encoding UTF8
-            $missingOutputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $missingOutputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
                 -Affinity @("src/main.go") 2>&1)
             $missingExitCode = $LASTEXITCODE
 
             '{"tasks":{}}' | Set-Content -LiteralPath $stateFilePath -Encoding UTF8
-            $emptyOutputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $emptyOutputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
                 -Affinity @("src/main.go") 2>&1)
             $emptyExitCode = $LASTEXITCODE

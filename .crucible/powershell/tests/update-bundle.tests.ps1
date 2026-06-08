@@ -2,6 +2,7 @@
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT = Join-Path $REPO_ROOT "powershell/update-bundle.ps1"
 $results = @()
 
@@ -45,6 +46,8 @@ function New-FrameworkFixture {
     param([Parameter(Mandatory=$true)][string]$Root)
     New-Item -ItemType Directory -Path $Root -Force | Out-Null
     git -C $Root init --quiet | Out-Null
+    git -C $Root config core.autocrlf false | Out-Null
+    git -C $Root config core.safecrlf false | Out-Null
     Write-Utf8File -Path (Join-Path $Root "install-manifest.json") -Content @'
 {
   "scaffold_source": "templates/project/.crucible",
@@ -90,7 +93,7 @@ function Invoke-UpdateBundle {
     if ($Prune) {
         $args += "-Prune"
     }
-    $output = @(powershell.exe @args 2>&1)
+    $output = @(& (Get-PwshCommand) @args 2>&1)
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = ($output -join "`n")
@@ -117,6 +120,28 @@ try {
         Assert-Result -Name "scaffold snapshot present" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/templates/project/.crucible/README.md")) -FailureMessage "scaffold snapshot was not installed"
         $config = Get-Content -LiteralPath (Join-Path $adopter ".crucible/config.yaml") -Raw -Encoding UTF8
         Assert-Result -Name "commit updated" -Condition ($config -match [regex]::Escape($commitB)) -FailureMessage "install commit was not advanced"
+    }
+
+    $results += Run-Test -Name "Upstream rename completes without crashing on a missing source" -Body {
+        # A framework-owned file renamed upstream leaves the old path present only in
+        # the baseline commit's file list. The apply step must not abort the whole
+        # update if such a path surfaces as an item whose on-disk source is gone -
+        # it skips it (the file's current name is applied as its own item).
+        $framework = Join-Path $tempRoot "rename-framework"
+        $commitA = New-FrameworkFixture -Root $framework
+        $adopter = Join-Path $tempRoot "rename-adopter"
+        Copy-FrameworkToAdopter -Framework $framework -Adopter $adopter -Commit $commitA
+
+        git -C $framework mv "docs/guide.md" "docs/guide-renamed.md" | Out-Null
+        Write-Utf8File -Path (Join-Path $framework "docs/guide-renamed.md") -Content 'guide head renamed'
+        $commitB = Invoke-GitCommit -Repo $framework -Message "rename guide"
+
+        $result = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe" -Prune
+        Assert-Result -Name "no crash (exit 0)" -Condition ($result.ExitCode -eq 0) -FailureMessage $result.Output
+        Assert-Result -Name "no missing-path failure" -Condition ($result.Output -notmatch 'Cannot find path') -FailureMessage $result.Output
+        Assert-Result -Name "renamed file added" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/guide-renamed.md")) -FailureMessage "renamed file was not added to adopter"
+        $renamed = Get-Content -LiteralPath (Join-Path $adopter ".crucible/docs/guide-renamed.md") -Raw -Encoding UTF8
+        Assert-Result -Name "renamed content is head" -Condition ($renamed -match 'renamed') -FailureMessage "renamed file has wrong content"
     }
 
     $results += Run-Test -Name "Needs-merge detection does not apply local-overwritten file" -Body {
@@ -197,6 +222,8 @@ try {
         $snapshotPath = Join-Path $adopter ".crucible/templates/project/.crucible/README.md"
         $ignoredSnapshotPath = Join-Path $adopter ".crucible/templates/project/.crucible/backlog/F-000.md"
         git -C $adopter init --quiet | Out-Null
+        git -C $adopter config core.autocrlf false | Out-Null
+        git -C $adopter config core.safecrlf false | Out-Null
         Write-Utf8File -Path (Join-Path $adopter ".gitignore") -Content ".crucible/templates/project/.crucible/backlog/"
 
         $result = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe"
@@ -259,6 +286,8 @@ try {
         # 3. A gitignored orphan file which must NEVER be flagged/removed
         # We need git init on adopter for check-ignore to work
         git -C $adopter init --quiet | Out-Null
+        git -C $adopter config core.autocrlf false | Out-Null
+        git -C $adopter config core.safecrlf false | Out-Null
         Write-Utf8File -Path (Join-Path $adopter ".gitignore") -Content ".crucible/docs/ignored_orphan.md"
         Write-Utf8File -Path (Join-Path $adopter ".crucible/docs/ignored_orphan.md") -Content 'ignored orphan'
 

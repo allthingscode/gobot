@@ -1,13 +1,16 @@
-# Regression tests for check-mojibake.ps1 invoked with multiple file paths.
+﻿# Regression tests for check-mojibake.ps1 invoked with multiple file paths.
 #
 # The adopter pre-commit hook invokes this script via:
-#   powershell.exe -File check-mojibake.ps1 <file1> <file2> ...
+#   (Get-PwshCommand) -File check-mojibake.ps1 <file1> <file2> ...
 # In -File mode a named array parameter (-Paths) binds only the first token, so the
 # script must accept files as positional/remaining arguments. This regression guards
 # the multi-file path that broke the first #31 implementation (a real gobot commit of
 # ~100 staged files surfaced it; the single-file unit test did not).
 
 $ErrorActionPreference = "Stop"
+
+$REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $scriptPath = Join-Path $PSScriptRoot "check-mojibake.ps1"
 $psExe = (Get-Process -Id $PID).Path  # the same PowerShell host running this test
 

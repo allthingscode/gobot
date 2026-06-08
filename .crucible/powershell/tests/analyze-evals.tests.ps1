@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $ANALYZE_SCRIPT = Join-Path $REPO_ROOT "powershell/analyze-evals.ps1"
 
 $results = @()
@@ -71,7 +72,7 @@ try {
         Push-Location $projectRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ANALYZE_SCRIPT -Json
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $ANALYZE_SCRIPT -Json
             }
         } finally {
             Pop-Location
@@ -88,7 +89,7 @@ try {
         Push-Location $projectRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ANALYZE_SCRIPT
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $ANALYZE_SCRIPT
             }
         } finally {
             Pop-Location

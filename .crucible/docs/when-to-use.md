@@ -146,7 +146,7 @@ Every prompt template carries `<!-- prompt_version: {role}-v1 -->`. Handoffs inc
 ### Reviewer 8-Step Verification (in order, all must pass)
 
 1. Isolated checks pass — `run-isolated-checks.ps1 -TaskId {task_id} -Mode full` exits 0
-2. Vet/Lint/Test/Doc parity — `go vet`, `golangci-lint`, `gotestsum`, `go run scripts/doc_lint.go` (matches CI exactly)
+2. Vet/Lint/Test/Doc parity — `go vet`, `golangci-lint`, `gotestsum`, `go run scripts/factory_lint.go` (matches CI exactly)
 3. Acceptance criteria met — every spec checkbox checked
 4. Scope bounded — changes limited to spec-named files and declared `file_affinity`
 5. No regressions — diff reviewed for behavior changes outside scope

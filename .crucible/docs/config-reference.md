@@ -2,7 +2,7 @@
 
 This is the authoritative reference for every key in `.crucible/config.yaml`. The machine-readable schema is at [`schemas/config.schema.json`](../schemas/config.schema.json). Validation is run by `powershell/validate-config.ps1`.
 
-For a step-by-step setup guide see [GET_STARTED.md](GET_STARTED.md). For a worked example see [`examples/gobot/.crucible/config.yaml`](../examples/gobot/.crucible/config.yaml).
+For a step-by-step setup guide see [get-started.md](get-started.md). For a worked example see [`examples/gobot/.crucible/config.yaml`](../examples/gobot/.crucible/config.yaml).
 
 ---
 
@@ -255,7 +255,7 @@ The Groomer declares actual `file_affinity` per task in the spec frontmatter. Th
 Run before starting any pipeline work:
 
 ```powershell
-powershell\validate-config.ps1 -ConfigPath .crucible\config.yaml
+./powershell/validate-config.ps1 -ConfigPath .crucible/config.yaml
 ```
 
 **Errors** (exit 2 — pipeline will not start):

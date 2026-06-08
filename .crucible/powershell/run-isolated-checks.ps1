@@ -114,6 +114,11 @@ function Invoke-Check {
     # Execute the string as a command line
     Invoke-Expression $CommandString
     if ($LASTEXITCODE -ne 0) {
+        # Emit a stable stdout marker before throwing. The orchestrator parses this line
+        # to name the failing check; child-process error rendering differs across
+        # PowerShell editions (pwsh on Linux vs powershell.exe on Windows), so relying on
+        # the thrown error text is not portable.
+        Write-Host ("Check failed: {0}" -f $Name)
         throw ("Check failed: {0}" -f $Name)
     }
 }

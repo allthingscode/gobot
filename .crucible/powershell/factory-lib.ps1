@@ -203,3 +203,6 @@ if (-not (Test-Path -LiteralPath $sessionOutputPath)) {
     throw "Required helper script not found at $sessionOutputPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
 }
 . $sessionOutputPath
+
+. (Join-Path $PSScriptRoot "lib/platform.ps1")
+

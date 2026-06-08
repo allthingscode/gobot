@@ -21,7 +21,7 @@
 
 ## Session Start
 
-Before doing anything, run `{{crucible_root}}/powershell/clear_session_state.ps1 implementation` to clear stale state safely. Do not edit `session_state.json` manually.
+Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1 implementation` to clear stale state safely. Do not edit `session_state.json` manually.
 
 **Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a verification handoff — follow it directly. Do NOT redesign. Skip to Phase 2: Code.
 
@@ -84,7 +84,7 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 
 Write table-driven tests as you go — not after. Run continuously:
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick
+powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"
 ```
 
 **STRICTLY FORBIDDEN**: `git push`. Your role ends with uncommitted changes staged in the worktree. Do not commit to `master`. Do not touch `BACKLOG.md`.
@@ -95,7 +95,7 @@ Before marking ready for Verification:
 
 1. Run full verification:
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full
+   powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
    <project race/coverage test command>
    ```
 2. Coverage >80% for new code? If not, add tests.

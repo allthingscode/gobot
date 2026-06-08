@@ -32,10 +32,10 @@ Runtime directories such as `session/`, `.agent-workspaces/`, `locks/`, `tmp/`, 
 
 ## Install
 
-From the Crucible source repository:
+From the Crucible source repository (on Linux/macOS, prefix the script with `pwsh`; see [get-started.md](get-started.md#prerequisites)):
 
 ```powershell
-powershell/init-project.ps1 -ProjectRoot <project-root> -ProjectName "<name>"
+./powershell/init-project.ps1 -ProjectRoot <project-root> -ProjectName "<name>"
 ```
 
 The script copies the self-contained template into `<project-root>/.crucible`, fills basic project metadata, and sets:
@@ -62,6 +62,7 @@ From the adopter project root, validate the install:
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/validate-config.ps1" -ConfigPath ".crucible/config.yaml"
 ```
+*(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 
 ## Agent Instruction Setup
 
@@ -93,7 +94,7 @@ Project-specific work belongs in the adopter project's installed `.crucible/`.
 For a new human or agent, read:
 
 1. [../README.md](../README.md) - what Crucible is and why it exists.
-2. [GET_STARTED.md](GET_STARTED.md) - step-by-step first task walkthrough and 10-minute quickstart.
+2. [get-started.md](get-started.md) - step-by-step first task walkthrough and 10-minute quickstart.
 3. [operating-manual.md](operating-manual.md) - end-to-end workflow.
 4. [policy.md](policy.md) - canonical gates and circuit breakers.
 5. [handoff-protocol.md](handoff-protocol.md) - handoff shape and session lifecycle.

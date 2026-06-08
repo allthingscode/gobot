@@ -2,7 +2,7 @@
 
 This walkthrough takes you from a fresh clone to a completed first task. It uses a TypeScript/Node project as the example to show that Crucible is not Go-specific.
 
-For reference documentation, see [operating-manual.md](operating-manual.md). For circuit breaker recovery, see [CIRCUIT_BREAKER_RUNBOOK.md](CIRCUIT_BREAKER_RUNBOOK.md).
+For reference documentation, see [operating-manual.md](operating-manual.md). For circuit breaker recovery, see [circuit-breaker-runbook.md](circuit-breaker-runbook.md).
 
 ---
 
@@ -11,28 +11,30 @@ For reference documentation, see [operating-manual.md](operating-manual.md). For
 Get from clone to a running first task in under 10 minutes.
 
 ### Prerequisites
-- Windows + PowerShell 5.1+ (current runtime; Go cross-platform rewrite planned)
+- A PowerShell host: Windows PowerShell 5.1 (built into Windows, the field-tested default) **or** [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS
 - Git
 - One of: Go, Node, Python, or Rust toolchain (matching the `-Language` flag below)
 
+> **Running the commands below.** On Windows, run the `.ps1` scripts directly as shown. On Linux/macOS, prefix the script path with `pwsh` (e.g. `pwsh ./powershell/init-project.ps1 ...`). Forward-slash paths work on every platform.
+
 ### Install
-1. Clone the Crucible framework repository to a stable directory outside your project (e.g., `C:\src\crucible`):
+1. Clone the Crucible framework repository to a stable directory outside your project (e.g., `C:/src/crucible` on Windows, `~/src/crucible` on Linux/macOS):
 ```powershell
-git clone https://github.com/allthingscode/crucible.git C:\src\crucible
-cd C:\src\crucible
+git clone https://github.com/allthingscode/crucible.git crucible
+cd crucible
 ```
 *(Note: The source clone is only needed at install or update time, never at runtime.)*
 
 2. Run the project initializer against your project root:
 ```powershell
-.\powershell\init-project.ps1 -ProjectRoot <your-project-path> -Language <go|node|python|rust> -WithSampleTask -AppendInstructions
+./powershell/init-project.ps1 -ProjectRoot <your-project-path> -Language <go|node|python|rust> -WithSampleTask -AppendInstructions
 ```
 This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md.
 
 ### Run the sample task
 ```powershell
 cd <your-project-path>
-.\.crucible\powershell\factory.ps1 -Init -TaskId F-001
+./.crucible/powershell/factory.ps1 -Init -TaskId F-001
 ```
 Follow the prompts. The factory will scaffold a Groomer session and tell you the next agent command.
 
@@ -41,9 +43,8 @@ Follow the prompts. The factory will scaffold a Groomer session and tell you the
 
 ## Prerequisites
 
-- Windows (PowerShell runtime is the current implementation; see [ROADMAP.md](../ROADMAP.md) for the planned cross-platform Go rewrite)
+- A PowerShell host: Windows PowerShell 5.1 (Windows) or [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (Windows, Linux, or macOS). The runtime is CI-verified on Windows and Linux; macOS is supported via `pwsh`. See [ROADMAP.md](../ROADMAP.md) for the planned Go rewrite.
 - Git
-- PowerShell 5.1+
 - Your project's normal build/test toolchain (in this example: Node + npm)
 
 ---
@@ -53,7 +54,7 @@ Follow the prompts. The factory will scaffold a Groomer session and tell you the
 From the Crucible framework directory, run:
 
 ```powershell
-powershell\init-project.ps1 -ProjectRoot "<project-root>" -ProjectName "My API"
+./powershell/init-project.ps1 -ProjectRoot "<project-root>" -ProjectName "My API"
 ```
 
 This installs a complete, self-contained `.crucible/` bundle into your project. The application must not reference any external directory paths or absolute paths outside the project repository at runtime. Your project tree now has:
@@ -105,8 +106,9 @@ project_mandates:
 Validate the config from your project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible\powershell\validate-config.ps1" -ConfigPath ".crucible\config.yaml"
+powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/validate-config.ps1" -ConfigPath ".crucible/config.yaml"
 ```
+*(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 
 A passing run confirms no placeholder commands remain.
 
@@ -157,20 +159,21 @@ Add it to `.crucible/backlog/BACKLOG.md`:
 From your project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible\powershell\factory.ps1" -Init -TaskId F-001
+powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory.ps1" -Init -TaskId F-001
 ```
+*(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 
 Expected output:
 
 ```
 [FACTORY] Validating environment...
 [FACTORY] No incoming handoff found for F-001. Bootstrapping Groomer session.
-[FACTORY] Scaffolded: .crucible\session\F-001\grooming\task.md
-[FACTORY] Scaffolded: .crucible\session\F-001\grooming\prompt.md
+[FACTORY] Scaffolded: .crucible/session/F-001/grooming/task.md
+[FACTORY] Scaffolded: .crucible/session/F-001/grooming/prompt.md
 
 [NEXT SESSION COMMAND]
 Start a Groomer agent session. Tell it:
-  Groomer: F-001 — read and follow all instructions in .crucible\session\F-001\grooming\prompt.md
+  Groomer: F-001 — read and follow all instructions in .crucible/session/F-001/grooming/prompt.md
   Recommended model: fast/cost-effective
 ```
 
@@ -181,13 +184,13 @@ Start a Groomer agent session. Tell it:
 Open an AI agent session (Claude Code, Gemini CLI, Codex, etc.) in your project directory. Paste the command the factory produced:
 
 ```
-Groomer: F-001 — read and follow all instructions in .crucible\session\F-001\grooming\prompt.md
+Groomer: F-001 — read and follow all instructions in .crucible/session/F-001/grooming/prompt.md
 ```
 
 The Groomer will:
 1. Read your backlog item and config
 2. Write a detailed technical spec with implementation strategy and file scope
-3. Write `.crucible\session\handoffs\F-001-{timestamp}.json`
+3. Write `.crucible/session/handoffs/F-001-{timestamp}.json`
 4. Run `factory.ps1 -Init -TaskId F-001`
 5. Present the factory output to you
 
@@ -202,7 +205,7 @@ You'll see something like:
 - Next Priority: F-001 → Architect
 
 [NEXT SESSION COMMAND]
-Architect: F-001 — read and follow all instructions in .crucible\session\F-001\architect\prompt.md
+Architect: F-001 — read and follow all instructions in .crucible/session/F-001/architect/prompt.md
 Recommended model: high-capability
 ```
 
@@ -215,12 +218,12 @@ Confirm with "go" (or "go" in a new session if you prefer a fresh context).
 Paste the command in an agent session:
 
 ```
-Architect: F-001 — read and follow all instructions in .crucible\session\F-001\architect\prompt.md
+Architect: F-001 — read and follow all instructions in .crucible/session/F-001/architect/prompt.md
 ```
 
 The Architect will:
 1. Read the Groomer's spec
-2. Implement the code inside an isolated git worktree at `.crucible\.agent-workspaces\architect-F-001\`
+2. Implement the code inside an isolated git worktree at `.crucible/.agent-workspaces/architect-F-001/`
 3. Run your verification commands (`npm test`, etc.) inside the worktree
 4. Commit the changes inside the worktree
 5. Write the handoff and run the factory
@@ -233,7 +236,7 @@ You confirm, then run the Reviewer.
 
 Each runs the same pattern: paste the factory-generated command, agent does its work, presents the next command, you confirm.
 
-The **Reviewer** checks the Architect's work against your spec and runs `npm test`, `npm run lint`, `npx tsc --noEmit`. If anything fails, it routes back to the Architect with a strike. After 3 strikes the task blocks and requires human intervention (see [CIRCUIT_BREAKER_RUNBOOK.md](CIRCUIT_BREAKER_RUNBOOK.md)).
+The **Reviewer** checks the Architect's work against your spec and runs `npm test`, `npm run lint`, `npx tsc --noEmit`. If anything fails, it routes back to the Architect with a strike. After 3 strikes the task blocks and requires human intervention (see [circuit-breaker-runbook.md](circuit-breaker-runbook.md)).
 
 The **Operator** merges the worktree branch to `main`, cleans up the worktree, updates the backlog to `Production`, and presents the **Human Gate**:
 
@@ -279,7 +282,7 @@ That's normal on a first run. The factory creates the Groomer session automatica
 Make sure the agent's working directory is your project root where the installed `.crucible/` lives.
 
 **Worktree already exists error**
-Run `powershell\factory.ps1 -Health` to find orphaned worktrees from previous runs, then `powershell\factory.ps1 -Cleanup` to preview cleanup or `powershell\factory.ps1 -Cleanup -Force` to execute it.
+Run `./powershell/factory.ps1 -Health` to find orphaned worktrees from previous runs, then `./powershell/factory.ps1 -Cleanup` to preview cleanup or `./powershell/factory.ps1 -Cleanup -Force` to execute it.
 
 ---
 

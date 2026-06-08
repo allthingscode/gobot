@@ -98,7 +98,7 @@ if ($content -match '(?ms)^paths:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
     $pathsBlock = $Matches[1]
     if ($pathsBlock -match '(?m)^\s{2}backlog:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
         $backlogVal = $Matches[1].Trim()
-        if ([System.IO.Path]::IsPathRooted($backlogVal)) {
+        if ([System.IO.Path]::IsPathRooted($backlogVal) -or $backlogVal -match '^([A-Za-z]:|[\\/])') {
             $errors += "paths.backlog must be a relative path inside the project."
         }
         if ($backlogVal -match "^\.\." -or $backlogVal -match "[\\/]\.\.") {

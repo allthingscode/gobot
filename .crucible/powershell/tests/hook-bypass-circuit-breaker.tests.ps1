@@ -1,9 +1,10 @@
-# Test for Git Hook Bypass Prevention circuit breaker.
+﻿# Test for Git Hook Bypass Prevention circuit breaker.
 # Git intentionally honors --no-verify by skipping local hooks, so Crucible enforces
 # this at the factory boundary when a handoff reports or references a bypass attempt.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
 $results = @()
@@ -120,7 +121,7 @@ created_at: "2026-05-25"
         $env:FACTORY_CYCLE_ID = "test-cycle"
 
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                 -Init -TaskId $taskId -ProjectRoot $projectRoot
         }
         $output = $res.Output -join "`n"

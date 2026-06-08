@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
 $results = @()
@@ -148,7 +149,7 @@ function Invoke-FactoryForArchitect {
     param([string]$ProjectRoot, [string]$TaskId)
     $env:FACTORY_CYCLE_ID = "test-cycle"
     return Invoke-ExternalCommand {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $TaskId -ProjectRoot $ProjectRoot -Quiet
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $TaskId -ProjectRoot $ProjectRoot -Quiet
     }
 }
 

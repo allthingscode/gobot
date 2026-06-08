@@ -1,4 +1,4 @@
-# Regression tests for powershell/validate-backlog.ps1.
+﻿# Regression tests for powershell/validate-backlog.ps1.
 #
 # Focus: Check B (Broken Links) must catch missing-file links in the
 # scaffold's unified `## Active Items` table, and must not flag links
@@ -8,6 +8,7 @@
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
 $results = @()
 
@@ -71,7 +72,7 @@ function Invoke-Validator {
     if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
         $cmdArgs += @("-ProjectRoot", $ProjectRoot)
     }
-    $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @cmdArgs 2>&1)
+    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @cmdArgs 2>&1)
     return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
 }
 
@@ -174,7 +175,7 @@ try {
         Assert-Result -Name "templated exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 (commented example link should be skipped), got " + $r.ExitCode + ". Output: " + $r.Output)
     }
 
-    # --- Test 4: Pattern C — row Status=Stub + spec status=Stub passes ---
+    # --- Test 4: Pattern C - row Status=Stub + spec status=Stub passes ---
     $results += Run-Test -Name "Pattern C: row Status=Stub matches spec status=Stub" -Body {
         $root = Join-Path $tempRoot "patternc-ok"
         New-MinimalBacklogTree -Root $root

@@ -1,4 +1,4 @@
-# End-to-end integration tests for the Crucible adopter path bootstrap.
+﻿# End-to-end integration tests for the Crucible adopter path bootstrap.
 # Verifies that a new project can adopt Crucible, write a backlog item, validate it,
 # create a new handoff, and boot the factory for the first time.
 
@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_BACKLOG = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
 $VALIDATE_CONFIG = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
@@ -82,7 +83,7 @@ try {
         }
 
         $initCmd = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
                 -ProjectRoot $projectRoot `
                 -ProjectName "Bootstrap App" `
                 -Quiet
@@ -130,7 +131,7 @@ Add a health endpoint.
         Push-Location $projectRoot
         try {
             $validateCmd = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_BACKLOG `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_BACKLOG `
                     -BacklogPath ".crucible/backlog/BACKLOG.md" -FixSummary
             }
         } finally {
@@ -160,7 +161,7 @@ Add a health endpoint.
 
         # 6. Verify config validation passes
         $validateConfigCmd = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_CONFIG `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_CONFIG `
                 -ConfigPath $configPath
         }
         Assert-Result -Name "validate-config exit" -Condition ($validateConfigCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $validateConfigCmd.ExitCode + ". Output: " + ($validateConfigCmd.Output -join "`n"))
@@ -169,7 +170,7 @@ Add a health endpoint.
         Push-Location $projectRoot
         try {
             $newHandoffCmd = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                     -NewHandoff `
                     -TaskId "F-001" `
                     -HandoffSource "grooming" `
@@ -196,7 +197,7 @@ Add a health endpoint.
         Push-Location $projectRoot
         try {
             $factoryInitCmd = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                     -Init -TaskId "F-001"
             }
         } finally {

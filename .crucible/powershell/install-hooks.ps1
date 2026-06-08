@@ -32,3 +32,19 @@ try {
     Pop-Location
 }
 
+# On Unix, git only runs hooks that carry the executable bit. A bundle installed
+# or committed on Windows records mode 100644, so a clone on Linux/macOS would
+# silently skip every gate. Ensure the activated hooks are executable here. This
+# is self-healing per clone because core.hooksPath is local (uncommitted) config,
+# so this script already runs after every fresh clone.
+$onWindows = $true
+if ($PSVersionTable.PSEdition -eq "Core") {
+    $onWindows = (Get-Variable IsWindows -ValueOnly -ErrorAction SilentlyContinue) -ne $false
+}
+if (-not $onWindows) {
+    Get-ChildItem -LiteralPath $fullHooksDir -File | ForEach-Object {
+        & chmod "+x" $_.FullName
+    }
+    Write-Host "Marked hook scripts executable for this platform." -ForegroundColor Green
+}
+

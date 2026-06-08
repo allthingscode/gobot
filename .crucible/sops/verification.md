@@ -22,7 +22,7 @@
 ## Review Workflow
 
 ### Step 1 — Pre-Review Setup
-1. Run `{{crucible_root}}/powershell/clear_session_state.ps1 verification` to clear stale state safely
+1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 verification` to clear stale state safely
 2. Read the backlog spec for `{task_id}` — understand what was supposed to be built
 3. Enter the assigned task worktree at `.crucible/.agent-workspaces/implementation-{task_id}` and review there. Do not check out task branches from the main checkout.
 
@@ -36,7 +36,7 @@ Verify every modified file falls within the declared package paths. Any file out
 ### Step 3 — Automated Verification
 Run the canonical isolated checks. Every check MUST pass before proceeding to manual review:
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full
+powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
 ```
 
 > **Shortcut**: `bash scripts/ci_check.sh` runs the CI parity checks with isolated caches/tmp and exits non-zero on first failure.

@@ -1,8 +1,10 @@
-# Test for Reviewer Verification Failure (fabricated test result rejected) circuit breaker.
+﻿# Test for Reviewer Verification Failure (fabricated test result rejected) circuit breaker.
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
+$pwshCmd = Get-PwshCommand
 
 $results = @()
 
@@ -73,14 +75,16 @@ try {
         }
 
         # 2. Initialize Crucible project
-        $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot `
             -ProjectName "Fabricated Test App" `
             -DefaultBranch "master" `
             -Language python `
             -Quiet 2>&1
 
-        # 3. Configure failing verification check (using cmd.exe /c exit 1 to avoid quotes)
+        # 3. Configure failing verification check. Use the resolved pwsh command
+        # with a non-zero exit so the check fails portably on Windows and Linux
+        # (cmd.exe does not exist on Linux).
         $configPath = Join-Path $projectRoot ".crucible/config.yaml"
         $configContent = @"
 project_name: "Fabricated Test App"
@@ -91,10 +95,10 @@ crucible_install_commit: "abcdef"
 verification:
   quick:
     - name: Failing Test
-      command: cmd.exe /c exit 1
+      command: $pwshCmd -NoProfile -Command exit 1
   full:
     - name: Failing Test Full
-      command: cmd.exe /c exit 1
+      command: $pwshCmd -NoProfile -Command exit 1
 "@
         [System.IO.File]::WriteAllText($configPath, $configContent)
 
@@ -196,7 +200,7 @@ APPROVED
 
         # 8. Run factory safely using Invoke-ExternalCommand helper
         $res = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                 -Init -TaskId "C-FABRICATED" -ProjectRoot $projectRoot
         }
         $output = $res.Output -join "`n"

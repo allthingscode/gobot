@@ -27,6 +27,11 @@ git clone <crucible-upstream-url> C:\path\to\crucible-source
 git -C C:\path\to\crucible-source pull
 ```
 
+> **Cross-platform note.** Examples below use `powershell.exe` and a Windows
+> source path. On Linux/macOS, replace `powershell.exe` with `pwsh` and use a
+> Unix path (e.g. `~/src/crucible-source`). Forward-slash paths work on every
+> platform.
+
 The source repo is used only for installs and updates. It is not referenced at runtime.
 
 ---
@@ -74,7 +79,7 @@ The source repo is used only for installs and updates. It is not referenced at r
 6. **Verify.** Run your bundle's test suite from your project root:
 
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File ".crucible\powershell\run_all_tests.ps1"
+   powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/run-all-tests.ps1"
    ```
 
 7. **Commit.** Treat the update like any other change: review, test, commit.
@@ -104,4 +109,4 @@ Use manual copying only when you intentionally want a single upstream file outsi
 
 ---
 
-For the initial install, see [GET_STARTED.md](GET_STARTED.md).
+For the initial install, see [get-started.md](get-started.md).

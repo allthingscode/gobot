@@ -1,4 +1,4 @@
-<!-- prompt_version: verification_prompt-v25 -->
+<!-- prompt_version: verification_prompt-v26 -->
 Verification: {task_id}
 
 {prev_session_summary}
@@ -52,7 +52,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
    
    Shortcut in worktree: `bash scripts/ci_check.sh` (same CI parity sequence with isolated caches/tmp).
 4. **Acceptance Criteria**: Review every item in the `Acceptance Criteria` section of the backlog spec for `{task_id}` and confirm implementation.
-5. **Quality Check**: Review the diff for Go idiomatic quality, error wrapping, and security.
+5. **Quality Check**: Review the diff for idiomatic quality, error handling, and security.
 6. **Documentation**: Write findings to `.crucible/session/{task_id}/verification/review_report.md`.
    - **MANDATORY**: The file MUST start with this exact YAML header (factory.ps1 validates it):
      ```yaml

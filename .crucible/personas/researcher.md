@@ -18,7 +18,7 @@ Task-type SOPs remain available for specialized research work:
 |---|---|---|
 | Open-ended investigation | `Researcher: Investigate [TOPIC]` | `{{crucible_root}}/sops/research-investigate.md` |
 | Adopter-project quality audit | `Researcher: Audit [project name]` | `{{crucible_root}}/sops/research-audit-project.md` |
-| Crucible quality audit | `Researcher: Audit Crucible` | `{{crucible_root}}/sops/research-audit-factory.md` |
+| Crucible quality audit | `Researcher: Audit Crucible` | `{{crucible_root}}/sops/research-audit-framework.md` |
 
 ---
 
@@ -45,7 +45,7 @@ The research SOP owns the current handoff JSON schema. Handoffs must use `source
 
 **State file:** `.crucible/session/global/session_state.json` -> `phases.research`
 
-Use `{{crucible_root}}/powershell/update_session_state.ps1 -Specialist research` for all writes. Never edit the JSON directly.
+Use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist research` for all writes. Never edit the JSON directly.
 
 ---
 
@@ -56,3 +56,6 @@ Use `{{crucible_root}}/powershell/update_session_state.ps1 -Specialist research`
 | Incoming handoff JSON | Backlog item file | Other phase scratch dirs |
 | Assigned SOP | `AGENTS.md` | `.crucible/session/{task_id}/{implementation,verification,grooming,deployment}/` |
 | `task.md` for this task | Existing research files | `vendor/` |
+
+> [!NOTE]
+> The Researcher is read-only for codebase and backlog files. Writing files outside of the designated `.crucible/research/` or `.crucible/session/` paths is detected as a scope violation at the `research -> grooming` gate and surfaces a security warning for human review (though the primary boundary control remains the orchestrator's `Explore` dispatch configuration).

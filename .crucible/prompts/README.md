@@ -54,7 +54,6 @@ agent "[PROMPT]"
 
 ### System Operations
 - `Health check` - Quick system health scan
-- `Doc lint` - Check documentation quality
 - `Doctor` - Run project doctor or configured health checks (interactive)
 - `Checkpoints` - List all session checkpoints
 

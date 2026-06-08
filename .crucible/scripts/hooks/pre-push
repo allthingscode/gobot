@@ -20,33 +20,42 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
+    # Resolve platform-appropriate PowerShell command. Prefer powershell.exe so
+    # Windows runs Windows PowerShell 5.1 (the field-tested host, matching CI);
+    # Linux/macOS have no powershell.exe and fall through to pwsh 7+.
+    PWSH="$(command -v powershell.exe || command -v pwsh)"
+
     # 1. Project Scaffolding unit tests
     echo "Running project scaffolding tests..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/init-project.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/init-project.tests.ps1
 
     # 2. Config Validation unit tests
     echo "Running config validation tests..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/validate-config.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/validate-config.tests.ps1
 
     # 3. Adopter Smoke tests
     echo "Running adopter smoke tests..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/adopter-smoke.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/adopter-smoke.tests.ps1
 
     # 4. File Affinity tests
     echo "Running file affinity tests..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-file-affinity.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-file-affinity.tests.ps1
 
     # 5. Core Factory Routing test suite
     echo "Running core factory routing tests..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/factory_test.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/factory.tests.ps1
 
     # 6. E2E Adopter Onboarding Bootstrap tests
     echo "Running adopter onboarding E2E bootstrap tests..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/adopter-bootstrap.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/adopter-bootstrap.tests.ps1
 
     # 7. Pre-push hook coverage tests
     echo "Running pre-push hook tests..."
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File powershell/tests/pre-push-hook.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/pre-push-hook.tests.ps1
+
+    # 8. Example bundle sync guard (examples/gobot mirror vs canonical)
+    echo "Running examples mirror sync tests..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/examples-mirror-sync.tests.ps1
 
     # NOTE: This hook intentionally does not delete any working-tree files. Test
     # suites isolate into temp dirs and clean up after themselves; a verification

@@ -29,7 +29,7 @@ See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 2. **Identify your task type** and read the assigned SOP:
    - `Researcher: Investigate [TOPIC]` → `.crucible/sops/research-investigate.md`
    - `Researcher: Audit [project name]` → `.crucible/sops/research-audit-project.md`
-   - `Researcher: Audit Dev Factory` → `.crucible/sops/research-audit-factory.md`
+   - `Researcher: Audit Crucible` → `.crucible/sops/research-audit-framework.md`
 3. **Follow the SOP steps exactly.** The SOP defines your inputs, process, and output format.
 4. **Handoff** per the protocol in `.crucible/sops/research.md` and the factory phase policy.
 

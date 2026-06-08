@@ -1,7 +1,8 @@
-# Smoke tests for powershell/init-project.ps1.
+﻿# Smoke tests for powershell/init-project.ps1.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $results = @()
 
@@ -40,7 +41,7 @@ try {
     $projectRoot = Join-Path $tempRoot "app"
 
     $results += Run-Test -Name "Installs scaffold with configured project metadata" -Body {
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $projectRoot `
             -ProjectName "Test App" `
             -Description "Temporary app for init-project tests." `
@@ -74,7 +75,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -ProjectRoot $projectRoot `
                 -ProjectName "Second App" `
                 -Quiet 2>&1)
@@ -88,7 +89,7 @@ try {
     }
 
     $results += Run-Test -Name "Force overwrites scaffold-managed files" -Body {
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $projectRoot `
             -ProjectName "Forced App" `
             -Description "Forced scaffold refresh." `
@@ -171,7 +172,7 @@ try {
     $appendRoot = Join-Path $tempRoot "append-app"
 
     $results += Run-Test -Name "AppendInstructions creates instruction files with sentinel markers" -Body {
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $appendRoot `
             -ProjectName "Append Test" `
             -AppendInstructions `
@@ -205,7 +206,7 @@ try {
         $beforeClaude = Get-Content -LiteralPath (Join-Path $appendRoot "CLAUDE.md") -Raw -Encoding UTF8
         $beforeGemini = Get-Content -LiteralPath (Join-Path $appendRoot "GEMINI.md") -Raw -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $appendRoot `
             -AppendInstructions `
             -Force `
@@ -231,7 +232,7 @@ try {
         $corruptRoot = Join-Path $tempRoot "corrupt-app"
 
         # First create a valid scaffold
-        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $corruptRoot `
             -ProjectName "Corrupt Test" `
             -Quiet 2>&1)
@@ -243,7 +244,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -ProjectRoot $corruptRoot `
                 -AppendInstructions `
                 -Force `
@@ -261,7 +262,7 @@ try {
         $preserveRoot = Join-Path $tempRoot "preserve-app"
 
         # Create scaffold first (without AppendInstructions)
-        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $preserveRoot `
             -ProjectName "Preserve Test" `
             -Quiet 2>&1)
@@ -272,7 +273,7 @@ try {
         [System.IO.File]::WriteAllText($personalAgents, $personalContent, [System.Text.UTF8Encoding]::new($false))
 
         # Run AppendInstructions
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $preserveRoot `
             -AppendInstructions `
             -Force `
@@ -295,7 +296,7 @@ try {
     $results += Run-Test -Name "Configures language presets correctly" -Body {
         foreach ($lang in 'go','node','python','rust') {
             $langRoot = Join-Path $tempRoot "lang-$lang"
-            $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -ProjectRoot $langRoot `
                 -ProjectName "Lang App $lang" `
                 -Language $lang `
@@ -316,7 +317,7 @@ try {
 
     $results += Run-Test -Name "Scaffolds sample task F-001 correctly" -Body {
         $sampleRoot = Join-Path $tempRoot "sample-task-app"
-        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $sampleRoot `
             -ProjectName "Sample App" `
             -Language "go" `
@@ -358,7 +359,7 @@ try {
 
     $results += Run-Test -Name "Stamps crucible_version and crucible_install_commit from upstream" -Body {
         $stampRoot = Join-Path $tempRoot "version-stamp-app"
-        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $stampRoot `
             -ProjectName "Stamp Test" `
             -Quiet 2>&1)
@@ -387,7 +388,7 @@ project:
 custom_value: "preserve me"
 "@ | Out-File -LiteralPath $configPath -Encoding UTF8
 
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $stampOnlyRoot `
             -StampVersionOnly `
             -Quiet 2>&1)
@@ -406,7 +407,7 @@ custom_value: "preserve me"
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $secondOutput = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $secondOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -ProjectRoot $stampOnlyRoot `
                 -StampVersionOnly `
                 -Quiet 2>&1)
@@ -421,7 +422,7 @@ custom_value: "preserve me"
 
     $results += Run-Test -Name "Default install output has no validate-backlog chatter" -Body {
         $quietRoot = Join-Path $tempRoot "quiet-output-app"
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $quietRoot `
             -ProjectName "Quiet Output Test" `
             -Language "go" `
@@ -435,7 +436,7 @@ custom_value: "preserve me"
 
     $results += Run-Test -Name "Step 5 shows sample-task hint when -WithSampleTask" -Body {
         $step5Root = Join-Path $tempRoot "step5-with-sample-app"
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $step5Root `
             -ProjectName "Step5 Sample Test" `
             -Language "go" `
@@ -448,7 +449,7 @@ custom_value: "preserve me"
 
     $results += Run-Test -Name "Step 5 shows generic hint when no -WithSampleTask" -Body {
         $step5Root = Join-Path $tempRoot "step5-no-sample-app"
-        $outputLines = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $step5Root `
             -ProjectName "Step5 NoSample Test" 2>&1)
         $output = $outputLines -join "`n"
@@ -503,7 +504,7 @@ project_mandates:
         $initialConfig | Out-File -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
 
         # Run init-project.ps1 with -Force to overwrite and respect custom config
-        $null = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+        $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
             -ProjectRoot $customAppRoot `
             -Force `
             -WithSampleTask `
@@ -524,7 +525,7 @@ project_mandates:
         # 3. Assert config validation passes on custom backlog config
         $valScript = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
         $valConfig = Join-Path $customAppRoot ".crucible/config.yaml"
-        $valResult = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $valScript -ConfigPath $valConfig 2>&1)
+        $valResult = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $valScript -ConfigPath $valConfig 2>&1)
         Assert-Result -Name "custom config validation exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validate-config exit 0, got " + $LASTEXITCODE + ". Output: " + ($valResult -join "`n"))
 
         # 4. Assert factory_lint passes in the custom app root context (dynamic linter check)
@@ -537,7 +538,7 @@ project_mandates:
 
         # 5. Assert factory-health checks pass using the custom backlog directory (dynamic health check)
         $healthScript = Join-Path $REPO_ROOT "powershell/factory-health.ps1"
-        $healthResult = @(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $healthScript -ProjectRoot $customAppRoot 2>&1)
+        $healthResult = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $healthScript -ProjectRoot $customAppRoot 2>&1)
         Assert-Result -Name "custom backlog health exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected factory-health exit 0, got " + $LASTEXITCODE + ". Output: " + ($healthResult -join "`n"))
     }
 }

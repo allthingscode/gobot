@@ -61,5 +61,5 @@ function Write-BlockedTaskRecord {
     }
 
     $updateJson = @{ status = "blocked"; circuit_breaker = $CircuitBreaker } | ConvertTo-Json -Compress
-    & "$FrameworkPowerShell/update_session_state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null
+    & "$FrameworkPowerShell/update-session-state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null
 }

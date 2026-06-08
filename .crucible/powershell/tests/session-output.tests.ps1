@@ -2,6 +2,7 @@
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
 $Quiet = $true
 . $FACTORY_LIB
@@ -91,7 +92,7 @@ function New-TestContext {
         CumulativeHandoffCount = 1
         IsBootstrap = $false
         Transition = "grooming -> verification"
-        NextFactoryCommand = "powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId $TaskId -Quiet"
+        NextFactoryCommand = "$((Get-PwshCommand)) -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId $TaskId -Quiet"
     }
 }
 
@@ -101,14 +102,14 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
     $results += Run-Test -Name "Write-NextStep writes expected content with explicit SessionDir" -Body {
         $sessionDir = Join-Path $tempRoot "next-step/session"
-        $command = "powershell.exe -File factory.ps1 -Init -TaskId F-901"
+        $command = "$((Get-PwshCommand)) -File factory.ps1 -Init -TaskId F-901"
 
         Write-NextStep -SessionDir $sessionDir -Command $command -TaskId "F-901" -Specialist "verification"
 
         $file = Join-Path $sessionDir "F-901/verification/next_step.txt"
         Assert-Result -Name "next_step exists" -Condition (Test-Path -LiteralPath $file) -FailureMessage "next_step.txt was not written"
-        $content = Get-Content -LiteralPath $file -Raw -Encoding UTF8
-        $expected = "=== SESSION END COMMAND ===`nRun this via Bash tool when your work is complete:`n`n$command`n`r`n"
+        $content = (Get-Content -LiteralPath $file -Raw -Encoding UTF8) -replace "`r`n", "`n"
+        $expected = ("=== SESSION END COMMAND ===`nRun this via Bash tool when your work is complete:`n`n$command`n" + "`n") -replace "`r`n", "`n"
         Assert-Result -Name "next_step content" -Condition ($content -eq $expected) -FailureMessage "next_step.txt content changed"
     }
 
@@ -168,7 +169,7 @@ New-Item -ItemType Directory -Path `$handoffs,`$prompts -Force | Out-Null
 New-FactoryPromptText -Context `$ctx
 "@
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1
         Assert-Result -Name "exit code" -Condition ($LASTEXITCODE -eq 1) -FailureMessage "unresolved placeholder did not exit 1; output: $($output | Out-String)"
         Assert-Result -Name "message" -Condition (($output | Out-String) -match "unresolved placeholders") -FailureMessage "unresolved placeholder message changed"
     }

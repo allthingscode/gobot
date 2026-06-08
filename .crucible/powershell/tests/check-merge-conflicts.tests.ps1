@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $CHECK_SCRIPT = Join-Path $REPO_ROOT "powershell/check-merge-conflicts.ps1"
 
 $results = @()
@@ -85,7 +86,7 @@ function Invoke-MergeCheck {
     Push-Location $ProjectRoot
     try {
         return Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $CHECK_SCRIPT -TaskId $TaskId -ProjectRoot $ProjectRoot
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CHECK_SCRIPT -TaskId $TaskId -ProjectRoot $ProjectRoot
         }
     } finally {
         Pop-Location
@@ -136,7 +137,7 @@ try {
         Push-Location $tempRoot
         try {
             $res = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $CHECK_SCRIPT -TaskId $taskId -ProjectRoot $projectRoot
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CHECK_SCRIPT -TaskId $taskId -ProjectRoot $projectRoot
             }
         } finally {
             Pop-Location

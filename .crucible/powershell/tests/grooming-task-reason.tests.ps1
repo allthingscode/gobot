@@ -1,10 +1,11 @@
-# Regression test for scoped grooming phase init reason handling.
+﻿# Regression test for scoped grooming phase init reason handling.
 # A researcher->groomer handoff must keep its own reason even when another Ready item exists.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
@@ -76,7 +77,7 @@ try {
         }
 
         $initCmd = Invoke-ExternalCommand {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
                 -ProjectRoot $projectRoot `
                 -ProjectName "Groomer Reason App" `
                 -Quiet
@@ -159,7 +160,7 @@ Separate ready item that must not rewrite another task's handoff reason.
         Push-Location $projectRoot
         try {
             $factoryCmd = Invoke-ExternalCommand {
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                     -Init -TaskId "C-100" -Quiet
             }
         } finally {

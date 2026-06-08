@@ -54,7 +54,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 3. **Merge Simulation ({task_id})**:
    - Before committing to `master`, run the merge simulation:
      ```powershell
-     {{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id}
+      {{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id} -ProjectRoot "{project_root}"
      ```
    - **If it fails**:
      - Status: Set task status to `"Ready for Rebase"`.

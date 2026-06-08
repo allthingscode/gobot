@@ -126,7 +126,8 @@ Blocked          → Ready              (human resolution + factory -Recover)
 ## 6. Security & Isolation
 
 - **Implementation Worktrees**: Every task MUST run in an isolated `git worktree` at `.crucible/.agent-workspaces/implementation-{id}`.
-- **Prompt Injection Defense**: Handoffs are scanned for patterns (e.g., "ignore previous instructions"). Researcher handoffs trigger an automatic block if patterns are found.
+- **Prompt Injection Defense**: Handoffs and research findings are scanned for patterns (e.g., "ignore previous instructions"). Researcher handoffs trigger an automatic block if patterns are found. As a defense-in-depth measure, all produced research artifacts and session research files are independently scanned; a detector hit in these files when no self-report has been made by the Researcher triggers a block.
+- **Research Scope Boundary**: As a defense-in-depth check, modifications during the research phase to tracked files outside `.crucible/research/` and `.crucible/session/` trigger a security warning in the console and event log to surface boundary violations for human review (advisory only, does not block the pipeline).
 - **File Affinity**: Groomers define the scope boundary. Specialists must not edit files outside this boundary.
 - **No Push/Commit Shortcuts**: Only the Operator may merge to `master` and push to origin.
 

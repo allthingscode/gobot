@@ -28,7 +28,7 @@ When assigned to the grooming phase, read the activity SOP before taking any act
 
 **State file**: `.crucible/session/global/session_state.json` -> `phases.grooming`
 
-**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update_session_state.ps1 -Specialist grooming -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
+**State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update-session-state.ps1 -Specialist grooming -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
 
 **Locking**: Follow the grooming SOP and factory task context for lock behavior.
 
