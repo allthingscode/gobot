@@ -16,7 +16,7 @@ REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
 echo "--- Crucible pre-push verification started"
 
-if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
+if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ] || { [ -f "$REPO_ROOT/powershell/run-all-tests.ps1" ] && [ -d "$REPO_ROOT/proposals" ]; }; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 

@@ -1,4 +1,4 @@
-﻿# Regression tests for check-mojibake.ps1 invoked with multiple file paths.
+# Regression tests for check-mojibake.ps1 invoked with multiple file paths.
 #
 # The adopter pre-commit hook invokes this script via:
 #   (Get-PwshCommand) -File check-mojibake.ps1 <file1> <file2> ...
@@ -58,6 +58,10 @@ try {
     # 3. Single file still works (no regression of prior behavior).
     $r3 = Invoke-Check -Files @($clean1)
     Check "single-file clean: exit 0" ($r3.ExitCode -eq 0) "exit=$($r3.ExitCode)`n$($r3.Output)"
+
+    # 4. Bare invocation (default paths) -> no error, exit 0.
+    $r4 = Invoke-Check -Files @()
+    Check "bare invocation: exit 0" ($r4.ExitCode -eq 0) "exit=$($r4.ExitCode)`n$($r4.Output)"
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -386,6 +386,16 @@ if ($WithSampleTask) {
     }
 }
 
+if ($stamp.Commit -match '^[0-9a-f]{40}$') {
+    try {
+        $provenance = New-ProvenanceManifest -FrameworkRoot $REPO_ROOT -Commit $stamp.Commit -Manifest $installManifest
+        $provenancePath = Write-ProvenanceManifest -BundleRoot $targetCrucible -ProvenanceManifest $provenance
+        Write-Info ("Wrote provenance manifest: " + $provenancePath) -ForegroundColor DarkGray
+    } catch {
+        Write-Warning ("Could not write provenance manifest: " + $_.Exception.Message)
+    }
+}
+
 if ($AppendInstructions) {
     Install-CrucibleInstructions -ProjectRoot $resolvedProjectRoot -Quiet:$Quiet | Out-Null
 }

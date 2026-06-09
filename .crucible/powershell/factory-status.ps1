@@ -10,7 +10,16 @@ param (
     [switch]$Tasks,
 
     [Parameter(Mandatory=$false)]
-    [switch]$ExportJSON
+    [switch]$ExportJSON,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$Drift,
+
+    [Parameter(Mandatory=$false)]
+    [string]$BundleRoot = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$FrameworkSource = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +29,81 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
     throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
 }
 . $helpersPath
+
+if ($Drift) {
+    . (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
+
+    $resolvedBundleRoot = $BundleRoot
+    if ([string]::IsNullOrWhiteSpace($resolvedBundleRoot)) {
+        $resolvedBundleRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+    } else {
+        $resolvedBundleRoot = (Resolve-Path -LiteralPath $resolvedBundleRoot).Path
+    }
+
+    $frameworkRoot = $FrameworkSource
+    if ([string]::IsNullOrWhiteSpace($frameworkRoot)) {
+        $frameworkRoot = $resolvedBundleRoot
+    } else {
+        $frameworkRoot = (Resolve-Path -LiteralPath $frameworkRoot).Path
+    }
+
+    $installManifest = Get-InstallManifest -FrameworkRoot $frameworkRoot
+    $provenance = Read-ProvenanceManifest -BundleRoot $resolvedBundleRoot
+
+    if ($null -eq $provenance) {
+        $configPath = Join-Path $resolvedBundleRoot "config.yaml"
+        $installCommit = ""
+        if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+            $configContent = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+            if ($configContent -match '(?m)^crucible_install_commit:\s*["'']?([0-9a-f]{40})["'']?\s*$') {
+                $installCommit = $Matches[1]
+            }
+        }
+        if ($installCommit -notmatch '^[0-9a-f]{40}$') {
+            Write-Host "Drift: no provenance manifest and no crucible_install_commit to backfill from." -ForegroundColor Red
+            Write-Host "Run init-project.ps1 from a Crucible source checkout to stamp the install commit, then retry." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host ("Drift: no manifest found; backfilling from crucible_install_commit " + $installCommit.Substring(0, 12) + "...") -ForegroundColor DarkGray
+        $provenance = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $installCommit -Manifest $installManifest
+    }
+
+    $classification = Get-DriftClassification -BundleRoot $resolvedBundleRoot -ProvenanceManifest $provenance -Manifest $installManifest
+
+    Write-Host "`nBundle Drift" -ForegroundColor Cyan
+    Write-Host "============" -ForegroundColor Cyan
+    Write-Host ("source_commit: " + [string]$provenance.source_commit)
+    foreach ($category in @("pristine", "customized", "adopter-added", "framework-removed")) {
+        Write-Host ("{0,-18} {1}" -f ($category + ":"), @($classification[$category]).Count)
+    }
+
+    $customized = @($classification["customized"])
+    if ($customized.Count -gt 0) {
+        Write-Host "`nCustomized files (differ from framework):" -ForegroundColor Yellow
+        foreach ($path in $customized) {
+            Write-Host ("  " + $path)
+        }
+    }
+    $added = @($classification["adopter-added"])
+    if ($added.Count -gt 0) {
+        Write-Host "`nAdopter-added files (not in manifest):" -ForegroundColor Gray
+        foreach ($path in $added) {
+            Write-Host ("  " + $path)
+        }
+    }
+    $removed = @($classification["framework-removed"])
+    if ($removed.Count -gt 0) {
+        Write-Host "`nFramework-removed files (in manifest, missing on disk):" -ForegroundColor Gray
+        foreach ($path in $removed) {
+            Write-Host ("  " + $path)
+        }
+    }
+
+    if ($customized.Count -gt 0) {
+        exit 1
+    }
+    exit 0
+}
 $sessionDir = Get-ConfiguredPath -Key "session"
 $backlogDir = Get-ConfiguredPath -Key "backlog"
 

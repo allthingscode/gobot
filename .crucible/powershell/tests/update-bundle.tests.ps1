@@ -317,6 +317,101 @@ try {
         $config = Get-Content -LiteralPath (Join-Path $adopter ".crucible/config.yaml") -Raw -Encoding UTF8
         Assert-Result -Name "commit updated after prune" -Condition ($config -match [regex]::Escape($commitC)) -FailureMessage "install commit did not advance after successful prune"
     }
+
+    $results += Run-Test -Name "P2 renamed-away file classified as review-removal if unmodified, needs-merge if modified" -Body {
+        $framework = Join-Path $tempRoot "p2-rename-framework"
+        $commitA = New-FrameworkFixture -Root $framework
+        # Write VERSION file to framework root so update-bundle can read/stamp it
+        Write-Utf8File -Path (Join-Path $framework "VERSION") -Content "0.4.0"
+        # Commit it
+        git -C $framework add VERSION | Out-Null
+        $commitA = Invoke-GitCommit -Repo $framework -Message "add version"
+
+        $adopter = Join-Path $tempRoot "p2-rename-adopter"
+        Copy-FrameworkToAdopter -Framework $framework -Adopter $adopter -Commit $commitA
+        
+        # Scenario A: Rename/remove the file in the framework
+        git -C $framework mv "docs/guide.md" "docs/guide-renamed.md" | Out-Null
+        Write-Utf8File -Path (Join-Path $framework "docs/guide-renamed.md") -Content 'guide head renamed'
+        $commitB = Invoke-GitCommit -Repo $framework -Message "rename guide"
+
+        # Adopter has NOT modified docs/guide.md
+        # Run in report-only mode first to verify classification
+        $result1 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "report-only" -Prune
+        Assert-Result -Name "exit ok for unmodified rename" -Condition ($result1.ExitCode -eq 0) -FailureMessage $result1.Output
+        Assert-Result -Name "classified as review-removal" -Condition ($result1.Output -match 'review-removal:\s+1') -FailureMessage $result1.Output
+        Assert-Result -Name "not classified as needs-merge" -Condition ($result1.Output -match 'needs-merge:\s+0') -FailureMessage $result1.Output
+
+        # Now actually apply the update in auto-safe mode
+        $result2 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe" -Prune
+        Assert-Result -Name "exit ok for auto-safe" -Condition ($result2.ExitCode -eq 0) -FailureMessage $result2.Output
+        Assert-Result -Name "stale guide.md is pruned" -Condition (-not (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/guide.md"))) -FailureMessage "guide.md was not pruned"
+        Assert-Result -Name "guide-renamed.md is added" -Condition (Test-Path -LiteralPath (Join-Path $adopter ".crucible/docs/guide-renamed.md")) -FailureMessage "guide-renamed.md was not added"
+        
+        # Verify crucible_version is stamped in config.yaml
+        $config = Get-Content -LiteralPath (Join-Path $adopter ".crucible/config.yaml") -Raw -Encoding UTF8
+        Assert-Result -Name "version stamped" -Condition ($config -match 'crucible_version: "0.4.0"') -FailureMessage ("crucible_version not stamped: " + $config)
+
+        # Scenario B: What if the adopter HAD modified docs/guide.md?
+        # Reset adopter
+        Remove-Item -LiteralPath $adopter -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-FrameworkToAdopter -Framework $framework -Adopter $adopter -Commit $commitA
+        
+        # Modify docs/guide.md on adopter
+        Write-Utf8File -Path (Join-Path $adopter ".crucible/docs/guide.md") -Content 'adopter modified guide content'
+        
+        $result3 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "report-only" -Prune
+        Assert-Result -Name "exit 2 for modified rename" -Condition ($result3.ExitCode -eq 2) -FailureMessage $result3.Output
+        Assert-Result -Name "classified as needs-merge" -Condition ($result3.Output -match 'needs-merge:\s+1') -FailureMessage $result3.Output
+        Assert-Result -Name "not classified as review-removal" -Condition ($result3.Output -match 'review-removal:\s+0') -FailureMessage $result3.Output
+    }
+
+    $results += Run-Test -Name "P3 custom-regions are preserved and files with only custom region edits are classified as safe-overwrite or no-op" -Body {
+        $framework = Join-Path $tempRoot "p3-custom-framework"
+        $commitA = New-FrameworkFixture -Root $framework
+        
+        # Create a file with custom regions in framework baseline
+        $contentA = "line 1`r`n# >>> CRUCIBLE-CUSTOM`r`ndefault custom region`r`n# <<< CRUCIBLE-CUSTOM`r`nline 3"
+        Write-Utf8File -Path (Join-Path $framework "docs/guide.md") -Content $contentA
+        $commitA = Invoke-GitCommit -Repo $framework -Message "add guide with custom region"
+
+        $adopter = Join-Path $tempRoot "p3-custom-adopter"
+        Copy-FrameworkToAdopter -Framework $framework -Adopter $adopter -Commit $commitA
+        
+        # Write adopter-modified custom region
+        $contentAdopter = "line 1`r`n# >>> CRUCIBLE-CUSTOM`r`nadopter custom region`r`n# <<< CRUCIBLE-CUSTOM`r`nline 3"
+        Write-Utf8File -Path (Join-Path $adopter ".crucible/docs/guide.md") -Content $contentAdopter
+
+        # Scenario A: Framework did NOT change the file.
+        # Running update-bundle should classify as no-op.
+        $result1 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "report-only"
+        Assert-Result -Name "exit ok for no change" -Condition ($result1.ExitCode -eq 0) -FailureMessage $result1.Output
+        Assert-Result -Name "custom region classified as no-op" -Condition ($result1.Output -match 'no-op:\s+4') -FailureMessage $result1.Output
+        Assert-Result -Name "custom region not classified as needs-merge" -Condition ($result1.Output -match 'needs-merge:\s+0') -FailureMessage $result1.Output
+
+        # Scenario B: Framework modified the file outside the custom region.
+        $contentB = "line 1 changed`r`n# >>> CRUCIBLE-CUSTOM`r`ndefault custom region`r`n# <<< CRUCIBLE-CUSTOM`r`nline 3"
+        Write-Utf8File -Path (Join-Path $framework "docs/guide.md") -Content $contentB
+        $commitB = Invoke-GitCommit -Repo $framework -Message "update guide outside custom region"
+
+        # Running update-bundle should classify as safe-overwrite.
+        $result2 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "report-only"
+        Assert-Result -Name "exit ok for safe-overwrite report" -Condition ($result2.ExitCode -eq 0) -FailureMessage $result2.Output
+        Assert-Result -Name "classified as safe-overwrite" -Condition ($result2.Output -match 'safe-overwrite:\s+1') -FailureMessage $result2.Output
+        Assert-Result -Name "not classified as needs-merge" -Condition ($result2.Output -match 'needs-merge:\s+0') -FailureMessage $result2.Output
+
+        # Apply in auto-safe mode
+        $result3 = Invoke-UpdateBundle -Framework $framework -Adopter $adopter -Mode "auto-safe"
+        Assert-Result -Name "exit ok for auto-safe apply" -Condition ($result3.ExitCode -eq 0) -FailureMessage $result3.Output
+        
+        # Verify the file is updated outside and custom region is preserved!
+        $updated = Get-Content -LiteralPath (Join-Path $adopter ".crucible/docs/guide.md") -Raw -Encoding UTF8
+        $expected = "line 1 changed`r`n# >>> CRUCIBLE-CUSTOM`r`nadopter custom region`r`n# <<< CRUCIBLE-CUSTOM`r`nline 3"
+        # Normalize line endings for comparison
+        $normUpdated = $updated.Replace("`r`n", "`n").Trim()
+        $normExpected = $expected.Replace("`r`n", "`n").Trim()
+        Assert-Result -Name "merged content correct" -Condition ($normUpdated -eq $normExpected) -FailureMessage ("expected:`n" + $normExpected + "`ngot:`n" + $normUpdated)
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

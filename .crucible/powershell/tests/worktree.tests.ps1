@@ -67,6 +67,45 @@ try {
         Assert-Result -Name "different dir test mismatch" -Condition (-not (Test-PathMatchesAffinity -ChangedPath "internal/app/vector_index_interval_test.go" -Affinity "internal/config/config.go")) -FailureMessage "test file in different directory should not match"
         Assert-Result -Name "sibling non-test mismatch" -Condition (-not (Test-PathMatchesAffinity -ChangedPath "internal/config/vector_index_interval.go" -Affinity "internal/config/config.go")) -FailureMessage "non-test sibling should not match file-level affinity"
     }
+
+    $results += Run-Test -Name "Get-OutOfScopeImplementationFiles is mirror-aware (issue #4)" -Body {
+        $repoPath = Join-Path $tempRoot "mirror-test-repo"
+        New-Item -ItemType Directory -Path $repoPath -Force | Out-Null
+        git -C $repoPath init --quiet | Out-Null
+        git -C $repoPath config user.name "Test" | Out-Null
+        git -C $repoPath config user.email "test@test.com" | Out-Null
+        
+        # Helper write function for test isolation
+        $writeHelper = {
+            param($Path, $Content)
+            $dir = Split-Path -Parent $Path
+            if (-not (Test-Path -LiteralPath $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
+            [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+        }
+        
+        & $writeHelper (Join-Path $repoPath "readme.md") "initial"
+        git -C $repoPath add . | Out-Null
+        git -C $repoPath commit -m "initial" --quiet | Out-Null
+        
+        # Create and checkout task/dummy branch
+        git -C $repoPath checkout -b "task/dummy" --quiet | Out-Null
+        
+        & $writeHelper (Join-Path $repoPath "powershell/tool.ps1") "changed"
+        & $writeHelper (Join-Path $repoPath "examples/gobot/.crucible/powershell/tool.ps1") "changed"
+        & $writeHelper (Join-Path $repoPath "unrelated.txt") "changed"
+        
+        git -C $repoPath add . | Out-Null
+        git -C $repoPath commit -m "changes" --quiet | Out-Null
+        
+        $affinity = @("powershell/")
+        
+        $outOfScope = @(Get-OutOfScopeImplementationFiles -WorktreePath $repoPath -TaskId "dummy" -FileAffinity $affinity)
+        
+        Assert-Result -Name "only unrelated is out of scope" -Condition ($outOfScope.Count -eq 1) -FailureMessage "expected exactly 1 out of scope file"
+        Assert-Result -Name "unrelated.txt is out of scope" -Condition ($outOfScope[0] -eq "unrelated.txt") -FailureMessage ("expected unrelated.txt to be out of scope, got: " + ($outOfScope -join ", "))
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

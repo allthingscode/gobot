@@ -109,6 +109,13 @@ function Get-OutOfScopeImplementationFiles {
 
     return @($changedFiles | Where-Object {
         $changedPath = $_
-        -not (@($affinity | Where-Object { Test-PathMatchesAffinity -ChangedPath $changedPath -Affinity $_ }).Count -gt 0)
+        $canonicalPath = $changedPath
+        if ($changedPath.StartsWith("examples/gobot/.crucible/", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $canonicalPath = $changedPath.Substring(25)
+        }
+        -not (@($affinity | Where-Object {
+            (Test-PathMatchesAffinity -ChangedPath $changedPath -Affinity $_) -or
+            (Test-PathMatchesAffinity -ChangedPath $canonicalPath -Affinity $_)
+        }).Count -gt 0)
     })
 }

@@ -1,11 +1,36 @@
 param(
     [Parameter(Mandatory = $false, ValueFromRemainingArguments = $true)]
-    [string[]]$Paths = @(
-        "prompts",
-        ".crucible/personas",
-        ".crucible/sops"
-    )
+    [string[]]$Paths = @()
 )
+
+if ($Paths.Count -eq 0) {
+    $parentOfPowershell = (Resolve-Path -Path "$PSScriptRoot/..").Path
+    $isFramework = (Test-Path -LiteralPath (Join-Path $parentOfPowershell "proposals")) -and (Test-Path -LiteralPath (Join-Path $parentOfPowershell "powershell/run-all-tests.ps1"))
+
+    if ($isFramework) {
+        $Paths = @(
+            (Join-Path $parentOfPowershell "prompts"),
+            (Join-Path $parentOfPowershell "personas"),
+            (Join-Path $parentOfPowershell "sops"),
+            (Join-Path $parentOfPowershell "docs"),
+            (Join-Path $parentOfPowershell "powershell"),
+            (Join-Path $parentOfPowershell "templates"),
+            (Join-Path $parentOfPowershell "README.md"),
+            (Join-Path $parentOfPowershell "ROADMAP.md"),
+            (Join-Path $parentOfPowershell "CHANGELOG.md")
+        )
+    } else {
+        $Paths = @(
+            (Join-Path $parentOfPowershell "prompts"),
+            (Join-Path $parentOfPowershell "personas"),
+            (Join-Path $parentOfPowershell "sops"),
+            (Join-Path $parentOfPowershell "docs"),
+            (Join-Path $parentOfPowershell "powershell"),
+            (Join-Path $parentOfPowershell "templates"),
+            (Join-Path $parentOfPowershell "README.md")
+        )
+    }
+}
 
 $ErrorActionPreference = "Stop"
 

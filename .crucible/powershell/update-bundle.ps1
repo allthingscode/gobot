@@ -41,73 +41,7 @@ function Write-ConfigScalar {
     [System.IO.File]::WriteAllText($ConfigPath, $content, [System.Text.UTF8Encoding]::new($false))
 }
 
-function Get-NormalizedSha256 {
-    param([AllowNull()][string]$Content)
-    if ($null -eq $Content) { return $null }
-    $normalized = ($Content -replace "`r`n", "`n").TrimEnd("`n")
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
-    } finally {
-        $sha.Dispose()
-    }
-}
-
-function Get-FileNormalizedHash {
-    param([Parameter(Mandatory=$true)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
-    return Get-NormalizedSha256 -Content (Get-Content -LiteralPath $Path -Raw -Encoding UTF8)
-}
-
-function Get-GitFileContent {
-    param(
-        [Parameter(Mandatory=$true)][string]$Repo,
-        [Parameter(Mandatory=$true)][string]$Commit,
-        [Parameter(Mandatory=$true)][string]$Path
-    )
-    $object = $Commit + ":" + (ConvertTo-RelativeSlashPath -Path $Path)
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $null = git -C $Repo cat-file -e $object 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            return $null
-        }
-    } finally {
-        $ErrorActionPreference = $previousPreference
-    }
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "git"
-    $psi.Arguments = "-C ""$Repo"" show ""$object"""
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-    $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
-
-    try {
-        $proc = [System.Diagnostics.Process]::Start($psi)
-        $output = $proc.StandardOutput.ReadToEnd()
-        $proc.WaitForExit()
-        if ($proc.ExitCode -ne 0) {
-            return $null
-        }
-        return $output
-    } catch {
-        return $null
-    }
-}
-
-function Get-GitFileNormalizedHash {
-    param(
-        [Parameter(Mandatory=$true)][string]$Repo,
-        [Parameter(Mandatory=$true)][string]$Commit,
-        [Parameter(Mandatory=$true)][string]$Path
-    )
-    return Get-NormalizedSha256 -Content (Get-GitFileContent -Repo $Repo -Commit $Commit -Path $Path)
-}
+. (Join-Path (Split-Path -Parent $PSCommandPath) "lib/normalized-hash.ps1")
 
 function Test-CrucibleGitIgnored {
     param(
@@ -186,7 +120,14 @@ function Copy-FrameworkFileToAdopter {
     if (-not (Test-Path -LiteralPath $destinationDir)) {
         New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
     }
-    Copy-Item -LiteralPath $source -Destination $destination -Force
+    if (Test-Path -LiteralPath $destination -PathType Leaf) {
+        $adopterContent = Get-Content -LiteralPath $destination -Raw -Encoding UTF8
+        $frameworkContent = Get-Content -LiteralPath $source -Raw -Encoding UTF8
+        $mergedContent = Merge-CustomRegions -AdopterContent $adopterContent -FrameworkContent $frameworkContent
+        [System.IO.File]::WriteAllText($destination, $mergedContent, [System.Text.UTF8Encoding]::new($false))
+    } else {
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+    }
 }
 
 function Invoke-UpdateBundle {
@@ -223,6 +164,12 @@ function Invoke-UpdateBundle {
         throw "Missing crucible_install_commit in .crucible/config.yaml. Run init-project.ps1 -StampVersionOnly once from a Crucible source checkout."
     }
 
+    $provManifest = Read-ProvenanceManifest -BundleRoot $adopterCrucibleRoot
+    if ($null -eq $provManifest) {
+        Write-Host "No provenance manifest found. Backfilling from $baselineCommit..." -ForegroundColor Yellow
+        $provManifest = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $baselineCommit -Manifest $manifest
+    }
+
     $baselineFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $frameworkRoot -AtCommit $baselineCommit)
     $headFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $frameworkRoot -AtCommit $frameworkHead)
     $sourcePaths = @($baselineFiles + $headFiles | Sort-Object -Unique)
@@ -238,32 +185,66 @@ function Invoke-UpdateBundle {
 
             $adopterFile = Join-Path $adopterCrucibleRoot $adopterPath
             $hAdopter = Get-FileNormalizedHash -Path $adopterFile
-            $hBaseline = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath
-            $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
+            $hAdopterBase = Get-FileNormalizedHash -Path $adopterFile -WithoutCustomRegions
+            
+            $hManifest = $null
+            $hManifestBase = $null
+            if ($null -ne $provManifest -and $null -ne $provManifest.files -and $null -ne $provManifest.files.$adopterPath) {
+                $hManifest = $provManifest.files.$adopterPath.hash
+                if ($provManifest.files.$adopterPath.base_hash) {
+                    $hManifestBase = $provManifest.files.$adopterPath.base_hash
+                }
+            }
+            if ($null -eq $hManifest) {
+                $hManifest = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath
+            }
+            if ($null -eq $hManifestBase) {
+                $hManifestBase = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath -WithoutCustomRegions
+            }
 
+            $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
+            $hHeadBase = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath -WithoutCustomRegions
+
+            # 1. If not present at framework HEAD
             if ($null -eq $hHead) {
                 if ($null -ne $hAdopter) {
-                    Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath $sourcePath -AdopterPath $adopterPath
+                    if ($null -ne $hManifestBase -and $hAdopterBase -ne $hManifestBase) {
+                        Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
+                    } else {
+                        Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath $sourcePath -AdopterPath $adopterPath
+                    }
                 }
                 continue
             }
+            
+            # 2. If not present on the adopter
             if ($null -eq $hAdopter) {
                 Add-ClassifiedItem -Results $results -Category "add" -SourcePath $sourcePath -AdopterPath $adopterPath
                 continue
             }
+            
+            # 3. If present on both:
             if ($hAdopter -eq $hHead) {
                 Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
                 continue
             }
-            if ($null -eq $hBaseline) {
+            
+            # If the adopter only modified the file inside the custom regions (or didn't modify it at all):
+            if ($null -ne $hManifestBase -and $hAdopterBase -eq $hManifestBase) {
+                if ($hManifest -ne $hHead) {
+                    Add-ClassifiedItem -Results $results -Category "safe-overwrite" -SourcePath $sourcePath -AdopterPath $adopterPath
+                } else {
+                    Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
+                }
+                continue
+            }
+            
+            # If the adopter has modified the file outside the custom regions (or there is no manifest base):
+            if ($hManifest -eq $hHead) {
+                Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
+            } else {
                 Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
-                continue
             }
-            if ($hAdopter -eq $hBaseline -and $hBaseline -ne $hHead) {
-                Add-ClassifiedItem -Results $results -Category "safe-overwrite" -SourcePath $sourcePath -AdopterPath $adopterPath
-                continue
-            }
-            Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
         }
     }
 
@@ -383,6 +364,17 @@ function Invoke-UpdateBundle {
         }
         if ($results["needs-merge"].Count -eq 0 -and $remainingRemovals -eq 0) {
             Write-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit" -Value $frameworkHead
+            $versionFile = Join-Path $frameworkRoot "VERSION"
+            if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
+                $version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+                Write-ConfigScalar -ConfigPath $configPath -Key "crucible_version" -Value $version
+            }
+            try {
+                $provenance = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $frameworkHead -Manifest $manifest
+                $null = Write-ProvenanceManifest -BundleRoot $adopterCrucibleRoot -ProvenanceManifest $provenance
+            } catch {
+                Write-Host ("Warning: could not write provenance manifest: " + $_.Exception.Message) -ForegroundColor Yellow
+            }
         }
     }
 

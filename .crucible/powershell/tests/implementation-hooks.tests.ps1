@@ -20,10 +20,19 @@ try {
     git add README.md
     git commit -m "init" --quiet
 
-    $CurrentBranch = git rev-parse --abbrev-ref HEAD
+    $CurrentBranch = (git rev-parse --abbrev-ref HEAD).Trim()
     $TaskId = "ARCH-001"
     $wtPath = Join-Path (Get-Location) ".crucible/.agent-workspaces/implementation-$TaskId"
-    git worktree add $wtPath -b "task/$TaskId" $CurrentBranch
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        git worktree add $wtPath -b "task/$TaskId" $CurrentBranch 2>$null
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "git worktree add failed with exit code $LASTEXITCODE"
+    }
     # Ensure architect hooks directory exists and set absolute path
     $hookDir = Join-Path $TempRoot "scripts/hooks/architect"
     if (-not (Test-Path $hookDir)) { New-Item -ItemType Directory -Force -Path $hookDir | Out-Null }

@@ -59,5 +59,5 @@ file_affinity_examples:
   - internal/agent/
   - cmd/gobot/
 crucible_version: "0.3.4"
-crucible_install_commit: "39ed135d56c9bdfa203be700abc67bfd06087ba1"
+crucible_install_commit: "51d7403b092f679e58c8b9b286ecd5646f598f51"
 

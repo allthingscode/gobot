@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot "normalized-hash.ps1")
+
 function Get-InstallManifest {
     param([string]$FrameworkRoot = "")
 
@@ -167,4 +169,154 @@ function Test-AdopterOwnedPath {
         }
     }
     return $false
+}
+
+$script:ProvenanceManifestVersion = 1
+
+function Get-ProvenanceManifestPath {
+    param([Parameter(Mandatory=$true)][string]$BundleRoot)
+    return Join-Path $BundleRoot "install-provenance.json"
+}
+
+function Get-ProvenanceBundlePaths {
+    param(
+        [Parameter(Mandatory=$true)][string]$FrameworkRoot,
+        [Parameter(Mandatory=$true)]$Manifest,
+        [Parameter(Mandatory=$true)][string]$Commit
+    )
+
+    $frameworkFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $FrameworkRoot -AtCommit $Commit)
+    $seen = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    $ordered = New-Object System.Collections.Generic.List[object]
+    foreach ($source in $frameworkFiles) {
+        foreach ($adopterPath in @(Get-AdopterPathsForSource -SourcePath $source -Manifest $Manifest)) {
+            if ([string]::IsNullOrWhiteSpace($adopterPath)) { continue }
+            $normalized = ConvertTo-ManifestRelativePath -Path $adopterPath
+            if (Test-AdopterOwnedPath -RelativePath $normalized -Manifest $Manifest) { continue }
+            if ($seen.Add($normalized)) {
+                $ordered.Add([pscustomobject]@{ AdopterPath = $normalized; SourcePath = $source }) | Out-Null
+            }
+        }
+    }
+    return $ordered.ToArray()
+}
+
+function New-ProvenanceManifest {
+    param(
+        [Parameter(Mandatory=$true)][string]$FrameworkRoot,
+        [Parameter(Mandatory=$true)][string]$Commit,
+        [Parameter(Mandatory=$false)]$Manifest = $null
+    )
+
+    $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+    if ($null -eq $Manifest) {
+        $Manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
+    }
+
+    $files = [ordered]@{}
+    foreach ($entry in @(Get-ProvenanceBundlePaths -FrameworkRoot $FrameworkRoot -Manifest $Manifest -Commit $Commit)) {
+        $content = Get-GitFileContent -Repo $FrameworkRoot -Commit $Commit -Path $entry.SourcePath
+        if ($null -eq $content) { continue }
+        $hash = Get-NormalizedSha256 -Content $content
+        $baseContent = Get-ContentWithoutCustomRegions -Content $content
+        $baseHash = Get-NormalizedSha256 -Content $baseContent
+        $files[$entry.AdopterPath] = [pscustomobject]@{
+            hash = $hash
+            base_hash = $baseHash
+        }
+    }
+
+    return [pscustomobject]@{
+        manifest_version = $script:ProvenanceManifestVersion
+        source_commit = $Commit
+        files = [pscustomobject]$files
+    }
+}
+
+function Write-ProvenanceManifest {
+    param(
+        [Parameter(Mandatory=$true)][string]$BundleRoot,
+        [Parameter(Mandatory=$true)]$ProvenanceManifest
+    )
+    $path = Get-ProvenanceManifestPath -BundleRoot $BundleRoot
+    $json = $ProvenanceManifest | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))
+    return $path
+}
+
+function Read-ProvenanceManifest {
+    param([Parameter(Mandatory=$true)][string]$BundleRoot)
+    $path = Get-ProvenanceManifestPath -BundleRoot $BundleRoot
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return $null
+    }
+    return Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+function Get-DriftClassification {
+    param(
+        [Parameter(Mandatory=$true)][string]$BundleRoot,
+        [Parameter(Mandatory=$true)]$ProvenanceManifest,
+        [Parameter(Mandatory=$true)]$Manifest
+    )
+
+    $BundleRoot = (Resolve-Path -LiteralPath $BundleRoot).Path
+    $results = [ordered]@{
+        pristine = New-Object System.Collections.Generic.List[string]
+        customized = New-Object System.Collections.Generic.List[string]
+        "adopter-added" = New-Object System.Collections.Generic.List[string]
+        "framework-removed" = New-Object System.Collections.Generic.List[string]
+    }
+
+    $manifestPaths = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($property in $ProvenanceManifest.files.PSObject.Properties) {
+        $relPath = ConvertTo-ManifestRelativePath -Path $property.Name
+        [void]$manifestPaths.Add($relPath)
+        $absolute = Join-Path $BundleRoot $relPath
+        $workingHash = Get-FileNormalizedHash -Path $absolute
+        if ($null -eq $workingHash) {
+            $results["framework-removed"].Add($relPath) | Out-Null
+            continue
+        }
+        
+        $manifestHash = [string]$property.Value.hash
+        $manifestBaseHash = if ($property.Value.base_hash) { [string]$property.Value.base_hash } else { $manifestHash }
+        
+        $workingHashBase = Get-FileNormalizedHash -Path $absolute -WithoutCustomRegions
+        
+        if ($workingHash -eq $manifestHash) {
+            $results["pristine"].Add($relPath) | Out-Null
+        } elseif ($workingHashBase -eq $manifestBaseHash) {
+            $results["pristine"].Add($relPath) | Out-Null
+        } else {
+            $results["customized"].Add($relPath) | Out-Null
+        }
+    }
+
+    $scanRoots = @($Manifest.copied_dirs | ForEach-Object { (ConvertTo-ManifestRelativePath -Path ([string]$_)).TrimEnd("/") })
+    $scanRoots += @($Manifest.root_files | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) })
+    foreach ($root in $scanRoots) {
+        $absoluteRoot = Join-Path $BundleRoot $root
+        if (-not (Test-Path -LiteralPath $absoluteRoot)) { continue }
+        if (Test-Path -LiteralPath $absoluteRoot -PathType Leaf) {
+            if (-not $manifestPaths.Contains($root)) {
+                if (-not (Test-AdopterOwnedPath -RelativePath $root -Manifest $Manifest)) {
+                    $results["adopter-added"].Add($root) | Out-Null
+                }
+            }
+            continue
+        }
+        foreach ($file in Get-ChildItem -LiteralPath $absoluteRoot -Recurse -File -Force) {
+            $rel = ConvertTo-ManifestRelativePath -Path ($file.FullName.Substring($BundleRoot.Length))
+            if ($manifestPaths.Contains($rel)) { continue }
+            if (Test-AdopterOwnedPath -RelativePath $rel -Manifest $Manifest) { continue }
+            $results["adopter-added"].Add($rel) | Out-Null
+        }
+    }
+
+    foreach ($key in @($results.Keys)) {
+        $sorted = @($results[$key] | Sort-Object -Unique)
+        $results[$key] = $sorted
+    }
+    return $results
 }

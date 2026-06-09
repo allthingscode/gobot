@@ -20,7 +20,7 @@ PWSH="$(command -v powershell.exe || command -v pwsh)"
 
 echo "--- Crucible pre-commit verification started"
 
-if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
+if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ] || { [ -f "$REPO_ROOT/powershell/run-all-tests.ps1" ] && [ -d "$REPO_ROOT/proposals" ]; }; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
@@ -29,8 +29,12 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-policy-drift.ps1
 
     # 2. Mojibake check
+    # Scan the framework's real top-level content dirs explicitly. A bare
+    # invocation defaults to adopter-oriented paths (.crucible/personas, etc.)
+    # that do not exist in the framework root, which previously left powershell/,
+    # sops/, docs/, and personas/ unscanned and let mojibake hide there.
     echo "Running mojibake check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md
 
     # 3. Go Factory Lint check
     echo "Running factory lint checks..."
