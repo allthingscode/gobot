@@ -1068,6 +1068,77 @@ func TestGetResults_LivenessStalenessIsNonCritical(t *testing.T) {
 	}
 }
 
+// ── checkVendorDir (B-001 footgun guard) ──────────────────────────────────────
+
+//nolint:paralleltest // mutates the package-global vendorDirFn seam; must not run concurrently with other vendor tests
+func TestCheckVendorDir_AbsentIsOK(t *testing.T) {
+	orig := vendorDirFn
+	defer func() { vendorDirFn = orig }()
+	vendorDirFn = func() string { return filepath.Join(t.TempDir(), "vendor") }
+
+	r := checkVendorDir()
+	if !r.OK {
+		t.Errorf("expected OK=true when no vendor/ dir, got detail: %s", r.Detail)
+	}
+}
+
+//nolint:paralleltest // mutates the package-global vendorDirFn seam; must not run concurrently with other vendor tests
+func TestCheckVendorDir_PresentWarns(t *testing.T) {
+	orig := vendorDirFn
+	defer func() { vendorDirFn = orig }()
+	vendorPath := filepath.Join(t.TempDir(), "vendor")
+	if err := os.MkdirAll(vendorPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	vendorDirFn = func() string { return vendorPath }
+
+	r := checkVendorDir()
+	if r.OK {
+		t.Error("expected OK=false when a vendor/ directory is present")
+	}
+	if r.Remediation == "" {
+		t.Error("expected a remediation hint when vendor/ is present")
+	}
+	if !strings.Contains(r.Detail, "shadows go.mod") {
+		t.Errorf("expected detail to mention shadowing go.mod, got: %s", r.Detail)
+	}
+}
+
+//nolint:paralleltest // mutates the package-global vendorDirFn seam; must not run concurrently with other vendor tests
+func TestCheckVendorDir_FileNotDirIsOK(t *testing.T) {
+	orig := vendorDirFn
+	defer func() { vendorDirFn = orig }()
+	vendorPath := filepath.Join(t.TempDir(), "vendor")
+	if err := os.WriteFile(vendorPath, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vendorDirFn = func() string { return vendorPath }
+
+	r := checkVendorDir()
+	if !r.OK {
+		t.Errorf("expected OK=true when vendor is a file, got detail: %s", r.Detail)
+	}
+}
+
+//nolint:paralleltest // agentctx ResetCheckpointManagerInstancesForTest is global; must not run concurrently
+func TestCheckVendorDir_IsNonCritical(t *testing.T) {
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
+
+	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	found := false
+	for _, result := range results {
+		if result.Name == "vendor policy" {
+			found = true
+			if result.Critical {
+				t.Fatal("expected vendor policy check to be non-critical")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected vendor policy check to be registered in GetResults")
+	}
+}
+
 func TestCheckSecretsRoundtrip_NonWindowsSkip(t *testing.T) {
 	t.Parallel()
 	// A failing store must NOT cause a failure on non-Windows: the check is skipped.

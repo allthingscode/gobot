@@ -166,7 +166,39 @@ If you skip the export step and only have the encrypted `dpapi_secrets.json`, or
 
 ---
 
-## 7. Security Best Practices Checklist
+## 7. Dependency & Vendoring Policy
+
+**gobot does not vendor.** Do **not** run `go mod vendor`, and do not commit a
+`vendor/` directory.
+
+### Rationale
+- There is no air-gapped, hermetic, or offline build requirement.
+- `go.sum` already provides cryptographic supply-chain integrity for every
+  dependency: it pins a verified hash per module version, so `go build` /
+  `go test` / `govulncheck` resolve and verify deps straight from `go.mod`
+  using the local module cache.
+- CI builds with `-mod=readonly` directly from `go.mod`; it never checks out a
+  `vendor/` directory.
+
+### The footgun (B-001)
+Go's default build mode is implicit `-mod=vendor` **whenever a `vendor/`
+directory exists**. A leftover, stale `vendor/` tree therefore silently shadows
+`go.mod`: a developer's plain `go build` / `go test` links the old pinned
+versions in `vendor/` instead of the `go.mod`-resolved (and possibly patched)
+ones, diverging from CI without any warning.
+
+### Guards & remediation
+- `gobot doctor` reports a **vendor policy** warning when a `vendor/` directory
+  is present in the working tree.
+- If you see that warning, **delete the local `vendor/` directory**. Because
+  `vendor/` is gitignored, this is a local-only action — there is nothing to
+  commit. Then rely on the module cache + `go.mod` as normal.
+- Use `go mod verify` (and `govulncheck ./...`) to confirm cached modules match
+  their `go.sum` hashes.
+
+---
+
+## 8. Security Best Practices Checklist
 - [ ] **Avoid Plaintext:** Never store API keys or tokens directly in `config.json`. Use `gobot secrets set` instead.
 - [ ] **Secure the Key (Linux/macOS):** Backup `~/.config/gobot/encryption.key` to a secure location (e.g., a password manager).
 - [ ] **Minimize Whitelist:** Keep `channels.telegram.allowFrom` limited to only necessary users.
