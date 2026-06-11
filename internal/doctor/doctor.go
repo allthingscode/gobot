@@ -142,6 +142,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkJobsDir(cfg), false),
 		r(checkBrowser(cfg.Browser, p.LookPath), false),
 		r(checkAuthorization(cfg), false),
+		r(checkVendorDir(), false),
 	}
 
 	// Only probe Gemini live if Gemini is actually configured.
@@ -640,6 +641,48 @@ func checkAuthorization(cfg *config.Config) Result {
 		Name:   "authorization",
 		OK:     true,
 		Detail: fmt.Sprintf("%d user(s) authorized", count),
+	}
+}
+
+// vendorDirFn returns the path to check for a stale vendor/ directory. It is a
+// package-private seam so tests can point it at a temp directory instead of the
+// real working directory. It defaults to "vendor" (relative to the process CWD).
+//
+//nolint:gochecknoglobals // Hook for testability; mirrors livenessStatFn seam.
+var vendorDirFn = func() string { return "vendor" }
+
+// checkVendorDir warns when a vendor/ directory is present in the working tree.
+//
+// B-001 footgun: gobot does NOT vendor as policy (vendor/ is gitignored and CI
+// builds with -mod=readonly straight from go.mod). But Go's default build mode is
+// implicit -mod=vendor whenever a vendor/ directory exists, so a leftover, stale
+// vendor/ tree silently shadows go.mod — a developer's plain `go build`/`go test`
+// links the old, possibly-vulnerable pinned versions instead of the go.mod-resolved
+// ones, diverging from CI. This advisory check surfaces that footgun. The fix is to
+// delete the local vendor/ directory (a local-only action; vendor/ is gitignored,
+// so nothing is committed). See docs/security.md ("Dependency & Vendoring Policy").
+func checkVendorDir() Result {
+	path := vendorDirFn()
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Result{Name: "vendor policy", OK: true, Detail: "no vendor/ directory (correct: gobot does not vendor)"}
+		}
+		return Result{
+			Name:        "vendor policy",
+			OK:          false,
+			Detail:      fmt.Sprintf("cannot stat %s: %v", path, err),
+			Remediation: "Check permissions on the working directory.",
+		}
+	}
+	if !info.IsDir() {
+		return Result{Name: "vendor policy", OK: true, Detail: fmt.Sprintf("%s is a file, not a vendor tree", path)}
+	}
+	return Result{
+		Name:        "vendor policy",
+		OK:          false,
+		Detail:      "vendor/ directory present; gobot does not vendor — a stale vendor/ silently shadows go.mod (default -mod=vendor) and diverges from CI",
+		Remediation: "Delete the local vendor/ directory (it is gitignored). Do not run 'go mod vendor'; rely on the module cache + go.mod. See docs/security.md.",
 	}
 }
 
