@@ -47,7 +47,32 @@ func TestStartDashboard(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	StartDashboard(ctx, "127.0.0.1:0", hub, &wg)
+	StartDashboard(ctx, "127.0.0.1:0", "", hub, &wg)
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Log("Warning: StartDashboard did not stop within 5 seconds")
+	}
+}
+
+// TestStartDashboard_NoTokenForcesLoopback exercises the no-auth path: a non-loopback
+// requested address is rewritten to loopback before binding (so the bind is safe to run).
+func TestStartDashboard_NoTokenForcesLoopback(t *testing.T) {
+	hub := dashboard.NewHub(10)
+	defer hub.Close()
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	StartDashboard(ctx, "0.0.0.0:0", "", hub, &wg)
 	cancel()
 
 	done := make(chan struct{})
