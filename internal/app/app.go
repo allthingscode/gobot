@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -119,7 +120,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	}
 
 	if cfg.Gateway.WebAddr != "" && hub != nil {
-		StartDashboard(ctx, cfg.Gateway.WebAddr, hub, &wg)
+		StartDashboard(ctx, cfg.Gateway.WebAddr, cfg.Gateway.AuthToken, hub, &wg)
 	}
 
 	var b *bot.Bot
@@ -157,8 +158,20 @@ func printStartupBanner(cfg *config.Config, api *TgAPI) {
 }
 
 // StartDashboard starts the F-111 SSE dashboard server in a separate goroutine.
-func StartDashboard(ctx context.Context, addr string, hub *dashboard.Hub, wg *sync.WaitGroup) {
-	srv := dashboard.NewServer(hub, addr)
+// When authToken is empty the dashboard has no authentication, so it is bound to a
+// loopback interface only and a warning is logged; remote access requires a configured token.
+func StartDashboard(ctx context.Context, addr, authToken string, hub *dashboard.Hub, wg *sync.WaitGroup) {
+	if authToken == "" {
+		bind := dashboardBindAddr(addr, authToken)
+		if bind != addr {
+			slog.Warn("dashboard: no auth token configured; binding to loopback only, remote access disabled",
+				"requested", addr, "bind", bind)
+			addr = bind
+		} else {
+			slog.Warn("dashboard: no auth token configured; serving unauthenticated on loopback interface", "bind", addr)
+		}
+	}
+	srv := dashboard.NewServer(hub, addr, authToken)
 	wg.Add(1)
 	go func() {
 		defer RecoverWithStack("dashboard")
@@ -167,6 +180,37 @@ func StartDashboard(ctx context.Context, addr string, hub *dashboard.Hub, wg *sy
 			slog.Error("dashboard: failure", "err", err)
 		}
 	}()
+}
+
+// dashboardBindAddr returns the address the dashboard should bind to. When no auth token
+// is configured, a non-loopback host is forced to 127.0.0.1 so an unauthenticated stream
+// is never exposed on a LAN-reachable interface. The port is preserved.
+func dashboardBindAddr(addr, token string) string {
+	if token != "" {
+		return addr
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if isLoopbackHost(host) {
+		return addr
+	}
+	return net.JoinHostPort("127.0.0.1", port)
+}
+
+func isLoopbackHost(host string) bool {
+	// An empty host means "all interfaces" (e.g. ":8080") - NOT loopback.
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func waitForShutdown(ctx context.Context, wg *sync.WaitGroup) {
