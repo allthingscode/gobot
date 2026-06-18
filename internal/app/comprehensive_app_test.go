@@ -231,7 +231,7 @@ func TestHeartbeatRunner_Functional(t *testing.T) {
 	cfg.Strategic.StorageRoot = tempDir
 	cfg.Strategic.UserChatID = 12345
 
-	hb := app.NewHeartbeatRunner(cfg, "tok")
+	hb := app.NewHeartbeatRunner(cfg, "tok", nil)
 
 	ctx := context.Background()
 	hb.HeartbeatCheck(ctx)

@@ -114,7 +114,7 @@ func TestStartHeartbeat_Disabled(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Heartbeat.Enabled = false
 	var wg sync.WaitGroup
-	StartHeartbeat(context.Background(), cfg, "", &wg)
+	StartHeartbeat(context.Background(), cfg, "", nil, &wg)
 	wg.Wait()
 }
 

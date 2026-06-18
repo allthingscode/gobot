@@ -355,7 +355,7 @@ func TestHeartbeatRunner_App(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = tmpDir
 
-	hb := NewHeartbeatRunner(cfg, "token")
+	hb := NewHeartbeatRunner(cfg, "token", nil)
 	if hb == nil {
 		t.Fatal("NewHeartbeatRunner returned nil")
 	}
