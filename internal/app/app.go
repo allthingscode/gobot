@@ -133,7 +133,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	printStartupBanner(cfg, api)
 
 	StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
-	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), &wg)
+	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
 
 	waitForShutdown(ctx, &wg)
 	return nil
@@ -460,12 +460,24 @@ func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bo
 	slog.Info("gobot: cron dispatcher started")
 }
 
-// StartHeartbeat starts the periodic health check runner.
-func StartHeartbeat(ctx context.Context, cfg *config.Config, token string, wg *sync.WaitGroup) {
+// alertSenderFromAPI adapts the concrete *TgAPI to the AlertSender interface while
+// preserving a true nil interface when no API is available. Assigning a nil *TgAPI
+// directly to an AlertSender would yield a non-nil interface wrapping a nil pointer,
+// defeating the runner's `sender == nil` guard and panicking on Send.
+func alertSenderFromAPI(api *TgAPI) AlertSender {
+	if api == nil {
+		return nil
+	}
+	return api
+}
+
+// StartHeartbeat starts the periodic health check runner, injecting the alert sender so
+// probe failures can page the operator.
+func StartHeartbeat(ctx context.Context, cfg *config.Config, token string, sender AlertSender, wg *sync.WaitGroup) {
 	if !cfg.Heartbeat.Enabled {
 		return
 	}
-	hb := NewHeartbeatRunner(cfg, token)
+	hb := NewHeartbeatRunner(cfg, token, sender)
 	wg.Add(1)
 	go func() {
 		defer RecoverWithStack("heartbeat-runner")

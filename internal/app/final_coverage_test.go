@@ -77,7 +77,7 @@ func TestStartHeartbeat_Coverage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	StartHeartbeat(ctx, cfg, "token", &wg)
+	StartHeartbeat(ctx, cfg, "token", nil, &wg)
 	time.Sleep(10 * time.Millisecond)
 	cancel()
 	wg.Wait()

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/bot"
+	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/doctor"
 )
 
@@ -19,6 +20,34 @@ type mockAlertSender struct {
 func (m *mockAlertSender) Send(_ context.Context, msg bot.OutboundMessage) error {
 	m.sent = append(m.sent, msg)
 	return nil
+}
+
+// TestNewHeartbeatRunner_WiresSender is the regression for B-003: the production
+// constructor must store the injected sender so sendAlert can reach the alert path.
+// Before the fix, NewHeartbeatRunner never set sender and alerts could never fire.
+func TestNewHeartbeatRunner_WiresSender(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Strategic.StorageRoot = t.TempDir()
+	sender := &mockAlertSender{}
+
+	hb := NewHeartbeatRunner(cfg, "token", sender)
+	if hb.sender == nil {
+		t.Fatal("NewHeartbeatRunner did not wire the injected sender (B-003 regression)")
+	}
+}
+
+// TestAlertSenderFromAPI_NilReturnsNilInterface guards the typed-nil pitfall: a nil
+// *TgAPI must become a true nil AlertSender interface, otherwise sendAlert's nil check
+// is defeated and Send panics on a nil pointer.
+func TestAlertSenderFromAPI_NilReturnsNilInterface(t *testing.T) {
+	t.Parallel()
+	if s := alertSenderFromAPI(nil); s != nil {
+		t.Errorf("alertSenderFromAPI(nil) = %v, want a true nil interface", s)
+	}
+	if s := alertSenderFromAPI(&TgAPI{}); s == nil {
+		t.Error("alertSenderFromAPI(non-nil *TgAPI) returned a nil interface")
+	}
 }
 
 func TestHeartbeatCheck(t *testing.T) {

@@ -256,7 +256,7 @@ func TestHeartbeatRunner_Run_Coverage(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Strategic.StorageRoot = tmpDir
 
-	hb := NewHeartbeatRunner(cfg, "token")
+	hb := NewHeartbeatRunner(cfg, "token", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 

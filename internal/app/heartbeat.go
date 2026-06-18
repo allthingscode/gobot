@@ -32,10 +32,13 @@ type HeartbeatRunner struct {
 	interval         time.Duration
 }
 
-// NewHeartbeatRunner constructs a HeartbeatRunner using config and token.
-func NewHeartbeatRunner(cfg *config.Config, token string) *HeartbeatRunner {
+// NewHeartbeatRunner constructs a HeartbeatRunner using config, token, and an alert sender.
+// sender may be nil (no alerts are sent); callers that derive the sender from a concrete
+// type must pass an untyped-nil interface for the disabled case (see alertSenderFromAPI).
+func NewHeartbeatRunner(cfg *config.Config, token string, sender AlertSender) *HeartbeatRunner {
 	return &HeartbeatRunner{
 		probes:           LiveProbesList(),
+		sender:           sender,
 		alertChatID:      cfg.Strategic.UserChatID,
 		storageRoot:      cfg.StorageRoot(),
 		apiKey:           cfg.GeminiAPIKey(),
