@@ -98,6 +98,14 @@ func shutdownOTel(p *observability.Provider) {
 
 func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager) error {
 	var wg sync.WaitGroup
+	// Derive a cancellable context so a critical subsystem failure can trigger
+	// shutdown of the rest. startErr collects the first non-graceful failure from
+	// a critical subsystem (the HTTP listeners); it is buffered and written with
+	// non-blocking sends so a failing goroutine never blocks startup or draining.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	startErr := make(chan error, 2)
+
 	checkpoints, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
 	var store agent.CheckpointStore
 	if err != nil {
@@ -116,11 +124,11 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 
 	gateHandler := SetupGateHandler(store, handler)
 	if cfg.Gateway.Enabled {
-		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg)
+		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg, startErr)
 	}
 
 	if cfg.Gateway.WebAddr != "" && hub != nil {
-		StartDashboard(ctx, cfg.Gateway.WebAddr, cfg.Gateway.AuthToken, hub, &wg)
+		StartDashboard(ctx, cfg.Gateway.WebAddr, cfg.Gateway.AuthToken, hub, &wg, startErr)
 	}
 
 	var b *bot.Bot
@@ -135,8 +143,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
 	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
 
-	waitForShutdown(ctx, &wg)
-	return nil
+	return waitForShutdown(ctx, cancel, &wg, startErr)
 }
 
 func printStartupBanner(cfg *config.Config, api *TgAPI) {
@@ -160,7 +167,7 @@ func printStartupBanner(cfg *config.Config, api *TgAPI) {
 // StartDashboard starts the F-111 SSE dashboard server in a separate goroutine.
 // When authToken is empty the dashboard has no authentication, so it is bound to a
 // loopback interface only and a warning is logged; remote access requires a configured token.
-func StartDashboard(ctx context.Context, addr, authToken string, hub *dashboard.Hub, wg *sync.WaitGroup) {
+func StartDashboard(ctx context.Context, addr, authToken string, hub *dashboard.Hub, wg *sync.WaitGroup, startErr chan<- error) {
 	if authToken == "" {
 		bind := dashboardBindAddr(addr, authToken)
 		if bind != addr {
@@ -178,8 +185,24 @@ func StartDashboard(ctx context.Context, addr, authToken string, hub *dashboard.
 		defer wg.Done()
 		if err := srv.ListenAndServe(ctx); err != nil {
 			slog.Error("dashboard: failure", "err", err)
+			reportStartupFailure(ctx, startErr, "dashboard", err)
 		}
 	}()
+}
+
+// reportStartupFailure forwards a non-graceful subsystem failure to startErr so
+// runAgentLoop can fail fast. A graceful shutdown (context cancelled) is not a
+// failure and is dropped. The send is non-blocking (buffered channel + default)
+// so a failing goroutine never blocks; a nil channel is tolerated for callers
+// that do not monitor startup (e.g. tests).
+func reportStartupFailure(ctx context.Context, startErr chan<- error, subsystem string, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	select {
+	case startErr <- fmt.Errorf("%s: %w", subsystem, err):
+	default:
+	}
 }
 
 // dashboardBindAddr returns the address the dashboard should bind to. When no auth token
@@ -213,19 +236,29 @@ func isLoopbackHost(host string) bool {
 	return false
 }
 
-func waitForShutdown(ctx context.Context, wg *sync.WaitGroup) {
+// waitForShutdown blocks until a shutdown signal, context cancellation, or a
+// critical subsystem startup failure. It returns a non-nil error only in the
+// last case, so the process exits non-zero when a subsystem fails to start;
+// signal/context shutdown returns nil (graceful, exit 0).
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, startErr <-chan error) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	var subsystemErr error
 	select {
 	case sig := <-sigChan:
 		slog.Info("gobot: received signal, shutting down", "signal", sig)
 	case <-ctx.Done():
 		slog.Info("gobot: context canceled, shutting down")
+	case err := <-startErr:
+		slog.Error("gobot: critical subsystem failed to start, shutting down", "err", err)
+		subsystemErr = err
+		cancel()
 	}
 
 	const drainTimeout = 5 * time.Second
 	DrainGoroutines(wg, drainTimeout)
+	return subsystemErr
 }
 
 // SetupLogging initializes the global structured logger based on configuration.
@@ -377,7 +410,7 @@ func SetupGateHandler(store agent.CheckpointStore, handler *DispatchHandler) bot
 }
 
 // StartGateway starts the HTTP gateway server in a separate goroutine.
-func StartGateway(ctx context.Context, cfg *config.Config, store agent.CheckpointStore, memStore *memory.MemoryStore, gateHandler bot.Handler, hub *dashboard.Hub, wg *sync.WaitGroup) {
+func StartGateway(ctx context.Context, cfg *config.Config, store agent.CheckpointStore, memStore *memory.MemoryStore, gateHandler bot.Handler, hub *dashboard.Hub, wg *sync.WaitGroup, startErr chan<- error) {
 	mgr, _ := store.(*agentctx.CheckpointManager)
 	res := dash.Resources{
 		Config:      cfg,
@@ -396,6 +429,7 @@ func StartGateway(ctx context.Context, cfg *config.Config, store agent.Checkpoin
 		defer wg.Done()
 		if err := srv.ListenAndServe(ctx); err != nil {
 			slog.Error("gateway: failure", "err", err)
+			reportStartupFailure(ctx, startErr, "gateway", err)
 		}
 	}()
 }

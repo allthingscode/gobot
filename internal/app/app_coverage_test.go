@@ -47,7 +47,7 @@ func TestStartDashboard(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	StartDashboard(ctx, "127.0.0.1:0", "", hub, &wg)
+	StartDashboard(ctx, "127.0.0.1:0", "", hub, &wg, nil)
 	cancel()
 
 	done := make(chan struct{})
@@ -72,7 +72,7 @@ func TestStartDashboard_NoTokenForcesLoopback(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	StartDashboard(ctx, "0.0.0.0:0", "", hub, &wg)
+	StartDashboard(ctx, "0.0.0.0:0", "", hub, &wg, nil)
 	cancel()
 
 	done := make(chan struct{})
@@ -122,7 +122,9 @@ func TestWaitForShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	cancel()
-	waitForShutdown(ctx, &wg)
+	if err := waitForShutdown(ctx, cancel, &wg, make(chan error, 1)); err != nil {
+		t.Errorf("graceful (ctx-cancel) shutdown must return nil, got %v", err)
+	}
 }
 
 func TestRunAgent_PrerequisiteFail(t *testing.T) {
@@ -149,7 +151,7 @@ func TestStartGateway_Shutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg)
+	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, nil)
 	cancel()
 
 	done := make(chan struct{})
