@@ -13,7 +13,7 @@ import (
 func TestSeedJob_CreatesStoreWhenAbsent(t *testing.T) {
 	t.Parallel()
 	storePath := filepath.Join(t.TempDir(), "nested", "jobs.json")
-	job := EveryJob("index_workspace", "Automatic Workspace Vector Index", "[SYSTEM] INDEX_WORKSPACE", 1000)
+	job := EveryJob(testIndexJobID, "Automatic Workspace Vector Index", "[SYSTEM] INDEX_WORKSPACE", 1000)
 
 	seeded, err := SeedJob(storePath, job)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestSeedJob_CreatesStoreWhenAbsent(t *testing.T) {
 	if err := json.Unmarshal(data, &store); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(store.Jobs) != 1 || store.Jobs[0].ID != "index_workspace" {
+	if len(store.Jobs) != 1 || store.Jobs[0].ID != testIndexJobID {
 		t.Fatalf("unexpected store: %+v", store.Jobs)
 	}
 }
@@ -39,7 +39,7 @@ func TestSeedJob_CreatesStoreWhenAbsent(t *testing.T) {
 func TestSeedJob_IdempotentOnExistingID(t *testing.T) {
 	t.Parallel()
 	storePath := filepath.Join(t.TempDir(), "jobs.json")
-	job := EveryJob("index_workspace", "name", "[SYSTEM] INDEX_WORKSPACE", 1000)
+	job := EveryJob(testIndexJobID, "name", "[SYSTEM] INDEX_WORKSPACE", 1000)
 
 	if _, err := SeedJob(storePath, job); err != nil {
 		t.Fatalf("first seed: %v", err)
@@ -62,7 +62,7 @@ func TestSeededIndexJob_DispatchesOnInterval(t *testing.T) {
 	const intervalMS = int64(60 * 1000)
 
 	if _, err := SeedJob(storePath, EveryJob(
-		"index_workspace", "Automatic Workspace Vector Index", "[SYSTEM] INDEX_WORKSPACE", intervalMS,
+		testIndexJobID, "Automatic Workspace Vector Index", "[SYSTEM] INDEX_WORKSPACE", intervalMS,
 	)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSeededIndexJob_DispatchesOnInterval(t *testing.T) {
 	if got := dispatcher.payloads[0].Message; got != "[SYSTEM] INDEX_WORKSPACE" {
 		t.Errorf("payload message = %q, want [SYSTEM] INDEX_WORKSPACE", got)
 	}
-	if got := dispatcher.payloads[0].ID; got != "index_workspace" {
+	if got := dispatcher.payloads[0].ID; got != testIndexJobID {
 		t.Errorf("payload id = %q, want index_workspace", got)
 	}
 }
