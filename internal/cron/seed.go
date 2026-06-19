@@ -3,7 +3,8 @@ package cron
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 // SeedJob ensures a job with the given id exists in the jobs.json store at
@@ -29,10 +30,7 @@ func SeedJob(storePath string, job Job) (seeded bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	if mkErr := os.MkdirAll(filepath.Dir(storePath), 0o755); mkErr != nil {
-		return false, fmt.Errorf("create jobs dir: %w", mkErr)
-	}
-	if writeErr := os.WriteFile(storePath, data, 0o600); writeErr != nil {
+	if writeErr := state.WriteFileAtomic(storePath, data, 0o600); writeErr != nil {
 		return false, fmt.Errorf("write jobs.json: %w", writeErr)
 	}
 	return true, nil

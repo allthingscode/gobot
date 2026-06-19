@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/logattr"
+	"github.com/allthingscode/gobot/internal/state"
 	robfigcron "github.com/robfig/cron/v3"
 )
 
@@ -412,7 +413,7 @@ func (s *Scheduler) saveStore() {
 		slog.Error("cron: failed to encode jobs store", logattr.Err(err))
 		return
 	}
-	if err := os.WriteFile(s.storePath, data, 0o600); err != nil {
+	if err := state.WriteFileAtomic(s.storePath, data, 0o600); err != nil {
 		slog.Error("cron: failed to save jobs store", logattr.Err(err))
 		return
 	}
