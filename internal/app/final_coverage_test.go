@@ -39,7 +39,7 @@ func TestStartDashboard_Coverage(t *testing.T) {
 	// Give more time for the server to start/stop
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	StartDashboard(ctx, "127.0.0.1:0", "", nil, &wg)
+	StartDashboard(ctx, "127.0.0.1:0", "", nil, &wg, nil)
 
 	// Wait a bit to ensure it actually starts
 	time.Sleep(20 * time.Millisecond)
@@ -91,7 +91,7 @@ func TestStartGateway_Coverage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg)
+	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, nil)
 	time.Sleep(10 * time.Millisecond)
 	cancel()
 	wg.Wait()

@@ -629,7 +629,7 @@ func TestStartGateway_NilListener_Coverage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // stop immediately
 
-	app.StartGateway(ctx, cfg, nil, nil, nil, nil, &wg)
+	app.StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, nil)
 	wg.Wait()
 }
 
