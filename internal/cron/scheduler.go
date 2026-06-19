@@ -211,13 +211,17 @@ func (s *Scheduler) poll(ctx context.Context) error {
 	results := s.runJobsConcurrently(ctx, due)
 
 	s.mu.Lock()
+	// Anchor the next run to when the dispatch actually finished, not the
+	// poll-start nowMS. A job that ran longer than its interval would otherwise
+	// be scheduled in the past and re-fire back-to-back on the next poll.
+	completionMS := s.clock.Now().UnixMilli()
 	for _, r := range results {
 		if r.err != nil {
 			s.store.Jobs[r.index].State.FailureCount++
 		} else {
 			s.store.Jobs[r.index].State.SuccessCount++
 		}
-		s.store.Jobs[r.index].State.NextRunAtMS = ComputeNextRun(s.store.Jobs[r.index].Schedule, nowMS)
+		s.store.Jobs[r.index].State.NextRunAtMS = ComputeNextRun(s.store.Jobs[r.index].Schedule, completionMS)
 	}
 	s.saveStore()
 	s.mu.Unlock()
