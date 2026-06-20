@@ -42,6 +42,33 @@ func TestSlogHandler(t *testing.T) {
 	}
 }
 
+// TestSlogHandler_RedactionPrecision exercises the value path (AC5): a benign key
+// that the old substring match wrongly redacted now passes through, while a genuinely
+// sensitive key still redacts.
+func TestSlogHandler_RedactionPrecision(t *testing.T) {
+	t.Parallel()
+	h := NewHub(10)
+	defer h.Close()
+
+	sub, _ := h.Subscribe()
+	handler := NewSlogHandler(h, slog.Default().Handler())
+	logger := slog.New(handler)
+
+	logger.Info("msg", "monkey", testVal1, "api_key", "sk-deadbeef")
+
+	select {
+	case entry := <-sub:
+		if entry.Fields["monkey"] != testVal1 {
+			t.Errorf("benign 'monkey' should pass through, got %v", entry.Fields["monkey"])
+		}
+		if entry.Fields["api_key"] != testRedacted {
+			t.Errorf("'api_key' should be redacted, got %v", entry.Fields["api_key"])
+		}
+	default:
+		t.Error("expected log entry in hub")
+	}
+}
+
 func TestSlogHandler_WithAttrs(t *testing.T) {
 	t.Parallel()
 	h := NewHub(10)
@@ -231,19 +258,33 @@ func TestIsSensitive(t *testing.T) {
 		key  string
 		want bool
 	}{
-		{"foo", false},
+		// True positives - genuinely sensitive field names (AC3).
 		{"token", true},
-		{"PASSWORD", true},
+		{"password", true},
+		{"PASSWORD", true}, // case-insensitive
 		{"secret", true},
-		{"api_key", true},
-		{"apiKey", true},
+		{"api_key", true},   // delimiter split -> token "key"
+		{"apiKey", true},    // camelCase split -> token "key"
+		{"apikey", true},    // single token in the set
 		{"Authorization", true},
-		{"key1", true}, // because it contains 'key'
+		{"auth", true},
+		{"key", true},
+		{"X-Auth-Token", true}, // tokens [x, auth, token]
+
+		// False positives that the old substring match wrongly redacted (AC2).
+		{"foo", false},
+		{"monkey", false},
+		{"donkey", false},
+		{"keyboard", false},
+		{"keyboard_layout", false},
+		{"key1", false},           // whole-token match: "key1" != "key" (was true under substring)
+		{"author", false},         // "author" != "auth"
+		{"oauth_flow_step", false}, // token "oauth" != "auth"
 	}
 
 	for _, tt := range tests {
 		if got := isSensitive(tt.key); got != tt.want {
-			t.Errorf("isSensitive(%s) = %v, want %v", tt.key, got, tt.want)
+			t.Errorf("isSensitive(%q) = %v, want %v", tt.key, got, tt.want)
 		}
 	}
 }
