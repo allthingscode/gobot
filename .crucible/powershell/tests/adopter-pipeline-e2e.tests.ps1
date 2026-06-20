@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
@@ -17,37 +18,14 @@ $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
 
 $results = @()
 
-function Assert-Result {
-    param([string]$Name, [bool]$Condition, [string]$FailureMessage)
-    if (-not $Condition) { throw ("FAILED: " + $Name + " - " + $FailureMessage) }
-}
 
-function Invoke-ExternalCommand {
-    param([Parameter(Mandatory=$true)][scriptblock]$Command)
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
-}
 
-function Run-Test {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host "EXCEPTION OCCURRED: $_" -ForegroundColor Red
-        Write-Host $_.ScriptStackTrace -ForegroundColor Red
-        return $false
-    }
-}
+
+
+
+
+
+
 
 # Stand up a fully-initialized adopter project with a deployment -> done handoff
 # already queued, so a single factory.ps1 -Init reaches the human gate.
@@ -58,28 +36,23 @@ function New-AdopterProject {
 
     $slug = $Title.Replace(" ", "_")
     $projectRoot = Join-Path $Root "app"
-    New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
+
+    . (Join-Path $PSScriptRoot "_fixtures.ps1")
+    $sharedFixture = Get-SharedAdopterFixture
+    Copy-Item -Path $sharedFixture -Destination $projectRoot -Recurse
+
+    $srcDir = Join-Path $projectRoot "src"
+    New-Item -ItemType Directory -Path $srcDir -Force | Out-Null
+    Set-Content -Path (Join-Path $srcDir "feature.txt") -Value "work product"
 
     Push-Location $projectRoot
     try {
-        git init --quiet
         git config user.name "Test User"
         git config user.email "test@example.com"
-        Set-Content -Path "README.md" -Value "# App"
-        New-Item -ItemType Directory -Path "src" -Force | Out-Null
-        Set-Content -Path "src/feature.txt" -Value "work product"
-        git add -A
-        git commit -m "initial commit" --quiet
+        git add src/feature.txt
+        git commit -m "add feature.txt" --quiet
     } finally {
         Pop-Location
-    }
-
-    $initCmd = Invoke-ExternalCommand {
-        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
-            -ProjectRoot $projectRoot -ProjectName "App" -Quiet
-    }
-    if ($initCmd.ExitCode -ne 0) {
-        throw ("init-project failed (" + $initCmd.ExitCode + "): " + ($initCmd.Output -join "`n"))
     }
 
     # Make verification commands cheap and replace the engineering-rules placeholder.
@@ -230,6 +203,11 @@ try {
         $env:FACTORY_CYCLE_ID = $cycle
         $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t2") -Cycle $cycle
 
+        $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
+        $otherTaskHandoff = Join-Path $handoffDir "F-901-20260615T120000Z.json"
+        '{"task_id":"F-901","source_phase":"grooming","target_phase":"implementation"}' |
+            Set-Content -LiteralPath $otherTaskHandoff -Encoding UTF8
+
         $acceptRun = Invoke-ExternalCommand {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                 -Init -TaskId "F-900" -ProjectRoot $projectRoot -Quiet `
@@ -254,6 +232,14 @@ try {
         $activeSpec = Join-Path $projectRoot ".crucible/backlog/features/active/F-900_Ship_It.md"
         Assert-Result -Name "active spec archived after accept (task finalized)" -Condition (-not (Test-Path -LiteralPath $activeSpec)) `
             -FailureMessage ("expected active spec to be archived/removed after accept, but it still exists at " + $activeSpec + ". Output: " + ($acceptRun.Output -join "`n"))
+
+        $activeHandoffs = @(Get-ChildItem -LiteralPath $handoffDir -Filter "F-900-*.json" -ErrorAction SilentlyContinue)
+        $archivedHandoffDir = Join-Path $handoffDir "archived"
+        $archivedHandoffs = @(Get-ChildItem -LiteralPath $archivedHandoffDir -Filter "F-900-*.json" -ErrorAction SilentlyContinue)
+        Assert-Result -Name "accepted task handoffs archived" -Condition ($activeHandoffs.Count -eq 0 -and $archivedHandoffs.Count -ge 1) `
+            -FailureMessage ("expected F-900 handoffs archived and removed from active handoff dir. Output: " + ($acceptRun.Output -join "`n"))
+        Assert-Result -Name "other task handoff preserved" -Condition (Test-Path -LiteralPath $otherTaskHandoff) `
+            -FailureMessage "expected unrelated F-901 handoff to remain active"
     }
 
     $results += Run-Test -Name "Drives the front half: grooming -> implementation -> verification -> deployment" -Body {

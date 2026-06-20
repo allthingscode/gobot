@@ -92,6 +92,16 @@ param (
     [Parameter(Mandatory=$false)]
     [switch]$AutoAdvance,
 
+    [Parameter(Mandatory=$false)]
+    [switch]$Rewind,
+
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("grooming")]
+    [string]$ToPhase = "",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$ResetBudget,
+
     # Absolute path to the project root (the directory containing .crucible/).
     # Defaults to the current working directory. Specify explicitly when invoking
     # the framework script from outside the project directory.
@@ -308,6 +318,24 @@ if ($Status) {
     }
     & $statusScript
     exit $LASTEXITCODE
+}
+
+if ($Rewind) {
+    if ([string]::IsNullOrWhiteSpace($TaskId)) {
+        Write-Host "Error: -TaskId is required when using -Rewind." -ForegroundColor Red
+        exit 1
+    }
+    if ([string]::IsNullOrWhiteSpace($ToPhase)) {
+        Write-Host "Error: -ToPhase is required when using -Rewind." -ForegroundColor Red
+        exit 1
+    }
+    if ($ToPhase -ne "grooming") {
+        Write-Host "Error: Only '-ToPhase grooming' is supported in this version." -ForegroundColor Red
+        exit 1
+    }
+
+    Invoke-TaskRewind -TaskId $TaskId -ToPhase $ToPhase -ResetBudget:$ResetBudget -SessionDir $sessionDir -HandoffDir $HANDOFF_DIR -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE -Quiet:$Quiet -WorkspacesDir $workspacesDir
+    exit 0
 }
 
 # --- 0a. Require -TaskId for all pipeline operations ---

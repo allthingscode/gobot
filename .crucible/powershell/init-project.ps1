@@ -386,7 +386,7 @@ if ($WithSampleTask) {
     }
 }
 
-if ($stamp.Commit -match '^[0-9a-f]{40}$') {
+if ($stamp.Commit -match '^[0-9a-f]{40}$' -and $env:CRUCIBLE_SKIP_PROVENANCE -ne 'true') {
     try {
         $provenance = New-ProvenanceManifest -FrameworkRoot $REPO_ROOT -Commit $stamp.Commit -Manifest $installManifest
         $provenancePath = Write-ProvenanceManifest -BundleRoot $targetCrucible -ProvenanceManifest $provenance

@@ -16,7 +16,7 @@ REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
 echo "--- Crucible pre-push verification started"
 
-if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ] || { [ -f "$REPO_ROOT/powershell/run-all-tests.ps1" ] && [ -d "$REPO_ROOT/proposals" ]; }; then
+if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
@@ -27,7 +27,9 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ] || { [ -f "$REPO_ROOT/powershell/run-all
 
     # 1. Project Scaffolding unit tests
     echo "Running project scaffolding tests..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/init-project.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/init-project-core.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/init-project-instructions.tests.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/init-project-config-version.tests.ps1
 
     # 2. Config Validation unit tests
     echo "Running config validation tests..."

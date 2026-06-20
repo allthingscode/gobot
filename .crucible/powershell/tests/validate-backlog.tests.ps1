@@ -1,4 +1,4 @@
-﻿# Regression tests for powershell/validate-backlog.ps1.
+# Regression tests for powershell/validate-backlog.ps1.
 #
 # Focus: Check B (Broken Links) must catch missing-file links in the
 # scaffold's unified `## Active Items` table, and must not flag links
@@ -8,21 +8,16 @@
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
 $results = @()
 
-function Assert-Result {
-    param([string]$Name, [bool]$Condition, [string]$FailureMessage)
-    if (-not $Condition) { throw ("FAILED: " + $Name + " - " + $FailureMessage) }
-}
 
-function Run-Test {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try { & $Body; Write-Host "PASSED" -ForegroundColor Green; return $true }
-    catch { Write-Host $_.Exception.Message -ForegroundColor Red; return $false }
-}
+
+
+
+
 
 function New-MinimalBacklogTree {
     param([string]$Root)

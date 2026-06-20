@@ -1,55 +1,25 @@
-﻿# Test for Scope Boundary Violation circuit breaker.
+# Test for Scope Boundary Violation circuit breaker.
 #
 # This test modifies a file outside the spec file_affinity and asserts factory blocks
 # the handoff before it can proceed to Reviewer.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $INIT_SCRIPT    = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 
 $results = @()
 
-function Assert-Result {
-    param(
-        [string]$Name,
-        [bool]$Condition,
-        [string]$FailureMessage
-    )
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Run-Test {
-    param(
-        [string]$Name,
-        [scriptblock]$Body
-    )
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
 
-function Invoke-ExternalCommand {
-    param([Parameter(Mandatory=$true)][scriptblock]$Command)
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
-}
+
+
+
+
+
+
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-scope-violation-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
@@ -174,6 +144,117 @@ try {
         Assert-Result -Name "Breaker is scope_violation" `
             -Condition ($blockedJson -match '"circuit_breaker":\s*"scope_violation"') `
             -FailureMessage "blocked record does not name 'scope_violation'. Content:`n$blockedJson"
+    }
+
+    $results += Run-Test -Name "Scope check skipped and advisory logged when file_affinity is empty" -Body {
+        # 1. Setup new project root
+        $projectRoot2 = Join-Path $tempRoot "app2"
+        New-Item -ItemType Directory -Path $projectRoot2 -Force | Out-Null
+
+        Push-Location $projectRoot2
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            New-Item -ItemType Directory -Path "src" -Force | Out-Null
+            Set-Content -Path "README.md"  -Value "# Scope Test 2"
+            Set-Content -Path "src/a.txt"  -Value "in-scope file"
+            git add .
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        # 2. Initialize Crucible
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+            -ProjectRoot $projectRoot2 -ProjectName "ScopeApp2" -DefaultBranch "master" `
+            -Language python -Quiet 2>&1
+
+        # 3. Spec has empty file_affinity
+        $taskId2  = "C-SCOPE-EMPTY"
+        $specDir2 = Join-Path $projectRoot2 ".crucible/backlog/chores/active"
+        New-Item -ItemType Directory -Path $specDir2 -Force | Out-Null
+        $specPath2 = Join-Path $specDir2 "${taskId2}_ScopeTest.md"
+
+        $specLines2 = @(
+            "---",
+            "item_id: `"$taskId2`"",
+            "priority: `"P3`"",
+            "status: `"Ready`"",
+            "specialist: `"Groomer`"",
+            "budget_tier: `"low`"",
+            "file_affinity: []",
+            "created_at: `"2026-05-25`"",
+            "---",
+            "# Spec"
+        )
+        [System.IO.File]::WriteAllLines($specPath2, $specLines2)
+
+        $backlogPath2 = Join-Path $projectRoot2 ".crucible/backlog/BACKLOG.md"
+        [System.IO.File]::AppendAllText($backlogPath2, ("`n| [$taskId2](chores/active/${taskId2}_ScopeTest.md) | Title |"))
+
+        # 4. Create architect worktree; touch some files
+        Push-Location $projectRoot2
+        try {
+            git branch "task/$taskId2" master
+            git worktree add ".crucible/.agent-workspaces/implementation-$taskId2" "task/$taskId2" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        $wtPath2 = Join-Path $projectRoot2 ".crucible/.agent-workspaces/implementation-$taskId2"
+        Set-Content -Path (Join-Path $wtPath2 "src/b.txt") -Value "out-of-scope change"
+        Push-Location $wtPath2
+        try {
+            git add "src/b.txt"
+            git commit -m "feat: out-of-scope edit" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        # 5. Handoff: architect -> reviewer (empty file_affinity)
+        $handoffDir2 = Join-Path $projectRoot2 ".crucible/session/handoffs"
+        New-Item -ItemType Directory -Path $handoffDir2 -Force | Out-Null
+        $ts2 = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+        $handoffPath2 = Join-Path $handoffDir2 ("${taskId2}-${ts2}.json")
+        $handoff2 = [ordered]@{
+            task_id                  = $taskId2
+            source_phase             = "implementation"
+            target_phase             = "verification"
+            reason                   = "Implementation complete"
+            generated_by             = "new-handoff.ps1"
+            tool_version             = "1.0.0"
+            handoff_retry_count      = 0
+            review_strike_count      = 0
+            rebase_count             = 0
+            budget_tier              = "low"
+            cumulative_handoff_count = 2
+            prompt_version           = "test-v1"
+            session_cycle_id         = "test-cycle2"
+            cycle_id                 = "test-cycle2"
+            artifacts                = @($specPath2)
+            file_affinity            = @()   # empty
+        }
+        $handoff2 | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath2 -Encoding UTF8
+
+        $env:FACTORY_CYCLE_ID = "test-cycle2"
+
+        # 6. Run factory; expect exit 0 because empty affinity skips scope checks with an advisory
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+                -Init -TaskId $taskId2 -ProjectRoot $projectRoot2
+        }
+        $output   = $res.Output -join "`n"
+        $exitCode = $res.ExitCode
+
+        Assert-Result -Name "Factory succeeds on empty file_affinity" `
+            -Condition ($exitCode -eq 0) `
+            -FailureMessage ("expected exit 0 (skipped scope check), got $exitCode. Output:`n$output")
+
+        Assert-Result -Name "Advisory logged for empty file_affinity" `
+            -Condition ($output -match "\[ADVISORY\] No file_affinity declared") `
+            -FailureMessage "Expected advisory in output, got: $output"
     }
 } finally {
     Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue

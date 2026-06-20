@@ -4,52 +4,19 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 $HOOK_PATH = Join-Path $REPO_ROOT "scripts/hooks/pre-push"
+$PRE_COMMIT_HOOK_PATH = Join-Path $REPO_ROOT "scripts/hooks/pre-commit"
 $results = @()
 
-function Assert-Result {
-    param(
-        [string]$Name,
-        [bool]$Condition,
-        [string]$FailureMessage
-    )
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Run-Test {
-    param(
-        [string]$Name,
-        [scriptblock]$Body
-    )
 
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
 
-function Invoke-ExternalCommand {
-    param(
-        [Parameter(Mandatory=$true)]
-        [scriptblock]$Command
-    )
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousPreference
-    }
-    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
-}
+
+
+
+
+
 
 function Get-ShellCommand {
     $shell = Get-Command sh -ErrorAction SilentlyContinue
@@ -79,6 +46,16 @@ $results += Run-Test -Name "Pre-push hook exists and is non-empty" -Body {
     Assert-Result -Name "hook uses strict shell mode" -Condition ($hookContent -match '(?m)^set -e$') -FailureMessage "pre-push hook should abort on the first failed check"
 }
 
+$results += Run-Test -Name "Hooks do not self-detect framework repos from project files" -Body {
+    $prePushContent = Get-Content -LiteralPath $HOOK_PATH -Raw -Encoding UTF8
+    $preCommitContent = Get-Content -LiteralPath $PRE_COMMIT_HOOK_PATH -Raw -Encoding UTF8
+
+    foreach ($hookContent in @($prePushContent, $preCommitContent)) {
+        Assert-Result -Name "no proposals fallback" -Condition (-not $hookContent.Contains('$REPO_ROOT/proposals')) -FailureMessage "hook should not infer framework mode from a proposals directory"
+        Assert-Result -Name "no run-all-tests fallback" -Condition (-not $hookContent.Contains('$REPO_ROOT/powershell/run-all-tests.ps1')) -FailureMessage "hook should not infer framework mode from run-all-tests.ps1"
+    }
+}
+
 $results += Run-Test -Name "Pre-push hook has valid shell syntax" -Body {
     $shell = Get-ShellCommand
     Assert-Result -Name "sh available" -Condition ($null -ne $shell) -FailureMessage "sh is required to syntax-check scripts/hooks/pre-push"
@@ -92,7 +69,9 @@ $results += Run-Test -Name "Pre-push hook has valid shell syntax" -Body {
 $results += Run-Test -Name "Pre-push hook runs the expected verification suites" -Body {
     $hookContent = Get-Content -LiteralPath $HOOK_PATH -Raw -Encoding UTF8
     $expectedScripts = @(
-        "powershell/tests/init-project.tests.ps1",
+        "powershell/tests/init-project-core.tests.ps1",
+        "powershell/tests/init-project-instructions.tests.ps1",
+        "powershell/tests/init-project-config-version.tests.ps1",
         "powershell/tests/validate-config.tests.ps1",
         "powershell/tests/adopter-smoke.tests.ps1",
         "powershell/tests/check-file-affinity.tests.ps1",

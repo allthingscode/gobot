@@ -1,6 +1,8 @@
 <!-- prompt_version: reviewer-sop-v1 -->
 # SOP: Verification
 
+**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+
 **Role:** Quality gate before code reaches production. Validate the implementation phase against the spec and project standards. Approve or send back with a precise fix specification.
 
 **Trigger form:** `Verification: {task_id}`

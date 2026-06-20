@@ -2,6 +2,7 @@
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
 $Quiet = $true
@@ -15,25 +16,11 @@ if (-not (Get-Command Check-Dependencies -ErrorAction SilentlyContinue)) {
 
 $results = @()
 
-function Assert-Result {
-    param([string]$Name, [bool]$Condition, [string]$FailureMessage)
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Run-Test {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
+
+
+
+
 
 function New-TestContext {
     param(
@@ -139,6 +126,27 @@ Remaining {budget_remaining}
         Assert-Result -Name "reason replaced" -Condition ($text -match "Reason unit test") -FailureMessage "handoff reason was not replaced"
         Assert-Result -Name "type replaced" -Condition ($text -match "Type features") -FailureMessage "type dir was not replaced"
         Assert-Result -Name "version captured" -Condition ($ctx.PromptVersion -eq "9.9.9") -FailureMessage "prompt version was not captured"
+    }
+
+    $results += Run-Test -Name "New-FactoryPromptText substitutes PowerShell host for non-Windows prompts" -Body {
+        $oldPlatformMock = $script:MockPlatformIsWindows
+        $oldPwshMock = $script:MockPwshCommandExists
+        try {
+            $script:MockPlatformIsWindows = $false
+            $script:MockPwshCommandExists = $true
+            $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "pwsh-host") -TaskId "F-906" -TargetPhase "verification"
+            @"
+Run powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/factory.ps1 -Init -TaskId {task_id}
+"@ | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "verification_prompt.md") -Encoding UTF8
+
+            $text = New-FactoryPromptText -Context $ctx
+
+            Assert-Result -Name "pwsh rendered" -Condition ($text -match "\bpwsh\b") -FailureMessage "non-Windows prompt did not render pwsh: $text"
+            Assert-Result -Name "windows host removed" -Condition (-not $text.Contains("powershell.exe")) -FailureMessage "non-Windows prompt still contains powershell.exe: $text"
+        } finally {
+            $script:MockPlatformIsWindows = $oldPlatformMock
+            $script:MockPwshCommandExists = $oldPwshMock
+        }
     }
 
     $results += Run-Test -Name "New-FactoryPromptText exits on unresolved placeholders" -Body {

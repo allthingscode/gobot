@@ -36,6 +36,31 @@ The source repo is used only for installs and updates. It is not referenced at r
 
 ---
 
+## Previewing Customization Drift
+
+Before pulling updates, you can inspect your local `.crucible/` customizations compared to your baseline (recorded at install or the last successful update) using the drift-detection tool:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory-status.ps1" -Drift
+```
+
+This is a read-only command that classifies all files into:
+- **pristine**: unchanged framework files.
+- **customized**: framework files edited by the adopter.
+- **adopter-added**: new files created in framework scan directories.
+- **framework-removed**: files in the manifest but missing on disk.
+
+It exits with code `0` when no customized files exist, and `1` if customizations or drift-detection errors are detected.
+
+### Backfilling Provenance Manifest
+Crucible uses a provenance manifest (`.crucible/install-provenance.json`) to track files. If this manifest is missing (e.g. from an older install version), the drift tool automatically backfills it in memory using the `crucible_install_commit` from your `config.yaml`. To do this, it requires access to the upstream Crucible source repository containing that commit:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory-status.ps1" -Drift -FrameworkSource "C:\path\to\crucible-source"
+```
+
+---
+
 ## Supported update workflow
 
 1. **Update your source checkout.**
@@ -100,6 +125,23 @@ The source repo is used only for installs and updates. It is not referenced at r
 - Anything ignored by the adopter repo under `.crucible/`
 
 For customized framework files, the updater uses the recorded `crucible_install_commit` to distinguish safe upstream changes from local edits that need manual merge.
+
+---
+
+## Preserving Custom Regions
+
+For files that you must edit but still want to keep tracking upstream updates, Crucible supports marked custom regions:
+
+```powershell
+# >>> CRUCIBLE-CUSTOM
+# your custom logic here
+# <<< CRUCIBLE-CUSTOM
+```
+
+When `update-bundle.ps1` runs:
+- If a file has modifications only within these custom regions, it is classified as `safe-overwrite` or `no-op`.
+- During update application, the updater merges the local custom region content with the upstream framework changes, preserving your customizations.
+- If a file has modifications outside the custom regions, it is classified as `needs-merge` for manual resolution.
 
 ---
 

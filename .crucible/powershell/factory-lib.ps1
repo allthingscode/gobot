@@ -206,3 +206,9 @@ if (-not (Test-Path -LiteralPath $sessionOutputPath)) {
 
 . (Join-Path $PSScriptRoot "lib/platform.ps1")
 
+$taskRewindPath = Join-Path $PSScriptRoot "lib/task-rewind.ps1"
+if (-not (Test-Path -LiteralPath $taskRewindPath)) {
+    throw "Required helper script not found at $taskRewindPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $taskRewindPath
+

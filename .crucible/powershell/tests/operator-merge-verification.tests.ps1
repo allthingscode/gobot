@@ -1,40 +1,19 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
 $results = @()
 
-function Assert-Result {
-    param([string]$Name, [bool]$Condition, [string]$FailureMessage)
-    if (-not $Condition) { throw ("FAILED: " + $Name + " - " + $FailureMessage) }
-}
 
-function Run-Test {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
 
-function Invoke-ExternalCommand {
-    param([Parameter(Mandatory=$true)][scriptblock]$Command)
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
-}
+
+
+
+
+
+
 
 function Test-GitInitMainSupported {
     $versionText = git --version
@@ -179,12 +158,23 @@ try {
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "does not exist"
     }
 
-    $results += Run-Test -Name "Unmerged commit_hash is rejected" -Body {
+    $results += Run-Test -Name "Unmerged commit_hash is rejected if gate has passed" -Body {
         $projectRoot = Join-Path $tempRoot "unmerged"
         $taskId = "C-OP-UNMERGED"
         Initialize-ProjectRepo -ProjectRoot $projectRoot | Out-Null
         $sideHash = New-SideBranchCommit -ProjectRoot $projectRoot -BaseBranch "master"
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -CommitHash $sideHash | Out-Null
+        
+        # Seed an accepted decision to simulate gate already passed
+        $gateDir = Join-Path $projectRoot ".crucible/session/global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+        $decision = [ordered]@{
+            task_id = $taskId
+            outcome = "accepted"
+            session_cycle_id = "test-cycle"
+        }
+        $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
+
         $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "is not merged"
     }
@@ -211,7 +201,7 @@ try {
         Assert-Result -Name "commit_hash not required" -Condition ($output -notmatch "commit_hash") -FailureMessage "factory skip path still required commit_hash. Output:`n$output"
     }
 
-    $results += Run-Test -Name "Main-default unmerged commit_hash is rejected against main" -Body {
+    $results += Run-Test -Name "Main-default unmerged commit_hash is rejected against main if gate has passed" -Body {
         if (-not $mainSupported) {
             Write-Host "SKIPPED: git init -b requires git >= 2.28" -ForegroundColor Yellow
             return
@@ -221,6 +211,17 @@ try {
         Initialize-ProjectRepo -ProjectRoot $projectRoot -Branch "main" | Out-Null
         $sideHash = New-SideBranchCommit -ProjectRoot $projectRoot -BaseBranch "main"
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -CommitHash $sideHash | Out-Null
+
+        # Seed an accepted decision
+        $gateDir = Join-Path $projectRoot ".crucible/session/global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+        $decision = [ordered]@{
+            task_id = $taskId
+            outcome = "accepted"
+            session_cycle_id = "test-cycle"
+        }
+        $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
+
         $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "is not merged into main"
     }

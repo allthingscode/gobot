@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $realRepoRoot = (Resolve-Path -Path "$PSScriptRoot/../..").Path
@@ -16,6 +16,7 @@ Copy-Item -Path (Join-Path $realRepoRoot "powershell") -Destination (Join-Path $
 
 # Set REPO_ROOT to temp root so new-handoff.ps1 resolves its target path to the temp directory
 $REPO_ROOT = $tempRoot
+. (Join-Path $PSScriptRoot '_harness.ps1')
 
 Set-Location -LiteralPath $tempRoot
 
@@ -75,18 +76,8 @@ function Invoke-Generator {
     }
 }
 
-function Invoke-ExternalCommand {
-    param([Parameter(Mandatory=$true)][scriptblock]$Command)
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return [PSCustomObject]@{ Output = ($output -join "`n"); ExitCode = $exitCode }
-}
+
+
 
 function Track-HandoffFile {
     param([string]$TaskId)
@@ -511,6 +502,84 @@ budget_tier: "low"
         }
         if ($result.Output -notmatch "not a valid Crucible project") {
             throw "Expected CWD validation failure message, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "file affinity falls back to spec frontmatter when not provided" -Script {
+        $taskId = New-TestTaskId "AFFINITY-SPEC"
+        $specPath = ".crucible/backlog/chores/active/$($taskId)_Spec_Affinity.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+        @"
+---
+item_id: "$taskId"
+type: "Chore"
+status: "Ready"
+target_phase: "implementation"
+priority: "P2"
+created_at: "2026-04-28"
+file_affinity: ["internal/cron/", "internal/config/"]
+budget_tier: "low"
+---
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $script:createdSpecFiles += $specPath
+
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "affinity spec fallback test"
+            PromptVersion = "groomer_prompt-v16"
+            Artifacts = @($specPath)
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ($obj.file_affinity.Count -ne 2 -or $obj.file_affinity[0] -ne "internal/cron/" -or $obj.file_affinity[1] -ne "internal/config/") {
+            throw "Expected file_affinity from spec YAML frontmatter, got: $($obj.file_affinity | Out-String)"
+        }
+    }
+
+    Invoke-Test -Name "file affinity falls back to spec frontmatter block list when not provided" -Script {
+        $taskId = New-TestTaskId "AFFINITY-SPEC-BLOCK"
+        $specPath = ".crucible/backlog/chores/active/$($taskId)_Spec_Affinity_Block.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+        @"
+---
+item_id: "$taskId"
+type: "Chore"
+status: "Ready"
+target_phase: "implementation"
+priority: "P2"
+created_at: "2026-04-28"
+file_affinity:
+  - internal/cron/
+  - internal/config/
+budget_tier: "low"
+---
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $script:createdSpecFiles += $specPath
+
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "affinity spec block fallback test"
+            PromptVersion = "groomer_prompt-v16"
+            Artifacts = @($specPath)
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ($obj.file_affinity.Count -ne 2 -or $obj.file_affinity[0] -ne "internal/cron/" -or $obj.file_affinity[1] -ne "internal/config/") {
+            throw "Expected file_affinity block list from spec YAML frontmatter, got: $($obj.file_affinity | Out-String)"
         }
     }
 

@@ -171,6 +171,50 @@ function Test-AdopterOwnedPath {
     return $false
 }
 
+function Test-CrucibleGitIgnored {
+    param(
+        [Parameter(Mandatory=$true)][string]$BundleRoot,
+        [Parameter(Mandatory=$true)][string]$RelativePath
+    )
+    $gitRoot = $null
+    $dir = [System.IO.Path]::GetFullPath($BundleRoot)
+    while ($null -ne $dir) {
+        if (Test-Path -LiteralPath (Join-Path $dir ".git")) {
+            $gitRoot = $dir
+            break
+        }
+        $parent = Split-Path -Parent $dir
+        if ($parent -eq $dir -or [string]::IsNullOrEmpty($parent)) {
+            break
+        }
+        $dir = $parent
+    }
+    if ($null -eq $gitRoot) {
+        return $false
+    }
+
+    $absoluteFilePath = [System.IO.Path]::GetFullPath((Join-Path $BundleRoot $RelativePath))
+
+    if ($absoluteFilePath.StartsWith($gitRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relativeToGit = $absoluteFilePath.Substring($gitRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+        $relativeToGit = $relativeToGit -replace '\\', '/'
+
+        $null = git -C $gitRoot check-ignore --quiet -- $relativeToGit 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+    return $false
+}
+
+function Test-ScaffoldSnapshotPath {
+    param(
+        [Parameter(Mandatory=$true)][string]$RelativePath,
+        [Parameter(Mandatory=$true)]$Manifest
+    )
+    $path = ConvertTo-ManifestRelativePath -Path $RelativePath
+    $scaffold = (ConvertTo-ManifestRelativePath -Path ([string]$Manifest.scaffold_source)).TrimEnd("/")
+    return $path.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 $script:ProvenanceManifestVersion = 1
 
 function Get-ProvenanceManifestPath {
@@ -213,6 +257,24 @@ function New-ProvenanceManifest {
         $Manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
     }
 
+    # Cache optimization: git commit contents are immutable. We can cache the generated
+    # manifest in the temp directory using a key derived from $FrameworkRoot and $Commit.
+    $normRoot = $FrameworkRoot -replace '\\', '/'
+    $cacheKey = Get-NormalizedSha256 -Content ($normRoot + "|" + $Commit)
+    $cachePath = Join-Path ([System.IO.Path]::GetTempPath()) "crucible-prov-cache-$cacheKey.json"
+
+    if (Test-Path -LiteralPath $cachePath -PathType Leaf) {
+        try {
+            $cachedJson = Get-Content -LiteralPath $cachePath -Raw -Encoding UTF8
+            $cachedManifest = $cachedJson | ConvertFrom-Json
+            if ($null -ne $cachedManifest -and $cachedManifest.source_commit -eq $Commit) {
+                return $cachedManifest
+            }
+        } catch {
+            # Ignore cache read errors and regenerate
+        }
+    }
+
     $files = [ordered]@{}
     foreach ($entry in @(Get-ProvenanceBundlePaths -FrameworkRoot $FrameworkRoot -Manifest $Manifest -Commit $Commit)) {
         $content = Get-GitFileContent -Repo $FrameworkRoot -Commit $Commit -Path $entry.SourcePath
@@ -226,11 +288,20 @@ function New-ProvenanceManifest {
         }
     }
 
-    return [pscustomobject]@{
+    $prov = [pscustomobject]@{
         manifest_version = $script:ProvenanceManifestVersion
         source_commit = $Commit
         files = [pscustomobject]$files
     }
+
+    try {
+        $json = $prov | ConvertTo-Json -Depth 10
+        [System.IO.File]::WriteAllText($cachePath, $json, [System.Text.UTF8Encoding]::new($false))
+    } catch {
+        # Ignore cache write errors
+    }
+
+    return $prov
 }
 
 function Write-ProvenanceManifest {
@@ -299,8 +370,12 @@ function Get-DriftClassification {
         $absoluteRoot = Join-Path $BundleRoot $root
         if (-not (Test-Path -LiteralPath $absoluteRoot)) { continue }
         if (Test-Path -LiteralPath $absoluteRoot -PathType Leaf) {
+            if ($root -eq "install-provenance.json") { continue }
             if (-not $manifestPaths.Contains($root)) {
                 if (-not (Test-AdopterOwnedPath -RelativePath $root -Manifest $Manifest)) {
+                    if (-not (Test-ScaffoldSnapshotPath -RelativePath $root -Manifest $Manifest)) {
+                        if (Test-CrucibleGitIgnored -BundleRoot $BundleRoot -RelativePath $root) { continue }
+                    }
                     $results["adopter-added"].Add($root) | Out-Null
                 }
             }
@@ -308,8 +383,12 @@ function Get-DriftClassification {
         }
         foreach ($file in Get-ChildItem -LiteralPath $absoluteRoot -Recurse -File -Force) {
             $rel = ConvertTo-ManifestRelativePath -Path ($file.FullName.Substring($BundleRoot.Length))
+            if ($rel -eq "install-provenance.json") { continue }
             if ($manifestPaths.Contains($rel)) { continue }
             if (Test-AdopterOwnedPath -RelativePath $rel -Manifest $Manifest) { continue }
+            if (-not (Test-ScaffoldSnapshotPath -RelativePath $rel -Manifest $Manifest)) {
+                if (Test-CrucibleGitIgnored -BundleRoot $BundleRoot -RelativePath $rel) { continue }
+            }
             $results["adopter-added"].Add($rel) | Out-Null
         }
     }

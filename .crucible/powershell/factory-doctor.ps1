@@ -65,6 +65,16 @@ function Invoke-ToolCheck {
         [string[]]$Arguments = @()
     )
 
+    # A missing executable makes the call operator throw CommandNotFoundException,
+    # which would abort the whole doctor run with no structured output. Treat an
+    # absent command as a non-zero check (exit 127) so every caller degrades safely.
+    if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
+        return [PSCustomObject]@{
+            ExitCode = 127
+            Output   = ("'" + $Command + "' was not found on PATH.")
+        }
+    }
+
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
@@ -303,9 +313,16 @@ if ($frameworkMode) {
     }
 
     $hooksRel = ".crucible/scripts/hooks"
-    $gitHooks = Invoke-ToolCheck -Command "git" -Arguments @("-C", $REPO_ROOT, "config", "core.hooksPath")
-    if ($gitHooks.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitHooks.Output)) {
-        $hooksRel = $gitHooks.Output.Trim()
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $gitCmd) {
+        Add-DoctorResult -Check "git.cli" -Status "warn" -Severity "advisory" `
+            -Details "git is not installed or not on PATH; using the default hooks path and skipping git-derived checks." `
+            -Remediation "Install git; it is required for worktrees, commits, and the deployment phase."
+    } else {
+        $gitHooks = Invoke-ToolCheck -Command "git" -Arguments @("-C", $REPO_ROOT, "config", "core.hooksPath")
+        if ($gitHooks.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitHooks.Output)) {
+            $hooksRel = $gitHooks.Output.Trim()
+        }
     }
     $adopterHook = $hooksRel
     if (-not [System.IO.Path]::IsPathRooted($adopterHook)) {

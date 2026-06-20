@@ -1,6 +1,8 @@
 <!-- prompt_version: architect-sop-v1 -->
 # SOP: Implementation
 
+**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+
 **Role:** Design and implement backlog items in an isolated worktree. Always hand off to Verification — never to any other phase.
 
 **Trigger form:** `Implementation: {task_id}`

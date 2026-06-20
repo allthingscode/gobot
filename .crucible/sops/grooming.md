@@ -1,6 +1,8 @@
 <!-- prompt_version: groomer-sop-v1 -->
 # SOP: Grooming
 
+**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+
 **Role:** De-risk backlog items and prepare complete technical specifications for the implementation phase.
 
 **Trigger forms:**
@@ -33,10 +35,23 @@ Scan `{{backlog_dir}}/` for new or untracked items. Deduplicate entries (merge s
 ### Pass 3: Priority Triage
 Identify the highest priority (`P0` → `P1` → `P2` → `P3`) items. Apply the hardening-first matrix (stability/hardening fixes must rank above features). Confirm status transitions are accurate. Flag any items blocked on external dependencies. Update state after this pass.
 
+#### Ship-vs-Local Severity Check
+Before assigning P0/P1 severity to vulnerability, dependency, generated-artifact, vendor, lockfile, or build-output claims, verify whether the affected artifact actually ships or participates in CI/release packaging.
+
+Check the concrete delivery path, not just the file's existence:
+- `.gitignore` and release packaging include/exclude rules
+- CI build mode and dependency mode (for example `-mod=vendor` vs `-mod=readonly`)
+- committed lockfiles/manifests used by the build
+- whether the artifact is generated, cached, local-only, or developer-machine-only
+- whether the current shipped/released commit already contains the alleged fix
+
+If the affected artifact is local-only, reclassify severity accordingly and describe the issue as developer-experience, hygiene, or local footgun unless it creates a real production/release risk.
+
+
 ### Pass 4: Technical Specification & Definition of Ready Audit
 Audit existing active items to ensure they meet the Definition of Ready (valid YAML frontmatter, problem statement, proposed architecture, checkboxes for acceptance criteria, context/dependencies). Draft/complete the detailed spec file for the next item to be implemented. The spec MUST include:
 - Clear acceptance criteria (checkboxes)
-- All affected packages and files (used to derive `file_affinity`)
+- All affected packages and files (under a `## Affected Files` or `## Scope` heading, used to validate `file_affinity`)
 - A proposed implementation strategy (enough for implementation to start without clarifying questions)
 - Any known risks or constraints
 
@@ -140,6 +155,7 @@ Before writing handoff.json, confirm:
 - [ ] `BACKLOG.md` status is updated
 - [ ] Backlog validation script passes
 - [ ] `task_id` in handoff matches the task being handed off
+- [ ] For vuln/dependency/build-artifact claims, ship-vs-local reality was checked before priority/severity was assigned
 
 ---
 

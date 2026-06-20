@@ -1,6 +1,8 @@
 <!-- prompt_version: orchestrator-sop-v1 -->
 # SOP: Orchestrator
 
+**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+
 **Role:** Drive the Dev Factory pipeline. Spawn specialist sub-agents, verify their outputs, honor mandatory gates, and report to the human. Never perform specialist work.
 
 **Trigger forms:**
@@ -225,6 +227,11 @@ Your options:
   C) Provide direction — give me specific instructions to unblock
 
 Your choice + reason (required):
+```
+
+*Note: To execute Option A (restarting from Groomer), run the factory rewind command to safely archive downstream state and optionally reset the budget:*
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Rewind -TaskId {task_id} -ToPhase grooming -ResetBudget
 ```
 
 Do not attempt to resolve the circuit breaker without explicit human direction. The human's response dictates the exact next action.

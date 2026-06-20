@@ -1,40 +1,19 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $DOCTOR_SCRIPT = Join-Path $REPO_ROOT "powershell/factory-doctor.ps1"
 
 $results = @()
 
-function Assert-Result {
-    param([string]$Name, [bool]$Condition, [string]$FailureMessage)
-    if (-not $Condition) { throw ("FAILED: " + $Name + " - " + $FailureMessage) }
-}
 
-function Run-Test {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
 
-function Invoke-ExternalCommand {
-    param([Parameter(Mandatory=$true)][scriptblock]$Command)
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
-}
+
+
+
+
+
+
 
 function Write-DoctorFixture {
     param([string]$ProjectRoot)
@@ -73,7 +52,8 @@ function Write-FakeGh {
     param([string]$BinDir)
 
     New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
-    @'
+    if (Test-PlatformIsWindows) {
+        @'
 @echo off
 if "%1"=="auth" (
   if "%2"=="status" (
@@ -84,6 +64,22 @@ if "%1"=="auth" (
 echo fake gh
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $BinDir "gh.cmd") -Encoding ASCII
+    } else {
+        # A .cmd stub is invisible to PATH lookup on Linux/macOS, so the gh tests
+        # would silently fall through to the host's real gh (or none). Write a real
+        # executable 'gh' so the stub is exercised hermetically on every platform.
+        $ghPath = Join-Path $BinDir "gh"
+        (@'
+#!/usr/bin/env bash
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  echo "You are not logged into any GitHub hosts." 1>&2
+  exit 1
+fi
+echo "fake gh"
+exit 0
+'@ -replace "`r`n", "`n") | Set-Content -LiteralPath $ghPath -Encoding ASCII
+        & chmod "+x" $ghPath
+    }
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-factory-doctor-test-" + [guid]::NewGuid().ToString("N"))
@@ -153,6 +149,96 @@ try {
         Assert-Result -Name "readiness header after gh failure" -Condition ($output -match "\[DOCTOR\] Factory Readiness Check") -FailureMessage "doctor aborted before reporting. Output:`n$output"
         Assert-Result -Name "gh auth surfaced" -Condition ($output -match "\[gh\.auth\].*not authenticated") -FailureMessage "doctor did not surface the gh auth state. Output:`n$output"
         Assert-Result -Name "gh auth is advisory, not blocking" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "unauthenticated gh must not block an adopter install. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Doctor reports missing gh as advisory, stays READY" -Body {
+        $projectRoot = Join-Path $tempRoot "no-gh-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+
+        # Make gh unresolvable without disturbing the PowerShell host. The two OSes
+        # need different tactics: on Windows gh has its own dir, so drop only PATH
+        # entries that contain a gh executable (System32 + host stay put); on Linux gh
+        # and pwsh share /usr/bin, so expose just a host symlink in a clean dir instead.
+        $originalPath = $env:PATH
+        if (Test-PlatformIsWindows) {
+            $sep = [System.IO.Path]::PathSeparator
+            $ghNames = @("gh.exe", "gh.cmd", "gh.bat", "gh")
+            $scopedPath = (($originalPath.Split($sep) | Where-Object {
+                $d = $_
+                ($d -ne "") -and -not ($ghNames | Where-Object {
+                    Test-Path -LiteralPath (Join-Path $d $_) -ErrorAction SilentlyContinue
+                })
+            }) -join $sep)
+        } else {
+            $cleanBin = Join-Path $tempRoot ("hostbin-" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $cleanBin -Force | Out-Null
+            # Expose the tools doctor invokes (git/go/sh + the host) but NOT gh, so it runs
+            # to completion with gh genuinely absent.
+            foreach ($tool in @((Get-PwshCommand), "git", "go", "sh")) {
+                $resolved = Get-Command $tool -ErrorAction SilentlyContinue
+                if ($resolved) {
+                    New-Item -ItemType SymbolicLink -Path (Join-Path $cleanBin $tool) -Target $resolved.Source | Out-Null
+                }
+            }
+            $scopedPath = $cleanBin
+        }
+
+        try {
+            $env:PATH = $scopedPath
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+            }
+        } finally {
+            $env:PATH = $originalPath
+        }
+        $output = $res.Output -join "`n"
+
+        Assert-Result -Name "gh absence surfaced" -Condition ($output -match "\[gh\.cli\].*not installed") -FailureMessage "doctor did not surface that gh is absent. Output:`n$output"
+        Assert-Result -Name "no gh.auth when gh absent" -Condition (-not ($output -match "\[gh\.auth\]")) -FailureMessage "doctor should not emit a gh.auth result when gh is absent. Output:`n$output"
+        Assert-Result -Name "missing gh is advisory, not blocking" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "absent gh must not block an adopter install. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Doctor degrades gracefully when git is absent" -Body {
+        $projectRoot = Join-Path $tempRoot "no-git-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+
+        # git is used to read core.hooksPath; a missing git must degrade to a structured
+        # advisory, never crash the run. Same per-OS scoping as the gh case, excluding git.
+        $originalPath = $env:PATH
+        if (Test-PlatformIsWindows) {
+            $sep = [System.IO.Path]::PathSeparator
+            $gitNames = @("git.exe", "git.cmd", "git.bat", "git")
+            $scopedPath = (($originalPath.Split($sep) | Where-Object {
+                $d = $_
+                ($d -ne "") -and -not ($gitNames | Where-Object {
+                    Test-Path -LiteralPath (Join-Path $d $_) -ErrorAction SilentlyContinue
+                })
+            }) -join $sep)
+        } else {
+            $cleanBin = Join-Path $tempRoot ("nogit-" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $cleanBin -Force | Out-Null
+            foreach ($tool in @((Get-PwshCommand), "go", "sh", "gh")) {
+                $resolved = Get-Command $tool -ErrorAction SilentlyContinue
+                if ($resolved) {
+                    New-Item -ItemType SymbolicLink -Path (Join-Path $cleanBin $tool) -Target $resolved.Source | Out-Null
+                }
+            }
+            $scopedPath = $cleanBin
+        }
+
+        try {
+            $env:PATH = $scopedPath
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+            }
+        } finally {
+            $env:PATH = $originalPath
+        }
+        $output = $res.Output -join "`n"
+
+        Assert-Result -Name "doctor did not crash without git" -Condition ($output -match "\[DOCTOR\] Factory Readiness Check") -FailureMessage "doctor produced no readiness output when git was absent. Output:`n$output"
+        Assert-Result -Name "git absence surfaced" -Condition ($output -match "\[git\.cli\]") -FailureMessage "doctor did not surface that git is absent. Output:`n$output"
+        Assert-Result -Name "missing git is advisory, not blocking" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "absent git should degrade to advisory, not block. Output:`n$output"
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

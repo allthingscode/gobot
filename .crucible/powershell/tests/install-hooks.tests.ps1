@@ -1,4 +1,4 @@
-﻿# Tests for install-hooks.ps1 (sets git core.hooksPath for framework and adopter repos).
+# Tests for install-hooks.ps1 (sets git core.hooksPath for framework and adopter repos).
 # The script derives the repo root from its own $PSScriptRoot, so each case stages a
 # copy of the real script inside a throwaway git repo and asserts the resulting config.
 
@@ -6,30 +6,17 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT_SRC = Join-Path $REPO_ROOT "powershell/install-hooks.ps1"
 
 $results = @()
 
-function Assert-Result {
-    param([string]$Name, [bool]$Condition, [string]$FailureMessage)
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Run-Test {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
+
+
+
+
 
 function Invoke-StagedScript {
     param([string]$ScriptPath)

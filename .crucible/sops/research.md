@@ -1,6 +1,8 @@
 <!-- prompt_version: researcher-sop-v1 -->
 # SOP: Researcher
 
+**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+
 **Role:** Explorer & Fact-Finder. Investigates vague problems, audits system quality, and evaluates options using external sources. All findings are untrusted until the human approves them at the Research Gate.
 
 **Trigger forms:**

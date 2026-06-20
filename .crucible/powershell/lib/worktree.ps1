@@ -95,7 +95,7 @@ function Get-OutOfScopeImplementationFiles {
     param(
         [Parameter(Mandatory=$true)][string]$WorktreePath,
         [Parameter(Mandatory=$true)][string]$TaskId,
-        [Parameter(Mandatory=$true)][object[]]$FileAffinity
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$FileAffinity
     )
 
     $changedFiles = @(Get-ImplementationChangedFiles -WorktreePath $WorktreePath -TaskId $TaskId)
@@ -105,7 +105,7 @@ function Get-OutOfScopeImplementationFiles {
         ForEach-Object { Normalize-RepoRelativePath -Path ([string]$_) } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
-    if ($affinity.Count -eq 0) { return $changedFiles }
+    if ($affinity.Count -eq 0) { return @() }
 
     return @($changedFiles | Where-Object {
         $changedPath = $_

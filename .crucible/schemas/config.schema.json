@@ -9,9 +9,9 @@
   "properties": {
     "crucible_root": {
       "type": "string",
-      "description": "Path to this project's installed Crucible bundle. Must point inside the application repo, normally .crucible. The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory.",
+      "description": "Path to this project's installed Crucible bundle. Must point inside the application repo, normally .crucible, but may be a custom relative path (e.g. .dev-factory, tools/crucible). The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory.",
       "minLength": 1,
-      "pattern": "^\\.crucible($|[\\\\/])"
+      "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(^|[\\\\/])\\.\\.($|[\\\\/])).+"
     },
     "crucible_version": {
       "type": "string",
@@ -48,13 +48,14 @@
     },
     "paths": {
       "type": "object",
-      "description": "Filesystem paths for Crucible runtime directories, all relative to the project root and rooted under .crucible/.",
+      "description": "Filesystem paths for Crucible runtime directories, all relative to the project root. While session and framework assets must be rooted under .crucible/, the backlog path may be any safe relative in-repo path.",
       "required": ["backlog", "session", "workspaces", "prompts", "personas", "sops"],
       "additionalProperties": false,
       "properties": {
         "backlog": {
           "type": "string",
-          "description": "Backlog directory (BACKLOG.md, features/, bugs/, chores/, blocked/).",
+          "description": "Backlog directory (BACKLOG.md, features/, bugs/, chores/, blocked/). May be any safe relative path inside the project root.",
+          "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(^|[\\\\/])\\.\\.($|[\\\\/])).+",
           "default": ".crucible/backlog"
         },
         "session": {

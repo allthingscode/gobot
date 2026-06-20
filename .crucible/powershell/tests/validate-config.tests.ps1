@@ -1,39 +1,18 @@
-﻿# Smoke tests for powershell/validate-config.ps1.
+# Smoke tests for powershell/validate-config.ps1.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
 $results = @()
 
-function Assert-Result {
-    param(
-        [string]$Name,
-        [bool]$Condition,
-        [string]$FailureMessage
-    )
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Run-Test {
-    param(
-        [string]$Name,
-        [scriptblock]$Body
-    )
 
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
+
+
+
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-config-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
@@ -266,6 +245,87 @@ try {
         $outputEsc = $outputLinesEsc -join "`n"
         Assert-Result -Name "esc-paths exit" -Condition ($exitCodeEsc -eq 2) -FailureMessage ("expected exit 2, got " + $exitCodeEsc + ". Output: " + $outputEsc)
         Assert-Result -Name "esc-paths message" -Condition ($outputEsc -match "paths.backlog must not escape the project root") -FailureMessage ("expected escaping error message. Output: " + $outputEsc)
+    }
+
+    $results += Run-Test -Name "Nested custom crucible_root (e.g. tools/crucible) is accepted when bundle structure exists" -Body {
+        $toolsCrucibleRoot = Join-Path $projectRoot "tools/crucible"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $toolsCrucibleRoot) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $projectRoot ".crucible") -Destination $toolsCrucibleRoot -Recurse -Force
+
+        $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $configToolsCrucible = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: "tools/crucible"'
+        $testPath = Join-Path $projectRoot ".crucible/config-tools-crucible.yaml"
+        $configToolsCrucible | Out-File -LiteralPath $testPath -Encoding UTF8
+
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "tools-crucible exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+        Assert-Result -Name "tools-crucible message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
+    }
+
+    $results += Run-Test -Name "Escaping or absolute crucible_root fails" -Body {
+        $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+
+        # 1. Escaping path
+        $configEsc = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: "../escaped"'
+        $testPathEsc = Join-Path $projectRoot ".crucible/config-esc-root.yaml"
+        $configEsc | Out-File -LiteralPath $testPathEsc -Encoding UTF8
+
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $outputLinesEsc = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathEsc 2>&1)
+            $exitCodeEsc = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        $outputEsc = $outputLinesEsc -join "`n"
+        Assert-Result -Name "esc-root exit" -Condition ($exitCodeEsc -eq 2) -FailureMessage ("expected exit 2, got " + $exitCodeEsc + ". Output: " + $outputEsc)
+        Assert-Result -Name "esc-root message" -Condition ($outputEsc -match "crucible_root must not escape the project root") -FailureMessage ("expected escaping error message. Output: " + $outputEsc)
+
+        # 2. Windows drive-rooted path
+        $configWin = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: "C:\some\path"'
+        $testPathWin = Join-Path $projectRoot ".crucible/config-win-root.yaml"
+        $configWin | Out-File -LiteralPath $testPathWin -Encoding UTF8
+
+        $ErrorActionPreference = "Continue"
+        try {
+            $outputLinesWin = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathWin 2>&1)
+            $exitCodeWin = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        $outputWin = $outputLinesWin -join "`n"
+        Assert-Result -Name "win-root exit" -Condition ($exitCodeWin -eq 2) -FailureMessage ("expected exit 2, got " + $exitCodeWin + ". Output: " + $outputWin)
+        Assert-Result -Name "win-root message" -Condition ($outputWin -match "crucible_root must be a relative path") -FailureMessage ("expected relative path error message. Output: " + $outputWin)
+
+        # 3. Unix absolute path
+        $configUnix = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: "/tmp/crucible"'
+        $testPathUnix = Join-Path $projectRoot ".crucible/config-unix-root.yaml"
+        $configUnix | Out-File -LiteralPath $testPathUnix -Encoding UTF8
+
+        $ErrorActionPreference = "Continue"
+        try {
+            $outputLinesUnix = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathUnix 2>&1)
+            $exitCodeUnix = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        $outputUnix = $outputLinesUnix -join "`n"
+        Assert-Result -Name "unix-root exit" -Condition ($exitCodeUnix -eq 2) -FailureMessage ("expected exit 2, got " + $exitCodeUnix + ". Output: " + $outputUnix)
+        Assert-Result -Name "unix-root message" -Condition ($outputUnix -match "crucible_root must be a relative path") -FailureMessage ("expected relative path error message. Output: " + $outputUnix)
+    }
+
+    $results += Run-Test -Name "Schema config.schema.json pattern regression test" -Body {
+        $schemaPath = Join-Path $REPO_ROOT "schemas/config.schema.json"
+        Assert-Result -Name "schema exists" -Condition (Test-Path -LiteralPath $schemaPath) -FailureMessage "config.schema.json not found"
+        $schemaContent = Get-Content -LiteralPath $schemaPath -Raw -Encoding UTF8
+
+        $obsoletePatternString = '"pattern": "^\\.crucible($|[\\\\/])"'
+        Assert-Result -Name "obsolete pattern gone" -Condition (-not $schemaContent.Contains($obsoletePatternString)) -FailureMessage "config.schema.json still contains the obsolete crucible_root pattern string"
+
+        $newPatternString = '"pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(^|[\\\\/])\\.\\.($|[\\\\/])).+"'
+        Assert-Result -Name "new pattern present" -Condition ($schemaContent.Contains($newPatternString)) -FailureMessage "config.schema.json does not contain the new pattern string"
     }
 }
 finally {

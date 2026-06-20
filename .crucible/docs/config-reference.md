@@ -18,7 +18,7 @@ project:
   description: A Node/TypeScript REST API # required
   default_branch: main                    # required
 
-paths:                                    # optional; if specified, all keys are required and must start with .crucible/
+paths:                                    # optional; if specified, all keys are required. session, workspaces, prompts, personas, and sops must start with .crucible/
   backlog:    .crucible/backlog
   session:    .crucible/session
   workspaces: .crucible/.agent-workspaces
@@ -61,19 +61,25 @@ file_affinity_examples:                   # optional; illustrative only
 
 ### `crucible_root` (required)
 
-Path to the installed Crucible bundle for this project. In a normal install this is `.crucible`.
+Path to the installed Crucible bundle for this project. In a normal install this is `.crucible`, but custom relative paths (e.g. `.dev-factory`, `tools/crucible`) are supported.
 
-This value must point to the project's own `.crucible` framework folder. Applications that use Crucible must use their own installed `.crucible/` directory, rather than referencing absolute or external directories.
+This value must point to a relative path inside the project. Applications that use Crucible must use their own installed framework folder, rather than referencing absolute or external directories, and the path must not escape the project root (no `..` segments).
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `crucible_root` | string | yes | Path to this project's installed Crucible bundle. The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory to run the pipeline. |
+| `crucible_root` | string | yes | Path to this project's installed Crucible bundle. Must be relative, safe, and contain a complete bundle structure. The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory to run the pipeline. |
 
 **Examples**:
 
 ```yaml
 # Standard install
 crucible_root: ".crucible"
+
+# Custom bundle directory
+crucible_root: ".dev-factory"
+
+# Nested custom bundle directory
+crucible_root: "tools/crucible"
 ```
 
 ---
@@ -260,7 +266,9 @@ Run before starting any pipeline work:
 
 **Errors** (exit 2 — pipeline will not start):
 - Any required section or field is missing
-- Any path under `paths` does not start with `.crucible/`
+- `crucible_root` is absolute, contains `..` path traversal segments, or does not point to a complete installed Crucible bundle (missing `docs`, `prompts`, `personas`, `schemas`, `sops`, or `powershell` directories)
+- Any path under `paths` (except `backlog`) does not start with `.crucible/`
+- `paths.backlog` is absolute or contains `..` path traversal segments
 - Any `verification` command still contains a scaffold placeholder (`replace-with-...`)
 
 **Warnings** (exit 0 — pipeline starts, but check these):

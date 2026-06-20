@@ -18,6 +18,111 @@ function Get-RootRelativePath {
     return $normPath
 }
 
+function Get-StrayFileClassification {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$RepoRoot
+    )
+    $fullPath = Join-Path $RepoRoot $Path
+    if (-not (Test-Path -LiteralPath $fullPath)) {
+        return "SURFACE, do not delete"
+    }
+
+    if (Test-Path -LiteralPath $fullPath -PathType Container) {
+        return "SURFACE, do not delete"
+    }
+
+    try {
+        $item = Get-Item -LiteralPath $fullPath
+        if ($item.Length -eq 0) {
+            return "safe-to-remove (zero-byte)"
+        }
+    } catch {}
+
+    $fileName = Split-Path $Path -Leaf
+    if ($fileName -match '\.(tmp|temp|bak|log)$' -or ($fileName -match 'diagnostic' -and $fileName -match '\.txt$')) {
+        return "safe-to-remove (known scratch pattern)"
+    }
+
+    return "SURFACE, do not delete"
+}
+
+function Test-AffectedPathCandidate {
+    param([AllowNull()][string]$Candidate)
+
+    $trimChars = [char[]](96, 39, 34, 32)
+
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return $false
+    }
+
+    $value = $Candidate.Trim()
+    $value = $value.Trim($trimChars)
+
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $false
+    }
+
+    if ($value -match '^(https?|file)://') {
+        return $false
+    }
+
+    if ($value -match '\s' -or $value -match ':') {
+        return $false
+    }
+
+    return ($value -match '^[A-Za-z0-9._/@*?+\-\\]+$')
+}
+
+function Add-AffectedPathCandidate {
+    param(
+        [System.Collections.ArrayList]$Candidates,
+        [AllowNull()][string]$Candidate
+    )
+
+    if (Test-AffectedPathCandidate -Candidate $Candidate) {
+        $trimChars = [char[]](96, 39, 34, 32)
+        [void]$Candidates.Add($Candidate.Trim().Trim($trimChars))
+    }
+}
+
+function Move-TaskHandoffsToArchive {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$SessionDir,
+        [Parameter(Mandatory=$true)][string]$Timestamp
+    )
+
+    $handoffDir = Join-Path $SessionDir "handoffs"
+    if (-not (Test-Path -LiteralPath $handoffDir)) {
+        return @()
+    }
+
+    $handoffFiles = @(Get-ChildItem -LiteralPath $handoffDir -Filter ($TaskId + "-*.json") -File -ErrorAction SilentlyContinue)
+    if ($handoffFiles.Count -eq 0) {
+        return @()
+    }
+
+    $archiveDir = Join-Path $handoffDir "archived"
+    if (-not (Test-Path -LiteralPath $archiveDir)) {
+        New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null
+    }
+
+    $archived = @()
+    foreach ($file in $handoffFiles) {
+        $destPath = Join-Path $archiveDir $file.Name
+        if (Test-Path -LiteralPath $destPath) {
+            $base = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            $ext = [System.IO.Path]::GetExtension($file.Name)
+            $destPath = Join-Path $archiveDir ($base + "-" + $Timestamp + $ext)
+        }
+        Move-Item -LiteralPath $file.FullName -Destination $destPath -Force
+        $archived += $destPath
+    }
+
+    return [string[]]$archived
+}
+
 function Resolve-FactoryInputHandoff {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -480,10 +585,14 @@ function Invoke-HandoffPreflightValidation {
             $specContent = Get-Content $specFile -Raw -Encoding UTF8
             $hasAffectedSection = $false
             $affectedSection = ""
-            $affectedMatches = [regex]::Matches($specContent, '(?ism)^##+\s+[^\r\n]*affected[^\r\n]*\r?\n(.*?)(\r?\n##+\s+|\z)')
+            $affectedMatches = [regex]::Matches($specContent, '(?ism)^##+\s+[^\r\n]*(?:affected|scope)[^\r\n]*\r?\n(.*?)(?=\r?\n##+\s+|\z)')
             if ($affectedMatches.Count -gt 0) {
                 $bodies = @()
                 foreach ($m in $affectedMatches) {
+                    $headingLine = ($m.Value -split '\r?\n')[0]
+                    if ($headingLine -match 'out\s*-\s*of\s*-\s*scope' -or $headingLine -match 'out\s+of\s+scope') {
+                        continue
+                    }
                     $body = $m.Groups[1].Value
                     if (-not [string]::IsNullOrWhiteSpace($body)) {
                         $bodies += $body
@@ -496,15 +605,15 @@ function Invoke-HandoffPreflightValidation {
             }
             
             if ($hasAffectedSection) {
-                $mentionedPaths = @()
+                $mentionedPaths = New-Object System.Collections.ArrayList
                 $backtickMatches = [regex]::Matches($affectedSection, '`([^`\r\n]+)`')
                 foreach ($m in $backtickMatches) {
-                    $mentionedPaths += $m.Groups[1].Value.Trim()
+                    Add-AffectedPathCandidate -Candidates $mentionedPaths -Candidate $m.Groups[1].Value
                 }
                 $listMatches = [regex]::Matches($affectedSection, '(?m)^\s*-\s+([^\r\n]+)')
                 foreach ($m in $listMatches) {
                     $val = $m.Groups[1].Value.Trim() -replace '`','' -replace '\*',''
-                    $mentionedPaths += $val
+                    Add-AffectedPathCandidate -Candidates $mentionedPaths -Candidate $val
                 }
                 
                 $specTopLevels = @()
@@ -538,11 +647,102 @@ function Invoke-HandoffPreflightValidation {
                     }
                 }
             } else {
-                # D23: Spec has no affected-files/packages section to validate file_affinity against
-                Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
-                Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
-                    -Outcome "warned" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
-                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                # Parse frontmatter from spec content
+                $specLines = $specContent -split '\r?\n'
+                $frontmatterLines = @()
+                $foundEnd = $false
+                if ($specLines.Count -ge 2 -and $specLines[0].Trim() -eq "---") {
+                    for ($i = 1; $i -lt $specLines.Count; $i++) {
+                        if ($specLines[$i].Trim() -eq "---") {
+                            $foundEnd = $true
+                            break
+                        }
+                        $frontmatterLines += $specLines[$i]
+                    }
+                }
+                
+                $frontmatterAffinity = @()
+                if ($foundEnd) {
+                    $inAffinityBlock = $false
+                    for ($i = 0; $i -lt $frontmatterLines.Count; $i++) {
+                        $line = $frontmatterLines[$i]
+                        if ($line -match '^\s*file_affinity:\s*(.*)$') {
+                            $rest = $Matches[1].Trim()
+                            if ($rest -match '^\[(.*)\]$') {
+                                $items = $Matches[1] -split ','
+                                foreach ($item in $items) {
+                                    $clean = $item.Trim().Trim('"' + "'")
+                                    if (-not [string]::IsNullOrWhiteSpace($clean)) {
+                                        $frontmatterAffinity += $clean
+                                    }
+                                }
+                                $inAffinityBlock = $false
+                            } else {
+                                $inAffinityBlock = $true
+                            }
+                            continue
+                        }
+                        if ($inAffinityBlock) {
+                            if ($line -match '^\s*-\s*(.*)$') {
+                                $item = $Matches[1].Trim().Trim('"' + "'")
+                                if (-not [string]::IsNullOrWhiteSpace($item)) {
+                                    $frontmatterAffinity += $item
+                                }
+                            } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
+                                continue
+                            } else {
+                                $inAffinityBlock = $false
+                            }
+                        }
+                    }
+                }
+                
+                if (@($frontmatterAffinity).Count -gt 0) {
+                    $specTopLevels = @()
+                    foreach ($p in $frontmatterAffinity) {
+                        $parts = $p -split '[/\\]'
+                        if ($parts.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
+                            $specTopLevels += $parts[0].Trim()
+                        }
+                    }
+                    $specTopLevels = @($specTopLevels | Select-Object -Unique)
+                    
+                    if ($specTopLevels.Count -gt 0) {
+                        $overbroad = @()
+                        foreach ($aff in @($handoff.file_affinity)) {
+                            $affTrimmed = $aff.Trim().Trim('/') -split '[/\\]'
+                            if ($affTrimmed.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($affTrimmed[0])) {
+                                $top = $affTrimmed[0]
+                                if ($specTopLevels -notcontains $top) {
+                                    $overbroad += $aff
+                                }
+                            }
+                        }
+                        
+                        if ($overbroad.Count -gt 0) {
+                            $joinedOverbroad = $overbroad -join ", "
+                            $joinedSpec = $specTopLevels -join ", "
+                            Write-Host "[WARN] Handoff file_affinity ($joinedOverbroad) lists top-level directories absent from the spec's frontmatter file_affinity ($joinedSpec)." -ForegroundColor Yellow
+                            Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
+                                -Outcome "warned" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec frontmatter ($joinedSpec)" `
+                                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                        } else {
+                            Write-Host "[INFO] Handoff file_affinity validated against spec's frontmatter file_affinity." -ForegroundColor Green
+                        }
+                    } else {
+                        # Frontmatter parsed but has no valid top-level directories - fall through to the warning
+                        Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
+                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
+                            -Outcome "warned" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
+                            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                    }
+                } else {
+                    # D23: Spec has no affected-files/packages section to validate file_affinity against
+                    Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
+                    Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
+                        -Outcome "warned" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
+                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                }
             }
         }
     }
@@ -673,7 +873,7 @@ function Complete-FactorySourceSession {
                 Write-Quiet ("[WARN] Optional checklist has " + $optionalUncheckedCount + " unchecked item(s) for " + $handoff.source_phase + " (non-blocking).") -ForegroundColor Yellow
             }
 
-            if ($requiredFailureCount -gt 0 -or $optionalUncheckedCount -gt 0) {
+            if ($requiredMalformedCount -gt 0 -or $optionalUncheckedCount -gt 0) {
                 Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
                     -Outcome "warned" -Notes ("Task checklist summary: required_unchecked=" + $requiredUncheckedCount + "; required_malformed=" + $requiredMalformedCount + "; optional_unchecked=" + $optionalUncheckedCount) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
@@ -684,6 +884,7 @@ function Complete-FactorySourceSession {
                     -Outcome "retry_required" -Notes ("Required task.md checklist quality gate failed: unchecked=" + $requiredUncheckedCount + "; malformed=" + $requiredMalformedCount) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-Host ("[STOP] Quality gate failed: " + $handoff.source_phase + " has required checklist issues (unchecked: " + $requiredUncheckedCount + ", malformed: " + $requiredMalformedCount + "). Complete required Task List items before handoff.") -ForegroundColor Red
+                Write-Host "Tick the required ## Task List checkboxes in task.md, then re-run factory.ps1 -Init -TaskId $($handoff.task_id)." -ForegroundColor Red
                 exit 2
             }
         }
@@ -943,7 +1144,12 @@ function Invoke-FactoryScopeGates {
                 $declaredAffinity = @($handoff.file_affinity)
             }
 
-            $outOfScopeFiles = @(Get-OutOfScopeImplementationFiles -WorktreePath $wtPath -TaskId $handoff.task_id -FileAffinity $declaredAffinity)
+            $outOfScopeFiles = @()
+            if (@($declaredAffinity).Count -gt 0) {
+                $outOfScopeFiles = @(Get-OutOfScopeImplementationFiles -WorktreePath $wtPath -TaskId $handoff.task_id -FileAffinity $declaredAffinity)
+            } else {
+                Write-Host "[ADVISORY] No file_affinity declared; scope check skipped." -ForegroundColor Yellow
+            }
             if ($outOfScopeFiles.Count -gt 0) {
                 $joined = ($outOfScopeFiles -join ", ")
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
@@ -1116,10 +1322,29 @@ function Test-CompletionArtifactGate {
                         } else {
                             $mainBranch = Get-PrimaryBranchName
 
-                            git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
-                            if ($LASTEXITCODE -ne 0) {
-                                $verificationPassed = $false
-                                $errorMsg = "Commit $($handoff.commit_hash) is not merged into $mainBranch."
+                            $gatePassed = $false
+                            $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
+                            if (Test-Path $GATE_DIR) {
+                                $decisions = @(Get-ChildItem -Path $GATE_DIR -Filter ($handoff.task_id + "-*.json") |
+                                    Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
+                                    Sort-Object LastWriteTime -Descending)
+                                if ($decisions.Count -gt 0) {
+                                    try {
+                                        $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                                        $advancingOutcomes = @("accepted", "redirected")
+                                        if ($advancingOutcomes -contains $latestDecision.outcome) {
+                                            $gatePassed = $true
+                                        }
+                                    } catch {}
+                                }
+                            }
+
+                            if ($gatePassed) {
+                                git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
+                                if ($LASTEXITCODE -ne 0) {
+                                    $verificationPassed = $false
+                                    $errorMsg = "Commit $($handoff.commit_hash) is not merged into $mainBranch."
+                                }
                             }
                         }
                     }
@@ -1150,10 +1375,29 @@ function Test-CompletionArtifactGate {
                         } else {
                             $mainBranch = Get-PrimaryBranchName
 
-                            git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
-                            if ($LASTEXITCODE -ne 0) {
-                                $verificationPassed = $false
-                                $errorMsg = "Commit $($handoff.commit_hash) is not merged into $mainBranch."
+                            $gatePassed = $false
+                            $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
+                            if (Test-Path $GATE_DIR) {
+                                $decisions = @(Get-ChildItem -Path $GATE_DIR -Filter ($handoff.task_id + "-*.json") |
+                                    Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
+                                    Sort-Object LastWriteTime -Descending)
+                                if ($decisions.Count -gt 0) {
+                                    try {
+                                        $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                                        $advancingOutcomes = @("accepted", "redirected")
+                                        if ($advancingOutcomes -contains $latestDecision.outcome) {
+                                            $gatePassed = $true
+                                        }
+                                    } catch {}
+                                }
+                            }
+
+                            if ($gatePassed) {
+                                git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
+                                if ($LASTEXITCODE -ne 0) {
+                                    $verificationPassed = $false
+                                    $errorMsg = "Commit $($handoff.commit_hash) is not merged into $mainBranch."
+                                }
                             }
                         }
                     }
@@ -2090,6 +2334,21 @@ function Invoke-HumanGateAction {
         }
 
         if ($SourcePhase -ne "grooming") {
+            $hasTaskBranch = $false
+            git show-ref --quiet "refs/heads/task/$TaskId"
+            if ($LASTEXITCODE -eq 0) {
+                $hasTaskBranch = $true
+            }
+            if ($hasTaskBranch) {
+                Write-Quiet "[HUMAN GATE] Merging branch task/$TaskId into $primaryBranch..."
+                Invoke-GitChecked { git checkout $primaryBranch }
+                Invoke-GitChecked { git merge --no-ff --no-edit "task/$TaskId" }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "[ERROR] git merge --no-ff --no-edit task/$TaskId failed!" -ForegroundColor Red
+                    exit 1
+                }
+            }
+
             $remotes = @(Invoke-GitChecked { git remote 2>$null })
             if ($remotes -contains "origin") {
                 Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
@@ -2101,20 +2360,40 @@ function Invoke-HumanGateAction {
             } else {
                 Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
             }
+
+            $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $resolvedProjectRoot
+            $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+            if (Test-Path $wtPath) {
+                Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
+                Invoke-GitChecked { git worktree prune }
+                if (Test-Path $wtPath) {
+                    Invoke-GitChecked { git worktree remove $wtPath }
+                }
+            }
+            if ($hasTaskBranch) {
+                Write-Quiet "[HUMAN GATE] Deleting task branch task/$TaskId..."
+                Invoke-GitChecked { git branch -d "task/$TaskId" }
+            }
         }
 
-        # Move pipeline log to archived if it exists
         $sessionDir = Join-Path $resolvedProjectRoot ".crucible/session"
+        $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+
+        # Move pipeline log to archived if it exists
         $pipelineLogPath = Join-Path $sessionDir "$TaskId/pipeline.log.jsonl"
         if (Test-Path -LiteralPath $pipelineLogPath) {
             $archivedDir = Join-Path $sessionDir "archived"
             if (-not (Test-Path $archivedDir)) {
                 New-Item -ItemType Directory -Force -Path $archivedDir | Out-Null
             }
-            $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
             $destPath = Join-Path $archivedDir "pipeline-$TaskId-$timestamp.log.jsonl"
             Move-Item -LiteralPath $pipelineLogPath -Destination $destPath -Force
             Write-Quiet "[HUMAN GATE] Archived pipeline log to $destPath"
+        }
+
+        $archivedHandoffs = @(Move-TaskHandoffsToArchive -TaskId $TaskId -SessionDir $sessionDir -Timestamp $timestamp)
+        if ($archivedHandoffs.Count -gt 0) {
+            Write-Quiet ("[HUMAN GATE] Archived " + $archivedHandoffs.Count + " handoff file(s) for " + $TaskId)
         }
     } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
         if ($SourcePhase -ne "grooming") {
@@ -2197,32 +2476,53 @@ function Invoke-HumanGateAction {
             $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
             $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
 
-            $resetTarget = "origin/$primaryBranch"
-            
-            # Derive pre-merge tip using reflog as primary defense in depth (for both merge and FF)
-            $reflogTip = (Invoke-GitChecked { git rev-parse --verify --quiet "${primaryBranch}@{1}" 2>$null }).Trim()
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
-                # Verify that $reflogTip is indeed an ancestor of $currentHead
-                git merge-base --is-ancestor $reflogTip $currentHead 2>$null
-                if ($LASTEXITCODE -eq 0) {
-                    $resetTarget = $reflogTip
+            # Only unwind a local merge if the gate actually advanced $primaryBranch
+            # beyond origin. In the review-before-merge flow the task branch is not
+            # merged until accept, so on reject/abandon there is typically nothing to
+            # unwind -- a blind reset would discard unrelated, already-pushed history
+            # (e.g. the previously-accepted task), resetting $primaryBranch to a stale
+            # reflog entry.
+            $primaryAhead = $false
+            git rev-parse --verify --quiet "origin/$primaryBranch" > $null 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $aheadCount = (Invoke-GitChecked { git rev-list --count "origin/$primaryBranch..$primaryBranch" }).Trim()
+                if ($aheadCount -match '^\d+$' -and [int]$aheadCount -gt 0) { $primaryAhead = $true }
+            } elseif ($parentList.Count -ge 2) {
+                # No origin tracking ref to compare against: only unwind a genuine merge commit.
+                $primaryAhead = $true
+            }
+
+            if ($primaryAhead) {
+                $resetTarget = "origin/$primaryBranch"
+
+                # Derive pre-merge tip using reflog as primary defense in depth (for both merge and FF)
+                $reflogTip = (Invoke-GitChecked { git rev-parse --verify --quiet "${primaryBranch}@{1}" 2>$null }).Trim()
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
+                    # Verify that $reflogTip is indeed an ancestor of $currentHead
+                    git merge-base --is-ancestor $reflogTip $currentHead 2>$null
+                    if ($LASTEXITCODE -eq 0) {
+                        $resetTarget = $reflogTip
+                    }
                 }
-            }
 
-            # If reflog check failed or wasn't ancestor, fall back to parent checking for merge commits
-            if ($resetTarget -eq "origin/$primaryBranch" -and $parentList.Count -ge 2) {
-                $resetTarget = $parentList[0]
-            }
+                # If reflog check failed or wasn't ancestor, fall back to parent checking for merge commits
+                if ($resetTarget -eq "origin/$primaryBranch" -and $parentList.Count -ge 2) {
+                    $resetTarget = $parentList[0]
+                }
 
-            if ($resetTarget -eq "origin/$primaryBranch") {
-                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
+                if ($resetTarget -eq "origin/$primaryBranch") {
+                    Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
+                } else {
+                    Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
+                }
+
+                Invoke-GitChecked { git checkout $primaryBranch }
+                Invoke-GitChecked { git reset --hard $resetTarget }
             } else {
-                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
+                Write-Quiet "[HUMAN GATE] No local merge to unwind ($primaryBranch is not ahead of origin/$primaryBranch); leaving $primaryBranch untouched."
+                Invoke-GitChecked { git checkout $primaryBranch }
             }
 
-            Invoke-GitChecked { git checkout $primaryBranch }
-            Invoke-GitChecked { git reset --hard $resetTarget }
-            
             if ($Outcome -eq "rejected") {
                 Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
                 if ($LASTEXITCODE -ne 0) {
@@ -2433,6 +2733,16 @@ function Invoke-HumanGate {
                 exit 1
             }
             
+            $primaryBranch = Get-PrimaryBranchName
+            $baseSha = (git rev-parse $primaryBranch 2>$null).Trim()
+            $branchSha = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
+            if ([string]::IsNullOrEmpty($branchSha)) {
+                git show-ref --quiet "refs/heads/task/$($handoff.task_id)"
+                if ($LASTEXITCODE -eq 0) {
+                    $branchSha = (git rev-parse "task/$($handoff.task_id)" 2>$null).Trim()
+                }
+            }
+
             $decision = [ordered]@{
                 task_id = $handoff.task_id
                 backlog_item = $handoff.task_id
@@ -2442,6 +2752,8 @@ function Invoke-HumanGate {
                 rework_requested = ($GateOutcome -eq "rejected")
                 redirect_target = $GateRedirectTarget
                 session_cycle_id = $currentGateCycle
+                base_sha = $baseSha
+                branch_sha = $branchSha
             }
             
             $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
@@ -2518,19 +2830,39 @@ function Invoke-HumanGate {
                             Write-Host "`n[HUMAN GATE] Action Required: Please complete the gate decision." -ForegroundColor Yellow
                             Write-Host ("File: " + $gateTemplatePath) -ForegroundColor White
                             
+                            $baseSha = ""
+                            $branchSha = ""
+                            if ($gateData.PSObject.Properties["base_sha"]) { $baseSha = $gateData.base_sha }
+                            if ($gateData.PSObject.Properties["branch_sha"]) { $branchSha = $gateData.branch_sha }
+                            if ([string]::IsNullOrEmpty($baseSha) -or [string]::IsNullOrEmpty($branchSha)) {
+                                $primaryBranch = Get-PrimaryBranchName
+                                $baseSha = (git rev-parse $primaryBranch 2>$null).Trim()
+                                $branchSha = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
+                                if ([string]::IsNullOrEmpty($branchSha)) {
+                                    git show-ref --quiet "refs/heads/task/$($handoff.task_id)"
+                                    if ($LASTEXITCODE -eq 0) {
+                                        $branchSha = (git rev-parse "task/$($handoff.task_id)" 2>$null).Trim()
+                                    }
+                                }
+                            }
+                            Write-Host "`n[HUMAN GATE] Review command to diff changes:" -ForegroundColor Yellow
+                            Write-Host "  git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+
                             # Write machine-readable signal file
                             $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
                                     "  1) Accept     - work looks good; pause after this item`n" +
                                     "  2) Reject     - something is wrong, send back for rework`n" +
                                     "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                                     "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
+                                    "Review command:`n" +
+                                    "  git -C `"$repoRoot`" diff $baseSha..$branchSha`n`n" +
                                     "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                             $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
                             
                             # Construct gate-specific command for next_step.txt
                             $pwshCmd = Get-PwshCommand
                             $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
-                        Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
+                            Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                             
                             exit 0
                         } else {
@@ -2560,6 +2892,16 @@ function Invoke-HumanGate {
                     }
                 } else {
                     # Create template and exit
+                    $primaryBranch = Get-PrimaryBranchName
+                    $baseSha = (git rev-parse $primaryBranch 2>$null).Trim()
+                    $branchSha = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
+                    if ([string]::IsNullOrEmpty($branchSha)) {
+                        git show-ref --quiet "refs/heads/task/$($handoff.task_id)"
+                        if ($LASTEXITCODE -eq 0) {
+                            $branchSha = (git rev-parse "task/$($handoff.task_id)" 2>$null).Trim()
+                        }
+                    }
+
                     $template = [ordered]@{
                         task_id = $handoff.task_id
                         backlog_item = $handoff.task_id
@@ -2568,15 +2910,22 @@ function Invoke-HumanGate {
                         reason = "Brief human description of why"
                         rework_requested = $false
                         redirect_target = $null
+                        base_sha = $baseSha
+                        branch_sha = $branchSha
                     }
                     $template | ConvertTo-Json | Set-Content -Path $gateTemplatePath -Encoding UTF8
                     
+                    Write-Host "`n[HUMAN GATE] Review command to diff changes:" -ForegroundColor Yellow
+                    Write-Host "  git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+
                     # Write machine-readable signal file
                     $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
                             "  1) Accept     - work looks good; pause after this item`n" +
                             "  2) Reject     - something is wrong, send back for rework`n" +
                             "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                             "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
+                            "Review command:`n" +
+                            "  git -C `"$repoRoot`" diff $baseSha..$branchSha`n`n" +
                             "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                     $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
 
@@ -2596,7 +2945,7 @@ function Invoke-HumanGate {
                     # Construct gate-specific command for next_step.txt
                     $pwshCmd = Get-PwshCommand
                     $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
-                Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
+                    Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                     
                     exit 0
                 }
@@ -2629,6 +2978,40 @@ function Invoke-RepositoryIntegrityGates {
     $LOG_FILE = $Context.LogFile
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
     $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+
+    # --- 3a. Baseline Cleanliness Probe at Task START ---
+    # Runs when a fresh task enters its first phase (grooming) via factory.ps1 -Init.
+    $Init = if ($Context.ContainsKey("Init")) { [bool]$Context.Init } else { $false }
+    if ($Init -and $handoff.target_phase -eq "grooming") {
+        $rawStatus = git status --porcelain 2>&1
+        $strayFiles = @()
+        foreach ($line in $rawStatus) {
+            if ($line.Length -lt 3) { continue }
+            $statusCode = $line.Substring(0, 2)
+            $path = $line.Substring(3).Trim()
+            # Catch untracked (??) AND uncommitted modifications/additions/deletions in the main working tree.
+            # The worktree lives under .agent-workspaces/ and is excluded, so these are always main-repo changes.
+            $isStray = ($statusCode -match '\?') -or ($statusCode.Trim() -match '^[MADRCUT]')
+            if ($isStray) {
+                $ignored = $path -match '^(\.crucible[/\\]|\.agent-workspaces[/\\]|\.gemini[/\\]|\.antigravitycli[/\\]|\.vscode[/\\]|vendor[/\\])'
+                if (-not $ignored) { $strayFiles += "$statusCode $path" }
+            }
+        }
+        if ($strayFiles.Count -gt 0) {
+            Write-Host "`n[ADVISORY] Pre-existing untracked files detected at task start:" -ForegroundColor Yellow
+            foreach ($f in $strayFiles) {
+                $status = $f.Substring(0, 2)
+                $filePath = $f.Substring(3)
+                $classification = Get-StrayFileClassification -Path $filePath -RepoRoot $repoRoot
+                Write-Host "  - $f [$classification]" -ForegroundColor Yellow
+            }
+            Write-Host "These files are not part of the active task but may block deployment later. STASH or SURFACE them before final handoff.`n" -ForegroundColor Yellow
+            
+            Write-EventLog -Event "workspace_baseline" -TaskId $handoff.task_id -Phase $handoff.target_phase -Outcome "warned" -Notes ("Pre-existing stray files: " + ($strayFiles -join ", ")) -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+        } else {
+            Write-Quiet "[WORKSPACE] Clean at baseline." -ForegroundColor Green
+        }
+    }
 
     # --- 3b. Backlog Integrity Gate ---
     # Run automatically when Groomer or Operator hands off (they own BACKLOG.md).
@@ -2678,18 +3061,24 @@ function Invoke-RepositoryIntegrityGates {
             if ($line.Length -lt 3) { continue }
             $statusCode = $line.Substring(0, 2)
             $path = $line.Substring(3).Trim()
-            # Catch untracked () AND uncommitted modifications/additions/deletions in the main working tree.
+            # Catch untracked (??) AND uncommitted modifications/additions/deletions in the main working tree.
             # The worktree lives under .agent-workspaces/ and is excluded, so these are always main-repo changes.
-            $isStray = ($statusCode -match '\') -or ($statusCode.Trim() -match '^[MADRCUT]')
+            $isStray = ($statusCode -match '\?') -or ($statusCode.Trim() -match '^[MADRCUT]')
             if ($isStray) {
                 $ignored = $path -match '^(\.crucible[/\\]|\.agent-workspaces[/\\]|\.gemini[/\\]|\.antigravitycli[/\\]|\.vscode[/\\]|vendor[/\\])'
                 if (-not $ignored) { $strayFiles += "$statusCode $path" }
             }
         }
         if ($strayFiles.Count -gt 0) {
-            Write-Host "`n[STOP] Workspace is not clean. The following untracked files must be removed before handoff:" -ForegroundColor Red
-            foreach ($f in $strayFiles) { Write-Host "  - $f" -ForegroundColor Yellow }
-            Write-Host "`nDelete or move these files, then re-run factory.ps1 -Init -TaskId $($handoff.task_id)" -ForegroundColor Red
+            Write-Host "`n[STOP] Workspace is not clean. The following untracked/uncommitted changes exist outside of private/ignored directories:" -ForegroundColor Red
+            foreach ($f in $strayFiles) {
+                $status = $f.Substring(0, 2)
+                $filePath = $f.Substring(3)
+                $classification = Get-StrayFileClassification -Path $filePath -RepoRoot $repoRoot
+                Write-Host "  - $f [$classification]" -ForegroundColor Yellow
+            }
+            Write-Host "`nSTASH or SURFACE untracked non-private files. Require human confirmation before deleting anything that is not obviously empty/scratch (marked as safe-to-remove). Never blanket-delete." -ForegroundColor Red
+            Write-Host "After resolving, re-run factory.ps1 -Init -TaskId $($handoff.task_id)" -ForegroundColor Red
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "blocked" -Notes ("Stray untracked files: " + ($strayFiles -join ", ")) -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             exit 2
         }

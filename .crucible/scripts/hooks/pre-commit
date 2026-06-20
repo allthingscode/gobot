@@ -20,7 +20,7 @@ PWSH="$(command -v powershell.exe || command -v pwsh)"
 
 echo "--- Crucible pre-commit verification started"
 
-if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ] || { [ -f "$REPO_ROOT/powershell/run-all-tests.ps1" ] && [ -d "$REPO_ROOT/proposals" ]; }; then
+if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 

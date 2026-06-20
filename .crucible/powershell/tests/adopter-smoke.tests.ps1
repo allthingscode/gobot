@@ -1,8 +1,9 @@
-﻿# Adopter smoke tests for Crucible.
+# Adopter smoke tests for Crucible.
 # Verifies that a new project can adopt Crucible, ignore data/runtime, validate configuration, and pass factory linting.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
@@ -10,33 +11,11 @@ $LINT_SCRIPT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
 
 $results = @()
 
-function Assert-Result {
-    param(
-        [string]$Name,
-        [bool]$Condition,
-        [string]$FailureMessage
-    )
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Run-Test {
-    param(
-        [string]$Name,
-        [scriptblock]$Body
-    )
 
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
+
+
+
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-adopter-smoke-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null

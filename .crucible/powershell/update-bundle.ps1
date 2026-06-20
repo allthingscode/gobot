@@ -43,30 +43,6 @@ function Write-ConfigScalar {
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "lib/normalized-hash.ps1")
 
-function Test-CrucibleGitIgnored {
-    param(
-        [Parameter(Mandatory=$true)][string]$AdopterRoot,
-        [Parameter(Mandatory=$true)][string]$RelativePath
-    )
-    $gitDir = Join-Path $AdopterRoot ".git"
-    if (-not (Test-Path -LiteralPath $gitDir)) {
-        return $false
-    }
-    $checkPath = ".crucible/" + (ConvertTo-RelativeSlashPath -Path $RelativePath)
-    $null = git -C $AdopterRoot check-ignore --quiet -- $checkPath 2>$null
-    return ($LASTEXITCODE -eq 0)
-}
-
-function Test-ScaffoldSnapshotPath {
-    param(
-        [Parameter(Mandatory=$true)][string]$RelativePath,
-        [Parameter(Mandatory=$true)]$Manifest
-    )
-    $path = ConvertTo-RelativeSlashPath -Path $RelativePath
-    $scaffold = (ConvertTo-RelativeSlashPath -Path ([string]$Manifest.scaffold_source)).TrimEnd("/")
-    return $path.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)
-}
-
 function New-ClassificationResult {
     return [ordered]@{
         "no-op" = New-Object System.Collections.Generic.List[object]
@@ -180,7 +156,7 @@ function Invoke-UpdateBundle {
             if ([string]::IsNullOrWhiteSpace($adopterPath)) { continue }
             if (Test-AdopterOwnedPath -RelativePath $adopterPath -Manifest $manifest) { continue }
             if (-not (Test-ScaffoldSnapshotPath -RelativePath $adopterPath -Manifest $manifest)) {
-                if (Test-CrucibleGitIgnored -AdopterRoot $adopterRootResolved -RelativePath $adopterPath) { continue }
+                if (Test-CrucibleGitIgnored -BundleRoot $adopterCrucibleRoot -RelativePath $adopterPath) { continue }
             }
 
             $adopterFile = Join-Path $adopterCrucibleRoot $adopterPath
@@ -275,7 +251,7 @@ function Invoke-UpdateBundle {
             if ($classifiedAdopterPaths.Contains($rel)) { continue }
             if (Test-AdopterOwnedPath -RelativePath $rel -Manifest $manifest) { continue }
             if (-not (Test-ScaffoldSnapshotPath -RelativePath $rel -Manifest $manifest)) {
-                if (Test-CrucibleGitIgnored -AdopterRoot $adopterRootResolved -RelativePath $rel) { continue }
+                if (Test-CrucibleGitIgnored -BundleRoot $adopterCrucibleRoot -RelativePath $rel) { continue }
             }
             Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath "" -AdopterPath $rel
             [void]$classifiedAdopterPaths.Add($rel)

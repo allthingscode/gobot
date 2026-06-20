@@ -567,7 +567,7 @@ The Verification phase must verify in this order — a failure at any step block
 **State file:** `.crucible/session/global/session_state.json` -> `phases.deployment`
 **Cleanup**: 
 1. Merge worktree to `master`, delete worktree, delete task branch.
-2. **Workspace Cleanliness**: Run `git status --short` and delete any untracked files outside `.crucible/`, `.agent-workspaces/`, `.gemini/`, and `.vscode/`. `factory.ps1` hard-blocks the handoff if stray files remain.
+2. **Workspace Cleanliness**: Run `git status --short`. Stash or surface untracked non-private files, and require human confirmation before deleting anything that is not obviously empty/scratch. Never blanket-delete. `factory.ps1` hard-blocks the handoff if stray files remain.
 3. **Dev Log Entry**: Append a dev log entry for this task to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`. Then validate with `validate-dev-log.ps1 -FileToPublish .crucible/dev-logs/UNPUBLISHED_LOGS.md`.
 4. **Archival ({task_id})**: Move `.crucible/session/{task_id}/pipeline.log.jsonl` to `.crucible/session/archived/pipeline-{task_id}-{ts}.log.jsonl`.
 **Handoff**: Write `.crucible/session/handoffs/{task_id}-{ts}.json`, then **execute** `factory.ps1 -Init -TaskId {task_id}` via the Bash tool (using the PowerShell invocation in Session Protocol), present the factory output to the human: a brief summary of what was accomplished, the assembled next-phase prompt, and which model is recommended. Wait for human confirmation before continuing.
@@ -629,7 +629,7 @@ Optional flags: `-HandoffArtifacts`, `-HandoffFileAffinity`, `-HandoffReviewerCh
 3. **Operator (Cleanup)**: 
    - `git worktree remove .agent-workspaces/implementation-{task_id}`
    - `git branch -d task/{task_id}`
-   - **Workspace Cleanliness**: `git status --short` — delete any untracked files outside private dirs before handoff.
+   - **Workspace Cleanliness**: `git status --short` — stash or surface untracked non-private files and require human confirmation before deleting. Never blanket-delete.
    - **Rotate Log ({task_id})**: Move `.crucible/session/{task_id}/pipeline.log.jsonl` to `.crucible/session/archived/`.
 
 ---

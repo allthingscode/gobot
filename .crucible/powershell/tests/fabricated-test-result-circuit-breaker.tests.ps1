@@ -1,6 +1,7 @@
-﻿# Test for Reviewer Verification Failure (fabricated test result rejected) circuit breaker.
+# Test for Reviewer Verification Failure (fabricated test result rejected) circuit breaker.
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
@@ -8,49 +9,14 @@ $pwshCmd = Get-PwshCommand
 
 $results = @()
 
-function Assert-Result {
-    param(
-        [string]$Name,
-        [bool]$Condition,
-        [string]$FailureMessage
-    )
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Run-Test {
-    param(
-        [string]$Name,
-        [scriptblock]$Body
-    )
 
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        return $false
-    }
-}
 
-function Invoke-ExternalCommand {
-    param(
-        [Parameter(Mandatory=$true)]
-        [scriptblock]$Command
-    )
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousPreference
-    }
-    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
-}
+
+
+
+
+
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-fabricated-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null

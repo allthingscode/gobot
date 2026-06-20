@@ -7,17 +7,15 @@ Deployment: {task_id}
 ## POLICY ENFORCEMENT (Mandatory)
 See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 - **Successor**: Only `grooming`.
-- **Merge Protocol**: Simulation MUST pass before real merge.
-- **Deployment**: Merge to the default branch (`master` or `main`) MUST succeed locally before handoff.
-- **Cleanup**: Delete worktree and task branch.
+- **Merge Protocol**: Simulation MUST pass before firing the gate.
+- **Deployment**: Merging, pushing, and cleanup (deleting branch/worktree) are handled automatically by the Human Gate upon acceptance.
 ---
 
 ---
 > ### HARD RULES — Read Before Anything Else
 > 1. **You MUST run `factory.ps1` at session end.** Do not write your own `gemini "..."` command. The pipeline command comes from factory output only — copy it verbatim.
-> 2. **Local merge MUST succeed before writing the handoff.** Verify with `git log master --oneline -1`.
-> 3. **Do NOT mark an item `Production` until it is actually merged locally.** Updating BACKLOG.md before the merge is complete is a false completion.
-> 4. **Your session ends after presenting the single `[NEXT SESSION COMMAND]` command line.** Do not pick the next backlog item or start a new task.
+> 2. **Do NOT merge task branch or clean up worktree/branch manually.** These are now executed automatically by the Human Gate upon acceptance.
+> 3. **Your session ends after presenting the single `[NEXT SESSION COMMAND]` command line.** Do not pick the next backlog item or start a new task.
 ---
 
 ## Readiness Check — Complete Before Any Other Step
@@ -63,26 +61,19 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
      - Prompt: Instruct implementation to rebase `task/{task_id}` onto `master`.
    - **If it passes**: Proceed to Step 4.
 
-4. **Commit & Local Merge**:
-   - Merge `task/{task_id}` into `master` locally using `git merge --no-ff --no-edit task/{task_id}` (always force a merge commit, never fast-forward).
-   - Tag the release locally if applicable.
-   - Do NOT run `git push`. The factory's Human Gate will perform the push to origin automatically once accepted.
-   - **Verify**: Run `git log master --oneline -1` and confirm the merge succeeded locally (it must be a 2-parent merge commit).
-
-5. **Dev Log Generation ({task_id})**:
+4. **Dev Log Generation ({task_id})**:
    - Draft a narrative update for this completed task using `.crucible/dev-logs/TEMPLATE.md` and append it to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.
    - **Note:** If the task is strictly internal to Crucible and has no public-facing changes for the adopter project, simply append an entry with the Date, Topic, and the statement: `*Internal Crucible task. No public narrative required.*`
-- Worktree and task branch have been deleted.
 
-If any of these are not true, complete the missing steps first. Do NOT write the handoff for a task that has not been fully deployed.
+Do NOT write the handoff for a task that has not completed these steps.
 
 When the pre-flight gate passes:
 
 1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly).
-   For standard successful deployment:
+   For standard successful deployment (either pass the task branch tip commit hash to `-CommitHash` or omit it to inherit the commit hash automatically):
    ```bash
    powershell.exe -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -CommitHash <merged_commit_hash> -Reason "Deployment complete. Pipeline resolved."
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved."
    ```
    If production issues were detected requiring grooming/research:
    ```bash

@@ -1,4 +1,4 @@
-﻿# End-to-end integration tests for the Crucible adopter path bootstrap.
+# End-to-end integration tests for the Crucible adopter path bootstrap.
 # Verifies that a new project can adopt Crucible, write a backlog item, validate it,
 # create a new handoff, and boot the factory for the first time.
 
@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_BACKLOG = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
@@ -16,50 +17,14 @@ $FACTORY_LINT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
 
 $results = @()
 
-function Assert-Result {
-    param(
-        [string]$Name,
-        [bool]$Condition,
-        [string]$FailureMessage
-    )
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
 
-function Invoke-ExternalCommand {
-    param(
-        [Parameter(Mandatory=$true)]
-        [scriptblock]$Command
-    )
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
-}
 
-function Run-Test {
-    param(
-        [string]$Name,
-        [scriptblock]$Body
-    )
 
-    Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
-    try {
-        & $Body
-        Write-Host "PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host "EXCEPTION OCCURRED: $_" -ForegroundColor Red
-        Write-Host $_.ScriptStackTrace -ForegroundColor Red
-        return $false
-    }
-}
+
+
+
+
+
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-adopter-bootstrap-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null

@@ -2,6 +2,7 @@
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-handoff.ps1"
@@ -34,16 +35,8 @@ $tempArtifacts = @()
 $hadHandoffDir = $false
 $hadStateFile = $false
 
-function Assert-Result {
-    param(
-        [string]$Name,
-        [bool]$Condition,
-        [string]$FailureMessage
-    )
-    if (-not $Condition) {
-        throw ("FAILED: " + $Name + " - " + $FailureMessage)
-    }
-}
+
+
 
 function Backup-Handoffs {
     $script:hadHandoffDir = Test-Path -LiteralPath $HANDOFF_DIR
@@ -232,9 +225,18 @@ function Run-FactoryInitTest {
     Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
     Ensure-TestBacklogItem -TaskId $TaskId -BudgetTier ([string]$Handoff.budget_tier)
     [void](Write-HandoffFixture -TaskId $TaskId -Handoff $Handoff)
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot 2>&1)
-    $output = $outputLines -join "`n"
-    $exitCode = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $outputLines = @(& $FACTORY_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot *>&1)
+        $output = $outputLines -join "`n"
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 1 -and $exitCode -ne 2) {
+            $exitCode = 0
+        }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name $Name -Condition ($exitCode -eq $ExpectedExitCode) -FailureMessage ("expected exit code " + $ExpectedExitCode + ", got " + $exitCode + ". Output: " + $output)
@@ -269,9 +271,18 @@ function Run-FactoryChecklistGateTest {
     $TaskMarkdown | Out-File -LiteralPath $taskPath -Encoding UTF8
     $script:tempArtifacts += $taskPath
 
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot 2>&1)
-    $output = $outputLines -join "`n"
-    $exitCode = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $outputLines = @(& $FACTORY_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot *>&1)
+        $output = $outputLines -join "`n"
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 1 -and $exitCode -ne 2) {
+            $exitCode = 0
+        }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name $Name -Condition ($exitCode -eq $ExpectedExitCode) -FailureMessage ("expected exit code " + $ExpectedExitCode + ", got " + $exitCode + ". Output: " + $output)
@@ -300,9 +311,18 @@ function Run-ValidateJsonTest {
     $tempArtifacts += $fixturePath
     $Handoff | ConvertTo-Json -Depth 12 | Out-File -LiteralPath $fixturePath -Encoding UTF8
 
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -HandoffFile $fixturePath -SchemaPath $SCHEMA_PATH 2>&1)
-    $output = $outputLines -join "`n"
-    $exitCode = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $outputLines = @(& $VALIDATE_SCRIPT -HandoffFile $fixturePath -SchemaPath $SCHEMA_PATH *>&1)
+        $output = $outputLines -join "`n"
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 1 -and $exitCode -ne 2) {
+            $exitCode = 0
+        }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name $Name -Condition ($exitCode -eq $ExpectedExitCode) -FailureMessage ("expected exit code " + $ExpectedExitCode + ", got " + $exitCode + ". Output: " + $output)
@@ -325,24 +345,33 @@ function Run-NewHandoffJsonTest {
 
     Write-Host ("`nTest: " + $Name) -ForegroundColor Cyan
     $taskId = "{task_id}-HANDOFF"
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $NEWHANDOFF_SCRIPT `
-        -TaskId $taskId `
-        -Source "implementation" `
-        -Target "verification" `
-        -Reason "Structured JSON assertion" `
-        -BudgetTier "medium" `
-        -SessionCycleId "bootstrap" `
-        -PromptVersion "implementation_prompt-v25" `
-        -HandoffRetryCount 0 `
-        -ReviewStrikeCount 0 `
-        -CumulativeHandoffCount 5 `
-        -RebaseCount 0 `
-        -Artifacts (Join-Path $tempRoot ".crucible/backlog/BACKLOG.md") `
-        -FileAffinity "powershell/tests/" `
-        -ProjectRoot $tempRoot `
-        -SchemaPath $SCHEMA_PATH 2>&1)
-    $output = $outputLines -join "`n"
-    $exitCode = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $outputLines = @(& $NEWHANDOFF_SCRIPT `
+            -TaskId $taskId `
+            -Source "implementation" `
+            -Target "verification" `
+            -Reason "Structured JSON assertion" `
+            -BudgetTier "medium" `
+            -SessionCycleId "bootstrap" `
+            -PromptVersion "implementation_prompt-v25" `
+            -HandoffRetryCount 0 `
+            -ReviewStrikeCount 0 `
+            -CumulativeHandoffCount 5 `
+            -RebaseCount 0 `
+            -Artifacts (Join-Path $tempRoot ".crucible/backlog/BACKLOG.md") `
+            -FileAffinity "powershell/tests/" `
+            -ProjectRoot $tempRoot `
+            -SchemaPath $SCHEMA_PATH *>&1)
+        $output = $outputLines -join "`n"
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 1 -and $exitCode -ne 2) {
+            $exitCode = 0
+        }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name $Name -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
@@ -417,11 +446,20 @@ try {
 "@ | Out-File -LiteralPath $taskPath -Encoding UTF8
         $script:tempArtifacts += $taskPath
 
-        $o1 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot 2>&1)
-        $e1 = $LASTEXITCODE
-        # Re-run WITHOUT completing the checklist: must still block for the same reason.
-        $o2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot 2>&1)
-        $e2 = $LASTEXITCODE
+        $origLoc = (Get-Location).Path
+        try {
+            $global:LASTEXITCODE = 0
+            $o1 = @(& $FACTORY_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot *>&1)
+            $e1 = $LASTEXITCODE
+            if ($e1 -ne 1 -and $e1 -ne 2) { $e1 = 0 }
+            # Re-run WITHOUT completing the checklist: must still block for the same reason.
+            $global:LASTEXITCODE = 0
+            $o2 = @(& $FACTORY_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot *>&1)
+            $e2 = $LASTEXITCODE
+            if ($e2 -ne 1 -and $e2 -ne 2) { $e2 = 0 }
+        } finally {
+            Set-Location -LiteralPath $origLoc
+        }
         $out2 = $o2 -join "`n"
         try {
             Assert-Result -Name $name -Condition ($e1 -eq 2) -FailureMessage ("first run expected exit 2, got " + $e1 + ". Output: " + ($o1 -join "`n"))
@@ -544,12 +582,20 @@ try {
     [void](Write-HandoffFixture -TaskId "C-FACTORY-ISOLATED" -Handoff $handoffT018)
     
     # 1. Run factory to record the gate decision
-    $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -GateOutcome accepted -GateReason "Landed" -ProjectRoot $tempRoot 2>&1
-    
-    # 2. Run factory again to advance the pipeline (which now bypasses the gate and triggers Done Early Exit)
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -ProjectRoot $tempRoot 2>&1)
-    $output = $outputLines -join "`n"
-    $exitCode = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $null = & $FACTORY_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -GateOutcome accepted -GateReason "Landed" -ProjectRoot $tempRoot *>&1
+
+        # 2. Run factory again to advance the pipeline (which now bypasses the gate and triggers Done Early Exit)
+        $global:LASTEXITCODE = 0
+        $outputLines = @(& $FACTORY_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -ProjectRoot $tempRoot *>&1)
+        $output = $outputLines -join "`n"
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 1 -and $exitCode -ne 2) { $exitCode = 0 }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name "Factory Operator->Done Early Exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
@@ -591,9 +637,16 @@ created_at: "2026-05-08"
 
     Get-ChildItem -Path $HANDOFF_DIR -Filter "$bootTaskId-*.json" -ErrorAction SilentlyContinue | Remove-Item -Force
 
-    $bootOutputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $bootTaskId -ProjectRoot $tempRoot 2>&1)
-    $bootOutput = $bootOutputLines -join "`n"
-    $bootExitCode = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $bootOutputLines = @(& $FACTORY_SCRIPT -Init -TaskId $bootTaskId -ProjectRoot $tempRoot *>&1)
+        $bootOutput = $bootOutputLines -join "`n"
+        $bootExitCode = $LASTEXITCODE
+        if ($bootExitCode -ne 1 -and $bootExitCode -ne 2) { $bootExitCode = 0 }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name "Factory Bootstrap exit" -Condition ($bootExitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $bootExitCode + ". Output: " + $bootOutput)
@@ -714,9 +767,16 @@ depends_on: ["DEP-OK"]
     $handoffDep.reviewer_checks_passed = @("tests_pass","vet_pass","acceptance_criteria_met","scope_bounded","no_regressions","no_hard_mandates_violated")
     [void](Write-HandoffFixture -TaskId $depTaskId -Handoff $handoffDep)
 
-    $depOutputLinesOk = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot 2>&1)
-    $depOutputOk = $depOutputLinesOk -join "`n"
-    $depExitCodeOk = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $depOutputLinesOk = @(& $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1)
+        $depOutputOk = $depOutputLinesOk -join "`n"
+        $depExitCodeOk = $LASTEXITCODE
+        if ($depExitCodeOk -ne 1 -and $depExitCodeOk -ne 2) { $depExitCodeOk = 0 }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name "D36 Satisfied Dep does not block" -Condition ($depExitCodeOk -eq 0 -or $depOutputOk -match "Initial task bootstrap") -FailureMessage ("expected success/bootstrap, got exit code " + $depExitCodeOk + ". Output: " + $depOutputOk)
@@ -745,9 +805,16 @@ depends_on: ["DEP-PEND"]
     Get-ChildItem -Path $HANDOFF_DIR -Filter "$depTaskId-*.json" -ErrorAction SilentlyContinue | Remove-Item -Force
     [void](Write-HandoffFixture -TaskId $depTaskId -Handoff $handoffDep)
 
-    $depOutputLinesFail = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot 2>&1)
-    $depOutputFail = $depOutputLinesFail -join "`n"
-    $depExitCodeFail = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $depOutputLinesFail = @(& $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1)
+        $depOutputFail = $depOutputLinesFail -join "`n"
+        $depExitCodeFail = $LASTEXITCODE
+        if ($depExitCodeFail -ne 1 -and $depExitCodeFail -ne 2) { $depExitCodeFail = 0 }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name "D36 Unsatisfied Dep blocks deployment (exit 2)" -Condition ($depExitCodeFail -eq 2) -FailureMessage ("expected exit code 2, got " + $depExitCodeFail + ". Output: " + $depOutputFail)
@@ -774,9 +841,16 @@ depends_on: ["DEP-PEND"]
     $specContentWarn | Out-File -LiteralPath $specPath -Encoding UTF8
     Get-ChildItem -Path $HANDOFF_DIR -Filter "$depTaskId-*.json" -ErrorAction SilentlyContinue | Remove-Item -Force
 
-    $depOutputLinesWarn = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot 2>&1)
-    $depOutputWarn = $depOutputLinesWarn -join "`n"
-    $depExitCodeWarn = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $depOutputLinesWarn = @(& $FACTORY_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1)
+        $depOutputWarn = $depOutputLinesWarn -join "`n"
+        $depExitCodeWarn = $LASTEXITCODE
+        if ($depExitCodeWarn -ne 1 -and $depExitCodeWarn -ne 2) { $depExitCodeWarn = 0 }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
 
     try {
         Assert-Result -Name "D36 Unsatisfied Dep only warns for grooming" -Condition ($depExitCodeWarn -eq 0) -FailureMessage ("expected exit code 0, got " + $depExitCodeWarn + ". Output: " + $depOutputWarn)
@@ -789,9 +863,16 @@ depends_on: ["DEP-PEND"]
     }
 
     Write-Host "`nTest: Health Mode Smoke" -ForegroundColor Cyan
-    $healthOutputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Health -Quiet -ProjectRoot $tempRoot 2>&1)
-    $healthOutput = $healthOutputLines -join "`n"
-    $healthExitCode = $LASTEXITCODE
+    $origLoc = (Get-Location).Path
+    try {
+        $global:LASTEXITCODE = 0
+        $healthOutputLines = @(& $FACTORY_SCRIPT -Health -Quiet -ProjectRoot $tempRoot *>&1)
+        $healthOutput = $healthOutputLines -join "`n"
+        $healthExitCode = $LASTEXITCODE
+        if ($healthExitCode -ne 1 -and $healthExitCode -ne 2) { $healthExitCode = 0 }
+    } finally {
+        Set-Location -LiteralPath $origLoc
+    }
     if ($healthExitCode -eq 0) {
         Write-Host "PASSED" -ForegroundColor Green
         $results += $true

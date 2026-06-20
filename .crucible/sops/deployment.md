@@ -1,6 +1,8 @@
 <!-- prompt_version: operator-sop-v3 -->
 # SOP: Deployment
 
+**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+
 **Role:** Merge approved code, verify production health, clean up artifacts, and hand off to the Groomer for the next cycle.
 
 **Trigger form:** `Deployment: {task_id}`
@@ -42,24 +44,10 @@ Before touching `master`, run the merge simulation:
 
 ### Mid-Session Progress (Checkpointing)
 Specialists MUST log their progress mid-session to ensure state recovery in case of failure.
-- **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major step (e.g., "Step 4: Merge to Master Complete").
-- **Example**: `### CHECKPOINT Step 5: Dev Log Generated`
+- **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major step (e.g., "Step 4: Dev Log Generated").
+- **Example**: `### CHECKPOINT Step 4: Dev Log Generated`
 
-### Step 4 — Local Merge
-```bash
-git checkout master
-git merge --no-ff --no-edit task/{task_id}
-```
-
-Do NOT run `git push`. The factory's Human Gate will perform the push to origin automatically once accepted.
-
-**Verify merge succeeded:**
-```bash
-git log master --oneline -1
-```
-Confirm the merge commit succeeded locally. If the merge failed or has conflicts: STOP. Do NOT write a handoff until merge is verified.
-
-### Step 5 — Dev Log Generation ({task_id})
+### Step 4 — Dev Log Generation ({task_id})
 Draft a narrative update using `.crucible/dev-logs/TEMPLATE.md` and append to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.
 
 For strictly internal Dev Factory tasks with no public-facing changes: append an entry with Date, Topic, and: `*Internal Dev Factory task. No public narrative required.*`
@@ -69,16 +57,7 @@ Validate before continuing:
 {{crucible_root}}/powershell/validate-dev-log.ps1 -FileToPublish .crucible/dev-logs/UNPUBLISHED_LOGS.md
 ```
 
-### Step 6 — Cleanup
-```bash
-git worktree remove .crucible/.agent-workspaces/implementation-{task_id}
-git branch -d task/{task_id}
-git status --short
-```
-
-Delete any untracked files outside `.crucible/`, `.agent-workspaces/`, `.gemini/`, `.vscode/`. The working tree must be clean — `factory.ps1` will block if stray files remain.
-
-### Step 7 — Capture Eval Record
+### Step 5 — Capture Eval Record
 
 Write a structured eval record before archiving the pipeline log. This feeds `{{crucible_root}}/powershell/analyze-evals.ps1`.
 
@@ -110,14 +89,14 @@ New-Item -ItemType Directory -Force -Path ".crucible/session/eval" | Out-Null
 $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_id}.json" -Encoding utf8
 ```
 
-### Step 8 — Backlog and Log Deferral
-No manual backlog update or log archiving is required here. The factory's Human Gate automatically archives the backlog spec, updates the `BACKLOG.md` status, reconciles the Priority-Summary, and archives the pipeline log once the human records an `accepted` or `redirected` decision.
+### Step 6 — Backlog, Log Deferral, and Cleanup
+No manual backlog update, log archiving, or Git cleanup is required here. The factory's Human Gate automatically merges the branch `task/{task_id}`, pushes to remote origin, deletes the worktree and branch, archives the backlog spec, updates the `BACKLOG.md` status, reconciles the Priority-Summary, and archives the pipeline log once the human records an `accepted` or `redirected` decision.
 
-### Step 9 — Run new-handoff.ps1 & Advance Pipeline
-Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done" and pass the merged master/main commit hash to `-CommitHash`:
+### Step 7 — Run new-handoff.ps1 & Advance Pipeline
+Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done" and pass the task branch commit hash (or simply omit it to inherit the implementation branch commit hash from the previous phase):
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -CommitHash "MERGE_COMMIT_HASH" -Reason "Deployment complete. Pipeline resolved."
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved."
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 
@@ -215,12 +194,10 @@ powershell.exe -ExecutionPolicy Bypass \
 ## Quality Bar
 
 Pre-flight gate — confirm all are true before writing handoff:
-- [ ] `git log master --oneline -1` shows the merge commit (merge succeeded locally)
 - [ ] `BACKLOG.md` entry for `{task_id}` shows active status (e.g. `Ready for Deploy` or `In Progress`)
-- [ ] Worktree and task branch have been deleted
 - [ ] Pipeline log is in `.crucible/session/{task_id}/` (will be archived by the factory on accept)
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
 - [ ] Routing to: `done` (or `grooming` if production issue threshold met)
 - [ ] `task_id` in handoff matches the task I was given
-- [ ] `commit_hash` in handoff matches the local merge commit hash
+- [ ] `commit_hash` in handoff matches the task branch tip commit hash (or is inherited)
 - [ ] Eval record written to `.crucible/session/eval/eval-{task_id}.json`

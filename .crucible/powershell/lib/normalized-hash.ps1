@@ -77,17 +77,8 @@ function Get-GitFileContent {
         [Parameter(Mandatory=$true)][string]$Commit,
         [Parameter(Mandatory=$true)][string]$Path
     )
+
     $object = $Commit + ":" + (ConvertTo-NormalizedRelativeSlashPath -Path $Path)
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $null = git -C $Repo cat-file -e $object 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            return $null
-        }
-    } finally {
-        $ErrorActionPreference = $previousPreference
-    }
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "git"

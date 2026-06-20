@@ -1,0 +1,817 @@
+# Tests for factory gate orchestration helpers.
+
+$ErrorActionPreference = "Stop"
+$REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$Quiet = $true
+. $FACTORY_LIB
+$pwshCmd = Get-PwshCommand
+
+$results = @()
+
+function Write-TestHandoff {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][hashtable]$Values
+    )
+
+    if (-not $Values.ContainsKey("generated_by")) {
+        $Values.generated_by = "new-handoff.ps1"
+    }
+    if (-not $Values.ContainsKey("tool_version")) {
+        $Values.tool_version = "1.0.0"
+    }
+
+    $Values | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function New-TestContext {
+    param(
+        [Parameter(Mandatory=$true)][string]$TempRoot,
+        [string]$TaskId = "F-001"
+    )
+
+    $sessionDir = Join-Path $TempRoot "session"
+    $handoffDir = Join-Path $sessionDir "handoffs"
+    $backlogDir = Join-Path $TempRoot "backlog"
+    $frameworkDir = Join-Path $TempRoot "powershell"
+    New-Item -ItemType Directory -Path $handoffDir, $backlogDir, $frameworkDir -Force | Out-Null
+
+    return @{
+        RepoRoot = $TempRoot
+        CrucibleRoot = ".crucible"
+        FrameworkPowerShell = $frameworkDir
+        SessionDir = $sessionDir
+        BacklogDir = $backlogDir
+        WorkspacesDir = Join-Path $TempRoot "workspaces"
+        HandoffDir = $handoffDir
+        PromptLib = Join-Path $TempRoot "prompts"
+        LogFile = Join-Path $sessionDir "$TaskId/pipeline.log.jsonl"
+        CircuitBreakerHistoryFile = Join-Path $sessionDir "global/circuit_breakers.jsonl"
+        TaskId = $TaskId
+        Target = "agent"
+        Init = $true
+        Recover = $false
+        Quiet = $true
+        AutoAdvance = $false
+        GateOutcome = $null
+        GateRedirectTarget = $null
+        GateReason = $null
+        BudgetCeilings = $null
+        Ceiling = $null
+        BudgetTierKey = ""
+        InvalidBudgetTier = ""
+        Handoff = $null
+        LatestHandoff = $null
+        RelativeHandoffPath = $null
+        CumulativeHandoffCount = 0
+        IsBootstrap = $false
+        Transition = $null
+        NextFactoryCommand = $null
+    }
+}
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-factory-gates-human-test-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+try {
+    $results += Run-Test -Name "Invoke-HumanGate D22 regression: gate push and reset behavior" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d22-regression"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        # 1. Setup a fake git repository structure
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        # Initialize origin repo
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+
+        # Initialize local repo
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+
+        # Create a commit on origin
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+
+        # 2. Simulate local merge on task branch
+        git -C $localRepo checkout -b task/F-999 2>$null | Out-Null
+        "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        git -C $localRepo add feature.md 2>$null | Out-Null
+        git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+        $featureSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-999 2>$null | Out-Null
+
+        $localCommits = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: local master ahead of origin before gate" -Condition ($localCommits.Count -gt 0) -FailureMessage "expected local master to be ahead of origin"
+
+        # 3. Setup context structure
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-d22.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Test Case 1: Accepted outcome -> should push changes to origin
+        $scriptContentAccept = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'work looks beautiful'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-999'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_ACCEPT"
+} catch {
+    Write-Host "FAILED: `$_"
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContentAccept | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCode = $LASTEXITCODE
+        $output = $outputLines -join "`n"
+        Assert-Result -Name "D22: human gate accepted exits successfully" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
+
+        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: git push succeeded on accept" -Condition ($behindCommits.Count -eq 0) -FailureMessage "origin/master is still behind master after acceptance"
+
+        # Test Case 2: Rejected outcome -> should unwind local merge and restore task branch
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo reset --hard HEAD~1 2>$null | Out-Null
+        git -C $originRepo update-ref refs/heads/master HEAD~1 2>$null | Out-Null
+        git -C $localRepo fetch origin master 2>$null | Out-Null
+        git -C $localRepo branch task/F-999 $featureSha 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-999 2>$null | Out-Null
+
+        $behindCommits2 = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: local master ahead before reject" -Condition ($behindCommits2.Count -gt 0) -FailureMessage "expected master to be ahead again"
+
+        git -C $localRepo branch -D task/F-999 2>$null | Out-Null
+
+        $scriptContentReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'needs rework'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-999'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REJECT"
+} catch {
+    Write-Host "FAILED: `$_"
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContentReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCode2 = $LASTEXITCODE
+        $output2 = $outputLines2 -join "`n"
+        Assert-Result -Name "D22: human gate rejected exits successfully" -Condition ($exitCode2 -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode2 + ". Output: " + $output2)
+
+        $behindCommits3 = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D22: local merge was unwound on reject" -Condition ($behindCommits3.Count -eq 0) -FailureMessage "master is still ahead of origin/master after reject"
+
+        git -C $localRepo show-ref --quiet refs/heads/task/F-999
+        Assert-Result -Name "D22: task branch was restored on reject" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch task/F-999 was not restored"
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate D37: push behavior with benign git stderr and failures" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d37-testing"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        # 1. Setup origin & local repo
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+
+        # Initial commit
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+
+        # Setup context structure
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        $pendingFile = Join-Path $sessionDir "F-100/gate_pending.txt"
+        $legacyPendingFile = Join-Path $gateDir "gate_decision_F-100_pending.json"
+
+        # Helper to re-create pending files
+        function Reset-PendingFiles {
+            New-Item -ItemType Directory -Path $gateDir, (Join-Path $sessionDir "F-100") -Force | Out-Null
+            "pending" | Set-Content -LiteralPath $pendingFile -Encoding UTF8
+            "legacy-pending" | Set-Content -LiteralPath $legacyPendingFile -Encoding UTF8
+        }
+
+        $scriptPath = Join-Path $caseRoot "run-d37.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Test Case 1: Accept with no-op push
+        Reset-PendingFiles
+        $scriptAcceptNoOp = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'verification of acceptance criteria passed'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_ACCEPT"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptAcceptNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "D37: no-op accept push exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: new pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
+        Assert-Result -Name "D37: legacy pending file removed" -Condition (-not (Test-Path $legacyPendingFile)) -FailureMessage "legacy pending file still exists"
+
+        # Test Case 2: Redirect with no-op push
+        Reset-PendingFiles
+        $scriptRedirectNoOp = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'redirected'
+    GateReason = 'redirect to new'
+    GateRedirectTarget = 'F-101'
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REDIRECT"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptRedirectNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "D37: no-op redirect push exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: redirected new pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
+        Assert-Result -Name "D37: redirected legacy pending file removed" -Condition (-not (Test-Path $legacyPendingFile)) -FailureMessage "legacy pending file still exists"
+
+        # Test Case 3: Real successful push (1 commit ahead)
+        git -C $localRepo checkout master 2>$null | Out-Null
+        "update" | Set-Content -LiteralPath (Join-Path $localRepo "update.txt") -Encoding UTF8
+        git -C $localRepo add update.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "second commit" 2>$null | Out-Null
+
+        Reset-PendingFiles
+        $scriptRealPush = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'commit push verification'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REAL_PUSH"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptRealPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "D37: real successful push exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: real successful push does not emit error records" -Condition ($outputText -notlike "*NativeCommandError*" -and $outputText -notlike "*WriteErrorException*") -FailureMessage "successful push emitted error record. Output:`n$outputText"
+        Assert-Result -Name "D37: real push pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
+
+        # Verify remote origin now matches local master
+        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "D37: push landed on origin" -Condition ($behindCommits.Count -eq 0) -FailureMessage "origin/master did not catch up"
+
+        # Test Case 4: Failing push (invalid remote / remote ref)
+        git -C $localRepo remote set-url origin "https://example.invalid/repo.git"
+        Reset-PendingFiles
+        $scriptFailedPush = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'this should fail push'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_UNEXPECTED"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptFailedPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+
+        # Check that it exited 1 due to push failure
+        Assert-Result -Name "D37: failed push exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit code 1, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "D37: failed push surfaces git error text" -Condition ($outputText -like "*fatal:*" -or $outputText -like "*error:*") -FailureMessage "failed push did not surface git error. Output:`n$outputText"
+        Assert-Result -Name "D37: failed push keeps pending files" -Condition (Test-Path $pendingFile) -FailureMessage "pending file was cleaned up on failure"
+
+        # Test Case 5: Reject/Abandon branch unwinding
+        # Restore a valid remote origin
+        git -C $localRepo remote set-url origin $originRepo
+
+        # Simulate local merge on task branch
+        git -C $localRepo checkout -b task/F-100 2>$null | Out-Null
+        "rwork" | Set-Content -LiteralPath (Join-Path $localRepo "rwork.txt") -Encoding UTF8
+        git -C $localRepo add rwork.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "rework commit" 2>$null | Out-Null
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-100 2>$null | Out-Null
+
+        # Remove task branch first to test restoration
+        git -C $localRepo branch -D task/F-100 2>$null | Out-Null
+
+        Reset-PendingFiles
+        $scriptReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'needs rework'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-100'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_REJECT"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+        $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "D37: reject unwinds merge and exits 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0 on reject, got $exitCode. Output:`n$outputText"
+        # Confirm branch task/F-100 exists
+        git -C $localRepo show-ref --quiet refs/heads/task/F-100
+        Assert-Result -Name "D37: reject restored task branch" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task/F-100 branch was not restored"
+    }
+
+    $results += Run-Test -Name "D22 follow-up: unwind merge resets to pre-merge tip, preserving unrelated commit" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d22-followup"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+
+        # Create an unrelated local commit on master that is unpushed
+        "unrelated" | Set-Content -LiteralPath (Join-Path $localRepo "unrelated.md") -Encoding UTF8
+        git -C $localRepo add unrelated.md 2>$null | Out-Null
+        git -C $localRepo commit -m "unrelated commit" 2>$null | Out-Null
+        $unrelatedHash = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Create and commit on a task branch
+        git -C $localRepo checkout -b task/F-998 origin/master 2>$null | Out-Null
+        "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        git -C $localRepo add feature.md 2>$null | Out-Null
+        git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+
+        # Merge task branch into master (where master has the unrelated commit)
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-998 2>$null | Out-Null
+
+        # Set up human gate decision folder
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Run unwind human gate rejected
+        $scriptPath = Join-Path $caseRoot "run-d22-followup.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'unwind test'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-998'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} catch {}
+finally {
+    Pop-Location
+}
+"@
+        $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+
+        # Check that master head has been reset back to $unrelatedHash, NOT origin/master!
+        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        Assert-Result -Name "D22 follow-up: master reset back to unrelated commit" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
+    }
+
+    $results += Run-Test -Name "D52: rejected unwind preserves unrelated un-pushed commits after fast-forward merge" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "d52-unwind-ff"
+        $originRepo = Join-Path $caseRoot "origin"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+
+        "initial content" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+
+        # Create an unrelated commit on master locally (un-pushed)
+        "unrelated content" | Set-Content -LiteralPath (Join-Path $localRepo "unrelated.md") -Encoding UTF8
+        git -C $localRepo add unrelated.md 2>$null | Out-Null
+        git -C $localRepo commit -m "unrelated commit" 2>$null | Out-Null
+        $unrelatedHash = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Create task branch from the unrelated commit (since it is rebased/based on master)
+        git -C $localRepo checkout -b task/F-997 2>$null | Out-Null
+        "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        git -C $localRepo add feature.md 2>$null | Out-Null
+        git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+
+        # Merge task branch into master using fast-forward (default behavior here since task branch is directly ahead of master)
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge task/F-997 2>$null | Out-Null
+
+        # Verify it was indeed a fast-forward (no merge commit with 2 parents)
+        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        $parents = (git -C $localRepo log --pretty=%P -n 1 $currentHead).Trim()
+        $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
+        Assert-Result -Name "D52: verify merge was fast-forward" -Condition ($parentList.Count -lt 2) -FailureMessage "expected fast-forward merge (1 parent), but got merge commit"
+
+        # Set up human gate decision folder
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # Run unwind human gate rejected
+        $scriptPath = Join-Path $caseRoot "run-d52-unwind.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptReject = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'unwind FF test'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-997'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} catch {}
+finally {
+    Pop-Location
+}
+"@
+        $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+
+        # Check that master HEAD has been reset back to $unrelatedHash, preserving the unrelated commit!
+        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        Assert-Result -Name "D52: master reset back to unrelated commit after FF merge rejection" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
+    }
+
+    $results += Run-Test -Name "Human gate records base and branch SHAs and prints review command" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-diff-cmd"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Create task branch
+        git -C $localRepo checkout -b task/F-888 2>$null | Out-Null
+        "changes" | Set-Content -LiteralPath (Join-Path $localRepo "file.txt") -Encoding UTF8
+        git -C $localRepo add file.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "commit on task branch" 2>$null | Out-Null
+        $branchSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Set up human gate decision folder
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-diff-cmd-test.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-888'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$branchSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputText = $output -join "`n"
+
+        # 1. Assert pending JSON contains base_sha and branch_sha
+        $pendingFile = Join-Path $gateDir "gate_decision_F-888_pending.json"
+        Assert-Result -Name "Pending file exists" -Condition (Test-Path $pendingFile) -FailureMessage "expected $pendingFile to exist"
+        $pendingData = Get-Content $pendingFile -Raw | ConvertFrom-Json
+        Assert-Result -Name "Pending JSON records base_sha" -Condition ($pendingData.base_sha -eq $baseSha) -FailureMessage "expected base_sha $baseSha, got $($pendingData.base_sha)"
+        Assert-Result -Name "Pending JSON records branch_sha" -Condition ($pendingData.branch_sha -eq $branchSha) -FailureMessage "expected branch_sha $branchSha, got $($pendingData.branch_sha)"
+
+        # 2. Assert output text contains the exact diff command
+        $expectedCmd = "git -C `"$localRepo`" diff $baseSha..$branchSha"
+        Assert-Result -Name "Output contains review command" -Condition ($outputText -match [regex]::Escape($expectedCmd)) -FailureMessage "expected output to contain command '$expectedCmd', got:`n$outputText"
+    }
+
+    $results += Run-Test -Name "Review-before-merge: reject on an unmerged task branch leaves master untouched (no data loss)" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "new-flow-reject"
+        $originRepo = Join-Path $caseRoot "origin"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+
+        "c1" | Set-Content -LiteralPath (Join-Path $localRepo "a.txt") -Encoding UTF8
+        git -C $localRepo add a.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        git -C $localRepo push -u origin master 2>$null | Out-Null
+
+        # A previously-accepted task that advanced AND pushed master (so master == origin
+        # and the reflog's prior entry is the unrelated initial commit).
+        "c2" | Set-Content -LiteralPath (Join-Path $localRepo "b.txt") -Encoding UTF8
+        git -C $localRepo add b.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "prior accepted task" 2>$null | Out-Null
+        git -C $localRepo push origin master 2>$null | Out-Null
+        $masterBefore = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # New flow: task branch exists with a commit but is NOT merged into master.
+        git -C $localRepo checkout -b task/F-779 2>$null | Out-Null
+        "feat" | Set-Content -LiteralPath (Join-Path $localRepo "feat.txt") -Encoding UTF8
+        git -C $localRepo add feat.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "feature" 2>$null | Out-Null
+        git -C $localRepo checkout master 2>$null | Out-Null
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-new-flow-reject.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptReject = @"
+`$ErrorActionPreference = "Continue"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'rejected'
+    GateReason = 'reject on unmerged branch'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-779'
+        source_phase = 'deployment'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try { Invoke-HumanGate -Context `$ctx } catch {} finally { Pop-Location }
+"@
+        $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+
+        $masterAfter = (git -C $localRepo rev-parse HEAD).Trim()
+        Assert-Result -Name "new-flow reject: master unchanged" -Condition ($masterAfter -eq $masterBefore) -FailureMessage "master moved on reject of an unmerged branch: $masterBefore -> $masterAfter"
+        Assert-Result -Name "new-flow reject: prior task commit preserved" -Condition (Test-Path (Join-Path $localRepo "b.txt")) -FailureMessage "previously-accepted task's file b.txt was discarded by the reject unwind"
+        git -C $localRepo show-ref --quiet refs/heads/task/F-779
+        Assert-Result -Name "new-flow reject: task branch retained" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task/F-779 branch was not retained after reject"
+    }
+
+} finally {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$failed = @($results | Where-Object { -not $_ }).Count
+if ($failed -gt 0) {
+    Write-Host ("`n$failed factory gate test(s) failed.") -ForegroundColor Red
+    exit 1
+}
+Write-Host "`nAll factory gate tests passed." -ForegroundColor Green
+exit 0

@@ -64,6 +64,19 @@ if ($Drift) {
             Write-Host "Run init-project.ps1 from a Crucible source checkout to stamp the install commit, then retry." -ForegroundColor Red
             exit 1
         }
+
+        $hasCommit = $false
+        try {
+            $null = git -C $frameworkRoot rev-parse --quiet --verify ($installCommit + "^{commit}") 2>$null
+            if ($LASTEXITCODE -eq 0) { $hasCommit = $true }
+        } catch {}
+
+        if (-not $hasCommit) {
+            Write-Host "Drift: no provenance manifest exists, and the install commit $installCommit is not present in the framework source at $frameworkRoot." -ForegroundColor Red
+            Write-Host "Please specify the path to your upstream Crucible source repository using -FrameworkSource <path> so the manifest can be backfilled." -ForegroundColor Red
+            exit 1
+        }
+
         Write-Host ("Drift: no manifest found; backfilling from crucible_install_commit " + $installCommit.Substring(0, 12) + "...") -ForegroundColor DarkGray
         $provenance = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $installCommit -Manifest $installManifest
     }

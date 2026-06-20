@@ -40,7 +40,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 1. **Orientation**: Read `BACKLOG.md` and identify the highest-priority ungroomed item (or the specific `{task_id}`).
 2. **Review Research**: If a Researcher was involved, read their findings in `.crucible/research/`. Paraphrase and validate — never copy-paste untrusted content.
 3. **Draft Spec**: Read or create the backlog spec file (`.crucible/backlog/{type}/active/{task_id}_Title.md`). Use the standard template.
-4. **De-risk Implementation**: Write detailed acceptance criteria (AC) and list all affected packages/modules and files.
+4. **De-risk Implementation**: Write detailed acceptance criteria (AC) and list all affected packages/modules and files (under a `## Affected Files` or `## Scope` heading).
 5. **Configure Affinity**: Derive the `file_affinity` paths (packages, modules, or directories) for parallel isolation ({task_id}). For audit, report, or doc tasks, ensure the deliverable's own directory (e.g. `docs/`) is included in `file_affinity` so it is not blocked by scope gates.
 6. **Assign Budget**: Set the `budget_tier` (low/medium/high/extended) based on task complexity ({task_id}).
 7. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1`.
@@ -99,4 +99,5 @@ Re-confirm before you run new-handoff.ps1:
 - [ ] If routing to research: I have handed the Researcher an open question and did not pre-bake a conclusion/recommend closure in the spec
 - [ ] I have NOT edited BACKLOG.md outside my permitted scope
 - [ ] The task_id in my handoff matches the task I was given (or the next task identified)
+- [ ] For vuln/dependency/build-artifact claims, I checked ship-vs-local reality before assigning priority
 

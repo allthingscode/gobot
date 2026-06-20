@@ -1,28 +1,16 @@
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '_harness.ps1')
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_harness.ps1')
 
 # Test harness setup
 $results = @()
 
-function Run-Test {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host "  Test: $Name"
-    try {
-        & $Body
-        Write-Host "  PASSED" -ForegroundColor Green
-        return $true
-    } catch {
-        Write-Host "  FAILED: $_" -ForegroundColor Red
-        return $false
-    }
-}
 
-function Assert-Result {
-    param([string]$Name, [bool]$Condition, [string]$FailureMessage)
-    if (-not $Condition) {
-        throw "Assertion '$Name' failed: $FailureMessage"
-    }
-}
+
+
+
+
 
 $results += Run-Test -Name "No literal '(m)' or `"(m)` regex flags in scripts" -Body {
     $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path

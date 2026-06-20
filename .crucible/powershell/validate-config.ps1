@@ -42,14 +42,15 @@ Test-Pattern -Name "crucible_root" -Pattern '(?m)^crucible_root:\s+["'']?[^"''\r
 if ($content -match '(?m)^crucible_root:\s+["'']?([^"''\r\n]+)["'']?\s*$') {
     $crucibleRootPath = $Matches[1].Trim()
     
+    $isRooted = [System.IO.Path]::IsPathRooted($crucibleRootPath) -or $crucibleRootPath -match '^([A-Za-z]:|[\\/])'
     $resolvedCrucibleRoot = $crucibleRootPath
-    if (-not [System.IO.Path]::IsPathRooted($crucibleRootPath)) {
+    if (-not $isRooted) {
         $configDir = Split-Path -Parent $ConfigPath
         $projRoot = Split-Path -Parent $configDir
         $resolvedCrucibleRoot = Join-Path $projRoot $crucibleRootPath
     }
 
-    if ([System.IO.Path]::IsPathRooted($crucibleRootPath)) {
+    if ($isRooted) {
         $errors += "crucible_root must be a relative path inside the project (e.g. .crucible, .dev-factory, tools/crucible)."
     }
     if ($crucibleRootPath -match "^\.\." -or $crucibleRootPath -match "[\\/]\.\.") {
