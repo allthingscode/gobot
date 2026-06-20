@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // groupOrAttrs records one WithGroup or WithAttrs step so Handle can replay
@@ -141,11 +142,62 @@ func (h *SlogHandler) WithGroup(name string) slog.Handler {
 	}
 }
 
+// sensitiveTerms are the exact, lowercase field-name tokens whose values must be
+// redacted. Matching is whole-token (see splitKeyTokens), NOT substring, so benign
+// keys like "monkey", "keyboard_layout", "key1", or "author" are left untouched while
+// "api_key", "apiKey", and "Authorization" still redact. To harden redaction, add a
+// term here rather than widening to a substring match.
+//
+//nolint:gochecknoglobals // read-only redaction lookup table, consulted on every log line
+var sensitiveTerms = map[string]struct{}{
+	"token":         {},
+	"password":      {},
+	"passwd":        {},
+	"pwd":           {},
+	"secret":        {},
+	"apikey":        {},
+	"key":           {},
+	"auth":          {},
+	"authorization": {},
+	"credential":    {},
+	"credentials":   {},
+	"bearer":        {},
+}
+
+// splitKeyTokens lower-cases key and splits it into tokens on non-alphanumeric
+// delimiters (_, -, ., /, space, ...) and on camelCase boundaries (a lowercase
+// letter followed by an uppercase one). Digit boundaries are deliberately NOT
+// split, so "key1" stays a single token and does not match "key".
+func splitKeyTokens(key string) []string {
+	var tokens []string
+	var b strings.Builder
+	runes := []rune(key)
+	flush := func() {
+		if b.Len() > 0 {
+			tokens = append(tokens, strings.ToLower(b.String()))
+			b.Reset()
+		}
+	}
+	for i, r := range runes {
+		switch {
+		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
+			flush() // delimiter: drop it, end the current token
+		case unicode.IsUpper(r) && i > 0 && unicode.IsLower(runes[i-1]):
+			flush() // camelCase boundary: lower -> Upper
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	flush()
+	return tokens
+}
+
+// isSensitive reports whether a field key names a secret, by whole-token match
+// against sensitiveTerms (case-insensitive).
 func isSensitive(key string) bool {
-	k := strings.ToLower(key)
-	sensitiveKeys := []string{"token", "password", "secret", "apikey", "api_key", "key", "auth"}
-	for _, sk := range sensitiveKeys {
-		if strings.Contains(k, sk) {
+	for _, tok := range splitKeyTokens(key) {
+		if _, ok := sensitiveTerms[tok]; ok {
 			return true
 		}
 	}
