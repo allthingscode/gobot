@@ -122,7 +122,7 @@ func TestWaitForShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	cancel()
-	if err := waitForShutdown(ctx, cancel, &wg, make(chan error, 1)); err != nil {
+	if err := waitForShutdown(ctx, cancel, &wg, make(chan error, 1), nil); err != nil {
 		t.Errorf("graceful (ctx-cancel) shutdown must return nil, got %v", err)
 	}
 }
@@ -151,7 +151,7 @@ func TestStartGateway_Shutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, nil)
+	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, nil, nil)
 	cancel()
 
 	done := make(chan struct{})

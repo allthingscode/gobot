@@ -105,6 +105,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	startErr := make(chan error, 2)
+	readiness := NewReadiness()
 
 	checkpoints, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
 	var store agent.CheckpointStore
@@ -124,7 +125,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 
 	gateHandler := SetupGateHandler(store, handler)
 	if cfg.Gateway.Enabled {
-		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg, startErr)
+		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg, startErr, readiness)
 	}
 
 	if cfg.Gateway.WebAddr != "" && hub != nil {
@@ -138,12 +139,30 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 		}
 	}
 
+	awaitReadyForBanner(ctx, cfg, readiness)
 	printStartupBanner(cfg, api)
 
 	StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
 	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
 
-	return waitForShutdown(ctx, cancel, &wg, startErr)
+	return waitForShutdown(ctx, cancel, &wg, startErr, readiness)
+}
+
+// awaitReadyForBanner blocks until the gateway listener reports bound, the context
+// is cancelled, or a short timeout elapses, so the "gobot ready" banner does not
+// print ahead of the bound listener. No-op when the gateway is disabled. On a bind
+// failure (no ready signal) it returns after the timeout; waitForShutdown then
+// surfaces the error via startErr.
+func awaitReadyForBanner(ctx context.Context, cfg *config.Config, readiness *Readiness) {
+	if !cfg.Gateway.Enabled || readiness == nil {
+		return
+	}
+	const bannerBindWait = 2 * time.Second
+	select {
+	case <-readiness.Ready():
+	case <-ctx.Done():
+	case <-time.After(bannerBindWait):
+	}
 }
 
 func printStartupBanner(cfg *config.Config, api *TgAPI) {
@@ -240,7 +259,7 @@ func isLoopbackHost(host string) bool {
 // critical subsystem startup failure. It returns a non-nil error only in the
 // last case, so the process exits non-zero when a subsystem fails to start;
 // signal/context shutdown returns nil (graceful, exit 0).
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, startErr <-chan error) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, startErr <-chan error, readiness *Readiness) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
@@ -254,6 +273,12 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.Wa
 		slog.Error("gobot: critical subsystem failed to start, shutting down", "err", err)
 		subsystemErr = err
 		cancel()
+	}
+
+	// Flip readiness off as soon as shutdown begins, before draining, so /ready
+	// reports 503 during the drain window while /health (liveness) stays 200.
+	if readiness != nil {
+		readiness.SetNotReady()
 	}
 
 	const drainTimeout = 5 * time.Second
@@ -410,7 +435,7 @@ func SetupGateHandler(store agent.CheckpointStore, handler *DispatchHandler) bot
 }
 
 // StartGateway starts the HTTP gateway server in a separate goroutine.
-func StartGateway(ctx context.Context, cfg *config.Config, store agent.CheckpointStore, memStore *memory.MemoryStore, gateHandler bot.Handler, hub *dashboard.Hub, wg *sync.WaitGroup, startErr chan<- error) {
+func StartGateway(ctx context.Context, cfg *config.Config, store agent.CheckpointStore, memStore *memory.MemoryStore, gateHandler bot.Handler, hub *dashboard.Hub, wg *sync.WaitGroup, startErr chan<- error, readiness *Readiness) {
 	mgr, _ := store.(*agentctx.CheckpointManager)
 	res := dash.Resources{
 		Config:      cfg,
@@ -423,6 +448,10 @@ func StartGateway(ctx context.Context, cfg *config.Config, store agent.Checkpoin
 		res.Hub = hub
 	}
 	srv := gateway.NewServer(cfg.Gateway, gateHandler, res)
+	if readiness != nil {
+		// /ready reads the live latch; the listener marks ready once bound.
+		srv.SetReadiness(readiness.IsReady, readiness.SetReady)
+	}
 	wg.Add(1)
 	go func() {
 		defer RecoverWithStack("gateway")

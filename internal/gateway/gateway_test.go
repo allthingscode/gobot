@@ -89,6 +89,66 @@ func validateHealth(t *testing.T, srv *Server) {
 	}
 }
 
+// TestGateway_Ready covers the /ready readiness probe (C-324): 200 only when the
+// readiness latch reports ready, 503 otherwise, distinct from /health liveness,
+// and unauthenticated (the handler enforces no token).
+func TestGateway_Ready(t *testing.T) {
+	t.Parallel()
+	cfg := config.GatewayConfig{Enabled: true, Host: "localhost", Port: 18791}
+
+	t.Run("200 when latch ready", func(t *testing.T) {
+		t.Parallel()
+		srv := NewServer(cfg, &mockHandler{}, dash.Resources{})
+		srv.SetReadiness(func() bool { return true }, func() {})
+		code, body := callReady(t, srv)
+		if code != http.StatusOK || body != "ready" {
+			t.Errorf("expected 200 ready, got %d %q", code, body)
+		}
+	})
+
+	t.Run("503 when latch not ready", func(t *testing.T) {
+		t.Parallel()
+		srv := NewServer(cfg, &mockHandler{}, dash.Resources{})
+		srv.SetReadiness(func() bool { return false }, func() {})
+		code, body := callReady(t, srv)
+		if code != http.StatusServiceUnavailable || body != "not ready" {
+			t.Errorf("expected 503 not ready, got %d %q", code, body)
+		}
+	})
+
+	t.Run("200 when no readiness wired", func(t *testing.T) {
+		t.Parallel()
+		srv := NewServer(cfg, &mockHandler{}, dash.Resources{})
+		code, _ := callReady(t, srv)
+		if code != http.StatusOK {
+			t.Errorf("expected 200 when unwired, got %d", code)
+		}
+	})
+
+	t.Run("readiness 503 while liveness stays 200", func(t *testing.T) {
+		t.Parallel()
+		srv := NewServer(cfg, &mockHandler{}, dash.Resources{})
+		srv.SetReadiness(func() bool { return false }, func() {})
+		readyCode, _ := callReady(t, srv)
+
+		hreq := httptest.NewRequestWithContext(context.Background(), "GET", "/health", http.NoBody)
+		hw := httptest.NewRecorder()
+		srv.handleHealth(hw, hreq)
+
+		if readyCode != http.StatusServiceUnavailable || hw.Code != http.StatusOK {
+			t.Errorf("expected ready=503 health=200, got ready=%d health=%d", readyCode, hw.Code)
+		}
+	})
+}
+
+func callReady(t *testing.T, srv *Server) (code int, body string) {
+	t.Helper()
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/ready", http.NoBody)
+	w := httptest.NewRecorder()
+	srv.handleReady(w, req)
+	return w.Code, w.Body.String()
+}
+
 func validateChat(t *testing.T, srv *Server, h *mockHandler, session, text, expectedReply string) {
 	t.Helper()
 	in := InboundRequest{
