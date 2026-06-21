@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -63,7 +64,7 @@ func (h *SlogHandler) Handle(ctx context.Context, r slog.Record) error {
 	entry := &LogEntry{
 		Timestamp: r.Time,
 		Level:     r.Level.String(),
-		Message:   r.Message,
+		Message:   redactSecrets(r.Message),
 		Fields:    fields,
 	}
 
@@ -103,8 +104,12 @@ func appendAttr(fields map[string]any, prefix string, a slog.Attr) {
 		return
 	}
 	val := a.Value.Any()
-	if isSensitive(a.Key) {
-		val = "[REDACTED]"
+	switch {
+	case isSensitive(a.Key):
+		val = redactedToken
+	case a.Value.Kind() == slog.KindString:
+		// Benign key: scan the string value for embedded secret spans (C-323).
+		val = redactSecrets(a.Value.String())
 	}
 	fields[prefix+a.Key] = val
 }
@@ -202,4 +207,50 @@ func isSensitive(key string) bool {
 		}
 	}
 	return false
+}
+
+const redactedToken = "[REDACTED]"
+
+// Redaction patterns for secrets embedded in free text (the record Message or a
+// string attribute value). These run on the dashboard hot path, so they are
+// compiled exactly once at package scope. The set is deliberately conservative -
+// only well-known secret shapes match - so commit SHAs, UUIDs, and ordinary URLs
+// pass through untouched (C-323). Generic entropy/length heuristics are out of
+// scope precisely because they mangle benign output.
+//
+//nolint:gochecknoglobals // read-only compiled patterns, consulted on every log line
+var (
+	// reURLAuth matches the userinfo (user:pass@) component of a URL.
+	reURLAuth = regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`)
+	// reKeyVal matches a known secret name followed by =/: and its value; only
+	// the value is redacted so the surrounding text stays readable.
+	reKeyVal = regexp.MustCompile(`(?i)\b(token|api[_-]?key|secret|password|passwd|access[_-]?token|refresh[_-]?token|auth)(\s*[=:]\s*)([^&\s"']+)`)
+	// reBearer matches an Authorization bearer credential.
+	reBearer = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=\-]+`)
+	// secretTokenPatterns match self-identifying secret tokens whose entire span
+	// is the secret.
+	secretTokenPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`sk-[A-Za-z0-9]{16,}`),                                   // OpenAI-style API key
+		regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`),                            // GitHub PAT / OAuth token
+		regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),                          // GitHub fine-grained PAT
+		regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                                      // AWS access key ID
+		regexp.MustCompile(`eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+`), // JWT
+	}
+)
+
+// redactSecrets masks high-confidence secret spans inside a free-text string
+// while leaving surrounding context intact. It is conservative by design: only
+// well-known secret shapes are matched, so SHAs, UUIDs, and credential-free URLs
+// are returned unchanged.
+func redactSecrets(s string) string {
+	if s == "" {
+		return s
+	}
+	s = reURLAuth.ReplaceAllString(s, "://"+redactedToken+"@")
+	s = reKeyVal.ReplaceAllString(s, "${1}${2}"+redactedToken)
+	s = reBearer.ReplaceAllString(s, "Bearer "+redactedToken)
+	for _, re := range secretTokenPatterns {
+		s = re.ReplaceAllString(s, redactedToken)
+	}
+	return s
 }
