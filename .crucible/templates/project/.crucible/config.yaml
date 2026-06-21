@@ -41,3 +41,9 @@ project_mandates:
 
 file_affinity_examples:
   - src/
+
+# Configuration for the human review gate (diff tool / editor).
+# Optional. Default is text-only git diff command.
+# review:
+#   diff_tool: zed      # Options: zed, code, etc.
+#   editor: zed         # Options: zed, code, etc. (defaults to diff_tool if unset)

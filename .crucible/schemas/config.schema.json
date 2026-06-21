@@ -157,6 +157,21 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "review": {
+      "type": "object",
+      "description": "Optional. Configuration for the human review gate (e.g. preferred diff tool or editor).",
+      "additionalProperties": false,
+      "properties": {
+        "diff_tool": {
+          "type": "string",
+          "description": "The command or name of the diff tool to use for showing changes (e.g. 'zed' or 'code')."
+        },
+        "editor": {
+          "type": "string",
+          "description": "The command or name of the editor to use for opening the worktree folder (e.g. 'zed' or 'code')."
+        }
+      }
     }
   },
   "definitions": {

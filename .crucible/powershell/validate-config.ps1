@@ -94,6 +94,14 @@ if ($content -match '(?m)^paths:\s*$') {
     Test-Pattern -Name "paths.backlog" -Pattern "(?m)^\s{2}backlog:\s+.+$" -Content $content
 }
 
+if ($content -match '(?m)^review:\s*$') {
+    foreach ($field in @("diff_tool", "editor")) {
+        if ($content -match ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s*")) {
+            Test-Pattern -Name ("review." + $field) -Pattern ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s+.+$") -Content $content
+        }
+    }
+}
+
 # Parse and validate paths block details
 if ($content -match '(?ms)^paths:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
     $pathsBlock = $Matches[1]

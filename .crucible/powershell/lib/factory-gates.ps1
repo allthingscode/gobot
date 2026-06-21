@@ -2845,8 +2845,63 @@ function Invoke-HumanGate {
                                     }
                                 }
                             }
-                            Write-Host "`n[HUMAN GATE] Review command to diff changes:" -ForegroundColor Yellow
-                            Write-Host "  git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+
+                            $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
+                            $wtPath = Join-Path $workspacesDir ("implementation-" + $handoff.task_id)
+                            $wtPathDisplay = $wtPath -replace '\\', '/'
+
+                            $diffTool = Get-ConfiguredReview -Key "diff_tool" -ProjectRoot $repoRoot
+                            $editor = Get-ConfiguredReview -Key "editor" -ProjectRoot $repoRoot
+
+                            $diffToolCommand = ""
+                            $editorOpenCommand = ""
+
+                            if (![string]::IsNullOrEmpty($diffTool)) {
+                                $resolvedDiffTool = Get-ConfiguredEditorCommand -EditorOrToolName $diffTool
+                                $taskSessionDir = Join-Path $sessionDir $handoff.task_id
+                                if (-not (Test-Path $taskSessionDir)) {
+                                    New-Item -ItemType Directory -Force -Path $taskSessionDir | Out-Null
+                                }
+                                $helperScriptPath = Join-Path $taskSessionDir "review-diff.ps1"
+                                $resolvedDiffToolEscaped = $resolvedDiffTool -replace '"', '`"'
+                                $scriptContent = @"
+`$left = `$args[0]
+`$right = `$args[1]
+`$tmp = Join-Path `$env:TEMP "crucible-review/$($handoff.task_id)"
+if (-not (Test-Path `$tmp)) { New-Item -ItemType Directory -Path `$tmp -Force | Out-Null }
+`$leftCopy = Join-Path `$tmp ("left_" + (Split-Path -Leaf `$left))
+`$rightCopy = Join-Path `$tmp ("right_" + (Split-Path -Leaf `$right))
+Copy-Item `$left `$leftCopy -Force
+Copy-Item `$right `$rightCopy -Force
+& "$resolvedDiffToolEscaped" --diff `$leftCopy `$rightCopy
+"@
+                                try {
+                                    $scriptContent | Set-Content -LiteralPath $helperScriptPath -Encoding UTF8
+                                } catch {}
+
+                                $helperScriptPathDisplay = $helperScriptPath -replace '\\', '/'
+                                $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"\`"`" $baseSha..$branchSha"
+                            }
+
+                            $editorToUse = if (![string]::IsNullOrEmpty($editor)) { $editor } else { $diffTool }
+                            if (![string]::IsNullOrEmpty($editorToUse)) {
+                                $resolvedEditor = Get-ConfiguredEditorCommand -EditorOrToolName $editorToUse
+                                $editorOpenCommand = "& `"$resolvedEditor`" `"$wtPathDisplay`""
+                            }
+
+                            Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
+                            if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                                Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
+                                Write-Host "    $diffToolCommand" -ForegroundColor Cyan
+                            }
+                            Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
+                            Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+                            Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
+                            if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                                Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
+                            } else {
+                                Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
+                            }
 
                             # Write machine-readable signal file
                             $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
@@ -2854,9 +2909,20 @@ function Invoke-HumanGate {
                                     "  2) Reject     - something is wrong, send back for rework`n" +
                                     "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                                     "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
-                                    "Review command:`n" +
-                                    "  git -C `"$repoRoot`" diff $baseSha..$branchSha`n`n" +
-                                    "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
+                                    "Review options:`n"
+                            if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                                $menu += "  - Launch visual diff tool (per-file):`n" +
+                                         "    $diffToolCommand`n"
+                            }
+                            $menu += "  - Command-line text diff:`n" +
+                                     "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
+                                     "  - Open the worktree folder in your editor:`n"
+                            if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                                $menu += "    $editorOpenCommand`n`n"
+                            } else {
+                                $menu += "    $wtPathDisplay`n`n"
+                            }
+                            $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                             $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
                             
                             # Construct gate-specific command for next_step.txt
@@ -2915,8 +2981,62 @@ function Invoke-HumanGate {
                     }
                     $template | ConvertTo-Json | Set-Content -Path $gateTemplatePath -Encoding UTF8
                     
-                    Write-Host "`n[HUMAN GATE] Review command to diff changes:" -ForegroundColor Yellow
-                    Write-Host "  git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+                    $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
+                    $wtPath = Join-Path $workspacesDir ("implementation-" + $handoff.task_id)
+                    $wtPathDisplay = $wtPath -replace '\\', '/'
+
+                    $diffTool = Get-ConfiguredReview -Key "diff_tool" -ProjectRoot $repoRoot
+                    $editor = Get-ConfiguredReview -Key "editor" -ProjectRoot $repoRoot
+
+                    $diffToolCommand = ""
+                    $editorOpenCommand = ""
+
+                    if (![string]::IsNullOrEmpty($diffTool)) {
+                        $resolvedDiffTool = Get-ConfiguredEditorCommand -EditorOrToolName $diffTool
+                        $taskSessionDir = Join-Path $sessionDir $handoff.task_id
+                        if (-not (Test-Path $taskSessionDir)) {
+                            New-Item -ItemType Directory -Force -Path $taskSessionDir | Out-Null
+                        }
+                        $helperScriptPath = Join-Path $taskSessionDir "review-diff.ps1"
+                        $resolvedDiffToolEscaped = $resolvedDiffTool -replace '"', '`"'
+                        $scriptContent = @"
+`$left = `$args[0]
+`$right = `$args[1]
+`$tmp = Join-Path `$env:TEMP "crucible-review/$($handoff.task_id)"
+if (-not (Test-Path `$tmp)) { New-Item -ItemType Directory -Path `$tmp -Force | Out-Null }
+`$leftCopy = Join-Path `$tmp ("left_" + (Split-Path -Leaf `$left))
+`$rightCopy = Join-Path `$tmp ("right_" + (Split-Path -Leaf `$right))
+Copy-Item `$left `$leftCopy -Force
+Copy-Item `$right `$rightCopy -Force
+& "$resolvedDiffToolEscaped" --diff `$leftCopy `$rightCopy
+"@
+                        try {
+                            $scriptContent | Set-Content -LiteralPath $helperScriptPath -Encoding UTF8
+                        } catch {}
+
+                        $helperScriptPathDisplay = $helperScriptPath -replace '\\', '/'
+                        $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"\`"`" $baseSha..$branchSha"
+                    }
+
+                    $editorToUse = if (![string]::IsNullOrEmpty($editor)) { $editor } else { $diffTool }
+                    if (![string]::IsNullOrEmpty($editorToUse)) {
+                        $resolvedEditor = Get-ConfiguredEditorCommand -EditorOrToolName $editorToUse
+                        $editorOpenCommand = "& `"$resolvedEditor`" `"$wtPathDisplay`""
+                    }
+
+                    Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
+                    if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                        Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
+                        Write-Host "    $diffToolCommand" -ForegroundColor Cyan
+                    }
+                    Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
+                    Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+                    Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
+                    if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                        Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
+                    } else {
+                        Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
+                    }
 
                     # Write machine-readable signal file
                     $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
@@ -2924,9 +3044,20 @@ function Invoke-HumanGate {
                             "  2) Reject     - something is wrong, send back for rework`n" +
                             "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                             "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
-                            "Review command:`n" +
-                            "  git -C `"$repoRoot`" diff $baseSha..$branchSha`n`n" +
-                            "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
+                            "Review options:`n"
+                    if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                        $menu += "  - Launch visual diff tool (per-file):`n" +
+                                 "    $diffToolCommand`n"
+                    }
+                    $menu += "  - Command-line text diff:`n" +
+                             "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
+                             "  - Open the worktree folder in your editor:`n"
+                    if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                        $menu += "    $editorOpenCommand`n`n"
+                    } else {
+                        $menu += "    $wtPathDisplay`n`n"
+                    }
+                    $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                     $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
 
                     Write-Host "`n[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:" -ForegroundColor Yellow

@@ -58,6 +58,11 @@ file_affinity_examples:
   - internal/app/
   - internal/agent/
   - cmd/gobot/
+
+# Human review gate: open the diff/worktree in Zed (see C-323 review-UX fix).
+review:
+  diff_tool: zed
+  editor: zed
 crucible_version: "0.3.4"
-crucible_install_commit: "9798e9b1b281717410a04a489f4181c1cdf0da16"
+crucible_install_commit: "a43ddcbae1e605fed94078a59f26ed14cd7d370e"
 

@@ -149,6 +149,20 @@ When `update-bundle.ps1` runs:
 
 Use manual copying only when you intentionally want a single upstream file outside the normal updater flow. Read the upstream diff first, copy only the file you want, re-apply any local customization, and run verification before committing.
 
+> **Gotcha: a no-op `update-bundle` run does NOT re-stamp `crucible_install_commit`.**
+> The updater only rewrites `crucible_install_commit` and `install-provenance.json`
+> when it actually applies or prunes at least one file. If you hand-copy upstream
+> files into the bundle yourself (manual fallback above) and then run
+> `update-bundle` to "record" them, the run classifies everything as `no-op`, so the
+> re-stamp block never fires and the recorded commit stays behind. The bundle then
+> reports stale via the `bundle.staleness` advisory even though its content is
+> current. To get a consistent re-stamp through the supported path, revert the
+> hand-copied files to their recorded-baseline content first (e.g.
+> `git show <install-commit>:<path>`), then run `update-bundle ... -Mode auto-safe`:
+> the files re-classify as `safe-overwrite`, the upstream versions are applied, and
+> the commit + provenance re-stamp officially. Prefer letting `update-bundle` apply
+> upstream files in the first place rather than hand-copying.
+
 ---
 
 For the initial install, see [get-started.md](get-started.md).

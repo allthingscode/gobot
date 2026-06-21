@@ -106,7 +106,7 @@ powershell.exe -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -Quiet
 ```
 
-**Human Gate handling:** If `factory.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. Present the gate menu and ask for the human's choice:
+**Human Gate handling:** If `factory.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. The file contains the gate menu and visual review options (Launch visual diff tool, Command-line text diff, and Open the worktree folder in your editor) to help the human inspect changes. Present the gate menu and options, and ask for the human's choice:
 
 ```
 1) Accept   - work looks good; pause after this item

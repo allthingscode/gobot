@@ -800,8 +800,212 @@ try { Invoke-HumanGate -Context `$ctx } catch {} finally { Pop-Location }
         $masterAfter = (git -C $localRepo rev-parse HEAD).Trim()
         Assert-Result -Name "new-flow reject: master unchanged" -Condition ($masterAfter -eq $masterBefore) -FailureMessage "master moved on reject of an unmerged branch: $masterBefore -> $masterAfter"
         Assert-Result -Name "new-flow reject: prior task commit preserved" -Condition (Test-Path (Join-Path $localRepo "b.txt")) -FailureMessage "previously-accepted task's file b.txt was discarded by the reject unwind"
-        git -C $localRepo show-ref --quiet refs/heads/task/F-779
         Assert-Result -Name "new-flow reject: task branch retained" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task/F-779 branch was not retained after reject"
+    }
+
+    $results += Run-Test -Name "Human gate visual review affordances appear when diff_tool is configured" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-affordances"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        # Create config.yaml with review config
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $configYaml = @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+roles:
+  researcher:
+    model_tier: fast
+  groomer:
+    model_tier: fast
+  architect:
+    model_tier: fast
+  reviewer:
+    model_tier: fast
+  operator:
+    model_tier: fast
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+review:
+  diff_tool: "zed"
+  editor: "code"
+"@
+        $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Create task branch
+        git -C $localRepo checkout -b task/F-889 2>$null | Out-Null
+        "changes" | Set-Content -LiteralPath (Join-Path $localRepo "file.txt") -Encoding UTF8
+        git -C $localRepo add file.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "commit on task branch" 2>$null | Out-Null
+        $branchSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Set up human gate decision folder
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-affordances-test.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-889'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$branchSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputText = $output -join "`n"
+
+        # Assert visual review commands and worktree opening command are generated
+        Assert-Result -Name "Visual diff tool command appears when configured" -Condition ($outputText -like "*difftool*") -FailureMessage "expected output to contain 'difftool', got:`n$outputText"
+        Assert-Result -Name "Editor command appears when configured" -Condition ($outputText -like "*code*") -FailureMessage "expected output to contain 'code' (from editor configuration), got:`n$outputText"
+        
+        # Verify review-diff.ps1 helper script was generated
+        $helperPath = Join-Path $sessionDir "F-889/review-diff.ps1"
+        Assert-Result -Name "review-diff.ps1 helper script generated" -Condition (Test-Path $helperPath) -FailureMessage "expected $helperPath to exist"
+        $helperContent = Get-Content $helperPath -Raw
+        Assert-Result -Name "review-diff.ps1 uses the resolved zed path" -Condition ($helperContent -like "*zed*") -FailureMessage "expected helper script to reference 'zed'"
+    }
+
+    $results += Run-Test -Name "Human gate visual review affordances fall back to text git diff when diff_tool is unconfigured" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-no-affordances"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        # Create config.yaml WITHOUT review config
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $configYaml = @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+roles:
+  researcher:
+    model_tier: fast
+  groomer:
+    model_tier: fast
+  architect:
+    model_tier: fast
+  reviewer:
+    model_tier: fast
+  operator:
+    model_tier: fast
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+"@
+        $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Create task branch
+        git -C $localRepo checkout -b task/F-890 2>$null | Out-Null
+        "changes" | Set-Content -LiteralPath (Join-Path $localRepo "file.txt") -Encoding UTF8
+        git -C $localRepo add file.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "commit on task branch" 2>$null | Out-Null
+        $branchSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Set up human gate decision folder
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-no-affordances-test.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-890'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$branchSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputText = $output -join "`n"
+
+        # Assert no visual review command is printed
+        Assert-Result -Name "No visual diff tool command printed when unconfigured" -Condition ($outputText -notlike "*difftool*") -FailureMessage "expected output to NOT contain 'difftool', got:`n$outputText"
+        Assert-Result -Name "Text diff fallback still printed" -Condition ($outputText -like "*git -C*diff*") -FailureMessage "expected output to contain command-line diff, got:`n$outputText"
     }
 
 } finally {

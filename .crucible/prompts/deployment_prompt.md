@@ -86,7 +86,7 @@ When the pre-flight gate passes:
      -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -Quiet
    ```
 3. **Human Gate Signal:** If `factory.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. That means the gate fired.
-4. **Present the Menu + Capture Reason:** Show the menu from `gate_pending.txt` (or the console output), ask for the human's choice (1, 2, 3, or 4), and require one concrete one-line quality reason for the chosen outcome.
+4. **Present the Menu + Capture Reason:** Show the menu from `gate_pending.txt` (or the console output), which includes the visual review options (Launch visual diff tool, Command-line text diff, and Open the worktree folder in your editor) to help the human inspect changes. Ask for the human's choice (1, 2, 3, or 4), and require one concrete one-line quality reason for the chosen outcome.
    - This reason is mandatory for **all** outcomes, including `accepted` and `abandoned`.
    - Do not accept placeholders such as `n/a`, `none`, `ok`, or `looks good`.
 5. **Advance with Outcome:** Once the human replies, run the factory again with the outcome:
