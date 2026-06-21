@@ -4,6 +4,7 @@ package dashboard
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -286,5 +287,131 @@ func TestIsSensitive(t *testing.T) {
 		if got := isSensitive(tt.key); got != tt.want {
 			t.Errorf("isSensitive(%q) = %v, want %v", tt.key, got, tt.want)
 		}
+	}
+}
+
+// TestRedactSecrets exercises every Pattern-Set entry in both directions (AC3):
+// each secret shape is masked, and benign look-alikes are returned verbatim.
+func TestRedactSecrets(t *testing.T) {
+	t.Parallel()
+	const secret = "deadbeefdeadbeef1234"
+
+	redacted := []struct {
+		name string
+		in   string
+		leak string // substring that must NOT survive
+	}{
+		{"bearer", "Authorization: Bearer sk-abcdefghij1234567890", "sk-abcdefghij1234567890"},
+		{"url basic-auth", "dialing https://admin:hunter2@db.example/path", "hunter2"},
+		{"token query param", "GET /x?token=" + secret, secret},
+		{"api_key assignment", "api_key=sk-abcdefghij1234567890 loaded", "sk-abcdefghij1234567890"},
+		{"openai key", "using sk-abcdefghij1234567890 now", "sk-abcdefghij1234567890"},
+		{"github pat", "token ghp_0123456789abcdefghij0123", "ghp_0123456789abcdefghij0123"},
+		{"aws key id", "creds AKIAIOSFODNN7EXAMPLE here", "AKIAIOSFODNN7EXAMPLE"},
+		{"jwt", "jwt eyJhbGciOiJI.eyJzdWIiOiIx.SflKxwRJSMeKK", "eyJhbGciOiJI"},
+	}
+	for _, tt := range redacted {
+		t.Run("redacts/"+tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := redactSecrets(tt.in)
+			if strings.Contains(got, tt.leak) {
+				t.Errorf("redactSecrets(%q) = %q, secret %q leaked", tt.in, got, tt.leak)
+			}
+			if !strings.Contains(got, testRedacted) {
+				t.Errorf("redactSecrets(%q) = %q, expected a %s span", tt.in, got, testRedacted)
+			}
+		})
+	}
+
+	// Benign look-alikes must pass through byte-for-byte (no false positives).
+	unchanged := []struct {
+		name string
+		in   string
+	}{
+		{"git sha", "merged a339d426e4bf9f271c08a8fa8b71404ad2242f8a"},
+		{"uuid", "id 550e8400-e29b-41d4-a716-446655440000"},
+		{"base64 data uri", "img data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA"},
+		{"word monkey", "the monkey ate the key"},
+		{"bare key=value", "key=value123 cached"},
+		{"credential-free url", "GET https://example.com/path?ref=main"},
+		{"empty", ""},
+	}
+	for _, tt := range unchanged {
+		t.Run("preserves/"+tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := redactSecrets(tt.in); got != tt.in {
+				t.Errorf("redactSecrets(%q) = %q, want unchanged", tt.in, got)
+			}
+		})
+	}
+}
+
+// TestSlogHandler_MessageBodyRedaction covers AC1: a secret embedded in the
+// record Message is masked while the surrounding text is preserved.
+func TestSlogHandler_MessageBodyRedaction(t *testing.T) {
+	t.Parallel()
+	h := NewHub(10)
+	defer h.Close()
+	sub, _ := h.Subscribe()
+	handler := NewSlogHandler(h, slog.Default().Handler())
+
+	entry := emit(t, handler, sub, record("calling API with bearer sk-abcdefghij1234567890 now"))
+	if strings.Contains(entry.Message, "sk-abcdefghij1234567890") {
+		t.Errorf("message leaked secret: %q", entry.Message)
+	}
+	if !strings.Contains(entry.Message, testRedacted) {
+		t.Errorf("message not redacted: %q", entry.Message)
+	}
+	if !strings.Contains(entry.Message, "calling API with") {
+		t.Errorf("surrounding message text not preserved: %q", entry.Message)
+	}
+}
+
+// TestSlogHandler_ValueRedaction_NestedGroup covers AC2: a secret in a string
+// value under a benign key is masked, including when nested inside a group.
+func TestSlogHandler_ValueRedaction_NestedGroup(t *testing.T) {
+	t.Parallel()
+	h := NewHub(10)
+	defer h.Close()
+	sub, _ := h.Subscribe()
+	handler := NewSlogHandler(h, slog.Default().Handler()).WithGroup("net")
+
+	entry := emit(t, handler, sub, record("fetch",
+		slog.String("url", "https://api/x?token=deadbeefdeadbeef1234")))
+
+	got, _ := entry.Fields["net.url"].(string)
+	if strings.Contains(got, "deadbeefdeadbeef1234") {
+		t.Errorf("nested value leaked secret: %q", got)
+	}
+	if !strings.Contains(got, testRedacted) {
+		t.Errorf("nested value not redacted: %q", got)
+	}
+}
+
+// TestSlogHandler_ValueRedaction_InlineGroup covers AC2 via appendAttr's group
+// recursion: a secret in a string value inside a slog.Group is masked, and the
+// group is flattened into a dotted key.
+func TestSlogHandler_ValueRedaction_InlineGroup(t *testing.T) {
+	t.Parallel()
+	h := NewHub(10)
+	defer h.Close()
+	sub, _ := h.Subscribe()
+	handler := NewSlogHandler(h, slog.Default().Handler())
+
+	entry := emit(t, handler, sub, record("req",
+		slog.Group("http",
+			slog.String("endpoint", "https://api/x?token=deadbeefdeadbeef1234"),
+			slog.String("method", "GET"),
+		)))
+
+	got, _ := entry.Fields["http.endpoint"].(string)
+	if strings.Contains(got, "deadbeefdeadbeef1234") {
+		t.Errorf("grouped value leaked secret: %q", got)
+	}
+	if !strings.Contains(got, testRedacted) {
+		t.Errorf("grouped value not redacted: %q", got)
+	}
+	if entry.Fields["http.method"] != "GET" {
+		t.Errorf("benign grouped value altered: %v", entry.Fields["http.method"])
 	}
 }
