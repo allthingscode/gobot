@@ -91,7 +91,7 @@ func TestStartGateway_Coverage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, nil)
+	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, nil, nil)
 	time.Sleep(10 * time.Millisecond)
 	cancel()
 	wg.Wait()

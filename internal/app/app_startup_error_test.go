@@ -30,7 +30,7 @@ func TestWaitForShutdown_ReturnsSubsystemError(t *testing.T) {
 	startErr <- wantErr
 
 	var wg sync.WaitGroup
-	err := waitForShutdown(ctx, spy, &wg, startErr)
+	err := waitForShutdown(ctx, spy, &wg, startErr, nil)
 	if err == nil || !strings.Contains(err.Error(), "address already in use") {
 		t.Fatalf("expected subsystem error returned, got %v", err)
 	}
@@ -47,7 +47,7 @@ func TestWaitForShutdown_GracefulReturnsNil(t *testing.T) {
 	cancel() // graceful: context already canceled
 
 	var wg sync.WaitGroup
-	if err := waitForShutdown(ctx, cancel, &wg, make(chan error, 1)); err != nil {
+	if err := waitForShutdown(ctx, cancel, &wg, make(chan error, 1), nil); err != nil {
 		t.Errorf("graceful shutdown must return nil, got %v", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestStartGateway_PortConflict_ReportsStartupFailure(t *testing.T) {
 	startErr := make(chan error, 1)
 	var wg sync.WaitGroup
 
-	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, startErr)
+	StartGateway(ctx, cfg, nil, nil, nil, nil, &wg, startErr, nil)
 
 	select {
 	case got := <-startErr:

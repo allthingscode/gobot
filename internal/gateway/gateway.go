@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -19,6 +20,20 @@ type Server struct {
 	cfg     config.GatewayConfig
 	dashRes dash.Resources
 	handler bot.Handler
+
+	// readyFn reports process readiness for the /ready handler. When nil, the
+	// server is considered ready as soon as it is serving. onBound is invoked
+	// once the listener has successfully bound (the readiness signal). Both are
+	// optional and wired by the caller via SetReadiness.
+	readyFn func() bool
+	onBound func()
+}
+
+// SetReadiness wires the readiness probe (readyFn, read by /ready) and the bind
+// signal (onBound, invoked once the listener binds). Call before ListenAndServe.
+func (s *Server) SetReadiness(readyFn func() bool, onBound func()) {
+	s.readyFn = readyFn
+	s.onBound = onBound
 }
 
 // NewServer creates a new Gateway server.
@@ -47,6 +62,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat", s.handleChat)
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/ready", s.handleReady)
 
 	// Dashboard routes with authentication
 	if s.cfg.DashboardEnabled {
@@ -62,6 +78,18 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	// Bind first (split from serving) so we can signal readiness only once the
+	// listener is actually accepting connections; a bind failure is returned to
+	// the caller (and never marks the process ready).
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+	if s.onBound != nil {
+		s.onBound()
+	}
+
 	go func() {
 		<-ctx.Done()
 		// Use WithoutCancel to detach from the cancelled parent context
@@ -72,8 +100,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}()
 
 	slog.Info("gateway: starting server", "addr", addr)
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		return fmt.Errorf("listen and serve: %w", err)
+	if err := srv.Serve(ln); err != http.ErrServerClosed {
+		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
 }
@@ -118,4 +146,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("OK"))
+}
+
+// handleReady is the readiness probe, distinct from /health liveness. It reports
+// 200 only while the process is ready to serve (listener bound and not shutting
+// down) and 503 otherwise, so orchestration can stop routing during startup and
+// the shutdown drain window. Unauthenticated, for parity with /health. When no
+// readiness probe is wired, a serving process is treated as ready.
+func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
+	if s.readyFn != nil && !s.readyFn() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("not ready"))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready"))
 }
