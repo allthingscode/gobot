@@ -143,6 +143,13 @@ function Copy-TemplateDirectory {
             continue
         }
 
+        if ($entry.FullName.StartsWith($REPO_ROOT, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $repoRel = $entry.FullName.Substring($REPO_ROOT.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Replace("\", "/")
+            if (Test-FrameworkDevOnlyFile -Path $repoRel) {
+                continue
+            }
+        }
+
         $target = Join-Path $Destination $relative
 
         if ($entry.PSIsContainer) {

@@ -276,7 +276,7 @@ $resolvedArtifacts = $normalizedArtifacts
 
 [string[]]$resolvedFileAffinity = @(if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
     @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["file_affinity"] -and $null -ne $latest.file_affinity) {
+} elseif ($null -ne $latest -and $latest.PSObject.Properties["file_affinity"] -and $null -ne $latest.file_affinity -and @($latest.file_affinity).Count -gt 0) {
     @($latest.file_affinity)
 } else {
     $specPath = Get-BacklogItemPathForTask -Task $TaskId

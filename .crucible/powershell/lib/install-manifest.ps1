@@ -39,6 +39,23 @@ function ConvertTo-ManifestRelativePath {
     return $Path.Replace("\", "/").TrimStart("/")
 }
 
+function Test-FrameworkDevOnlyFile {
+    param([string]$Path)
+    $normalized = $Path.Replace("\", "/").TrimStart("/")
+    $devOnlyPaths = @(
+        "powershell/tests/examples-mirror-sync.tests.ps1",
+        "powershell/tests/pre-push-hook.tests.ps1",
+        "powershell/tests/init-project-core.tests.ps1",
+        "powershell/tests/init-project-instructions.tests.ps1",
+        "powershell/tests/init-project-config-version.tests.ps1",
+        "powershell/tests/update-bundle-core.tests.ps1",
+        "powershell/tests/update-bundle-custom-regions.tests.ps1",
+        "powershell/tests/update-bundle-rename-prune.tests.ps1",
+        "powershell/tests/update-bundle-scope-snapshot.tests.ps1"
+    )
+    return $devOnlyPaths -contains $normalized
+}
+
 function Get-FrameworkOwnedFiles {
     param(
         [string]$FrameworkRoot = "",
@@ -65,7 +82,7 @@ function Get-FrameworkOwnedFiles {
             }
             $files += $treeOutput
         }
-        return @($files | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) } | Sort-Object -Unique)
+        return @($files | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) } | Where-Object { -not (Test-FrameworkDevOnlyFile -Path $_) } | Sort-Object -Unique)
     }
 
     $files = @()
@@ -91,7 +108,7 @@ function Get-FrameworkOwnedFiles {
             ConvertTo-ManifestRelativePath -Path $relative
         }
     }
-    return @($files | Sort-Object -Unique)
+    return @($files | Where-Object { -not (Test-FrameworkDevOnlyFile -Path $_) } | Sort-Object -Unique)
 }
 
 function Convert-FrameworkPathToAdopter {

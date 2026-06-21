@@ -240,6 +240,116 @@ try {
         Assert-Result -Name "git absence surfaced" -Condition ($output -match "\[git\.cli\]") -FailureMessage "doctor did not surface that git is absent. Output:`n$output"
         Assert-Result -Name "missing git is advisory, not blocking" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "absent git should degrade to advisory, not block. Output:`n$output"
     }
+
+    # Hermetic git fixture acting as the framework source. The staleness check
+    # must not depend on the ambient repo: in an adopter, $REPO_ROOT is the
+    # .crucible bundle dir (no .git, no `main`), so leaning on it makes these
+    # tests pass only in the framework repo. A throwaway repo makes them portable.
+    function Initialize-FrameworkFixture {
+        param([string]$Path, [int]$Commits = 3)
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        Push-Location $Path
+        try {
+            git init -b main --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            $shas = @()
+            for ($i = 1; $i -le $Commits; $i++) {
+                git commit --allow-empty -m "commit $i" --quiet
+                $shas += (git rev-parse HEAD).Trim()
+            }
+            return [pscustomobject]@{ Head = $shas[-1]; OlderCommit = $shas[0] }
+        } finally {
+            Pop-Location
+        }
+    }
+
+    $gitSupportsInitB = $true
+    $gitProbe = Join-Path $tempRoot "git-initb-probe"
+    New-Item -ItemType Directory -Path $gitProbe -Force | Out-Null
+    Push-Location $gitProbe
+    try { git init -b main --quiet 2>$null; if ($LASTEXITCODE -ne 0) { $gitSupportsInitB = $false } } finally { Pop-Location }
+
+    $results += Run-Test -Name "Doctor checks for bundle staleness and warns when lagging HEAD" -Body {
+        if (-not $gitSupportsInitB) { Write-Host "SKIPPED: git init -b requires git >= 2.28" -ForegroundColor Yellow; return }
+        $projectRoot = Join-Path $tempRoot "stale-project"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+
+        $fwPath = Join-Path $tempRoot "fw-stale"
+        $fw = Initialize-FrameworkFixture -Path $fwPath
+
+        @(
+            'crucible_root: ".crucible"',
+            'crucible_version: "1.0.0"',
+            "crucible_install_commit: `"$($fw.OlderCommit)`"",
+            'project:',
+            '  name: "Stale App"',
+            '  default_branch: "main"',
+            'paths:',
+            '  backlog: .crucible/backlog',
+            '  session: .crucible/session',
+            '  workspaces: .crucible/.agent-workspaces',
+            '  prompts: .crucible/prompts',
+            'verification:',
+            '  quick:',
+            '    - name: test',
+            '      command: cmd /c exit 0'
+        ) | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $oldDevRoot = $env:CRUCIBLE_DEV_ROOT
+        $env:CRUCIBLE_DEV_ROOT = $fwPath
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+            }
+        } finally {
+            $env:CRUCIBLE_DEV_ROOT = $oldDevRoot
+        }
+        $output = $res.Output -join "`n"
+
+        Assert-Result -Name "staleness check warn status" -Condition ($output -match "\[bundle\.staleness\].*lags framework HEAD") -FailureMessage "doctor did not warn about staleness. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Doctor checks for bundle staleness and stays silent when up-to-date" -Body {
+        if (-not $gitSupportsInitB) { Write-Host "SKIPPED: git init -b requires git >= 2.28" -ForegroundColor Yellow; return }
+        $projectRoot = Join-Path $tempRoot "current-project"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+
+        $fwPath = Join-Path $tempRoot "fw-current"
+        $fw = Initialize-FrameworkFixture -Path $fwPath
+
+        @(
+            'crucible_root: ".crucible"',
+            'crucible_version: "1.0.0"',
+            "crucible_install_commit: `"$($fw.Head)`"",
+            'project:',
+            '  name: "Current App"',
+            '  default_branch: "main"',
+            'paths:',
+            '  backlog: .crucible/backlog',
+            '  session: .crucible/session',
+            '  workspaces: .crucible/.agent-workspaces',
+            '  prompts: .crucible/prompts',
+            'verification:',
+            '  quick:',
+            '    - name: test',
+            '      command: cmd /c exit 0'
+        ) | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $oldDevRoot = $env:CRUCIBLE_DEV_ROOT
+        $env:CRUCIBLE_DEV_ROOT = $fwPath
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+            }
+        } finally {
+            $env:CRUCIBLE_DEV_ROOT = $oldDevRoot
+        }
+        $output = $res.Output -join "`n"
+
+        Assert-Result -Name "staleness check pass status" -Condition ($output -match "\[bundle\.staleness\].*up-to-date") -FailureMessage "doctor did not pass staleness when up-to-date. Output:`n$output"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

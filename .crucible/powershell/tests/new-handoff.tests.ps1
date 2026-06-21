@@ -583,6 +583,65 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "file affinity falls back to spec frontmatter when prior handoff has empty affinity" -Script {
+        $taskId = New-TestTaskId "AFFINITY-EMPTY-PRIOR"
+        $specPath = ".crucible/backlog/chores/active/$($taskId)_Spec_Affinity.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+        @"
+---
+item_id: "$taskId"
+type: "Chore"
+status: "Ready"
+target_phase: "implementation"
+priority: "P2"
+created_at: "2026-04-28"
+file_affinity: ["internal/cron/", "internal/config/"]
+budget_tier: "low"
+---
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $script:createdSpecFiles += $specPath
+
+        $handoffPath = Join-Path $handoffDir "$taskId-20260530T120000Z.json"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $handoffPath) -Force | Out-Null
+        [ordered]@{
+            task_id = $taskId
+            source_phase = "grooming"
+            target_phase = "implementation"
+            reason = "prior handoff"
+            generated_by = "new-handoff.ps1"
+            tool_version = "1.0.0"
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "low"
+            cumulative_handoff_count = 1
+            prompt_version = "groomer_prompt-v16"
+            session_cycle_id = "cycle-1"
+            artifacts = @("powershell/factory.ps1")
+            file_affinity = @()
+        } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $script:createdFiles += $handoffPath
+
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "implementation"
+            Target = "verification"
+            Reason = "empty prior fallback test"
+            PromptVersion = "impl_prompt-v1"
+            Artifacts = @("powershell/factory.ps1")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ($obj.file_affinity.Count -ne 2 -or $obj.file_affinity[0] -ne "internal/cron/" -or $obj.file_affinity[1] -ne "internal/config/") {
+            throw "Expected file_affinity to fall back to spec frontmatter, got: $($obj.file_affinity | Out-String)"
+        }
+    }
+
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
 } finally {
     Set-Location -LiteralPath $origLocation

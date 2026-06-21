@@ -367,6 +367,52 @@ if ($frameworkMode) {
                 -Remediation "Run 'gh auth login' if your deployment phase opens GitHub PRs."
         }
     }
+
+    # Staleness advisory check for installed bundle
+    $bannerCommit = ""
+    if ($configText -match '(?m)^crucible_install_commit:\s+["'']([^"''\r\n]+)["'']\s*$') {
+        $bannerCommit = $Matches[1].Trim()
+    }
+    if ($bannerCommit -match '^[0-9a-f]{40}$') {
+        $frameworkSource = ""
+        if (-not [string]::IsNullOrWhiteSpace($env:CRUCIBLE_DEV_ROOT) -and (Test-Path -LiteralPath (Join-Path $env:CRUCIBLE_DEV_ROOT ".git"))) {
+            $frameworkSource = $env:CRUCIBLE_DEV_ROOT
+        } elseif (-not [string]::IsNullOrWhiteSpace($env:CRUCIBLE_FRAMEWORK_DIR) -and (Test-Path -LiteralPath (Join-Path $env:CRUCIBLE_FRAMEWORK_DIR ".git"))) {
+            $frameworkSource = $env:CRUCIBLE_FRAMEWORK_DIR
+        } else {
+            $siblingCandidate = Join-Path (Split-Path -Parent $REPO_ROOT) "crucible"
+            if (Test-Path -LiteralPath (Join-Path $siblingCandidate ".git")) {
+                $frameworkSource = $siblingCandidate
+            }
+        }
+        if ($frameworkSource) {
+            $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet main
+            $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitMainResult) { ($gitMainResult | Out-String).Trim() } else { "" }
+            if (-not ($frameworkHead -match '^[0-9a-f]{40}$')) {
+                $gitHeadResult = git -C $frameworkSource rev-parse HEAD 2>$null
+                $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitHeadResult) { ($gitHeadResult | Out-String).Trim() } else { "" }
+            }
+            if ($frameworkHead -match '^[0-9a-f]{40}$') {
+                if ($bannerCommit -eq $frameworkHead) {
+                    Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
+                        -Details ("Bundle is up-to-date with framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
+                } else {
+                    $null = git -C $frameworkSource merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
+                    if ($LASTEXITCODE -eq 0) {
+                        Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `
+                            -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") lags framework HEAD (" + $frameworkHead.Substring(0, 7) + ").") `
+                            -Remediation ("Run 'update-bundle.ps1 -FrameworkSource " + $frameworkSource + "' to bring it current.")
+                    } else {
+                        Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
+                            -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") is not stale relative to framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
+                    }
+                }
+            } else {
+                Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `
+                    -Details ("Framework source found at " + $frameworkSource + " but could not resolve HEAD commit.")
+            }
+        }
+    }
 }
 
 # Check (always): required factory scripts present in the bundle.
