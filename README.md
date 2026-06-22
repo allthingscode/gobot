@@ -142,22 +142,13 @@ gobot's design principle is **stability and security for one user over scale for
      "strategic_edition": { "storage_root": "" }
    }
    ```
-   `allowFrom` is the whitelist — only chat IDs listed here can interact with the bot. Use the numeric ID from [@userinfobot](https://t.me/userinfobot).
+   `allowFrom` is the whitelist — only chat IDs listed here can interact with the bot. Use the numeric ID from [@userinfobot](https://t.me/userinfobot). Adding your chat ID here is all that is needed: on startup gobot promotes every `allowFrom` ID into its access-control database automatically, so the single-user happy path does not need a separate `authorize` step.
 
-   > **Two separate paths:** The config file (`~/.gobot/config.json`) and the data directory (`~/gobot_data/` by default) are in different locations. `GOBOT_HOME` overrides the config file path; `GOBOT_STORAGE` overrides the data directory. If you move one, update the other accordingly.
+   > **One location:** Set `GOBOT_HOME` and both the config file (`$GOBOT_HOME/.gobot/config.json`) and the data directory (`$GOBOT_HOME/data/`) live under it — nothing to keep in sync. `GOBOT_STORAGE` is an optional override only if you want data on a separate volume. See [docs/configuration.md](docs/configuration.md#path-resolution) for the precedence order.
 
-4. **Register your Telegram user** with the bot's access control database:
-   ```bash
-   # Windows:
-   .\bin\gobot.exe authorize <your-telegram-chat-id>
-   # Linux/macOS:
-   ./bin/gobot authorize <your-telegram-chat-id>
-   ```
-   > **Why both?** `allowFrom` in config is the network-level whitelist (messages from unlisted IDs are dropped before any processing). `authorize` registers the user in the database for conversation history and per-user state. Both are required.
-
-5. **Google OAuth** *(skip if not using Gmail/Calendar/Tasks)*:
+4. **Google OAuth** *(skip if not using Gmail/Calendar/Tasks)*:
    - Follow the [Google Cloud Setup Guide](docs/google-setup.md) to create an OAuth2 "Desktop app" credential and enable the required APIs.
-   - Save the downloaded JSON file to `~/gobot_data/secrets/client_secrets.json` (adjust if you changed `storage_root`).
+   - Save the downloaded JSON file to the `secrets/client_secrets.json` file under your data root (the `data:` path printed by `gobot init`; `$GOBOT_HOME/data/secrets/` by default).
    - Run:
      ```bash
      # Windows:
@@ -166,7 +157,7 @@ gobot's design principle is **stability and security for one user over scale for
      ./bin/gobot reauth
      ```
 
-6. **Verify your setup**:
+5. **Verify your setup**:
    ```bash
    # Windows:
    .\bin\gobot.exe doctor
@@ -175,7 +166,7 @@ gobot's design principle is **stability and security for one user over scale for
    ```
    All critical checks should show `[OK]`. Warnings (`[WRN]`) are advisory only.
 
-7. **Run**:
+6. **Run**:
    ```bash
    # Windows:
    .\bin\gobot.exe run
@@ -183,6 +174,8 @@ gobot's design principle is **stability and security for one user over scale for
    ./bin/gobot run
    ```
    Send a message to your bot in Telegram — it should respond. Start with something simple like "Hello!" to confirm everything is working.
+
+   > **Multi-user / escape hatch:** `gobot authorize <code-or-chat-id>` still authorizes a user that is not in `allowFrom` (e.g. someone pairing via a code). You only need it when granting access to an ID outside the `allowFrom` whitelist; the single-user happy path above does not.
 
 ## Documentation
 

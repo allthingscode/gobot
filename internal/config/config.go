@@ -395,14 +395,21 @@ type MCPServerConfig struct {
 // StorageRoot returns the configured storage root.
 // Priority:
 // 1. config.json (strategic_edition.storage_root)
-// 2. GOBOT_STORAGE environment variable
-// 3. ~/gobot_data (portable default).
+// 2. GOBOT_STORAGE environment variable (explicit override; existing installs unchanged)
+// 3. $GOBOT_HOME/data (derived default, so a single GOBOT_HOME is the only path to set)
+// 4. ~/gobot_data (portable default when neither GOBOT_STORAGE nor GOBOT_HOME is set).
+//
+// An install that sets GOBOT_HOME but not GOBOT_STORAGE resolves data under $GOBOT_HOME/data; set
+// GOBOT_STORAGE explicitly to pin a separate location. GOBOT_STORAGE-set installs never relocate.
 func (c *Config) StorageRoot() string {
 	if c.Strategic.StorageRoot != "" {
 		return c.Strategic.StorageRoot
 	}
 	if envRoot := os.Getenv("GOBOT_STORAGE"); envRoot != "" {
 		return envRoot
+	}
+	if gobotHome := os.Getenv("GOBOT_HOME"); gobotHome != "" {
+		return filepath.Join(gobotHome, "data")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

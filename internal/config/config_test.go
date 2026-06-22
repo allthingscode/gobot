@@ -94,6 +94,29 @@ func TestStorageRoot_Default(t *testing.T) {
 	}
 }
 
+func TestStorageRoot_GobotHomeDerived(t *testing.T) {
+	// GOBOT_STORAGE wins over GOBOT_HOME (existing installs never relocate).
+	t.Setenv("GOBOT_HOME", filepath.Join("home", "root"))
+	t.Setenv("GOBOT_STORAGE", "explicit_storage")
+	cfg := &Config{}
+	if got := cfg.StorageRoot(); got != "explicit_storage" {
+		t.Errorf("GOBOT_STORAGE should win over GOBOT_HOME: got %q, want %q", got, "explicit_storage")
+	}
+
+	// With GOBOT_STORAGE unset, data derives from GOBOT_HOME (single knob).
+	t.Setenv("GOBOT_STORAGE", "")
+	want := filepath.Join("home", "root", "data")
+	if got := cfg.StorageRoot(); got != want {
+		t.Errorf("GOBOT_HOME-derived storage: got %q, want %q", got, want)
+	}
+
+	// config.json storage_root still takes top priority over both env vars.
+	cfgOverride := &Config{Strategic: StrategicConfig{StorageRoot: "config_root"}}
+	if got := cfgOverride.StorageRoot(); got != "config_root" {
+		t.Errorf("config storage_root should win over env: got %q, want %q", got, "config_root")
+	}
+}
+
 func TestSave(t *testing.T) {
 	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "config.json")
