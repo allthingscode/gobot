@@ -2880,7 +2880,8 @@ Copy-Item `$right `$rightCopy -Force
                                 } catch {}
 
                                 $helperScriptPathDisplay = $helperScriptPath -replace '\\', '/'
-                                $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"\`"`" $baseSha..$branchSha"
+                                $pwshCmd = Get-PwshCommand
+                                $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"$pwshCmd -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"`" $baseSha..$branchSha"
                             }
 
                             $editorToUse = if (![string]::IsNullOrEmpty($editor)) { $editor } else { $diffTool }
@@ -3015,7 +3016,8 @@ Copy-Item `$right `$rightCopy -Force
                         } catch {}
 
                         $helperScriptPathDisplay = $helperScriptPath -replace '\\', '/'
-                        $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"\`"`" $baseSha..$branchSha"
+                        $pwshCmd = Get-PwshCommand
+                        $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"$pwshCmd -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"`" $baseSha..$branchSha"
                     }
 
                     $editorToUse = if (![string]::IsNullOrEmpty($editor)) { $editor } else { $diffTool }

@@ -908,6 +908,52 @@ try {
         Assert-Result -Name "review-diff.ps1 helper script generated" -Condition (Test-Path $helperPath) -FailureMessage "expected $helperPath to exist"
         $helperContent = Get-Content $helperPath -Raw
         Assert-Result -Name "review-diff.ps1 uses the resolved zed path" -Condition ($helperContent -like "*zed*") -FailureMessage "expected helper script to reference 'zed'"
+
+        # Regression check: Extract and run the generated difftool command to verify quoting and execution
+        $diffLines = @($outputText -split "`n" | Where-Object { $_.Trim() -like "git -C *" -and $_ -like "*difftool*" })
+        Assert-Result -Name "Found emitted git difftool command in output" -Condition ($diffLines.Count -eq 1) -FailureMessage "expected exactly 1 difftool command line, found: $($diffLines.Count)`n$outputText"
+        
+        if ($diffLines.Count -eq 1) {
+            $diffToolCommand = $diffLines[0].Trim()
+            
+            # 1. Static quote balancing assertion
+            $cleanCommandForQuotes = $diffToolCommand -replace '\\"', ''
+            $quoteCount = ($cleanCommandForQuotes -split '"').Count - 1
+            Assert-Result -Name "Difftool command unescaped quotes are balanced" -Condition ($quoteCount -eq 4) -FailureMessage "expected exactly 4 unescaped double quotes (balanced), found $quoteCount in command:`n$diffToolCommand"
+            
+            Assert-Result -Name "Difftool command has no doubled escaped quotes" -Condition ($diffToolCommand -notlike '*\"\"*') -FailureMessage "expected no doubled escaped quotes in command:`n$diffToolCommand"
+
+            # 2. Dynamic execution regression check
+            $stubLog = Join-Path $caseRoot "stub.log"
+            $stubContent = @"
+`$args | Set-Content -LiteralPath '$stubLog' -Encoding UTF8
+"@
+            $stubContent | Set-Content -LiteralPath $helperPath -Encoding UTF8
+
+            $runningOnWindows = $true
+            $isWindowsVar = Get-Variable -Name "IsWindows" -ErrorAction SilentlyContinue
+            if ($null -ne $isWindowsVar) { $runningOnWindows = $isWindowsVar.Value }
+            if ($runningOnWindows) {
+                $runScript = Join-Path $caseRoot "run-diff.bat"
+                $diffToolCommand | Set-Content -LiteralPath $runScript -Encoding ASCII
+                $runOutput = cmd.exe /c `"$runScript`" 2>&1
+            } else {
+                $runScript = Join-Path $caseRoot "run-diff.sh"
+                $diffToolCommand | Set-Content -LiteralPath $runScript -Encoding UTF8
+                $runOutput = sh $runScript 2>&1
+            }
+            $runOutputText = $runOutput -join "`n"
+            
+            Assert-Result -Name "Emitted difftool command executed successfully" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "difftool command execution failed with exit code $LASTEXITCODE. Output:`n$runOutputText`nCommand run:`n$diffToolCommand"
+            $gitDiffOut = git -C $localRepo diff --stat "$baseSha..$branchSha" 2>&1
+            $gitLogOut = git -C $localRepo log --oneline -n 5 2>&1
+            Assert-Result -Name "Stub log file was created" -Condition (Test-Path $stubLog) -FailureMessage "expected $stubLog to exist after running difftool command.`nOutput from difftool was:`n$runOutputText`nCommand run:`n$diffToolCommand`nGit Diff:`n$gitDiffOut`nGit Log:`n$gitLogOut"
+            
+            if (Test-Path $stubLog) {
+                $loggedArgs = @(Get-Content $stubLog)
+                Assert-Result -Name "Stub logged exactly two file arguments" -Condition ($loggedArgs.Count -eq 2) -FailureMessage "expected 2 arguments to be logged, found: $($loggedArgs.Count)`nContent:`n$($loggedArgs -join "`n")"
+            }
+        }
     }
 
     $results += Run-Test -Name "Human gate visual review affordances fall back to text git diff when diff_tool is unconfigured" -Body {
