@@ -223,6 +223,50 @@ Spec body
         Assert-Result -Name "task content" -Condition ($task -match "Task: F-905" -and $task -match "Phase: verification") -FailureMessage "task.md content changed"
         Assert-Result -Name "context content" -Condition ($context -match "Context Bundle: F-905" -and $context -match "Phase: verification") -FailureMessage "context.md content changed"
     }
+    $results += Run-Test -Name "Worktree creation tolerates git stderr under EAP=Stop" -Body {
+        # Regression: bare `git worktree add` writes "Preparing worktree" to stderr on success,
+        # which under Windows PowerShell 5.1 with EAP=Stop becomes a terminating NativeCommandError
+        # and aborted -Init before task.md was written. session-output.ps1 now routes the call
+        # through Invoke-GitChecked; this asserts that contract holds (no throw, exit 0, worktree made).
+        $repo = Join-Path $tempRoot "wt-stderr"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        Push-Location $repo
+        try {
+            git init --quiet
+            git config core.autocrlf false
+            git config user.email "t@t.t"
+            git config user.name "t"
+            Set-Content -Path "README.md" -Value "# t" -Encoding UTF8
+            git add README.md
+            git commit -m "init" --quiet
+            $mainBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+            $wtPath = Join-Path $repo ".crucible/.agent-workspaces/implementation-F-907"
+
+            $threw = $false
+            $eapAtCall = $ErrorActionPreference
+            try {
+                Invoke-GitChecked { git worktree add $wtPath -b "task/F-907" $mainBranch }
+            } catch {
+                $threw = $true
+            }
+
+            Assert-Result -Name "EAP is Stop at call site" -Condition ($eapAtCall -eq "Stop") -FailureMessage "test must run under EAP=Stop to exercise the regression; was $eapAtCall"
+            Assert-Result -Name "did not terminate on git stderr" -Condition (-not $threw) -FailureMessage "Invoke-GitChecked threw on benign git worktree-add stderr"
+            Assert-Result -Name "git exit code 0" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "worktree add exit code was $LASTEXITCODE"
+            Assert-Result -Name "worktree created" -Condition (Test-Path -LiteralPath $wtPath) -FailureMessage "worktree dir was not created at $wtPath"
+        } finally {
+            Pop-Location
+        }
+    }
+    $results += Run-Test -Name "session-output routes git worktree add through Invoke-GitChecked" -Body {
+        # Binds the call site cross-platform: the suite drives -Init via pwsh-7 child processes,
+        # which do not reproduce the PS 5.1 NativeCommandError-on-stderr behavior, so a revert to a
+        # bare `git worktree add` would silently pass the runtime test above. This static guard fails
+        # on any unwrapped worktree-add line in session-output.ps1.
+        $src = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/session-output.ps1")
+        $bare = @($src | Where-Object { $_ -match 'git worktree add' -and $_ -notmatch 'Invoke-GitChecked' -and $_.TrimStart() -notmatch '^#' })
+        Assert-Result -Name "no unwrapped worktree add" -Condition ($bare.Count -eq 0) -FailureMessage ("found bare git worktree add line(s): " + ($bare -join " | "))
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

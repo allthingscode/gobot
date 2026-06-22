@@ -395,17 +395,21 @@ function Initialize-FactoryTargetSession {
             }
 
             # Prune stale worktrees first
-            git worktree prune
+            Invoke-GitChecked { git worktree prune }
 
             if (-not (Test-Path $wtPath)) {
                 Write-Quiet ("[INIT] Creating git worktree at " + $wtPath + "...") -ForegroundColor Yellow
                 $mainBranch = Get-PrimaryBranchName
                 $taskBranch = "task/" + $handoff.task_id
                 git show-ref --verify --quiet ("refs/heads/" + $taskBranch)
+                # git worktree add prints "Preparing worktree" to stderr on success; under Windows
+                # PowerShell 5.1 with EAP=Stop that benign stderr becomes a terminating
+                # NativeCommandError and aborts -Init before task.md is written. Invoke-GitChecked
+                # localizes EAP, demotes exit-0 stderr to a notice, and preserves $LASTEXITCODE.
                 if ($LASTEXITCODE -eq 0) {
-                    git worktree add $wtPath $taskBranch
+                    Invoke-GitChecked { git worktree add $wtPath $taskBranch }
                 } else {
-                    git worktree add $wtPath -b $taskBranch $mainBranch
+                    Invoke-GitChecked { git worktree add $wtPath -b $taskBranch $mainBranch }
                 }
                 if ($LASTEXITCODE -ne 0) {
                     Write-Host ("Error: Failed to create implementation worktree at " + $wtPath) -ForegroundColor Red

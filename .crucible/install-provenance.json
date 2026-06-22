@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "800a054d49b90a85d624c9927de6334942a7cd92",
+    "source_commit":  "d2dfc3d95b20ae47099468f4e6d19c12debf039d",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -215,8 +215,8 @@
                                                       "base_hash":  "8aaf1922742ce6c4793d54a16ad2bb7c444abf1080a9b7beb74f6a90314e2602"
                                                   },
                   "powershell/lib/session-output.ps1":  {
-                                                            "hash":  "18d87ff078a35cf4092c066bf18a1a687dff2b5f2bf54898b7805f8fddc59526",
-                                                            "base_hash":  "18d87ff078a35cf4092c066bf18a1a687dff2b5f2bf54898b7805f8fddc59526"
+                                                            "hash":  "4c2970e9cd0dc46d9090dae9c6b4248bc8d2d4ae4e84bdf4c749220c01756e39",
+                                                            "base_hash":  "4c2970e9cd0dc46d9090dae9c6b4248bc8d2d4ae4e84bdf4c749220c01756e39"
                                                         },
                   "powershell/lib/task-checklist.ps1":  {
                                                             "hash":  "eeb8a72135fa245bc1695fb4a22c7c8640ac2b02de6de22687b79a0ada1d9976",
@@ -427,8 +427,8 @@
                                                                                      "base_hash":  "7aaf4966e4603274d266e3c227d1996389452d01b8fbfb6613dfc0c4908e49aa"
                                                                                  },
                   "powershell/tests/session-output.tests.ps1":  {
-                                                                    "hash":  "2e3a864aaa756af19d1ac6179c711559b23e11427b9617e923f076e7b3657289",
-                                                                    "base_hash":  "2e3a864aaa756af19d1ac6179c711559b23e11427b9617e923f076e7b3657289"
+                                                                    "hash":  "7ddeb4a096687f23f16ae6726b9211321380f8951d00feac3ebaacdcd8f49b41",
+                                                                    "base_hash":  "7ddeb4a096687f23f16ae6726b9211321380f8951d00feac3ebaacdcd8f49b41"
                                                                 },
                   "powershell/tests/status-drift.tests.ps1":  {
                                                                   "hash":  "3e3753cf2ce4382df664f7934184f665723c0e04fec74016ae115b08ff580db2",
