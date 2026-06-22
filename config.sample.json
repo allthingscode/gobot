@@ -60,7 +60,7 @@
             "timeout": 120
         },
         "mcpServers": {},
-        "high_risk": []
+        "highRisk": []
     },
     "strategic_edition": {
         "user_email": "",
@@ -89,18 +89,18 @@
     },
     "gateway": {
         "enabled": false,
-        "dashboard_enabled": false,
-        "auth_token": "",
+        "dashboardEnabled": false,
+        "authToken": "",
         "host": "127.0.0.1",
         "port": 18790,
-        "web_addr": ""
+        "webAddr": ""
     },
     "resilience": {
-        "circuit_breakers": {}
+        "circuitBreakers": {}
     },
     "context": {
-        "session_token_budget": 80000,
-        "compaction_summary_turns": 20
+        "sessionTokenBudget": 80000,
+        "compactionSummaryTurns": 20
     },
     "cron": {
         "enabled": false
@@ -112,13 +112,13 @@
     "logging": {
         "level": "INFO",
         "format": "text",
-        "max_size_mb": 50,
-        "max_backups": 5,
-        "max_age_days": 30,
+        "maxSizeMB": 50,
+        "maxBackups": 5,
+        "maxAgeDays": 30,
         "compress": true
     },
     "browser": {
-        "debug_port": 0,
+        "debugPort": 0,
         "headless": true
     }
 }
