@@ -41,6 +41,17 @@ function Write-StatusFixture {
           "timestamp": "2026-05-25T12:00:00Z"
         }
       }
+    },
+    "F-002": {
+      "status": "finished"
+    },
+    "F-003": {
+      "phases": {
+        "architect": {
+          "status": "Complete",
+          "timestamp": "2026-05-25T13:00:00Z"
+        }
+      }
     }
   }
 }
@@ -75,7 +86,7 @@ try {
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         $json = $output | ConvertFrom-Json
         Assert-Result -Name "task surfaced" -Condition ($json.tasks[0].Task -eq "F-001") -FailureMessage "expected F-001 in JSON output. Output:`n$output"
-        Assert-Result -Name "stats present" -Condition ($json.stats.total -eq 1) -FailureMessage "expected total=1 in JSON output. Output:`n$output"
+        Assert-Result -Name "stats present" -Condition ($json.stats.total -eq 3) -FailureMessage "expected total=3 in JSON output. Output:`n$output"
     }
 
     $results += Run-Test -Name "Summary emits pipeline health" -Body {
@@ -89,7 +100,20 @@ try {
         }
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
-        Assert-Result -Name "summary output" -Condition ($output -match "Pipeline Health" -and $output -match "Total Managed Tasks: 1") -FailureMessage "summary output missing expected content. Output:`n$output"
+        Assert-Result -Name "summary output" -Condition ($output -match "Pipeline Health" -and $output -match "Total Managed Tasks: 3") -FailureMessage "summary output missing expected content. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Status runs clean under StrictMode when task lacks keys" -Body {
+        Push-Location $projectRoot
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command "Set-StrictMode -Version Latest; & '$STATUS_SCRIPT' -ExportJSON"
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code under StrictMode" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

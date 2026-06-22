@@ -172,14 +172,14 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     $meta = $taskMeta[$taskId]
     
     # Determine active phase/specialist
-    $activeSpec = if ($taskState.PSObject.Properties["active_phase"]) { $taskState.active_phase } else { $taskState.active_specialist }
+    $activeSpec = if ($taskState.PSObject.Properties["active_phase"]) { $taskState.active_phase } elseif ($taskState.PSObject.Properties["active_specialist"]) { $taskState.active_specialist } else { $null }
     $isFinished = $true
     
     # Check if any phase is still active
     $currentSpec = "N/A"
     $latestTs = [DateTime]::MinValue
     
-    $phasesMap = if ($taskState.PSObject.Properties["phases"]) { $taskState.phases } else { $taskState.specialists }
+    $phasesMap = if ($taskState.PSObject.Properties["phases"]) { $taskState.phases } elseif ($taskState.PSObject.Properties["specialists"]) { $taskState.specialists } else { $null }
     if ($phasesMap) {
         foreach ($specName in $phasesMap.PSObject.Properties.Name) {
             $spec = $phasesMap.$specName
@@ -236,8 +236,8 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     }
 
     $affinity = ""
-    $groomState = if ($taskState.phases -and $taskState.phases.PSObject.Properties["grooming"]) { $taskState.phases.grooming } elseif ($taskState.specialists -and $taskState.specialists.PSObject.Properties["groomer"]) { $taskState.specialists.groomer } else { $null }
-    if ($groomState -and $groomState.file_affinity) {
+    $groomState = if ($taskState.PSObject.Properties["phases"] -and $taskState.phases.PSObject.Properties["grooming"]) { $taskState.phases.grooming } elseif ($taskState.PSObject.Properties["specialists"] -and $taskState.specialists.PSObject.Properties["groomer"]) { $taskState.specialists.groomer } else { $null }
+    if ($groomState -and $groomState.PSObject.Properties["file_affinity"] -and $groomState.file_affinity) {
         $affinity = $groomState.file_affinity -join ", "
     }
     
@@ -269,17 +269,17 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
 
     # Is it blocked?
     $isBlocked = $false
-    if ($taskState.status -eq "blocked") { 
+    if ($taskState.PSObject.Properties["status"] -and $taskState.status -eq "blocked") { 
         $isBlocked = $true 
         $isFinished = $false
     }
 
-    $statusStr = if ($meta.Status) { $meta.Status } elseif ($isFinished) { "Finished" } else { "In Progress" }
+    $statusStr = if ($meta -and $meta.Status) { $meta.Status } elseif ($isFinished) { "Finished" } else { "In Progress" }
     if ($isBlocked) { $statusStr = "Blocked" }
 
     $allTasks += [PSCustomObject]@{
         Task           = $taskId
-        Title          = if ($meta.Title) { $meta.Title } else { "Unknown" }
+        Title          = if ($meta -and $meta.Title) { $meta.Title } else { "Unknown" }
         Status         = $statusStr
         Dependencies   = $dependencies
         Specialist     = if ($activeSpec) { $activeSpec } elseif ($isFinished) { "none" } else { "N/A" }
@@ -290,7 +290,7 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
 }
 
 # --- 4. Summary Stats ---
-$totalManaged = ($sessionState.tasks.PSObject.Properties.Name).Count
+$totalManaged = @($sessionState.tasks.PSObject.Properties.Name).Count
 $inFlight = @($allTasks | Where-Object { $_.Status -match "In Progress|Ready for Review|Ready for Deploy" }).Count
 $blocked = @($allTasks | Where-Object { $_.Blocker -eq "YES" }).Count
 $ready = @($taskMeta.Values | Where-Object { $_.Status -eq "Ready" }).Count
@@ -299,7 +299,7 @@ $ready = @($taskMeta.Values | Where-Object { $_.Status -eq "Ready" }).Count
 $blockedTaskIds = @(
     $sessionState.tasks.PSObject.Properties.Name | Where-Object {
         $task = $sessionState.tasks.$_
-        $null -ne $task -and $task.status -eq "blocked"
+        $null -ne $task -and $task.PSObject.Properties["status"] -and $task.status -eq "blocked"
     }
 )
 
@@ -338,7 +338,7 @@ $cbEvents = @(
 
 # Merge Conflicts (Last 7 Days)
 $cutoff = (Get-Date).AddDays(-7)
-$conflictEvents = $cbEvents | Where-Object { $_.outcome -match "conflict" -and [DateTime]::Parse($_.timestamp) -gt $cutoff }
+$conflictEvents = @($cbEvents | Where-Object { $_.outcome -match "conflict" -and [DateTime]::Parse($_.timestamp) -gt $cutoff })
 $conflictRate = 0
 if ($totalManaged -gt 0) {
     $conflictRate = ($conflictEvents.Count / $totalManaged) * 100

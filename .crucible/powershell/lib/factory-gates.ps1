@@ -48,7 +48,10 @@ function Get-StrayFileClassification {
 }
 
 function Test-AffectedPathCandidate {
-    param([AllowNull()][string]$Candidate)
+    param(
+        [AllowNull()][string]$Candidate,
+        [string]$RepoRoot = ""
+    )
 
     $trimChars = [char[]](96, 39, 34, 32)
 
@@ -71,16 +74,29 @@ function Test-AffectedPathCandidate {
         return $false
     }
 
-    return ($value -match '^[A-Za-z0-9._/@*?+\-\\]+$')
+    # Harden candidate matching: must contain slash, have valid extension, or exist on disk
+    if ($value -match '[/\\]' -or $value -match '\.[A-Za-z0-9]{2,4}$') {
+        return ($value -match '^[A-Za-z0-9._/@*?+\-\\]+$')
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $fullPath = Join-Path $RepoRoot $value
+        if (Test-Path -LiteralPath $fullPath) {
+            return ($value -match '^[A-Za-z0-9._/@*?+\-\\]+$')
+        }
+    }
+
+    return $false
 }
 
 function Add-AffectedPathCandidate {
     param(
         [System.Collections.ArrayList]$Candidates,
-        [AllowNull()][string]$Candidate
+        [AllowNull()][string]$Candidate,
+        [string]$RepoRoot = ""
     )
 
-    if (Test-AffectedPathCandidate -Candidate $Candidate) {
+    if (Test-AffectedPathCandidate -Candidate $Candidate -RepoRoot $RepoRoot) {
         $trimChars = [char[]](96, 39, 34, 32)
         [void]$Candidates.Add($Candidate.Trim().Trim($trimChars))
     }
@@ -608,12 +624,12 @@ function Invoke-HandoffPreflightValidation {
                 $mentionedPaths = New-Object System.Collections.ArrayList
                 $backtickMatches = [regex]::Matches($affectedSection, '`([^`\r\n]+)`')
                 foreach ($m in $backtickMatches) {
-                    Add-AffectedPathCandidate -Candidates $mentionedPaths -Candidate $m.Groups[1].Value
+                    Add-AffectedPathCandidate -Candidates $mentionedPaths -Candidate $m.Groups[1].Value -RepoRoot $Context.RepoRoot
                 }
                 $listMatches = [regex]::Matches($affectedSection, '(?m)^\s*-\s+([^\r\n]+)')
                 foreach ($m in $listMatches) {
                     $val = $m.Groups[1].Value.Trim() -replace '`','' -replace '\*',''
-                    Add-AffectedPathCandidate -Candidates $mentionedPaths -Candidate $val
+                    Add-AffectedPathCandidate -Candidates $mentionedPaths -Candidate $val -RepoRoot $Context.RepoRoot
                 }
                 
                 $specTopLevels = @()
@@ -631,6 +647,9 @@ function Invoke-HandoffPreflightValidation {
                         $affTrimmed = $aff.Trim().Trim('/') -split '[/\\]'
                         if ($affTrimmed.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($affTrimmed[0])) {
                             $top = $affTrimmed[0]
+                            if ($top -match '\.[A-Za-z0-9]{2,4}$') {
+                                continue
+                            }
                             if ($specTopLevels -notcontains $top) {
                                 $overbroad += $aff
                             }
@@ -713,6 +732,9 @@ function Invoke-HandoffPreflightValidation {
                             $affTrimmed = $aff.Trim().Trim('/') -split '[/\\]'
                             if ($affTrimmed.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($affTrimmed[0])) {
                                 $top = $affTrimmed[0]
+                                if ($top -match '\.[A-Za-z0-9]{2,4}$') {
+                                    continue
+                                }
                                 if ($specTopLevels -notcontains $top) {
                                     $overbroad += $aff
                                 }

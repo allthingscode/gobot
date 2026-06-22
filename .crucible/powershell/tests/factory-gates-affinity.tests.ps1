@@ -764,6 +764,86 @@ exit 0
         $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
         Assert-Result -Name "D23 fallback: absent warning logged" -Condition ($logContent -match "Spec file does not declare an affected files/packages section") -FailureMessage "expected absent warning in log, got: $logContent"
     }
+
+    $results += Run-Test -Name "D19 regression: C-326 and C-327 spec shapes with root-level files and code tokens" -Body {
+        $caseRoot = Join-Path $tempRoot "d19-c326-c327-regression"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "C-326"
+
+        Push-Location $caseRoot
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        $backlogDir = Join-Path $caseRoot ".crucible/backlog"
+        $activeDir = Join-Path $backlogDir "features/active"
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+        $specPath = Join-Path $activeDir "C-326_test.md"
+        $specContent = @'
+---
+item_id: "C-326"
+status: "Ready"
+---
+## Affected Files
+- `internal/config/config.go` - rename `Strategic`/`StrategicConfig` and the JSON key.
+- `internal/config/validator.go` - update `strategic_edition.*` field names in messages to `runtime.*`.
+- `internal/config/config_test.go` - `Save` round-trips.
+- `docs/configuration.md`
+- `README.md`
+'@
+        $specContent | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $frameworkDir = Join-Path $caseRoot "powershell"
+        New-Item -ItemType Directory -Path $frameworkDir -Force | Out-Null
+        @'
+param([string]$HandoffFile, [string]$SchemaPath)
+Write-Output '{"ok":true}'
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $frameworkDir "validate-handoff.ps1") -Encoding UTF8
+
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "C-326-20260530T120000Z.json"
+        $handoffObj = @{
+            task_id = "C-326"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            file_affinity = @("internal/config/", "docs/configuration.md", "config.sample.json")
+            budget_tier = "low"
+            reason = "test"
+            prompt_version = "1.0.0"
+        }
+        $handoffObj | ConvertTo-Json -Compress | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+
+        $ctx.TaskId = "C-326"
+        $ctx.BacklogDir = $backlogDir
+        $ctx.FrameworkPowerShell = $frameworkDir
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $caseRoot
+        try {
+            Invoke-HandoffPreflightValidation -Context $ctx
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+        }
+
+        $logContent = ""
+        if (Test-Path -LiteralPath $ctx.LogFile) {
+            $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
+        }
+        Assert-Result -Name "no overbroad warning logged" -Condition ($logContent -notmatch "Handoff file_affinity contains paths") -FailureMessage "expected no warning in log, got: $logContent"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

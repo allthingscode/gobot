@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory=$false)][string]$AdopterRoot = (Get-Location).Path,
     [Parameter(Mandatory=$false)][switch]$DryRun,
     [Parameter(Mandatory=$false)][ValidateSet("interactive", "auto-safe", "report-only")][string]$Mode = "interactive",
-    [Parameter(Mandatory=$false)][switch]$Prune
+    [Parameter(Mandatory=$false)][switch]$Prune,
+    [Parameter(Mandatory=$false)][switch]$Restamp
 )
 
 $ErrorActionPreference = "Stop"
@@ -333,24 +334,42 @@ function Invoke-UpdateBundle {
         Write-Host ("Pruned " + $prunedCount + " obsolete file(s).")
     }
 
+    $shouldRestamp = $false
     if ($shouldApply -or $shouldPrune) {
         $remainingRemovals = $results["review-removal"].Count
         if ($shouldPrune) {
             $remainingRemovals -= $prunedCount
         }
         if ($results["needs-merge"].Count -eq 0 -and $remainingRemovals -eq 0) {
-            Write-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit" -Value $frameworkHead
-            $versionFile = Join-Path $frameworkRoot "VERSION"
-            if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
-                $version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
-                Write-ConfigScalar -ConfigPath $configPath -Key "crucible_version" -Value $version
-            }
-            try {
-                $provenance = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $frameworkHead -Manifest $manifest
-                $null = Write-ProvenanceManifest -BundleRoot $adopterCrucibleRoot -ProvenanceManifest $provenance
-            } catch {
-                Write-Host ("Warning: could not write provenance manifest: " + $_.Exception.Message) -ForegroundColor Yellow
-            }
+            $shouldRestamp = $true
+        }
+    } elseif ($Restamp -and -not $effectiveDryRun) {
+        # No content delta to apply or prune, but -Restamp was requested: advance the
+        # provenance only when the bundle is genuinely all-no-op. Any safe-overwrite,
+        # add, needs-merge, or review-removal item means content is NOT current, so
+        # stamping HEAD would lie about what is installed - refuse and tell the caller
+        # to run a normal update first.
+        $pendingWork = $results["safe-overwrite"].Count + $results["add"].Count + $results["needs-merge"].Count + $results["review-removal"].Count
+        if ($pendingWork -eq 0) {
+            $shouldRestamp = $true
+            Write-Host "Re-stamping bundle provenance to framework HEAD (content already current)." -ForegroundColor Cyan
+        } else {
+            Write-Host ("Cannot -Restamp: " + $pendingWork + " file(s) still need apply/prune/merge. Run a normal update first.") -ForegroundColor Yellow
+        }
+    }
+
+    if ($shouldRestamp) {
+        Write-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit" -Value $frameworkHead
+        $versionFile = Join-Path $frameworkRoot "VERSION"
+        if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
+            $version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+            Write-ConfigScalar -ConfigPath $configPath -Key "crucible_version" -Value $version
+        }
+        try {
+            $provenance = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $frameworkHead -Manifest $manifest
+            $null = Write-ProvenanceManifest -BundleRoot $adopterCrucibleRoot -ProvenanceManifest $provenance
+        } catch {
+            Write-Host ("Warning: could not write provenance manifest: " + $_.Exception.Message) -ForegroundColor Yellow
         }
     }
 
