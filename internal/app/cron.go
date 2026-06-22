@@ -60,7 +60,7 @@ func NewCronDispatcher(cfg *config.Config, mgr *agent.SessionManager, stack *Age
 		b:            b,
 		storageRoot:  cfg.StorageRoot(),
 		secretsRoot:  cfg.SecretsRoot(),
-		userEmail:    cfg.Strategic.UserEmail,
+		userEmail:    cfg.Runtime.UserEmail,
 		vecStore:     stack.VecStore,
 		embedProv:    stack.EmbedProv,
 		workspaceDir: cfg.WorkspacePath(""),

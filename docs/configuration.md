@@ -25,7 +25,7 @@ the resolved `config:` and `data:` paths.
 
 | Precedence | Source | Resolved path |
 |---|---|---|
-| 1 | `strategic_edition.storage_root` in config.json | that value |
+| 1 | `runtime.storage_root` in config.json | that value |
 | 2 | `GOBOT_STORAGE` env set | that value (explicit override) |
 | 3 | `GOBOT_HOME` set (and `GOBOT_STORAGE` unset) | `$GOBOT_HOME/data` |
 | 4 | neither env var set | `~/gobot_data` |
@@ -57,7 +57,7 @@ Config keys use **camelCase** (e.g. `maxTokens`, `dashboardEnabled`, `circuitBre
 - `gobot config reformat` rewrites a legacy file to canonical-only form, so it doubles as the one-step migration tool: run it once and the warnings stop.
 - The aliases are temporary. After the deprecation window they will be removed, after which only the canonical camelCase keys load. Migrate with `gobot config reformat` now to avoid a future break.
 
-> The `strategic_edition` block (its key and nested fields such as `storage_root`, `user_email`) is intentionally **not** part of this convention change yet; it is migrated separately (C-327). Its keys are documented in their existing form below.
+> The block formerly keyed `strategic_edition` is now keyed `runtime` (C-327, "Strategic Edition" branding removal). The legacy `strategic_edition` key still loads via the same alias mechanism. Its nested fields keep their existing `snake_case` names (`storage_root`, `user_email`, ...) - a casing migration for them is out of scope; they are documented in their existing form below.
 
 ---
 
@@ -167,7 +167,7 @@ Settings for the `chromedp`-based headless browser tools.
 
 ---
 
-### 5. Strategic Edition (`strategic_edition`)
+### 5. Runtime (`runtime`)
 
 Settings for advanced agent features, including Google Workspace integration. For instructions on setting up Google credentials, see the [Google Cloud Setup Guide](google-setup.md).
 
@@ -188,7 +188,7 @@ Settings for advanced agent features, including Google Workspace integration. Fo
 | `policy_file_path` | string | Path to a tool policy file for fine-grained allow/deny rules. |
 | `embedding_model` | string | Embedding model name for vector search (default `"text-embedding-004"`). |
 
-#### Routing (`strategic_edition.routing`)
+#### Routing (`runtime.routing`)
 
 Enables a manager agent to route incoming messages to specialist sub-agents.
 
@@ -198,7 +198,7 @@ Enables a manager agent to route incoming messages to specialist sub-agents.
 | `manager_model` | string | Model used by the routing manager agent. |
 | `manager_provider` | string | Provider for the routing manager (defaults to `agents.defaults.provider`). |
 
-#### Observability (`strategic_edition.observability`)
+#### Observability (`runtime.observability`)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -271,7 +271,7 @@ The heartbeat is a **pure infrastructure health check** — no LLM is invoked. O
 2. **Gemini** — verifies the Gemini API key is valid and reachable
 3. **Gmail** — verifies the OAuth token is present and not expired
 
-After each check it writes a `LIVENESS` file to `{storage_root}/LIVENESS` with the current timestamp and failure count. If any probe fails, an alert is sent via Telegram to `strategic_edition.user_chat_id`. Successful ticks log at `DEBUG` level only.
+After each check it writes a `LIVENESS` file to `{storage_root}/LIVENESS` with the current timestamp and failure count. If any probe fails, an alert is sent via Telegram to `runtime.user_chat_id`. Successful ticks log at `DEBUG` level only.
 
 ---
 

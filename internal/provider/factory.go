@@ -60,7 +60,7 @@ func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// Cost-based Routing (F-116)
-	if cfg != nil && cfg.Strategic.Routing.Enabled {
+	if cfg != nil && cfg.Runtime.Routing.Enabled {
 		if err := f.setupRouting(cfg); err != nil {
 			slog.Warn("factory: routing setup failed, continuing with direct providers", logattr.Err(err))
 		}
@@ -70,7 +70,7 @@ func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
 }
 
 func (f *Factory) setupRouting(cfg *config.Config) error {
-	rCfg := cfg.Strategic.Routing
+	rCfg := cfg.Runtime.Routing
 
 	// Default provider is the 'executor' for routing.
 	execProvName := cfg.DefaultProvider()

@@ -69,7 +69,7 @@ func TestShellExecTool_Idempotency(t *testing.T) {
 	// Create a dummy workspace
 	workspace := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = workspace
+	cfg.Runtime.StorageRoot = workspace
 	tool := newShellExecTool(cfg, 10*time.Second, registry)
 
 	execID := "unique-id-123"

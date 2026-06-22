@@ -1,4 +1,4 @@
-# gobot - The Strategic Agent Runtime
+# gobot - The Agent Runtime
 
 [![CI](https://github.com/allthingscode/gobot/actions/workflows/ci.yml/badge.svg)](https://github.com/allthingscode/gobot/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/allthingscode/gobot)](go.mod)
@@ -139,7 +139,7 @@ gobot's design principle is **stability and security for one user over scale for
        }
      },
      "providers": { "gemini": { "apiKey": "YOUR_GEMINI_API_KEY" } },
-     "strategic_edition": { "storage_root": "" }
+     "runtime": { "storage_root": "" }
    }
    ```
    `allowFrom` is the whitelist — only chat IDs listed here can interact with the bot. Use the numeric ID from [@userinfobot](https://t.me/userinfobot). Adding your chat ID here is all that is needed: on startup gobot promotes every `allowFrom` ID into its access-control database automatically, so the single-user happy path does not need a separate `authorize` step.

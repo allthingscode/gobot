@@ -61,8 +61,8 @@ func (m *coverageMockProvider) Models() []provider.ModelInfo { return nil }
 func TestCronDispatcher_MoreBranches_Part1(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.UserEmail = testEmail
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.UserEmail = testEmail
+	cfg.Runtime.StorageRoot = t.TempDir()
 
 	api := &appMockAPI{}
 	b := bot.New(api, nil)
@@ -97,8 +97,8 @@ func TestCronDispatcher_MoreBranches_Part1(t *testing.T) {
 func TestCronDispatcher_MoreBranches_Part2(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.UserEmail = testEmail
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.UserEmail = testEmail
+	cfg.Runtime.StorageRoot = t.TempDir()
 
 	api := &appMockAPI{}
 	b := bot.New(api, nil)
@@ -200,7 +200,7 @@ func TestSpawnTool_HandleFallback_Coverage(t *testing.T) {
 func TestAgentRunner_BuildSystemPrompt_Branches_Coverage(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 
 	r := &AgentRunner{
 		SystemPrompt: "Base prompt",
@@ -212,11 +212,11 @@ func TestAgentRunner_BuildSystemPrompt_Branches_Coverage(t *testing.T) {
 		t.Errorf("expected base prompt, got %q", p1)
 	}
 
-	if err := os.MkdirAll(filepath.Join(cfg.Strategic.StorageRoot, "workspace"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cfg.Runtime.StorageRoot, "workspace"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	awarenessContent := "Awareness info"
-	if err := os.WriteFile(filepath.Join(cfg.Strategic.StorageRoot, "workspace", "AWARENESS.md"), []byte(awarenessContent), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg.Runtime.StorageRoot, "workspace", "AWARENESS.md"), []byte(awarenessContent), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -254,7 +254,7 @@ func TestHeartbeatRunner_Run_Coverage(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 
 	hb := NewHeartbeatRunner(cfg, "token", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

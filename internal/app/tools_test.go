@@ -43,7 +43,7 @@ func TestReadTextFileTool_Execute_Success(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 	tool := app.NewReadTextFileTool(cfg)
 	got, err := tool.Execute(context.Background(), "sess", "user", map[string]any{
 		"file_path": "test.txt",
@@ -60,7 +60,7 @@ func TestReadTextFileTool_Execute_SandboxEscaping(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 	tool := app.NewReadTextFileTool(cfg)
 
 	// Attempt to read something outside the sandbox
@@ -97,7 +97,7 @@ func TestReadTextFileTool_Execute_ProjectRootFallback(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir // WorkspacePath(userID) will use this + /workspace
+	cfg.Runtime.StorageRoot = tmpDir // WorkspacePath(userID) will use this + /workspace
 	cfg.SetProjectRoot(projectDir)
 
 	tool := app.NewReadTextFileTool(cfg)

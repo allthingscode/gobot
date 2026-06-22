@@ -16,7 +16,7 @@ func TestBuildAwarenessContent(t *testing.T) {
 	cfg := &config.Config{}
 	// StorageRoot defaults to ~/gobot_data or similar, but we can set it via Strategic.StorageRoot
 	tmpDir := t.TempDir()
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 
 	got := buildAwarenessContent(cfg)
 
@@ -41,7 +41,7 @@ func TestEnsureAwarenessFile(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 
 	awarenessPath := cfg.WorkspacePath("", "AWARENESS.md")
 
@@ -79,7 +79,7 @@ func TestLoadPrivateFile(t *testing.T) {
 
 	cfg := &config.Config{}
 	tmpStorage := t.TempDir()
-	cfg.Strategic.StorageRoot = tmpStorage
+	cfg.Runtime.StorageRoot = tmpStorage
 
 	filename := "TEST_FILE.md"
 	content := "test content"
@@ -129,7 +129,7 @@ func TestLoadSystemPrompt(t *testing.T) {
 
 	tmpStorage := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpStorage
+	cfg.Runtime.StorageRoot = tmpStorage
 
 	seedPromptFiles(t, tmpHome, tmpStorage)
 

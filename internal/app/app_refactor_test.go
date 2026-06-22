@@ -112,8 +112,8 @@ func TestCronDispatcher_Dispatch_App(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	cfg.Strategic.StorageRoot = t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cfg.Strategic.StorageRoot, "workspace"), 0o755); err != nil {
+	cfg.Runtime.StorageRoot = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cfg.Runtime.StorageRoot, "workspace"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	silentPayload := cron.Payload{
@@ -205,7 +205,7 @@ func TestTgAPI_HandleUpdate_Callback_App(t *testing.T) {
 func TestBuildAgentStack_Basic_App(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 
 	stack, cleanup, err := BuildAgentStack(context.Background(), cfg, nil, nil)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestBuildAgentStack_Basic_App(t *testing.T) {
 func TestInitProviders_Routing_App(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.Routing.Enabled = true
+	cfg.Runtime.Routing.Enabled = true
 	_, _, err := InitProviders(context.Background(), cfg)
 	if err != nil {
 		t.Logf("InitProviders failed: %v", err)
@@ -246,7 +246,7 @@ func TestReadTextFileTool_App(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 
 	tool := NewReadTextFileTool(cfg)
 
@@ -353,7 +353,7 @@ func TestHeartbeatRunner_App(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 
 	hb := NewHeartbeatRunner(cfg, "token", nil)
 	if hb == nil {
@@ -370,7 +370,7 @@ func TestAwareness_App(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 
 	content := buildAwarenessContent(cfg)
 	if !strings.Contains(content, "STRATEGIC AWARENESS") {

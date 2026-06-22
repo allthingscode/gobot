@@ -1,4 +1,4 @@
-// gobot - Strategic Edition agent runtime (Go)
+// gobot - agent runtime (Go)
 //
 //go:generate go-winres make --in ../../versioninfo.json
 package main
@@ -27,8 +27,8 @@ var (
 func main() {
 	root := &cobra.Command{
 		Use:   "gobot",
-		Short: "Strategic Edition agent runtime",
-		Long:  "gobot - the Go-native runtime for gobot Strategic Edition.",
+		Short: "gobot agent runtime",
+		Long:  "gobot - the Go-native agent runtime.",
 	}
 	root.SilenceErrors = true
 

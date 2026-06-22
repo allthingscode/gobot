@@ -125,7 +125,7 @@ func (v *Validator) validateAgentDefaults(result *ValidationResult) {
 
 func (v *Validator) validateStrategic(result *ValidationResult) {
 	// Validate Idempotency TTL
-	v.validateTTL("strategic_edition.idempotencyTTL", v.cfg.Strategic.IdempotencyTTL, result)
+	v.validateTTL("runtime.idempotencyTTL", v.cfg.Runtime.IdempotencyTTL, result)
 }
 
 func (v *Validator) validateTTL(field, value string, result *ValidationResult) {
@@ -146,7 +146,7 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 	root := v.cfg.StorageRoot()
 	if root == "" {
 		result.Errors = append(result.Errors, ValidationError{
-			Field:    "strategic_edition.storage_root",
+			Field:    "runtime.storage_root",
 			Message:  "storage root is not configured",
 			Remedy:   "run 'gobot init' to create default config",
 			Severity: SeverityCritical,
@@ -158,14 +158,14 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			result.Errors = append(result.Errors, ValidationError{
-				Field:    "strategic_edition.storage_root",
+				Field:    "runtime.storage_root",
 				Message:  fmt.Sprintf("directory does not exist: %s", root),
 				Remedy:   "run 'gobot init' to create directories",
 				Severity: SeverityCritical,
 			})
 		} else {
 			result.Errors = append(result.Errors, ValidationError{
-				Field:    "strategic_edition.storage_root",
+				Field:    "runtime.storage_root",
 				Message:  fmt.Sprintf("cannot access directory: %v", err),
 				Remedy:   "check permissions on parent directory",
 				Severity: SeverityCritical,
@@ -176,7 +176,7 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 
 	if !info.IsDir() {
 		result.Errors = append(result.Errors, ValidationError{
-			Field:    "strategic_edition.storage_root",
+			Field:    "runtime.storage_root",
 			Message:  fmt.Sprintf("path is not a directory: %s", root),
 			Remedy:   "remove the file and run 'gobot init'",
 			Severity: SeverityCritical,
@@ -188,7 +188,7 @@ func (v *Validator) validateStorageRoot(result *ValidationResult) {
 	tmpFile, err := os.CreateTemp(root, ".gobot-write-test-*")
 	if err != nil {
 		result.Errors = append(result.Errors, ValidationError{
-			Field:    "strategic_edition.storage_root",
+			Field:    "runtime.storage_root",
 			Message:  fmt.Sprintf("directory is not writable: %v", err),
 			Remedy:   "check directory permissions",
 			Severity: SeverityCritical,

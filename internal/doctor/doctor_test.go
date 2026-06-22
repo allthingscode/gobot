@@ -19,7 +19,7 @@ import (
 // cfgWithRoot returns a Config with StorageRoot set to root.
 func cfgWithRoot(root string) *config.Config {
 	return &config.Config{
-		Strategic: config.StrategicConfig{StorageRoot: root},
+		Runtime: config.RuntimeConfig{StorageRoot: root},
 	}
 }
 

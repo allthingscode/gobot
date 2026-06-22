@@ -68,7 +68,7 @@ func TestStorageRoot_Default(t *testing.T) {
 	// We test StorageRoot priority: Config > Env Var > Default.
 
 	// 1. Config override
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "config_root"}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: "config_root"}}
 	if got := cfg.StorageRoot(); got != "config_root" {
 		t.Errorf("Priority 1 (Config) failed: got %q, want %q", got, "config_root")
 	}
@@ -112,7 +112,7 @@ func TestStorageRoot_GobotHomeDerived(t *testing.T) {
 	}
 
 	// config.json storage_root still takes top priority over both env vars.
-	cfgOverride := &Config{Strategic: StrategicConfig{StorageRoot: "config_root"}}
+	cfgOverride := &Config{Runtime: RuntimeConfig{StorageRoot: "config_root"}}
 	if got := cfgOverride.StorageRoot(); got != "config_root" {
 		t.Errorf("config storage_root should win over env: got %q, want %q", got, "config_root")
 	}
@@ -122,7 +122,7 @@ func TestSave(t *testing.T) {
 	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "config.json")
 	cfg := &Config{
-		Strategic: StrategicConfig{UserEmail: "test@example.com"},
+		Runtime: RuntimeConfig{UserEmail: "test@example.com"},
 	}
 	if err := cfg.Save(tmp); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -131,14 +131,14 @@ func TestSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom failed: %v", err)
 	}
-	if cfg2.Strategic.UserEmail != "test@example.com" {
-		t.Errorf("got email %q, want %q", cfg2.Strategic.UserEmail, "test@example.com")
+	if cfg2.Runtime.UserEmail != "test@example.com" {
+		t.Errorf("got email %q, want %q", cfg2.Runtime.UserEmail, "test@example.com")
 	}
 }
 
 func TestStorageRoot_Override(t *testing.T) {
 	t.Parallel()
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "custom_storage"}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: "custom_storage"}}
 	if cfg.StorageRoot() != "custom_storage" {
 		t.Errorf("got %q, want custom_storage", cfg.StorageRoot())
 	}
@@ -168,7 +168,7 @@ func TestSecretsRoot(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.storageRoot}}
+			cfg := &Config{Runtime: RuntimeConfig{StorageRoot: tc.storageRoot}}
 			if got := cfg.SecretsRoot(); got != tc.want {
 				t.Errorf("SecretsRoot() = %q, want %q", got, tc.want)
 			}
@@ -260,7 +260,7 @@ func TestGatewayDefaultsNoAllInterfacesBinding(t *testing.T) {
 
 func TestLogsRoot(t *testing.T) {
 	t.Parallel()
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "logs_root"}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: "logs_root"}}
 	want := filepath.Join("logs_root", "logs")
 	if got := cfg.LogsRoot(); got != want {
 		t.Errorf("LogsRoot() = %q, want %q", got, want)
@@ -269,7 +269,7 @@ func TestLogsRoot(t *testing.T) {
 
 func TestLogPath(t *testing.T) {
 	t.Parallel()
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: "logs_root"}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: "logs_root"}}
 	want := filepath.Join("logs_root", "logs", "gobot.log")
 	if got := cfg.LogPath("gobot.log"); got != want {
 		t.Errorf("LogPath() = %q, want %q", got, want)
@@ -335,7 +335,7 @@ func TestWorkspacePath(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := &Config{Strategic: StrategicConfig{StorageRoot: tc.root}}
+			cfg := &Config{Runtime: RuntimeConfig{StorageRoot: tc.root}}
 			got := cfg.WorkspacePath("", tc.subpath...)
 			if got != tc.want {
 				t.Errorf("WorkspacePath(%v) = %q, want %q", tc.subpath, got, tc.want)
@@ -353,7 +353,7 @@ func TestGeminiAPIKey(t *testing.T) {
 }
 
 func TestGeminiAPIKey_Empty(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: t.TempDir()}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: t.TempDir()}}
 	t.Setenv("GEMINI_API_KEY", "")
 	if cfg.GeminiAPIKey() != "" {
 		t.Errorf("expected empty key, got %q", cfg.GeminiAPIKey())
@@ -515,7 +515,7 @@ func TestTelegramToken_FromConfig(t *testing.T) {
 }
 
 func TestTelegramToken_EnvFallback(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: t.TempDir()}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: t.TempDir()}}
 	t.Setenv("TELEGRAM_BOT_TOKEN", "env-token")
 	if cfg.TelegramToken() != "env-token" {
 		t.Errorf("got %q, want env-token", cfg.TelegramToken())
@@ -523,7 +523,7 @@ func TestTelegramToken_EnvFallback(t *testing.T) {
 }
 
 func TestTelegramToken_Empty(t *testing.T) {
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: t.TempDir()}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: t.TempDir()}}
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	if cfg.TelegramToken() != "" {
 		t.Errorf("got %q, want empty", cfg.TelegramToken())
@@ -560,7 +560,7 @@ func TestMCPEnvFor_UnknownServer(t *testing.T) {
 
 func TestMCPEnvFor_NoServers(t *testing.T) {
 	t.Parallel()
-	cfg := &Config{Strategic: StrategicConfig{}}
+	cfg := &Config{Runtime: RuntimeConfig{}}
 	env := cfg.MCPEnvFor("any-server")
 	if len(env) != 0 {
 		t.Errorf("expected empty map, got %v", env)
@@ -570,7 +570,7 @@ func TestMCPEnvFor_NoServers(t *testing.T) {
 func TestMCPEnvFor_EmptyValue_NoFallback(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{
-		Strategic: StrategicConfig{StorageRoot: t.TempDir()},
+		Runtime: RuntimeConfig{StorageRoot: t.TempDir()},
 		Tools: ToolsConfig{
 			MCPServers: map[string]MCPServerConfig{
 				"my-server": {
@@ -655,7 +655,7 @@ func TestEffectiveMaxToolIterations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := &Config{
-				Strategic: StrategicConfig{MaxToolIterations: tc.limit},
+				Runtime: RuntimeConfig{MaxToolIterations: tc.limit},
 			}
 			if got := cfg.EffectiveMaxToolIterations(); got != tc.want {
 				t.Errorf("EffectiveMaxToolIterations() = %d, want %d", got, tc.want)
@@ -724,7 +724,7 @@ func TestObservabilityConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	obs := cfg.Strategic.Observability
+	obs := cfg.Runtime.Observability
 	if obs.ServiceName != "test-bot" {
 		t.Errorf("got service_name %q, want test-bot", obs.ServiceName)
 	}
@@ -751,7 +751,7 @@ func TestConfig_SecretsErrorLogging(t *testing.T) {
 	if err := os.WriteFile(secretsFile, []byte("{invalid json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &Config{Strategic: StrategicConfig{StorageRoot: tmpDir}}
+	cfg := &Config{Runtime: RuntimeConfig{StorageRoot: tmpDir}}
 	t.Setenv("GEMINI_API_KEY", "env-gemini-key")
 	t.Setenv("ANTHROPIC_API_KEY", "env-anthropic-key")
 	t.Setenv("OPENAI_API_KEY", "env-openai-key")
@@ -871,7 +871,7 @@ func TestEmbeddingModel(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := &Config{Strategic: StrategicConfig{EmbeddingModel: tc.field}}
+			cfg := &Config{Runtime: RuntimeConfig{EmbeddingModel: tc.field}}
 			if got := cfg.EmbeddingModel(); got != tc.want {
 				t.Errorf("EmbeddingModel() = %q, want %q", got, tc.want)
 			}
@@ -1098,21 +1098,50 @@ func TestNormalizeLegacyKeys_DoesNotTouchUserMaps(t *testing.T) {
 	}
 }
 
-// AC5: the legacy->canonical alias map is the single source of truth and intentionally
-// excludes the strategic_edition block (migrated separately by C-327).
-func TestLegacyKeyRenames_ExcludesStrategicEdition(t *testing.T) {
+// The legacy->canonical alias map is the single source of truth for deprecated keys.
+// C-326 maps snake_case spellings to camelCase; C-327 adds the root-level
+// strategic_edition -> runtime block rename onto the same path.
+func TestLegacyKeyRenames_SingleSourceOfTruth(t *testing.T) {
 	t.Parallel()
-	for path, renames := range legacyKeyRenames {
-		if strings.Contains(strings.ToLower(path), "strategic") {
-			t.Errorf("legacyKeyRenames must not migrate the strategic_edition block: found path %q", path)
-		}
+	for _, renames := range legacyKeyRenames {
 		for legacy, canonical := range renames {
-			if strings.Contains(canonical, "_") {
-				t.Errorf("canonical key still snake_case: %s -> %s", legacy, canonical)
+			if canonical == "" {
+				t.Errorf("alias %q maps to an empty canonical key", legacy)
 			}
 		}
 	}
 	if legacyKeyRenames["gateway"]["auth_token"] != "authToken" {
 		t.Errorf("expected gateway.auth_token -> authToken in alias map")
+	}
+	// C-327: the strategic_edition block is renamed to runtime via the root path.
+	if legacyKeyRenames[""]["strategic_edition"] != "runtime" {
+		t.Errorf("expected root-level strategic_edition -> runtime alias (C-327)")
+	}
+}
+
+// AC2 (C-327): the block formerly keyed strategic_edition now serializes under "runtime",
+// and a config using the legacy strategic_edition key still loads identically.
+func TestRuntimeBlock_LegacyStrategicEditionAlias(t *testing.T) {
+	t.Parallel()
+	legacyCfg, err := decode(bytes.NewReader([]byte(`{"strategic_edition":{"user_email":"a@b.com","storage_root":"/data"}}`)))
+	if err != nil {
+		t.Fatalf("decode legacy strategic_edition: %v", err)
+	}
+	canonicalCfg, err := decode(bytes.NewReader([]byte(`{"runtime":{"user_email":"a@b.com","storage_root":"/data"}}`)))
+	if err != nil {
+		t.Fatalf("decode runtime: %v", err)
+	}
+	if !reflect.DeepEqual(legacyCfg.Runtime, canonicalCfg.Runtime) {
+		t.Errorf("legacy strategic_edition did not load identically to runtime:\n legacy=%+v\n runtime=%+v", legacyCfg.Runtime, canonicalCfg.Runtime)
+	}
+	if legacyCfg.Runtime.UserEmail != "a@b.com" || legacyCfg.Runtime.StorageRoot != "/data" {
+		t.Errorf("runtime values not populated from legacy key: %+v", legacyCfg.Runtime)
+	}
+	data, err := canonicalCfg.Marshal()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if out := string(data); strings.Contains(out, "strategic_edition") || !strings.Contains(out, `"runtime"`) {
+		t.Errorf("Marshal must emit \"runtime\" and not \"strategic_edition\"; got:\n%s", out)
 	}
 }

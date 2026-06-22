@@ -30,7 +30,7 @@ type ResumableThread struct {
 	LatestIteration int    // The highest iteration number recorded for this thread.
 }
 
-// CheckpointManager manages SQLite-based durability for the Strategic Edition
+// CheckpointManager manages SQLite-based durability for gobot
 // agent loop. It mirrors checkpoint_logic.py's CheckpointManager class.
 // Obtain an instance via GetCheckpointManager — do not construct directly.
 type CheckpointManager struct {

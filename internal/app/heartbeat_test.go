@@ -28,7 +28,7 @@ func (m *mockAlertSender) Send(_ context.Context, msg bot.OutboundMessage) error
 func TestNewHeartbeatRunner_WiresSender(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	sender := &mockAlertSender{}
 
 	hb := NewHeartbeatRunner(cfg, "token", sender)

@@ -60,7 +60,7 @@ rules:
 	}
 
 	cfg := &config.Config{}
-	cfg.Strategic.PolicyFilePath = policyPath
+	cfg.Runtime.PolicyFilePath = policyPath
 
 	runner := &AgentRunner{}
 	mgr := &agent.SessionManager{}
@@ -98,7 +98,7 @@ rules:
 	}
 
 	cfg := &config.Config{}
-	cfg.Strategic.PolicyFilePath = policyPath
+	cfg.Runtime.PolicyFilePath = policyPath
 
 	runner := &AgentRunner{}
 	mgr := &agent.SessionManager{}
