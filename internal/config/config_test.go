@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -935,5 +936,183 @@ func TestBreaker_Parsing(t *testing.T) {
 	maxFail, window, timeout = cfg.Breaker("missing")
 	if maxFail != 5 || window != 60*time.Second || timeout != 30*time.Second {
 		t.Errorf("missing breaker: got (%d, %v, %v), want (5, 60s, 30s)", maxFail, window, timeout)
+	}
+}
+
+// --- C-326: legacy snake_case -> canonical camelCase key migration ---
+
+// AC2: a config written with the old snake_case keys still loads with identical values.
+func TestNormalizeLegacyKeys_LoadsLegacySnakeCase(t *testing.T) {
+	t.Parallel()
+	legacy := `{
+	  "logging": {"max_size_mb": 50, "max_backups": 5, "max_age_days": 30},
+	  "browser": {"debug_port": 9222},
+	  "resilience": {"circuit_breakers": {"llm": {"max_failures": 7, "window": "60s", "timeout": "30s"}}},
+	  "context": {"session_token_budget": 12345, "compaction_summary_turns": 9},
+	  "gateway": {"dashboard_enabled": true, "auth_token": "tok", "web_addr": "127.0.0.1:8080"},
+	  "tools": {"high_risk": ["shell_exec"]}
+	}`
+	cfg, err := decode(bytes.NewReader([]byte(legacy)))
+	if err != nil {
+		t.Fatalf("decode legacy config: %v", err)
+	}
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"logging.maxSizeMB", cfg.Logging.MaxSizeMB, 50},
+		{"logging.maxBackups", cfg.Logging.MaxBackups, 5},
+		{"logging.maxAgeDays", cfg.Logging.MaxAgeDays, 30},
+		{"browser.debugPort", cfg.Browser.DebugPort, 9222},
+		{"resilience.circuitBreakers[llm].maxFailures", cfg.Resilience.CircuitBreakers["llm"].MaxFailures, uint32(7)},
+		{"context.sessionTokenBudget", cfg.Context.SessionTokenBudget, 12345},
+		{"context.compactionSummaryTurns", cfg.Context.CompactionSummaryTurns, 9},
+		{"gateway.dashboardEnabled", cfg.Gateway.DashboardEnabled, true},
+		{"gateway.authToken", cfg.Gateway.AuthToken, "tok"},
+		{"gateway.webAddr", cfg.Gateway.WebAddr, "127.0.0.1:8080"},
+		{"tools.highRisk", strings.Join(cfg.Tools.HighRisk, ","), "shell_exec"},
+	}
+	for _, c := range checks {
+		if !reflect.DeepEqual(c.got, c.want) {
+			t.Errorf("%s = %v (%T), want %v (%T)", c.name, c.got, c.got, c.want, c.want)
+		}
+	}
+}
+
+// A canonical (camelCase) config loads unchanged through the normalization pass.
+func TestNormalizeLegacyKeys_CanonicalLoadsUnchanged(t *testing.T) {
+	t.Parallel()
+	canonical := `{"logging":{"maxSizeMB":42},"gateway":{"authToken":"abc"},"tools":{"highRisk":["x"]}}`
+	cfg, err := decode(bytes.NewReader([]byte(canonical)))
+	if err != nil {
+		t.Fatalf("decode canonical config: %v", err)
+	}
+	if cfg.Logging.MaxSizeMB != 42 || cfg.Gateway.AuthToken != "abc" || len(cfg.Tools.HighRisk) != 1 {
+		t.Errorf("canonical keys not loaded: logging=%+v gateway=%+v tools=%+v", cfg.Logging, cfg.Gateway, cfg.Tools)
+	}
+}
+
+// AC1: Marshal never emits a migrated snake_case key; it emits the canonical form.
+func TestMarshal_EmitsCanonicalKeysOnly(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{
+		Logging:    LoggingConfig{MaxSizeMB: 1, MaxBackups: 2, MaxAgeDays: 3},
+		Browser:    BrowserConfig{DebugPort: 9222},
+		Resilience: ResilienceConfig{CircuitBreakers: map[string]BreakerConfig{"llm": {MaxFailures: 4}}},
+		Context:    ContextConfig{SessionTokenBudget: 5, CompactionSummaryTurns: 6},
+		Gateway:    GatewayConfig{DashboardEnabled: true, AuthToken: "t", WebAddr: "a"},
+		Tools:      ToolsConfig{HighRisk: []string{"x"}},
+	}
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	out := string(data)
+	for _, k := range []string{
+		"max_size_mb", "max_backups", "max_age_days", "debug_port", "circuit_breakers",
+		"max_failures", "session_token_budget", "compaction_summary_turns",
+		"dashboard_enabled", "auth_token", "web_addr", "high_risk",
+	} {
+		if strings.Contains(out, `"`+k+`"`) {
+			t.Errorf("Marshal output still contains legacy key %q", k)
+		}
+	}
+	for _, k := range []string{
+		"maxSizeMB", "debugPort", "circuitBreakers", "maxFailures", "sessionTokenBudget",
+		"compactionSummaryTurns", "dashboardEnabled", "authToken", "webAddr", "highRisk",
+	} {
+		if !strings.Contains(out, `"`+k+`"`) {
+			t.Errorf("Marshal output missing canonical key %q", k)
+		}
+	}
+}
+
+// AC3: when both the legacy and canonical keys are present, the canonical value wins and
+// exactly one WARN naming the deprecated key is logged.
+//
+//nolint:paralleltest // mutates the global slog default to capture warnings
+func TestNormalizeLegacyKeys_BothPresent_CanonicalWinsWarnsOnce(t *testing.T) {
+	var logBuf bytes.Buffer
+	oldDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldDefault) })
+
+	input := `{"gateway":{"auth_token":"legacy","authToken":"canonical"}}`
+	cfg, err := decode(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if cfg.Gateway.AuthToken != "canonical" {
+		t.Errorf("canonical did not win: got %q", cfg.Gateway.AuthToken)
+	}
+	if got := strings.Count(logBuf.String(), "deprecated_key=auth_token"); got != 1 {
+		t.Errorf("expected exactly one warn for auth_token, got %d; log:\n%s", got, logBuf.String())
+	}
+}
+
+// AC4: Load(legacy) -> Marshal yields canonical, stable output (what `config reformat`
+// relies on to migrate a legacy file deterministically).
+func TestNormalizeLegacyKeys_ReformatIsCanonicalAndIdempotent(t *testing.T) {
+	t.Parallel()
+	legacy := `{"logging":{"max_size_mb":7},"context":{"session_token_budget":8}}`
+	cfg1, err := decode(bytes.NewReader([]byte(legacy)))
+	if err != nil {
+		t.Fatalf("decode legacy: %v", err)
+	}
+	data1, err := cfg1.Marshal()
+	if err != nil {
+		t.Fatalf("marshal1: %v", err)
+	}
+	if strings.Contains(string(data1), "max_size_mb") || strings.Contains(string(data1), "session_token_budget") {
+		t.Errorf("reformatted output still has legacy keys:\n%s", data1)
+	}
+	cfg2, err := decode(bytes.NewReader(data1))
+	if err != nil {
+		t.Fatalf("decode reformatted: %v", err)
+	}
+	data2, err := cfg2.Marshal()
+	if err != nil {
+		t.Fatalf("marshal2: %v", err)
+	}
+	if !bytes.Equal(data1, data2) {
+		t.Errorf("reformat not idempotent:\n%s\n---\n%s", data1, data2)
+	}
+}
+
+// Path-scoping safety: a legacy-looking key inside a user-controlled map (an mcpServers
+// env var) is NOT rewritten - only the known config paths are normalized.
+func TestNormalizeLegacyKeys_DoesNotTouchUserMaps(t *testing.T) {
+	t.Parallel()
+	input := `{"tools":{"mcpServers":{"srv":{"command":"c","args":[],"env":{"auth_token":"keepme"}}}}}`
+	cfg, err := decode(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	srv, ok := cfg.Tools.MCPServers["srv"]
+	if !ok {
+		t.Fatal("mcpServers[srv] missing")
+	}
+	if srv.Env["auth_token"] != "keepme" {
+		t.Errorf("user map key was rewritten: env=%+v", srv.Env)
+	}
+}
+
+// AC5: the legacy->canonical alias map is the single source of truth and intentionally
+// excludes the strategic_edition block (migrated separately by C-327).
+func TestLegacyKeyRenames_ExcludesStrategicEdition(t *testing.T) {
+	t.Parallel()
+	for path, renames := range legacyKeyRenames {
+		if strings.Contains(strings.ToLower(path), "strategic") {
+			t.Errorf("legacyKeyRenames must not migrate the strategic_edition block: found path %q", path)
+		}
+		for legacy, canonical := range renames {
+			if strings.Contains(canonical, "_") {
+				t.Errorf("canonical key still snake_case: %s -> %s", legacy, canonical)
+			}
+		}
+	}
+	if legacyKeyRenames["gateway"]["auth_token"] != "authToken" {
+		t.Errorf("expected gateway.auth_token -> authToken in alias map")
 	}
 }

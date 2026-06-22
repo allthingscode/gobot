@@ -49,6 +49,16 @@ A "not correctly formatted" result is a style-only signal, not a validity error.
 
 This formatting check is opt-in. It is not run at application startup, in `gobot doctor`, or in preflight diagnostics; it runs only when you invoke `gobot config reformat --check` explicitly. To check whether a config is semantically valid (rather than canonically formatted), use `gobot config validate`.
 
+### Key naming convention (camelCase) and legacy aliases
+
+Config keys use **camelCase** (e.g. `maxTokens`, `dashboardEnabled`, `circuitBreakers`). Older releases mixed camelCase and `snake_case` in the same file; those `snake_case` spellings are now **deprecated aliases** that still load during a deprecation window.
+
+- On load, a deprecated key (e.g. `auth_token`, `max_size_mb`, `circuit_breakers`, `session_token_budget`) is accepted and a one-time `WARN` names the deprecated key and its canonical replacement. If both the deprecated and canonical key are present, the **canonical key wins** and the deprecated one is ignored.
+- `gobot config reformat` rewrites a legacy file to canonical-only form, so it doubles as the one-step migration tool: run it once and the warnings stop.
+- The aliases are temporary. After the deprecation window they will be removed, after which only the canonical camelCase keys load. Migrate with `gobot config reformat` now to avoid a future break.
+
+> The `strategic_edition` block (its key and nested fields such as `storage_root`, `user_email`) is intentionally **not** part of this convention change yet; it is migrated separately (C-327). Its keys are documented in their existing form below.
+
 ---
 
 ## Configuration Structure
@@ -128,11 +138,11 @@ Credentials and endpoints for LLM providers. All API keys fall back to the DPAPI
 |-------|------|-------------|
 | `timeout` | int | Timeout in seconds for `shell_exec` commands (default 120). |
 
-#### High-Risk Tools (`tools.high_risk`)
+#### High-Risk Tools (`tools.highRisk`)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `high_risk` | array[string] | Tool names that require Human-in-the-Loop approval regardless of the `hitl` channel setting. |
+| `highRisk` | array[string] | Tool names that require Human-in-the-Loop approval regardless of the `hitl` channel setting. _(legacy alias: `high_risk`)_ |
 
 #### MCP Servers (`tools.mcpServers`)
 
@@ -152,7 +162,7 @@ Settings for the `chromedp`-based headless browser tools.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `debug_port` | int | Port to attach to an existing Chrome instance (e.g., `9222`). `0` = disabled. |
+| `debugPort` | int | Port to attach to an existing Chrome instance (e.g., `9222`). `0` = disabled. _(legacy alias: `debug_port`)_ |
 | `headless` | bool | If `true`, launches a new headless Chrome instance for browser tools. |
 
 ---
@@ -207,11 +217,11 @@ Internal HTTP server for the management dashboard and webhook ingress.
 | Field | Type | Description |
 |-------|------|-------------|
 | `enabled` | bool | Enable the HTTP gateway. |
-| `dashboard_enabled` | bool | Enable the web management dashboard on the gateway. |
-| `auth_token` | string | Bearer token required for authenticated gateway endpoints. |
+| `dashboardEnabled` | bool | Enable the web management dashboard on the gateway. _(legacy alias: `dashboard_enabled`)_ |
+| `authToken` | string | Bearer token required for authenticated gateway endpoints. _(legacy alias: `auth_token`)_ |
 | `host` | string | Host to bind to (default `"127.0.0.1"`). |
 | `port` | int | Port to listen on (default `18790`). |
-| `web_addr` | string | Override full bind address (e.g., `"0.0.0.0:9000"`). Takes precedence over `host`/`port`. |
+| `webAddr` | string | Override full bind address (e.g., `"0.0.0.0:9000"`). Takes precedence over `host`/`port`. _(legacy alias: `web_addr`)_ |
 
 ---
 
@@ -221,8 +231,8 @@ Per-provider circuit breaker configuration.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `circuit_breakers` | object | Map of breaker names (e.g., `gemini`, `telegram`) to settings. |
-| `...max_failures` | int | Number of failures before the breaker opens. |
+| `circuitBreakers` | object | Map of breaker names (e.g., `gemini`, `telegram`) to settings. _(legacy alias: `circuit_breakers`)_ |
+| `...maxFailures` | int | Number of failures before the breaker opens. _(legacy alias: `max_failures`)_ |
 | `...window` | string | Rolling window for failure counting (e.g., `"60s"`). |
 | `...timeout` | string | Time to wait before attempting to close the breaker (e.g., `"30s"`). |
 
@@ -234,8 +244,8 @@ Defaults when not configured: 5 failures, 60s window, 30s timeout.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `session_token_budget` | int | Token budget per session before compaction is triggered (default 80000). |
-| `compaction_summary_turns` | int | Number of oldest turns to summarize per compaction pass (default 20). |
+| `sessionTokenBudget` | int | Token budget per session before compaction is triggered (default 80000). _(legacy alias: `session_token_budget`)_ |
+| `compactionSummaryTurns` | int | Number of oldest turns to summarize per compaction pass (default 20). _(legacy alias: `compaction_summary_turns`)_ |
 
 ---
 
@@ -271,7 +281,7 @@ After each check it writes a `LIVENESS` file to `{storage_root}/LIVENESS` with t
 |-------|------|-------------|
 | `level` | string | Log level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default `INFO`). |
 | `format` | string | Log format: `text` or `json` (default `text`). |
-| `max_size_mb` | int | Maximum log file size in MB before rotation (default 50). |
-| `max_backups` | int | Number of rotated log files to retain (default 5). |
-| `max_age_days` | int | Days to retain old log files (default 30). |
+| `maxSizeMB` | int | Maximum log file size in MB before rotation (default 50). _(legacy alias: `max_size_mb`)_ |
+| `maxBackups` | int | Number of rotated log files to retain (default 5). _(legacy alias: `max_backups`)_ |
+| `maxAgeDays` | int | Days to retain old log files (default 30). _(legacy alias: `max_age_days`)_ |
 | `compress` | bool | Compress rotated log files (default `true`). |

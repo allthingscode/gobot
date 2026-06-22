@@ -99,8 +99,8 @@ func (v *Validator) Validate() *ValidationResult {
 
 func (v *Validator) validateResilience(result *ValidationResult) {
 	for name, bc := range v.cfg.Resilience.CircuitBreakers {
-		v.validateTTL(fmt.Sprintf("resilience.circuit_breakers.%s.window", name), bc.Window, result)
-		v.validateTTL(fmt.Sprintf("resilience.circuit_breakers.%s.timeout", name), bc.Timeout, result)
+		v.validateTTL(fmt.Sprintf("resilience.circuitBreakers.%s.window", name), bc.Window, result)
+		v.validateTTL(fmt.Sprintf("resilience.circuitBreakers.%s.timeout", name), bc.Timeout, result)
 	}
 }
 
