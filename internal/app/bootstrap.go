@@ -103,7 +103,7 @@ func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, 
 	}
 
 	// Use cost-based routing if enabled (F-116)
-	if cfg.Strategic.Routing.Enabled {
+	if cfg.Runtime.Routing.Enabled {
 		if rp, err := provider.Get("routing"); err == nil {
 			return rp, model, nil
 		}

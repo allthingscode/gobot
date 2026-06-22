@@ -78,7 +78,7 @@ func (p *OpenAIProvider) sendRequest(ctx context.Context, url string, jsonData [
 	// OpenRouter specific headers for identification (optional but recommended)
 	if p.name == providerNameOpenRouter {
 		httpReq.Header.Set("HTTP-Referer", "https://github.com/allthingscode/gobot")
-		httpReq.Header.Set("X-Title", "Gobot Strategic Edition")
+		httpReq.Header.Set("X-Title", "gobot")
 	}
 
 	resp, err := p.client.Do(httpReq)

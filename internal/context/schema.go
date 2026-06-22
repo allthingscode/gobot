@@ -1,4 +1,4 @@
-// Package context provides durable state persistence for the Strategic Edition
+// Package context provides durable state persistence for gobot
 // agent loop. This file contains the message schema types ported from
 // checkpoint_logic.py (Pydantic v2 models → plain Go structs with JSON tags).
 package context

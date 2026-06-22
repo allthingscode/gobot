@@ -30,13 +30,13 @@ func readJobsStore(t *testing.T, storageRoot string) cron.Store {
 func TestSeedDefaultCronJobs_EnabledSeedsIndexJob(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
-	cfg.Strategic.VectorSearchEnabled = true
-	cfg.Strategic.VectorIndexInterval = "24h"
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Runtime.VectorSearchEnabled = true
+	cfg.Runtime.VectorIndexInterval = "24h"
 
 	SeedDefaultCronJobs(cfg)
 
-	store := readJobsStore(t, cfg.Strategic.StorageRoot)
+	store := readJobsStore(t, cfg.Runtime.StorageRoot)
 	job, ok := findJob(store, indexWorkspaceJobID)
 	if !ok {
 		t.Fatalf("expected seeded job %q, got %d jobs", indexWorkspaceJobID, len(store.Jobs))
@@ -75,8 +75,8 @@ func TestSeedDefaultCronJobs_DisabledSeedsNothing(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = storageRoot
-	cfg.Strategic.VectorSearchEnabled = false
+	cfg.Runtime.StorageRoot = storageRoot
+	cfg.Runtime.VectorSearchEnabled = false
 
 	SeedDefaultCronJobs(cfg)
 
@@ -94,23 +94,23 @@ func TestSeedDefaultCronJobs_DisabledSeedsNothing(t *testing.T) {
 func TestSeedDefaultCronJobs_DoesNotClobberExisting(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
-	cfg.Strategic.VectorSearchEnabled = true
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Runtime.VectorSearchEnabled = true
 
 	SeedDefaultCronJobs(cfg)
 	// Operator disables the auto-seeded job; a restart must preserve that.
-	store := readJobsStore(t, cfg.Strategic.StorageRoot)
+	store := readJobsStore(t, cfg.Runtime.StorageRoot)
 	for i := range store.Jobs {
 		if store.Jobs[i].ID == indexWorkspaceJobID {
 			store.Jobs[i].Enabled = false
 		}
 	}
 	data, _ := store.EncodeJSON()
-	_ = os.WriteFile(filepath.Join(cfg.Strategic.StorageRoot, "workspace", "jobs.json"), data, 0o600)
+	_ = os.WriteFile(filepath.Join(cfg.Runtime.StorageRoot, "workspace", "jobs.json"), data, 0o600)
 
 	SeedDefaultCronJobs(cfg)
 
-	store = readJobsStore(t, cfg.Strategic.StorageRoot)
+	store = readJobsStore(t, cfg.Runtime.StorageRoot)
 	job, ok := findJob(store, indexWorkspaceJobID)
 	if !ok {
 		t.Fatal("job missing after re-seed")

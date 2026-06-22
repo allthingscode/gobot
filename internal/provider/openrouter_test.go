@@ -26,7 +26,7 @@ func TestOpenRouterProvider_Chat_PrefixStripping(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("missing or incorrect auth header: %s", r.Header.Get("Authorization"))
 		}
-		if r.Header.Get("X-Title") != "Gobot Strategic Edition" {
+		if r.Header.Get("X-Title") != "gobot" {
 			t.Errorf("missing or incorrect X-Title header: %s", r.Header.Get("X-Title"))
 		}
 

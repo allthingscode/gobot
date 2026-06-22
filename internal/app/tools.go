@@ -247,10 +247,10 @@ func appendGoogleTools(cfg *config.Config, tools []Tool, tracer *observability.D
 }
 
 func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, registry *ToolRegistry, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer) []Tool {
-	if userEmail := cfg.Strategic.UserEmail; userEmail != "" {
+	if userEmail := cfg.Runtime.UserEmail; userEmail != "" {
 		gmailSecrets := filepath.Join(secretsRoot, "gmail")
 		tools = append(tools, newSendEmailTool(gmailSecrets, cfg.StorageRoot(), userEmail, registry, tracer, tmgr))
-		if cfg.Strategic.GmailReadonly {
+		if cfg.Runtime.GmailReadonly {
 			tools = append(tools, newSearchGmailTool(gmailSecrets, tracer))
 			tools = append(tools, newReadGmailTool(gmailSecrets, tracer))
 			slog.Info("run: registered gmail tools (send, search, read)")
@@ -258,7 +258,7 @@ func appendGmailTools(cfg *config.Config, secretsRoot string, tools []Tool, regi
 			slog.Info("run: registered gmail tools (send only; gmail_readonly=false)")
 		}
 	} else {
-		slog.Warn("run: send_email tool disabled -- strategic_edition.user_email not set in config")
+		slog.Warn("run: send_email tool disabled -- runtime.user_email not set in config")
 	}
 	return tools
 }

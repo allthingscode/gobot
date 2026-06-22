@@ -27,7 +27,7 @@ func TestVectorIndexInterval(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := &Config{}
-			cfg.Strategic.VectorIndexInterval = tt.raw
+			cfg.Runtime.VectorIndexInterval = tt.raw
 			if got := cfg.VectorIndexInterval(); got != tt.want {
 				t.Errorf("VectorIndexInterval(%q) = %v, want %v", tt.raw, got, tt.want)
 			}

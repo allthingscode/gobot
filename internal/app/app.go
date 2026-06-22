@@ -66,7 +66,7 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 	}
 
 	tracer := observability.NewDispatchTracer(otelProvider)
-	tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Strategic.CustomCSSPath)
+	tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Runtime.CustomCSSPath)
 	stack, cleanup, err := BuildAgentStack(ctx, cfg, tmgr, tracer)
 	if err != nil {
 		return err

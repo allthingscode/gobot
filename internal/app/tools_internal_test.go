@@ -71,8 +71,8 @@ func TestAppendGmailTools_All(t *testing.T) {
 	t.Parallel()
 	var tools []Tool
 	cfg := &config.Config{}
-	cfg.Strategic.UserEmail = "test@example.com"
-	cfg.Strategic.GmailReadonly = true
+	cfg.Runtime.UserEmail = "test@example.com"
+	cfg.Runtime.GmailReadonly = true
 
 	got := appendGmailTools(cfg, "root", tools, nil, nil, nil)
 	// send_email, search_gmail, read_gmail
@@ -85,8 +85,8 @@ func TestAppendGmailTools_SendOnly(t *testing.T) {
 	t.Parallel()
 	var tools []Tool
 	cfg := &config.Config{}
-	cfg.Strategic.UserEmail = "test@example.com"
-	cfg.Strategic.GmailReadonly = false
+	cfg.Runtime.UserEmail = "test@example.com"
+	cfg.Runtime.GmailReadonly = false
 
 	got := appendGmailTools(cfg, "root", tools, nil, nil, nil)
 	// send_email only

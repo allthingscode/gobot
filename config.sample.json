@@ -62,7 +62,7 @@
         "mcpServers": {},
         "highRisk": []
     },
-    "strategic_edition": {
+    "runtime": {
         "user_email": "",
         "user_chat_id": 0,
         "storage_root": "",

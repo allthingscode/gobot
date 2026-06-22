@@ -291,7 +291,7 @@ func TestLogsUsesHub(t *testing.T) {
 		{Timestamp: time.UnixMilli(1700000001000), Level: "WARN", Message: "hub-entry-beta"},
 	}}
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir() // no log file present; must use hub
+	cfg.Runtime.StorageRoot = t.TempDir() // no log file present; must use hub
 
 	h := NewHandler(Resources{Config: cfg, Hub: hub})
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true", http.NoBody)
@@ -361,7 +361,7 @@ func TestLogsLevelFilter(t *testing.T) {
 func fetchLogsBody(t *testing.T, backlog []*dashboard.LogEntry, query string) string {
 	t.Helper()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	h := NewHandler(Resources{Config: cfg, Hub: &mockLogHub{backlog: backlog}})
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs"+query, http.NoBody)
 	w := httptest.NewRecorder()
@@ -394,7 +394,7 @@ func TestLogsFallsBackToFileWhenHubEmpty(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = dir
+	cfg.Runtime.StorageRoot = dir
 	logDir := filepath.Join(dir, "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatalf("mkdir logs dir: %v", err)
@@ -418,7 +418,7 @@ func TestLogsFallsBackToFileWhenHubEmpty(t *testing.T) {
 
 func writeLogFile(t *testing.T, cfg *config.Config, contents string) {
 	t.Helper()
-	logDir := filepath.Join(cfg.Strategic.StorageRoot, "logs")
+	logDir := filepath.Join(cfg.Runtime.StorageRoot, "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatalf("mkdir logs dir: %v", err)
 	}
@@ -430,7 +430,7 @@ func writeLogFile(t *testing.T, cfg *config.Config, contents string) {
 func TestLogsEmptyStateNoFilter(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	writeLogFile(t, cfg, "")
 
 	h := NewHandler(Resources{Config: cfg})
@@ -453,7 +453,7 @@ func TestLogsEmptyStateNoFilter(t *testing.T) {
 func TestLogsEmptyStateActiveFilter(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	writeLogFile(t, cfg, "2026-01-01 00:00:00 INFO unrelated\n")
 
 	h := NewHandler(Resources{Config: cfg})
@@ -476,7 +476,7 @@ func TestLogsNonEmptyPassthrough(t *testing.T) {
 		{Timestamp: time.UnixMilli(1700000000000), Level: "INFO", Message: "render-me"},
 	}}
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 
 	h := NewHandler(Resources{Config: cfg, Hub: hub})
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/logs?partial=true", http.NoBody)
@@ -499,7 +499,7 @@ func TestLogsTailPartial(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = dir
+	cfg.Runtime.StorageRoot = dir
 	logDir := filepath.Join(dir, "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatalf("mkdir logs dir: %v", err)

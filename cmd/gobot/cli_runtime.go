@@ -44,7 +44,7 @@ func newCLISessionManagerWithDeps(ctx context.Context, cfg *config.Config, mode 
 		slog.Warn("pre-flight diagnostics found issues", "err", err)
 	}
 
-	tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Strategic.CustomCSSPath)
+	tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Runtime.CustomCSSPath)
 	stack, cleanup, err := deps.buildCLIStack(ctx, cfg, tmgr, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build agent stack: %w", err)

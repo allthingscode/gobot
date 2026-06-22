@@ -24,9 +24,9 @@ func cmdEmail() *cobra.Command {
 				return fmt.Errorf("config: %w", err)
 			}
 			secretsRoot := cfg.SecretsRoot()
-			userEmail := cfg.Strategic.UserEmail
+			userEmail := cfg.Runtime.UserEmail
 			if userEmail == "" {
-				return fmt.Errorf("strategic_edition.user_email not set in config")
+				return fmt.Errorf("runtime.user_email not set in config")
 			}
 
 			// Gmail service uses secretsRoot/gmail/token.json
@@ -36,7 +36,7 @@ func cmdEmail() *cobra.Command {
 				return fmt.Errorf("auth: %w", err)
 			}
 
-			tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Strategic.CustomCSSPath)
+			tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Runtime.CustomCSSPath)
 			wrapped := tmgr.Wrap(body)
 			content := google.EmailContent{
 				Subject: subject,

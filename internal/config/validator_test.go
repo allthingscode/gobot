@@ -21,7 +21,7 @@ func baseValidConfig(t *testing.T) *Config {
 	}
 
 	return &Config{
-		Strategic: StrategicConfig{
+		Runtime: RuntimeConfig{
 			StorageRoot: tmpDir,
 		},
 		Providers: ProvidersConfig{
@@ -86,13 +86,13 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 			name:        "empty storage root",
 			storageRoot: "",
 			wantError:   true,
-			errorField:  "strategic_edition.storage_root",
+			errorField:  "runtime.storage_root",
 		},
 		{
 			name:        "non-existent storage root",
 			storageRoot: "/nonexistent/path/that/does/not/exist",
 			wantError:   true,
-			errorField:  "strategic_edition.storage_root",
+			errorField:  "runtime.storage_root",
 		},
 	}
 
@@ -101,7 +101,7 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := baseValidConfig(t)
-			cfg.Strategic.StorageRoot = tt.storageRoot
+			cfg.Runtime.StorageRoot = tt.storageRoot
 
 			validator := NewValidator(cfg)
 			result := validator.Validate()
@@ -346,7 +346,7 @@ func getAgentDefaultsTestCases() []agentDefaultsTestCase {
 			name:           "invalid idempotency ttl",
 			idempotencyTTL: "10", // missing unit
 			wantError:      true,
-			errorField:     "strategic_edition.idempotencyTTL",
+			errorField:     "runtime.idempotencyTTL",
 		},
 		{
 			name:           "valid idempotency ttl",
@@ -360,14 +360,14 @@ func applyAgentDefaults(cfg *Config, tt agentDefaultsTestCase) {
 	cfg.Agents.Defaults.LockTimeoutSeconds = tt.lockTimeout
 	cfg.Agents.Defaults.ContextPruning.TTL = tt.pruningTTL
 	cfg.Agents.Defaults.Compaction.MemoryFlush.TTL = tt.compactionTTL
-	cfg.Strategic.IdempotencyTTL = tt.idempotencyTTL
+	cfg.Runtime.IdempotencyTTL = tt.idempotencyTTL
 }
 
 func TestValidationResult_CriticalErrors(t *testing.T) {
 	t.Parallel()
 	result := &ValidationResult{
 		Errors: []ValidationError{
-			{Field: "strategic_edition.storage_root", Message: "not found", Severity: SeverityCritical},
+			{Field: "runtime.storage_root", Message: "not found", Severity: SeverityCritical},
 			{Field: "providers.gemini.apiKey", Message: "missing", Severity: SeverityCritical},
 			{Field: "disk_space", Message: "low", Severity: SeverityWarning},
 		},
@@ -463,7 +463,7 @@ func TestReportValidation(t *testing.T) {
 
 	// Invalid config with critical error should return error
 	invalidCfg := baseValidConfig(t)
-	invalidCfg.Strategic.StorageRoot = ""
+	invalidCfg.Runtime.StorageRoot = ""
 
 	// Special case for Windows fallback again
 	if invalidCfg.StorageRoot() != "" {

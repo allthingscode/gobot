@@ -157,7 +157,7 @@ func buildAwarenessContent(cfg *config.Config) string {
 		"- **Workspace Root:** " + workspaceRoot + "\n" +
 		"- **Project Root:** " + projectRoot + "\n" +
 		"- **System Role:** Strategic Orchestrator\n" +
-		"- **Edition:** Gobot Strategic Edition\n" +
+		"- **Agent:** gobot\n" +
 		"\n" +
 		"## SYSTEM STATE\n" +
 		"- **Automated Batch System:** Scheduled tasks are modular Markdown files.\n" +

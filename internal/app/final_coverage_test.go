@@ -21,9 +21,9 @@ func TestLiveProbesList_Coverage(t *testing.T) {
 func TestRunAgent_InitSequence_Coverage(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 	cfg.Providers.Gemini.APIKey = testToken
-	cfg.Strategic.UserChatID = 12345
+	cfg.Runtime.UserChatID = 12345
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

@@ -111,7 +111,7 @@ func TestShellExecTool_Execute(t *testing.T) {
 			t.Parallel()
 			mock := &mockExecutor{output: tc.mockOutput, err: tc.mockErr}
 			cfg := &config.Config{}
-			cfg.Strategic.StorageRoot = t.TempDir()
+			cfg.Runtime.StorageRoot = t.TempDir()
 			tool := &shellExecTool{
 				cfg:     cfg,
 				newExec: func(sandbox.Config) sandbox.Executor { return mock },

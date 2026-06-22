@@ -37,7 +37,7 @@ type Config struct {
 	Channels   ChannelsConfig   `json:"channels"`
 	Providers  ProvidersConfig  `json:"providers"`
 	Tools      ToolsConfig      `json:"tools"`
-	Strategic  StrategicConfig  `json:"strategic_edition"`
+	Runtime    RuntimeConfig    `json:"runtime"`
 	Gateway    GatewayConfig    `json:"gateway"`
 	Resilience ResilienceConfig `json:"resilience"`
 	Context    ContextConfig    `json:"context"`
@@ -63,7 +63,7 @@ func (c *Config) SetProjectRoot(root string) {
 
 type BrowserConfig struct {
 	DebugPort int  `json:"debugPort"` // 0 = disabled; non-zero = attach to existing Chrome
-	Headless  bool `json:"headless"`   // true = launch headless Chrome
+	Headless  bool `json:"headless"`  // true = launch headless Chrome
 }
 
 type CronConfig struct {
@@ -223,7 +223,7 @@ type ToolsConfig struct {
 	HighRisk   []string                   `json:"highRisk"`
 }
 
-type StrategicConfig struct {
+type RuntimeConfig struct {
 	UserEmail           string              `json:"user_email"`
 	UserChatID          int64               `json:"user_chat_id"`
 	StorageRoot         string              `json:"storage_root"`
@@ -234,11 +234,11 @@ type StrategicConfig struct {
 	GmailReadonly       bool                `json:"gmail_readonly"`           // when false, search_gmail and read_gmail tools are not registered
 	GoogleScopes        []string            `json:"google_scopes,omitempty"`  // OAuth scopes requested during reauth; defaults to full task/calendar/gmail set
 	Observability       ObservabilityConfig `json:"observability"`
-	TemplatesPath       string              `json:"templates_path,omitempty"`   // Custom directory for email templates
-	CustomCSSPath       string              `json:"custom_css_path,omitempty"`  // Custom CSS file for email styling override
-	Routing             RoutingConfig       `json:"routing"`                    // F-102
-	PolicyFilePath      string              `json:"policy_file_path,omitempty"` // F-103
-	EmbeddingModel      string              `json:"embedding_model,omitempty"`  // B-049
+	TemplatesPath       string              `json:"templates_path,omitempty"`        // Custom directory for email templates
+	CustomCSSPath       string              `json:"custom_css_path,omitempty"`       // Custom CSS file for email styling override
+	Routing             RoutingConfig       `json:"routing"`                         // F-102
+	PolicyFilePath      string              `json:"policy_file_path,omitempty"`      // F-103
+	EmbeddingModel      string              `json:"embedding_model,omitempty"`       // B-049
 	VectorIndexInterval string              `json:"vector_index_interval,omitempty"` // F-142, e.g. "24h"
 }
 
@@ -258,12 +258,12 @@ type ObservabilityConfig struct {
 
 // MultiUserEnabled returns true if multi-user workspace isolation is enabled (F-073).
 func (c *Config) MultiUserEnabled() bool {
-	return c.Strategic.MultiUserEnabled
+	return c.Runtime.MultiUserEnabled
 }
 
 // VectorSearchEnabled returns true if semantic hybrid search is enabled (F-030).
 func (c *Config) VectorSearchEnabled() bool {
-	return c.Strategic.VectorSearchEnabled
+	return c.Runtime.VectorSearchEnabled
 }
 
 // VectorIndexInterval returns the interval for the automatic workspace
@@ -271,7 +271,7 @@ func (c *Config) VectorSearchEnabled() bool {
 // be parsed as a Go duration, a warning is logged and the default is used.
 func (c *Config) VectorIndexInterval() time.Duration {
 	const defaultInterval = 24 * time.Hour
-	raw := c.Strategic.VectorIndexInterval
+	raw := c.Runtime.VectorIndexInterval
 	if raw == "" {
 		return defaultInterval
 	}
@@ -285,14 +285,14 @@ func (c *Config) VectorIndexInterval() time.Duration {
 
 // TemplatesPath returns the custom directory for email templates, if configured.
 func (c *Config) TemplatesPath() string {
-	return c.Strategic.TemplatesPath
+	return c.Runtime.TemplatesPath
 }
 
 // GoogleScopes returns the OAuth2 scopes to request during reauth.
 // Defaults to the full task/calendar/gmail set when not configured.
 func (c *Config) GoogleScopes() []string {
-	if len(c.Strategic.GoogleScopes) > 0 {
-		return c.Strategic.GoogleScopes
+	if len(c.Runtime.GoogleScopes) > 0 {
+		return c.Runtime.GoogleScopes
 	}
 	return []string{
 		"https://www.googleapis.com/auth/tasks",
@@ -340,8 +340,8 @@ func (c *Config) CompactionSummaryTurns() int {
 // EffectiveIdempotencyTTL returns the configured idempotency key TTL,
 // defaulting to 24 hours if unset or invalid.
 func (c *Config) EffectiveIdempotencyTTL() time.Duration {
-	if c.Strategic.IdempotencyTTL != "" {
-		if ttl, err := time.ParseDuration(c.Strategic.IdempotencyTTL); err == nil && ttl > 0 {
+	if c.Runtime.IdempotencyTTL != "" {
+		if ttl, err := time.ParseDuration(c.Runtime.IdempotencyTTL); err == nil && ttl > 0 {
 			return ttl
 		}
 	}
@@ -377,8 +377,8 @@ func (c *Config) LockTimeoutDuration() time.Duration {
 // EffectiveMaxToolIterations returns the configured tool iteration cap,
 // defaulting to 25 if unset or zero.
 func (c *Config) EffectiveMaxToolIterations() int {
-	if c.Strategic.MaxToolIterations > 0 {
-		return c.Strategic.MaxToolIterations
+	if c.Runtime.MaxToolIterations > 0 {
+		return c.Runtime.MaxToolIterations
 	}
 	return 25
 }
@@ -394,7 +394,7 @@ type MCPServerConfig struct {
 
 // StorageRoot returns the configured storage root.
 // Priority:
-// 1. config.json (strategic_edition.storage_root)
+// 1. config.json (runtime.storage_root)
 // 2. GOBOT_STORAGE environment variable (explicit override; existing installs unchanged)
 // 3. $GOBOT_HOME/data (derived default, so a single GOBOT_HOME is the only path to set)
 // 4. ~/gobot_data (portable default when neither GOBOT_STORAGE nor GOBOT_HOME is set).
@@ -402,8 +402,8 @@ type MCPServerConfig struct {
 // An install that sets GOBOT_HOME but not GOBOT_STORAGE resolves data under $GOBOT_HOME/data; set
 // GOBOT_STORAGE explicitly to pin a separate location. GOBOT_STORAGE-set installs never relocate.
 func (c *Config) StorageRoot() string {
-	if c.Strategic.StorageRoot != "" {
-		return c.Strategic.StorageRoot
+	if c.Runtime.StorageRoot != "" {
+		return c.Runtime.StorageRoot
 	}
 	if envRoot := os.Getenv("GOBOT_STORAGE"); envRoot != "" {
 		return envRoot
@@ -487,8 +487,8 @@ func (c *Config) LogPath(filename string) string {
 // EmbeddingModel returns the configured embedding model name,
 // falling back to "text-embedding-004" if unset or empty.
 func (c *Config) EmbeddingModel() string {
-	if c.Strategic.EmbeddingModel != "" {
-		return c.Strategic.EmbeddingModel
+	if c.Runtime.EmbeddingModel != "" {
+		return c.Runtime.EmbeddingModel
 	}
 	return "text-embedding-004"
 }
@@ -712,12 +712,12 @@ func (c *Config) LogFormat() string {
 
 // TelemetryEnabled returns true if OTel is enabled.
 func (c *Config) TelemetryEnabled() bool {
-	return c.Strategic.Observability.OTLPEndpoint != ""
+	return c.Runtime.Observability.OTLPEndpoint != ""
 }
 
 // OTelEndpoint returns the OTel collector endpoint.
 func (c *Config) OTelEndpoint() string {
-	return c.Strategic.Observability.OTLPEndpoint
+	return c.Runtime.Observability.OTLPEndpoint
 }
 
 // HighRiskTools returns the list of tools that require human approval.
@@ -727,7 +727,7 @@ func (c *Config) HighRiskTools() []string {
 
 // PolicyFilePath returns the configured tool policy file path.
 func (c *Config) PolicyFilePath() string {
-	return c.Strategic.PolicyFilePath
+	return c.Runtime.PolicyFilePath
 }
 
 // DefaultConfigPath returns ~/.gobot/config.json.
@@ -804,12 +804,15 @@ func applyGatewayDefaults(cfg *Config) {
 // of a JSON object used as a map (e.g. a named circuit breaker under
 // resilience.circuitBreakers). The loader rewrites legacy keys to canonical before strict
 // decoding so existing configs keep working during the deprecation window, while
-// Config.Save only ever emits the canonical key. The strategic_edition block is
-// intentionally excluded here and is migrated separately by C-327. To end the deprecation
-// window, delete this map and the normalizeLegacyKeys call in decode in one commit.
+// Config.Save only ever emits the canonical key. To end the deprecation window, delete
+// this map and the normalizeLegacyKeys call in decode in one commit.
 //
 //nolint:gochecknoglobals // immutable lookup table for the key-deprecation window
 var legacyKeyRenames = map[string]map[string]string{
+	"": {
+		// C-327: the legacy "strategic_edition" block was renamed to the neutral "runtime".
+		"strategic_edition": "runtime",
+	},
 	"logging": {
 		"max_size_mb":  "maxSizeMB",
 		"max_backups":  "maxBackups",

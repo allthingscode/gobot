@@ -30,7 +30,7 @@ func TestSetupLogging(t *testing.T) {
 	}()
 
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 
 	// Case 1: Text format
 	SetupLogging(cfg, nil)

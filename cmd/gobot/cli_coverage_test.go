@@ -172,7 +172,7 @@ func TestCmdState_Execute_Coverage(t *testing.T) {
 func TestCmdResume_NotFound_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
@@ -186,7 +186,7 @@ func TestCmdResume_NotFound_Coverage(t *testing.T) {
 func TestCmdClearCheckpoint_NotFound_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
 
@@ -199,7 +199,7 @@ func TestCmdClearCheckpoint_NotFound_Coverage(t *testing.T) {
 func TestCmdStateInspect_NotFound_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
@@ -213,7 +213,7 @@ func TestCmdStateInspect_NotFound_Coverage(t *testing.T) {
 func TestCmdStateArchive_NotFound_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
@@ -227,7 +227,7 @@ func TestCmdStateArchive_NotFound_Coverage(t *testing.T) {
 func TestCmdStateRecover_NotFound_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
@@ -241,7 +241,7 @@ func TestCmdStateRecover_NotFound_Coverage(t *testing.T) {
 func TestCmdDoctor_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
 
@@ -256,7 +256,7 @@ func TestCmdRun_PrereqError_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
 	cfg.Channels.Telegram.Enabled = true // No token -> prereq error
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
 
@@ -280,7 +280,7 @@ func TestConfigReformat_Error_Coverage(t *testing.T) {
 func TestCmdTasks_Add_Coverage(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
 

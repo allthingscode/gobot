@@ -23,7 +23,7 @@ func TestSetupOTel(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{}
 
-	cfg.Strategic.Observability.OTLPEndpoint = ""
+	cfg.Runtime.Observability.OTLPEndpoint = ""
 	p, err := SetupOTel(ctx, cfg)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -32,7 +32,7 @@ func TestSetupOTel(t *testing.T) {
 		t.Error("expected nil provider when telemetry disabled")
 	}
 
-	cfg.Strategic.Observability.OTLPEndpoint = "localhost:4317"
+	cfg.Runtime.Observability.OTLPEndpoint = "localhost:4317"
 	p, err = SetupOTel(ctx, cfg)
 	if p != nil {
 		_ = p.Shutdown(ctx)
@@ -170,7 +170,7 @@ func TestStartGateway_Shutdown(t *testing.T) {
 func TestSetupLogging_Basic(t *testing.T) {
 	cfg := &config.Config{}
 	tempDir := t.TempDir()
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	SetupLogging(cfg, nil)
 }
 
@@ -363,7 +363,7 @@ func TestMCPProxyTool_Methods(t *testing.T) {
 
 func TestInitVectorStore_NonGemini(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	runner := &AgentRunner{}
 	// nil provider is not *provider.GeminiProvider → returns nil, nil
 	store, embedProv, cleanup := InitVectorStore(cfg, nil, runner)
@@ -375,7 +375,7 @@ func TestInitVectorStore_NonGemini(t *testing.T) {
 
 func TestInitVectorStore_GeminiNoAPIKey(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	runner := &AgentRunner{}
 	prov := provider.NewGeminiProvider(nil)
 	store, embedProv, cleanup := InitVectorStore(cfg, prov, runner)
@@ -387,8 +387,8 @@ func TestInitVectorStore_GeminiNoAPIKey(t *testing.T) {
 
 func TestInitVectorStore_GeminiWithAPIKey(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
-	cfg.Strategic.VectorSearchEnabled = true
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Runtime.VectorSearchEnabled = true
 	cfg.Providers.Gemini.APIKey = "test-api-key"
 	runner := &AgentRunner{}
 	prov := provider.NewGeminiProvider(nil)
@@ -406,7 +406,7 @@ func TestInitVectorStore_GeminiWithAPIKey(t *testing.T) {
 
 func TestInitMemory_Basic(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	runner := &AgentRunner{}
 	memStore, cleanup := InitMemory(cfg, runner)
 	defer cleanup()
@@ -543,7 +543,7 @@ func TestListTasksTool_Execute_NoToken(t *testing.T) {
 func TestShellExecTool_Declaration(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	registry := NewToolRegistry(tempDir)
 	tool := newShellExecTool(cfg, 30*time.Second, registry)
 	decl := tool.Declaration()
@@ -564,7 +564,7 @@ func TestBuildSystemPrompt_NilMemStore(t *testing.T) {
 
 func TestBuildSystemPrompt_WithMemStore_SkipRAG(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	runner := &AgentRunner{SystemPrompt: "sys", Cfg: cfg}
 	memStore, cleanup := InitMemory(cfg, runner)
 	defer cleanup()
@@ -589,7 +589,7 @@ func TestSetupConsolidator_NilMemStore(t *testing.T) {
 
 func TestSetupConsolidator_WithMemStore(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	runner := &AgentRunner{Cfg: cfg}
 	memStore, cleanup := InitMemory(cfg, runner)
 	defer cleanup()
@@ -646,8 +646,8 @@ func TestRunIdempotencyCleanup_CancelledCtx(t *testing.T) {
 
 func TestInitMemory_MultiUser(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
-	cfg.Strategic.MultiUserEnabled = true
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Runtime.MultiUserEnabled = true
 	runner := &AgentRunner{}
 	memStore, cleanup := InitMemory(cfg, runner)
 	defer cleanup()
@@ -658,8 +658,8 @@ func TestInitMemory_MultiUser(t *testing.T) {
 
 func TestNewSessionManager_MultiUser(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
-	cfg.Strategic.MultiUserEnabled = true
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Runtime.MultiUserEnabled = true
 	runner := &AgentRunner{Cfg: cfg}
 	memStore, cleanup := InitMemory(cfg, runner)
 	defer cleanup()

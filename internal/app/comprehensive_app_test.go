@@ -110,7 +110,7 @@ func TestSetupLogging_Minimal(t *testing.T) {
 	}
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	cfg.Logging.Level = "DEBUG"
 	cfg.Logging.Format = "json"
 
@@ -144,7 +144,7 @@ func TestAwareness_Functional(t *testing.T) {
 	defer app.SetUserHomeDir(oldHome)
 
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 
 	// Test EnsureAwarenessFile
 	app.EnsureAwarenessFile(cfg)
@@ -195,8 +195,8 @@ func TestCronDispatcher_Functional(t *testing.T) {
 	tempDir := t.TempDir()
 
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
-	cfg.Strategic.UserEmail = "test@example.com"
+	cfg.Runtime.StorageRoot = tempDir
+	cfg.Runtime.UserEmail = "test@example.com"
 
 	stack := &app.AgentStack{
 		Runner: &app.AgentRunner{}, // will be ignored by NewCronDispatcher as it uses stack.NewSessionManager
@@ -228,8 +228,8 @@ func TestHeartbeatRunner_Functional(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
-	cfg.Strategic.UserChatID = 12345
+	cfg.Runtime.StorageRoot = tempDir
+	cfg.Runtime.UserChatID = 12345
 
 	hb := app.NewHeartbeatRunner(cfg, "tok", nil)
 
@@ -247,7 +247,7 @@ func TestInitMemory_Coverage(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 
 	runner := &app.AgentRunner{}
 	mem, cleanup := app.InitMemory(cfg, runner)
@@ -309,8 +309,8 @@ func TestRegisterTools_Coverage(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Providers.Google.APIKey = "key"
 	cfg.Providers.Google.CustomCX = "cx"
-	cfg.Strategic.UserEmail = "test@example.com"
-	cfg.Strategic.GmailReadonly = false
+	cfg.Runtime.UserEmail = "test@example.com"
+	cfg.Runtime.GmailReadonly = false
 
 	reg := app.NewToolRegistry(t.TempDir())
 	tools := app.RegisterTools(cfg, nil, "model", nil, nil, nil, reg, nil, nil)
@@ -331,7 +331,7 @@ func TestDispatchHandler_HandleCallback_Coverage(t *testing.T) {
 func TestReadTextFileTool_Error(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	tool := app.NewReadTextFileTool(cfg)
 	_, err := tool.Execute(context.Background(), "s", "u", map[string]any{
 		"file_path": "non-existent",
@@ -362,7 +362,7 @@ func TestSetupHooks_Coverage(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 
 	// Add a policy file
 	policyFile := filepath.Join(tempDir, "tool_policy.yaml")
@@ -487,7 +487,7 @@ func TestAgentRunner_CallTool_Coverage(t *testing.T) {
 	t.Parallel()
 	r := &app.AgentRunner{}
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = t.TempDir()
+	cfg.Runtime.StorageRoot = t.TempDir()
 	r.SetTools([]app.Tool{app.NewReadTextFileTool(cfg)})
 
 	// Tool exists but will fail due to missing file
@@ -513,7 +513,7 @@ func TestShellExecTool_Coverage(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 	tool := app.NewShellExecTool(cfg, 1*time.Second, nil)
 
 	ctx := context.Background()
@@ -550,7 +550,7 @@ func TestShellExecTool_Coverage(t *testing.T) {
 func TestLoadPrivateFile_Coverage(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tempDir
+	cfg.Runtime.StorageRoot = tempDir
 
 	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
 	_ = os.WriteFile(filepath.Join(tempDir, ".gobot", "TEST.md"), []byte("data"), 0o600)
@@ -645,7 +645,7 @@ func TestInitProviders_Coverage(t *testing.T) {
 func TestBuildAgentStack_Routing_Coverage(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	cfg.Strategic.Routing.Enabled = true
+	cfg.Runtime.Routing.Enabled = true
 
 	_, _, _ = app.BuildAgentStack(context.Background(), cfg, nil, nil)
 }

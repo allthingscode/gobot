@@ -39,7 +39,7 @@ func NewHeartbeatRunner(cfg *config.Config, token string, sender AlertSender) *H
 	return &HeartbeatRunner{
 		probes:           LiveProbesList(),
 		sender:           sender,
-		alertChatID:      cfg.Strategic.UserChatID,
+		alertChatID:      cfg.Runtime.UserChatID,
 		storageRoot:      cfg.StorageRoot(),
 		apiKey:           cfg.GeminiAPIKey(),
 		tgToken:          token,

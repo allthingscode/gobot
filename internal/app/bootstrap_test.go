@@ -58,9 +58,9 @@ func TestInitProviders_CostRouting(t *testing.T) { //nolint:paralleltest // uses
 	ctx := context.Background()
 	cfg := &config.Config{}
 	cfg.Agents.Defaults.Provider = "gemini"
-	cfg.Strategic.Routing.Enabled = true
-	cfg.Strategic.Routing.ManagerProvider = "anthropic"
-	cfg.Strategic.Routing.ManagerModel = "claude-3-haiku"
+	cfg.Runtime.Routing.Enabled = true
+	cfg.Runtime.Routing.ManagerProvider = "anthropic"
+	cfg.Runtime.Routing.ManagerModel = "claude-3-haiku"
 
 	prov, _, err := InitProviders(ctx, cfg)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestInitMemory_Failures(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
 	// Use a path that is unlikely to be writable or valid, but don't strictly assert nil if NewMemoryStore is too resilient.
-	cfg.Strategic.StorageRoot = ""
+	cfg.Runtime.StorageRoot = ""
 	runner := &AgentRunner{}
 
 	_, cleanup := InitMemory(cfg, runner)
@@ -89,7 +89,7 @@ func TestInitMemory_Success(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	cfg := &config.Config{}
-	cfg.Strategic.StorageRoot = tmpDir
+	cfg.Runtime.StorageRoot = tmpDir
 	runner := &AgentRunner{}
 
 	memStore, cleanup := InitMemory(cfg, runner)
@@ -105,7 +105,7 @@ func TestInitVectorStore_Failures(t *testing.T) {
 	runner := &AgentRunner{}
 
 	// Case 1: Vector search disabled
-	cfg.Strategic.VectorSearchEnabled = false
+	cfg.Runtime.VectorSearchEnabled = false
 	vs, ep, cleanup := InitVectorStore(cfg, nil, runner)
 	if vs != nil || ep != nil {
 		t.Error("expected nil vs and ep when VectorSearchEnabled is false")
@@ -113,7 +113,7 @@ func TestInitVectorStore_Failures(t *testing.T) {
 	cleanup()
 
 	// Case 2: Prov is not a GeminiProvider
-	cfg.Strategic.VectorSearchEnabled = true
+	cfg.Runtime.VectorSearchEnabled = true
 	prov := &MockProvider{}
 	vs, ep, cleanup = InitVectorStore(cfg, prov, runner)
 	if vs != nil || ep != nil {
