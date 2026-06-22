@@ -90,6 +90,21 @@ func TestCmdRunAutoInit(t *testing.T) {
 	}
 }
 
+func TestRunInit_PrintsResolvedPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("GOBOT_STORAGE", tmpDir)
+	t.Setenv("GOBOT_HOME", tmpHome)
+
+	var buf bytes.Buffer
+	require.NoError(t, runInit(&buf, ""))
+
+	out := buf.String()
+	assert.Contains(t, out, "Resolved paths:")
+	assert.Contains(t, out, "config: "+config.DefaultConfigPath())
+	assert.Contains(t, out, "data:   "+tmpDir)
+}
+
 func TestRunInit_PrintsEncryptionKeyWarning(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpHome := t.TempDir()

@@ -8,7 +8,33 @@ By default, `gobot` looks for `config.json` in:
 - **Windows:** `%USERPROFILE%\.gobot\config.json`
 - **Linux/macOS:** `~/.gobot/config.json`
 
-You can override the storage root with `gobot init --root <path>` or the `GOBOT_STORAGE` environment variable. (`GOBOT_HOME` controls the config file path only, not the storage root.)
+## Path Resolution
+
+gobot resolves two locations: the **config file** and the **data root** (databases, logs, secrets).
+Set a single `GOBOT_HOME` and both live under it, with nothing to keep in sync. `gobot init` prints
+the resolved `config:` and `data:` paths.
+
+**Config file path** (`DefaultConfigPath`):
+
+| Precedence | Source | Resolved path |
+|---|---|---|
+| 1 | `GOBOT_HOME` set | `$GOBOT_HOME/.gobot/config.json` |
+| 2 | default | `~/.gobot/config.json` (Windows: `%USERPROFILE%\.gobot\config.json`) |
+
+**Data root** (`StorageRoot`):
+
+| Precedence | Source | Resolved path |
+|---|---|---|
+| 1 | `strategic_edition.storage_root` in config.json | that value |
+| 2 | `GOBOT_STORAGE` env set | that value (explicit override) |
+| 3 | `GOBOT_HOME` set (and `GOBOT_STORAGE` unset) | `$GOBOT_HOME/data` |
+| 4 | neither env var set | `~/gobot_data` |
+
+`GOBOT_STORAGE` always wins over the `GOBOT_HOME`-derived default, so an existing install that sets
+`GOBOT_STORAGE` never relocates its data. An install that sets `GOBOT_HOME` but not `GOBOT_STORAGE`
+resolves data under `$GOBOT_HOME/data`; to keep data at the legacy `~/gobot_data`, set
+`GOBOT_STORAGE` explicitly. You can also override the data root for a one-shot `gobot init` with
+`--root <path>` (which sets `GOBOT_STORAGE` for that invocation).
 
 ---
 
@@ -72,7 +98,7 @@ Controls default model parameters and specialist overrides.
 |-------|------|-------------|
 | `enabled` | bool | Enable the Telegram bot interface. |
 | `token` | string | Telegram Bot API token. Falls back to DPAPI key `telegram_token` or `TELEGRAM_BOT_TOKEN` env. |
-| `allowFrom` | array[string] | Whitelist of numeric Telegram Chat/User IDs allowed to interact. |
+| `allowFrom` | array[string] | Whitelist of numeric Telegram Chat/User IDs allowed to interact. On startup, every ID here is auto-promoted into the access-control database (idempotent), so single-user setups need no separate `gobot authorize` step. `allowFrom` is the network-layer drop list; the database backs conversation history and per-user state. Use `gobot authorize <chat-id>` only to grant an ID that is *not* in `allowFrom`. |
 | `hitl` | bool | Enable Human-in-the-Loop approval for side-effecting tools (sending email, creating calendar events, etc.). |
 
 ---
@@ -139,7 +165,7 @@ Settings for advanced agent features, including Google Workspace integration. Fo
 |-------|------|-------------|
 | `user_email` | string | Primary email address for Google Workspace tools. Required to enable Gmail and Calendar tools. |
 | `user_chat_id` | int64 | Telegram chat ID used for direct-message notifications. |
-| `storage_root` | string | Root directory for databases, logs, and secrets. Falls back to `GOBOT_STORAGE` env, then `~/gobot_data`. |
+| `storage_root` | string | Root directory for databases, logs, and secrets. When empty, falls back to `GOBOT_STORAGE`, then `$GOBOT_HOME/data`, then `~/gobot_data` (see [Path Resolution](#path-resolution)). |
 | `max_tool_iterations` | int | Override for maximum tool iterations (overrides `agents.defaults.maxToolIterations`). |
 | `idempotencyTTL` | string | TTL for side-effect idempotency keys (default `"24h"`). |
 | `vector_search_enabled` | bool | Enable semantic/hybrid memory search (requires embedding provider). When `true`, gobot also seeds a default recurring `index_workspace` cron job so the workspace vector index is refreshed automatically (see `vector_index_interval`). |

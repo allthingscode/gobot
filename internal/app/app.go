@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -124,6 +125,7 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	SetupConsolidator(cfg, stack, mgr, handler, otelProvider, tracer)
 
 	gateHandler := SetupGateHandler(store, handler)
+	ReconcileAuthorizedFromAllowFrom(cfg, store)
 	if cfg.Gateway.Enabled {
 		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg, startErr, readiness)
 	}
@@ -432,6 +434,50 @@ func SetupGateHandler(store agent.CheckpointStore, handler *DispatchHandler) bot
 	}
 	slog.Info("run: DM pairing enabled")
 	return bot.NewPairingHandler(pairingStore, handler)
+}
+
+// ReconcileAuthorizedFromAllowFrom promotes every Telegram chat ID in
+// channels.telegram.allowFrom (the trusted network whitelist) into the
+// authorization database on boot, so a single-user happy path no longer requires a
+// manual `gobot authorize` step. It is idempotent: already-authorized IDs are left
+// untouched and only newly authorized IDs are logged. A nil or non-pairing store is
+// a no-op. Returns the number of IDs newly authorized.
+func ReconcileAuthorizedFromAllowFrom(cfg *config.Config, store agent.CheckpointStore) int {
+	if cfg == nil || store == nil {
+		return 0
+	}
+	mgr, ok := store.(*agentctx.CheckpointManager)
+	if !ok {
+		return 0
+	}
+	pairingStore, err := agentctx.NewPairingStore(mgr.DB())
+	if err != nil {
+		slog.Warn("run: allowFrom reconcile skipped, pairing store unavailable", "err", err)
+		return 0
+	}
+
+	reconciled := 0
+	for _, raw := range cfg.TelegramAllowedFrom() {
+		chatID, perr := strconv.ParseInt(raw, 10, 64)
+		if perr != nil {
+			continue // non-numeric entries are ignored, mirroring NewTgAPI
+		}
+		authorized, aerr := pairingStore.IsAuthorized(chatID)
+		if aerr != nil {
+			slog.Warn("run: allowFrom reconcile: authorization check failed", "chat_id", chatID, "err", aerr)
+			continue
+		}
+		if authorized {
+			continue
+		}
+		if err := pairingStore.AuthorizeByChatID(chatID, "allowFrom-reconcile"); err != nil {
+			slog.Warn("run: allowFrom reconcile: authorize failed", "chat_id", chatID, "err", err)
+			continue
+		}
+		reconciled++
+		slog.Info("run: authorized allowFrom chat ID from whitelist", "chat_id", chatID)
+	}
+	return reconciled
 }
 
 // StartGateway starts the HTTP gateway server in a separate goroutine.

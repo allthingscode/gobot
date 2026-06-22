@@ -99,6 +99,9 @@ func runInit(out io.Writer, root string) error {
 	}
 
 	fmt.Fprintf(out, "Initialized gobot workspace at %s\n", cfg.StorageRoot())
+	fmt.Fprintln(out, "Resolved paths:")
+	fmt.Fprintf(out, "  config: %s\n", config.DefaultConfigPath())
+	fmt.Fprintf(out, "  data:   %s\n", cfg.StorageRoot())
 	printEncryptionKeyBackupWarning(out)
 	return nil
 }
