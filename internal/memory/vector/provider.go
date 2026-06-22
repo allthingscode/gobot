@@ -24,11 +24,23 @@ type EmbeddingProvider interface {
 type GeminiProvider struct {
 	apiKey string
 	model  string
+
+	// baseURL and httpClient are seams for testing; they default to the real
+	// Gemini endpoint and http.DefaultClient so runtime behavior is unchanged.
+	baseURL    string
+	httpClient *http.Client
 }
+
+const geminiEmbedBaseURL = "https://generativelanguage.googleapis.com"
 
 // NewGeminiProvider creates a new EmbeddingProvider using the Gemini REST API directly.
 func NewGeminiProvider(apiKey, model string) *GeminiProvider {
-	return &GeminiProvider{apiKey: apiKey, model: model}
+	return &GeminiProvider{
+		apiKey:     apiKey,
+		model:      model,
+		baseURL:    geminiEmbedBaseURL,
+		httpClient: http.DefaultClient,
+	}
 }
 
 type embedContentRequest struct {
@@ -74,7 +86,7 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		err = fmt.Errorf("gemini embed: http: %w", err)
 		span.RecordError(err)
@@ -104,7 +116,7 @@ func (p *GeminiProvider) buildURL() string {
 	if !strings.HasPrefix(model, "models/") {
 		model = "models/" + model
 	}
-	return fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/%s:embedContent?key=%s", model, p.apiKey)
+	return fmt.Sprintf("%s/v1beta/%s:embedContent?key=%s", p.baseURL, model, p.apiKey)
 }
 
 func (p *GeminiProvider) parseResponse(resp *http.Response, span trace.Span) ([]float32, error) {
