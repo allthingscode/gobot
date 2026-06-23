@@ -112,6 +112,70 @@ function Get-ConfiguredReview {
     return ""
 }
 
+function Get-ConfiguredManifestFiles {
+    param(
+        [string]$ProjectRoot = ""
+    )
+
+    $root = ""
+    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        $root = $ProjectRoot
+    } else {
+        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+        if ($null -ne $repoRootVar) {
+            $root = $repoRootVar.Value
+        } else {
+            $root = (Get-Location).Path
+        }
+    }
+
+    if ($root -and (Test-Path -LiteralPath $root)) {
+        $root = (Resolve-Path -LiteralPath $root).Path
+    }
+
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        $root = (Get-Location).Path
+    }
+
+    $configPath = Join-Path $root ".crucible/config.yaml"
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        return @()
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        if ($content -match '(?ms)^manifest_files:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
+            $block = $Matches[1]
+            $list = @()
+            $lines = $block -split '\r?\n'
+            foreach ($line in $lines) {
+                if ($line -match '^\s*-\s*(.*)$') {
+                    $item = $Matches[1].Trim().Trim('"' + "'")
+                    if (-not [string]::IsNullOrWhiteSpace($item)) {
+                        $list += $item
+                    }
+                }
+            }
+            if ($list.Count -gt 0) {
+                return $list
+            }
+        }
+        if ($content -match '(?m)^manifest_files:\s*\[(.*?)\]\s*$') {
+            $items = $Matches[1] -split ','
+            $list = @()
+            foreach ($item in $items) {
+                $clean = $item.Trim().Trim('"' + "'")
+                if (-not [string]::IsNullOrWhiteSpace($clean)) {
+                    $list += $clean
+                }
+            }
+            return $list
+        }
+    } catch {}
+
+    return @()
+}
+
 function Get-ConfiguredEditorCommand {
     param(
         [Parameter(Mandatory = $true)]

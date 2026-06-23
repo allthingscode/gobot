@@ -64,5 +64,5 @@ review:
   diff_tool: zed
   editor: zed
 crucible_version: "0.3.4"
-crucible_install_commit: "06d8b0b8c547b46a777bda32f61e1b39a3f40805"
+crucible_install_commit: "dd48ae03300c53c7ffcb74bcb0f5dea35c114d93"
 

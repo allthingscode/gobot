@@ -79,6 +79,29 @@ try {
         $expected = Join-Path (Resolve-Path -LiteralPath $proj).Path "state/sess"
         Assert-Result -Name "foreign cwd" -Condition ($got -eq $expected) -FailureMessage "expected '$expected', got '$got'"
     }
+
+    $results += Run-Test -Name "Get-ConfiguredManifestFiles parses list and block syntax" -Body {
+        $proj = Join-Path $tempRoot "manifest-test"
+        New-Item -ItemType Directory -Path (Join-Path $proj ".crucible") -Force | Out-Null
+        
+        # Test block list syntax
+        Set-Content -LiteralPath (Join-Path $proj ".crucible/config.yaml") -Value "manifest_files:`n  - go.mod`n  - go.sum`n" -Encoding UTF8
+        $got = Get-ConfiguredManifestFiles -ProjectRoot $proj
+        Assert-Result -Name "block list size" -Condition (@($got).Count -eq 2) -FailureMessage "expected 2 manifest files"
+        Assert-Result -Name "block list go.mod" -Condition ($got[0] -eq "go.mod") -FailureMessage "expected go.mod, got $($got[0])"
+        Assert-Result -Name "block list go.sum" -Condition ($got[1] -eq "go.sum") -FailureMessage "expected go.sum, got $($got[1])"
+
+        # Test inline array syntax
+        Set-Content -LiteralPath (Join-Path $proj ".crucible/config.yaml") -Value "manifest_files: [`"package.json`", `"package-lock.json`"]`n" -Encoding UTF8
+        $gotInline = Get-ConfiguredManifestFiles -ProjectRoot $proj
+        Assert-Result -Name "inline list size" -Condition (@($gotInline).Count -eq 2) -FailureMessage "expected 2 inline manifest files"
+        Assert-Result -Name "inline list package.json" -Condition ($gotInline[0] -eq "package.json") -FailureMessage "expected package.json, got $($gotInline[0])"
+
+        # Test missing manifest_files returning empty array
+        Set-Content -LiteralPath (Join-Path $proj ".crucible/config.yaml") -Value "paths:`n  backlog: `"work`"`n" -Encoding UTF8
+        $gotEmpty = Get-ConfiguredManifestFiles -ProjectRoot $proj
+        Assert-Result -Name "missing manifests empty" -Condition (@($gotEmpty).Count -eq 0) -FailureMessage "expected empty array when key is missing"
+    }
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

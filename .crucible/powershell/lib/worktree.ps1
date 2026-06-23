@@ -107,12 +107,29 @@ function Get-OutOfScopeImplementationFiles {
 
     if ($affinity.Count -eq 0) { return @() }
 
+    $manifestFiles = @(Get-ConfiguredManifestFiles -ProjectRoot $WorktreePath)
+
     return @($changedFiles | Where-Object {
         $changedPath = $_
         $canonicalPath = $changedPath
         if ($changedPath.StartsWith("examples/gobot/.crucible/", [System.StringComparison]::OrdinalIgnoreCase)) {
             $canonicalPath = $changedPath.Substring(25)
         }
+
+        # Bypass allowed manifest files (build side effects)
+        $isManifest = $false
+        foreach ($manifest in $manifestFiles) {
+            $cleanManifest = $manifest.Replace("\", "/").Trim().TrimStart("/")
+            if ($changedPath -eq $cleanManifest -or $canonicalPath -eq $cleanManifest -or 
+                $changedPath -like "*/$cleanManifest" -or $canonicalPath -like "*/$cleanManifest") {
+                $isManifest = $true
+                break
+            }
+        }
+        if ($isManifest) {
+            return $false
+        }
+
         -not (@($affinity | Where-Object {
             (Test-PathMatchesAffinity -ChangedPath $changedPath -Affinity $_) -or
             (Test-PathMatchesAffinity -ChangedPath $canonicalPath -Affinity $_)

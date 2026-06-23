@@ -93,6 +93,44 @@ try {
         Assert-Result -Name "only unrelated is out of scope" -Condition ($outOfScope.Count -eq 1) -FailureMessage "expected exactly 1 out of scope file"
         Assert-Result -Name "unrelated.txt is out of scope" -Condition ($outOfScope[0] -eq "unrelated.txt") -FailureMessage ("expected unrelated.txt to be out of scope, got: " + ($outOfScope -join ", "))
     }
+
+    $results += Run-Test -Name "Get-OutOfScopeImplementationFiles bypasses allowed manifest files" -Body {
+        $repoPath = Join-Path $tempRoot "manifest-bypass-repo"
+        New-Item -ItemType Directory -Path $repoPath -Force | Out-Null
+        git -C $repoPath init --quiet | Out-Null
+        git -C $repoPath config user.name "Test" | Out-Null
+        git -C $repoPath config user.email "test@test.com" | Out-Null
+        
+        $writeHelper = {
+            param($Path, $Content)
+            $dir = Split-Path -Parent $Path
+            if (-not (Test-Path -LiteralPath $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
+            [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+        }
+        
+        $configDir = Join-Path $repoPath ".crucible"
+        & $writeHelper (Join-Path $configDir "config.yaml") "manifest_files:`n  - go.mod`n  - go.sum`n"
+        & $writeHelper (Join-Path $repoPath "readme.md") "initial"
+        
+        git -C $repoPath add . | Out-Null
+        git -C $repoPath commit -m "initial" --quiet | Out-Null
+        git -C $repoPath checkout -b "task/dummy" --quiet | Out-Null
+        
+        & $writeHelper (Join-Path $repoPath "powershell/tool.ps1") "changed"
+        & $writeHelper (Join-Path $repoPath "go.mod") "changed"
+        & $writeHelper (Join-Path $repoPath "unrelated.txt") "changed"
+        
+        git -C $repoPath add . | Out-Null
+        git -C $repoPath commit -m "changes" --quiet | Out-Null
+        
+        $affinity = @("powershell/")
+        $outOfScope = @(Get-OutOfScopeImplementationFiles -WorktreePath $repoPath -TaskId "dummy" -FileAffinity $affinity)
+        
+        Assert-Result -Name "manifest is bypassed" -Condition ($outOfScope.Count -eq 1) -FailureMessage "expected exactly 1 out of scope file (go.mod should be bypassed)"
+        Assert-Result -Name "only unrelated.txt out of scope" -Condition ($outOfScope[0] -eq "unrelated.txt") -FailureMessage ("expected unrelated.txt to be the only out of scope file, got: " + ($outOfScope -join ", "))
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

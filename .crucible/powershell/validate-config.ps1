@@ -94,6 +94,19 @@ if ($content -match '(?m)^paths:\s*$') {
     Test-Pattern -Name "paths.backlog" -Pattern "(?m)^\s{2}backlog:\s+.+$" -Content $content
 }
 
+if ($content -match '(?m)^manifest_files:[ \t]*(.*)$') {
+    $rest = $Matches[1].Trim()
+    if ($rest -ne "") {
+        if ($rest -notmatch '^\[.+?\][ \t]*$') {
+            $errors += "manifest_files must be an array of files (either block or inline format)."
+        }
+    } else {
+        if ($content -notmatch '(?m)^manifest_files:[ \t]*\r?\n\s{2}-\s+.+$') {
+            $errors += "manifest_files must be an array of files (either block or inline format)."
+        }
+    }
+}
+
 if ($content -match '(?m)^review:\s*$') {
     foreach ($field in @("diff_tool", "editor")) {
         if ($content -match ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s*")) {

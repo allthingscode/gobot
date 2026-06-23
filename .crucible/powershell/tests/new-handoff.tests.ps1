@@ -642,6 +642,72 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "file affinity unions prior handoff and spec frontmatter" -Script {
+        $taskId = New-TestTaskId "AFFINITY-UNION"
+        $specPath = ".crucible/backlog/chores/active/$($taskId)_Spec_Affinity.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+        @"
+---
+item_id: "$taskId"
+type: "Chore"
+status: "Ready"
+target_phase: "implementation"
+priority: "P2"
+created_at: "2026-04-28"
+file_affinity: ["internal/cron/", "internal/config/", "internal/db/", "internal/api/"]
+budget_tier: "low"
+---
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $script:createdSpecFiles += $specPath
+
+        $handoffPath = Join-Path $handoffDir "$taskId-20260530T120000Z.json"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $handoffPath) -Force | Out-Null
+        [ordered]@{
+            task_id = $taskId
+            source_phase = "grooming"
+            target_phase = "implementation"
+            reason = "prior handoff"
+            generated_by = "new-handoff.ps1"
+            tool_version = "1.0.0"
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "low"
+            cumulative_handoff_count = 1
+            prompt_version = "groomer_prompt-v16"
+            session_cycle_id = "cycle-1"
+            artifacts = @("powershell/factory.ps1")
+            file_affinity = @("internal/cron/", "internal/config/")
+        } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $script:createdFiles += $handoffPath
+
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "implementation"
+            Target = "verification"
+            Reason = "union fallback test"
+            PromptVersion = "impl_prompt-v1"
+            Artifacts = @("powershell/factory.ps1")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        
+        $expected = @("internal/api/", "internal/config/", "internal/db/", "internal/cron/")
+        foreach ($exp in $expected) {
+            if ($obj.file_affinity -notcontains $exp) {
+                throw "Expected resolved file_affinity to contain '$exp', got: $($obj.file_affinity -join ', ')"
+            }
+        }
+        if ($obj.file_affinity.Count -ne 4) {
+            throw "Expected 4 items in file_affinity, got: $($obj.file_affinity.Count)"
+        }
+    }
+
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
 } finally {
     Set-Location -LiteralPath $origLocation

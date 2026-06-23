@@ -42,6 +42,11 @@ project_mandates:
 file_affinity_examples:
   - src/
 
+# Language manifest/lock files allowed to change as build side-effects
+# manifest_files:
+#   - package.json
+#   - package-lock.json
+
 # Configuration for the human review gate (diff tool / editor).
 # Optional. Default is text-only git diff command.
 # review:

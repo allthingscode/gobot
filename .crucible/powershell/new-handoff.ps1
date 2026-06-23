@@ -274,64 +274,70 @@ foreach ($art in $resolvedArtifacts) {
 }
 $resolvedArtifacts = $normalizedArtifacts
 
-[string[]]$resolvedFileAffinity = @(if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
-    @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+$baseAffinity = @()
+if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
+    $baseAffinity = @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["file_affinity"] -and $null -ne $latest.file_affinity -and @($latest.file_affinity).Count -gt 0) {
-    @($latest.file_affinity)
-} else {
-    $specPath = Get-BacklogItemPathForTask -Task $TaskId
-    $frontmatterAffinity = @()
-    if ($specPath -and (Test-Path -LiteralPath $specPath)) {
-        $specContent = Get-Content -LiteralPath $specPath -Raw -Encoding UTF8
-        $specLines = $specContent -split '\r?\n'
-        $frontmatterLines = @()
-        $foundEnd = $false
-        if ($specLines.Count -ge 2 -and $specLines[0].Trim() -eq "---") {
-            for ($i = 1; $i -lt $specLines.Count; $i++) {
-                if ($specLines[$i].Trim() -eq "---") {
-                    $foundEnd = $true
-                    break
-                }
-                $frontmatterLines += $specLines[$i]
+    $baseAffinity = @($latest.file_affinity)
+}
+
+$specPath = Get-BacklogItemPathForTask -Task $TaskId
+$frontmatterAffinity = @()
+if ($specPath -and (Test-Path -LiteralPath $specPath)) {
+    $specContent = Get-Content -LiteralPath $specPath -Raw -Encoding UTF8
+    $specLines = $specContent -split '\r?\n'
+    $frontmatterLines = @()
+    $foundEnd = $false
+    if ($specLines.Count -ge 2 -and $specLines[0].Trim() -eq "---") {
+        for ($i = 1; $i -lt $specLines.Count; $i++) {
+            if ($specLines[$i].Trim() -eq "---") {
+                $foundEnd = $true
+                break
             }
+            $frontmatterLines += $specLines[$i]
         }
-        if ($foundEnd) {
-            $inAffinityBlock = $false
-            for ($i = 0; $i -lt $frontmatterLines.Count; $i++) {
-                $line = $frontmatterLines[$i]
-                if ($line -match '^\s*file_affinity:\s*(.*)$') {
-                    $rest = $Matches[1].Trim()
-                    if ($rest -match '^\[(.*)\]$') {
-                        $items = $Matches[1] -split ','
-                        foreach ($item in $items) {
-                            $clean = $item.Trim().Trim('"' + "'")
-                            if (-not [string]::IsNullOrWhiteSpace($clean)) {
-                                $frontmatterAffinity += $clean
-                            }
+    }
+    if ($foundEnd) {
+        $inAffinityBlock = $false
+        for ($i = 0; $i -lt $frontmatterLines.Count; $i++) {
+            $line = $frontmatterLines[$i]
+            if ($line -match '^\s*file_affinity:\s*(.*)$') {
+                $rest = $Matches[1].Trim()
+                if ($rest -match '^\[(.*)\]$') {
+                    $items = $Matches[1] -split ','
+                    foreach ($item in $items) {
+                        $clean = $item.Trim().Trim('"' + "'")
+                        if (-not [string]::IsNullOrWhiteSpace($clean)) {
+                            $frontmatterAffinity += $clean
                         }
-                        $inAffinityBlock = $false
-                    } else {
-                        $inAffinityBlock = $true
                     }
-                    continue
+                    $inAffinityBlock = $false
+                } else {
+                    $inAffinityBlock = $true
                 }
-                if ($inAffinityBlock) {
-                    if ($line -match '^\s*-\s*(.*)$') {
-                        $item = $Matches[1].Trim().Trim('"' + "'")
-                        if (-not [string]::IsNullOrWhiteSpace($item)) {
-                            $frontmatterAffinity += $item
-                        }
-                    } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
-                        continue
-                    } else {
-                        $inAffinityBlock = $false
+                continue
+            }
+            if ($inAffinityBlock) {
+                if ($line -match '^\s*-\s*(.*)$') {
+                    $item = $Matches[1].Trim().Trim('"' + "'")
+                    if (-not [string]::IsNullOrWhiteSpace($item)) {
+                        $frontmatterAffinity += $item
                     }
+                } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
+                    continue
+                } else {
+                    $inAffinityBlock = $false
                 }
             }
         }
     }
-    @($frontmatterAffinity)
-})
+}
+
+[string[]]$resolvedFileAffinity = @(
+    @($baseAffinity + $frontmatterAffinity) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique
+)
 
 [string[]]$resolvedStubSpecsCreated = @(if ($null -ne $StubSpecsCreated -and $StubSpecsCreated.Count -gt 0) {
     @($StubSpecsCreated | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })

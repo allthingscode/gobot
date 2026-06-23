@@ -316,6 +316,37 @@ try {
         Assert-Result -Name "unix-root message" -Condition ($outputUnix -match "crucible_root must be a relative path") -FailureMessage ("expected relative path error message. Output: " + $outputUnix)
     }
 
+    $results += Run-Test -Name "Config with manifest_files validates correctly" -Body {
+        $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        
+        # 1. Valid config with manifest_files block syntax
+        $configWithManifest = $config + "`nmanifest_files:`n  - go.mod`n  - go.sum`n"
+        $testPathWith = Join-Path $projectRoot ".crucible/config-with-manifest.yaml"
+        $configWithManifest | Out-File -LiteralPath $testPathWith -Encoding UTF8
+
+        $outputLinesWith = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathWith 2>&1)
+        $exitCodeWith = $LASTEXITCODE
+        $outputWith = $outputLinesWith -join "`n"
+        Assert-Result -Name "valid manifest exit" -Condition ($exitCodeWith -eq 0) -FailureMessage ("expected exit 0 for valid manifest_files config, got " + $exitCodeWith + ". Output: " + $outputWith)
+
+        # 2. Invalid config with malformed manifest_files scalar syntax
+        $configBadManifest = $config + "`nmanifest_files: go.mod`n"
+        $testPathBad = Join-Path $projectRoot ".crucible/config-bad-manifest.yaml"
+        $configBadManifest | Out-File -LiteralPath $testPathBad -Encoding UTF8
+
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $outputLinesBad = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathBad 2>&1)
+            $exitCodeBad = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        $outputBad = $outputLinesBad -join "`n"
+        Assert-Result -Name "bad manifest exit" -Condition ($exitCodeBad -eq 2) -FailureMessage ("expected exit 2 for invalid manifest_files, got " + $exitCodeBad + ". Output: " + $outputBad)
+        Assert-Result -Name "bad manifest message" -Condition ($outputBad -match "manifest_files must be an array") -FailureMessage ("expected array validation error message. Output: " + $outputBad)
+    }
+
     $results += Run-Test -Name "Schema config.schema.json pattern regression test" -Body {
         $schemaPath = Join-Path $REPO_ROOT "schemas/config.schema.json"
         Assert-Result -Name "schema exists" -Condition (Test-Path -LiteralPath $schemaPath) -FailureMessage "config.schema.json not found"

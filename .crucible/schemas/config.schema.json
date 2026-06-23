@@ -158,6 +158,14 @@
         "minLength": 1
       }
     },
+    "manifest_files": {
+      "type": "array",
+      "description": "Optional list of language manifest or lock files (e.g. go.mod, package.json) that are automatically allowed to change by the scope gate as they are unavoidable side effects of building.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "review": {
       "type": "object",
       "description": "Optional. Configuration for the human review gate (e.g. preferred diff tool or editor).",
