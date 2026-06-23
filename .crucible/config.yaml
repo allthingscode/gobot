@@ -59,6 +59,11 @@ file_affinity_examples:
   - internal/agent/
   - cmd/gobot/
 
+# Language manifest files allowed to change as build side-effects (scope-gate bypass).
+manifest_files:
+  - go.mod
+  - go.sum
+
 # Human review gate: open the diff/worktree in Zed (see C-323 review-UX fix).
 review:
   diff_tool: zed
