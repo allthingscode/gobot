@@ -96,6 +96,22 @@ try {
         Assert-Result -Name "optional unchecked empty" -Condition ($result.OptionalUnchecked.Count -eq 0) -FailureMessage "missing file should have no optional unchecked items"
         Assert-Result -Name "malformed empty" -Condition ($result.RequiredMalformed.Count -eq 0) -FailureMessage "missing file should have no malformed items"
     }
+
+    $results += Run-Test -Name "Inapplicable skip marker [-] is accepted and not blocking" -Body {
+        $taskPath = Join-Path $tempRoot "skipped-task.md"
+        @"
+# Task
+
+## Task List
+- [x] Done item
+- [-] Skipped item
+- [X] Another done item
+"@ | Set-Content -LiteralPath $taskPath -Encoding UTF8
+
+        $result = Get-TaskChecklistGateResult -TaskMdPath $taskPath
+        Assert-Result -Name "required unchecked is empty" -Condition ($result.RequiredUnchecked.Count -eq 0) -FailureMessage "expected no unchecked items"
+        Assert-Result -Name "required malformed is empty" -Condition ($result.RequiredMalformed.Count -eq 0) -FailureMessage "expected no malformed items"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

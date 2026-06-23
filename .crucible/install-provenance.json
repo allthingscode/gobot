@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "dd48ae03300c53c7ffcb74bcb0f5dea35c114d93",
+    "source_commit":  "e231e3707d377f597f8ad6215aa750c37674b15f",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -219,8 +219,8 @@
                                                             "base_hash":  "4c2970e9cd0dc46d9090dae9c6b4248bc8d2d4ae4e84bdf4c749220c01756e39"
                                                         },
                   "powershell/lib/task-checklist.ps1":  {
-                                                            "hash":  "eeb8a72135fa245bc1695fb4a22c7c8640ac2b02de6de22687b79a0ada1d9976",
-                                                            "base_hash":  "eeb8a72135fa245bc1695fb4a22c7c8640ac2b02de6de22687b79a0ada1d9976"
+                                                            "hash":  "537502fa3598604943e02dd536c3a08acc347527c46499b28db13b1fe03c877f",
+                                                            "base_hash":  "537502fa3598604943e02dd536c3a08acc347527c46499b28db13b1fe03c877f"
                                                         },
                   "powershell/lib/task-rewind.ps1":  {
                                                          "hash":  "56163df5c1ae4d9cc901a15de3d291a1cd9fdd342ae69b223948d100fb2541e4",
@@ -435,8 +435,8 @@
                                                                   "base_hash":  "3e3753cf2ce4382df664f7934184f665723c0e04fec74016ae115b08ff580db2"
                                                               },
                   "powershell/tests/task-checklist.tests.ps1":  {
-                                                                    "hash":  "be9762cf06371950fbc0f27554c94d046c5d9cff1f8b9d96611c732234caf22a",
-                                                                    "base_hash":  "be9762cf06371950fbc0f27554c94d046c5d9cff1f8b9d96611c732234caf22a"
+                                                                    "hash":  "78ced5f0248bc9187b33da842976da80954691efbc6e00de348aa0d6e3dff50a",
+                                                                    "base_hash":  "78ced5f0248bc9187b33da842976da80954691efbc6e00de348aa0d6e3dff50a"
                                                                 },
                   "powershell/tests/task-rewind.tests.ps1":  {
                                                                  "hash":  "a4ed3d19233182baab21be11756e9d4cf3a0f796bdf5ffdcbd10ced62515c4d7",
@@ -447,8 +447,8 @@
                                                                                      "base_hash":  "ba437aa76f394e92a5a4110050ab506a3e4a9be386193441ff511feeed6f5ea6"
                                                                                  },
                   "powershell/tests/validate-backlog.tests.ps1":  {
-                                                                      "hash":  "d9eee126b304581f5e3dd700b11ae5dad5fd5839fb477ac84526636c8d82df52",
-                                                                      "base_hash":  "d9eee126b304581f5e3dd700b11ae5dad5fd5839fb477ac84526636c8d82df52"
+                                                                      "hash":  "7fbe5840e8617190c4cf1da0811708f9d7a541146b79c62d1373864f5a9f25bc",
+                                                                      "base_hash":  "7fbe5840e8617190c4cf1da0811708f9d7a541146b79c62d1373864f5a9f25bc"
                                                                   },
                   "powershell/tests/validate-config.tests.ps1":  {
                                                                      "hash":  "52a18af8a11c4058bb34add961ca0600e8c154c0e916630a6a30ec12f01e2091",
@@ -471,8 +471,8 @@
                                                               "base_hash":  "e1c8375c333a54dcbc377f683d4212856c2d719dd6589793ebf645a274c75b49"
                                                           },
                   "powershell/validate-backlog.ps1":  {
-                                                          "hash":  "c48c101dc040fa379d8313d78d967d82a3a3091dd765353cb6e7ee53ae10371f",
-                                                          "base_hash":  "c48c101dc040fa379d8313d78d967d82a3a3091dd765353cb6e7ee53ae10371f"
+                                                          "hash":  "81f4de3c6f57bd636a279d40e92387fa34fe405063f68267ba2ac02134d2e96f",
+                                                          "base_hash":  "81f4de3c6f57bd636a279d40e92387fa34fe405063f68267ba2ac02134d2e96f"
                                                       },
                   "powershell/validate-config.ps1":  {
                                                          "hash":  "5335677a7044276ca97d3cc8fb49ee6f4867ec0e83890303af5eccf56e9b29e0",

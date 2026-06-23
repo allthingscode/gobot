@@ -37,7 +37,8 @@ function New-SpecFile {
         [string]$Priority = "P2",
         [string]$Title = "Sample",
         [string]$Status = "Ready",
-        [string[]]$FileAffinity = @()
+        [string[]]$FileAffinity = @(),
+        [string]$BudgetTier = ""
     )
     $full = Join-Path $Root $RelPath
     New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
@@ -47,12 +48,17 @@ function New-SpecFile {
         $affinityBlock = "`nfile_affinity:`n" + (($FileAffinity | ForEach-Object { "  - " + $_ }) -join "`n")
     }
     
+    $budgetBlock = ""
+    if ($BudgetTier) {
+        $budgetBlock = "`nbudget_tier: `"$BudgetTier`""
+    }
+    
     @"
 ---
 item_id: "$ItemId"
 type: "Chore"
 status: "$Status"
-priority: "$Priority"$affinityBlock
+priority: "$Priority"$affinityBlock$budgetBlock
 target_phase: "implementation"
 created_at: "2026-05-25"
 ---
@@ -550,6 +556,125 @@ target_phase: "done"
         } finally {
             Set-Location -LiteralPath $origCwd
         }
+    }
+
+    # --- Test 12: budget_tier validation: valid, absent, and invalid values ---
+    $results += Run-Test -Name "budget_tier validation: valid, absent, and invalid values" -Body {
+        $root = Join-Path $tempRoot "budget-tier-validation"
+        New-MinimalBacklogTree -Root $root
+        
+        # Spec with valid budget_tier
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Good_Budget.md" -ItemId "C-001" -Priority "P2" -Title "Good Budget" -BudgetTier "low"
+        # Spec with absent budget_tier (should be OK)
+        New-SpecFile -Root $root -RelPath "chores/active/C-002_Absent_Budget.md" -ItemId "C-002" -Priority "P2" -Title "Absent Budget"
+        
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 2 | C-001, C-002 |
+| **P3** | 0 | - |
+
+**Status Overview**: 2 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Good_Budget.md) | P2 | Ready | Good Budget | Architect |
+| [C-002](chores/active/C-002_Absent_Budget.md) | P2 | Ready | Absent Budget | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        # Run validation - should PASS
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "good and absent budget tiers pass" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+
+        # Spec with invalid budget_tier
+        New-SpecFile -Root $root -RelPath "chores/active/C-003_Bad_Budget.md" -ItemId "C-003" -Priority "P2" -Title "Bad Budget" -BudgetTier "small"
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 3 | C-001, C-002, C-003 |
+| **P3** | 0 | - |
+
+**Status Overview**: 3 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Good_Budget.md) | P2 | Ready | Good Budget | Architect |
+| [C-002](chores/active/C-002_Absent_Budget.md) | P2 | Ready | Absent Budget | Architect |
+| [C-003](chores/active/C-003_Bad_Budget.md) | P2 | Ready | Bad Budget | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        # Run validation - should FAIL
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "invalid budget tier fails" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected exit non-zero, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "invalid budget tier error message" -Condition ($r.Output -match "Invalid budget_tier.*'small'") -FailureMessage ("expected invalid budget tier error referencing 'small'. Output: " + $r.Output)
+    }
+
+    # --- Test 13: a 'budget_tier' documentation comment must not false-positive ---
+    $results += Run-Test -Name "budget_tier comment line does not false-positive" -Body {
+        $root = Join-Path $tempRoot "budget-tier-comment"
+        New-MinimalBacklogTree -Root $root
+
+        $spec = Join-Path $root "chores/active/C-010_Commented_Budget.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $spec) -Force | Out-Null
+@"
+---
+item_id: "C-010"
+type: "Chore"
+status: "Ready"
+priority: "P2"
+# budget_tier: The token budget category (low, medium, high, extended)
+budget_tier: "low"
+target_phase: "implementation"
+created_at: "2026-05-25"
+---
+
+# C-010 Commented Budget
+"@ | Set-Content -LiteralPath $spec -Encoding UTF8
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-010 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-010](chores/active/C-010_Commented_Budget.md) | P2 | Ready | Commented Budget | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "comment line does not trip budget_tier check" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "no spurious budget_tier error" -Condition (-not ($r.Output -match "Invalid budget_tier")) -FailureMessage ("expected no budget_tier error from a comment line. Output: " + $r.Output)
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

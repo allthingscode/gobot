@@ -21,7 +21,7 @@ function Get-TaskChecklistGateResult {
 
     function Is-PostSessionFactoryChecklistItem {
         param([string]$ChecklistLine)
-        return $ChecklistLine -match '^\s*-\s+\[( |/|x|X)\]\s*Run\s+factory\.ps1\s+-Init\s+-TaskId\b'
+        return $ChecklistLine -match '^\s*-\s+\[( |/|x|X|-)\]\s*Run\s+factory\.ps1\s+-Init\s+-TaskId\b'
     }
 
     for ($idx = 0; $idx -lt $lines.Count; $idx++) {
@@ -52,7 +52,7 @@ function Get-TaskChecklistGateResult {
         }
 
         # Preserve strict blocking for malformed checklist markers in the required section.
-        if ($inRequiredSection -and $line -match '^\s*-\s+\[' -and $line -notmatch '^\s*-\s+\[( |/|x|X)\]') {
+        if ($inRequiredSection -and $line -match '^\s*-\s+\[' -and $line -notmatch '^\s*-\s+\[( |/|x|X|-)\]') {
             if (Is-PostSessionFactoryChecklistItem -ChecklistLine $line) {
                 continue
             }

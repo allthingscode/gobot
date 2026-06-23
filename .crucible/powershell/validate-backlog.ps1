@@ -239,7 +239,7 @@ try {
                 Write-Quiet "Found $($files.Count) $type files"
                 foreach ($file in $files) {
                     try {
-                        $frontmatter = Get-Content -Path $file.FullName -Head 10
+                        $frontmatter = Get-Content -Path $file.FullName -Head 30
                         if ($frontmatter) {
                             $frontmatterStr = [string]$frontmatter
                             $priority = "P2" # default
@@ -259,6 +259,25 @@ try {
                             $filenameId = ($file.Name -replace '_.*$', '') -replace '\.md$', ''
                             if ($itemId -ne $filenameId) {
                                 $errors += "Filename ID mismatch: file '$($file.Name)' prefix '$filenameId' does not match frontmatter item_id '$itemId'"
+                            }
+
+                            # Validate budget_tier (Finding 1). Match per-line and anchor at line
+                            # start so a documentation comment (e.g. '# budget_tier: low|medium|...')
+                            # is never mistaken for the declaration.
+                            $budgetTier = $null
+                            foreach ($fmLine in $frontmatter) {
+                                if ($fmLine -match '^\s*budget_tier:\s*"?([^"\s\r\n]+)"?') {
+                                    $budgetTier = $matches[1]
+                                    break
+                                }
+                            }
+                            if ($null -ne $budgetTier -and $budgetTier -ne "") {
+                                $allowedBudgetTiers = @("low", "medium", "high", "extended")
+                                if ($allowedBudgetTiers -notcontains $budgetTier.ToLowerInvariant()) {
+                                    $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
+                                    $relPath = $relPath -replace '\\', '/'
+                                    $errors += "Invalid budget_tier in frontmatter of spec '$relPath': '$budgetTier'. Allowed values: low, medium, high, extended"
+                                }
                             }
 
                             # Validate file_affinity paths exist (D46)
