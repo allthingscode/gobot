@@ -24,7 +24,7 @@ var (
 	buildTime  = "unknown" // overridden at build time via -ldflags
 )
 
-func main() {
+func buildRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "gobot",
 		Short: "gobot agent runtime",
@@ -54,6 +54,11 @@ func main() {
 		cmdTasks(),
 		cmdState(),
 	)
+	return root
+}
+
+func main() {
+	root := buildRootCmd()
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -201,6 +206,6 @@ func cmdRun() *cobra.Command {
 			return app.RunAgent(cmd.Context(), cfg)
 		},
 	}
-	cmd.Flags().StringVar(&webAddr, "web-addr", "", "Address for the F-111 web dashboard (e.g. 127.0.0.1:7331)")
+	cmd.Flags().StringVar(&webAddr, "web-addr", "", "Address for the web dashboard (e.g. 127.0.0.1:7331)")
 	return cmd
 }

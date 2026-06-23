@@ -108,7 +108,7 @@ func groupByTier(models []ModelInfo) map[string][]ModelInfo {
 
 func addReportHeader(lines *[]string, modelCount int) {
 	today := time.Now().Format("2006-01-02")
-	*lines = append(*lines, "# F-043: Model Tier Audit Report")
+	*lines = append(*lines, "# Model Tier Audit Report")
 	*lines = append(*lines, "**Date:** "+today+"  ")
 	*lines = append(*lines, "**Available models:** "+strconv.Itoa(modelCount))
 	*lines = append(*lines, "")
