@@ -2656,6 +2656,42 @@ function Invoke-HumanGateAction {
     }
 }
 
+function Get-GateReviewRange {
+    # Computes the base..branch commit range the Human Gate shows for visual/text
+    # review. The branch endpoint is the task branch TIP (the actual reviewed work),
+    # not the handoff's commit_hash -- that is the stale bootstrap-era HEAD recorded
+    # when the task was first created, before any implementation commit. The base
+    # endpoint is the MERGE-BASE of the primary branch and the task branch, not the
+    # primary-branch tip: when the primary branch has advanced past where the task
+    # was cut, its tip skews the diff (wrong direction / unrelated commits) and omits
+    # the task's own changes. Falls back to the legacy (primary-tip..commit_hash)
+    # behavior only when no task branch exists (e.g. factory tasks whose changes are
+    # not carried on a task branch).
+    param(
+        [Parameter(Mandatory = $true)][string]$PrimaryBranch,
+        [Parameter(Mandatory = $true)][string]$TaskId,
+        [string]$CommitHash = ""
+    )
+
+    $branchRef = "task/$TaskId"
+    $baseSha = ""
+    $branchSha = ""
+
+    git show-ref --quiet "refs/heads/$branchRef"
+    if ($LASTEXITCODE -eq 0) {
+        $branchSha = (git rev-parse $branchRef 2>$null).Trim()
+        $mergeBase = (git merge-base $PrimaryBranch $branchRef 2>$null).Trim()
+        if (-not [string]::IsNullOrEmpty($mergeBase)) { $baseSha = $mergeBase }
+    }
+
+    if ([string]::IsNullOrEmpty($branchSha)) { $branchSha = $CommitHash }
+    if ([string]::IsNullOrEmpty($baseSha)) {
+        $baseSha = (git rev-parse $PrimaryBranch 2>$null).Trim()
+    }
+
+    return @{ BaseSha = $baseSha; BranchSha = $branchSha }
+}
+
 function Invoke-HumanGate {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -2756,14 +2792,10 @@ function Invoke-HumanGate {
             }
             
             $primaryBranch = Get-PrimaryBranchName
-            $baseSha = (git rev-parse $primaryBranch 2>$null).Trim()
-            $branchSha = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
-            if ([string]::IsNullOrEmpty($branchSha)) {
-                git show-ref --quiet "refs/heads/task/$($handoff.task_id)"
-                if ($LASTEXITCODE -eq 0) {
-                    $branchSha = (git rev-parse "task/$($handoff.task_id)" 2>$null).Trim()
-                }
-            }
+            $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
+            $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
+            $baseSha = $gateRange.BaseSha
+            $branchSha = $gateRange.BranchSha
 
             $decision = [ordered]@{
                 task_id = $handoff.task_id
@@ -2858,14 +2890,10 @@ function Invoke-HumanGate {
                             if ($gateData.PSObject.Properties["branch_sha"]) { $branchSha = $gateData.branch_sha }
                             if ([string]::IsNullOrEmpty($baseSha) -or [string]::IsNullOrEmpty($branchSha)) {
                                 $primaryBranch = Get-PrimaryBranchName
-                                $baseSha = (git rev-parse $primaryBranch 2>$null).Trim()
-                                $branchSha = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
-                                if ([string]::IsNullOrEmpty($branchSha)) {
-                                    git show-ref --quiet "refs/heads/task/$($handoff.task_id)"
-                                    if ($LASTEXITCODE -eq 0) {
-                                        $branchSha = (git rev-parse "task/$($handoff.task_id)" 2>$null).Trim()
-                                    }
-                                }
+                                $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
+                                $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
+                                $baseSha = $gateRange.BaseSha
+                                $branchSha = $gateRange.BranchSha
                             }
 
                             $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
@@ -2982,14 +3010,10 @@ Copy-Item `$right `$rightCopy -Force
                 } else {
                     # Create template and exit
                     $primaryBranch = Get-PrimaryBranchName
-                    $baseSha = (git rev-parse $primaryBranch 2>$null).Trim()
-                    $branchSha = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
-                    if ([string]::IsNullOrEmpty($branchSha)) {
-                        git show-ref --quiet "refs/heads/task/$($handoff.task_id)"
-                        if ($LASTEXITCODE -eq 0) {
-                            $branchSha = (git rev-parse "task/$($handoff.task_id)" 2>$null).Trim()
-                        }
-                    }
+                    $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
+                    $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
+                    $baseSha = $gateRange.BaseSha
+                    $branchSha = $gateRange.BranchSha
 
                     $template = [ordered]@{
                         task_id = $handoff.task_id

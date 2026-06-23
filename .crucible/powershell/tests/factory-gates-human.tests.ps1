@@ -1054,6 +1054,57 @@ try {
         Assert-Result -Name "Text diff fallback still printed" -Condition ($outputText -like "*git -C*diff*") -FailureMessage "expected output to contain command-line diff, got:`n$outputText"
     }
 
+    $results += Run-Test -Name "Get-GateReviewRange: base=merge-base, branch=task tip when primary advanced past task base" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-review-range"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        git -C $caseRoot init --initial-branch=master 2>$null | Out-Null
+        git -C $caseRoot config user.name "Tester"
+        git -C $caseRoot config user.email "test@example.com"
+
+        # Base commit: where the task branch is cut from.
+        "base" | Set-Content -LiteralPath (Join-Path $caseRoot "README.md") -Encoding UTF8
+        git -C $caseRoot add README.md 2>$null | Out-Null
+        git -C $caseRoot commit -m "base commit" 2>$null | Out-Null
+        $baseCommit = (git -C $caseRoot rev-parse HEAD).Trim()
+
+        # Cut the task branch from the base (no work on it yet).
+        git -C $caseRoot branch task/F-700 $baseCommit 2>$null | Out-Null
+
+        # Primary branch advances past the base -- the trigger that broke the old range.
+        "unrelated" | Set-Content -LiteralPath (Join-Path $caseRoot "other.md") -Encoding UTF8
+        git -C $caseRoot add other.md 2>$null | Out-Null
+        git -C $caseRoot commit -m "advance master" 2>$null | Out-Null
+        $masterTip = (git -C $caseRoot rev-parse HEAD).Trim()
+
+        # The actual reviewed work lands on the task branch.
+        git -C $caseRoot checkout task/F-700 2>$null | Out-Null
+        "feature" | Set-Content -LiteralPath (Join-Path $caseRoot "feature.md") -Encoding UTF8
+        git -C $caseRoot add feature.md 2>$null | Out-Null
+        git -C $caseRoot commit -m "task work" 2>$null | Out-Null
+        $taskTip = (git -C $caseRoot rev-parse HEAD).Trim()
+        git -C $caseRoot checkout master 2>$null | Out-Null
+
+        Push-Location $caseRoot
+        try {
+            # Pass the stale bootstrap-era HEAD (here the base commit) as CommitHash to
+            # prove the helper prefers the live task-branch tip over it.
+            $range = Get-GateReviewRange -PrimaryBranch "master" -TaskId "F-700" -CommitHash $baseCommit
+        } finally {
+            Pop-Location
+        }
+
+        Assert-Result -Name "review-range: branch endpoint is the task tip" -Condition ($range.BranchSha -eq $taskTip) -FailureMessage "expected BranchSha=$taskTip (task tip), got $($range.BranchSha)"
+        Assert-Result -Name "review-range: branch endpoint ignores stale commit_hash" -Condition ($range.BranchSha -ne $baseCommit) -FailureMessage "BranchSha fell back to the stale commit_hash $baseCommit"
+        Assert-Result -Name "review-range: base endpoint is the merge-base" -Condition ($range.BaseSha -eq $baseCommit) -FailureMessage "expected BaseSha=$baseCommit (merge-base), got $($range.BaseSha)"
+        Assert-Result -Name "review-range: base endpoint is not the advanced primary tip" -Condition ($range.BaseSha -ne $masterTip) -FailureMessage "BaseSha used the advanced master tip $masterTip"
+
+        $rangeFiles = @(git -C $caseRoot diff --name-only "$($range.BaseSha)..$($range.BranchSha)")
+        Assert-Result -Name "review-range: diff lists the task file" -Condition ($rangeFiles -contains "feature.md") -FailureMessage "expected feature.md in range diff, got: $($rangeFiles -join ', ')"
+        Assert-Result -Name "review-range: diff excludes unrelated master-only file" -Condition ($rangeFiles -notcontains "other.md") -FailureMessage "range diff leaked unrelated master commit (other.md)"
+    }
+
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
