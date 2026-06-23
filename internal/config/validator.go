@@ -36,6 +36,17 @@ func (v ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", v.Field, v.Message)
 }
 
+// Actionable renders the error as a three-line problem/fix/path block instead of
+// a bare validator string, so a first-run user is told exactly what is wrong, how
+// to fix it, and which config key to edit (F-144 AC3).
+func (v ValidationError) Actionable() string {
+	fix := v.Remedy
+	if fix == "" {
+		fix = "see docs/configuration.md"
+	}
+	return fmt.Sprintf("Problem: %s\n  Fix:   %s\n  Path:  %s", v.Message, fix, v.Field)
+}
+
 // ValidationResult holds all validation errors.
 type ValidationResult struct {
 	Errors []ValidationError
@@ -65,6 +76,28 @@ func (r *ValidationResult) CriticalErrors() []ValidationError {
 		}
 	}
 	return critical
+}
+
+// FormatActionable renders every error in the result as an actionable block,
+// most-severe first (critical before warning). Returns "" when there are none.
+func (r *ValidationResult) FormatActionable() string {
+	if !r.HasErrors() {
+		return ""
+	}
+	var b strings.Builder
+	for _, e := range r.Errors {
+		if e.Severity == SeverityCritical {
+			b.WriteString(e.Actionable())
+			b.WriteString("\n")
+		}
+	}
+	for _, e := range r.Errors {
+		if e.Severity != SeverityCritical {
+			b.WriteString(e.Actionable())
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // Validator performs configuration validation.

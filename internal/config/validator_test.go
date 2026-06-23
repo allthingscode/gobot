@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -473,5 +474,57 @@ func TestReportValidation(t *testing.T) {
 
 	if err := ReportValidation(invalidCfg); err == nil {
 		t.Error("expected error for invalid config, got nil")
+	}
+}
+
+func TestValidationError_Actionable(t *testing.T) {
+	t.Parallel()
+	e := ValidationError{
+		Field:    "channels.telegram.token",
+		Message:  "telegram is enabled but no token is configured",
+		Remedy:   "set channels.telegram.token or TELEGRAM_BOT_TOKEN env var",
+		Severity: SeverityCritical,
+	}
+	got := e.Actionable()
+	if !strings.Contains(got, "Problem: telegram is enabled but no token is configured") {
+		t.Errorf("missing problem line: %q", got)
+	}
+	if !strings.Contains(got, "Fix:   set channels.telegram.token") {
+		t.Errorf("missing fix line: %q", got)
+	}
+	if !strings.Contains(got, "Path:  channels.telegram.token") {
+		t.Errorf("missing path line: %q", got)
+	}
+}
+
+func TestValidationError_Actionable_FallbackFix(t *testing.T) {
+	t.Parallel()
+	e := ValidationError{Field: "f", Message: "m"}
+	if !strings.Contains(e.Actionable(), "Fix:   see docs/configuration.md") {
+		t.Errorf("expected fallback fix, got %q", e.Actionable())
+	}
+}
+
+func TestValidationResult_FormatActionable_CriticalFirst(t *testing.T) {
+	t.Parallel()
+	r := &ValidationResult{Errors: []ValidationError{
+		{Field: "warn.field", Message: "a warning", Remedy: "fix warn", Severity: SeverityWarning},
+		{Field: "crit.field", Message: "a critical", Remedy: "fix crit", Severity: SeverityCritical},
+	}}
+	out := r.FormatActionable()
+	ci := strings.Index(out, "a critical")
+	wi := strings.Index(out, "a warning")
+	if ci == -1 || wi == -1 {
+		t.Fatalf("both errors should render: %q", out)
+	}
+	if ci > wi {
+		t.Errorf("critical must render before warning: %q", out)
+	}
+}
+
+func TestValidationResult_FormatActionable_Empty(t *testing.T) {
+	t.Parallel()
+	if got := (&ValidationResult{}).FormatActionable(); got != "" {
+		t.Errorf("expected empty string for no errors, got %q", got)
 	}
 }

@@ -1145,3 +1145,21 @@ func TestRuntimeBlock_LegacyStrategicEditionAlias(t *testing.T) {
 		t.Errorf("Marshal must emit \"runtime\" and not \"strategic_edition\"; got:\n%s", out)
 	}
 }
+
+func TestExplainLoadError(t *testing.T) {
+	t.Parallel()
+	if got := ExplainLoadError(nil); got != "" {
+		t.Errorf("nil error should explain to empty, got %q", got)
+	}
+	if got := ExplainLoadError(errors.New("some unrelated failure")); got != "" {
+		t.Errorf("unrelated error should explain to empty, got %q", got)
+	}
+	parseErr := errors.New("config: invalid field or syntax: unexpected end of JSON input")
+	got := ExplainLoadError(parseErr)
+	if !strings.Contains(got, "not valid JSON") {
+		t.Errorf("expected actionable JSON hint, got %q", got)
+	}
+	if !strings.Contains(got, DefaultConfigPath()) {
+		t.Errorf("expected config path in hint, got %q", got)
+	}
+}

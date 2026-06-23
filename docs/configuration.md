@@ -2,6 +2,13 @@
 
 `gobot` uses a JSON configuration file (typically `config.json`) to manage agent behavior, provider credentials, and integration settings.
 
+> **New here? Run `gobot quickstart` instead of hand-editing this file.** It collects the
+> genuinely-required values (Telegram token, authorized chat ID, one LLM provider key), stores secrets
+> in the encrypted vault (never plaintext in `config.json`), writes the non-secret config, and verifies
+> readiness. It runs interactively or fully non-interactively (`--non-interactive` with flags/env) and
+> reports each problem as a problem/fix/path message. This reference documents every field for when you
+> need to tune the config by hand.
+
 ## File Location
 
 By default, `gobot` looks for `config.json` in:
