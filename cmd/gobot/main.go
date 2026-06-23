@@ -35,6 +35,7 @@ func main() {
 	root.AddCommand(
 		cmdVersion(),
 		cmdInit(),
+		cmdQuickstart(),
 		cmdDoctor(),
 		cmdRun(),
 		cmdSimulate(),

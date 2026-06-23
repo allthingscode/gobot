@@ -744,6 +744,25 @@ func Load() (*Config, error) {
 	return LoadFrom(DefaultConfigPath())
 }
 
+// ExplainLoadError renders a config.Load/LoadFrom failure as an actionable
+// problem/fix/path block (F-144 AC3). decode wraps malformed JSON and unknown
+// fields as "config: invalid field or syntax: ..."; this turns that into a
+// first-run-friendly message pointing at the exact file to edit. Returns "" when
+// err is nil or is not a recognized config-parse failure.
+func ExplainLoadError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if !strings.Contains(err.Error(), "invalid field or syntax") {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Problem: %s is not valid JSON, or contains an unknown field.\n"+
+			"  Fix:   correct the JSON syntax / remove the unrecognized key (the parser names it above), then re-run.\n"+
+			"  Path:  %s",
+		DefaultConfigPath(), DefaultConfigPath())
+}
+
 // LoadFrom reads and parses a config file, stripping a leading UTF-8 BOM if present.
 func LoadFrom(path string) (*Config, error) {
 	f, err := os.Open(path)

@@ -105,7 +105,26 @@ gobot's design principle is **stability and security for one user over scale for
 - At least one LLM API key (Gemini, Anthropic, OpenAI, or OpenRouter)
 - *(Optional)* Google OAuth2 "Desktop app" credentials for Gmail/Calendar/Tasks
 
-**Steps:**
+**Fastest path — `gobot quickstart`:** After building (step 1 below), run `gobot quickstart`. It walks
+you through the genuinely-required values (Telegram token, your chat ID, one LLM provider key), stores
+secrets in the encrypted vault, writes the config for you, and finishes by verifying readiness — no
+hand-editing JSON. When a value is wrong it prints a problem/fix/path message, not a raw error. It also
+runs fully non-interactively for automation and never blocks on a non-TTY:
+
+```bash
+# interactive (prompts for each value; secrets are not echoed):
+./bin/gobot quickstart
+# non-interactive (scriptable — flags or matching env vars):
+./bin/gobot quickstart --non-interactive \
+  --telegram-token "$TELEGRAM_BOT_TOKEN" --allow-from 123456789 \
+  --provider gemini --api-key "$GEMINI_API_KEY"
+```
+
+`quickstart` is idempotent — re-running it on a configured install is non-destructive — and it does not
+start the agent (run `gobot run` when it reports "Ready"). Prefer to configure by hand? Follow the
+manual steps below.
+
+**Steps (manual configuration):**
 
 1. **Build**:
    ```bash
