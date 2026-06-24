@@ -83,7 +83,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 
 | | gobot | PicoClaw |
 |---|---|---|
-| RAM Footprint | ~72MB idle | <10MB idle |
+| RAM Footprint | ~23MB idle (cold) | <10MB idle |
 | Startup Time | <100ms | <1s |
 | Channels | Telegram | 16+ (Slack, Discord, Telegram, etc.) |
 | Google Workspace | Deep (Gmail, Calendar, Tasks) | Not supported |
@@ -91,6 +91,8 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 | Secrets Security | Yes (Windows DPAPI) | No (Plaintext config / Env) |
 | MCP Support | No | Yes |
 | Observability | Full (OTel + slog + doctor) | Basic |
+
+The RAM figure above is cold idle with an empty workspace (measured - see [Footprint](#footprint)). The comparison is partly apples-to-oranges: a stripped Go binary's mapped runtime baseline alone is ~15-20 MB resident, so sub-10 MB is not an architecture goal for gobot. That resident cost buys Google Workspace depth, HITL, in-process vector search, and full observability.
 
 gobot's design principle is **stability and security for one user over scale for many**. Every architectural decision — SQLite over external servers, structured observability, and Windows-native security — is a deliberate trade of raw channel count for reliability, data security, and operational simplicity.
 
@@ -225,7 +227,8 @@ Works everywhere you do — **Windows** (with enhanced security), **Linux**, and
 ## Footprint
 
 - **Binary size:** 28.98 MB, measured on April 26, 2026 with `go build -mod=readonly -trimpath -ldflags="-s -w" -o gobot-c191.exe ./cmd/gobot`.
-- **Idle RSS:** 72.59 MB, sampled after 60 seconds from `tasklist /FI "IMAGENAME eq gobot-c191.exe" /FO CSV /NH` while `gobot run` was idle in a temp profile.
+- **Cold idle RSS:** ~23 MB Working Set (gateway only, Telegram off, empty workspace), measured 2026-06-24 via `Get-Process WorkingSet64` sampled to stability against an isolated empty `GOBOT_HOME`. Rises to ~24-25 MB with all in-process subsystems enabled (vector search, cron, heartbeat, headless browser, multi-user). The live Go heap is only ~3 MB; the rest is Go-runtime plus mapped binary baseline, so GC tuning is not a lever. Reproduce on any build from the boot DEBUG `gobot: boot memory` log or the `gobot doctor` memory line (both surface `runtime.ReadMemStats` heap/sys).
+- **Warm/loaded RSS:** grows with the in-memory vector index (chromem-go holds embeddings resident, roughly embedding_count x dimension x 4 bytes) plus the SQLite page cache and chat history. It is a function of corpus size, not a single number, and is not yet separately quantified. An earlier unsourced "72.59 MB idle" figure reflected such a warm/unspecified profile, not a cold start.
 - **Soft ceiling:** keep the stripped Windows binary under 40 MB; if it grows past that, investigate dependency or asset growth before shipping.
 
 ## Built for Humans Who Demand More
