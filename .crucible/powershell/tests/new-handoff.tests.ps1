@@ -708,6 +708,77 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "falls back to primary branch HEAD when no task branch exists" -Script {
+        $taskId = New-TestTaskId "NO-BRANCH-FALLBACK"
+        $gitRepoDir = [System.IO.Path]::Combine($tempRoot, "git-fallback-test")
+        New-Item -ItemType Directory -Path $gitRepoDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $tempRoot "powershell") -Destination (Join-Path $gitRepoDir "powershell") -Recurse -Force | Out-Null
+        
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $gitRepoDir
+        Set-Location -LiteralPath $gitRepoDir
+        try {
+            & git init -b master --quiet
+            & git config user.name "Test"
+            & git config user.email "test@example.com"
+            & git config commit.gpgSign false
+            
+            $configDir = Join-Path $gitRepoDir ".crucible"
+            New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+            @(
+                "project: HandoffFallbackTest",
+                "paths:",
+                "  backlog: .crucible/backlog",
+                "  session: .crucible/session",
+                "  workspaces: .crucible/.agent-workspaces"
+            ) | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+            $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
+            New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
+            $backlogFile = Join-Path $backlogDir "BACKLOG.md"
+            "- $taskId" | Set-Content -LiteralPath $backlogFile -Encoding UTF8
+            
+            Set-Content -LiteralPath "dummy.txt" -Value "hello"
+            & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
+            & git commit -m "initial commit" --quiet
+            
+            $expectedHead = (& git rev-parse HEAD).Trim()
+            
+            $result = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "deployment"
+                Target = "done"
+                Reason = "resolve task"
+                SessionCycleId = "cycle-test"
+                SchemaPath = $schemaPath
+                ProjectRoot = $gitRepoDir
+            } -NoRegister
+            
+            if ($result.ExitCode -ne 0) {
+                throw "Generator failed: $($result.Output)"
+            }
+            
+            $sessionHandoffDir = Join-Path $gitRepoDir ".crucible/session/handoffs"
+            $latest = Get-ChildItem -Path $sessionHandoffDir -Filter ($taskId + "-*.json") |
+                Sort-Object Name -Descending | Select-Object -First 1
+                
+            if ($null -eq $latest) {
+                throw "No handoff file created for $taskId at $sessionHandoffDir"
+            }
+            
+            $obj = Get-Content -LiteralPath $latest.FullName -Raw | ConvertFrom-Json
+            if ($obj.commit_hash -ne $expectedHead) {
+                throw "Expected commit_hash to fall back to master HEAD ($expectedHead), got: $($obj.commit_hash)"
+            }
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+            Set-Location -LiteralPath $tempRoot
+            if (Test-Path -LiteralPath $gitRepoDir) {
+                Remove-Item -Recurse -Force -LiteralPath $gitRepoDir -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
 } finally {
     Set-Location -LiteralPath $origLocation

@@ -41,6 +41,8 @@ Run the canonical isolated checks. Every check MUST pass before proceeding to ma
 powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
 ```
 
+Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod tidy -diff` for Go, or equivalent lockfile checks).
+
 > **Shortcut**: `bash scripts/ci_check.sh` runs the CI parity checks with isolated caches/tmp and exits non-zero on first failure.
 
 ### Step 4 — Acceptance Criteria Review

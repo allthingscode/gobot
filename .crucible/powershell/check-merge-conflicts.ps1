@@ -31,6 +31,13 @@ $mainBranch = "master"
 git -C $REPO_ROOT show-ref --verify --quiet refs/heads/main
 if ($LASTEXITCODE -eq 0) { $mainBranch = "main" }
 
+# 1b. Verify task branch exists
+git -C $REPO_ROOT show-ref --verify --quiet "refs/heads/task/$TaskId"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "No task branch (task/$TaskId) exists. Nothing to merge (Pattern C/no-code task)." -ForegroundColor Green
+    exit 0
+}
+
 $currentBranch = git -C $REPO_ROOT rev-parse --abbrev-ref HEAD
 if ($currentBranch -ne $mainBranch) {
     Write-Host "Warning: Not on $mainBranch branch. Switching to $mainBranch..." -ForegroundColor Yellow

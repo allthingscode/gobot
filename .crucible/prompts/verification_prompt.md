@@ -50,6 +50,8 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 3. **Automated Verification**: Run the canonical isolated checker before manual review:
    - `powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"`
    
+   Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod tidy -diff` for Go, or equivalent lockfile checks).
+   
    Shortcut in worktree: `bash scripts/ci_check.sh` (same CI parity sequence with isolated caches/tmp).
 4. **Acceptance Criteria**: Review every item in the `Acceptance Criteria` section of the backlog spec for `{task_id}` and confirm implementation.
 5. **Quality Check**: Review the diff for idiomatic quality, error handling, and security.

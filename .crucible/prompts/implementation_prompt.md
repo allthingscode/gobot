@@ -49,7 +49,7 @@ If you cannot answer all four, STOP. Re-read the files, then answer.
 2. **Decision**: Is the spec >50 lines or unclear? If so, complete Phase 1: Design (write plan to `task.md`) before Phase 2: Code.
 3. **Isolation**: Perform all code edits inside the isolated worktree at `{worktree}`.
 4. **Implementation**: Write idiomatic, well-structured code in the project's language, following the spec and project mandates. Run isolated validation from the assigned worktree as you work: `powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"` (or `-Mode full` before handoff).
-5. **Project mandates**: Follow the language, runtime, error-handling, and safety rules declared in `.crucible/config.yaml` and the target repository instructions.
+5. **Project mandates**: Follow the language, runtime, error-handling, and safety rules declared in `.crucible/config.yaml` and the target repository instructions. If you add or modify dependencies (e.g. adding imports in Go), you MUST run the language-specific package tidy/lock step (e.g. `go mod tidy`) in the worktree so the lockfile/manifest stays current and tidy.
 6. **Self-Review**: Verify all acceptance criteria are met and test coverage for new code is >80%.
 7. **Commit**: `git add . ; git commit -m "feat(scope): implement {task_id}"` inside the worktree. STRICTLY NO PUSH.
 8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).

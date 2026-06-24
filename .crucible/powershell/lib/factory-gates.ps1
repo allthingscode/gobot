@@ -2715,6 +2715,25 @@ function Invoke-HumanGate {
     $Quiet = [bool]$Context.Quiet
     $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
 
+    $taskBranchExists = $false
+    $isGit = $false
+    $checkDir = $repoRoot
+    while (-not [string]::IsNullOrEmpty($checkDir)) {
+        if (Test-Path -LiteralPath (Join-Path $checkDir ".git")) {
+            $isGit = $true
+            break
+        }
+        $parent = Split-Path -Parent $checkDir
+        if ($parent -eq $checkDir -or [string]::IsNullOrEmpty($parent)) { break }
+        $checkDir = $parent
+    }
+    if ($isGit) {
+        git -C $repoRoot show-ref --verify --quiet "refs/heads/task/$($handoff.task_id)" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $taskBranchExists = $true
+        }
+    }
+
     # --- 3a. Human Gate ---
     $isGroomingClosure = ($handoff.source_phase -eq "grooming" -and $handoff.target_phase -eq "done")
     $shouldRunHumanGate = $false
@@ -2941,17 +2960,21 @@ Copy-Item `$right `$rightCopy -Force
                             }
 
                             Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
-                            if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                                Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
-                                Write-Host "    $diffToolCommand" -ForegroundColor Cyan
-                            }
-                            Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
-                            Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
-                            Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
-                            if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                                Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
+                            if ($taskBranchExists) {
+                                if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                                    Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
+                                    Write-Host "    $diffToolCommand" -ForegroundColor Cyan
+                                }
+                                Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
+                                Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+                                Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
+                                if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                                    Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
+                                } else {
+                                    Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
+                                }
                             } else {
-                                Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
+                                Write-Host "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs" -ForegroundColor Cyan
                             }
 
                             # Write machine-readable signal file
@@ -2961,17 +2984,21 @@ Copy-Item `$right `$rightCopy -Force
                                     "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                                     "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
                                     "Review options:`n"
-                            if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                                $menu += "  - Launch visual diff tool (per-file):`n" +
-                                         "    $diffToolCommand`n"
-                            }
-                            $menu += "  - Command-line text diff:`n" +
-                                     "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
-                                     "  - Open the worktree folder in your editor:`n"
-                            if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                                $menu += "    $editorOpenCommand`n`n"
+                            if ($taskBranchExists) {
+                                if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                                    $menu += "  - Launch visual diff tool (per-file):`n" +
+                                             "    $diffToolCommand`n"
+                                }
+                                $menu += "  - Command-line text diff:`n" +
+                                         "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
+                                         "  - Open the worktree folder in your editor:`n"
+                                if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                                    $menu += "    $editorOpenCommand`n`n"
+                                } else {
+                                    $menu += "    $wtPathDisplay`n`n"
+                                }
                             } else {
-                                $menu += "    $wtPathDisplay`n`n"
+                                $menu += "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs`n`n"
                             }
                             $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                             $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
@@ -3073,17 +3100,21 @@ Copy-Item `$right `$rightCopy -Force
                     }
 
                     Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
-                    if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                        Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
-                        Write-Host "    $diffToolCommand" -ForegroundColor Cyan
-                    }
-                    Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
-                    Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
-                    Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
-                    if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                        Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
+                    if ($taskBranchExists) {
+                        if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                            Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
+                            Write-Host "    $diffToolCommand" -ForegroundColor Cyan
+                        }
+                        Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
+                        Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
+                        Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
+                        if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                            Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
+                        } else {
+                            Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
+                        }
                     } else {
-                        Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
+                        Write-Host "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs" -ForegroundColor Cyan
                     }
 
                     # Write machine-readable signal file
@@ -3093,17 +3124,21 @@ Copy-Item `$right `$rightCopy -Force
                             "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                             "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
                             "Review options:`n"
-                    if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                        $menu += "  - Launch visual diff tool (per-file):`n" +
-                                 "    $diffToolCommand`n"
-                    }
-                    $menu += "  - Command-line text diff:`n" +
-                             "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
-                             "  - Open the worktree folder in your editor:`n"
-                    if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                        $menu += "    $editorOpenCommand`n`n"
+                    if ($taskBranchExists) {
+                        if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+                            $menu += "  - Launch visual diff tool (per-file):`n" +
+                                     "    $diffToolCommand`n"
+                        }
+                        $menu += "  - Command-line text diff:`n" +
+                                 "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
+                                 "  - Open the worktree folder in your editor:`n"
+                        if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+                            $menu += "    $editorOpenCommand`n`n"
+                        } else {
+                            $menu += "    $wtPathDisplay`n`n"
+                        }
                     } else {
-                        $menu += "    $wtPathDisplay`n`n"
+                        $menu += "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs`n`n"
                     }
                     $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                     $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8

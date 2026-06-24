@@ -198,6 +198,18 @@ try {
         Assert-Result -Name "no origin message" -Condition ($output -match "No origin remote configured") -FailureMessage "expected explicit no-origin message. Output:`n$output"
     }
 
+    $results += Run-Test -Name "Missing task branch returns clean exit code" -Body {
+        $projectRoot = Join-Path $tempRoot "missing-branch"
+        $taskId = "C-MERGE-MISSING"
+        Initialize-Repo -ProjectRoot $projectRoot
+        # Do NOT create the task/C-MERGE-MISSING branch
+
+        $res = Invoke-MergeCheck -ProjectRoot $projectRoot -TaskId $taskId
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "clean message" -Condition ($output -match "No task branch") -FailureMessage "expected no-task-branch message. Output:`n$output"
+    }
+
     $results += Run-Test -Name "Honors configured session path" -Body {
         $projectRoot = Join-Path $tempRoot "custom-session"
         $taskId = "C-MERGE-CUSTOM"

@@ -195,6 +195,7 @@ verification:
     - { name: vet,  command: "go vet ./..." }
     - { name: lint, command: "golangci-lint run ./..." }
     - { name: test, command: "go test ./..." }
+    - { name: mod-tidy, command: "go mod tidy -diff" }
 
 # Python
 verification:

@@ -74,6 +74,7 @@ Perform ALL edits inside the isolated worktree at `.crucible/.agent-workspaces/i
 
 Follow all project mandates:
 - Follow project language/runtime mandates from `.crucible/config.yaml`; do not introduce panics or unsafe shortcuts unless explicitly allowed.
+- If you add or modify dependencies (e.g. adding imports in Go, Node, Python, Rust), you MUST run the language-specific package tidy/lock step (e.g. `go mod tidy`, `npm install`, `poetry lock`) in the worktree so the lockfile/manifest stays current and tidy.
 - Wrap errors: `fmt.Errorf("context: %w", err)`
 - Structured logging: `log/slog` with attributes
 - Durable by default: SQLite

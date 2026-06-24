@@ -217,6 +217,35 @@ $resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
     $null
 }
 
+$isGitRepo = $false
+$checkDir = $REPO_ROOT
+while (-not [string]::IsNullOrEmpty($checkDir)) {
+    if (Test-Path -LiteralPath (Join-Path $checkDir ".git")) {
+        $isGitRepo = $true
+        break
+    }
+    $parent = Split-Path -Parent $checkDir
+    if ($parent -eq $checkDir -or [string]::IsNullOrEmpty($parent)) { break }
+    $checkDir = $parent
+}
+
+if ($isGitRepo) {
+    if ([string]::IsNullOrWhiteSpace($resolvedCommitHash)) {
+        $taskBranch = "task/$TaskId"
+        git show-ref --verify --quiet "refs/heads/$taskBranch" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            $primaryBranch = "master"
+            git show-ref --verify --quiet refs/heads/main 2>$null
+            if ($LASTEXITCODE -eq 0) { $primaryBranch = "main" }
+            
+            $primaryHead = (git rev-parse $primaryBranch 2>$null)
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($primaryHead)) {
+                $resolvedCommitHash = $primaryHead.Trim()
+            }
+        }
+    }
+}
+
 [string[]]$resolvedArtifacts = @(if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
     @($Artifacts | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["artifacts"] -and $null -ne $latest.artifacts) {

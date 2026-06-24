@@ -35,6 +35,9 @@ Before touching `master`, run the merge simulation:
 {{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id} -ProjectRoot "{project_root}"
 ```
 
+> [!NOTE]
+> Pattern-C closures (research/grooming items with no code changes) have no task branch. `check-merge-conflicts.ps1` will automatically detect the missing branch, print a Pattern-C message, and exit successfully with code 0. You can proceed directly to the next step.
+
 **If simulation fails:**
 - Set task status to `"Ready for Rebase"`
 - Write handoff to **implementation** with reason: "Merge conflict detected during simulation. See conflict_report.json."
