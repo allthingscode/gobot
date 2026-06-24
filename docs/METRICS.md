@@ -120,6 +120,19 @@ below.
 - **Memory footprint** → `doctor` (one-line `[OK] memory — heap NN MiB, sys NN
   MiB`), a dashboard gauge, and a DEBUG log line at boot. Not an ERROR/WARN
   unless a configurable ceiling is exceeded.
+  - **Measured cold idle (2026-06-24, current build):** ~23 MB Working Set
+    (gateway only, Telegram off, empty workspace), sampled to stability via
+    `Get-Process WorkingSet64` against an isolated empty `GOBOT_HOME`, and
+    cross-checked with the C-330 instrumentation: boot DEBUG `gobot: boot
+    memory` log (`heap_alloc_mib=3.3 sys_mib=11.6`) and the `gobot doctor`
+    memory line (`heap 3.4 MiB, sys 15.6 MiB`). Rises to ~24-25 MB with all
+    in-process subsystems enabled. The live Go heap is only ~3 MB; the balance
+    is Go-runtime + mapped-binary baseline, so GC tuning is not the lever.
+    Warm/loaded RSS scales with the in-memory vector index (chromem-go is
+    resident by design) and is not yet separately quantified. This measured
+    figure supersedes the prior unsourced "72.59 MB idle" number; see the README
+    "Footprint" section and `.crucible/research/R-013_findings.md` for the full
+    methodology.
 - **Message latency (P50/P99)** → dashboard panel for operators; OTel histogram
   for external collectors. Do not spam logs per request; log only when a request
   exceeds a slow threshold (WARN).
