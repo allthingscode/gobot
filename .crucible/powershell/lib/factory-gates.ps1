@@ -2734,6 +2734,36 @@ function Invoke-HumanGate {
         }
     }
 
+    # Resolve a concrete review pointer for Pattern-C (no-code) closures. Prefer a
+    # findings/.md artifact named in the handoff; else the newest research/.md file
+    # matching the task id; else fall back to the archived spec.
+    $patternCReviewDoc = ""
+    $reviewDocCandidates = @()
+    if ($handoff.PSObject.Properties["artifacts"] -and $handoff.artifacts) {
+        foreach ($artifact in $handoff.artifacts) {
+            if ($artifact -and ([string]$artifact -match '\.md$')) { $reviewDocCandidates += [string]$artifact }
+        }
+    }
+    $patternCReviewDoc = $reviewDocCandidates | Where-Object { $_ -match '(?i)findings' } | Select-Object -First 1
+    if ([string]::IsNullOrEmpty($patternCReviewDoc)) {
+        $patternCReviewDoc = $reviewDocCandidates | Select-Object -First 1
+    }
+    if ([string]::IsNullOrEmpty($patternCReviewDoc) -and -not [string]::IsNullOrEmpty($crucibleRoot)) {
+        $patternCResearchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
+        if (Test-Path -LiteralPath $patternCResearchDir) {
+            $patternCFound = Get-ChildItem -LiteralPath $patternCResearchDir -Filter "$($handoff.task_id)*.md" -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($patternCFound) {
+                $patternCReviewDoc = ((Join-Path $crucibleRoot "research") + "/" + $patternCFound.Name) -replace '\\', '/'
+            }
+        }
+    }
+    $patternCReviewHint = if (-not [string]::IsNullOrEmpty($patternCReviewDoc)) {
+        "Pattern-C closure - no code diff; review $patternCReviewDoc + filed stubs"
+    } else {
+        "Pattern-C closure - no code diff; review the archived spec + filed stubs"
+    }
+
     # --- 3a. Human Gate ---
     $isGroomingClosure = ($handoff.source_phase -eq "grooming" -and $handoff.target_phase -eq "done")
     $shouldRunHumanGate = $false
@@ -2974,7 +3004,7 @@ Copy-Item `$right `$rightCopy -Force
                                     Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
                                 }
                             } else {
-                                Write-Host "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs" -ForegroundColor Cyan
+                                Write-Host "  - $patternCReviewHint" -ForegroundColor Cyan
                             }
 
                             # Write machine-readable signal file
@@ -2998,7 +3028,7 @@ Copy-Item `$right `$rightCopy -Force
                                     $menu += "    $wtPathDisplay`n`n"
                                 }
                             } else {
-                                $menu += "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs`n`n"
+                                $menu += "  - $patternCReviewHint`n`n"
                             }
                             $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                             $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
@@ -3114,7 +3144,7 @@ Copy-Item `$right `$rightCopy -Force
                             Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
                         }
                     } else {
-                        Write-Host "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs" -ForegroundColor Cyan
+                        Write-Host "  - $patternCReviewHint" -ForegroundColor Cyan
                     }
 
                     # Write machine-readable signal file
@@ -3138,7 +3168,7 @@ Copy-Item `$right `$rightCopy -Force
                             $menu += "    $wtPathDisplay`n`n"
                         }
                     } else {
-                        $menu += "  - Pattern-C closure - no code diff; review <findings doc> + filed stubs`n`n"
+                        $menu += "  - $patternCReviewHint`n`n"
                     }
                     $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                     $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8

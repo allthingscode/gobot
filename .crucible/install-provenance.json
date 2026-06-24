@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "55608b1bb5fc8128ed09f4ff413a9b61356b6ffd",
+    "source_commit":  "abcb678aa6b5c922b3d5bbbd6e5ee98eede42582",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -183,8 +183,8 @@
                                                        "base_hash":  "9b788aee06a8ccc865a927a1fd25c1606c6070e1a1bd60f149e48f160565ae79"
                                                    },
                   "powershell/lib/factory-gates.ps1":  {
-                                                           "hash":  "61a174927a9dfdb819cf77ac07c4648f014c061ca12f79c12c99cec8ce213696",
-                                                           "base_hash":  "61a174927a9dfdb819cf77ac07c4648f014c061ca12f79c12c99cec8ce213696"
+                                                           "hash":  "03096d4976f9cc5c734fa93a4204afdec19661487081893b1c606407179f98bb",
+                                                           "base_hash":  "03096d4976f9cc5c734fa93a4204afdec19661487081893b1c606407179f98bb"
                                                        },
                   "powershell/lib/handoff.ps1":  {
                                                      "hash":  "7f69c612f50659748325039d569380c0362601098b25fd7883e23bd40c9f38b1",
@@ -339,8 +339,8 @@
                                                                            "base_hash":  "f69ace4d22ac2954a9e072bb51c4141dbc148eb44b16aa50906f149a2b1e3626"
                                                                        },
                   "powershell/tests/factory-gates-human.tests.ps1":  {
-                                                                         "hash":  "a8da5c07315e270b901fcbd28aca90d108a00c496442cfe6d1a3613469dd8a48",
-                                                                         "base_hash":  "a8da5c07315e270b901fcbd28aca90d108a00c496442cfe6d1a3613469dd8a48"
+                                                                         "hash":  "3d524730ddb2b836c22c79f4159aed8f2198d7c6d8129368832be03550e17be2",
+                                                                         "base_hash":  "3d524730ddb2b836c22c79f4159aed8f2198d7c6d8129368832be03550e17be2"
                                                                      },
                   "powershell/tests/factory-gates-integrity.tests.ps1":  {
                                                                              "hash":  "985a2e17bb7d00d802f67702e8ab9c01b1ac5838d33d2d72e4d6dea8c88463e5",

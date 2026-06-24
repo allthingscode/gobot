@@ -956,6 +956,144 @@ try {
         }
     }
 
+    $results += Run-Test -Name "Pattern-C closure (no task branch): gate prints Pattern-C message, not a diff/worktree surface" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-pattern-c"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        # Review IS configured (diff_tool + editor) - so any diff/worktree surface that appears would
+        # be because a task branch was assumed, NOT because review config is missing.
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+review:
+  diff_tool: "zed"
+  editor: "code"
+"@ | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # NOTE: deliberately NO task/R-900 branch is created (Pattern-C research closure).
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-pattern-c.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'R-900'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$baseSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "Pattern-C: gate prints the Pattern-C closure message" -Condition ($outputText -like "*Pattern-C closure*") -FailureMessage "expected 'Pattern-C closure' message, got:`n$outputText"
+        Assert-Result -Name "Pattern-C: no difftool command emitted (no task branch)" -Condition ($outputText -notlike "*difftool*") -FailureMessage "expected NO difftool command for a no-branch closure, got:`n$outputText"
+        Assert-Result -Name "Pattern-C: no text git-diff review command emitted" -Condition ($outputText -notlike "*diff $baseSha..$baseSha*") -FailureMessage "expected NO degenerate commit..commit diff command, got:`n$outputText"
+        $pendingFile = Join-Path $sessionDir "R-900/gate_pending.txt"
+        Assert-Result -Name "Pattern-C: gate_pending.txt written" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_pending.txt at $pendingFile"
+        if (Test-Path $pendingFile) {
+            $pendingText = Get-Content $pendingFile -Raw
+            Assert-Result -Name "Pattern-C: gate_pending menu carries the Pattern-C message" -Condition ($pendingText -like "*Pattern-C closure*") -FailureMessage "expected gate_pending.txt to contain the Pattern-C message, got:`n$pendingText"
+        }
+    }
+
+    $results += Run-Test -Name "Pattern-C closure resolves the actual findings doc path into the review hint" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-pattern-c-findings"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+"@ | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        # A research findings deliverable exists at the conventional location.
+        $researchDir = Join-Path $configDir "research"
+        New-Item -ItemType Directory -Path $researchDir -Force | Out-Null
+        "findings body" | Set-Content -LiteralPath (Join-Path $researchDir "R-901_findings.md") -Encoding UTF8
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-pattern-c-findings.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '.crucible'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'R-901'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$baseSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "Pattern-C: review hint names the actual findings doc" -Condition ($outputText -like "*.crucible/research/R-901_findings.md*") -FailureMessage "expected the resolved findings path, got:`n$outputText"
+        Assert-Result -Name "Pattern-C: no literal placeholder remains" -Condition ($outputText -notlike "*<findings doc>*") -FailureMessage "expected no '<findings doc>' placeholder, got:`n$outputText"
+    }
+
     $results += Run-Test -Name "Human gate visual review affordances fall back to text git diff when diff_tool is unconfigured" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "gate-no-affordances"

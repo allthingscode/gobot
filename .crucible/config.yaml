@@ -43,6 +43,8 @@ verification:
       command: gotestsum --format testdox -- -mod=readonly ./internal/... ./cmd/...
     - name: doc lint
       command: go run scripts/doc_lint.go
+    - name: mod-tidy
+      command: go mod tidy -diff
   config_check:
     name: config reformat check
     command: go run -mod=readonly ./cmd/gobot config reformat --check config.sample.json
@@ -69,5 +71,5 @@ review:
   diff_tool: zed
   editor: zed
 crucible_version: "0.3.4"
-crucible_install_commit: "55608b1bb5fc8128ed09f4ff413a9b61356b6ffd"
+crucible_install_commit: "abcb678aa6b5c922b3d5bbbd6e5ee98eede42582"
 
