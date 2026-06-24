@@ -8,8 +8,22 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
+
+// checkMemory reports current process memory (Go heap + OS-obtained Sys) as an
+// informational doctor line. It is the in-process replacement for ad-hoc tasklist
+// snapshots (R-013); always OK (no ceiling logic - R-013 found GC/limit tuning is
+// not a lever, so a hard ceiling is not yet justified).
+func checkMemory() Result {
+	s := observability.ReadMemSnapshot()
+	return Result{
+		Name:   "memory",
+		OK:     true,
+		Detail: fmt.Sprintf("heap %.1f MiB, sys %.1f MiB", s.HeapAllocMiB(), s.SysMiB()),
+	}
+}
 
 // checkResilience returns results for all registered circuit breakers.
 func checkResilience() []Result {

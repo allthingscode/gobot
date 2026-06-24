@@ -131,6 +131,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkBrowser(cfg.Browser, p.LookPath), false),
 		r(checkAuthorization(cfg), false),
 		r(checkVendorDir(), false),
+		r(checkMemory(), false),
 	}
 
 	// Only probe Gemini live if Gemini is actually configured.

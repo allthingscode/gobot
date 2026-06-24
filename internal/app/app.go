@@ -44,6 +44,7 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 	}
 
 	SetupLogging(cfg, hub)
+	LogBootMemory(slog.Default())
 	runPreFlightDiagnostics(cfg)
 
 	if err := config.ReportValidation(cfg); err != nil {

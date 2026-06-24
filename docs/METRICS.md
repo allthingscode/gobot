@@ -106,7 +106,7 @@ below.
 
 | Metric | Purpose | Collection | Status | Surface |
 |---|---|---|---|---|
-| **Memory footprint** (RSS or heap alloc at startup and idle) | Detect leaks / bloat; confirm small footprint | `runtime.ReadMemStats` (HeapAlloc/Sys) sampled at boot and periodically | Not collected | `doctor` line + dashboard panel + DEBUG log at boot |
+| **Memory footprint** (RSS or heap alloc at startup and idle) | Detect leaks / bloat; confirm small footprint | `runtime.ReadMemStats` (HeapAlloc/Sys) sampled at boot and periodically | Collected (doctor line + boot DEBUG log); dashboard panel pending | `doctor` line + dashboard panel + DEBUG log at boot |
 | **Message latency** (P50, P99 per user request) | UX responsiveness; spot regressions | Time agent dispatch end-to-end; aggregate quantiles (extend `DispatchTracer`/OTel histogram) | Span `duration_ms` exists per call; no P50/P99 aggregation | Dashboard panel; OTel histogram for collectors |
 | **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected, not surfaced in `doctor` | `doctor` check (new) + dashboard panel |
 | **Startup time** (process start → ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `main` entry; log delta when bot is listening | Not collected | INFO log at ready + `doctor` detail |
