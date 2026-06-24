@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -67,6 +68,20 @@ func SetupLogging(cfg *config.Config, hub *dashboard.Hub) {
 	}
 
 	slog.SetDefault(slog.New(handler))
+}
+
+// LogBootMemory emits a single DEBUG record with the process memory footprint at
+// boot (R-013 / C-330). It is silent at the default INFO level and adds no hot-path
+// cost - ReadMemSnapshot is called exactly once. The logger is passed explicitly so
+// tests can capture the record; RunAgent passes slog.Default().
+func LogBootMemory(logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	s := observability.ReadMemSnapshot()
+	logger.Debug("gobot: boot memory",
+		"heap_alloc_mib", math.Round(s.HeapAllocMiB()*10)/10,
+		"sys_mib", math.Round(s.SysMiB()*10)/10)
 }
 
 // SetupOTel initializes OpenTelemetry tracing and metrics if enabled in config.
