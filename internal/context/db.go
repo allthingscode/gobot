@@ -12,6 +12,33 @@ import (
 
 const dbFileName = "checkpoints.db"
 
+// vacuumFreelistThreshold is the number of free pages above which reclaimIfBloated
+// runs a one-time VACUUM. At SQLite's 4 KB default page size this is ~1 MB of
+// reclaimable space - enough to ignore normal churn but catch the large backlog a
+// pre-C-335 database accumulated before checkpoint retention was bounded.
+const vacuumFreelistThreshold = 256
+
+// reclaimIfBloated runs a single VACUUM when the freelist has grown past
+// vacuumFreelistThreshold pages. Checkpoint pruning (C-335) returns superseded
+// rows' pages to the freelist; in WAL mode SQLite reuses those pages for later
+// inserts, so steady-state size plateaus without a VACUUM. The one-time VACUUM
+// only reclaims the historical bloat an existing database carried in before the
+// prune took effect. It must run on a freshly opened handle with no concurrent
+// writers (VACUUM cannot run inside a transaction).
+func reclaimIfBloated(db *sql.DB) error {
+	var freelist int
+	if err := db.QueryRowContext(stdctx.Background(), "PRAGMA freelist_count").Scan(&freelist); err != nil {
+		return fmt.Errorf("reclaimIfBloated: read freelist_count: %w", err)
+	}
+	if freelist <= vacuumFreelistThreshold {
+		return nil
+	}
+	if _, err := db.ExecContext(stdctx.Background(), "VACUUM"); err != nil {
+		return fmt.Errorf("reclaimIfBloated: vacuum: %w", err)
+	}
+	return nil
+}
+
 // openDB opens (or creates) the SQLite database at dbDir/workspace/checkpoints.db
 // with WAL mode enabled. The caller is responsible for closing the returned *sql.DB.
 func openDB(dbDir string) (*sql.DB, error) {

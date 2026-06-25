@@ -14,6 +14,11 @@ import (
 	"github.com/allthingscode/gobot/internal/logattr"
 )
 
+// maxCheckpointsPerThread bounds checkpoints.db growth (C-335). Only the latest
+// snapshot is ever read (see LoadLatest), so superseded iterations are pruned on
+// save; the surplus over 1 is retained purely as recovery/debug headroom.
+const maxCheckpointsPerThread = 10
+
 // ThreadSnapshot is the return type for LoadLatest.
 type ThreadSnapshot struct {
 	Iteration int                // The sequential iteration number of this snapshot.
@@ -74,6 +79,13 @@ func GetCheckpointManager(dbDir string) (*CheckpointManager, error) {
 		return nil, err
 	}
 	if err := initSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	// Reclaim space left behind by checkpoint pruning in databases created
+	// before retention was bounded (C-335). Gated on freelist size, so a
+	// freshly created or already-compact database skips the VACUUM entirely.
+	if err := reclaimIfBloated(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -145,6 +157,25 @@ func (m *CheckpointManager) SaveSnapshot(ctx context.Context, threadID string, i
 		threadID, iteration, string(stateJSON), checksum,
 	); err != nil {
 		return false, fmt.Errorf("SaveSnapshot: insert checkpoint: %w", err)
+	}
+	// Bound retention (C-335): LoadLatest only ever reads the newest row, so
+	// keep just the last maxCheckpointsPerThread iterations per thread. Pruning
+	// in the same transaction as the insert caps the row count after every save
+	// and rolls back with it on failure. The kept set uses the identical
+	// ordering LoadLatest reads by, so the latest snapshot is never deleted.
+	if _, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM checkpoints
+		 WHERE thread_id = ?
+		   AND checkpoint_id NOT IN (
+		     SELECT checkpoint_id FROM checkpoints
+		     WHERE thread_id = ?
+		     ORDER BY iteration DESC, checkpoint_id DESC
+		     LIMIT ?
+		   )`,
+		threadID, threadID, maxCheckpointsPerThread,
+	); err != nil {
+		return false, fmt.Errorf("SaveSnapshot: prune checkpoints: %w", err)
 	}
 	if _, err := tx.ExecContext(
 		ctx,
