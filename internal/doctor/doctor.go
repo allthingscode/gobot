@@ -132,6 +132,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkAuthorization(cfg), false),
 		r(checkVendorDir(), false),
 		r(checkMemory(), false),
+		r(checkCron(cfg), false),
 	}
 
 	// Only probe Gemini live if Gemini is actually configured.
