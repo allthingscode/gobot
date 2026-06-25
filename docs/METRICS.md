@@ -108,7 +108,7 @@ below.
 |---|---|---|---|---|
 | **Memory footprint** (RSS or heap alloc at startup and idle) | Detect leaks / bloat; confirm small footprint | `runtime.ReadMemStats` (HeapAlloc/Sys) sampled at boot and periodically | Collected (doctor line + boot DEBUG log); dashboard panel pending | `doctor` line + dashboard panel + DEBUG log at boot |
 | **Message latency** (P50, P99 per user request) | UX responsiveness; spot regressions | Time agent dispatch end-to-end; aggregate quantiles (extend `DispatchTracer`/OTel histogram) | Span `duration_ms` exists per call; no P50/P99 aggregation | Dashboard panel; OTel histogram for collectors |
-| **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected, not surfaced in `doctor` | `doctor` check (new) + dashboard panel |
+| **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected; surfaced in `doctor` (C-332); dashboard panel pending | `doctor` check + dashboard panel |
 | **Startup time** (process start → ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `main` entry; log delta when bot is listening | Not collected | INFO log at ready + `doctor` detail |
 | **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive from lock `AcquiredAt`/`TotalHoldTime`; flag sessions held beyond threshold | Partial: lock hold time + deadlock timeout exist | `doctor` advisory + WARN log (extends existing 5s contention warn) |
 | **Storage database size** (SQLite) | Detect unbounded growth of checkpoint/memory DBs | `os.Stat` the SQLite file(s) or `PRAGMA page_count * page_size` | Not collected | `doctor` line + dashboard panel |
@@ -136,7 +136,10 @@ below.
 - **Message latency (P50/P99)** → dashboard panel for operators; OTel histogram
   for external collectors. Do not spam logs per request; log only when a request
   exceeds a slow threshold (WARN).
-- **Cron job health** → new `doctor` check reading `JobState`
+- **Cron job health** → `doctor` `cron` line (C-332) reading `JobState` from
+  `{StorageRoot}/workspace/jobs.json` read-only: `[OK] cron - N jobs, all healthy,
+  next run in <dur>` (or `no scheduled jobs`), and `[WARN]` (advisory, non-critical)
+  when any job has a non-zero `FailureCount`. Dashboard panel still pending.
   (`last/next run, success/failure counts`) and a dashboard table. Source data
   already exists in `jobs.json`.
 - **Startup time** → single INFO log line at "ready/listening" and a `doctor`
