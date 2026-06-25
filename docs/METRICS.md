@@ -128,11 +128,17 @@ below.
     memory line (`heap 3.4 MiB, sys 15.6 MiB`). Rises to ~24-25 MB with all
     in-process subsystems enabled. The live Go heap is only ~3 MB; the balance
     is Go-runtime + mapped-binary baseline, so GC tuning is not the lever.
-    Warm/loaded RSS scales with the in-memory vector index (chromem-go is
-    resident by design) and is not yet separately quantified. This measured
-    figure supersedes the prior unsourced "72.59 MB idle" number; see the README
-    "Footprint" section and `.crucible/research/R-013_findings.md` for the full
-    methodology.
+    Warm/loaded RSS scales with the in-memory vector index (chromem-go holds
+    embeddings resident). Measured (R-015) at gobot's 768-dim embeddings: **warm
+    RSS ~= cold ~23 MB + (fact_count x ~3.6 KB)** live heap - the 768 x 4 = 3,072 B
+    embedding plus ~16% chromem document/map overhead (~3,541 B/vector measured at
+    5k). A full re-index transiently spikes process RSS to ~2-2.6x the live index
+    (chromem normalizes each embedding into a second slice) before the runtime
+    returns it to the OS. The figure is re-verifiable in CI via
+    `TestWarmFootprintPerVector` in `internal/memory/vector` - the warm analogue of
+    the C-330/C-331 cold instrumentation. This measured cold figure supersedes the
+    prior unsourced "72.59 MB idle" number; see the README "Footprint" section for
+    the full methodology.
 - **Message latency (P50/P99)** → dashboard panel for operators; OTel histogram
   for external collectors. Do not spam logs per request; log only when a request
   exceeds a slow threshold (WARN).
