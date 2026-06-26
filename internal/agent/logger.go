@@ -17,6 +17,12 @@ type SessionLogger interface {
 	Log(sessionKey string, iteration int, messages []agentctx.StrategicMessage) error
 }
 
+// maxSessionAgeDays is the retention window for dated session transcript
+// directories. Directories older than this (by date) are pruned on each Log
+// call. Durable conversation state lives in checkpoints.db; these .md files are
+// a human-readable debug aid, not the source of truth.
+const maxSessionAgeDays = 14
+
 // safeKey replaces characters that are invalid in filenames with underscores.
 var safeKeyRe = regexp.MustCompile(`[^a-zA-Z0-9_\-]`)
 
@@ -60,7 +66,42 @@ func (l *MarkdownLogger) Log(sessionKey string, iteration int, messages []agentc
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("MarkdownLogger: write %s: %w", path, err)
 	}
+
+	// Prune is best-effort: the transcript above is already durably written, so
+	// a cleanup failure must not turn a successful Log into an error.
+	_ = l.pruneOldSessions(now)
 	return nil
+}
+
+// pruneOldSessions removes dated session directories under sessionsDir whose
+// date is strictly older than maxSessionAgeDays before now. Entries whose names
+// do not parse as YYYY-MM-DD are left untouched. now is threaded from the caller
+// so pruning is deterministically testable without sleeping.
+func (l *MarkdownLogger) pruneOldSessions(now time.Time) error {
+	entries, err := os.ReadDir(l.sessionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("MarkdownLogger: read sessions dir %s: %w", l.sessionsDir, err)
+	}
+
+	cutoff := now.UTC().Truncate(24 * time.Hour).AddDate(0, 0, -maxSessionAgeDays)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dirDate, parseErr := time.Parse("2006-01-02", entry.Name())
+		if parseErr != nil {
+			continue
+		}
+		if dirDate.Before(cutoff) {
+			if rmErr := os.RemoveAll(filepath.Join(l.sessionsDir, entry.Name())); rmErr != nil {
+				err = fmt.Errorf("MarkdownLogger: prune %s: %w", entry.Name(), rmErr)
+			}
+		}
+	}
+	return err
 }
 
 // renderMarkdown produces the file content for a session snapshot.
