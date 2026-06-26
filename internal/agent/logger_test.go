@@ -102,6 +102,117 @@ func TestRenderMarkdown_ContentItems(t *testing.T) {
 	}
 }
 
+func TestMarkdownLogger_PrunesOldDatedDirs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	l := NewMarkdownLogger(root)
+	sessionsDir := filepath.Join(root, "workspace", "sessions")
+
+	now := time.Now().UTC()
+	oldDir := filepath.Join(sessionsDir, "2000-01-01")
+	// Strictly older than the window (older than maxSessionAgeDays ago).
+	staleDir := filepath.Join(sessionsDir, now.AddDate(0, 0, -(maxSessionAgeDays+1)).Format("2006-01-02"))
+	for _, d := range []string{oldDir, staleDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", d, err)
+		}
+	}
+
+	msgs := []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("x")}}}
+	if err := l.Log("s1", 1, msgs); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+
+	for _, d := range []string{oldDir, staleDir} {
+		if _, err := os.Stat(d); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be pruned, stat err = %v", d, err)
+		}
+	}
+}
+
+func TestMarkdownLogger_KeepsRecentDatedDirs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	l := NewMarkdownLogger(root)
+	sessionsDir := filepath.Join(root, "workspace", "sessions")
+
+	now := time.Now().UTC()
+	yesterday := filepath.Join(sessionsDir, now.AddDate(0, 0, -1).Format("2006-01-02"))
+	// Exactly at the window edge (cutoff is exclusive: only strictly older is pruned).
+	edge := filepath.Join(sessionsDir, now.AddDate(0, 0, -maxSessionAgeDays).Format("2006-01-02"))
+	for _, d := range []string{yesterday, edge} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", d, err)
+		}
+	}
+
+	msgs := []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("x")}}}
+	if err := l.Log("s1", 1, msgs); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+
+	for _, d := range []string{yesterday, edge} {
+		if _, err := os.Stat(d); err != nil {
+			t.Errorf("expected %s to be kept, stat err = %v", d, err)
+		}
+	}
+	// The just-written turn's directory must always survive.
+	today := filepath.Join(sessionsDir, now.Format("2006-01-02"))
+	if _, err := os.Stat(today); err != nil {
+		t.Errorf("today's transcript dir missing after Log: %v", err)
+	}
+}
+
+func TestMarkdownLogger_IgnoresNonDateEntries(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	l := NewMarkdownLogger(root)
+	sessionsDir := filepath.Join(root, "workspace", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	strayDir := filepath.Join(sessionsDir, "not-a-date")
+	if err := os.MkdirAll(strayDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	strayFile := filepath.Join(sessionsDir, "README.md")
+	if err := os.WriteFile(strayFile, []byte("keep me"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	msgs := []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("x")}}}
+	if err := l.Log("s1", 1, msgs); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+
+	for _, p := range []string{strayDir, strayFile} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected %s untouched, stat err = %v", p, err)
+		}
+	}
+}
+
+func TestMarkdownLogger_PruneReturnsNilWhenNothingToPrune(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	l := NewMarkdownLogger(root)
+
+	// sessionsDir does not exist yet.
+	if err := l.pruneOldSessions(time.Now().UTC()); err != nil {
+		t.Fatalf("pruneOldSessions on missing dir: %v", err)
+	}
+
+	msgs := []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("x")}}}
+	if err := l.Log("s1", 1, msgs); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	// Successful write with nothing prunable still returns nil.
+	if err := l.pruneOldSessions(time.Now().UTC()); err != nil {
+		t.Fatalf("pruneOldSessions with only recent dir: %v", err)
+	}
+}
+
 func TestSanitizeKey(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ in, want string }{
