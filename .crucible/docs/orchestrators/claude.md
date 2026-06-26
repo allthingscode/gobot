@@ -14,22 +14,24 @@ When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in 
 
 Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are dispatched as `general-purpose` sub-agents. The Researcher uses `Explore` (read-only search tools, enforces the trust boundary at the toolset level). Sub-agents share the same working directory and git state — they are not sandboxed. Do not pass orchestrator session history to sub-agents.
 
-### Specialist Model Tiers
+### Specialist Model Selection
 
-| Specialist | model |
-|------------|-------|
-| Architect  | opus  |
-| Reviewer   | opus  |
-| Groomer    | haiku |
-| Researcher | opus  |
-| Operator   | haiku |
+Do **not** hard-code a per-role model. The factory computes the model from the activity
+(`target_phase`, `budget_tier`, `design_required`) and prints a `[RECOMMENDED MODEL] <x>`
+line next to the dispatch command after each `factory.ps1 -Init`. Dispatch the sub-agent
+with that model. The canonical policy and the default/escalation table live in
+[`docs/policy.md`](../policy.md) §2.3.
+
+Quick reference: Sonnet is the default; Opus is reserved for Research (always), design-heavy
+or `high`/`extended`-tier Architect work (`design_required`), and `high`/`extended`-tier
+Grooming/Review; the Operator is Haiku; the orchestrator itself runs on Sonnet.
 
 ### Standard Specialist Dispatch (Groomer, Architect, Reviewer, Operator)
 
 ```
 Agent({
   subagent_type: "general-purpose",
-  model: "{model-from-table-above}",
+  model: "{model from the [RECOMMENDED MODEL] line the factory printed}",
   description: "{Phase} session for {task_id}",
   prompt: `{Role}: {task_id} — read and follow all instructions in
 .crucible/session/{task_id}/{phase}/prompt.md

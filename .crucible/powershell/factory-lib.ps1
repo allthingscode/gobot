@@ -46,6 +46,39 @@ $script:PHASE_ROLE_MAP = @{
     "deployment"     = "operator"
 }
 
+# Recommended model per specialist phase (model-efficiency policy; see docs/policy.md 2.3).
+# Default to the Sonnet workhorse and escalate to the strong (Opus) model only where the
+# activity warrants deeper reasoning: open-ended research, novel design, or high-complexity
+# work (budget_tier high/extended). The Operator is mechanical (Haiku). The orchestrator
+# reads the printed [RECOMMENDED MODEL] line rather than hard-coding a per-role table.
+$script:MODEL_STRONG  = "opus"
+$script:MODEL_DEFAULT = "sonnet"
+$script:MODEL_LIGHT   = "haiku"
+$script:MODEL_ESCALATION_TIERS = @("high", "extended")
+
+function Get-SpecialistModel {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetPhase,
+        [string]$BudgetTier = "medium",
+        [bool]$DesignRequired = $false
+    )
+
+    $phase = if ($null -ne $TargetPhase) { $TargetPhase.Trim().ToLowerInvariant() } else { "" }
+    $tier  = if ([string]::IsNullOrWhiteSpace($BudgetTier)) { "medium" } else { $BudgetTier.Trim().ToLowerInvariant() }
+    $tierEscalates = $script:MODEL_ESCALATION_TIERS -contains $tier
+
+    switch ($phase) {
+        "research"       { return $script:MODEL_STRONG }
+        "grooming"       { if ($tierEscalates) { return $script:MODEL_STRONG } else { return $script:MODEL_DEFAULT } }
+        "implementation" { if ($DesignRequired -or $tierEscalates) { return $script:MODEL_STRONG } else { return $script:MODEL_DEFAULT } }
+        "verification"   { if ($tierEscalates) { return $script:MODEL_STRONG } else { return $script:MODEL_DEFAULT } }
+        "deployment"     { if ($tierEscalates) { return $script:MODEL_DEFAULT } else { return $script:MODEL_LIGHT } }
+        "done"           { return "" }
+        default          { return $script:MODEL_DEFAULT }
+    }
+}
+
 function Write-Quiet {
     param(
         [Parameter(Mandatory=$true)][string]$Message,

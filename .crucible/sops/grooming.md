@@ -81,9 +81,11 @@ Do NOT hand-author or hand-edit the handoff JSON. You must use the `new-handoff.
 Run `new-handoff.ps1` to write the handoff JSON:
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source grooming -Target <implementation|research|verification> -Reason "Ready for next phase" [-FileAffinity "<paths>"] [-BudgetTier <low|medium|high|extended>]
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source grooming -Target <implementation|research|verification> -Reason "Ready for next phase" [-FileAffinity "<paths>"] [-BudgetTier <low|medium|high|extended>] [-DesignRequired]
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats fields like `file_affinity`.)
+
+**`-DesignRequired` (implementation handoffs only):** Set this flag when the Architect must still produce the design — i.e. the spec states the goal and constraints but not the concrete approach. **Omit it** when your spec already contains a complete `## Design` the Architect only has to execute. This single bit drives the Architect's model (design → strong model; execution → default model) per `docs/policy.md` §2.3; do not over-set it, as design-tier work is the expensive path.
 
 ### Step 3 — Run validation
 Run `{{crucible_root}}/powershell/validate-backlog.ps1`. A failing validation blocks the handoff — fix `BACKLOG.md` before proceeding.

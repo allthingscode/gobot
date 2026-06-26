@@ -107,7 +107,7 @@ The transition from the **Operator** specialist to the next step requires a huma
 
 - **Gate Decision Record**: Stored in `.crucible/session/global/gate_decisions/`.
 - **Process**: When `factory.ps1` detects a handoff from the Operator, it creates a `gate_pending.txt` signal file and halts.
-- **Advance**: The agent MUST capture a specific human reason and execute `factory.ps1 -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "reason"`.
+- **Advance**: Before executing the gate command, the Operator must have finalized the task explicitly using `archive-task.ps1`. Once finalized, the agent MUST capture a specific human reason and execute the gate command: `factory.ps1 -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "reason"`.
 
 ---
 
@@ -563,7 +563,7 @@ The Verification phase must verify in this order — a failure at any step block
     `factory.ps1` hard-blocks the deployment handoff if `review_decision` is not `APPROVED` or `acceptance_criteria_met` is not `true`.
 
 ### Deployment
-**Role**: Deployment & Health. The Operator persona merges approved changes, performs the final commit/push, and verifies production health. They mark items as `Production` or `Resolved` in the backlog and then hand off to `done` (or back to grooming if production issue threshold met).
+**Role**: Deployment & Health. The Operator persona merges approved changes, performs the final commit/push, and verifies production health. They explicitly finalize the task by running `archive-task.ps1` (which moves the spec to archived/ and updates the backlog status to `Production` or `Resolved`), and then hand off to `done` (or back to grooming if production issue threshold met).
 **State file:** `.crucible/session/global/session_state.json` -> `phases.deployment`
 **Cleanup**: 
 1. Merge worktree to `master`, delete worktree, delete task branch.

@@ -21,6 +21,10 @@ param(
     # Keep synchronized with $script:BUDGET_TIERS in factory-lib.ps1.
     [ValidateSet("low", "medium", "high", "extended")]
     [string]$BudgetTier = "",
+    # Set by the Groomer on a grooming->implementation handoff when the Architect must
+    # produce the design (escalates the Architect to the strong model). Omit when the
+    # spec already contains a complete design (execution-only, default model).
+    [switch]$DesignRequired,
     [int]$CumulativeHandoffCount = -1,
     [string]$PromptVersion = "",
     [string]$SessionCycleId = "",
@@ -398,6 +402,9 @@ $payload = [ordered]@{
 
 if ($Source -eq "grooming" -or @($resolvedFileAffinity).Count -gt 0) {
     $payload.file_affinity = $resolvedFileAffinity
+}
+if ($Target -eq "implementation") {
+    $payload.design_required = [bool]$DesignRequired
 }
 if (@($resolvedStubSpecsCreated).Count -gt 0) {
     $payload.stub_specs_created = $resolvedStubSpecsCreated

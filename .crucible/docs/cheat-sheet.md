@@ -42,9 +42,9 @@ Your role is to provide **high-level direction and approval**. You are the "Pilo
 ### Initial Task Bootstrapping
 
 When starting a task from the backlog using `factory.ps1 -Init -TaskId {id}`, if no active session folder exists, the factory automatically bootstraps the task:
-*   It parses the task's frontmatter in the backlog spec file (`{task_id}_{title}.md`).
-*   It extracts the `target_phase` field (typically `"grooming"` or `"research"`), which specifies the first activity phase to receive the task.
-*   It automatically generates an initial book-end handoff from `deployment` to that `target_phase`, scaffolds the workspace directories, and prepares the next phase prompt.
+*   It parses the task's frontmatter in the backlog spec file (`{task_id}_{title}.md`) to read `budget_tier`.
+*   It always book-ends the task into the `grooming` phase first, regardless of `target_specialist`. Every backlog item enters the pipeline at grooming; the research phase is reached afterward via the `grooming -> research` transition, when the Groomer (or human) determines investigation is needed.
+*   It automatically generates an initial book-end handoff from `deployment` to `grooming`, scaffolds the workspace directories, and prepares the Groomer prompt.
 
 ---
 

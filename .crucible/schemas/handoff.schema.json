@@ -44,6 +44,10 @@
       "enum": ["low", "medium", "high", "extended"],
       "description": "The token budget tier assigned during grooming"
     },
+    "design_required": {
+      "type": "boolean",
+      "description": "Set by the Groomer on a grooming->implementation handoff. true when the Architect must produce the design (escalates the Architect to the strong model tier); false/omitted when the spec already contains a complete design (execution-only, default model tier)."
+    },
     "cumulative_handoff_count": {
       "type": "integer",
       "minimum": 1,

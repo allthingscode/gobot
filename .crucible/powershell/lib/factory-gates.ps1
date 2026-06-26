@@ -2286,8 +2286,7 @@ function Invoke-HumanGateAction {
             if ($backlogContent -match [regex]::Escape($TaskId)) {
                 $finalization = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $resolvedProjectRoot
                 if (-not $finalization.IsFinalized) {
-                    Write-Host "`n[D44] WARNING: Task $TaskId was not finalized before accept/push!" -ForegroundColor Yellow
-                    Write-Host "[D44] Auto-finalizing task $TaskId now..." -ForegroundColor Cyan
+                    Write-Host "`n[D44] INFO: Task $TaskId was not explicitly finalized before accept/push. Auto-finalizing fallback now..." -ForegroundColor Yellow
 
                     # Locate active spec
                     $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $resolvedProjectRoot
@@ -2389,7 +2388,16 @@ function Invoke-HumanGateAction {
                 Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
                 Invoke-GitChecked { git worktree prune }
                 if (Test-Path $wtPath) {
-                    Invoke-GitChecked { git worktree remove $wtPath }
+                    try {
+                        $null = git worktree remove --force $wtPath 2>$null
+                        if (Test-Path $wtPath) {
+                            Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
+                        }
+                    } catch {
+                        if (Test-Path $wtPath) {
+                            Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
+                        }
+                    }
                 }
             }
             if ($hasTaskBranch) {

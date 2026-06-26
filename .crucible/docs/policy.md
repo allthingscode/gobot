@@ -40,6 +40,23 @@ When a circuit breaker for **Token Budget** is triggered:
 
 When `review_strike_count` reaches 2, `factory.ps1` emits a visible DEGRADED warning and logs a `degraded` event. The Architect MUST treat this as a directive to reduce scope — split the task, defer the contentious part, or simplify — rather than attempting a full re-implementation. If the blocker requires human input, escalate before consuming the last strike.
 
+### 2.3 Model Selection
+
+The model a specialist runs on is **computed by the factory, not fixed per role**. `factory.ps1` derives it from the activity (the handoff's `target_phase`, `budget_tier`, and `design_required`) via `Get-SpecialistModel` and prints a `[RECOMMENDED MODEL]` line next to the dispatch command. The orchestrator dispatches the sub-agent with that model — it does not maintain its own per-role table.
+
+The policy defaults to the Sonnet workhorse and escalates to the strong (Opus) model only where the activity warrants deeper reasoning:
+
+| Phase / Role | Default | Escalates to strong (Opus) when |
+|---|---|---|
+| research / Researcher | Opus | always (open-ended synthesis + judgment) |
+| grooming / Groomer | Sonnet | `budget_tier` is `high` or `extended` |
+| implementation / Architect | Sonnet | `design_required` is true, **or** `budget_tier` is `high`/`extended` |
+| verification / Reviewer | Sonnet | `budget_tier` is `high` or `extended` |
+| deployment / Operator | Haiku | `budget_tier` is `high`/`extended` (escalates only to Sonnet) |
+| (orchestrator) | Sonnet | never — orchestration is procedural verification |
+
+`design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming→implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by the factory.
+
 ## 3. Human Gates
 
 

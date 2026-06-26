@@ -66,6 +66,9 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
    - Draft a narrative update for this completed task using `.crucible/dev-logs/TEMPLATE.md` and append it to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.
    - **Note:** If the task is strictly internal to Crucible and has no public-facing changes for the adopter project, simply append an entry with the Date, Topic, and the statement: `*Internal Crucible task. No public narrative required.*`
 
+5. **Finalize Task ({task_id})**:
+   - Run the archive/finalize command explicitly to move the spec to archived/ and set its backlog status, so the gate sees the task already finalized. Run the exact command provided in your `task.md` (which calls `archive-task.ps1` with the correct `-BacklogPath` and `-SpecPath` arguments).
+
 Do NOT write the handoff for a task that has not completed these steps.
 
 When the pre-flight gate passes:

@@ -92,8 +92,12 @@ New-Item -ItemType Directory -Force -Path ".crucible/session/eval" | Out-Null
 $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_id}.json" -Encoding utf8
 ```
 
-### Step 6 — Backlog, Log Deferral, and Cleanup
-No manual backlog update, log archiving, or Git cleanup is required here. The factory's Human Gate automatically merges the branch `task/{task_id}`, pushes to remote origin, deletes the worktree and branch, archives the backlog spec, updates the `BACKLOG.md` status, reconciles the Priority-Summary, and archives the pipeline log once the human records an `accepted` or `redirected` decision.
+### Step 6 — Finalize Task
+Run `archive-task.ps1` to explicitly finalize the task. This moves the backlog spec to the `archived/` directory and updates the status in `BACKLOG.md` to `Production` or `Resolved`:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/archive-task.ps1" -BacklogPath "{{backlog_dir}}/BACKLOG.md" -SpecPath "<resolved_path_to_active_spec_file>"
+```
+(Note: Locate the resolved active spec path from the `Backlog Item:` line in your `task.md`. No manual Git cleanup or pipeline log archiving is required; the factory's Human Gate automatically merges the branch `task/{task_id}`, pushes to remote origin, deletes the worktree and branch, and archives the pipeline log once the human records an `accepted` or `redirected` decision.)
 
 ### Step 7 — Run new-handoff.ps1 & Advance Pipeline
 Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done" and pass the task branch commit hash (or simply omit it to inherit the implementation branch commit hash from the previous phase):
