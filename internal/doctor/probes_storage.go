@@ -118,9 +118,9 @@ func fmtBytes(n int64) string {
 	}
 }
 
-// walToken formats a WAL size as " (+wal N)" when >= 1 KiB, otherwise "".
+// walToken formats a WAL size as " (+wal N)" when present and non-zero, otherwise "".
 func walToken(walBytes int64) string {
-	if walBytes < int64(1<<10) {
+	if walBytes == 0 {
 		return ""
 	}
 	return fmt.Sprintf(" (+wal %s)", fmtBytes(walBytes))

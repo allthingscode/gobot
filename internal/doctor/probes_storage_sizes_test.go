@@ -75,7 +75,7 @@ func TestCheckStorageSizes_BelowThreshold(t *testing.T) {
 func TestCheckStorageSizes_CheckpointsWAL(t *testing.T) {
 	t.Parallel()
 	root := setupStorageRoot(t)
-	walContent := make([]byte, 2048) // 2 KiB — above the 1 KiB display threshold
+	walContent := []byte("x") // 1 byte — any non-zero WAL must produce +wal token
 	writeTestFile(t, filepath.Join(root, "workspace", "checkpoints.db"), []byte("x"))
 	writeTestFile(t, filepath.Join(root, "workspace", "checkpoints.db-wal"), walContent)
 	r := checkStorageSizes(cfgWithRoot(root))
