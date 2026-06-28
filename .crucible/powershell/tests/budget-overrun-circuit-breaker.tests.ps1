@@ -1,5 +1,5 @@
 # Test for Token Budget Exceeded circuit breaker.
-# Supplies a handoff with budget_tier="low" (ceiling=6) and cumulative_handoff_count=7,
+# Supplies a handoff with budget_tier="low" (ceiling=10) and cumulative_handoff_count=11,
 # which exceeds the ceiling.  Expects factory to write a "budget_exceeded" blocked record
 # and exit with code 2.
 
@@ -27,7 +27,7 @@ try {
     $projectRoot = Join-Path $tempRoot "app"
     New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
 
-    $results += Run-Test -Name "Budget overrun trips at low-tier ceiling (6)" -Body {
+    $results += Run-Test -Name "Budget overrun trips at low-tier ceiling (10)" -Body {
         # 1. Git repo + initial commit
         Push-Location $projectRoot
         try {
@@ -42,7 +42,7 @@ try {
             Pop-Location
         }
 
-        # 2. Backlog spec with budget_tier = "low" (ceiling = 6 handoffs)
+        # 2. Backlog spec with budget_tier = "low" (ceiling = 10 handoffs)
         $taskId  = "C-BUDGET"
         $specDir = Join-Path $projectRoot ".crucible/backlog/chores/active"
         New-Item -ItemType Directory -Path $specDir -Force | Out-Null
@@ -68,7 +68,7 @@ created_at: "2026-05-25"
         }
         [System.IO.File]::AppendAllText($backlogPath, "`n| [$taskId](chores/active/${taskId}_BudgetTest.md) | Title |")
 
-        # 3. Handoff with cumulative_handoff_count = 7 (> ceiling of 6 for "low")
+        # 3. Handoff with cumulative_handoff_count = 11 (> ceiling of 10 for "low")
         $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
         New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
         $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
@@ -81,8 +81,8 @@ created_at: "2026-05-25"
             handoff_retry_count      = 0
             review_strike_count      = 0
             rebase_count             = 0
-            budget_tier              = "low"          # ceiling = 6
-            cumulative_handoff_count = 7              # exceeds ceiling -> breaker fires
+            budget_tier              = "low"          # ceiling = 10
+            cumulative_handoff_count = 11             # exceeds ceiling -> breaker fires
             prompt_version           = "test-v1"
             session_cycle_id         = "test-cycle"
             cycle_id                 = "test-cycle"

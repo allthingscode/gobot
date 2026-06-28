@@ -16,8 +16,15 @@ if (-not (Test-Path -LiteralPath $taskChecklistPath)) {
 # string literals, so keep those literals synchronized with this constant.
 $script:FACTORY_PHASES = @("research", "grooming", "implementation", "verification", "deployment")
 
+# Handoff ceilings per tier. Sized so a task can absorb normal review-fix cycles before
+# tripping the budget breaker: the minimal happy path is ~5 handoffs (bootstrap -> grooming ->
+# implementation -> verification -> deployment -> done) and each CHANGES_REQUESTED review cycle
+# adds 2 (verification -> implementation -> verification). 'low' therefore allows ~2 review
+# cycles plus the terminal deployment->done handoff; higher tiers scale up for research and
+# more iteration. (Raised 2026-06-27: low 6->10/medium 10->16/high 24->28/extended 32->40 after
+# a clean, approved low-tier task tripped the breaker at deployment->done with a single review cycle.)
 $script:BUDGET_TIERS = @("low", "medium", "high", "extended")
-$script:BUDGET_CEILINGS = @{ low = 6; medium = 10; high = 24; extended = 32 }
+$script:BUDGET_CEILINGS = @{ low = 10; medium = 16; high = 28; extended = 40 }
 
 function Get-BudgetCeilings {
     return $script:BUDGET_CEILINGS.Clone()

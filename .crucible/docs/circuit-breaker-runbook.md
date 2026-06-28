@@ -119,7 +119,7 @@ Is the task spec clear?
 
 ## Breaker 4 — Token Budget Exceeded
 
-**Trigger**: `cumulative_handoff_count` exceeds the tier ceiling (Low=6, Medium=10, High=24).
+**Trigger**: `cumulative_handoff_count` exceeds the tier ceiling (Low=10, Medium=16, High=28, Extended=40).
 
 **What it means**: The task consumed more pipeline cycles than estimated. This is not necessarily a failure — complex tasks legitimately need more cycles — but it requires explicit human approval to continue.
 
