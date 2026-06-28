@@ -638,7 +638,8 @@ function Write-FactoryCiStatusBanner {
     $designRequired = $false
     if ($handoff.PSObject.Properties["design_required"]) { $designRequired = [bool]$handoff.design_required }
     $handoffTier = if ($handoff.PSObject.Properties["budget_tier"]) { [string]$handoff.budget_tier } else { "" }
-    $recommendedModel = Get-SpecialistModel -TargetPhase $handoff.target_phase -BudgetTier $handoffTier -DesignRequired $designRequired
+    $capabilityTier = Get-SpecialistModel -TargetPhase $handoff.target_phase -BudgetTier $handoffTier -DesignRequired $designRequired
+    $recommendedModel = Get-ConfiguredModel -Target $Target -Tier $capabilityTier
 
     # Gate transitions always require human confirmation regardless of -AutoAdvance.
     # Research Gate is enforced by Researcher SOP; Human Gate fires on all operator handoffs.

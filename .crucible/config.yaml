@@ -30,6 +30,27 @@ roles:
   operator:
     model_tier: fast
 
+# Concrete models per CLI target and capability tier. The factory computes an abstract tier
+# (strong / default / light) from the phase, budget_tier, and design_required, then resolves
+# it here for the active -Target (claude | codex | antigravity; 'agent' uses the claude row).
+# Edit these as providers release new models -- this is the single source of truth the
+# [RECOMMENDED MODEL] line reads. Quote any value containing spaces.
+models:
+  default_target: claude
+  targets:
+    claude:
+      strong: opus
+      default: sonnet
+      light: haiku
+    codex:
+      strong: gpt-5.5
+      default: gpt-5.5
+      light: gpt-5.4
+    antigravity:
+      strong: "Gemini 3.1 Pro (High)"
+      default: "Gemini 3.5 Flash (High)"
+      light: "Gemini 3.5 Flash (Medium)"
+
 verification:
   quick:
     - name: go test
@@ -71,5 +92,5 @@ review:
   diff_tool: zed
   editor: zed
 crucible_version: "0.3.4"
-crucible_install_commit: "8937f38314df73c21d7dfccd65514604e388cdcd"
+crucible_install_commit: "c067d97e0a059d6e07126f1ecfda2bf02c5df530"
 

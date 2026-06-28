@@ -72,7 +72,7 @@ These are invoked **by the agent**, not by you. Listed here for reference only.
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/factory.ps1" -Init -Target agent -TaskId {task_id}
-# -Target: agent (default) | claude | gemini | antigravity
+# -Target: agent (default) | claude | codex | antigravity
 ```
 
 ---

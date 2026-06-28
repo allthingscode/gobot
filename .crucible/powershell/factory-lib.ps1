@@ -46,14 +46,18 @@ $script:PHASE_ROLE_MAP = @{
     "deployment"     = "operator"
 }
 
-# Recommended model per specialist phase (model-efficiency policy; see docs/policy.md 2.3).
-# Default to the Sonnet workhorse and escalate to the strong (Opus) model only where the
-# activity warrants deeper reasoning: open-ended research, novel design, or high-complexity
-# work (budget_tier high/extended). The Operator is mechanical (Haiku). The orchestrator
-# reads the printed [RECOMMENDED MODEL] line rather than hard-coding a per-role table.
-$script:MODEL_STRONG  = "opus"
-$script:MODEL_DEFAULT = "sonnet"
-$script:MODEL_LIGHT   = "haiku"
+# Model selection is two stage. Get-SpecialistModel maps the activity (target_phase,
+# budget_tier, design_required) to an abstract CAPABILITY TIER (strong/default/light);
+# Get-ConfiguredModel (lib/config-helpers.ps1) then resolves that tier to a concrete model
+# for the active -Target (claude/codex/antigravity), reading the editable `models:` block in
+# config.yaml. This keeps provider-specific model names out of the routing logic and in
+# config, where they are easy to update as models change. Default to the 'default' tier and
+# escalate to 'strong' only where the activity warrants deeper reasoning: open-ended research,
+# novel design, or high/extended budget. The mechanical Operator runs on the 'light' tier.
+# The orchestrator reads the printed [RECOMMENDED MODEL] line rather than hard-coding a table.
+$script:TIER_STRONG  = "strong"
+$script:TIER_DEFAULT = "default"
+$script:TIER_LIGHT   = "light"
 $script:MODEL_ESCALATION_TIERS = @("high", "extended")
 
 function Get-SpecialistModel {
@@ -69,13 +73,13 @@ function Get-SpecialistModel {
     $tierEscalates = $script:MODEL_ESCALATION_TIERS -contains $tier
 
     switch ($phase) {
-        "research"       { return $script:MODEL_STRONG }
-        "grooming"       { if ($tierEscalates) { return $script:MODEL_STRONG } else { return $script:MODEL_DEFAULT } }
-        "implementation" { if ($DesignRequired -or $tierEscalates) { return $script:MODEL_STRONG } else { return $script:MODEL_DEFAULT } }
-        "verification"   { if ($tierEscalates) { return $script:MODEL_STRONG } else { return $script:MODEL_DEFAULT } }
-        "deployment"     { if ($tierEscalates) { return $script:MODEL_DEFAULT } else { return $script:MODEL_LIGHT } }
+        "research"       { return $script:TIER_STRONG }
+        "grooming"       { if ($tierEscalates) { return $script:TIER_STRONG } else { return $script:TIER_DEFAULT } }
+        "implementation" { if ($DesignRequired -or $tierEscalates) { return $script:TIER_STRONG } else { return $script:TIER_DEFAULT } }
+        "verification"   { if ($tierEscalates) { return $script:TIER_STRONG } else { return $script:TIER_DEFAULT } }
+        "deployment"     { if ($tierEscalates) { return $script:TIER_DEFAULT } else { return $script:TIER_LIGHT } }
         "done"           { return "" }
-        default          { return $script:MODEL_DEFAULT }
+        default          { return $script:TIER_DEFAULT }
     }
 }
 

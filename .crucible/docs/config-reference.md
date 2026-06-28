@@ -132,7 +132,36 @@ Assigns a model tier to each specialist. All five roles are required.
 | `fast` | Cost-effective models (e.g. Haiku, Gemini Flash) |
 | `high-capability` | High-reasoning models (e.g. Opus, Gemini Pro) |
 
-The factory translates these tiers to CLI-specific model flags when assembling the next session command. Both values must be used at least once across the five roles — `validate-config.ps1` warns if either is absent.
+> **Note:** `roles.*.model_tier` is legacy and superseded by the `models:` block below, which the factory's `[RECOMMENDED MODEL]` computation actually reads. `validate-config.ps1` still warns if a tier value is unused, so the block is retained for now.
+
+---
+
+### `models` (optional)
+
+Concrete models per CLI target and capability tier. The factory computes an abstract tier (`strong` / `default` / `light`) from the phase, `budget_tier`, and `design_required` (see `docs/policy.md` §2.3), then resolves it **here** for the active `-Target`. This block is the single source of truth the `[RECOMMENDED MODEL]` line reads, and is the place to edit as providers release new models.
+
+```yaml
+models:
+  default_target: claude
+  targets:
+    claude:
+      strong: opus
+      default: sonnet
+      light: haiku
+    codex:
+      strong: gpt-5.5
+      default: gpt-5.5
+      light: gpt-5.4
+    antigravity:
+      strong: "Gemini 3.1 Pro (High)"
+      default: "Gemini 3.5 Flash (High)"
+      light: "Gemini 3.5 Flash (Medium)"
+```
+
+- **Targets**: `claude` | `codex` | `antigravity`. The default `-Target agent` uses the `claude` row.
+- **Resolution order**: a value in this block wins; if absent, the framework default map (same values shown above) applies; an unknown target/tier degrades to the tier token rather than throwing. The block is optional — omit it and the defaults apply.
+- **Quoting**: quote any value containing spaces (e.g. the Antigravity labels).
+- **Codex auth note**: `-codex`-suffixed slugs (`gpt-5.x-codex`) require an API-key account. ChatGPT-login Codex accepts the plain `gpt-5.x` slugs; reasoning effort is set separately in `~/.codex/config.toml`, not in the model slug.
 
 ---
 

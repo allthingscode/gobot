@@ -176,6 +176,82 @@ function Get-ConfiguredManifestFiles {
     return @()
 }
 
+# Resolve an abstract capability tier (strong/default/light, from Get-SpecialistModel) to a
+# concrete model name for the active CLI target. Resolution order:
+#   1. the config.yaml `models:` block (operator-editable; models change often)
+#   2. the framework default map below (source of truth when config is absent)
+#   3. the tier token itself (last resort; never throws)
+# 'agent' is the generic default CLI and runs the Claude models. An empty tier (the 'done'
+# phase) has no model. Keep the default map in sync with templates/project/.crucible/config.yaml.
+function Get-ConfiguredModel {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Target,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Tier,
+        [string]$ProjectRoot = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Tier)) { return "" }
+
+    $target = if ($null -ne $Target) { $Target.Trim().ToLowerInvariant() } else { "" }
+    if ([string]::IsNullOrWhiteSpace($target) -or $target -eq "agent") { $target = "claude" }
+    $tier = $Tier.Trim().ToLowerInvariant()
+
+    $defaults = @{
+        claude      = @{ strong = "opus";                   default = "sonnet";                  light = "haiku" }
+        codex       = @{ strong = "gpt-5.5";                 default = "gpt-5.5";                  light = "gpt-5.4" }
+        antigravity = @{ strong = "Gemini 3.1 Pro (High)";   default = "Gemini 3.5 Flash (High)";  light = "Gemini 3.5 Flash (Medium)" }
+    }
+
+    $configured = Get-ModelFromConfig -Target $target -Tier $tier -ProjectRoot $ProjectRoot
+    if (-not [string]::IsNullOrWhiteSpace($configured)) { return $configured }
+
+    if ($defaults.ContainsKey($target) -and $defaults[$target].ContainsKey($tier)) {
+        return $defaults[$target][$tier]
+    }
+
+    return $tier
+}
+
+# Read models.targets.<target>.<tier> from config.yaml. Returns "" when absent. The block is
+# 2-space-indented YAML: models: (0) > targets: (2) > <target>: (4) > <tier>: (6).
+function Get-ModelFromConfig {
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][string]$Tier,
+        [string]$ProjectRoot = ""
+    )
+
+    $root = ""
+    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        $root = $ProjectRoot
+    } else {
+        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+        if ($null -ne $repoRootVar) { $root = $repoRootVar.Value } else { $root = (Get-Location).Path }
+    }
+    if ($root -and (Test-Path -LiteralPath $root)) { $root = (Resolve-Path -LiteralPath $root).Path }
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+
+    $configPath = Join-Path $root ".crucible/config.yaml"
+    if (-not (Test-Path -LiteralPath $configPath)) { return "" }
+
+    try {
+        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        if ($content -match '(?ms)^models:[ \t]*\r?\n(.*?)(?=\r?\n\S|\z)') {
+            $modelsBlock = $Matches[1]
+            $targetPattern = '(?ms)^[ ]{4}' + [regex]::Escape($Target) + ':[ \t]*\r?\n(.*?)(?=\r?\n[ ]{0,4}\S|\z)'
+            if ($modelsBlock -match $targetPattern) {
+                $targetBlock = $Matches[1]
+                $tierPattern = '(?m)^[ ]{6}' + [regex]::Escape($Tier) + ':[ \t]*["'']?([^"''\r\n]+)["'']?[ \t]*$'
+                if ($targetBlock -match $tierPattern) {
+                    return $Matches[1].Trim()
+                }
+            }
+        }
+    } catch {}
+
+    return ""
+}
+
 function Get-ConfiguredEditorCommand {
     param(
         [Parameter(Mandatory = $true)]

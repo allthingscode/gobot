@@ -28,6 +28,29 @@ roles:
   operator:
     model_tier: fast
 
+# Concrete models per CLI target and capability tier. The factory computes an abstract tier
+# (strong / default / light) from the phase, budget_tier, and design_required, then resolves
+# it here for the active -Target (claude | codex | antigravity; 'agent' uses the claude row).
+# Edit these as providers release new models -- this is the single source of truth the
+# [RECOMMENDED MODEL] line reads. Quote any value containing spaces.
+# NOTE: codex '-codex'-suffixed slugs require an API-key account; ChatGPT-login Codex accepts
+# the plain gpt-5.x slugs (reasoning effort is set separately in ~/.codex/config.toml).
+models:
+  default_target: claude
+  targets:
+    claude:
+      strong: opus
+      default: sonnet
+      light: haiku
+    codex:
+      strong: gpt-5.5
+      default: gpt-5.5
+      light: gpt-5.4
+    antigravity:
+      strong: "Gemini 3.1 Pro (High)"
+      default: "Gemini 3.5 Flash (High)"
+      light: "Gemini 3.5 Flash (Medium)"
+
 verification:
   quick:
     - name: test

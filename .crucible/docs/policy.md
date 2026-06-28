@@ -42,18 +42,29 @@ When `review_strike_count` reaches 2, `factory.ps1` emits a visible DEGRADED war
 
 ### 2.3 Model Selection
 
-The model a specialist runs on is **computed by the factory, not fixed per role**. `factory.ps1` derives it from the activity (the handoff's `target_phase`, `budget_tier`, and `design_required`) via `Get-SpecialistModel` and prints a `[RECOMMENDED MODEL]` line next to the dispatch command. The orchestrator dispatches the sub-agent with that model — it does not maintain its own per-role table.
+The model a specialist runs on is **computed by the factory, not fixed per role**, in two stages:
 
-The policy defaults to the Sonnet workhorse and escalates to the strong (Opus) model only where the activity warrants deeper reasoning:
+1. **Activity → capability tier.** `Get-SpecialistModel` derives an abstract tier — `strong`, `default`, or `light` — from the handoff's `target_phase`, `budget_tier`, and `design_required`. This stage is provider-agnostic; it knows nothing about specific model names.
+2. **Tier → concrete model for the active target.** `Get-ConfiguredModel` resolves that tier to a real model for the active `-Target` (`claude` | `codex` | `antigravity`; `agent` uses the `claude` row), reading the editable `models:` block in `config.yaml`. The factory prints the result as a `[RECOMMENDED MODEL]` line next to the dispatch command; the orchestrator dispatches with it and keeps no per-role table of its own.
 
-| Phase / Role | Default | Escalates to strong (Opus) when |
+The tier policy defaults to the `default` workhorse and escalates to `strong` only where the activity warrants deeper reasoning:
+
+| Phase / Role | Tier | Escalates to `strong` when |
 |---|---|---|
-| research / Researcher | Opus | always (open-ended synthesis + judgment) |
-| grooming / Groomer | Sonnet | `budget_tier` is `high` or `extended` |
-| implementation / Architect | Sonnet | `design_required` is true, **or** `budget_tier` is `high`/`extended` |
-| verification / Reviewer | Sonnet | `budget_tier` is `high` or `extended` |
-| deployment / Operator | Haiku | `budget_tier` is `high`/`extended` (escalates only to Sonnet) |
-| (orchestrator) | Sonnet | never — orchestration is procedural verification |
+| research / Researcher | `strong` | always (open-ended synthesis + judgment) |
+| grooming / Groomer | `default` | `budget_tier` is `high` or `extended` |
+| implementation / Architect | `default` | `design_required` is true, **or** `budget_tier` is `high`/`extended` |
+| verification / Reviewer | `default` | `budget_tier` is `high` or `extended` |
+| deployment / Operator | `light` | `budget_tier` is `high`/`extended` (escalates only to `default`) |
+| (orchestrator) | `default` | never — orchestration is procedural verification |
+
+The concrete model each tier maps to lives in `config.yaml` under `models:` (see `docs/config-reference.md`) so it is easy to update as providers ship new models. Framework defaults:
+
+| Target | `strong` | `default` | `light` |
+|---|---|---|---|
+| `claude` (and `agent`) | opus | sonnet | haiku |
+| `codex` | gpt-5.5 | gpt-5.5 | gpt-5.4 |
+| `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.5 Flash (High) | Gemini 3.5 Flash (Medium) |
 
 `design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming→implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by the factory.
 

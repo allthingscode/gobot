@@ -1,6 +1,6 @@
 # Factory Orchestrator Script
 # Validates handoff.json, routes pipeline in code, assembles next prompt from template.
-# Usage: .\.crucible\\factory.ps1 [-Target agent|gemini|claude] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>]
+# Usage: .\.crucible\\factory.ps1 [-Target agent|claude|codex|antigravity] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>]
 #
 # Dual-use note: -Init serves two purposes depending on call site:
 #   Session START: validates incoming handoff, scaffolds worktree + task.md, logs session_start event.
@@ -12,7 +12,7 @@
 
 param (
     [Parameter(Mandatory=$false)]
-    [ValidateSet("agent", "gemini", "claude", "antigravity")]
+    [ValidateSet("agent", "claude", "codex", "antigravity")]
     [string]$Target = "agent",
 
     [Parameter(Mandatory=$false)]
