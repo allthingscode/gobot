@@ -1139,6 +1139,21 @@ func TestCheckVendorDir_IsNonCritical(t *testing.T) {
 	}
 }
 
+func TestGetResults_IncludesStorageSizes(t *testing.T) {
+	t.Parallel()
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
+	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	for i := range results {
+		if results[i].Name == "storage sizes" {
+			if results[i].Critical {
+				t.Error("storage sizes result must be non-critical")
+			}
+			return
+		}
+	}
+	t.Fatal("GetResults did not include a 'storage sizes' result")
+}
+
 func TestCheckSecretsRoundtrip_NonWindowsSkip(t *testing.T) {
 	t.Parallel()
 	// A failing store must NOT cause a failure on non-Windows: the check is skipped.
