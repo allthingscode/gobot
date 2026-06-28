@@ -111,7 +111,7 @@ below.
 | **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected; surfaced in `doctor` (C-332); dashboard panel pending | `doctor` check + dashboard panel |
 | **Startup time** (process start → ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `main` entry; log delta when bot is listening | Not collected | INFO log at ready + `doctor` detail |
 | **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive from lock `AcquiredAt`/`TotalHoldTime`; flag sessions held beyond threshold | Partial: lock hold time + deadlock timeout exist | `doctor` advisory + WARN log (extends existing 5s contention warn) |
-| **Storage database size** (SQLite) | Detect unbounded growth of checkpoint/memory DBs | `os.Stat` the SQLite file(s) or `PRAGMA page_count * page_size` | Not collected | `doctor` line + dashboard panel |
+| **Storage database size** (SQLite) | Detect unbounded growth of checkpoint/memory DBs | `os.Stat` the SQLite file(s) or `PRAGMA page_count * page_size` | Collected (doctor line; dashboard panel pending) | `doctor` line (C-337); dashboard panel pending |
 
 ---
 
