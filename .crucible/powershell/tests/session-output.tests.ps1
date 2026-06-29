@@ -114,6 +114,7 @@ Artifacts {artifacts_list}
 Strikes {strike_count}
 Count {handoff_count}
 Remaining {budget_remaining}
+Ceiling {budget_ceiling}
 {context_block}
 {prev_session_summary}
 {rebase_section}
@@ -126,6 +127,7 @@ Remaining {budget_remaining}
         Assert-Result -Name "reason replaced" -Condition ($text -match "Reason unit test") -FailureMessage "handoff reason was not replaced"
         Assert-Result -Name "type replaced" -Condition ($text -match "Type features") -FailureMessage "type dir was not replaced"
         Assert-Result -Name "version captured" -Condition ($ctx.PromptVersion -eq "9.9.9") -FailureMessage "prompt version was not captured"
+        Assert-Result -Name "ceiling replaced" -Condition ($text -match "Ceiling 6") -FailureMessage "budget_ceiling was not replaced"
     }
 
     $results += Run-Test -Name "New-FactoryPromptText substitutes PowerShell host for non-Windows prompts" -Body {

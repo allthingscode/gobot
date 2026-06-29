@@ -523,7 +523,7 @@ try {
 
     $handoffT007 = Get-BaseHandoff "C-FACTORY-TASK"
     $handoffT007.budget_tier = "extended"
-    $handoffT007.cumulative_handoff_count = 40
+    $handoffT007.cumulative_handoff_count = 41
     $results += Run-FactoryInitTest -Name "Budget Exceeded Circuit Breaker" -TaskId "C-FACTORY-TASK" -Handoff $handoffT007 -ExpectedExitCode 2 -ExpectedPattern "Token Budget Exceeded"
 
     $handoffT009 = Get-BaseHandoff "C-FACTORY-TASK"

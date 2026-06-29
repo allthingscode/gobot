@@ -10,6 +10,29 @@ When the human says `"Orchestrate {TASK_ID}"`, `"Orchestrate the next task in th
 
 The parent session is the controller. It does not become Groomer, Architect, Reviewer, Operator, or Researcher.
 
+## Codex as a Specialist Under Another Orchestrator
+
+This document covers Codex as the **parent** orchestrator. Codex can also run as a **single-phase
+specialist** under a different parent (for example, a Claude Code orchestrator dispatching Codex for the
+verification/review phase). That topology does **not** use `spawn_agent` or this document's parent
+mechanics — the parent invokes the Crucible launcher:
+
+```
+powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
+  -TaskId {task_id} -Phase {phase} -Model {model}
+```
+
+The launcher wraps `codex exec -s danger-full-access --skip-git-repo-check`, captures the final message
+and transcript, and reports `STATUS=SUCCESS` or `STATUS=LAUNCH_FAILED` so an infrastructure failure is
+never mistaken for a review verdict. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
+
+> **Why not the plugin `task` runtime / `codex-rescue` subagent for full-access specialist work?** That
+> path hardcodes a `read-only`/`workspace-write` sandbox and routes through the app-server broker, which
+> on Windows shells out to `codex-windows-sandbox-setup.exe` (often absent) and fails every command —
+> yielding a false `CHANGES_REQUESTED` with no work done. `codex exec -s danger-full-access` via the
+> Crucible launcher is the reliable full-access path. See the parent-side dispatch protocol in
+> `docs/orchestrators/CLAUDE.md` ("Dispatching a Codex Specialist").
+
 ## Adapter Boundary
 
 This file is the Codex adapter layer. `.crucible/sops/orchestrator.md` remains the canonical, platform-neutral SOP for all agent runtimes (Codex, Claude Code, Gemini CLI).

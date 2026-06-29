@@ -1,20 +1,17 @@
-# Gemini / Antigravity Strategic Orchestrator Protocol
+# Antigravity Strategic Orchestrator Protocol
 
-This document defines **Gemini / Antigravity CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Gemini / Antigravity CLI environments.
+This document defines **Antigravity CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Antigravity CLI environment. The legacy Gemini CLI runtime is retained at the end for reference.
 
 > **Cross-platform.** The `powershell.exe` invocations below are the Windows form. On Linux/macOS, use `pwsh` (PowerShell 7+) in their place.
 
 ## The "Orchestrate" Directive
 
-When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in the backlog"`, Gemini/Antigravity CLI adopts the **Strategic Orchestrator** persona. The current session is the controller. It does not become Groomer, Architect, Reviewer, Operator, or Researcher.
+When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in the backlog"`, the Antigravity CLI session adopts the **Strategic Orchestrator** persona. The current session is the controller. It does not become Groomer, Architect, Reviewer, Operator, or Researcher.
 
 ---
 
 ## Sub-Agent Invocation
 
-Depending on the CLI runtime (Gemini CLI vs. Antigravity CLI), the invocation syntax and target sub-agent differ:
-
-### 1. Antigravity CLI Runtime (Recommended / Active)
 Antigravity CLI uses `invoke_subagent` and targets the `self` sub-agent type (which inherits all of the parent session's configuration and tools for read/write execution):
 
 ```json
@@ -38,32 +35,12 @@ invoke_subagent(
 )
 ```
 
-### 2. Gemini CLI Runtime (Legacy)
-Gemini CLI uses `invoke_agent` and targets the `generalist` sub-agent:
-
-```python
-invoke_agent(
-  agent_name="generalist",
-  prompt=(
-    f"{Role}: {TASK_ID} — read and follow all instructions in "
-    f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
-    "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
-    "to task.md after each major phase. Do not write the final handoff until all "
-    "required task checklist items are complete.\n\n"
-    "After writing handoff JSON, run factory.ps1 -Init -TaskId {TASK_ID} -Quiet "
-    "and report the factory output verbatim. Stop after reporting. "
-    "Do not spawn successor agents."
-  )
-)
-```
-
 ---
 
 ### Bootstrap: Groomer Selects Next Item
 
 When no task ID is known:
 
-#### Antigravity CLI Runtime
 ```json
 invoke_subagent(
   Subagents=[
@@ -83,24 +60,6 @@ invoke_subagent(
       )
     }
   ]
-)
-```
-
-#### Gemini CLI Runtime
-```python
-invoke_agent(
-  agent_name="generalist",
-  prompt=(
-    "Groomer: Next Item\n\n"
-    "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
-    "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
-    "update its spec, write the grooming -> implementation handoff, then run:\n\n"
-    "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
-    "-Init -TaskId <selected_task_id> -Quiet\n\n"
-    "Follow your SOP checkpoint mandate. Do not write the handoff until required "
-    "checklist items are complete. Stop after factory output. Report the selected "
-    "task ID and factory output verbatim."
-  )
 )
 ```
 
@@ -138,6 +97,46 @@ All gate presentation formats (Research Gate, Human Gate, Circuit Breaker Gate) 
 
 ---
 
-**Status**: ACTIVE
-**Owner**: Gemini / Antigravity CLI Agent
+## Legacy: Gemini CLI Runtime
 
+The Gemini CLI was the original runtime for this orchestrator doc before Antigravity. It uses `invoke_agent` and targets the `generalist` sub-agent. Retained for adopters still on that runtime; new work uses the Antigravity path above.
+
+```python
+invoke_agent(
+  agent_name="generalist",
+  prompt=(
+    f"{Role}: {TASK_ID} — read and follow all instructions in "
+    f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
+    "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
+    "to task.md after each major phase. Do not write the final handoff until all "
+    "required task checklist items are complete.\n\n"
+    "After writing handoff JSON, run factory.ps1 -Init -TaskId {TASK_ID} -Quiet "
+    "and report the factory output verbatim. Stop after reporting. "
+    "Do not spawn successor agents."
+  )
+)
+```
+
+Bootstrap form (no task ID known):
+
+```python
+invoke_agent(
+  agent_name="generalist",
+  prompt=(
+    "Groomer: Next Item\n\n"
+    "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
+    "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
+    "update its spec, write the grooming -> implementation handoff, then run:\n\n"
+    "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
+    "-Init -TaskId <selected_task_id> -Quiet\n\n"
+    "Follow your SOP checkpoint mandate. Do not write the handoff until required "
+    "checklist items are complete. Stop after factory output. Report the selected "
+    "task ID and factory output verbatim."
+  )
+)
+```
+
+---
+
+**Status**: ACTIVE
+**Owner**: Antigravity CLI Agent

@@ -67,7 +67,7 @@ function Get-ConfiguredPath {
 function Get-ConfiguredReview {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("diff_tool", "editor")]
+        [ValidateSet("diff_tool", "editor", "auto_push")]
         [string]$Key,
         [string]$ProjectRoot = ""
     )

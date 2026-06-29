@@ -799,9 +799,17 @@ function Invoke-HandoffPreflightValidation {
         }
 
         $allTaskHandoffs = @(Get-ChildItem -Path $HANDOFF_DIR -Filter ($handoff.task_id + "-*.json"))
-        $allTaskHandoffs = @(Sort-HandoffFiles -Files $allTaskHandoffs)
-        if ($allTaskHandoffs.Count -gt 1) {
-            Write-Quiet ("[HANDOFF] Warning: Found $($allTaskHandoffs.Count - 1) previous handoff files for $($handoff.task_id) that may be stale.") -ForegroundColor Yellow
+        $staleTaskHandoffs = @()
+        foreach ($file in $allTaskHandoffs) {
+            try {
+                $content = Get-Content $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($content.PSObject.Properties["session_cycle_id"] -and $content.session_cycle_id -ne $env:FACTORY_CYCLE_ID) {
+                    $staleTaskHandoffs += $file
+                }
+            } catch {}
+        }
+        if ($staleTaskHandoffs.Count -gt 0) {
+            Write-Quiet ("[HANDOFF] Warning: Found $($staleTaskHandoffs.Count) previous handoff files for $($handoff.task_id) that may be stale.") -ForegroundColor Yellow
         }
     }
 }
@@ -2370,16 +2378,27 @@ function Invoke-HumanGateAction {
                 }
             }
 
-            $remotes = @(Invoke-GitChecked { git remote 2>$null })
-            if ($remotes -contains "origin") {
-                Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
-                Invoke-GitChecked { git push origin $primaryBranch }
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
-                    exit 1
+            $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $resolvedProjectRoot
+            $autoPush = $false
+            if ($autoPushVal -eq "true") {
+                $autoPush = $true
+            }
+
+            if ($autoPush) {
+                $remotes = @(Invoke-GitChecked { git remote 2>$null })
+                if ($remotes -contains "origin") {
+                    Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
+                    Invoke-GitChecked { git push origin $primaryBranch }
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                        exit 1
+                    }
+                } else {
+                    Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
                 }
             } else {
-                Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
+                Write-Host "[HUMAN GATE] Refusing to push; merge remains LOCAL only. Run the following command to publish:" -ForegroundColor Yellow
+                Write-Host "  git push origin $primaryBranch" -ForegroundColor Cyan
             }
 
             $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $resolvedProjectRoot
@@ -2424,6 +2443,17 @@ function Invoke-HumanGateAction {
         $archivedHandoffs = @(Move-TaskHandoffsToArchive -TaskId $TaskId -SessionDir $sessionDir -Timestamp $timestamp)
         if ($archivedHandoffs.Count -gt 0) {
             Write-Quiet ("[HUMAN GATE] Archived " + $archivedHandoffs.Count + " handoff file(s) for " + $TaskId)
+        }
+
+        # Prune the finalized task from session_state.json so -Status does not render it
+        # as a ghost "In Progress" entry. The deployment/grooming done-handoff path prunes
+        # via the same call; the accept finalize path must too, otherwise a task archived
+        # here (and later invisible to the backlog parser) falls through to "In Progress".
+        try {
+            $updateStateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "update-session-state.ps1"
+            & $updateStateScript -Specialist done -TaskId $TaskId -UpdateJson "{}" -Merge $false -ProjectRoot $resolvedProjectRoot | Out-Null
+        } catch {
+            Write-Quiet ("[HUMAN GATE] Could not prune session state for " + $TaskId + ": " + $_.Exception.Message)
         }
     } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
         if ($SourcePhase -ne "grooming") {
@@ -2941,6 +2971,18 @@ function Invoke-HumanGate {
                             Write-Host "`n[HUMAN GATE] Action Required: Please complete the gate decision." -ForegroundColor Yellow
                             Write-Host ("File: " + $gateTemplatePath) -ForegroundColor White
                             
+                            $primaryBranch = Get-PrimaryBranchName
+                            $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $repoRoot
+                            $autoPush = $false
+                            if ($autoPushVal -eq "true") {
+                                $autoPush = $true
+                            }
+                            $acceptDesc = if ($autoPush) {
+                                "work looks good; merges to $primaryBranch and pushes to origin; pause after this item"
+                            } else {
+                                "work looks good; merges to $primaryBranch (local only); pause after this item"
+                            }
+
                             $baseSha = ""
                             $branchSha = ""
                             if ($gateData.PSObject.Properties["base_sha"]) { $baseSha = $gateData.base_sha }
@@ -3017,7 +3059,7 @@ Copy-Item `$right `$rightCopy -Force
 
                             # Write machine-readable signal file
                             $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
-                                    "  1) Accept     - work looks good; pause after this item`n" +
+                                    "  1) Accept     - $acceptDesc`n" +
                                     "  2) Reject     - something is wrong, send back for rework`n" +
                                     "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                                     "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
@@ -3075,6 +3117,16 @@ Copy-Item `$right `$rightCopy -Force
                 } else {
                     # Create template and exit
                     $primaryBranch = Get-PrimaryBranchName
+                    $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $repoRoot
+                    $autoPush = $false
+                    if ($autoPushVal -eq "true") {
+                        $autoPush = $true
+                    }
+                    $acceptDesc = if ($autoPush) {
+                        "work looks good; merges to $primaryBranch and pushes to origin; pause after this item"
+                    } else {
+                        "work looks good; merges to $primaryBranch (local only); pause after this item"
+                    }
                     $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
                     $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
                     $baseSha = $gateRange.BaseSha
@@ -3157,7 +3209,7 @@ Copy-Item `$right `$rightCopy -Force
 
                     # Write machine-readable signal file
                     $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
-                            "  1) Accept     - work looks good; pause after this item`n" +
+                            "  1) Accept     - $acceptDesc`n" +
                             "  2) Reject     - something is wrong, send back for rework`n" +
                             "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
                             "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
@@ -3183,7 +3235,7 @@ Copy-Item `$right `$rightCopy -Force
 
                     Write-Host "`n[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:" -ForegroundColor Yellow
                     Write-Host ""
-                    Write-Host "  1) Accept     - work looks good; pause after this item" -ForegroundColor Cyan
+                    Write-Host "  1) Accept     - $acceptDesc" -ForegroundColor Cyan
                     Write-Host "  2) Reject     - something is wrong, send back for rework" -ForegroundColor Cyan
                     Write-Host "  3) Redirect   - accept this item and work on a specific item next (ask which one)" -ForegroundColor Cyan
                     Write-Host "  4) Abandon    - do not accept; stop the pipeline entirely" -ForegroundColor Cyan

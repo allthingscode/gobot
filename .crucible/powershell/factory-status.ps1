@@ -201,6 +201,14 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
         }
     }
     
+    $isBacklogFinalized = $false
+    if ($meta -and ($meta.Status -eq "Resolved" -or $meta.Status -eq "Production")) {
+        $isBacklogFinalized = $true
+    }
+    if ($isBacklogFinalized) {
+        $isFinished = $true
+    }
+
     if (-not $activeSpec -and -not $isFinished) {
         $activeSpec = $currentSpec
     }
@@ -272,6 +280,11 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     if ($taskState.PSObject.Properties["status"] -and $taskState.status -eq "blocked") { 
         $isBlocked = $true 
         $isFinished = $false
+    }
+
+    if ($isBacklogFinalized) {
+        $isBlocked = $false
+        $isFinished = $true
     }
 
     $statusStr = if ($meta -and $meta.Status) { $meta.Status } elseif ($isFinished) { "Finished" } else { "In Progress" }

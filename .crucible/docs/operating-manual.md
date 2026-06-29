@@ -360,9 +360,9 @@ detects another Groomer's `task.md` when dispatching a new Groomer session.
 
 Tell the agent (in whatever CLI you are using): `"Groomer: Groom {task_id}"` and wait for it to
 finish. Then: `"Groomer: Groom {task_id}"`. The exact invocation syntax depends on the CLI:
-- **Claude Code**: see `.crucible/CLAUDE_ORCHESTRATOR.md`
-- **Gemini / Antigravity CLI**: see `.crucible/GEMINI_ORCHESTRATOR.md`
-- **Codex CLI**: see `.crucible/CODEX_ORCHESTRATOR.md`
+- **Claude Code**: see `docs/orchestrators/claude.md`
+- **Antigravity CLI**: see `docs/orchestrators/antigravity.md`
+- **Codex CLI**: see `docs/orchestrators/codex.md`
 
 After each Groomer session, `factory.ps1 -Init -TaskId <id>` is run automatically by the
 agent. That creates the handoff file that scopes the pipeline to that task.

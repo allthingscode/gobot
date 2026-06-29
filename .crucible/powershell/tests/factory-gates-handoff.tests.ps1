@@ -143,7 +143,7 @@ budget_tier: medium
 
         Assert-Result -Name "source mapped" -Condition ($ctx.Handoff.source_phase -eq "implementation") -FailureMessage "source_specialist was not mapped"
         Assert-Result -Name "target mapped" -Condition ($ctx.Handoff.target_phase -eq "verification") -FailureMessage "target_specialist was not mapped"
-        Assert-Result -Name "ceiling mapped" -Condition ($ctx.Ceiling -eq 24) -FailureMessage "budget ceiling was not derived"
+        Assert-Result -Name "ceiling mapped" -Condition ($ctx.Ceiling -eq 28) -FailureMessage "budget ceiling was not derived"
     }
 
     $results += Run-Test -Name "Read-FactoryHandoffContext maps extended budget ceiling" -Body {
@@ -168,7 +168,7 @@ budget_tier: medium
 
         Read-FactoryHandoffContext -Context $ctx
 
-        Assert-Result -Name "extended ceiling" -Condition ($ctx.Ceiling -eq 32) -FailureMessage "extended budget ceiling was not 32"
+        Assert-Result -Name "extended ceiling" -Condition ($ctx.Ceiling -eq 40) -FailureMessage "extended budget ceiling was not 40"
         Assert-Result -Name "no invalid tier" -Condition ([string]::IsNullOrWhiteSpace($ctx.InvalidBudgetTier)) -FailureMessage "extended was marked invalid"
     }
 
@@ -332,6 +332,111 @@ exit 0
         $sorted = Sort-HandoffFiles -Files $files
 
         Assert-Result -Name "D30 Winner is path1" -Condition ($sorted[0].FullName -eq $path1) -FailureMessage ("Expected path1 to be sorted first, got " + $sorted[0].Name)
+    }
+
+    $results += Run-Test -Name "Handoff preflight stale check only warns on prior cycle handoffs" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "stale-handoff-suppress") -TaskId "F-905"
+        $ctx.Init = $true
+        $ctx.Quiet = $false
+
+        # Write first handoff for this cycle
+        $handoffPath1 = Join-Path $ctx.HandoffDir "F-905-20260526T120000Z.json"
+        Write-TestHandoff -Path $handoffPath1 -Values @{
+            task_id = "F-905"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "low"
+            reason = "test1"
+            artifacts = @()
+            file_affinity = @()
+            prompt_version = "1.0.0"
+            session_cycle_id = "cycle-current"
+        }
+        $ctx.LatestHandoff = Get-Item $handoffPath1
+        $ctx.Handoff = Get-Content -LiteralPath $handoffPath1 -Raw -Encoding UTF8 | ConvertFrom-Json
+
+        # Write second handoff for the same cycle
+        $handoffPath2 = Join-Path $ctx.HandoffDir "F-905-20260526T130000Z.json"
+        Write-TestHandoff -Path $handoffPath2 -Values @{
+            task_id = "F-905"
+            source_phase = "implementation"
+            target_phase = "verification"
+            cumulative_handoff_count = 2
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "low"
+            reason = "test2"
+            artifacts = @()
+            file_affinity = @()
+            prompt_version = "1.0.0"
+            session_cycle_id = "cycle-current"
+        }
+
+        # Mock validate-handoff.ps1
+        @'
+param([string]$HandoffFile, [string]$SchemaPath)
+Write-Output '{"ok":true}'
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $ctx.FrameworkPowerShell "validate-handoff.ps1") -Encoding UTF8
+
+        # Shadow Write-Quiet to collect warnings
+        $script:warnMessages = @()
+        function Write-Quiet {
+            param($Message, $ForegroundColor)
+            $script:warnMessages += $Message
+        }
+
+        # Run with current cycle ID matching handoffs - should NOT warn
+        $previousCycleId = $env:FACTORY_CYCLE_ID
+        $env:FACTORY_CYCLE_ID = "cycle-current"
+        
+        try {
+            $ErrorActionPreference = "Continue"
+            Invoke-HandoffPreflightValidation -Context $ctx
+        } finally {
+            $env:FACTORY_CYCLE_ID = $previousCycleId
+        }
+
+        $warnText = $script:warnMessages -join "`n"
+        Assert-Result -Name "no warn on current cycle handoffs" -Condition ($warnText -notmatch "Found \d+ previous handoff files.*may be stale") -FailureMessage "warned about current cycle handoffs. Warnings:`n$warnText"
+
+        # Now write a handoff with a different (stale) cycle ID
+        $handoffPathStale = Join-Path $ctx.HandoffDir "F-905-20260526T110000Z.json"
+        Write-TestHandoff -Path $handoffPathStale -Values @{
+            task_id = "F-905"
+            source_phase = "grooming"
+            target_phase = "implementation"
+            cumulative_handoff_count = 1
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "low"
+            reason = "teststale"
+            artifacts = @()
+            file_affinity = @()
+            prompt_version = "1.0.0"
+            session_cycle_id = "cycle-old"
+        }
+
+        # Reset warning collection
+        $script:warnMessages = @()
+
+        # Run again with current cycle ID - should warn about the stale cycle handoff
+        $env:FACTORY_CYCLE_ID = "cycle-current"
+        try {
+            $ErrorActionPreference = "Continue"
+            Invoke-HandoffPreflightValidation -Context $ctx
+        } finally {
+            $env:FACTORY_CYCLE_ID = $previousCycleId
+        }
+
+        $warnTextStale = $script:warnMessages -join "`n"
+        Assert-Result -Name "warn on old cycle handoffs" -Condition ($warnTextStale -match "Found 1 previous handoff files for F-905 that may be stale") -FailureMessage "did not warn about stale cycle handoff. Warnings:`n$warnTextStale"
     }
 
 } finally {

@@ -271,6 +271,20 @@ try {
     Push-Location $gitProbe
     try { git init -b main --quiet 2>$null; if ($LASTEXITCODE -ne 0) { $gitSupportsInitB = $false } } finally { Pop-Location }
 
+    $results += Run-Test -Name "Doctor reports Codex CLI as advisory, never blocks READY" -Body {
+        $projectRoot = Join-Path $tempRoot "codex-probe-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+        }
+        $output = $res.Output -join "`n"
+
+        Assert-Result -Name "codex.cli check present" -Condition ($output -match "\[codex\.cli\]") -FailureMessage "doctor did not emit a codex.cli check. Output:`n$output"
+        Assert-Result -Name "codex.cli is advisory only" -Condition (-not ($output -match "\[codex\.cli\].*severity: critical")) -FailureMessage "codex.cli must never be critical. Output:`n$output"
+        Assert-Result -Name "codex absence/presence does not block" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "codex probe must not flip readiness. Output:`n$output"
+    }
+
     $results += Run-Test -Name "Doctor checks for bundle staleness and warns when lagging HEAD" -Body {
         if (-not $gitSupportsInitB) { Write-Host "SKIPPED: git init -b requires git >= 2.28" -ForegroundColor Yellow; return }
         $projectRoot = Join-Path $tempRoot "stale-project"

@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "findings"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["APPROVED", "CHANGES_REQUESTED"],
+      "description": "The review outcome. APPROVED only when every acceptance criterion and test-plan item is satisfied."
+    },
+    "summary": {
+      "type": "string",
+      "description": "One- to three-sentence rationale for the verdict."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Specific issues. Empty when APPROVED with no remarks.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "location", "detail"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["BLOCKER", "MAJOR", "MINOR", "NOTE"]
+          },
+          "location": {
+            "type": "string",
+            "description": "file:line or a short scope description."
+          },
+          "detail": {
+            "type": "string",
+            "description": "What is wrong and what the fix should establish."
+          }
+        }
+      }
+    }
+  }
+}

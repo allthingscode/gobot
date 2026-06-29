@@ -7,7 +7,7 @@ Implementation: {task_id}
 ## POLICY ENFORCEMENT (Mandatory)
 See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 - **Successor**: Only `verification`.
-- **Budget**: {handoff_count}/{budget_remaining} handoffs used.
+- **Budget**: {handoff_count}/{budget_ceiling} handoffs used ({budget_remaining} remaining).
 - **Isolation**: Edits ONLY in `{worktree}`.
 - **No Push**: Commit in worktree, NO `git push`.
 ---

@@ -108,7 +108,7 @@ if ($content -match '(?m)^manifest_files:[ \t]*(.*)$') {
 }
 
 if ($content -match '(?m)^review:\s*$') {
-    foreach ($field in @("diff_tool", "editor")) {
+    foreach ($field in @("diff_tool", "editor", "auto_push")) {
         if ($content -match ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s*")) {
             Test-Pattern -Name ("review." + $field) -Pattern ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s+.+$") -Content $content
         }

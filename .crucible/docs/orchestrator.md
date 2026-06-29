@@ -24,9 +24,9 @@ Before taking any action:
 2. Read **`{{crucible_root}}/docs/policy.md`** — the canonical authority on gates, circuit breakers, specialist routing, and budget enforcement. You are the primary enforcer of this document.
 3. Read **`.crucible/sops/orchestrator.md`** — your full workflow, gate protocols, and failure taxonomy.
 4. Read the tool-specific doc for your environment:
-   - Claude Code: `.crucible/CLAUDE_ORCHESTRATOR.md`
-   - Gemini / Antigravity CLI: `.crucible/GEMINI_ORCHESTRATOR.md`
-   - Codex CLI: `.crucible/CODEX_ORCHESTRATOR.md`
+   - Claude Code: `{{crucible_root}}/docs/orchestrators/claude.md`
+   - Antigravity CLI: `{{crucible_root}}/docs/orchestrators/antigravity.md`
+   - Codex CLI: `{{crucible_root}}/docs/orchestrators/codex.md`
 
 You cannot enforce policies you have not read. Step 0 is mandatory — every subsequent step depends on the resolved `crucible_root`. Steps 1 and 2 are not optional either.
 

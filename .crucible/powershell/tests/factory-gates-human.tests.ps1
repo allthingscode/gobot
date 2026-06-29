@@ -120,6 +120,33 @@ try {
         $gateDir = Join-Path $sessionDir "global/gate_decisions"
         New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
 
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $configYaml = @"
+project:
+  name: Fake Project
+  description: Fake description
+  default_branch: master
+roles:
+  researcher:  { model_tier: fast }
+  groomer:     { model_tier: fast }
+  architect:   { model_tier: high-capability }
+  reviewer:    { model_tier: high-capability }
+  operator:    { model_tier: fast }
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+review:
+  auto_push: true
+"@
+        $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
         $scriptPath = Join-Path $caseRoot "run-d22.ps1"
         $libPath = $FACTORY_LIB.Replace("'", "''")
 
@@ -248,6 +275,32 @@ try {
 
         # Setup context structure
         $sessionDir = Join-Path $localRepo ".crucible/session"
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $configYaml = @"
+project:
+  name: Fake
+  description: Fake
+  default_branch: master
+roles:
+  researcher:  { model_tier: fast }
+  groomer:     { model_tier: fast }
+  architect:   { model_tier: high-capability }
+  reviewer:    { model_tier: high-capability }
+  operator:    { model_tier: fast }
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+review:
+  auto_push: true
+"@
+        $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
         $gateDir = Join-Path $sessionDir "global/gate_decisions"
         $pendingFile = Join-Path $sessionDir "F-100/gate_pending.txt"
         $legacyPendingFile = Join-Path $gateDir "gate_decision_F-100_pending.json"
@@ -1241,6 +1294,248 @@ try {
         $rangeFiles = @(git -C $caseRoot diff --name-only "$($range.BaseSha)..$($range.BranchSha)")
         Assert-Result -Name "review-range: diff lists the task file" -Condition ($rangeFiles -contains "feature.md") -FailureMessage "expected feature.md in range diff, got: $($rangeFiles -join ', ')"
         Assert-Result -Name "review-range: diff excludes unrelated master-only file" -Condition ($rangeFiles -notcontains "other.md") -FailureMessage "range diff leaked unrelated master commit (other.md)"
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate: auto_push config controls git push" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "auto-push-testing"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo remote add origin $originRepo
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $null = git -C $localRepo push -u origin master 2>&1
+
+        # Cut task branch and commit
+        git -C $localRepo checkout -b task/F-777 2>$null | Out-Null
+        "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        git -C $localRepo add feature.md 2>$null | Out-Null
+        git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+        $featureSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        # Checkout master and merge locally
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-777 2>$null | Out-Null
+
+        # Setup context structure
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-autopush.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        # Test Case 1: auto_push = false (should merge locally but not push, and print instructions)
+        $configYaml = @"
+project:
+  name: Fake
+  description: Fake
+  default_branch: master
+roles:
+  researcher:  { model_tier: fast }
+  groomer:     { model_tier: fast }
+  architect:   { model_tier: high-capability }
+  reviewer:    { model_tier: high-capability }
+  operator:    { model_tier: fast }
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+review:
+  auto_push: false
+"@
+        $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'work looks beautiful'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-777'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_ACCEPT"
+} catch {
+    Write-Host "FAILED: `$_"
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCode = $LASTEXITCODE
+        $output = $outputLines -join "`n"
+
+        Assert-Result -Name "auto_push=false: human gate accepted exits successfully" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
+        Assert-Result -Name "auto_push=false: prints refusal note" -Condition ($output -match "Refusing to push; merge remains LOCAL only") -FailureMessage "expected refusal note in output"
+        Assert-Result -Name "auto_push=false: prints push command" -Condition ($output -match "git push origin master") -FailureMessage "expected push command in output"
+
+        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "auto_push=false: local master remains ahead of origin" -Condition ($behindCommits.Count -gt 0) -FailureMessage "expected origin/master to be behind master"
+
+        # Test Case 2: auto_push = true (should merge and push)
+        $configYamlTrue = $configYaml -replace "auto_push: false", "auto_push: true"
+        $configYamlTrue | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        # Restore branch and merge state for re-test
+        git -C $localRepo checkout master 2>$null | Out-Null
+        git -C $localRepo reset --hard HEAD~1 2>$null | Out-Null
+        git -C $originRepo update-ref refs/heads/master HEAD~1 2>$null | Out-Null
+        git -C $localRepo fetch origin master 2>$null | Out-Null
+        git -C $localRepo branch task/F-777 $featureSha 2>$null | Out-Null
+        git -C $localRepo merge --no-edit task/F-777 2>$null | Out-Null
+
+        $outputLinesTrue = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCodeTrue = $LASTEXITCODE
+        $outputTrue = $outputLinesTrue -join "`n"
+
+        Assert-Result -Name "auto_push=true: human gate accepted exits successfully" -Condition ($exitCodeTrue -eq 0) -FailureMessage "expected exit code 0, got $exitCodeTrue"
+        Assert-Result -Name "auto_push=true: does not print refusal note" -Condition ($outputTrue -notmatch "Refusing to push; merge remains LOCAL only") -FailureMessage "should not have printed refusal note"
+
+        $behindCommitsTrue = @(git -C $localRepo log origin/master..master --oneline)
+        Assert-Result -Name "auto_push=true: git push succeeded" -Condition ($behindCommitsTrue.Count -eq 0) -FailureMessage "expected origin/master to be even with master"
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate accept prunes finalized task from session_state.json" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "accept-prune-state"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        $globalDir = Join-Path $sessionDir "global"
+        New-Item -ItemType Directory -Path $globalDir -Force | Out-Null
+
+        $configYaml = @"
+project:
+  name: Fake
+  description: Fake
+  default_branch: master
+roles:
+  researcher:  { model_tier: fast }
+  groomer:     { model_tier: fast }
+  architect:   { model_tier: high-capability }
+  reviewer:    { model_tier: high-capability }
+  operator:    { model_tier: fast }
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+review:
+  auto_push: false
+"@
+        $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        # Seed session_state.json with the finalized task plus a sibling that must survive.
+        $stateFile = Join-Path $globalDir "session_state.json"
+        $stateJson = @"
+{
+  "version": "1.0",
+  "tasks": {
+    "F-778": { "phases": { "implementation": { "status": "complete", "timestamp": "2026-06-29T00:00:00Z" } } },
+    "F-999": { "phases": { "grooming": { "status": "complete", "timestamp": "2026-06-29T00:00:00Z" } } }
+  }
+}
+"@
+        $stateJson | Set-Content -LiteralPath $stateFile -Encoding UTF8
+
+        $scriptPath = Join-Path $caseRoot "run-prune.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $fwPwsh = (Split-Path -Parent $FACTORY_LIB).Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    FrameworkPowerShell = '$fwPwsh'
+    GateOutcome = 'accepted'
+    GateReason = 'work looks complete and correct'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-778'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_ACCEPT"
+} catch {
+    Write-Host "FAILED: `$_"
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $exitCode = $LASTEXITCODE
+        $output = $outputLines -join "`n"
+
+        Assert-Result -Name "accept-prune: human gate accepted exits successfully" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode. Output: $output"
+
+        $stateAfter = (Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8) | ConvertFrom-Json
+        $hasGhost = $stateAfter.tasks.PSObject.Properties["F-778"]
+        Assert-Result -Name "accept-prune: finalized task removed from session_state" -Condition ($null -eq $hasGhost) -FailureMessage "expected F-778 pruned from session_state.json; output: $output"
+
+        $siblingKept = $stateAfter.tasks.PSObject.Properties["F-999"]
+        Assert-Result -Name "accept-prune: other tasks preserved" -Condition ($null -ne $siblingKept) -FailureMessage "expected F-999 to remain in session_state.json"
     }
 
 } finally {

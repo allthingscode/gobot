@@ -60,7 +60,7 @@ When starting a task from the backlog using `factory.ps1 -Init -TaskId {id}`, if
 
 These are invoked **by the agent**, not by you. Listed here for reference only.
 
-*   **`"Orchestrate the next task in the backlog."`**: High-level directive to drive a task through the pipeline using isolated sub-agents. All orchestrators share the same meta-role definition (`.crucible/docs/orchestrator.md`) and SOP (`.crucible/sops/orchestrator.md`). Tool-specific mechanics: Claude Code → `.crucible/CLAUDE_ORCHESTRATOR.md`; Gemini/Antigravity CLI → `.crucible/GEMINI_ORCHESTRATOR.md`; Codex CLI → `.crucible/CODEX_ORCHESTRATOR.md`.
+*   **`"Orchestrate the next task in the backlog."`**: High-level directive to drive a task through the pipeline using isolated sub-agents. All orchestrators share the same meta-role definition (`docs/orchestrator.md`) and SOP (`sops/orchestrator.md`). Tool-specific mechanics: Claude Code → `docs/orchestrators/claude.md`; Antigravity CLI → `docs/orchestrators/antigravity.md`; Codex CLI → `docs/orchestrators/codex.md`.
 *   **`factory.ps1 -Init -TaskId {task_id}`**: Dual-purpose — at session START it validates the incoming handoff and scaffolds the workspace; at session END it routes the pipeline to the next specialist. Run by agent via Bash after every handoff.
 *   **`factory.ps1 -Init -TaskId {task_id} -AutoAdvance`**: Orchestrator mode — emits `[AUTO-ADVANCE]` for non-gate transitions so the orchestrator chains specialists without waiting for human confirmation. Gate transitions (Researcher→Groomer, Operator→*) always pause.
 *   **`factory.ps1 -Health`**: System health check — orphaned worktrees, stale locks, blocked tasks, oversized scratchpads. The only command that does not require `-TaskId`.

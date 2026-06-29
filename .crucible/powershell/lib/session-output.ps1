@@ -213,6 +213,9 @@ function New-FactoryPromptText {
         } else { "unknown" }
         $promptText = $promptText.Replace("{budget_remaining}", $budgetRemaining)
 
+        $budgetCeiling = if ($ceiling -gt 0) { [string]$ceiling } else { "unknown" }
+        $promptText = $promptText.Replace("{budget_ceiling}", $budgetCeiling)
+
         $contextBlock = "## Handoff Context`n" +
             "- **Reason**: " + $handoff.reason + "`n" +
             "- **Artifacts**: " + $artifactsList + "`n" +

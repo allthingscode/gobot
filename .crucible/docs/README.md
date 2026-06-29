@@ -41,7 +41,7 @@ Related folders (each has its own index): per-phase SOPs and runbooks in
 | [git-policy.md](git-policy.md) | What to commit versus ignore in an adopting project. |
 | [implementation-phase-reference.md](implementation-phase-reference.md) | Human-readable reference for the implementation phase workflow. |
 | [orchestrator.md](orchestrator.md) | The Orchestrator meta-role: mandates and gate enforcement (tool-agnostic). |
-| [orchestrators/](orchestrators/) | CLI-specific orchestrator mechanics: [claude](orchestrators/claude.md), [codex](orchestrators/codex.md), [gemini](orchestrators/gemini.md). |
+| [orchestrators/](orchestrators/) | CLI-specific orchestrator mechanics: [claude](orchestrators/claude.md), [codex](orchestrators/codex.md), [antigravity](orchestrators/antigravity.md). |
 
 ## Operations and runbooks
 

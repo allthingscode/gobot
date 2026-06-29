@@ -161,7 +161,12 @@ try {
 
     # Update global fields if formalized schema is detected
     if ($state.PSObject.Properties["version"]) {
-        $state.timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $nowStamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        if ($state.PSObject.Properties["timestamp"]) {
+            $state.timestamp = $nowStamp
+        } else {
+            $state | Add-Member -MemberType NoteProperty -Name "timestamp" -Value $nowStamp
+        }
     }
 
     # Convert to JSON (PowerShell's default Pretty Print)

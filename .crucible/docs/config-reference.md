@@ -53,6 +53,11 @@ project_mandates:                         # required; at least one rule
 file_affinity_examples:                   # optional; illustrative only
   - src/api/
   - src/services/
+
+review:                                   # optional
+  diff_tool: zed                          # optional
+  editor: code                            # optional
+  auto_push: false                        # optional; defaults to false
 ```
 
 ---
@@ -162,6 +167,7 @@ models:
 - **Resolution order**: a value in this block wins; if absent, the framework default map (same values shown above) applies; an unknown target/tier degrades to the tier token rather than throwing. The block is optional — omit it and the defaults apply.
 - **Quoting**: quote any value containing spaces (e.g. the Antigravity labels).
 - **Codex auth note**: `-codex`-suffixed slugs (`gpt-5.x-codex`) require an API-key account. ChatGPT-login Codex accepts the plain `gpt-5.x` slugs; reasoning effort is set separately in `~/.codex/config.toml`, not in the model slug.
+- **Dispatching Codex as a specialist**: when a phase is run by Codex (not Claude), the orchestrator launches it with `powershell/launch-codex-specialist.ps1`, which wraps `codex exec -s danger-full-access` and reports an explicit `STATUS=SUCCESS`/`STATUS=LAUNCH_FAILED` (so a broken runtime is never mistaken for a verdict). Run `launch-codex-specialist.ps1 -Preflight -Model <codex-model>` first. See `docs/orchestrators/CLAUDE.md` and `docs/orchestrators/codex.md`.
 
 ---
 
@@ -283,6 +289,18 @@ file_affinity_examples:
 ```
 
 The Groomer declares actual `file_affinity` per task in the spec frontmatter. This field just provides examples to make those declarations consistent.
+
+---
+
+### `review` (optional)
+
+Settings related to human review workflows.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `diff_tool` | string | (empty) | Visual diff tool command prefix (e.g. `zed`, `code`). |
+| `editor` | string | (empty) | Code editor command prefix for opening worktrees. |
+| `auto_push` | boolean | `false` | Whether to automatically push merged changes to `origin` remote upon acceptance. |
 
 ---
 

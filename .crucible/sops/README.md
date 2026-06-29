@@ -38,7 +38,7 @@ The Orchestrator is the meta-role that drives the pipeline (not a phase speciali
 |---|---|
 | [orchestrator.md](orchestrator.md) | The procedure: drive the pipeline, spawn specialists, honor gates. |
 | [../docs/orchestrator.md](../docs/orchestrator.md) | The persona/identity (who the Orchestrator is). |
-| [../docs/orchestrators/](../docs/orchestrators/) | CLI-specific mechanics (Claude Code, Codex, Gemini). |
+| [../docs/orchestrators/](../docs/orchestrators/) | CLI-specific mechanics (Claude Code, Codex, Antigravity). |
 
 ## Human-initiated runbooks
 

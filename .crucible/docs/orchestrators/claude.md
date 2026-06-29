@@ -47,6 +47,50 @@ Report the factory output verbatim. Stop after reporting. Do not spawn successor
 })
 ```
 
+### Dispatching a Codex Specialist (non-Claude)
+
+Crucible is a multi-brand factory: a phase can be run by a Codex specialist instead of a Claude
+sub-agent. When the dispatch target is Codex, do **not** use the `Agent` tool and do **not** use the
+codex plugin's `codex-rescue` / `task` runtime (it hardcodes a read-only sandbox and, on Windows,
+fails through a missing sandbox helper — producing a false `CHANGES_REQUESTED`). Use the
+Crucible-blessed launcher, which wraps `codex exec -s danger-full-access` and reports an explicit
+launch status.
+
+1. Compute the Codex model. Run `factory.ps1 -Init` with `-Target codex` so the `[RECOMMENDED MODEL]`
+   line resolves to the configured Codex model (e.g. `gpt-5.5`):
+
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -Target codex -Quiet
+   ```
+
+2. **Preflight once** (cheap runtime smoke). This catches a broken Codex runtime/auth BEFORE the phase
+   runs, so a dead runtime can never masquerade as a verdict:
+
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" -Preflight -Model {model}
+   ```
+
+   Proceed only on `[CODEX PREFLIGHT] PASS`. On FAIL, fix the runtime (`codex login`, sandbox helper)
+   or fall back to a Claude specialist — do not dispatch.
+
+3. Launch the specialist for the phase:
+
+   ```bash
+   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
+     -TaskId {task_id} -Phase {phase} -Model {model}
+   ```
+
+   Add `-WorkingDir {worktree}` for implementation/verification phases that operate in a task worktree,
+   and `-ReviewSchema` for a verification phase to enforce a structured review verdict.
+
+4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=SUCCESS` or
+   `STATUS=LAUNCH_FAILED`. A verdict is only valid when `STATUS=SUCCESS` **and** the handoff +
+   `### CHECKPOINT` checks below pass. `STATUS=LAUNCH_FAILED` is an infrastructure failure — re-run the
+   preflight, fix the runtime, and re-dispatch; never record it as `CHANGES_REQUESTED`.
+
+Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, `factory.ps1 -Init`) is
+identical to a Claude specialist — see *After Each Sub-Agent Returns*.
+
 ### Researcher Dispatch
 
 Use `Explore` (not `general-purpose`) to enforce read-only tool access and the trust boundary at the toolset level.

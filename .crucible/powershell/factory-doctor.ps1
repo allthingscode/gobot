@@ -415,12 +415,27 @@ if ($frameworkMode) {
     }
 }
 
+# Check (always, advisory): Codex specialist runtime. Codex is an opt-in multi-brand
+# specialist target; this never blocks readiness. A live exec smoke is intentionally NOT
+# run here (cost/network) - the deep runtime check is launch-codex-specialist.ps1 -Preflight,
+# which catches the broken-sandbox-helper failure mode before a phase runs.
+$codexCmd = Get-Command codex -ErrorAction SilentlyContinue
+if (-not $codexCmd) {
+    Add-DoctorResult -Check "codex.cli" -Status "warn" -Severity "advisory" `
+        -Details "Codex CLI (codex) is not installed; only required if you dispatch Codex specialists." `
+        -Remediation "Install the Codex CLI and run 'codex login' only if you use Codex as a pipeline specialist."
+} else {
+    Add-DoctorResult -Check "codex.cli" -Status "pass" -Severity "advisory" `
+        -Details ("Found codex at " + $codexCmd.Source + "; verify the runtime with 'launch-codex-specialist.ps1 -Preflight -Model <codex-model>' before dispatching.")
+}
+
 # Check (always): required factory scripts present in the bundle.
 $requiredScripts = @(
     "factory.ps1",
     "validate-handoff.ps1",
     "validate-backlog.ps1",
-    "update-session-state.ps1"
+    "update-session-state.ps1",
+    "launch-codex-specialist.ps1"
 )
 $missingScripts = @()
 foreach ($scriptName in $requiredScripts) {

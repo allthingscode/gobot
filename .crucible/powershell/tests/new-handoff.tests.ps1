@@ -779,6 +779,38 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "UTF-8 BOM hygiene validation" -Script {
+        $taskId = New-TestTaskId "BOM-CHECK"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "BOM check test"
+            PromptVersion = "groomer_prompt-v16"
+            Artifacts = @("powershell/factory.ps1")
+            FileAffinity = @("powershell/")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        
+        # Read first 3 bytes of the file
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            throw "Handoff file contains UTF-8 BOM (EF BB BF)!"
+        }
+        
+        # Assert it still parses as JSON
+        $content = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
+        $obj = $content | ConvertFrom-Json
+        if ($obj.task_id -ne $taskId) {
+            throw "Handoff JSON failed to parse properly or has incorrect task_id"
+        }
+    }
+
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
 } finally {
     Set-Location -LiteralPath $origLocation

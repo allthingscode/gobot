@@ -20,7 +20,7 @@
 | Latest handoff | `.crucible/session/handoffs/{task_id}-*.json` (newest timestamp) |
 | Gate signal (if present) | `.crucible/session/{task_id}/gate_pending.txt` |
 | Specialist prompt | `.crucible/session/{task_id}/{role}/prompt.md` |
-| Tool-specific mechanics | `.crucible/CLAUDE_ORCHESTRATOR.md` / `GEMINI_ORCHESTRATOR.md` / `CODEX_ORCHESTRATOR.md` |
+| Tool-specific mechanics | `docs/orchestrators/claude.md` / `antigravity.md` / `codex.md` |
 
 ---
 
@@ -30,7 +30,7 @@
 0b. **Resolve `backlog_dir`**. Read `paths.backlog` from `.crucible/config.yaml`. If it is not configured, default to `.crucible/backlog`. Every `{{backlog_dir}}` placeholder in every persona, SOP, and prompt you subsequently load — substitutes to this resolved value.
 1. Read **`{{crucible_root}}/docs/operating-manual.md`** — the operating rules of the pipeline you are driving.
 2. Read **`{{crucible_root}}/docs/policy.md`** — the canonical authority you enforce. Know it before you touch anything.
-3. Read the tool-specific orchestrator doc for your environment (Claude / Gemini / Codex).
+3. Read the tool-specific orchestrator doc for your environment (Claude / Antigravity / Codex).
 4. If task ID is known: run `factory.ps1 -Init -TaskId {task_id} -Quiet` (resolve the script's path as `{{crucible_root}}/powershell/factory.ps1`). Read output carefully.
 5. If bootstrap (no task ID): spawn a Groomer sub-agent with the bootstrap prompt (see tool-specific doc).
 6. Check for `gate_pending.txt` — if present, go directly to Gate Protocol before anything else.
@@ -119,10 +119,20 @@ Use the sub-agent invocation mechanic for your environment (see tool-specific do
    factory output. Do not spawn successor agents.
    ```
 
+**Non-Claude (multi-brand) specialists.** A phase may be run by a different agent brand (e.g. Codex)
+via a Crucible launcher rather than a native sub-agent. The launcher reports an explicit
+`STATUS=SUCCESS` / `STATUS=LAUNCH_FAILED`. See the tool-specific doc for the launch command and
+preflight. The verdict-not-label rule in Step 5 applies.
+
 ### Step 5 — Verify specialist output and track budget
 
 After the sub-agent returns:
 
+0. **Verdict, not label (multi-brand specialists).** If the phase was run by a non-Claude launcher,
+   the result is trustworthy only when the launcher reported `STATUS=SUCCESS` **and** a handoff exists.
+   A `STATUS=LAUNCH_FAILED` is an infrastructure failure (broken runtime/auth) — treat it as a Failure
+   Protocol case (fix runtime, re-preflight, re-dispatch, or fall back to a Claude specialist). **Never**
+   record a launch failure as a review `CHANGES_REQUESTED` or any other specialist verdict.
 1. Read `.crucible/session/{task_id}/{role}/task.md`
 2. Confirm `### CHECKPOINT` markers exist (required for non-trivial work)
 3. Confirm no required `- [ ]` items remain unchecked

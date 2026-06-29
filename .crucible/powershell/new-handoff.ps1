@@ -430,7 +430,7 @@ $tempOutputPath = $resolvedOutputPath + ".tmp"
 
 try {
     $json = $payload | ConvertTo-Json -Depth 12
-    Set-Content -LiteralPath $tempOutputPath -Value $json -Encoding UTF8
+    [System.IO.File]::WriteAllText($tempOutputPath, $json, (New-Object System.Text.UTF8Encoding $false))
 
     $validatorPath = Join-Path $PSScriptRoot "validate-handoff.ps1"
     if (-not (Test-Path -LiteralPath $validatorPath)) {
