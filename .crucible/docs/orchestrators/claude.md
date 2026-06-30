@@ -77,11 +77,27 @@ launch status.
 
    ```bash
    powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
-     -TaskId {task_id} -Phase {phase} -Model {model}
+     -TaskId {task_id} -Phase {phase} -Model {model} -Effort {effort}
    ```
 
    Add `-WorkingDir {worktree}` for implementation/verification phases that operate in a task worktree,
    and `-ReviewSchema` for a verification phase to enforce a structured review verdict.
+
+   **Pass the recommended effort.** Alongside `[RECOMMENDED MODEL]`, the factory prints a
+   `[RECOMMENDED EFFORT] <none|minimal|low|medium|high|xhigh>` line for a Codex target (it is the
+   capability tier mapped to a Codex reasoning effort: strong/light -> `high`, default -> `medium`).
+   Pass that value as `-Effort`; the launcher forwards it as `-c model_reasoning_effort`. Effort is a
+   Codex-only lever -- Claude's `Agent` dispatch has no effort knob (its effort is encoded in the model
+   tier), so no effort line is printed for a Claude target.
+
+   **Keep the dispatch prompt a one-line file pointer.** The launcher auto-generates the specialist
+   prompt: a single "read and follow `.crucible/session/{task_id}/{phase}/prompt.md`" instruction plus
+   the standard contract. Put every task-specific instruction — including a human gate decision —
+   *into that phase `prompt.md`* (append a clearly marked section), never into a hand-built
+   `-PromptText`. **Rule: an external specialist ALWAYS gets a handoff/instruction file plus a simple
+   prompt that says to read and follow it.** A multi-line `-PromptText` carrying quotes, percent signs,
+   or newlines is shattered into separate argv tokens by PowerShell native-argument quoting and codex
+   rejects it (`error: unexpected argument ...`) — keep the prompt trivial and the file rich.
 
 4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=SUCCESS` or
    `STATUS=LAUNCH_FAILED`. A verdict is only valid when `STATUS=SUCCESS` **and** the handoff +

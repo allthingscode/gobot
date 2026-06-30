@@ -6,6 +6,7 @@ function Write-NextStep {
         [string]$Specialist,
         [string]$ActionCmd = $null,
         [string]$RecommendedModel = $null,
+        [string]$RecommendedEffort = $null,
         [switch]$ShouldAutoAdvance
     )
     $nsDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
@@ -31,6 +32,9 @@ function Write-NextStep {
         Write-Host $ActionCmd
         if (-not [string]::IsNullOrEmpty($RecommendedModel)) {
             Write-Host ("[RECOMMENDED MODEL] " + $RecommendedModel + " - dispatch the specialist sub-agent with this model.") -ForegroundColor Cyan
+        }
+        if (-not [string]::IsNullOrEmpty($RecommendedEffort)) {
+            Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort (Codex only).") -ForegroundColor Cyan
         }
         Write-Host ""
         Write-Quiet ("[NEXT PIPELINE STEP] Run at session end (also saved to " + $nsFile + "):") -ForegroundColor DarkGray
@@ -643,13 +647,15 @@ function Write-FactoryCiStatusBanner {
     $handoffTier = if ($handoff.PSObject.Properties["budget_tier"]) { [string]$handoff.budget_tier } else { "" }
     $capabilityTier = Get-SpecialistModel -TargetPhase $handoff.target_phase -BudgetTier $handoffTier -DesignRequired $designRequired
     $recommendedModel = Get-ConfiguredModel -Target $Target -Tier $capabilityTier
+    $recommendedEffort = ""
+    if ($Target -eq "codex") { $recommendedEffort = Get-SpecialistEffort -Tier $capabilityTier }
 
     # Gate transitions always require human confirmation regardless of -AutoAdvance.
     # Research Gate is enforced by Researcher SOP; Human Gate fires on all operator handoffs.
     $isGateTransition = (($handoff.source_phase -eq "deployment") -or ($handoff.source_phase -eq "research")) -and -not $isBootstrap
     $shouldAutoAdvance = $AutoAdvance -and -not $isGateTransition
 
-    Write-NextStep -SessionDir $Context.SessionDir -Command $nextFactoryCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -ShouldAutoAdvance:$shouldAutoAdvance
+    Write-NextStep -SessionDir $Context.SessionDir -Command $nextFactoryCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedEffort $recommendedEffort -ShouldAutoAdvance:$shouldAutoAdvance
 
     $Context.ActionCmd = $actionCmd
     $Context.ShouldAutoAdvance = $shouldAutoAdvance

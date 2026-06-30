@@ -120,12 +120,27 @@ $results += Run-Test "Tiers absent from config fall back to the default map" {
     Assert-Result "codex light (not in cfg) -> gpt-5.4" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $cfgRoot) -eq 'gpt-5.4') "expected gpt-5.4"
 }
 
+# --- Stage 1b: capability tier -> Codex reasoning effort ---
+
+$results += Run-Test "Tier -> Codex effort: strong/light high, default medium" {
+    Assert-Result "strong -> high" ((Get-SpecialistEffort -Tier 'strong') -eq 'high') "expected high"
+    Assert-Result "default -> medium" ((Get-SpecialistEffort -Tier 'default') -eq 'medium') "expected medium"
+    Assert-Result "light -> high" ((Get-SpecialistEffort -Tier 'light') -eq 'high') "expected high"
+}
+
+$results += Run-Test "Effort: empty/unknown tier yields empty (nothing emitted)" {
+    Assert-Result "empty tier" ((Get-SpecialistEffort -Tier '') -eq '') "expected empty"
+    Assert-Result "unknown tier" ((Get-SpecialistEffort -Tier 'bogus') -eq '') "expected empty"
+    Assert-Result "case/space-insensitive" ((Get-SpecialistEffort -Tier '  STRONG ') -eq 'high') "expected high"
+}
+
 # --- End-to-end: phase -> tier -> model for a codex pipeline ---
 
-$results += Run-Test "End-to-end: low-tier grooming on codex resolves to gpt-5.5" {
+$results += Run-Test "End-to-end: low-tier grooming on codex resolves to gpt-5.5 + medium effort" {
     $tier = Get-SpecialistModel -TargetPhase 'grooming' -BudgetTier 'low'
     Assert-Result "tier is default" ($tier -eq 'default') "expected default tier"
     Assert-Result "codex default -> gpt-5.5" ((Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot) -eq 'gpt-5.5') "expected gpt-5.5"
+    Assert-Result "codex default -> medium effort" ((Get-SpecialistEffort -Tier $tier) -eq 'medium') "expected medium"
 }
 
 Remove-Item -Recurse -Force -LiteralPath $noCfgRoot -ErrorAction SilentlyContinue

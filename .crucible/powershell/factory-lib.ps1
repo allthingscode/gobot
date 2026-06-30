@@ -67,6 +67,12 @@ $script:TIER_DEFAULT = "default"
 $script:TIER_LIGHT   = "light"
 $script:MODEL_ESCALATION_TIERS = @("high", "extended")
 
+# Codex reasoning effort, keyed by the same abstract tier as the model. Claude's Agent dispatch
+# has no effort knob (effort is encoded in the model tier), so this is consumed only when the
+# dispatch target is codex, via launch-codex-specialist.ps1 -Effort. The light tier carries
+# 'high' deliberately: the cheaper light-tier model is given more reasoning to compensate.
+$script:TIER_EFFORT = @{ strong = "high"; default = "medium"; light = "high" }
+
 function Get-SpecialistModel {
     [CmdletBinding()]
     param(
@@ -88,6 +94,17 @@ function Get-SpecialistModel {
         "done"           { return "" }
         default          { return $script:TIER_DEFAULT }
     }
+}
+
+# Resolve an abstract capability tier (strong/default/light) to a Codex reasoning effort.
+# Returns "" for an empty/unknown tier (e.g. the 'done' phase) so the caller emits nothing.
+function Get-SpecialistEffort {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Tier)
+
+    $t = if ($null -ne $Tier) { $Tier.Trim().ToLowerInvariant() } else { "" }
+    if ($script:TIER_EFFORT.ContainsKey($t)) { return $script:TIER_EFFORT[$t] }
+    return ""
 }
 
 function Write-Quiet {

@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "7df770cf5f37f3ec5e9669b430f60cf2cb7376c2",
+    "source_commit":  "20bcdd8afd8966f2124cd9a61fb636f337b4f808",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -55,8 +55,8 @@
                                                             "base_hash":  "e233713f9c2b9065e24a909c4a94ffb29c674c8d07fea17567e1fba6c0cbcc6f"
                                                         },
                   "docs/orchestrators/claude.md":  {
-                                                       "hash":  "c33404eec3d67253cb293b84c3b5b848959500bbc6361c3cbea3960c9a8f6b41",
-                                                       "base_hash":  "c33404eec3d67253cb293b84c3b5b848959500bbc6361c3cbea3960c9a8f6b41"
+                                                       "hash":  "88e03188e90a954187af993d6f57e894e993d33f51b434e7ad5c072d270707d2",
+                                                       "base_hash":  "88e03188e90a954187af993d6f57e894e993d33f51b434e7ad5c072d270707d2"
                                                    },
                   "docs/orchestrators/codex.md":  {
                                                       "hash":  "291f5871171aa5ee07e8df43253fe0368faaf122622520069602f8af4002a75f",
@@ -151,8 +151,8 @@
                                                         "base_hash":  "7ab30ddda2616f27293dcbd18cb1f5bc6cf46c89368e7b7d6b1a5c08a3f8304c"
                                                     },
                   "powershell/factory-lib.ps1":  {
-                                                     "hash":  "95d5d7e89a709a8a870addcc2a1b77c9d2bdf3da6bc3e562b232ef60e79e59cd",
-                                                     "base_hash":  "95d5d7e89a709a8a870addcc2a1b77c9d2bdf3da6bc3e562b232ef60e79e59cd"
+                                                     "hash":  "5534ad3cf6a2ee38cc22d9a04a030412e708164315842fa22b0b753a987eaabe",
+                                                     "base_hash":  "5534ad3cf6a2ee38cc22d9a04a030412e708164315842fa22b0b753a987eaabe"
                                                  },
                   "powershell/factory-status.ps1":  {
                                                         "hash":  "e7e55e518efc23e9fa69d39b4ccd41e5531cc89a2879ebe495c23f9710fd35aa",
@@ -223,8 +223,8 @@
                                                       "base_hash":  "8aaf1922742ce6c4793d54a16ad2bb7c444abf1080a9b7beb74f6a90314e2602"
                                                   },
                   "powershell/lib/session-output.ps1":  {
-                                                            "hash":  "4b92ee1b28b6cfc89f4f877cf958bb114a7c58d4ed3f3343098d5f8aa1ed7f78",
-                                                            "base_hash":  "4b92ee1b28b6cfc89f4f877cf958bb114a7c58d4ed3f3343098d5f8aa1ed7f78"
+                                                            "hash":  "ab1addf2645e8f9376faadc1aa7d3dbcef5fa0bebd60724eabb85eed4981143a",
+                                                            "base_hash":  "ab1addf2645e8f9376faadc1aa7d3dbcef5fa0bebd60724eabb85eed4981143a"
                                                         },
                   "powershell/lib/task-checklist.ps1":  {
                                                             "hash":  "537502fa3598604943e02dd536c3a08acc347527c46499b28db13b1fe03c877f",
@@ -407,8 +407,8 @@
                                                                              "base_hash":  "8b593ceb86cccc8ed480d391dfc304dda025a152f5dc7429f3899a544cc1f60b"
                                                                          },
                   "powershell/tests/model-selection.tests.ps1":  {
-                                                                     "hash":  "07e2d3721c5c5693f8dc91f5f2e8fd2b42392654372c66b0e7aff1e7eb448868",
-                                                                     "base_hash":  "07e2d3721c5c5693f8dc91f5f2e8fd2b42392654372c66b0e7aff1e7eb448868"
+                                                                     "hash":  "2a90afd1af42e033b808e6a419c7e2eced774acd9900e71e0749cd61906db2ef",
+                                                                     "base_hash":  "2a90afd1af42e033b808e6a419c7e2eced774acd9900e71e0749cd61906db2ef"
                                                                  },
                   "powershell/tests/new-handoff.tests.ps1":  {
                                                                  "hash":  "975aaa8533fcaffed9f9a072419a997b12429329b91d1428aaff1a25785834bd",
