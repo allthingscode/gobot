@@ -274,7 +274,12 @@ if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
 
 # --- Classification: SUCCESS vs LAUNCH_FAILED ---
-$infra = Test-InfraFailure -Text $result.Output
+# A codex exec run that exits 0 AND captures a final message succeeded: codex's own auth/runtime
+# failures exit non-zero and write no last-message. The infra-marker scan is therefore consulted
+# only to ENRICH the reason on an already-failed run (exit != 0), never as an independent trigger
+# over a 0-exit run. Broad markers ("unauthorized", "command not found", "program not found")
+# occur routinely in the agent's own captured tool output (test names, log lines, source it read)
+# and scanning a full transcript would false-positive a successful phase as LAUNCH_FAILED.
 $lastMsg = ""
 if (Test-Path -LiteralPath $lastMsgPath) {
     $lastMsg = (Get-Content -LiteralPath $lastMsgPath -Raw -ErrorAction SilentlyContinue)
@@ -284,10 +289,13 @@ if (Test-Path -LiteralPath $lastMsgPath) {
 $failReason = ""
 if ($result.ExitCode -eq 127) {
     $failReason = "codex not found on PATH"
-} elseif ($null -ne $infra) {
-    $failReason = "infrastructure failure (marker: $infra)"
 } elseif ($result.ExitCode -ne 0) {
-    $failReason = "non-zero exit code ($($result.ExitCode))"
+    $marker = Test-InfraFailure -Text $result.Output
+    if ($null -ne $marker) {
+        $failReason = "infrastructure failure (exit $($result.ExitCode), marker: $marker)"
+    } else {
+        $failReason = "non-zero exit code ($($result.ExitCode))"
+    }
 } elseif ([string]::IsNullOrWhiteSpace($lastMsg)) {
     $failReason = "no final message captured (--output-last-message empty)"
 } elseif ($useSchema) {

@@ -36,6 +36,16 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, "this is not a verdict", $enc) }
         exit 0
     }
+    "markerok" {
+        # Exit 0 with a valid final message but emit infra-marker words in the transcript,
+        # mimicking real agent tool output (a Go test name, a 'dashboard: unauthorized' log
+        # line). Must classify SUCCESS: the marker scan must not fire on a 0-exit run.
+        Write-Output "test PASS: Is transient error unauthorized"
+        Write-Output "dashboard: unauthorized access attempt logged; command not found in old path"
+        Write-Output "fake codex transcript CRUCIBLE_OK"
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
+        exit 0
+    }
     "stdinprobe" {
         # Mimic real codex reading stdin: report whether stdin reaches EOF promptly.
         # If the launcher closes codex stdin (the fix), EOF is immediate -> STDIN_EOF.
@@ -210,6 +220,16 @@ try {
         Assert-Result -Name "infrastructure reason" -Condition ($res.Output -match "infrastructure failure") -FailureMessage "expected infrastructure-failure reason. Output:`n$($res.Output)"
         Assert-Result -Name "not a verdict" -Condition ($res.Output -match "NOT a review verdict") -FailureMessage "expected explicit not-a-verdict guard. Output:`n$($res.Output)"
         Assert-Result -Name "exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode)."
+    }
+
+    $results += Run-Test -Name "Phase launch SUCCESS despite infra-marker words in 0-exit agent output" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-markerok"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "markerok" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-992", "-Phase", "research", "-Model", "gpt-5.5",
+            "-PromptText", "RESEARCH", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "marker words do not fail a 0-exit run" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "0-exit run with marker words in transcript must be SUCCESS. Output:`n$($res.Output)"
+        Assert-Result -Name "markerok exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
     }
 
     $results += Run-Test -Name "Phase launch LAUNCH_FAILED when no final message captured" -Body {
