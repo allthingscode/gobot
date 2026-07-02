@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "20bcdd8afd8966f2124cd9a61fb636f337b4f808",
+    "source_commit":  "79ce14c5f8be32821ee00d186cae39a37217a16c",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -55,8 +55,8 @@
                                                             "base_hash":  "e233713f9c2b9065e24a909c4a94ffb29c674c8d07fea17567e1fba6c0cbcc6f"
                                                         },
                   "docs/orchestrators/claude.md":  {
-                                                       "hash":  "88e03188e90a954187af993d6f57e894e993d33f51b434e7ad5c072d270707d2",
-                                                       "base_hash":  "88e03188e90a954187af993d6f57e894e993d33f51b434e7ad5c072d270707d2"
+                                                       "hash":  "e4dd855940bed45fde180c0dc41264391b14465973ea297e6eaa19d0c8e7fd89",
+                                                       "base_hash":  "e4dd855940bed45fde180c0dc41264391b14465973ea297e6eaa19d0c8e7fd89"
                                                    },
                   "docs/orchestrators/codex.md":  {
                                                       "hash":  "291f5871171aa5ee07e8df43253fe0368faaf122622520069602f8af4002a75f",

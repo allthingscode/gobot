@@ -14,6 +14,10 @@ When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in 
 
 Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are dispatched as `general-purpose` sub-agents. The Researcher uses `Explore` (read-only search tools, enforces the trust boundary at the toolset level). Sub-agents share the same working directory and git state — they are not sandboxed. Do not pass orchestrator session history to sub-agents.
 
+### Default Specialist Target: Codex
+
+In this operating configuration, **Claude is the orchestrator and Codex runs all specialist work** (Groomer, Architect, Reviewer, Operator, Researcher). Default every dispatch to a Codex specialist via `launch-codex-specialist.ps1` (see *Dispatching a Codex Specialist*), resolving the model/effort with `factory.ps1 -Init -Target codex`. Fall back to a Claude `Agent` sub-agent only when a Codex preflight fails or the human asks for Claude on a specific phase. The orchestrator itself stays Claude — it never becomes a specialist.
+
 ### Specialist Model Selection
 
 Do **not** hard-code a per-role model. The factory computes the model from the activity
