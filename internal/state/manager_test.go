@@ -200,3 +200,49 @@ func TestManager_ListActive(t *testing.T) {
 		t.Errorf("Expected 2 active workflows, got %d", len(ids))
 	}
 }
+
+func TestDefaultManagerConfig(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultManagerConfig()
+	if cfg.StateDir != "state" {
+		t.Fatalf("StateDir = %q", cfg.StateDir)
+	}
+	if cfg.LockTimeout != 30*time.Second {
+		t.Fatalf("LockTimeout = %v", cfg.LockTimeout)
+	}
+	if cfg.MaxRetries != 3 {
+		t.Fatalf("MaxRetries = %d", cfg.MaxRetries)
+	}
+}
+
+func TestLoadWorkflowMissing(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	manager := NewManager(ManagerConfig{StateDir: tempDir, LockTimeout: 5 * time.Second})
+	_ = manager.Init()
+	_, err := manager.LoadWorkflow("nonexistent-wf")
+	if err == nil {
+		t.Fatal("expected error loading non-existent workflow")
+	}
+}
+
+func TestManagerCleanupStaleLocks(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	manager := NewManager(ManagerConfig{StateDir: tempDir, LockTimeout: 5 * time.Second})
+	_ = manager.Init()
+	if err := manager.CleanupStaleLocks(); err != nil {
+		t.Fatalf("CleanupStaleLocks: %v", err)
+	}
+}
+
+func TestManagerListActiveEmpty(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	manager := NewManager(ManagerConfig{StateDir: tempDir, LockTimeout: 5 * time.Second})
+	_ = manager.Init()
+	ids, err := manager.ListActive()
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("ListActive empty = %v, %v", ids, err)
+	}
+}
