@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/cron"
 )
 
@@ -155,8 +156,9 @@ func TestCheckCron_CorruptFile(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // GetResults opens the cached checkpoint DB; ResetCheckpointManagerInstancesForTest is global and must not run concurrently
 func TestGetResults_IncludesCron(t *testing.T) {
-	t.Parallel()
+	defer agentctx.ResetCheckpointManagerInstancesForTest()
 	results := GetResults(cfgWithRoot(t.TempDir()), nil)
 	for i := range results {
 		if results[i].Name == "cron" {
