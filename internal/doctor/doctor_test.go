@@ -4,6 +4,7 @@ package doctor
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,11 +17,49 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
+// TestMain runs the doctor suite, then fails if any checkpoint-manager handle
+// was left open — i.e. a GetResults/Run/checkAuthorization test built its cfg
+// without doctorTestCfg/registerCheckpointCleanup. On Windows an open
+// checkpoints.db pins its temp dir and fails TempDir cleanup nondeterministically;
+// this turns that latent leak into a deterministic failure on every platform.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if code == 0 {
+		if n := agentctx.CachedCheckpointManagerCountForTest(); n != 0 {
+			fmt.Fprintf(os.Stderr, "doctor: %d checkpoint-manager handle(s) leaked after tests; build test cfgs via doctorTestCfg (or call registerCheckpointCleanup) so checkpoints.db is closed\n", n)
+			code = 1
+		}
+	}
+	os.Exit(code)
+}
+
 // cfgWithRoot returns a Config with StorageRoot set to root.
 func cfgWithRoot(root string) *config.Config {
 	return &config.Config{
 		Runtime: config.RuntimeConfig{StorageRoot: root},
 	}
+}
+
+// doctorTestCfg returns a Config rooted at a fresh temp dir and registers cleanup
+// that closes the checkpoint-manager handle GetResults/Run cache for that root.
+// GetCheckpointManager caches one open *sql.DB per StorageRoot for the process
+// lifetime (correct in the live bot, where doctor shares the agent loop's handle);
+// in tests each root is throwaway, so the handle must be closed or Windows cannot
+// remove the temp dir. Any doctor test that reaches the checkpoint DB (GetResults,
+// Run, checkAuthorization) must build its cfg here.
+func doctorTestCfg(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := cfgWithRoot(t.TempDir())
+	registerCheckpointCleanup(t, cfg)
+	return cfg
+}
+
+// registerCheckpointCleanup evicts the cached checkpoint-manager handle for cfg's
+// StorageRoot when the test ends. Call it after the t.TempDir() the root derives
+// from, so eviction runs before TempDir's RemoveAll (t.Cleanup is LIFO).
+func registerCheckpointCleanup(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(cfg.StorageRoot()) })
 }
 
 // writeTokenJSON writes a minimal token file with the given expiry and optional refresh token to dir/filename.
@@ -364,9 +403,8 @@ func assertGoogleOAuthSecretsResult(t *testing.T, createFile, expectedOK bool, d
 
 func TestGetResults_GoogleOAuthSecretsIsNonCritical(t *testing.T) {
 	t.Parallel()
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
 
-	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	results := GetResults(doctorTestCfg(t), nil)
 	found := false
 	for _, result := range results {
 		if result.Name == "google oauth secrets" {
@@ -491,7 +529,6 @@ func TestCheckJobsDir_WithJobs(t *testing.T) {
 // ── Run ───────────────────────────────────────────────────────────────────────
 
 func TestRun_AllChecksPass(t *testing.T) {
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
 	root := t.TempDir()
 	// Setup required subdirs for doctor
 	if err := os.MkdirAll(filepath.Join(root, "workspace", "jobs"), 0o755); err != nil {
@@ -512,6 +549,7 @@ func TestRun_AllChecksPass(t *testing.T) {
 
 	cfg := cfgWithRoot(root)
 	cfg.Channels.Telegram.Token = "123:test-token"
+	registerCheckpointCleanup(t, cfg)
 
 	// Use Run with nil probes (skips live checks)
 	if err := Run(cfg, nil); err != nil {
@@ -520,10 +558,10 @@ func TestRun_AllChecksPass(t *testing.T) {
 }
 
 func TestRun_FailsOnBadStorageRoot(t *testing.T) {
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
 	t.Setenv("GEMINI_API_KEY", "test-key-for-run-1234")
 
 	cfg := cfgWithRoot(filepath.Join(t.TempDir(), "nonexistent"))
+	registerCheckpointCleanup(t, cfg)
 	if err := Run(cfg, nil); err == nil {
 		t.Error("expected Run to return error for missing storage root")
 	}
@@ -531,7 +569,7 @@ func TestRun_FailsOnBadStorageRoot(t *testing.T) {
 
 func TestDoctor_BreakerWarning(t *testing.T) {
 	t.Parallel()
-	cfg := &config.Config{}
+	cfg := doctorTestCfg(t)
 	cfg.Resilience.CircuitBreakers = map[string]config.BreakerConfig{
 		"old": {MaxFailures: 5, Window: "", Timeout: ""},
 		"new": {MaxFailures: 5, Window: "1m", Timeout: "30s"},
@@ -616,14 +654,12 @@ func TestCheckBrowser_NotConfigured(t *testing.T) {
 
 // ── checkAuthorization ───────────────────────────────────────────────────────
 
-//nolint:paralleltest // agentctx caches CheckpointManager instances by path; t.TempDir is unique but ResetCheckpointManagerInstancesForTest is global
 func TestCheckAuthorization(t *testing.T) {
-	// This test doesn't use t.Parallel() because agentctx caches CheckpointManager instances by path.
-	// t.TempDir() gives us unique paths, but let's be safe.
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
+	t.Parallel()
 
 	root := t.TempDir()
 	cfg := cfgWithRoot(root)
+	registerCheckpointCleanup(t, cfg)
 
 	// Case 1: Database initialized but no users
 	r := checkAuthorization(cfg)
@@ -1051,9 +1087,8 @@ func TestCheckLivenessStaleness_StatError(t *testing.T) {
 
 func TestGetResults_LivenessStalenessIsNonCritical(t *testing.T) {
 	t.Parallel()
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
 
-	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	results := GetResults(doctorTestCfg(t), nil)
 	found := false
 	for _, result := range results {
 		if result.Name == "liveness staleness" {
@@ -1120,11 +1155,10 @@ func TestCheckVendorDir_FileNotDirIsOK(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // agentctx ResetCheckpointManagerInstancesForTest is global; must not run concurrently
 func TestCheckVendorDir_IsNonCritical(t *testing.T) {
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
+	t.Parallel()
 
-	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	results := GetResults(doctorTestCfg(t), nil)
 	found := false
 	for _, result := range results {
 		if result.Name == "vendor policy" {
@@ -1141,8 +1175,7 @@ func TestCheckVendorDir_IsNonCritical(t *testing.T) {
 
 func TestGetResults_IncludesStorageSizes(t *testing.T) {
 	t.Parallel()
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
-	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	results := GetResults(doctorTestCfg(t), nil)
 	for i := range results {
 		if results[i].Name == "storage sizes" {
 			if results[i].Critical {

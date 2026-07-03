@@ -4,8 +4,6 @@ package doctor
 import (
 	"regexp"
 	"testing"
-
-	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
 var memoryDetailRe = regexp.MustCompile(`^heap [0-9.]+ MiB, sys [0-9.]+ MiB$`)
@@ -28,10 +26,9 @@ func TestCheckMemory_Informational(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // GetResults opens the cached checkpoint DB; ResetCheckpointManagerInstancesForTest is global and must not run concurrently
 func TestGetResults_IncludesMemory(t *testing.T) {
-	defer agentctx.ResetCheckpointManagerInstancesForTest()
-	results := GetResults(cfgWithRoot(t.TempDir()), nil)
+	t.Parallel()
+	results := GetResults(doctorTestCfg(t), nil)
 
 	var found *Result
 	for i := range results {

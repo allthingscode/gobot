@@ -64,6 +64,29 @@ func ResetCheckpointManagerInstancesForTest() {
 	resetCheckpointManagerInstances()
 }
 
+// EvictCheckpointManagerForTest closes and removes the single cached instance
+// for dbDir, if present. Unlike resetCheckpointManagerInstances it touches only
+// this one path, so tests that each use a unique temp StorageRoot can release
+// their own handle without disturbing others' — safe under t.Parallel. Used only
+// for testing.
+func EvictCheckpointManagerForTest(dbDir string) {
+	cmMu.Lock()
+	defer cmMu.Unlock()
+	if mgr, ok := cmInstances[dbDir]; ok {
+		_ = mgr.db.Close()
+		delete(cmInstances, dbDir)
+	}
+}
+
+// CachedCheckpointManagerCountForTest reports how many checkpoint-manager handles
+// are currently cached. Tests use it to assert none were leaked. Used only for
+// testing.
+func CachedCheckpointManagerCountForTest() int {
+	cmMu.Lock()
+	defer cmMu.Unlock()
+	return len(cmInstances)
+}
+
 // GetCheckpointManager returns a CheckpointManager for the specified dbDir.
 // It caches instances to ensure only one handle is open per directory.
 func GetCheckpointManager(dbDir string) (*CheckpointManager, error) {
