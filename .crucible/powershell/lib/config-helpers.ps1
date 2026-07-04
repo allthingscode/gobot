@@ -67,7 +67,7 @@ function Get-ConfiguredPath {
 function Get-ConfiguredReview {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("diff_tool", "editor", "auto_push")]
+        [ValidateSet("diff_tool", "editor", "auto_push", "require_green_ci", "ci_timeout_minutes")]
         [string]$Key,
         [string]$ProjectRoot = ""
     )
@@ -95,6 +95,8 @@ function Get-ConfiguredReview {
 
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath)) {
+        if ($Key -eq "auto_push" -or $Key -eq "require_green_ci") { return "false" }
+        if ($Key -eq "ci_timeout_minutes") { return "20" }
         return ""
     }
 
@@ -109,6 +111,8 @@ function Get-ConfiguredReview {
         }
     } catch {}
 
+    if ($Key -eq "auto_push" -or $Key -eq "require_green_ci") { return "false" }
+    if ($Key -eq "ci_timeout_minutes") { return "20" }
     return ""
 }
 

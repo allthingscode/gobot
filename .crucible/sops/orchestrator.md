@@ -186,6 +186,8 @@ indicate: approved / deferred / rejected. I will pass your decisions to the Groo
 
 The Human Gate fires after every Operator session. The loop halts here.
 
+A task that merges code to trunk is not done until adopter CI for the merge commit is GREEN. After recording an accepted Human Gate that pushes task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>` and trust the `[CI WATCH] STATUS=...` value. `STATUS=RED` means the task is not done: fix forward and re-run the gate. `[CI WATCH] SKIPPED (gh unavailable)`, `STATUS=NO_RUNS`, and `STATUS=PENDING_TIMEOUT` are advisory unless project policy says otherwise.
+
 Present to the human:
 
 ```
@@ -304,6 +306,7 @@ Next action:     {what the human needs to do, or "pipeline complete — no actio
 Before declaring an orchestration session complete, confirm:
 - [ ] Every phase ran in the correct order (grooming → implementation → verification → deployment)
 - [ ] Every Human Gate and Research Gate was presented before advancing
+- [ ] Any task that merged code to trunk has adopter CI GREEN for the merge commit, using the `[CI WATCH] STATUS=...` output rather than prose labels
 - [ ] No specialist work was performed by the Orchestrator directly
 - [ ] All `### CHECKPOINT` requirements verified before each pipeline advance
 - [ ] All gate decisions recorded in `.crucible/session/global/gate_decisions/`

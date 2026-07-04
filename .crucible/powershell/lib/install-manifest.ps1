@@ -51,7 +51,8 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/update-bundle-core.tests.ps1",
         "powershell/tests/update-bundle-custom-regions.tests.ps1",
         "powershell/tests/update-bundle-rename-prune.tests.ps1",
-        "powershell/tests/update-bundle-scope-snapshot.tests.ps1"
+        "powershell/tests/update-bundle-scope-snapshot.tests.ps1",
+        "powershell/tests/watch-adopter-ci.tests.ps1"
     )
     return $devOnlyPaths -contains $normalized
 }

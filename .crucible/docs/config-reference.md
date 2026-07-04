@@ -58,6 +58,8 @@ review:                                   # optional
   diff_tool: zed                          # optional
   editor: code                            # optional
   auto_push: false                        # optional; defaults to false
+  require_green_ci: false                 # optional; defaults to false
+  ci_timeout_minutes: 20                  # optional; defaults to 20
 ```
 
 ---
@@ -301,6 +303,8 @@ Settings related to human review workflows.
 | `diff_tool` | string | (empty) | Visual diff tool command prefix (e.g. `zed`, `code`). |
 | `editor` | string | (empty) | Code editor command prefix for opening worktrees. |
 | `auto_push` | boolean | `false` | Whether to automatically push merged changes to `origin` remote upon acceptance. |
+| `require_green_ci` | boolean | `false` | Whether accepted, auto-pushed tasks must wait for adopter CI on the merge commit before finalizing. |
+| `ci_timeout_minutes` | integer | `20` | Maximum minutes to wait for adopter CI before treating unfinished runs as advisory timeout. |
 
 ---
 

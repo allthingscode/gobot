@@ -72,6 +72,141 @@ function New-TestContext {
         NextFactoryCommand = $null
     }
 }
+
+function New-FakeGhForGate {
+    param(
+        [Parameter(Mandatory=$true)][string]$Dir,
+        [Parameter(Mandatory=$true)][string]$Mode
+    )
+    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    $path = Join-Path $Dir "gh.cmd"
+    $content = @"
+@echo off
+if "%1 %2"=="auth status" exit /b 0
+if "%1 %2"=="run list" (
+  if "$Mode"=="green" echo [{"databaseId":201,"status":"completed","conclusion":"success"}]
+  if "$Mode"=="red" echo [{"databaseId":202,"status":"completed","conclusion":"failure"}]
+  exit /b 0
+)
+if "%1 %2"=="run view" (
+  echo {"jobs":[{"name":"windows-ci","conclusion":"failure"}]}
+  exit /b 0
+)
+exit /b 1
+"@
+    [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding $false))
+    return $path
+}
+
+function New-CiGateCase {
+    param(
+        [Parameter(Mandatory=$true)][string]$CaseRoot,
+        [Parameter(Mandatory=$true)][string]$TaskId
+    )
+    $originRepo = Join-Path $CaseRoot "remote_origin"
+    $localRepo = Join-Path $CaseRoot "local_repo"
+    New-Item -ItemType Directory -Path $originRepo, $localRepo -Force | Out-Null
+
+    git -C $originRepo init --bare --initial-branch=master 2>$null | Out-Null
+    git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+    git -C $localRepo config user.name "Tester"
+    git -C $localRepo config user.email "test@example.com"
+    git -C $localRepo remote add origin $originRepo
+
+    "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+    git -C $localRepo add README.md 2>$null | Out-Null
+    git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+    git -C $localRepo push -u origin master 2>$null | Out-Null
+
+    git -C $localRepo checkout -b "task/$TaskId" 2>$null | Out-Null
+    "feature" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+    git -C $localRepo add feature.md 2>$null | Out-Null
+    git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
+
+    git -C $localRepo checkout master 2>$null | Out-Null
+
+    $configDir = Join-Path $localRepo ".crucible"
+    $sessionDir = Join-Path $configDir "session"
+    New-Item -ItemType Directory -Path $configDir, (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+    $configYaml = @"
+project:
+  name: Fake
+  description: Fake
+  default_branch: master
+roles:
+  researcher:  { model_tier: fast }
+  groomer:     { model_tier: fast }
+  architect:   { model_tier: high-capability }
+  reviewer:    { model_tier: high-capability }
+  operator:    { model_tier: fast }
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+review:
+  auto_push: true
+  require_green_ci: true
+  ci_timeout_minutes: 1
+"@
+    $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+    return [pscustomobject]@{
+        LocalRepo = $localRepo
+        SessionDir = $sessionDir
+    }
+}
+
+function Invoke-CiGateCase {
+    param(
+        [Parameter(Mandatory=$true)]$Case,
+        [Parameter(Mandatory=$true)][string]$TaskId
+    )
+    $scriptPath = Join-Path (Split-Path -Parent $Case.LocalRepo) ("run-" + $TaskId + ".ps1")
+    $libPath = $FACTORY_LIB.Replace("'", "''")
+    $localRepo = $Case.LocalRepo.Replace("'", "''")
+    $sessionDir = $Case.SessionDir.Replace("'", "''")
+    $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'accepted'
+    GateReason = 'ci gate coverage'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = '$TaskId'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+    Write-Host "PASSED_ACCEPT"
+} catch {
+    Write-Host "FAILED: `$_"
+    exit 1
+} finally {
+    Pop-Location
+}
+"@
+    $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+    return [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output = ($outputLines -join "`n")
+    }
+}
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-factory-gates-human-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
@@ -1536,6 +1671,74 @@ try {
 
         $siblingKept = $stateAfter.tasks.PSObject.Properties["F-999"]
         Assert-Result -Name "accept-prune: other tasks preserved" -Condition ($null -ne $siblingKept) -FailureMessage "expected F-999 to remain in session_state.json"
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate require_green_ci blocks final cleanup on RED" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "ci-red"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-CIR"
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "red" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F-CIR"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "ci red exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "ci red reports status" -Condition ($result.Output -match "\[CI WATCH\] STATUS=RED") -FailureMessage $result.Output
+        Assert-Result -Name "ci red reports failed job" -Condition ($result.Output -match "windows-ci") -FailureMessage $result.Output
+        Assert-Result -Name "ci red task not done" -Condition ($result.Output -match "task F-CIR is NOT done") -FailureMessage $result.Output
+        git -C $case.LocalRepo show-ref --quiet refs/heads/task/F-CIR
+        Assert-Result -Name "ci red keeps task branch" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch was deleted on red CI"
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate require_green_ci finalizes on GREEN" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "ci-green"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-CIG"
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "green" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F-CIG"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "ci green exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "ci green reports status" -Condition ($result.Output -match "\[CI WATCH\] STATUS=GREEN") -FailureMessage $result.Output
+        git -C $case.LocalRepo show-ref --quiet refs/heads/task/F-CIG
+        Assert-Result -Name "ci green deletes task branch" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task branch was not deleted after green CI"
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate require_green_ci finalizes when gh is absent" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "ci-gh-absent"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-CIA"
+        $oldPath = $env:PATH
+        try {
+            $pathParts = @($oldPath -split [regex]::Escape([System.IO.Path]::PathSeparator) | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_) -and
+                -not (Test-Path -LiteralPath (Join-Path $_ "gh.exe")) -and
+                -not (Test-Path -LiteralPath (Join-Path $_ "gh.cmd"))
+            })
+            $env:PATH = $caseRoot + [System.IO.Path]::PathSeparator + ($pathParts -join [System.IO.Path]::PathSeparator)
+            $result = Invoke-CiGateCase -Case $case -TaskId "F-CIA"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "ci absent exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "ci absent reports skip" -Condition ($result.Output -match "\[CI WATCH\] SKIPPED \(gh unavailable\)") -FailureMessage $result.Output
+        git -C $case.LocalRepo show-ref --quiet refs/heads/task/F-CIA
+        Assert-Result -Name "ci absent deletes task branch" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task branch was not deleted after skipped CI watch"
     }
 
 } finally {

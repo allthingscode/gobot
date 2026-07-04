@@ -217,6 +217,8 @@ All gate presentation formats and the failure decision tree are in `.crucible/so
 
 **Critical for Human Gate**: after recording the human's gate decision via `factory.ps1 -GateOutcome`, stop immediately. Do not spawn another sub-agent. Do not run `factory.ps1 -Init` to look for the next prompt. Report the pipeline state and end the session. The human must re-trigger orchestration explicitly for the next cycle. The human's choice is the gate — the orchestrator never crosses it on their behalf.
 
+**CI Definition of Done**: a task that merges code to trunk is not done until adopter CI for the merge commit reports `[CI WATCH] STATUS=GREEN`. After any push of accepted task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>` and trust the STATUS value, not a prose label. Treat `STATUS=RED` as "task not done -- fix forward and re-run the gate." `[CI WATCH] SKIPPED (gh unavailable)`, `STATUS=NO_RUNS`, and `STATUS=PENDING_TIMEOUT` are advisory unless project policy says otherwise.
+
 If a sub-agent does not produce the required handoff or does not run factory.ps1, follow the Failure Protocol in `.crucible/sops/orchestrator.md`. The orchestrator may only:
 
 - Read sub-agent output and inspect task state files

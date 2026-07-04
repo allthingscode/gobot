@@ -2383,6 +2383,20 @@ function Invoke-HumanGateAction {
             if ($autoPushVal -eq "true") {
                 $autoPush = $true
             }
+            $requireGreenCiVal = Get-ConfiguredReview -Key "require_green_ci" -ProjectRoot $resolvedProjectRoot
+            $requireGreenCi = $false
+            if ($requireGreenCiVal -eq "true") {
+                $requireGreenCi = $true
+            }
+            $ciTimeoutVal = Get-ConfiguredReview -Key "ci_timeout_minutes" -ProjectRoot $resolvedProjectRoot
+            $ciTimeoutMinutes = 20
+            if (-not [string]::IsNullOrWhiteSpace($ciTimeoutVal)) {
+                $parsedTimeout = 0
+                if ([int]::TryParse($ciTimeoutVal, [ref]$parsedTimeout) -and $parsedTimeout -gt 0) {
+                    $ciTimeoutMinutes = $parsedTimeout
+                }
+            }
+            $mergedSha = (git rev-parse HEAD 2>$null).Trim()
 
             if ($autoPush) {
                 $remotes = @(Invoke-GitChecked { git remote 2>$null })
@@ -2393,12 +2407,44 @@ function Invoke-HumanGateAction {
                         Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
                         exit 1
                     }
+                    if ($requireGreenCi) {
+                        $watchScript = Join-Path (Split-Path -Parent $PSScriptRoot) "watch-adopter-ci.ps1"
+                        Write-Host ("[HUMAN GATE] Watching origin CI for " + $mergedSha + " before finalizing...") -ForegroundColor Cyan
+                        $ciOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript -Commit $mergedSha -TimeoutMinutes $ciTimeoutMinutes -CrucibleRoot $resolvedProjectRoot 2>&1)
+                        $ciExitCode = $LASTEXITCODE
+                        foreach ($line in $ciOutput) {
+                            Write-Host $line
+                        }
+                        if ($ciExitCode -eq 1) {
+                            Write-Host ("[HUMAN GATE] CI is RED for " + $mergedSha + "; task " + $TaskId + " is NOT done. Fix forward and re-run the gate.") -ForegroundColor Red
+                            exit 1
+                        } elseif ($ciExitCode -eq 2) {
+                            Write-Host ("[HUMAN GATE] CI did not finish before timeout for " + $mergedSha + "; finalizing while CI continues.") -ForegroundColor Yellow
+                            $originUrl = (git remote get-url origin 2>$null)
+                            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
+                                $originText = ([string]$originUrl).Trim()
+                                $actionsUrl = ""
+                                if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
+                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
+                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                } else {
+                                    $actionsUrl = $originText
+                                }
+                                Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
+                            }
+                        }
+                    }
                 } else {
                     Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
                 }
             } else {
                 Write-Host "[HUMAN GATE] Refusing to push; merge remains LOCAL only. Run the following command to publish:" -ForegroundColor Yellow
                 Write-Host "  git push origin $primaryBranch" -ForegroundColor Cyan
+                if ($requireGreenCi) {
+                    Write-Host "[HUMAN GATE] Then verify adopter CI for the merge commit:" -ForegroundColor Yellow
+                    Write-Host ("  pwsh -File .crucible/powershell/watch-adopter-ci.ps1 -Commit " + $mergedSha) -ForegroundColor Cyan
+                }
             }
 
             $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $resolvedProjectRoot

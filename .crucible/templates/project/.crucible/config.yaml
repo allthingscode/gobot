@@ -75,3 +75,6 @@ file_affinity_examples:
 # review:
 #   diff_tool: zed      # Options: zed, code, etc.
 #   editor: zed         # Options: zed, code, etc. (defaults to diff_tool if unset)
+#   auto_push: false
+#   require_green_ci: false
+#   ci_timeout_minutes: 20

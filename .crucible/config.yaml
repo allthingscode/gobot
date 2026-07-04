@@ -91,6 +91,7 @@ manifest_files:
 review:
   diff_tool: zed
   editor: zed
+  require_green_ci: true
 crucible_version: "0.3.4"
-crucible_install_commit: "79ce14c5f8be32821ee00d186cae39a37217a16c"
+crucible_install_commit: "950f80cfd7f305966a5005ad48d16a912e557727"
 
