@@ -91,10 +91,20 @@ function Get-RunList {
     if ($result.ExitCode -ne 0) {
         return $null
     }
-    if ([string]::IsNullOrWhiteSpace($result.Output)) {
-        return @()
+    # Return $null ONLY for gh failure above. Normalize parsed runs to a real
+    # array and return it via the unary comma so PowerShell does not unroll an
+    # empty result to $null on assignment. Cross-platform hazard: pwsh emits
+    # nothing for "[]" (assignment yields $null) while Windows PS 5.1 returns
+    # "[]" as a single array object; branching on $null -eq $parsed normalizes
+    # both to count 0, so the caller correctly reports NO_RUNS (not SKIP/timeout).
+    $parsed = $null
+    if (-not [string]::IsNullOrWhiteSpace($result.Output)) {
+        $parsed = $result.Output | ConvertFrom-Json
     }
-    return @($result.Output | ConvertFrom-Json)
+    if ($null -eq $parsed) {
+        return ,@()
+    }
+    return ,@($parsed)
 }
 
 function Write-FailedJobs {

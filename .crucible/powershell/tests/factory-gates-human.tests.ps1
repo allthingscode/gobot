@@ -79,22 +79,44 @@ function New-FakeGhForGate {
         [Parameter(Mandatory=$true)][string]$Mode
     )
     New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-    $path = Join-Path $Dir "gh.cmd"
-    $content = @"
-@echo off
-if "%1 %2"=="auth status" exit /b 0
-if "%1 %2"=="run list" (
-  if "$Mode"=="green" echo [{"databaseId":201,"status":"completed","conclusion":"success"}]
-  if "$Mode"=="red" echo [{"databaseId":202,"status":"completed","conclusion":"failure"}]
-  exit /b 0
-)
-if "%1 %2"=="run view" (
-  echo {"jobs":[{"name":"windows-ci","conclusion":"failure"}]}
-  exit /b 0
-)
-exit /b 1
-"@
-    [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding $false))
+    $impl = Join-Path $Dir "gh-impl.ps1"
+    $safeMode = $Mode.Replace("'", "''")
+    (@"
+`$Mode = '$safeMode'
+`$verb = ""
+if (`$args.Count -ge 2) { `$verb = `$args[0] + " " + `$args[1] }
+if (`$verb -eq "auth status") {
+    if (`$Mode -eq "unauth") { exit 1 }
+    exit 0
+}
+if (`$verb -eq "run list") {
+    if (`$Mode -eq "green") { Write-Output '[{"databaseId":201,"status":"completed","conclusion":"success"}]' }
+    if (`$Mode -eq "red") { Write-Output '[{"databaseId":202,"status":"completed","conclusion":"failure"}]' }
+    exit 0
+}
+if (`$verb -eq "run view") {
+    Write-Output '{"jobs":[{"name":"windows-ci","conclusion":"failure"}]}'
+    exit 0
+}
+exit 1
+"@ -replace "`r`n", "`n") | Set-Content -LiteralPath $impl -Encoding ASCII
+
+    $hostCmd = (Get-PwshCommand)
+    if (Test-PlatformIsWindows) {
+        $path = Join-Path $Dir "gh.cmd"
+        @(
+            '@echo off',
+            ('"' + $hostCmd + '" -NoProfile -ExecutionPolicy Bypass -File "%~dp0gh-impl.ps1" %*'),
+            'exit /b %errorlevel%'
+        ) | Set-Content -LiteralPath $path -Encoding ASCII
+    } else {
+        $path = Join-Path $Dir "gh"
+        (@"
+#!/usr/bin/env bash
+exec $hostCmd -NoProfile -ExecutionPolicy Bypass -File "`$(dirname "`$0")/gh-impl.ps1" "`$@"
+"@ -replace "`r`n", "`n") | Set-Content -LiteralPath $path -Encoding ASCII
+        & chmod "+x" $path
+    }
     return $path
 }
 
@@ -1722,14 +1744,14 @@ try {
         $caseRoot = Join-Path $tempRoot "ci-gh-absent"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-CIA"
+        # Simulate "gh unavailable" with a shim whose `auth status` fails, rather
+        # than stripping gh's dir from PATH -- on CI/Linux gh lives in /usr/bin
+        # alongside git, so removing it would also remove git and break the gate.
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "unauth" | Out-Null
         $oldPath = $env:PATH
         try {
-            $pathParts = @($oldPath -split [regex]::Escape([System.IO.Path]::PathSeparator) | Where-Object {
-                -not [string]::IsNullOrWhiteSpace($_) -and
-                -not (Test-Path -LiteralPath (Join-Path $_ "gh.exe")) -and
-                -not (Test-Path -LiteralPath (Join-Path $_ "gh.cmd"))
-            })
-            $env:PATH = $caseRoot + [System.IO.Path]::PathSeparator + ($pathParts -join [System.IO.Path]::PathSeparator)
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
             $result = Invoke-CiGateCase -Case $case -TaskId "F-CIA"
         } finally {
             $env:PATH = $oldPath
