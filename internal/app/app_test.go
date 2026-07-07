@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
@@ -141,7 +142,7 @@ func TestRunAgentLoop(t *testing.T) {
 	cfg := &config.Config{}
 	stack := &AgentStack{Runner: &AgentRunner{}}
 
-	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil, nil)
+	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil, nil, time.Now())
 }
 
 func TestInitIdempotencyHandlesTypedNilCheckpointManager(t *testing.T) {

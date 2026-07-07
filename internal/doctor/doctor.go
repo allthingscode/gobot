@@ -122,6 +122,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkPlaintextSecrets(cfg), false),
 		r(checkHITL(cfg), false),
 		r(checkLogs(cfg), false),
+		r(checkStartupTime(cfg), false),
 		r(checkAPIKey(cfg), true),
 		r(checkTelegram(cfg.TelegramToken(), p.ProbeTelegram), false),
 		r(checkGoogleOAuthSecrets(cfg), false),

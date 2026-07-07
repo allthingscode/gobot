@@ -28,6 +28,8 @@ var Version = "dev"
 
 // RunAgent is the high-level entry point for the strategic agent.
 func RunAgent(ctx context.Context, cfg *config.Config) error {
+	startupStart := time.Now()
+
 	// F-133: Record project root from where we were started.
 	if wd, err := os.Getwd(); err == nil {
 		cfg.SetProjectRoot(wd)
@@ -64,7 +66,7 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	return runAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer, tmgr)
+	return runAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer, tmgr, startupStart)
 }
 
 func validateRunPrerequisites(cfg *config.Config) error {
@@ -88,7 +90,7 @@ func shutdownOTel(p *observability.Provider) {
 	}
 }
 
-func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager) error {
+func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager, startupStart time.Time) error {
 	var wg sync.WaitGroup
 	// Derive a cancellable context so a critical subsystem failure can trigger
 	// shutdown of the rest. startErr collects the first non-graceful failure from
@@ -133,6 +135,13 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	}
 
 	awaitReadyForBanner(ctx, cfg, readiness)
+	readyAt := time.Now()
+	if cfg.Gateway.Enabled {
+		if readinessAt, ok := readiness.ReadyAt(); ok {
+			readyAt = readinessAt
+		}
+	}
+	recordStartupReady(cfg, startupStart, readyAt)
 	printStartupBanner(cfg, api)
 
 	StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
