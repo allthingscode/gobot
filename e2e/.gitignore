@@ -1,0 +1,10 @@
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Re-include the lockfile the repo-wide rule ignores; pin deps for deterministic CI.
+# (Root .gitignore miscategorizes package-lock.json under generated files; the harness
+# binary is already covered by root `*.exe`, so no local rule is needed for it.)
+!package-lock.json
