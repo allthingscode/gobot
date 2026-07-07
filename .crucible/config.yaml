@@ -58,6 +58,8 @@ verification:
   full:
     - name: go vet
       command: go vet -mod=readonly ./internal/... ./cmd/...
+    - name: scoped coverage
+      command: $threshold = 80.0; New-Item -ItemType Directory -Force artifacts | Out-Null; go test -mod=readonly -coverprofile artifacts/coverage.out ./internal/... ./cmd/...; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $coverageOutput = go tool cover -func artifacts/coverage.out; $coverageOutput; $coverage = [double](($coverageOutput | Select-String '^total:' | ForEach-Object { ($_ -split '\s+')[-1].TrimEnd('%') })); $coverageText = $coverage.ToString("F1"); Write-Host ("Total coverage: {0}%" -f $coverageText); if ($coverage -lt $threshold) { Write-Host ("Coverage {0}% is below {1}% threshold" -f $coverageText, $threshold.ToString("F1")); exit 1 }
     - name: golangci-lint
       command: golangci-lint run --modules-download-mode=readonly ./internal/... ./cmd/...
     - name: tests
@@ -95,4 +97,3 @@ review:
   require_green_ci: true
 crucible_version: "0.3.4"
 crucible_install_commit: "67d4bff7018f724bec67077253aecc074be93f35"
-
