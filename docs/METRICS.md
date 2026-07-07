@@ -109,7 +109,7 @@ below.
 | **Memory footprint** (RSS or heap alloc at startup and idle) | Detect leaks / bloat; confirm small footprint | `runtime.ReadMemStats` (HeapAlloc/Sys) sampled at boot and periodically | Collected (doctor line + boot DEBUG log); dashboard panel pending | `doctor` line + dashboard panel + DEBUG log at boot |
 | **Message latency** (P50, P99 per user request) | UX responsiveness; spot regressions | Time agent dispatch end-to-end; aggregate quantiles (extend `DispatchTracer`/OTel histogram) | Span `duration_ms` exists per call; no P50/P99 aggregation | Dashboard panel; OTel histogram for collectors |
 | **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected; surfaced in `doctor` (C-332); dashboard panel pending | `doctor` check + dashboard panel |
-| **Startup time** (process start → ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `main` entry; log delta when bot is listening | Not collected | INFO log at ready + `doctor` detail |
+| **Startup time** (process start → ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `RunAgent` entry; log and persist delta when bot is ready/listening | Collected (INFO log + `doctor` detail); dashboard panel pending | INFO log at ready + `doctor` detail |
 | **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive from lock `AcquiredAt`/`TotalHoldTime`; flag sessions held beyond threshold | Partial: lock hold time + deadlock timeout exist | `doctor` advisory + WARN log (extends existing 5s contention warn) |
 | **Storage database size** (SQLite) | Detect unbounded growth of checkpoint/memory DBs | `os.Stat` the SQLite file(s) or `PRAGMA page_count * page_size` | Collected (doctor line; dashboard panel pending) | `doctor` line (C-337); dashboard panel pending |
 
@@ -149,7 +149,8 @@ below.
   (`last/next run, success/failure counts`) and a dashboard table. Source data
   already exists in `jobs.json`.
 - **Startup time** → single INFO log line at "ready/listening" and a `doctor`
-  detail. Not surfaced on the dashboard (one-shot value).
+  detail from `<storage>/workspace/startup.json`. Not surfaced on the dashboard
+  today (one-shot value).
 - **Long-running session duration** → extend the existing lock-contention WARN
   to also flag long holds; advisory `doctor` line. Keep the 5s holder-stack
   capture as-is.

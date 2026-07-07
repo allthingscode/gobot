@@ -49,6 +49,39 @@ func TestReadiness_Transitions(t *testing.T) {
 	}
 }
 
+func TestReadiness_ReadyAtRecordsFirstReady(t *testing.T) {
+	t.Parallel()
+	r := NewReadiness()
+
+	if readyAt, ok := r.ReadyAt(); ok || !readyAt.IsZero() {
+		t.Fatalf("new latch ReadyAt = %s, %v; want zero,false", readyAt, ok)
+	}
+
+	beforeReady := time.Now()
+	r.SetReady()
+	readyAt, ok := r.ReadyAt()
+	if !ok {
+		t.Fatal("expected ReadyAt to be recorded after SetReady")
+	}
+	if readyAt.Before(beforeReady) {
+		t.Fatalf("ReadyAt = %s before SetReady lower bound %s", readyAt, beforeReady)
+	}
+
+	r.SetNotReady()
+	afterNotReady, ok := r.ReadyAt()
+	if !ok || !afterNotReady.Equal(readyAt) {
+		t.Fatalf("ReadyAt changed after SetNotReady: got %s,%v want %s,true", afterNotReady, ok, readyAt)
+	}
+	r.SetReady()
+	if !r.IsReady() {
+		t.Fatal("expected ready after second SetReady")
+	}
+	secondReadyAt, ok := r.ReadyAt()
+	if !ok || !secondReadyAt.Equal(readyAt) {
+		t.Fatalf("ReadyAt changed after second SetReady: got %s,%v want %s,true", secondReadyAt, ok, readyAt)
+	}
+}
+
 // TestStartGateway_SetsReadinessOnBind covers AC2: the latch flips ready only
 // after the gateway listener actually binds.
 func TestStartGateway_SetsReadinessOnBind(t *testing.T) {

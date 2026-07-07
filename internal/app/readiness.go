@@ -1,6 +1,9 @@
 package app
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // Readiness is a concurrency-safe latch that distinguishes process readiness from
 // liveness. It starts not-ready, flips ready once a critical listener has bound,
@@ -11,9 +14,11 @@ import "sync"
 // used by startup orchestration to wait for the bind signal. IsReady() reflects the
 // live state (including the shutdown flip) and backs the /ready handler.
 type Readiness struct {
-	mu      sync.Mutex
-	ready   bool
-	readyCh chan struct{}
+	mu            sync.Mutex
+	ready         bool
+	readySignaled bool
+	readyAt       time.Time
+	readyCh       chan struct{}
 }
 
 // NewReadiness returns a not-ready latch.
@@ -26,8 +31,12 @@ func NewReadiness() *Readiness {
 func (r *Readiness) SetReady() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.ready {
-		r.ready = true
+	r.ready = true
+	if !r.readySignaled {
+		r.readySignaled = true
+		if r.readyAt.IsZero() {
+			r.readyAt = time.Now()
+		}
 		close(r.readyCh)
 	}
 }
@@ -50,4 +59,14 @@ func (r *Readiness) IsReady() bool {
 // Ready returns a channel closed the first time readiness is reached.
 func (r *Readiness) Ready() <-chan struct{} {
 	return r.readyCh
+}
+
+// ReadyAt returns the first timestamp at which readiness was reached.
+func (r *Readiness) ReadyAt() (time.Time, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.readyAt.IsZero() {
+		return time.Time{}, false
+	}
+	return r.readyAt, true
 }
