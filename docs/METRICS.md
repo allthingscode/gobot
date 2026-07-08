@@ -52,17 +52,21 @@ elapsed line.
 Checks present today:
 
 - **Critical:** storage root, workspace writable, security store, llm api key.
-- **Advisory:** encryption key, plaintext secrets, HITL enabled, logs directory,
-  telegram token (+ optional live probe), google oauth secrets, google token
-  expiry, gmail token expiry, jobs directory (+ job count), browser
-  availability, authorization (count of authorized users), gemini live probe.
-- **Resilience:** per circuit breaker — `state, successes, failures, rejections`
+- **Advisory:** secrets roundtrip, liveness staleness, encryption key,
+  plaintext secrets, HITL enabled, logs directory, startup time, telegram token
+  (+ optional live probe), google oauth secrets, google token expiry, gmail
+  token expiry, jobs directory (+ job count), browser availability,
+  authorization (count of authorized users), vendor directory guard, memory
+  footprint, local latency snapshot, cron job health, storage sizes, and gemini
+  live probe.
+- **Resilience:** per circuit breaker - `state, successes, failures, rejections`
   (`checkResilience`), plus a migration warning for old-format breaker durations.
-- **Concurrency:** per session lock — `contention, max_wait, total_hold`
+- **Concurrency:** per session lock - `contention, max_wait, total_hold`
   (`checkConcurrency`, fed by `agent.GetLockMetrics`).
 
-The doctor surfaces the elapsed wall-clock time for the check run itself, but
-**not** process startup time, memory footprint, or database size.
+The doctor also surfaces the elapsed wall-clock time for the check run itself.
+Dedicated dashboard metric panels for memory, latency, startup time, and storage
+growth remain future work, but these are no longer missing from `doctor`.
 
 ### 1.3 Session lock metrics (`internal/agent/lock_metrics.go`)
 
@@ -76,8 +80,10 @@ returns a snapshot consumed by `doctor` and debug endpoints.
 `JobState` (`internal/cron/cron.go`) persists per job in `jobs.json`:
 `LastRunAtMS`, `NextRunAtMS`, `RunCount`, `SuccessCount`, `FailureCount`. The
 scheduler increments success/failure counters after each dispatch and logs
-triggers and dispatch failures. These counters are durable but are **not**
-surfaced in `doctor` output today.
+triggers and dispatch failures. These counters are durable and are surfaced in
+`doctor` through the `cron` check. They are also visible on the dashboard cron
+page when the running scheduler is wired into the gateway; otherwise the page
+falls back to configured cron tasks.
 
 ### 1.5 OpenTelemetry (opt-in, `internal/observability`)
 
@@ -101,13 +107,23 @@ and last-updated timestamps for `agent.dispatch`, `telegram.dispatch`, and
 `tool.execute`. `gobot doctor` reads this file without starting runtime services
 and reports missing/no-sample data distinctly from measured latency.
 
-### 1.7 Web dashboard (F-139, `internal/dashboard`)
+### 1.7 Web dashboard (`internal/gateway/dash`)
 
-The dashboard server streams structured log entries to the browser over SSE
-(`/events`) with a backlog replay, plus a static `index.html`. It is a **live
-log viewer** today; it does not yet render dedicated metric panels (latency,
-memory, cron health). It is the natural future surface for the core metrics
-below.
+The gateway dashboard is mounted at `/dash/` when the gateway is enabled. It is
+no longer only a live log viewer. Current pages are:
+
+| Page | Route | Current surface |
+|---|---|---|
+| Home | `/dash/` | Online status, process uptime, version, and an embedded quick doctor diagnostic. |
+| Doctor | `/dash/doctor` | Runs local `doctor.GetResults` and renders current `[OK]/[WRN]/[ERR]` checks. |
+| Cron | `/dash/cron` | Shows live scheduler jobs when available, including schedule, last run, next run, and status; otherwise shows configured tasks. |
+| Sessions | `/dash/sessions` | Lists resumable checkpoint threads with model, iteration, and last-updated timestamp. |
+| Memory | `/dash/memory` and `/dash/memory/search` | Shows indexed fact count and searches long-term memory. |
+| Logs | `/dash/logs` | Tails recent live or file-backed structured logs with level filtering. |
+
+Dedicated dashboard metric panels/gauges for latency, memory footprint, startup
+time, and storage-size trends remain future work unless those values appear
+through the dashboard doctor page.
 
 ---
 
@@ -117,9 +133,9 @@ below.
 |---|---|---|---|---|
 | **Memory footprint** (RSS or heap alloc at startup and idle) | Detect leaks / bloat; confirm small footprint | `runtime.ReadMemStats` (HeapAlloc/Sys) sampled at boot and periodically | Collected (doctor line + boot DEBUG log); dashboard panel pending | `doctor` line + dashboard panel + DEBUG log at boot |
 | **Message latency** (P50, P99 per user request) | UX responsiveness; spot regressions | `DispatchTracer` records bounded local windows for agent, Telegram, and tool timings; OTel remains opt-in for collectors | Collected locally (`workspace/latency.json`) and surfaced in `doctor`; dashboard panel pending | `doctor` line + dashboard panel + OTel histogram/traces for collectors |
-| **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected; surfaced in `doctor` (C-332); dashboard panel pending | `doctor` check + dashboard panel |
+| **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected; surfaced in `doctor` and `/dash/cron`; dedicated metric panel pending | `doctor` check + dashboard cron table |
 | **Startup time** (process start → ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `RunAgent` entry; log and persist delta when bot is ready/listening | Collected (INFO log + `doctor` detail); dashboard panel pending | INFO log at ready + `doctor` detail |
-| **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive from lock `AcquiredAt`/`TotalHoldTime`; flag sessions held beyond threshold | Partial: lock hold time + deadlock timeout exist | `doctor` advisory + WARN log (extends existing 5s contention warn) |
+| **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive from lock `AcquiredAt`/`TotalHoldTime`; flag sessions held beyond threshold | Partial: lock hold time + deadlock timeout exist; dedicated stale-lock alert pending | `doctor` lock metrics + WARN/ERROR logs |
 | **Storage database size** (SQLite) | Detect unbounded growth of checkpoint/memory DBs | `os.Stat` the SQLite file(s) or `PRAGMA page_count * page_size` | Collected (doctor line; dashboard panel pending) | `doctor` line (C-337); dashboard panel pending |
 
 ---
@@ -157,15 +173,17 @@ below.
 - **Cron job health** → `doctor` `cron` line (C-332) reading `JobState` from
   `{StorageRoot}/workspace/jobs.json` read-only: `[OK] cron - N jobs, all healthy,
   next run in <dur>` (or `no scheduled jobs`), and `[WARN]` (advisory, non-critical)
-  when any job has a non-zero `FailureCount`. Dashboard panel still pending.
-  (`last/next run, success/failure counts`) and a dashboard table. Source data
+  when any job has a non-zero `FailureCount`. The dashboard cron page shows a
+  live job table when the scheduler is wired, with configured-task fallback.
   already exists in `jobs.json`.
 - **Startup time** → single INFO log line at "ready/listening" and a `doctor`
   detail from `<storage>/workspace/startup.json`. Not surfaced on the dashboard
   today (one-shot value).
-- **Long-running session duration** → extend the existing lock-contention WARN
-  to also flag long holds; advisory `doctor` line. Keep the 5s holder-stack
-  capture as-is.
+- **Long-running session duration** -> lock metrics expose
+  `AcquiredAt`, `TotalHoldTime`, and contention/max-wait data to `doctor`.
+  Operators can infer long holds from those values today, but a dedicated
+  dashboard/operator alert for stale held locks remains future work. Keep the
+  5s holder-stack capture as-is.
 - **Storage database size** → `doctor` line and a dashboard gauge. WARN only past
   a configurable threshold.
 - **Token consumption** (existing OTel counter) → intentionally **not** surfaced
@@ -179,10 +197,10 @@ below.
 | Surface | Command / Location | What it shows |
 |---|---|---|
 | Logs | `gobot logs [--filter --since --follow]` | All structured slog records, including cron triggers, lock contention, dashboard start |
-| Doctor | `gobot doctor` | Health checks incl. local latency P50/P99, circuit-breaker stats, and live session-lock contention metrics |
-| Cron state | `<storage>/workspace/jobs.json` (`JobState`) | Per-job run/success/failure counts, last/next run |
+| Doctor | `gobot doctor` | Health checks incl. startup time, memory footprint, local latency P50/P99, cron health, storage sizes, circuit-breaker stats, and live session-lock contention metrics |
+| Cron state | `<storage>/workspace/jobs.json` (`JobState`) | Per-job run/success/failure counts, last/next run; read by `doctor` and the live dashboard cron page |
 | Latency state | `<storage>/workspace/latency.json` (`LatencySnapshot`) | Recent bounded P50/P99 samples for agent, Telegram, and tool execution |
-| Dashboard | dashboard server `/` and `/events` (F-139) | Live SSE stream of structured log entries |
+| Dashboard | gateway dashboard under `/dash/` | Home, doctor diagnostics, cron jobs, resumable sessions, memory search, and logs |
 | OTel | external OTLP collector (opt-in) | Token counter, tool-duration histogram, memory/consolidation counters, dispatch spans; separate from local latency snapshots |
 
 ---
@@ -191,8 +209,9 @@ below.
 
 - Keep the core set small; do not preempt the P1 stability audits (C-302,
   C-303, C-305).
-- This spec is the input to F-139 dashboard metric panels and to a future
-  Architect cycle that adds the missing instrumentation (memory, latency
-  quantiles, startup time, db size, cron-health doctor check).
-- Memory and db-size checks should be cheap (`runtime.ReadMemStats`, `os.Stat`)
-  and must never block startup.
+- Shipped doctor checks cover memory, local latency, startup time, cron health,
+  and storage sizes. Remaining observability gaps are future dashboard panels,
+  trend views, and operator alerting, not missing current-state doctor
+  instrumentation.
+- Memory and db-size checks are cheap (`runtime.ReadMemStats`, `os.Stat`) and
+  must never block startup.
