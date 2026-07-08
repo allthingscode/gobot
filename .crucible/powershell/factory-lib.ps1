@@ -96,6 +96,40 @@ function Get-SpecialistModel {
     }
 }
 
+# Sticky per-task specialist target. The human picks -Target once (e.g. codex); persist it
+# per task so every later phase's -Init recommends the same specialist instead of resetting
+# to the default. An explicit -Target (Explicit=$true) overwrites the stored value; an
+# omitted -Target reloads it. Returns the resolved target (unchanged when there is no TaskId
+# or no stored value). Silently ignores an unrecognized stored value.
+function Resolve-StickyTarget {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$TaskId,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$SessionDir,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Target,
+        [Parameter(Mandatory = $true)][bool]$Explicit
+    )
+    if ([string]::IsNullOrWhiteSpace($TaskId) -or [string]::IsNullOrWhiteSpace($SessionDir)) {
+        return $Target
+    }
+    $stateFile = Join-Path $SessionDir ($TaskId + "/target.txt")
+    if ($Explicit) {
+        $stateDir = Split-Path -Parent $stateFile
+        if (-not (Test-Path -LiteralPath $stateDir)) {
+            New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+        }
+        Set-Content -LiteralPath $stateFile -Value $Target -Encoding UTF8
+        return $Target
+    }
+    if (Test-Path -LiteralPath $stateFile) {
+        $stored = (Get-Content -LiteralPath $stateFile -Raw).Trim()
+        if (@("agent", "claude", "codex", "antigravity") -contains $stored) {
+            return $stored
+        }
+    }
+    return $Target
+}
+
 # Resolve an abstract capability tier (strong/default/light) to a Codex reasoning effort.
 # Returns "" for an empty/unknown tier (e.g. the 'done' phase) so the caller emits nothing.
 function Get-SpecialistEffort {

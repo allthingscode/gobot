@@ -2,7 +2,9 @@ param(
     [string]$Commit = "",
     [string]$Repo = "",
     [int]$TimeoutMinutes = 20,
-    [string]$CrucibleRoot = ""
+    [string]$CrucibleRoot = "",
+    [int]$NoRunsGraceMinutes = 2,
+    [int]$PollSeconds = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -163,6 +165,8 @@ if ([string]::IsNullOrWhiteSpace($Repo)) {
 }
 
 $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+$noRunsDeadline = (Get-Date).AddMinutes($NoRunsGraceMinutes)
+$sawRuns = $false
 $lastRuns = @()
 
 while ($true) {
@@ -174,10 +178,20 @@ while ($true) {
     $lastRuns = @($runs)
 
     if ($lastRuns.Count -eq 0) {
+        # No workflow run is registered for this commit yet. GitHub Actions can take
+        # several seconds after a push to create the run, so an initial absence is
+        # PENDING, not a verdict: keep polling until a run registers or the grace
+        # window elapses. Concluding NO_RUNS on the first empty poll is the push->poll
+        # race that lets a require_green_ci gate finalize before CI even exists.
+        if (-not $sawRuns -and (Get-Date) -lt $noRunsDeadline) {
+            Start-Sleep -Seconds $PollSeconds
+            continue
+        }
         Write-Host "[CI WATCH] STATUS=NO_RUNS"
         Write-Host ("  commit: " + $Commit)
         exit 3
     }
+    $sawRuns = $true
 
     $allCompleted = $true
     foreach ($run in $lastRuns) {
@@ -216,5 +230,5 @@ while ($true) {
         exit 2
     }
 
-    Start-Sleep -Seconds 10
+    Start-Sleep -Seconds $PollSeconds
 }

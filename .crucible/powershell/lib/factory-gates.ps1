@@ -2433,6 +2433,8 @@ function Invoke-HumanGateAction {
                                 }
                                 Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
                             }
+                        } elseif ($ciExitCode -eq 3) {
+                            Write-Host ("[HUMAN GATE] CI could not be confirmed for " + $mergedSha + ": no workflow runs registered within the grace window. Finalizing, but verify CI manually before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
                         }
                     }
                 } else {
@@ -3131,7 +3133,7 @@ Copy-Item `$right `$rightCopy -Force
                             
                             # Construct gate-specific command for next_step.txt
                             $pwshCmd = Get-PwshCommand
-                            $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
+                            $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
                             Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                             
                             exit 0
@@ -3294,7 +3296,7 @@ Copy-Item `$right `$rightCopy -Force
                     
                     # Construct gate-specific command for next_step.txt
                     $pwshCmd = Get-PwshCommand
-                    $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -Quiet"
+                    $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/factory.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
                     Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                     
                     exit 0

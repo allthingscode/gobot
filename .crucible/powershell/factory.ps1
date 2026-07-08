@@ -289,6 +289,13 @@ $GLOBAL_DIR = Join-Path $sessionDir "global"
 if (-not (Test-Path $GLOBAL_DIR)) { New-Item -ItemType Directory -Force -Path $GLOBAL_DIR | Out-Null }
 $CB_HISTORY_FILE = Join-Path $GLOBAL_DIR "circuit_breakers.jsonl"
 
+# Sticky per-task specialist target: the human picks -Target once (e.g. codex) and the
+# whole pipeline should keep recommending it. Without this, every phase's -Init defaults
+# -Target back to "agent", so the printed [NEXT SESSION COMMAND]/[RECOMMENDED MODEL]
+# mislabels a Codex-run pipeline. Persist an explicit -Target and reload it when omitted.
+$Target = Resolve-StickyTarget -TaskId $TaskId -SessionDir $sessionDir -Target $Target `
+    -Explicit ($PSBoundParameters.ContainsKey('Target'))
+
 $factoryContext = @{
     RepoRoot = $REPO_ROOT
     CrucibleRoot = $crucibleRoot
