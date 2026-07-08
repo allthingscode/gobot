@@ -1,6 +1,6 @@
 module github.com/allthingscode/gobot
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/chromedp/chromedp v0.15.1
