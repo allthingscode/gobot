@@ -212,6 +212,21 @@ manual steps below.
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on our coding standards, build process, and how to submit pull requests.
 
+### Coverage Gate
+
+CI and Crucible full verification enforce an 80.0% minimum aggregate Go statement coverage floor over the scoped package set `./internal/... ./cmd/...`. To run the same check locally:
+
+```powershell
+New-Item -ItemType Directory -Force artifacts | Out-Null
+go test -mod=readonly -coverprofile artifacts/coverage.out ./internal/... ./cmd/...
+$coverageOutput = go tool cover -func artifacts/coverage.out
+$coverageOutput
+$coverage = [double](($coverageOutput | Select-String '^total:' | ForEach-Object { ($_ -split '\s+')[-1].TrimEnd('%') }))
+$coverageText = $coverage.ToString("F1")
+Write-Host ("Total coverage: {0}%" -f $coverageText)
+if ($coverage -lt 80.0) { Write-Host ("Coverage {0}% is below 80.0% threshold" -f $coverageText); exit 1 }
+```
+
 ## What You Can Do With gobot
 
 - Ask about your schedule: "What's on my calendar today?"
