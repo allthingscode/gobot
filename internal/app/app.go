@@ -58,7 +58,10 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 		defer shutdownOTel(otelProvider)
 	}
 
-	tracer := observability.NewDispatchTracer(otelProvider)
+	latencyRecorder := observability.NewLatencyRecorder(observability.DefaultLatencyCapacity)
+	tracer := observability.NewDispatchTracerWithLatency(otelProvider, latencyRecorder, func(snapshot observability.LatencySnapshot) error {
+		return observability.WriteLatencySnapshot(cfg.StorageRoot(), snapshot)
+	})
 	tmgr := reporter.NewTemplateManagerWithCSS(cfg.TemplatesPath(), cfg.Runtime.CustomCSSPath)
 	stack, cleanup, err := BuildAgentStack(ctx, cfg, tmgr, tracer)
 	if err != nil {
