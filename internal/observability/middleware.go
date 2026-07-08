@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -11,7 +12,9 @@ import (
 
 // DispatchTracer wraps dispatch operations with tracing.
 type DispatchTracer struct {
-	provider *Provider
+	provider        *Provider
+	latencyRecorder *LatencyRecorder
+	latencySink     func(LatencySnapshot) error
 }
 
 // NewDispatchTracer creates a new dispatch tracer.
@@ -19,10 +22,27 @@ func NewDispatchTracer(provider *Provider) *DispatchTracer {
 	return &DispatchTracer{provider: provider}
 }
 
+// NewDispatchTracerWithLatency creates a dispatch tracer that also records local latency samples.
+func NewDispatchTracerWithLatency(provider *Provider, recorder *LatencyRecorder, sink func(LatencySnapshot) error) *DispatchTracer {
+	return &DispatchTracer{provider: provider, latencyRecorder: recorder, latencySink: sink}
+}
+
+// SetLatencyRecorder configures local latency sampling for an existing tracer.
+func (d *DispatchTracer) SetLatencyRecorder(recorder *LatencyRecorder, sink func(LatencySnapshot) error) {
+	if d == nil {
+		return
+	}
+	d.latencyRecorder = recorder
+	d.latencySink = sink
+}
+
 // TraceBotDispatch traces a Telegram bot dispatch operation.
 func (d *DispatchTracer) TraceBotDispatch(ctx context.Context, sessionKey string, fn func(context.Context) error) error {
+	start := time.Now()
 	if d.provider == nil {
-		return fn(ctx)
+		err := fn(ctx)
+		d.recordLatency(LatencyMetricTelegramDispatch, start)
+		return err
 	}
 	ctx, span := d.provider.StartSpan(ctx, "telegram.dispatch",
 		attribute.String("session.key", sessionKey),
@@ -30,6 +50,7 @@ func (d *DispatchTracer) TraceBotDispatch(ctx context.Context, sessionKey string
 	defer span.End()
 
 	err := fn(ctx)
+	d.recordLatency(LatencyMetricTelegramDispatch, start)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -40,8 +61,11 @@ func (d *DispatchTracer) TraceBotDispatch(ctx context.Context, sessionKey string
 
 // TraceAgentDispatch traces an agent session dispatch operation.
 func (d *DispatchTracer) TraceAgentDispatch(ctx context.Context, sessionKey string, messageCount int, fn func(context.Context) (string, error)) (string, error) {
+	start := time.Now()
 	if d.provider == nil {
-		return fn(ctx)
+		response, err := fn(ctx)
+		d.recordLatency(LatencyMetricAgentDispatch, start)
+		return response, err
 	}
 	ctx, span := d.provider.StartSpan(ctx, "agent.dispatch",
 		attribute.String("session.key", sessionKey),
@@ -50,6 +74,7 @@ func (d *DispatchTracer) TraceAgentDispatch(ctx context.Context, sessionKey stri
 	defer span.End()
 
 	response, err := fn(ctx)
+	d.recordLatency(LatencyMetricAgentDispatch, start)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -143,8 +168,11 @@ func (d *DispatchTracer) TraceConsolidation(ctx context.Context, sessionKey stri
 
 // TraceToolExecution traces a tool execution with duration metrics.
 func (d *DispatchTracer) TraceToolExecution(ctx context.Context, sessionKey, toolName string, fn func(context.Context) (string, error)) (string, error) {
+	start := time.Now()
 	if d.provider == nil {
-		return fn(ctx)
+		result, err := fn(ctx)
+		d.recordLatency(LatencyMetricToolExecute, start)
+		return result, err
 	}
 	ctx, span := d.provider.StartSpan(ctx, "tool.execute",
 		attribute.String("session.key", sessionKey),
@@ -152,9 +180,9 @@ func (d *DispatchTracer) TraceToolExecution(ctx context.Context, sessionKey, too
 	)
 	defer span.End()
 
-	start := time.Now()
 	result, err := fn(ctx)
 	duration := time.Since(start)
+	d.recordLatencyDuration(LatencyMetricToolExecute, duration)
 
 	// Record metric
 	d.provider.RecordToolDuration(ctx, duration)
@@ -177,4 +205,23 @@ func (d *DispatchTracer) RecordTokens(ctx context.Context, count int64) {
 		return
 	}
 	d.provider.RecordTokens(ctx, count)
+}
+
+func (d *DispatchTracer) recordLatency(metric string, start time.Time) {
+	d.recordLatencyDuration(metric, time.Since(start))
+}
+
+func (d *DispatchTracer) recordLatencyDuration(metric string, duration time.Duration) {
+	if d == nil || d.latencyRecorder == nil {
+		return
+	}
+	if !d.latencyRecorder.Record(metric, duration) {
+		return
+	}
+	if d.latencySink == nil {
+		return
+	}
+	if err := d.latencySink(d.latencyRecorder.Snapshot()); err != nil {
+		slog.Warn("observability: failed to persist latency snapshot", "err", err)
+	}
 }

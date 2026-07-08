@@ -24,6 +24,11 @@ acting** and to rely on the established surfaces rather than ad-hoc inspection.
 - **Cron health.** Confirm scheduled work is running via cron `JobState`
   (`last/next run`, `success/failure` counts) in `<storage>/workspace/jobs.json`
   and the `cron: triggering job` / `cron: job dispatch failed` log lines.
+- **Latency.** Use the `gobot doctor` latency line for recent local P50/P99
+  samples. It is backed by `<storage>/workspace/latency.json` and works without
+  an external telemetry collector. Missing data means the process has not
+  recorded a snapshot yet; `recorded, no samples yet` means the marker exists
+  but no dispatch/tool timing has been sampled.
 - **Concurrency.** Watch for `agent: lock contention` (WARN) and
   `session lock timeout — possible deadlock` (ERROR). The `doctor` concurrency
   section reports live per-session contention, max wait, and total hold time.
@@ -43,9 +48,11 @@ An operator persona should be able to report on the minimal core set defined in
 5. Long-running session duration (hang/deadlock detection).
 6. Storage database size (SQLite growth).
 
-Where a metric is not yet surfaced (see the Status column in `docs/METRICS.md`),
-the operator should say so explicitly rather than guess. Adding the missing
-instrumentation is a future Architect task, not an operator action.
+Local latency is now surfaced in `doctor`; dashboard latency panels remain future
+work. Where any other metric is not yet surfaced (see the Status column in
+`docs/METRICS.md`), the operator should say so explicitly rather than guess.
+Adding missing instrumentation is a future Architect task, not an operator
+action.
 
 ### Operating principles
 

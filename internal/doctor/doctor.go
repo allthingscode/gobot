@@ -133,6 +133,7 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkAuthorization(cfg), false),
 		r(checkVendorDir(), false),
 		r(checkMemory(), false),
+		r(checkLatency(cfg), false),
 		r(checkCron(cfg), false),
 		r(checkStorageSizes(cfg), false),
 	}

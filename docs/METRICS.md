@@ -92,7 +92,16 @@ operations in spans and attaches `duration_ms` attributes for provider and tool
 calls. This is **opt-in** and intended for external collectors, not the default
 local operator experience.
 
-### 1.6 Web dashboard (F-139, `internal/dashboard`)
+### 1.6 Local latency snapshot (`workspace/latency.json`)
+
+`DispatchTracer` also records a bounded in-process rolling window for local
+latency metrics and persists a compact snapshot to
+`<storage>/workspace/latency.json`. The file contains recent counts, P50, P99,
+and last-updated timestamps for `agent.dispatch`, `telegram.dispatch`, and
+`tool.execute`. `gobot doctor` reads this file without starting runtime services
+and reports missing/no-sample data distinctly from measured latency.
+
+### 1.7 Web dashboard (F-139, `internal/dashboard`)
 
 The dashboard server streams structured log entries to the browser over SSE
 (`/events`) with a backlog replay, plus a static `index.html`. It is a **live
@@ -107,7 +116,7 @@ below.
 | Metric | Purpose | Collection | Status | Surface |
 |---|---|---|---|---|
 | **Memory footprint** (RSS or heap alloc at startup and idle) | Detect leaks / bloat; confirm small footprint | `runtime.ReadMemStats` (HeapAlloc/Sys) sampled at boot and periodically | Collected (doctor line + boot DEBUG log); dashboard panel pending | `doctor` line + dashboard panel + DEBUG log at boot |
-| **Message latency** (P50, P99 per user request) | UX responsiveness; spot regressions | Time agent dispatch end-to-end; aggregate quantiles (extend `DispatchTracer`/OTel histogram) | Span `duration_ms` exists per call; no P50/P99 aggregation | Dashboard panel; OTel histogram for collectors |
+| **Message latency** (P50, P99 per user request) | UX responsiveness; spot regressions | `DispatchTracer` records bounded local windows for agent, Telegram, and tool timings; OTel remains opt-in for collectors | Collected locally (`workspace/latency.json`) and surfaced in `doctor`; dashboard panel pending | `doctor` line + dashboard panel + OTel histogram/traces for collectors |
 | **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected; surfaced in `doctor` (C-332); dashboard panel pending | `doctor` check + dashboard panel |
 | **Startup time** (process start → ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `RunAgent` entry; log and persist delta when bot is ready/listening | Collected (INFO log + `doctor` detail); dashboard panel pending | INFO log at ready + `doctor` detail |
 | **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive from lock `AcquiredAt`/`TotalHoldTime`; flag sessions held beyond threshold | Partial: lock hold time + deadlock timeout exist | `doctor` advisory + WARN log (extends existing 5s contention warn) |
@@ -139,9 +148,12 @@ below.
     the C-330/C-331 cold instrumentation. This measured cold figure supersedes the
     prior unsourced "72.59 MB idle" number; see the README "Footprint" section for
     the full methodology.
-- **Message latency (P50/P99)** → dashboard panel for operators; OTel histogram
-  for external collectors. Do not spam logs per request; log only when a request
-  exceeds a slow threshold (WARN).
+- **Message latency (P50/P99)** → `doctor` line from
+  `<storage>/workspace/latency.json`, dashboard panel for operators, and OTel
+  histogram/traces for external collectors. Local snapshots are bounded and
+  compact; empty snapshots are reported as no samples rather than zero latency.
+  Do not spam logs per request; log only when a request exceeds a slow threshold
+  (WARN).
 - **Cron job health** → `doctor` `cron` line (C-332) reading `JobState` from
   `{StorageRoot}/workspace/jobs.json` read-only: `[OK] cron - N jobs, all healthy,
   next run in <dur>` (or `no scheduled jobs`), and `[WARN]` (advisory, non-critical)
@@ -167,10 +179,11 @@ below.
 | Surface | Command / Location | What it shows |
 |---|---|---|
 | Logs | `gobot logs [--filter --since --follow]` | All structured slog records, including cron triggers, lock contention, dashboard start |
-| Doctor | `gobot doctor` | Health checks incl. circuit-breaker stats and live session-lock contention metrics |
+| Doctor | `gobot doctor` | Health checks incl. local latency P50/P99, circuit-breaker stats, and live session-lock contention metrics |
 | Cron state | `<storage>/workspace/jobs.json` (`JobState`) | Per-job run/success/failure counts, last/next run |
+| Latency state | `<storage>/workspace/latency.json` (`LatencySnapshot`) | Recent bounded P50/P99 samples for agent, Telegram, and tool execution |
 | Dashboard | dashboard server `/` and `/events` (F-139) | Live SSE stream of structured log entries |
-| OTel | external OTLP collector (opt-in) | Token counter, tool-duration histogram, memory/consolidation counters, dispatch spans |
+| OTel | external OTLP collector (opt-in) | Token counter, tool-duration histogram, memory/consolidation counters, dispatch spans; separate from local latency snapshots |
 
 ---
 
