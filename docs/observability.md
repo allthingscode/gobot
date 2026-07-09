@@ -21,20 +21,27 @@ acting** and to rely on the established surfaces rather than ad-hoc inspection.
 - **Logs for evidence.** Use `gobot logs --filter ERROR --since 1h` to triage
   recent failures and `--follow` to watch live behavior. All operator-relevant
   events are structured `log/slog` records (see `docs/METRICS.md` §1.1).
-- **Cron health.** Confirm scheduled work is running via cron `JobState`
-  (`last/next run`, `success/failure` counts) in `<storage>/workspace/jobs.json`
-  and the `cron: triggering job` / `cron: job dispatch failed` log lines.
+- **Cron health.** Confirm scheduled work is running through the `gobot doctor`
+  cron check and, when the gateway dashboard is enabled, `/dash/cron`. The
+  source data lives in `<storage>/workspace/jobs.json` and includes
+  `last/next run` plus `success/failure` counts; logs still carry
+  `cron: triggering job` and `cron: job dispatch failed` events.
 - **Latency.** Use the `gobot doctor` latency line for recent local P50/P99
   samples. It is backed by `<storage>/workspace/latency.json` and works without
   an external telemetry collector. Missing data means the process has not
   recorded a snapshot yet; `recorded, no samples yet` means the marker exists
   but no dispatch/tool timing has been sampled.
 - **Concurrency.** Watch for `agent: lock contention` (WARN) and
-  `session lock timeout — possible deadlock` (ERROR). The `doctor` concurrency
-  section reports live per-session contention, max wait, and total hold time.
-- **Dashboard.** When the F-139 dashboard is running, use it as the live log
-  surface; future metric panels (memory, latency, cron health) will appear here
-  per `docs/METRICS.md` §2–3.
+  `session lock timeout - possible deadlock` (ERROR). The `doctor` concurrency
+  section reports live per-session contention, max wait, total hold time, and
+  enough lock state to identify long-held sessions. A dedicated stale-lock
+  dashboard alert remains future work.
+- **Dashboard.** When the gateway dashboard is running, use `/dash/` for the
+  system overview and quick doctor diagnostic, `/dash/doctor` for local health
+  checks, `/dash/cron` for scheduled jobs, `/dash/sessions` for resumable
+  threads, `/dash/memory` for fact count and memory search, and `/dash/logs` for
+  recent structured logs. Dedicated metric panels for latency, memory
+  footprint, startup time, and storage growth remain future work.
 
 ### Core metrics an operator should be able to answer
 
@@ -48,11 +55,13 @@ An operator persona should be able to report on the minimal core set defined in
 5. Long-running session duration (hang/deadlock detection).
 6. Storage database size (SQLite growth).
 
-Local latency is now surfaced in `doctor`; dashboard latency panels remain future
-work. Where any other metric is not yet surfaced (see the Status column in
+Memory footprint, message latency, cron job health, startup time, and storage
+sizes are surfaced by `doctor`. Long-running session duration is represented
+through the existing lock metrics rather than a dedicated duration panel. When a
+dashboard panel or alert is still pending (see the Status column in
 `docs/METRICS.md`), the operator should say so explicitly rather than guess.
-Adding missing instrumentation is a future Architect task, not an operator
-action.
+Adding missing dashboard/operator surfaces is a future Architect task, not an
+operator action.
 
 ### Operating principles
 
