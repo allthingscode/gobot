@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/allthingscode/gobot/internal/resilience"
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 // ErrNeedsReauth is returned when the OAuth2 token is expired and cannot be refreshed
@@ -105,7 +106,7 @@ func NewService(ctx context.Context, secretsRoot string) (*Service, error) {
 			return nil, fmt.Errorf("token refresh failed: %w", err)
 		}
 		if updated, err := json.Marshal(tok); err == nil { //nolint:gosec // G117: RefreshToken must be marshaled to persist the token
-			_ = os.WriteFile(tokenPath, updated, 0o600)
+			_ = state.WriteFileAtomic(tokenPath, updated, 0o600)
 		}
 	}
 

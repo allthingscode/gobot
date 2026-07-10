@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"sort"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 // #nosec G101 - This is a filename, not a secret.
@@ -173,11 +175,7 @@ func (s *SecretsStore) save(m map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return fmt.Errorf("secrets: create dir: %w", err)
 	}
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Errorf("secrets: marshal: %w", err)
-	}
-	if err := os.WriteFile(s.path, data, 0o600); err != nil {
+	if err := state.WriteFileJSON(s.path, m, 0o600); err != nil {
 		return fmt.Errorf("secrets: write file: %w", err)
 	}
 	return nil

@@ -2,7 +2,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,6 +55,20 @@ func TestToolRegistry_Idempotency(t *testing.T) {
 	regPath := filepath.Join(tmpDir, sessionKey, "tool_registry.json")
 	if _, err := os.Stat(regPath); os.IsNotExist(err) {
 		t.Fatal("registry file not created")
+	}
+	registryJSON, err := os.ReadFile(regPath)
+	if err != nil {
+		t.Fatalf("read registry file: %v", err)
+	}
+	if !bytes.HasSuffix(registryJSON, []byte("\n")) {
+		t.Fatalf("registry JSON missing trailing newline: %q", registryJSON)
+	}
+	var persisted toolRegistryData
+	if err := json.Unmarshal(registryJSON, &persisted); err != nil {
+		t.Fatalf("unmarshal registry file: %v", err)
+	}
+	if persisted.Executions[execID] != result {
+		t.Fatalf("persisted execution = %q, want %q", persisted.Executions[execID], result)
 	}
 }
 

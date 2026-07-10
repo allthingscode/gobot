@@ -19,6 +19,7 @@ import (
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/reporter"
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 const (
@@ -364,11 +365,7 @@ func (r *ToolRegistry) save(sessionKey string, data *toolRegistryData) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir registry: %w", err)
 	}
-	b, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal registry: %w", err)
-	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
+	if err := state.WriteFileJSON(path, data, 0o600); err != nil {
 		return fmt.Errorf("write registry: %w", err)
 	}
 	return nil
