@@ -1,4 +1,4 @@
-﻿# Metrics Reference
+# Metrics Reference
 
 This document is the canonical reference for gobot's runtime footprint and
 operator/user-experience (UX) metrics. It records what is **already** observable
@@ -23,11 +23,11 @@ telemetry that adds maintenance burden.
 gobot logs structured records via the standard library `log/slog`. Operators
 read them through the `gobot logs` command (`cmd/gobot/logs.go`), which supports:
 
-- `--lines N` â€” tail the last N lines (default 100).
-- `--filter LEVEL` â€” filter by `ERROR`, `WARN`, `INFO`, `DEBUG`.
-- `--since DURATION` â€” only show records newer than e.g. `1h`, `30m`.
-- `--follow` â€” stream new records as they are written.
-- `--list` â€” list available log files with size and mtime.
+- `--lines N` — tail the last N lines (default 100).
+- `--filter LEVEL` — filter by `ERROR`, `WARN`, `INFO`, `DEBUG`.
+- `--since DURATION` — only show records newer than e.g. `1h`, `30m`.
+- `--follow` — stream new records as they are written.
+- `--list` — list available log files with size and mtime.
 
 Notable log-emitted signals already present:
 
@@ -90,8 +90,8 @@ falls back to configured cron tasks.
 
 When an OTLP exporter is configured, the `Provider` records:
 
-- `tokenCounter` â€” total tokens consumed by LLM calls.
-- `toolHistogram` â€” tool-execution duration (seconds).
+- `tokenCounter` — total tokens consumed by LLM calls.
+- `toolHistogram` — tool-execution duration (seconds).
 - `consolidationsTriggered`, `factsExtracted`, `factsIndexed`, `factsSkipped`.
 
 `DispatchTracer` (`middleware.go`) wraps bot/agent/provider/tool/memory
@@ -148,7 +148,7 @@ not as zero-valued measurements.
 
 ## 3. Recommended Surface Points (per metric)
 
-- **Memory footprint** â†’ `doctor` (one-line `[OK] memory â€” heap NN MiB, sys NN
+- **Memory footprint** → `doctor` (one-line `[OK] memory — heap NN MiB, sys NN
   MiB`), the `/dash/metrics` memory panel, and a DEBUG log line at boot. Not an ERROR/WARN
   unless a configurable ceiling is exceeded.
   - **Measured cold idle (2026-06-24, current build):** ~23 MB Working Set
@@ -170,27 +170,27 @@ not as zero-valued measurements.
     the C-330/C-331 cold instrumentation. This measured cold figure supersedes the
     prior unsourced "72.59 MB idle" number; see the README "Footprint" section for
     the full methodology.
-- **Message latency (P50/P99)** â†’ `doctor` line from
+- **Message latency (P50/P99)** → `doctor` line from
   `<storage>/workspace/latency.json`, dashboard panel for operators, and OTel
   histogram/traces for external collectors. Local snapshots are bounded and
   compact; empty snapshots are reported as no samples rather than zero latency.
   Do not spam logs per request; log only when a request exceeds a slow threshold
   (WARN).
-- **Cron job health** â†’ `doctor` `cron` line (C-332) reading `JobState` from
+- **Cron job health** → `doctor` `cron` line (C-332) reading `JobState` from
   `{StorageRoot}/workspace/jobs.json` read-only: `[OK] cron - N jobs, all healthy,
   next run in <dur>` (or `no scheduled jobs`), and `[WARN]` (advisory, non-critical)
   when any job has a non-zero `FailureCount`. The dashboard cron page shows a
   live job table when the scheduler is wired, with configured-task fallback.
   already exists in `jobs.json`.
-- **Startup time** â†’ single INFO log line at "ready/listening" and a `doctor`
+- **Startup time** → single INFO log line at "ready/listening" and a `doctor`
   detail from `<storage>/workspace/startup.json`. Surfaced on `/dash/metrics`; missing markers are shown as not recorded rather than as zero.
 - **Long-running session duration** -> lock metrics expose
   `AcquiredAt`, `TotalHoldTime`, and contention/max-wait data to `doctor`.
   Operators can infer long holds from those values today, but a dedicated
   dashboard/operator alert for stale held locks remains future work. Keep the
   5s holder-stack capture as-is.
-- **Storage database size** â†’ `doctor` line and the `/dash/metrics` storage panel. WARN only past the existing advisory threshold; missing stores are shown as absent rather than zero-sized measurements.
-- **Token consumption** (existing OTel counter) â†’ intentionally **not** surfaced
+- **Storage database size** → `doctor` line and the `/dash/metrics` storage panel. WARN only past the existing advisory threshold; missing stores are shown as absent rather than zero-sized measurements.
+- **Token consumption** (existing OTel counter) → intentionally **not** surfaced
   in `doctor`/dashboard by default; it is cost telemetry for external collectors,
   not a stability signal.
 
@@ -216,4 +216,3 @@ not as zero-valued measurements.
 - Shipped doctor checks and `/dash/metrics` cover memory, local latency, startup time, cron health, and storage sizes. Remaining observability gaps are trend views and operator alerting, not missing current-state instrumentation.
 - Memory and db-size checks are cheap (`runtime.ReadMemStats`, `os.Stat`) and
   must never block startup.
-
