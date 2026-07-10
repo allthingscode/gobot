@@ -15,6 +15,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/dashboard"
+	"github.com/allthingscode/gobot/internal/observability"
 )
 
 // mockCronProvider implements CronProvider.
@@ -63,6 +64,7 @@ func TestDashboardHandlers(t *testing.T) {
 		{"/dash/", http.StatusOK, []string{"GoBot Dashboard", "test-v1", "System Overview"}},
 		{"/dash/sessions", http.StatusOK, []string{"Active Sessions"}},
 		{"/dash/memory", http.StatusOK, []string{"Strategic Memory", "42"}},
+		{"/dash/metrics", http.StatusOK, []string{"Operator Metrics", "Latency P50/P99", "Process Memory"}},
 		{"/dash/cron", http.StatusOK, []string{"Cron Jobs"}},
 		{"/dash/doctor", http.StatusOK, []string{"Doctor Diagnostics"}},
 		{"/dash/doctor?partial=true", http.StatusOK, []string{"Last checked:"}},
@@ -82,6 +84,116 @@ func setupDashboardHandler() *Handler {
 	cfg.Gateway.DashboardEnabled = true
 	res := Resources{Config: cfg, Checkpoints: nil, Memory: &mockMemoryStats{count: 42}, Version: "test-v1"}
 	return NewHandler(res)
+}
+
+func TestMetricsEmptyStates(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	h := NewHandler(Resources{Config: cfg})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/metrics", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"Operator Metrics",
+		"Not recorded yet",
+		"No storage files found",
+		"No scheduled jobs",
+		"workspace/latency.json has not been written.",
+		"workspace/startup.json has not been written.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+	for _, notWant := range []string{"p50 0 ms", "p99 0 ms", "0 recent samples"} {
+		if strings.Contains(body, notWant) {
+			t.Fatalf("empty metrics page should not render misleading zero value %q:\n%s", notWant, body)
+		}
+	}
+}
+
+func TestMetricsMeasuredStates(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	writeMetricFixtures(t, cfg.Runtime.StorageRoot)
+
+	provider := &mockCronProvider{jobs: []cron.Job{
+		{
+			Name:     "Live Daily",
+			Enabled:  true,
+			Schedule: cron.Schedule{Kind: cron.KindCron, Expr: "0 9 * * *"},
+			State:    cron.JobState{LastRunAtMS: 1700000000000, NextRunAtMS: 1700003600000, RunCount: 3, SuccessCount: 3},
+		},
+	}}
+	h := NewHandler(Resources{Config: cfg, Cron: provider})
+
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/metrics", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"agent.dispatch",
+		"p50 12 ms / p99 45 ms",
+		"telegram.dispatch",
+		"Process Memory",
+		"Storage Size",
+		"checkpoints",
+		"Startup Time",
+		"1234 ms",
+		"Cron Health",
+		"Live Daily",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func writeMetricFixtures(t *testing.T, storageRoot string) {
+	t.Helper()
+	now := time.Now().UTC()
+	p50 := int64(12)
+	p99 := int64(45)
+	if err := observability.WriteLatencySnapshot(storageRoot, observability.LatencySnapshot{
+		Version:     observability.LatencySnapshotVersion,
+		GeneratedAt: now,
+		Metrics: []observability.LatencyMetricSnapshot{
+			{
+				Name:      observability.LatencyMetricAgentDispatch,
+				Count:     3,
+				P50MS:     &p50,
+				P99MS:     &p99,
+				UpdatedAt: now,
+			},
+			{Name: observability.LatencyMetricTelegramDispatch},
+			{Name: observability.LatencyMetricToolExecute},
+		},
+	}); err != nil {
+		t.Fatalf("write latency snapshot: %v", err)
+	}
+	ws := filepath.Join(storageRoot, "workspace")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	readyAt := now.Format(time.RFC3339Nano)
+	if err := os.WriteFile(filepath.Join(ws, "startup.json"), []byte(`{"version":1,"ready_at":"`+readyAt+`","duration_ms":1234}`), 0o600); err != nil {
+		t.Fatalf("write startup fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "checkpoints.db"), []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write checkpoints fixture: %v", err)
+	}
 }
 
 func validateDashboardResponse(t *testing.T, h *Handler, path string, expectedStatus int, expectedBody []string) {
