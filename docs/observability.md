@@ -37,11 +37,10 @@ acting** and to rely on the established surfaces rather than ad-hoc inspection.
   enough lock state to identify long-held sessions. A dedicated stale-lock
   dashboard alert remains future work.
 - **Dashboard.** When the gateway dashboard is running, use `/dash/` for the
-  system overview and quick doctor diagnostic, `/dash/doctor` for local health
-  checks, `/dash/cron` for scheduled jobs, `/dash/sessions` for resumable
-  threads, `/dash/memory` for fact count and memory search, and `/dash/logs` for
-  recent structured logs. Dedicated metric panels for latency, memory
-  footprint, startup time, and storage growth remain future work.
+  system overview and quick doctor diagnostic, `/dash/metrics` for compact
+  operator metric panels, `/dash/doctor` for local health checks, `/dash/cron`
+  for scheduled jobs, `/dash/sessions` for resumable threads, `/dash/memory` for
+  fact count and memory search, and `/dash/logs` for recent structured logs.
 
 ### Core metrics an operator should be able to answer
 
@@ -56,12 +55,11 @@ An operator persona should be able to report on the minimal core set defined in
 6. Storage database size (SQLite growth).
 
 Memory footprint, message latency, cron job health, startup time, and storage
-sizes are surfaced by `doctor`. Long-running session duration is represented
-through the existing lock metrics rather than a dedicated duration panel. When a
-dashboard panel or alert is still pending (see the Status column in
-`docs/METRICS.md`), the operator should say so explicitly rather than guess.
-Adding missing dashboard/operator surfaces is a future Architect task, not an
-operator action.
+sizes are surfaced by `doctor` and summarized on `/dash/metrics`. Long-running
+session duration is represented through the existing lock metrics rather than a
+dedicated duration panel. Missing latency/startup history should be reported as
+not recorded; operators should not infer zero values from absent local snapshot
+files.
 
 ### Operating principles
 
