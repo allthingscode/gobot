@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 const startupMarkerVersion = 1
@@ -47,13 +47,7 @@ func writeStartupMarker(storageRoot string, marker startupMarker) error {
 		return fmt.Errorf("create startup marker directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(marker, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal startup marker: %w", err)
-	}
-	data = append(data, '\n')
-
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := state.WriteFileJSON(path, marker, 0o600); err != nil {
 		return fmt.Errorf("write startup marker: %w", err)
 	}
 	return nil

@@ -13,6 +13,7 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/doctor"
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 // AlertSender is the minimal interface needed by HeartbeatRunner to send Telegram alerts.
@@ -123,7 +124,7 @@ func (hb *HeartbeatRunner) probeGmail() []probeResult {
 func (hb *HeartbeatRunner) writeLivenessFile(failureCount int) {
 	livenessPath := filepath.Join(hb.storageRoot, "LIVENESS")
 	livenessContent := fmt.Sprintf("ok %s failures=%d\n", time.Now().UTC().Format(time.RFC3339), failureCount)
-	if err := os.WriteFile(livenessPath, []byte(livenessContent), 0o600); err != nil {
+	if err := state.WriteFileAtomic(livenessPath, []byte(livenessContent), 0o600); err != nil {
 		slog.Warn("heartbeat: failed to write LIVENESS file", "err", err)
 	}
 }

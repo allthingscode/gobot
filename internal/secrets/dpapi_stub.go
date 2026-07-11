@@ -11,6 +11,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 // protect encrypts plaintext using AES-256-GCM with a per-user key stored at
@@ -107,7 +109,7 @@ func loadOrCreateKey() ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("load key: mkdir: %w", err)
 	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
+	if err := state.WriteFileAtomic(path, key, 0o600); err != nil {
 		return nil, fmt.Errorf("load key: write %s: %w", path, err)
 	}
 	return key, nil

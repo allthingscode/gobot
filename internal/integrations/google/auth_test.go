@@ -64,6 +64,17 @@ func TestBearerToken_ExpiredRefreshes(t *testing.T) {
 	if got != "new-token" { //nolint:goconst // test fixture token
 		t.Errorf("want new-token, got %q", got)
 	}
+	tokenData, err := os.ReadFile(GoogleTokenPath(dir))
+	if err != nil {
+		t.Fatalf("read refreshed token: %v", err)
+	}
+	var refreshed storedToken
+	if err := json.Unmarshal(tokenData, &refreshed); err != nil {
+		t.Fatalf("unmarshal refreshed token: %v", err)
+	}
+	if refreshed.Token != "new-token" {
+		t.Fatalf("persisted token = %q, want new-token", refreshed.Token)
+	}
 }
 
 func TestBearerToken_MissingFile(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/secrets"
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 const (
@@ -170,14 +171,17 @@ func persistToken(secretsRoot string, token *storedToken) error {
 	}
 
 	googlePath := GoogleTokenPath(secretsRoot)
-	if err := os.WriteFile(googlePath, tokenJSON, 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Dir(googlePath), 0o755); err != nil {
+		return fmt.Errorf("create google token directory: %w", err)
+	}
+	if err := state.WriteFileAtomic(googlePath, tokenJSON, 0o600); err != nil {
 		return fmt.Errorf("failed to save google_token.json: %w", err)
 	}
 
 	gmailDir := filepath.Join(secretsRoot, "gmail")
 	_ = os.MkdirAll(gmailDir, 0o755)
 	gmailPath := filepath.Join(gmailDir, "token.json")
-	if err := os.WriteFile(gmailPath, tokenJSON, 0o600); err != nil {
+	if err := state.WriteFileAtomic(gmailPath, tokenJSON, 0o600); err != nil {
 		return fmt.Errorf("failed to save gmail token: %w", err)
 	}
 
@@ -325,7 +329,7 @@ func refreshAndSaveToken(ctx context.Context, tok *storedToken, path string, cli
 	}
 	// nolint:gosec // RefreshToken is a secret
 	if updated, err := json.Marshal(tok); err == nil {
-		_ = os.WriteFile(path, updated, 0o600)
+		_ = state.WriteFileAtomic(path, updated, 0o600)
 	}
 	return nil
 }
