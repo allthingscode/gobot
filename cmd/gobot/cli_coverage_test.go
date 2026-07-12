@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/secrets"
 )
 
 func setupTestHome(t *testing.T) string {
@@ -27,6 +30,7 @@ func setupTestHome(t *testing.T) string {
 
 	t.Setenv("GOBOT_HOME", tempDir)
 	t.Setenv("GOBOT_STORAGE", tempDir)
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(tempDir, "encryption.key"))
 
 	t.Cleanup(func() {
 		_ = os.RemoveAll(tempDir)
@@ -37,254 +41,419 @@ func setupTestHome(t *testing.T) string {
 //nolint:paralleltest // uses global state
 func TestCmdVersion(t *testing.T) {
 	cmd := cmdVersion()
-	// Just execute it to hit the lines.
-	_ = cmd.Execute()
+	out := bytes.NewBuffer(nil)
+	cmd.SetOut(out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "gobot ") {
+		t.Fatalf("expected version line, got %q", got)
+	}
+	if !strings.Contains(got, "runtime:") {
+		t.Fatalf("expected runtime line, got %q", got)
+	}
 }
 
 //nolint:paralleltest // uses global state
-func TestCmdInit(t *testing.T) {
+func TestCmdInitCreatesWorkspace(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cmd := cmdInit()
+	out := bytes.NewBuffer(nil)
+	cmd.SetOut(out)
 	cmd.SetArgs([]string{"--root", tempDir})
-	_ = cmd.Execute()
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Initialized gobot workspace at "+tempDir) {
+		t.Fatalf("expected init output for temp root, got %q", got)
+	}
+	for _, dir := range []string{"sessions", "secrets", "memory", "logs"} {
+		if _, err := os.Stat(filepath.Join(tempDir, "workspace", dir)); err != nil {
+			t.Fatalf("expected workspace dir %s: %v", dir, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, ".gobot", "config.json")); err != nil {
+		t.Fatalf("expected config file: %v", err)
+	}
 }
 
 //nolint:paralleltest // uses global state
-func TestCmdLogs_Functional(t *testing.T) {
+func TestCmdLogsPrintsSelectedLogContent(t *testing.T) {
 	tempDir := setupTestHome(t)
 	logDir := filepath.Join(tempDir, "logs")
-	_ = os.MkdirAll(logDir, 0o755)
-	_ = os.WriteFile(filepath.Join(logDir, "gobot.log"), []byte("test log\n"), 0o600)
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "gobot.log"), []byte("first\nselected log\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	cmd := cmdLogs()
+	out := bytes.NewBuffer(nil)
+	cmd.SetOut(out)
 	cmd.SetArgs([]string{"--lines", "1"})
-	_ = cmd.Execute()
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "selected log") {
+		t.Fatalf("expected selected log line, got %q", got)
+	}
+	if strings.Contains(got, "first") {
+		t.Fatalf("expected only one tailed line, got %q", got)
+	}
 }
 
 //nolint:paralleltest // uses global state
-func TestCmdConfig_Functional(t *testing.T) {
-	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-
-	cmd := cmdConfig()
-	cmd.SetArgs([]string{"validate"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdSecrets_Functional(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace", "secrets"), 0o755)
-
-	cmd := cmdSecretsSet()
-	cmd.SetArgs([]string{"key1", "val1"})
-	_ = cmd.Execute()
-
-	cmdGet := cmdSecretsGet()
-	cmdGet.SetArgs([]string{"key1"})
-	_ = cmdGet.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdCheckpoints_List_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-
-	cmd := cmdCheckpoints()
-	cmd.SetArgs([]string{})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdSimulate_Functional_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	_ = os.WriteFile(filepath.Join(tempDir, "workspace", "AWARENESS.md"), []byte("test"), 0o600)
-
-	cmd := cmdSimulate()
-	cmd.SetArgs([]string{"hello"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdAuthorize_Execute_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-
-	cmd := cmdAuthorize()
-	cmd.SetArgs([]string{"12345"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdEmail_Execute_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-
-	cmd := cmdEmail()
-	cmd.SetArgs([]string{"subj", "body"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdCalendar_Execute_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-
-	cmd := cmdCalendar()
-	cmd.SetArgs([]string{})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdTasks_Execute_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-
-	cmd := cmdTasks()
-	cmd.SetArgs([]string{"list"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdMemory_Execute_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-
-	cmd := cmdMemory()
-	cmd.SetArgs([]string{"rebuild"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdState_Execute_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-
-	cmd := cmdState()
-	cmd.SetArgs([]string{"list"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdResume_NotFound_Coverage(t *testing.T) {
+func TestCmdConfigReformatReportsSuccess(t *testing.T) {
 	tempDir := setupTestHome(t)
 	cfg := &config.Config{}
 	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
+	configPath := filepath.Join(tempDir, ".gobot", "config.json")
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
-	cmd := cmdResume()
-	cmd.SetArgs([]string{"nonexistent-thread"})
-	_ = cmd.Execute()
+	out := captureStdout(t, func() {
+		cmd := cmdConfig()
+		cmd.SetArgs([]string{"reformat", configPath})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Successfully reformatted "+configPath) {
+		t.Fatalf("expected reformat success output, got %q", out)
+	}
 }
 
 //nolint:paralleltest // uses global state
-func TestCmdClearCheckpoint_NotFound_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-
-	cmd := cmdClearCheckpoint()
-	cmd.SetArgs([]string{"nonexistent-thread"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdStateInspect_NotFound_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-
-	cmd := cmdState()
-	cmd.SetArgs([]string{"inspect", "nonexistent-wf"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdStateArchive_NotFound_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-
-	cmd := cmdState()
-	cmd.SetArgs([]string{"archive", "nonexistent-wf"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdStateRecover_NotFound_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-
-	cmd := cmdState()
-	cmd.SetArgs([]string{"recover", "nonexistent-wf"})
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdDoctor_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-
-	cmd := cmdDoctor()
-	b := bytes.NewBufferString("")
-	cmd.SetOut(b)
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestCmdRun_PrereqError_Coverage(t *testing.T) {
-	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	cfg.Channels.Telegram.Enabled = true // No token -> prereq error
-	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
-
-	cmd := cmdRun()
-	_ = cmd.Execute()
-}
-
-//nolint:paralleltest // uses global state
-func TestConfigReformat_Error_Coverage(t *testing.T) {
+func TestConfigReformatReturnsLoadErrorForInvalidConfig(t *testing.T) {
 	tempDir := setupTestHome(t)
 	configPath := filepath.Join(tempDir, ".gobot", "config.json")
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = os.WriteFile(configPath, []byte("invalid json"), 0o600)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("invalid json"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	cmd := cmdConfig()
-	cmd.SetArgs([]string{"reformat"})
-	_ = cmd.Execute()
+	cmd.SetArgs([]string{"reformat", configPath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if !strings.Contains(err.Error(), "load config") || !strings.Contains(err.Error(), "invalid field or syntax") {
+		t.Fatalf("expected wrapped config load error, got %v", err)
+	}
 }
 
 //nolint:paralleltest // uses global state
-func TestCmdTasks_Add_Coverage(t *testing.T) {
+func TestCmdSecretsSetAndGetRoundTrip(t *testing.T) {
 	tempDir := setupTestHome(t)
-	cfg := &config.Config{}
-	cfg.Runtime.StorageRoot = tempDir
-	_ = os.MkdirAll(filepath.Join(tempDir, ".gobot"), 0o755)
-	_ = cfg.Save(filepath.Join(tempDir, ".gobot", "config.json"))
 
-	cmd := cmdTasks()
-	cmd.SetArgs([]string{"add", "test task"})
-	_ = cmd.Execute()
+	setOut := captureStdout(t, func() {
+		cmd := cmdSecretsSet()
+		cmd.SetArgs([]string{"key1", "val1"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("set Execute: %v", err)
+		}
+	})
+	if !strings.Contains(setOut, `Secret "key1" stored.`) {
+		t.Fatalf("expected set confirmation, got %q", setOut)
+	}
+
+	getOut := captureStdout(t, func() {
+		cmd := cmdSecretsGet()
+		cmd.SetArgs([]string{"key1"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("get Execute: %v", err)
+		}
+	})
+	if strings.TrimSpace(getOut) != "val1" {
+		t.Fatalf("secret get output = %q, want val1", getOut)
+	}
+
+	store := secrets.NewSecretsStore(tempDir)
+	if got, err := store.Get("key1"); err != nil || got != "val1" {
+		t.Fatalf("persisted secret = %q, err %v", got, err)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdCheckpointsListReportsEmptyStore(t *testing.T) {
+	tempDir := setupTestHome(t)
+	if err := os.MkdirAll(filepath.Join(tempDir, "workspace"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		cmd := cmdCheckpoints()
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "No resumable checkpoints found.") {
+		t.Fatalf("expected empty checkpoint output, got %q", out)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdResumeReportsMissingCheckpoint(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	out := captureStdout(t, func() {
+		cmd := cmdResume()
+		cmd.SetArgs([]string{"nonexistent-thread"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "No checkpoint found for thread: nonexistent-thread") {
+		t.Fatalf("expected missing checkpoint output, got %q", out)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdClearCheckpointIsIdempotentForMissingThread(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	out := captureStdout(t, func() {
+		cmd := cmdClearCheckpoint()
+		cmd.SetArgs([]string{"nonexistent-thread"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Successfully marked session nonexistent-thread as completed.") {
+		t.Fatalf("expected idempotent clear output, got %q", out)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdStateListReportsEmptyState(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	out := captureStdout(t, func() {
+		cmd := cmdState()
+		cmd.SetArgs([]string{"list"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "No active workflows") {
+		t.Fatalf("expected empty state output, got %q", out)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdStateMissingWorkflowErrors(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	tests := []struct {
+		name     string
+		args     []string
+		wantText string
+	}{
+		{name: "inspect", args: []string{"inspect", "nonexistent-wf"}, wantText: "loading workflow"},
+		{name: "archive", args: []string{"archive", "nonexistent-wf"}, wantText: "archiving workflow"},
+		{name: "recover", args: []string{"recover", "nonexistent-wf"}, wantText: "recovering workflow"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := cmdState()
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected missing workflow error")
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("expected %q context, got %v", tc.wantText, err)
+			}
+		})
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdTasksRequireOAuthToken(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "list", args: []string{"list"}, want: "tasks auth"},
+		{name: "add", args: []string{"add", "test task"}, want: "create task"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := cmdTasks()
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected OAuth token error")
+			}
+			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "google_token.json not found") {
+				t.Fatalf("expected deterministic auth error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCmdSimulateRequiresPrompt(t *testing.T) {
+	t.Parallel()
+
+	cmd := cmdSimulate()
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing prompt error")
+	}
+	if !strings.Contains(err.Error(), "accepts 1 arg") {
+		t.Fatalf("expected argument validation error, got %v", err)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdAuthorizeDirectChatID(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	out := captureStdout(t, func() {
+		cmd := cmdAuthorize()
+		cmd.SetArgs([]string{"12345"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Authorized chat ID 12345 directly.") {
+		t.Fatalf("expected direct authorization output, got %q", out)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdEmailRequiresConfiguredRecipient(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	cmd := cmdEmail()
+	cmd.SetArgs([]string{"subject", "body"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing user email error")
+	}
+	if !strings.Contains(err.Error(), "runtime.user_email not set") {
+		t.Fatalf("expected recipient configuration error, got %v", err)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdCalendarRequiresOAuthToken(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	cmd := cmdCalendar()
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected OAuth token error")
+	}
+	if !strings.Contains(err.Error(), "calendar") || !strings.Contains(err.Error(), "google_token.json not found") {
+		t.Fatalf("expected deterministic auth error, got %v", err)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdMemorySearchReportsEmptyResults(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	out := captureStdout(t, func() {
+		cmd := cmdMemory()
+		cmd.SetArgs([]string{"search", "missing"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "No results found.") {
+		t.Fatalf("expected empty memory search output, got %q", out)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdMemoryRebuildReportsIndexedCount(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+	if err := os.MkdirAll(filepath.Join(tempDir, "workspace", "sessions"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		cmd := cmdMemory()
+		cmd.SetArgs([]string{"rebuild"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Memory index rebuilt: 0 session files indexed.") {
+		t.Fatalf("expected rebuild count output, got %q", out)
+	}
+}
+
+//nolint:paralleltest // uses global state
+func TestCmdConfigValidateReturnsExitCodeErrorForInvalidConfig(t *testing.T) {
+	tempDir := setupTestHome(t)
+	configPath := filepath.Join(tempDir, ".gobot", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("invalid json"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cmd := cmdConfig()
+	cmd.SetArgs([]string{"validate", configPath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	var exitErr *exitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected exitCodeError, got %T: %v", err, err)
+	}
+	if exitErr.code != 1 {
+		t.Fatalf("exit code = %d, want 1", exitErr.code)
+	}
+	if !strings.Contains(err.Error(), "failed to load config") {
+		t.Fatalf("expected config load context, got %v", err)
+	}
+}
+
+func writeTestConfig(t *testing.T, storageRoot string) {
+	t.Helper()
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = storageRoot
+	if err := cfg.Save(filepath.Join(storageRoot, ".gobot", "config.json")); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 }
