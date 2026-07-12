@@ -80,14 +80,23 @@ $script:InfraMarkers = @(
 )
 
 function Resolve-ProjectRoot {
-    param([string]$Candidate)
+    param([string]$Candidate, [string]$ScriptDir)
     if (-not [string]::IsNullOrWhiteSpace($Candidate)) {
         if (-not (Test-Path -LiteralPath $Candidate)) {
             throw "ProjectRoot path does not exist: $Candidate"
         }
         return (Resolve-Path -LiteralPath $Candidate).Path
     }
-    return (Get-Location).Path
+    # Derive the project root from THIS script's location, never the caller's cwd. The
+    # launcher ships to adopters at <root>/.crucible/powershell/ and lives in the framework
+    # repo at <root>/powershell/, so $PSScriptRoot names the target repo unambiguously no
+    # matter where the orchestrator invoked us from. Defaulting to cwd silently dispatched a
+    # phase against the wrong repo when the orchestrator ran from a different checkout.
+    $parent = Split-Path -Path $ScriptDir -Parent
+    if ((Split-Path -Path $parent -Leaf) -eq ".crucible") {
+        $parent = Split-Path -Path $parent -Parent
+    }
+    return (Resolve-Path -LiteralPath $parent).Path
 }
 
 function Get-RoleForPhase {
@@ -170,7 +179,7 @@ function Invoke-CodexExec {
     return [PSCustomObject]@{ ExitCode = $exitCode; Output = $output }
 }
 
-$REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot
+$REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot
 
 if ([string]::IsNullOrWhiteSpace($Model)) {
     Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED MODEL] value from factory.ps1 -Init -Target codex)." -ForegroundColor Red
@@ -268,6 +277,8 @@ if (-not [string]::IsNullOrWhiteSpace($Effort)) {
 
 Write-Host ""
 Write-Host ("[CODEX SPECIALIST] Launching " + $Role + " for " + $TaskId + " (" + $Phase + ")") -ForegroundColor Cyan
+$rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from script location" } else { "from -ProjectRoot" }
+Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
 Write-Host ("  model: " + $Model + "  |  access: danger-full-access  |  workdir: " + $WorkingDir)
 if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 

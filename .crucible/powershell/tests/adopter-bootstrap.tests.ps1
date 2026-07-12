@@ -184,7 +184,10 @@ Add a health endpoint.
 
             # Verify that a commit runs the hooks and passes
             $testCommitFile = "test-hook-file.md"
-            Set-Content -Path $testCommitFile -Value "# Test Commit File" -Encoding UTF8
+            # Write BOM-free: Set-Content -Encoding UTF8 emits a BOM on PS 5.1, which the
+            # hook's encoding guard now (correctly) rejects. A genuinely clean fixture must
+            # match the repo's UTF-8-without-BOM standard.
+            [System.IO.File]::WriteAllText((Join-Path (Get-Location).Path $testCommitFile), "# Test Commit File`n", [System.Text.UTF8Encoding]::new($false))
             git add $testCommitFile
             $commitCmd = Invoke-ExternalCommand {
                 git commit -m "Testing adopter pre-commit hook"
@@ -200,7 +203,7 @@ Add a health endpoint.
                 git commit -m "Testing adopter pre-commit hook mojibake failure"
             }
             Assert-Result -Name "adopter commit with mojibake hook fails" -Condition ($commitMojiCmd.ExitCode -ne 0) -FailureMessage "expected commit to fail due to mojibake markers, but it succeeded"
-            Assert-Result -Name "mojibake failure output contains marker info" -Condition (($commitMojiCmd.Output -join "`n") -match "Mojibake markers detected") -FailureMessage ("expected output to indicate mojibake detection, got: " + ($commitMojiCmd.Output -join "`n"))
+            Assert-Result -Name "mojibake failure output contains marker info" -Condition (($commitMojiCmd.Output -join "`n") -match "Encoding issues detected") -FailureMessage ("expected output to indicate mojibake detection, got: " + ($commitMojiCmd.Output -join "`n"))
 
             # Clean up the staged/committed mojibake file to leave the test repo clean
             git reset HEAD $mojibakeFile | Out-Null

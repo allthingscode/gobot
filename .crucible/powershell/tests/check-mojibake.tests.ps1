@@ -45,6 +45,12 @@ try {
     $dirty = Join-Path $tempRoot "dirty.md"
     [System.IO.File]::WriteAllText($dirty, ("bad " + [char]0x00C3 + [char]0x00A9 + " marker`n"), [System.Text.UTF8Encoding]::new($false))
 
+    # A file whose only defect is a UTF-8 BOM (EF BB BF). The mojibake marker scan is
+    # blind to this; the dedicated BOM check must catch it. WriteAllText with a
+    # BOM-emitting UTF8Encoding prepends the mark to otherwise clean content.
+    $bom = Join-Path $tempRoot "bom.md"
+    [System.IO.File]::WriteAllText($bom, "clean text after a bom`n", [System.Text.UTF8Encoding]::new($true))
+
     # 1. Multiple clean files, passed positionally -> no positional-binding error, exit 0.
     $r1 = Invoke-Check -Files @($clean1, $clean2)
     Check "multi-file clean: no positional error" (-not ($r1.Output -match "positional parameter")) $r1.Output
@@ -62,6 +68,16 @@ try {
     # 4. Bare invocation (default paths) -> no error, exit 0.
     $r4 = Invoke-Check -Files @()
     Check "bare invocation: exit 0" ($r4.ExitCode -eq 0) "exit=$($r4.ExitCode)`n$($r4.Output)"
+
+    # 5. A BOM-only file (no mojibake markers) -> detected by the BOM check, exit 1.
+    $r5 = Invoke-Check -Files @($bom)
+    Check "bom file: detected (exit 1)" ($r5.ExitCode -eq 1) "exit=$($r5.ExitCode)`n$($r5.Output)"
+    Check "bom file: names the file" ($r5.Output -match "bom.md") $r5.Output
+    Check "bom file: reports BOM" ($r5.Output -match "BOM") $r5.Output
+
+    # 6. Clean files (no BOM, no markers) are not false-flagged by the BOM check.
+    $r6 = Invoke-Check -Files @($clean1, $clean2)
+    Check "clean files: no BOM false positive (exit 0)" ($r6.ExitCode -eq 0) "exit=$($r6.ExitCode)`n$($r6.Output)"
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

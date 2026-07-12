@@ -262,6 +262,35 @@ try {
         Assert-Result -Name "verdict reason" -Condition ($res.Output -match "valid review verdict") -FailureMessage "expected verdict-validation reason. Output:`n$($res.Output)"
     }
 
+    $results += Run-Test -Name "Default project root derives from script location, not cwd" -Body {
+        # Copy the launcher into an adopter-style layout <proj>/.crucible/powershell/ and invoke
+        # it WITHOUT -ProjectRoot. The old cwd default resolved the session dir under the caller's
+        # cwd, silently dispatching against the wrong repo. The fix must resolve it under <proj>
+        # (the repo the script ships in), regardless of the caller's working directory.
+        $proj = Join-Path $tempRoot "proj-derived"
+        $shipDir = Join-Path $proj ".crucible/powershell"
+        New-Item -ItemType Directory -Path $shipDir -Force | Out-Null
+        $copied = Join-Path $shipDir "launch-codex-specialist.ps1"
+        Copy-Item -LiteralPath $LAUNCHER -Destination $copied -Force
+        $originalPath = $env:PATH
+        $originalMode = $env:CODEX_FAKE_MODE
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $originalPath
+            $env:CODEX_FAKE_MODE = "success"
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $copied `
+                    -TaskId "C-991" -Phase "verification" -Model "gpt-5.5" -PromptText "REVIEW"
+            }
+        } finally {
+            $env:PATH = $originalPath
+            $env:CODEX_FAKE_MODE = $originalMode
+        }
+        Assert-Result -Name "status success" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
+        Assert-Result -Name "root derived banner" -Condition ($res.Output -match "derived from script location") -FailureMessage "expected derived-root banner. Output:`n$($res.Output)"
+        $sessionUnderProj = Join-Path $proj ".crucible/session/C-991/verification/codex-transcript.txt"
+        Assert-Result -Name "session under derived root" -Condition (Test-Path -LiteralPath $sessionUnderProj) -FailureMessage "expected session dir under derived project root at $sessionUnderProj. Output:`n$($res.Output)"
+    }
+
     $results += Run-Test -Name "Missing -Model is rejected" -Body {
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @("-TaskId", "C-993", "-Phase", "verification")
         Assert-Result -Name "model required exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2 for missing model, got $($res.ExitCode). Output:`n$($res.Output)"
