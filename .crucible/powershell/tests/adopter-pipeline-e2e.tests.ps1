@@ -198,6 +198,40 @@ try {
             -FailureMessage ("expected gate_pending.txt at " + $pendingFile + ". Output: " + ($gateRun.Output -join "`n"))
     }
 
+    $results += Run-Test -Name "bundle factory derives project root from script location, not cwd" -Body {
+        # Regression: factory.ps1 used to default -ProjectRoot to the caller's cwd, so an
+        # orchestrator running the gate from a different checkout silently targeted the wrong
+        # repo ("No active handoff"). The bundle's own factory must resolve its project from
+        # $PSScriptRoot (<root>/.crucible/powershell) regardless of where it is invoked.
+        $cycle = "cycle-e2e-derive"
+        $env:FACTORY_CYCLE_ID = $cycle
+        $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t-derive") -Cycle $cycle
+        $bundleFactory = Join-Path $projectRoot ".crucible/powershell/factory.ps1"
+
+        # cwd is deliberately an UNRELATED directory with no .crucible/. If root fell back to
+        # cwd, factory would find no F-900 handoff and exit 1 with no gate fired here.
+        Push-Location $tempRoot
+        try {
+            $gateRun = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $bundleFactory `
+                    -Init -TaskId "F-900" -Quiet
+            }
+        } finally {
+            Pop-Location
+        }
+
+        Assert-Result -Name "derive run exits 0" -Condition ($gateRun.ExitCode -eq 0) `
+            -FailureMessage ("expected exit 0, got " + $gateRun.ExitCode + ". Output: " + ($gateRun.Output -join "`n"))
+
+        $pendingFile = Join-Path $projectRoot ".crucible/session/F-900/gate_pending.txt"
+        Assert-Result -Name "gate fired in the script-derived project (not cwd)" -Condition (Test-Path -LiteralPath $pendingFile) `
+            -FailureMessage ("expected gate_pending.txt at " + $pendingFile + " proving root derived from script location. Output: " + ($gateRun.Output -join "`n"))
+
+        $cwdCrucible = Join-Path $tempRoot ".crucible"
+        Assert-Result -Name "no .crucible leaked into cwd" -Condition (-not (Test-Path -LiteralPath $cwdCrucible)) `
+            -FailureMessage ("factory wrote a .crucible under cwd " + $tempRoot + ", meaning it still resolved root from cwd")
+    }
+
     $results += Run-Test -Name "Recording accepted stamps the gate decision with the firing cycle" -Body {
         $cycle = "cycle-e2e-2"
         $env:FACTORY_CYCLE_ID = $cycle

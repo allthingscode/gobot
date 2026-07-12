@@ -103,8 +103,8 @@ param (
     [switch]$ResetBudget,
 
     # Absolute path to the project root (the directory containing .crucible/).
-    # Defaults to the current working directory. Specify explicitly when invoking
-    # the framework script from outside the project directory.
+    # Defaults to the root derived from this script's location (never the caller's cwd).
+    # Specify explicitly only to target a project other than the one this script ships in.
     [Parameter(Mandatory=$false)]
     [string]$ProjectRoot = ""
 )
@@ -138,9 +138,18 @@ function Get-CrucibleRoot {
 # Framework powershell/ directory — used to resolve sibling scripts regardless of CWD.
 $FRAMEWORK_POWERSHELL = $PSScriptRoot
 # Anchor paths to the project root (where .crucible/ lives).
-# Default is CWD; -ProjectRoot overrides for explicit invocation from elsewhere.
+# -ProjectRoot overrides for explicit invocation from elsewhere; otherwise derive the
+# root from THIS script's location, never the caller's cwd. factory.ps1 ships to adopters
+# at <root>/.crucible/powershell/ and lives in the framework repo at <root>/powershell/,
+# so $PSScriptRoot names the target repo unambiguously no matter where the orchestrator
+# invoked us from. Defaulting to cwd silently targeted the wrong repo when the orchestrator
+# ran the gate from a different checkout.
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $REPO_ROOT = (Get-Location).Path
+    $derivedParent = Split-Path -Path $PSScriptRoot -Parent
+    if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
+        $derivedParent = Split-Path -Path $derivedParent -Parent
+    }
+    $REPO_ROOT = (Resolve-Path -LiteralPath $derivedParent).Path
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red

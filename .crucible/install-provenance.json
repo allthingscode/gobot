@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "f463f22137392361c9541840d08df9bb2335d22c",
+    "source_commit":  "1d6b5c8ea2b2f5b879cd95c8fcb8654999c29581",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -143,8 +143,8 @@
                                                              "base_hash":  "d9c0937d50b75be4ad9f3205eeebe41571ad156f95845cebd7602ba0d8fb70bd"
                                                          },
                   "powershell/factory.ps1":  {
-                                                 "hash":  "77b447679ca8ecd23577243077fcf2543e77a1ed5cacc8db0762361249bae403",
-                                                 "base_hash":  "77b447679ca8ecd23577243077fcf2543e77a1ed5cacc8db0762361249bae403"
+                                                 "hash":  "367a600d86c2bab8e845f72200adaf94ff599723ede4ebf9fb9cf846ccf92e78",
+                                                 "base_hash":  "367a600d86c2bab8e845f72200adaf94ff599723ede4ebf9fb9cf846ccf92e78"
                                              },
                   "powershell/factory-doctor.ps1":  {
                                                         "hash":  "c496b84e632f1e3340df98f79612fd06308835500e8b5eed26b9b7b97a0169c8",
@@ -267,8 +267,8 @@
                                                                        "base_hash":  "3f1c51aaf35d1fb657ce0d19794244a92bd2445d59ff3a97f7d4f486bc631460"
                                                                    },
                   "powershell/tests/adopter-pipeline-e2e.tests.ps1":  {
-                                                                          "hash":  "9172c63a4b73d47cec8161ab9dfa42d24f59d96b0b68627dcf2e1a5d69b1be0a",
-                                                                          "base_hash":  "9172c63a4b73d47cec8161ab9dfa42d24f59d96b0b68627dcf2e1a5d69b1be0a"
+                                                                          "hash":  "71dbaa63252374d0f05ae456262cb22088be47e144ea595a248ed7f9153dca0b",
+                                                                          "base_hash":  "71dbaa63252374d0f05ae456262cb22088be47e144ea595a248ed7f9153dca0b"
                                                                       },
                   "powershell/tests/adopter-smoke.tests.ps1":  {
                                                                    "hash":  "3268a5558587df6d3094deeef64dfb0defdb81f5df54342385ae671bbd8ccdf7",
