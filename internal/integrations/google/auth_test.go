@@ -4,10 +4,12 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +76,151 @@ func TestBearerToken_ExpiredRefreshes(t *testing.T) {
 	}
 	if refreshed.Token != "new-token" {
 		t.Fatalf("persisted token = %q, want new-token", refreshed.Token)
+	}
+}
+
+type secureStoreRefreshCase struct {
+	name              string
+	oldAccessToken    string
+	refreshToken      string
+	clientID          string
+	clientSecret      string
+	refreshedToken    string
+	refreshedLifetime int
+}
+
+func TestBearerToken_SecureStoreExpiredRefreshesAndPersists(t *testing.T) {
+	t.Parallel()
+
+	tests := []secureStoreRefreshCase{
+		{
+			name:              "expired_token_from_secure_store",
+			oldAccessToken:    "secure-old-token",
+			refreshToken:      "secure-refresh-token",
+			clientID:          "secure-client-id",
+			clientSecret:      "secure-client-secret",
+			refreshedToken:    "secure-new-token",
+			refreshedLifetime: 3600,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runSecureStoreRefreshTest(t, tt)
+		})
+	}
+}
+
+func runSecureStoreRefreshTest(t *testing.T, tt secureStoreRefreshCase) {
+	t.Helper()
+
+	refreshForms := make(chan url.Values, 1)
+	srv := httptest.NewServer(secureStoreRefreshHandler(t, tt, refreshForms))
+	defer srv.Close()
+
+	store, secretsRoot := seedSecureStoreToken(t, tt, srv.URL)
+	got, err := bearerTokenWithClient(context.Background(), secretsRoot, srv.Client())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != tt.refreshedToken {
+		t.Fatalf("token = %q, want %q", got, tt.refreshedToken)
+	}
+
+	assertRefreshForm(t, <-refreshForms, tt)
+	assertPersistedSecureStoreToken(t, store, tt)
+}
+
+func secureStoreRefreshHandler(t *testing.T, tt secureStoreRefreshCase, forms chan<- url.Values) http.Handler {
+	t.Helper()
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("want POST, got %s", r.Method)
+		}
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024))
+		if err != nil {
+			t.Fatalf("read refresh form: %v", err)
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse refresh form: %v", err)
+		}
+		forms <- form
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"access_token": tt.refreshedToken,
+			"expires_in":   tt.refreshedLifetime,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func seedSecureStoreToken(t *testing.T, tt secureStoreRefreshCase, tokenURI string) (store secretsStore, secretsRoot string) {
+	t.Helper()
+
+	storageRoot := t.TempDir()
+	secretsRoot = filepath.Join(storageRoot, "secrets")
+	store = tokenStore(secretsRoot)
+	stored := storedToken{
+		Token:        tt.oldAccessToken,
+		RefreshToken: tt.refreshToken,
+		TokenURI:     tokenURI,
+		ClientID:     tt.clientID,
+		ClientSecret: tt.clientSecret,
+		Expiry:       time.Now().Add(-1 * time.Hour),
+	}
+	tokenJSON, err := json.Marshal(stored) //nolint:gosec // RefreshToken is a test fixture.
+	if err != nil {
+		t.Fatalf("marshal stored token: %v", err)
+	}
+	if err := store.Set("google_oauth_token", string(tokenJSON)); err != nil {
+		t.Fatalf("seed secure-store token: %v", err)
+	}
+	return store, secretsRoot
+}
+
+type secretsStore = interface {
+	Set(key, value string) error
+	Get(key string) (string, error)
+}
+
+func assertRefreshForm(t *testing.T, gotForm url.Values, tt secureStoreRefreshCase) {
+	t.Helper()
+
+	wantForm := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {tt.refreshToken},
+		"client_id":     {tt.clientID},
+		"client_secret": {tt.clientSecret},
+	}
+	for key, want := range wantForm {
+		if got := gotForm[key]; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("refresh form %s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func assertPersistedSecureStoreToken(t *testing.T, store secretsStore, tt secureStoreRefreshCase) {
+	t.Helper()
+
+	persistedJSON, err := store.Get("google_oauth_token")
+	if err != nil {
+		t.Fatalf("read persisted secure-store token: %v", err)
+	}
+	var persisted storedToken
+	if err := json.Unmarshal([]byte(persistedJSON), &persisted); err != nil {
+		t.Fatalf("unmarshal persisted secure-store token: %v", err)
+	}
+	if persisted.Token != tt.refreshedToken {
+		t.Errorf("persisted token = %q, want %q", persisted.Token, tt.refreshedToken)
+	}
+	if persisted.RefreshToken != tt.refreshToken {
+		t.Errorf("persisted refresh token = %q, want %q", persisted.RefreshToken, tt.refreshToken)
+	}
+	if time.Until(persisted.Expiry) < 50*time.Minute {
+		t.Errorf("persisted expiry = %s, want at least 50m in the future", persisted.Expiry)
 	}
 }
 

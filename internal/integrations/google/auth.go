@@ -300,7 +300,12 @@ func tryLoadTokenFromDPAPI(ctx context.Context, secretsRoot string, client *http
 		}
 		// nolint:gosec // RefreshToken is a secret, but we must marshal it to persist it.
 		if updated, err := json.Marshal(tok); err == nil {
-			_ = store.Set("google_oauth_token", string(updated))
+			if err := store.Set("google_oauth_token", string(updated)); err != nil {
+				// The refreshed token is already valid for this call; secure-store
+				// persistence is best-effort so transient local store issues do
+				// not break long-running Google integrations.
+				return tok.Token, true
+			}
 		}
 	}
 	return tok.Token, true
