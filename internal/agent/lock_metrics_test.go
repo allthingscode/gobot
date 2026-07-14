@@ -178,3 +178,59 @@ func TestSessionLock_Lifecycle(t *testing.T) {
 		t.Fatal("expected metrics to be removed after last release")
 	}
 }
+
+func TestLockStatus_CurrentHoldDurationAndStaleness(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		status    LockStatus
+		wantAge   time.Duration
+		wantStale bool
+	}{
+		{
+			name:      "unlocked",
+			status:    LockStatus{},
+			wantAge:   0,
+			wantStale: false,
+		},
+		{
+			name:      "locked without acquired at",
+			status:    LockStatus{IsLocked: true},
+			wantAge:   0,
+			wantStale: false,
+		},
+		{
+			name:      "locked below threshold",
+			status:    LockStatus{IsLocked: true, AcquiredAt: now.Add(-30 * time.Second)},
+			wantAge:   30 * time.Second,
+			wantStale: false,
+		},
+		{
+			name:      "locked above threshold",
+			status:    LockStatus{IsLocked: true, AcquiredAt: now.Add(-2 * time.Minute)},
+			wantAge:   2 * time.Minute,
+			wantStale: true,
+		},
+		{
+			name:      "future acquired at",
+			status:    LockStatus{IsLocked: true, AcquiredAt: now.Add(time.Second)},
+			wantAge:   0,
+			wantStale: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.status.CurrentHoldDuration(now); got != tt.wantAge {
+				t.Fatalf("CurrentHoldDuration() = %s, want %s", got, tt.wantAge)
+			}
+			if got := tt.status.IsStale(now, StaleLockThreshold); got != tt.wantStale {
+				t.Fatalf("IsStale() = %v, want %v", got, tt.wantStale)
+			}
+		})
+	}
+}

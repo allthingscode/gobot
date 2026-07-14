@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -63,19 +64,41 @@ func checkConcurrency() []Result {
 	}
 
 	results := make([]Result, 0, len(metrics))
-	for name, m := range metrics {
-		detail := fmt.Sprintf("contention: %d, max_wait: %s, total_hold: %s",
-			m.ContentionCount,
-			m.MaxWaitTime.Round(time.Millisecond),
-			m.TotalHoldTime.Round(time.Millisecond))
+	names := make([]string, 0, len(metrics))
+	for name := range metrics {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 
-		results = append(results, Result{
-			Name:   "lock: " + name,
-			OK:     true, // advisory
-			Detail: detail,
-		})
+	now := time.Now()
+	for _, name := range names {
+		results = append(results, concurrencyResult(name, metrics[name], now))
 	}
 	return results
+}
+
+func concurrencyResult(name string, m agent.LockStatus, now time.Time) Result {
+	holdAge := "n/a"
+	if age := m.CurrentHoldDuration(now); age > 0 {
+		holdAge = age.Round(time.Millisecond).String()
+	}
+	detail := fmt.Sprintf("locked: %t, held: %s, contention: %d, max_wait: %s, total_hold: %s",
+		m.IsLocked,
+		holdAge,
+		m.ContentionCount,
+		m.MaxWaitTime.Round(time.Millisecond),
+		m.TotalHoldTime.Round(time.Millisecond))
+
+	result := Result{
+		Name:   "lock: " + name,
+		OK:     true,
+		Detail: detail,
+	}
+	if m.IsStale(now, agent.StaleLockThreshold) {
+		result.OK = false
+		result.Remediation = "Inspect active session work for this lock; wait only if in-flight work is expected, and restart gobot if the lock remains stuck or the holder cannot complete."
+	}
+	return result
 }
 
 // vendorDirFn returns the path to check for a stale vendor/ directory. It is a

@@ -61,20 +61,23 @@ Checks present today:
   live probe.
 - **Resilience:** per circuit breaker - `state, successes, failures, rejections`
   (`checkResilience`), plus a migration warning for old-format breaker durations.
-- **Concurrency:** per session lock - `contention, max_wait, total_hold`
-  (`checkConcurrency`, fed by `agent.GetLockMetrics`).
+- **Concurrency:** per session lock - `locked`, current hold age, `contention`,
+  `max_wait`, `total_hold` (`checkConcurrency`, fed by
+  `agent.GetLockMetrics`). Locks held longer than 60s produce an advisory,
+  non-critical warning before the default 120s deadlock timeout.
 
 The doctor also surfaces the elapsed wall-clock time for the check run itself.
-The dashboard metrics page now summarizes memory, latency, startup time, and
-storage growth for operators who need the same current-state signals in the web
-UI.
+The dashboard metrics page now summarizes memory, latency, startup time,
+storage growth, cron health, and session-lock state for operators who need the
+same current-state signals in the web UI.
 
 ### 1.3 Session lock metrics (`internal/agent/lock_metrics.go`)
 
 `LockStatus` tracks, per session key: `IsLocked`, `AcquiredAt`, `WaitCount`,
 `TotalWaitTime`, `TotalHoldTime`, `ContentionCount`, `MaxWaitTime`, and a
 `HolderStack` snapshot captured when a wait exceeds 5s. `GetLockMetrics()`
-returns a snapshot consumed by `doctor` and debug endpoints.
+returns a snapshot consumed by `doctor`, debug endpoints, and the dashboard
+metrics page.
 
 ### 1.4 Cron job health (`internal/cron`)
 
@@ -136,13 +139,13 @@ The metrics page reads the same local snapshots and read-only probes used by
 | **Message latency** (P50, P99 per user request) | UX responsiveness; spot regressions | `DispatchTracer` records bounded local windows for agent, Telegram, and tool timings; OTel remains opt-in for collectors | Collected locally (`workspace/latency.json`) and surfaced in `doctor` plus `/dash/metrics` | `doctor` line + dashboard metrics panel + OTel histogram/traces for collectors |
 | **Cron job health** (last run, next run, failure count) | Confirm scheduled work runs; catch silent failures | Already persisted in `JobState` | Collected; surfaced in `doctor`, `/dash/cron`, and `/dash/metrics` | `doctor` check + dashboard cron table + dashboard metrics panel |
 | **Startup time** (process start -> ready/listening) | Detect slow boots / init regressions | Capture `time.Now()` at `RunAgent` entry; log and persist delta when bot is ready/listening | Collected (INFO log + `doctor` detail) and surfaced on `/dash/metrics` | INFO log at ready + `doctor` detail + dashboard metrics panel |
-| **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive from lock `AcquiredAt`/`TotalHoldTime`; flag sessions held beyond threshold | Partial: lock hold time + deadlock timeout exist; dedicated stale-lock alert pending | `doctor` lock metrics + WARN/ERROR logs |
+| **Long-running session duration** (hang detection) | Detect stuck sessions / deadlocks | Derive current hold age from lock `AcquiredAt`; flag sessions held beyond the 60s stale threshold | Collected and surfaced as advisory, non-critical stale-lock warnings | `doctor` lock metrics + `/dash/metrics` Session Locks panel + WARN/ERROR logs |
 | **Storage database size** (SQLite) | Detect unbounded growth of checkpoint/memory DBs | `os.Stat` the SQLite file(s) or `PRAGMA page_count * page_size` | Collected (doctor line) and surfaced on `/dash/metrics` | `doctor` line (C-337); dashboard metrics panel |
 
 The dashboard metric panels referenced above are now shipped on `/dash/metrics`
-for memory, local latency, cron health, startup time, and storage size. Missing
-latency/startup files and absent stores are rendered as not recorded or absent,
-not as zero-valued measurements.
+for memory, local latency, cron health, startup time, storage size, and session
+locks. Missing latency/startup files, absent stores, and absent lock metrics are
+rendered as not recorded or absent, not as zero-valued measurements.
 
 ---
 
@@ -184,11 +187,11 @@ not as zero-valued measurements.
   already exists in `jobs.json`.
 - **Startup time** → single INFO log line at "ready/listening" and a `doctor`
   detail from `<storage>/workspace/startup.json`. Surfaced on `/dash/metrics`; missing markers are shown as not recorded rather than as zero.
-- **Long-running session duration** -> lock metrics expose
-  `AcquiredAt`, `TotalHoldTime`, and contention/max-wait data to `doctor`.
-  Operators can infer long holds from those values today, but a dedicated
-  dashboard/operator alert for stale held locks remains future work. Keep the
-  5s holder-stack capture as-is.
+- **Long-running session duration** -> lock metrics expose current locked
+  state, current hold age, `TotalHoldTime`, and contention/max-wait data to
+  `doctor` and `/dash/metrics`. A held lock older than 60s is reported as an
+  advisory, non-critical warning with remediation; the 5s holder-stack capture
+  remains log/metrics data and is not dumped into doctor/dashboard output.
 - **Storage database size** → `doctor` line and the `/dash/metrics` storage panel. WARN only past the existing advisory threshold; missing stores are shown as absent rather than zero-sized measurements.
 - **Token consumption** (existing OTel counter) → intentionally **not** surfaced
   in `doctor`/dashboard by default; it is cost telemetry for external collectors,

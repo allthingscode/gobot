@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/observability"
 )
@@ -54,6 +56,7 @@ func (h *Handler) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 			h.storagePanel(),
 			h.startupPanel(),
 			h.cronPanel(),
+			sessionLocksPanel(agent.GetLockMetrics(), time.Now()),
 		},
 	}
 	h.render(w, "layout.html", "metrics.html", data)
@@ -237,6 +240,47 @@ func liveCronPanel(tasks []cronTaskView) metricPanelView {
 	return metricPanel("Cron Health", status, fmt.Sprintf("%d live jobs", len(tasks)), "Live scheduler state from dashboard resources.", rows)
 }
 
+func sessionLocksPanel(metrics map[string]agent.LockStatus, now time.Time) metricPanelView {
+	if len(metrics) == 0 {
+		return metricPanel("Session Locks", metricStatusUnavailable, "No active locks", "No session lock metrics are currently registered.", nil)
+	}
+
+	names := make([]string, 0, len(metrics))
+	for name := range metrics {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	status := metricStatusOK
+	rows := make([]metricRowView, 0, len(names))
+	for _, name := range names {
+		lock := metrics[name]
+		rowStatus := metricStatusOK
+		primary := "unlocked"
+		if lock.IsLocked {
+			primary = "held " + formatLockHoldAge(lock.CurrentHoldDuration(now))
+		}
+		if lock.IsStale(now, agent.StaleLockThreshold) {
+			status = metricStatusWarn
+			rowStatus = metricStatusWarn
+			primary = "stale " + primary
+		}
+		rows = append(rows, metricRow(
+			name,
+			rowStatus,
+			primary,
+			fmt.Sprintf("contention %d; max wait %s; total hold %s", lock.ContentionCount, lock.MaxWaitTime.Round(time.Millisecond), lock.TotalHoldTime.Round(time.Millisecond)),
+		))
+	}
+
+	primary := fmt.Sprintf("%d locks observed", len(metrics))
+	detail := fmt.Sprintf("Warns when a held lock exceeds %s.", agent.StaleLockThreshold)
+	if status == metricStatusWarn {
+		primary = "Stale lock detected"
+	}
+	return metricPanel("Session Locks", status, primary, detail, rows)
+}
+
 func (h *Handler) storageRoot() string {
 	if h.res.Config == nil {
 		return ""
@@ -293,6 +337,13 @@ func formatMetricTime(t time.Time) string {
 
 func isStale(t time.Time) bool {
 	return !t.IsZero() && time.Since(t) > metricStaleAfter
+}
+
+func formatLockHoldAge(age time.Duration) string {
+	if age <= 0 {
+		return "n/a"
+	}
+	return age.Round(time.Millisecond).String()
 }
 
 func formatMetricBytes(n int64) string {
