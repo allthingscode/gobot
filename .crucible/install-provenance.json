@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "4edfecad4165ce576e3d9d44b8442e4e5ec71887",
+    "source_commit":  "d9626ef14379b048ae6819fbc2acdb349b35a784",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -255,8 +255,8 @@
                                                        "base_hash":  "e580a3cac7becaa037bb643a3390f65dcdded3528249996387594bf0f64b62a5"
                                                    },
                   "powershell/run-isolated-checks.ps1":  {
-                                                             "hash":  "f338647711f505670ab021dcce43fb92c2a23999415d87df3650ec224b82161e",
-                                                             "base_hash":  "f338647711f505670ab021dcce43fb92c2a23999415d87df3650ec224b82161e"
+                                                             "hash":  "5383ed0fb068fb139c168975fd3356be5c29940797f76ff2f0f897b5bfb32171",
+                                                             "base_hash":  "5383ed0fb068fb139c168975fd3356be5c29940797f76ff2f0f897b5bfb32171"
                                                          },
                   "powershell/tests/_fixtures.ps1":  {
                                                          "hash":  "406a707021c4f352e71d7f48929a3ad60bb44c85b42c827b8584c29624db3003",
@@ -447,8 +447,8 @@
                                                                                   "base_hash":  "461dec05064f2b854d6d624bdb6120104d138c3bcfe07e6f53786b888b992953"
                                                                               },
                   "powershell/tests/run-isolated-checks.tests.ps1":  {
-                                                                         "hash":  "4ff8abe02ed81a5b1dfe85cc9640d6c79c080024da2f4fe353bda6a5cbadeaea",
-                                                                         "base_hash":  "4ff8abe02ed81a5b1dfe85cc9640d6c79c080024da2f4fe353bda6a5cbadeaea"
+                                                                         "hash":  "9049b02ff0fe70f5c580c62fcf8ef1f535ba75b0164abe74fcd36c3c19803847",
+                                                                         "base_hash":  "9049b02ff0fe70f5c580c62fcf8ef1f535ba75b0164abe74fcd36c3c19803847"
                                                                      },
                   "powershell/tests/scope-violation-circuit-breaker.tests.ps1":  {
                                                                                      "hash":  "7aaf4966e4603274d266e3c227d1996389452d01b8fbfb6613dfc0c4908e49aa",

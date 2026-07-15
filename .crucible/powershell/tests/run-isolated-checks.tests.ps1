@@ -178,6 +178,54 @@ try {
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected success (config_check should be skipped in quick mode), got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "config check skip" -Condition ($output -notmatch "==> test config check skip") -FailureMessage "config check should not run in quick mode. Output:`n$output"
     }
+
+    $results += Run-Test -Name "Folded block-scalar command is joined and executed, not parsed as a bare '>'" -Body {
+        Push-Location $projectRoot
+        try {
+            @(
+                "project: RunIsolatedChecksTest",
+                "verification:",
+                "  full:",
+                "    - name: folded-ok",
+                "      command: >-",
+                "        $pwshCmd -NoProfile",
+                "        -Command `"exit 0`""
+            ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected success from folded command, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "check ran" -Condition ($output -match "==> folded-ok") -FailureMessage "expected folded check to run. Output:`n$output"
+        Assert-Result -Name "no bare-gt parse error" -Condition ($output -notmatch "is not recognized") -FailureMessage "folded scalar indicator leaked to Invoke-Expression. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "Block-scalar command body actually executes (failure propagates)" -Body {
+        Push-Location $projectRoot
+        try {
+            @(
+                "project: RunIsolatedChecksTest",
+                "verification:",
+                "  full:",
+                "    - name: folded-fail",
+                "      command: >-",
+                "        $pwshCmd -NoProfile",
+                "        -Command `"exit 1`""
+            ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -ne 0) -FailureMessage "expected folded command body to run and fail, got $($res.ExitCode). Output:`n$output"
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath

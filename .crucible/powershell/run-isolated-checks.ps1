@@ -51,7 +51,59 @@ $configCheckCommand = ""
 # Map "test" mode to "quick" if the framework calls it with "test" for backward compatibility
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
 
-foreach ($line in $lines) {
+# Read a YAML block scalar (| literal or > folded) whose header line is at index
+# $HeaderIndex. Adopters commonly write a multi-statement verification command as a
+# folded scalar (`command: >-`) for readability; the inline regex only captured the
+# `>-` indicator, so Invoke-Expression later choked on a bare `>`. Returns the joined
+# body plus NextIndex (first line NOT consumed). Folded joins content lines with
+# spaces (blank line -> newline); literal joins with newlines. Chomping indicators
+# are accepted; the trailing newline is irrelevant to Invoke-Expression.
+function Read-BlockScalar {
+    param(
+        [string[]]$Lines,
+        [int]$HeaderIndex,
+        [string]$Indicator,
+        [int]$KeyIndent
+    )
+    $folded = $Indicator.StartsWith(">")
+    $bodyLines = New-Object System.Collections.Generic.List[string]
+    $blockIndent = -1
+    $i = $HeaderIndex + 1
+    while ($i -lt $Lines.Count) {
+        $line = $Lines[$i]
+        if ($line -match "^\s*$") {
+            $bodyLines.Add("")
+            $i++
+            continue
+        }
+        $indent = ($line -replace "^(\s*).*$", '$1').Length
+        if ($indent -le $KeyIndent) { break }
+        if ($blockIndent -lt 0) { $blockIndent = $indent }
+        if ($line.Length -ge $blockIndent) {
+            $bodyLines.Add($line.Substring($blockIndent))
+        } else {
+            $bodyLines.Add($line.TrimStart())
+        }
+        $i++
+    }
+    while ($bodyLines.Count -gt 0 -and $bodyLines[$bodyLines.Count - 1] -eq "") {
+        $bodyLines.RemoveAt($bodyLines.Count - 1)
+    }
+    if ($folded) {
+        $value = ""
+        foreach ($b in $bodyLines) {
+            if ($b -eq "") { $value += "`n" }
+            elseif ($value -eq "" -or $value.EndsWith("`n")) { $value += $b }
+            else { $value += " " + $b }
+        }
+    } else {
+        $value = ($bodyLines -join "`n")
+    }
+    return @{ Value = $value; NextIndex = $i }
+}
+
+for ($idx = 0; $idx -lt $lines.Count; $idx++) {
+    $line = $lines[$idx]
     if ($line -match "^verification:\s*$") {
         $inVerification = $true
         continue
@@ -59,39 +111,52 @@ foreach ($line in $lines) {
     if ($inVerification -and $line -match "^[a-zA-Z]") {
         $inVerification = $false
     }
-    if ($inVerification) {
-        if ($line -match "^\s{2}${targetMode}:\s*$") {
-            $inMode = $true
-            $inConfigCheck = $false
-            continue
+    if (-not $inVerification) { continue }
+
+    if ($line -match "^\s{2}${targetMode}:\s*$") {
+        $inMode = $true
+        $inConfigCheck = $false
+        continue
+    }
+    if ($line -match "^\s{2}config_check:\s*$") {
+        $inConfigCheck = $true
+        $inMode = $false
+        continue
+    }
+    if (($inMode -or $inConfigCheck) -and $line -match "^\s{2}[a-zA-Z]") {
+        $inMode = $false
+        $inConfigCheck = $false
+    }
+    if ($inMode) {
+        if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
+            $currentName = $Matches[1].Trim("`"' ")
         }
-        if ($line -match "^\s{2}config_check:\s*$") {
-            $inConfigCheck = $true
-            $inMode = $false
-            continue
-        }
-        if (($inMode -or $inConfigCheck) -and $line -match "^\s{2}[a-zA-Z]") {
-            $inMode = $false
-            $inConfigCheck = $false
-        }
-        if ($inMode) {
-            if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
-                $currentName = $Matches[1].Trim("`"' ")
+        if ($line -match "^(\s{6})command:\s*(.+?)\s*$") {
+            $keyIndent = $Matches[1].Length
+            $rawVal = $Matches[2].Trim()
+            if ($rawVal -match "^[|>][+-]?\d*$") {
+                $bs = Read-BlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
+                $commands += @{ Name = $currentName; Command = $bs.Value }
+                $idx = $bs.NextIndex - 1
+            } else {
+                $commands += @{ Name = $currentName; Command = $rawVal.Trim("`"' ") }
             }
-            if ($line -match "^\s{6}command:\s*(.+?)\s*$") {
-                $commands += @{
-                    Name = $currentName
-                    Command = $Matches[1].Trim("`"' ")
-                }
-                $currentName = ""
-            }
+            $currentName = ""
         }
-        if ($inConfigCheck) {
-            if ($line -match "^\s{4}name:\s*(.+?)\s*$") {
-                $configCheckName = $Matches[1].Trim("`"' ")
-            }
-            if ($line -match "^\s{4}command:\s*(.+?)\s*$") {
-                $configCheckCommand = $Matches[1].Trim("`"' ")
+    }
+    if ($inConfigCheck) {
+        if ($line -match "^\s{4}name:\s*(.+?)\s*$") {
+            $configCheckName = $Matches[1].Trim("`"' ")
+        }
+        if ($line -match "^(\s{4})command:\s*(.+?)\s*$") {
+            $keyIndent = $Matches[1].Length
+            $rawVal = $Matches[2].Trim()
+            if ($rawVal -match "^[|>][+-]?\d*$") {
+                $bs = Read-BlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
+                $configCheckCommand = $bs.Value
+                $idx = $bs.NextIndex - 1
+            } else {
+                $configCheckCommand = $rawVal.Trim("`"' ")
             }
         }
     }
