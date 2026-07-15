@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "7f5fea7dac88e3587ebf3c9cde65a6dec97bbdef",
+    "source_commit":  "4edfecad4165ce576e3d9d44b8442e4e5ec71887",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -55,8 +55,8 @@
                                                             "base_hash":  "e233713f9c2b9065e24a909c4a94ffb29c674c8d07fea17567e1fba6c0cbcc6f"
                                                         },
                   "docs/orchestrators/claude.md":  {
-                                                       "hash":  "1fa1279c068b265d9c37dfea2e94efc66e4c6a29a2dca0e6ef371756a135c1a3",
-                                                       "base_hash":  "1fa1279c068b265d9c37dfea2e94efc66e4c6a29a2dca0e6ef371756a135c1a3"
+                                                       "hash":  "806494e19cfb9f74c795b18d9bab32fbb023f0de82f2b1feeb8d7e50e3f8735b",
+                                                       "base_hash":  "806494e19cfb9f74c795b18d9bab32fbb023f0de82f2b1feeb8d7e50e3f8735b"
                                                    },
                   "docs/orchestrators/codex.md":  {
                                                       "hash":  "291f5871171aa5ee07e8df43253fe0368faaf122622520069602f8af4002a75f",
@@ -246,6 +246,10 @@
                                                      "hash":  "a92c9057c98378628112c7ceac54d4cc93edc5d18616313f33f2154e44393bea",
                                                      "base_hash":  "a92c9057c98378628112c7ceac54d4cc93edc5d18616313f33f2154e44393bea"
                                                  },
+                  "powershell/record-research-gate.ps1":  {
+                                                              "hash":  "7047808f011e8523503664bb2c333e3fd86068ed0e3b7cbaedd6e29073908cbe",
+                                                              "base_hash":  "7047808f011e8523503664bb2c333e3fd86068ed0e3b7cbaedd6e29073908cbe"
+                                                          },
                   "powershell/run-all-tests.ps1":  {
                                                        "hash":  "e580a3cac7becaa037bb643a3390f65dcdded3528249996387594bf0f64b62a5",
                                                        "base_hash":  "e580a3cac7becaa037bb643a3390f65dcdded3528249996387594bf0f64b62a5"
@@ -430,6 +434,10 @@
                                                                          "hash":  "7bc585c76a16c5cf25605938b710b7ccd3d8f7c662b762a3239725e30531ac56",
                                                                          "base_hash":  "7bc585c76a16c5cf25605938b710b7ccd3d8f7c662b762a3239725e30531ac56"
                                                                      },
+                  "powershell/tests/record-research-gate.tests.ps1":  {
+                                                                          "hash":  "9814e8ff3f81a46f83781f80506b5d1f42920965d3b02e154bcb6db776f1be82",
+                                                                          "base_hash":  "9814e8ff3f81a46f83781f80506b5d1f42920965d3b02e154bcb6db776f1be82"
+                                                                      },
                   "powershell/tests/regex-hygiene.tests.ps1":  {
                                                                    "hash":  "357a8ad90da03129aa39e73f0cdaf6c895a8f349e59bb602846f218b0b6b5d5d",
                                                                    "base_hash":  "357a8ad90da03129aa39e73f0cdaf6c895a8f349e59bb602846f218b0b6b5d5d"
@@ -619,8 +627,8 @@
                                                            "base_hash":  "8ee5b77031d7a5ed965330fe71c7490eb616e2473b6816a4ec1ec7e06d9d1b24"
                                                        },
                   "sops/research-audit-project.md":  {
-                                                         "hash":  "0ce2c8a7cc598b9a4dc9697f501ad82d0ddfbd236ecf6ae22712f468f1dcb6fb",
-                                                         "base_hash":  "0ce2c8a7cc598b9a4dc9697f501ad82d0ddfbd236ecf6ae22712f468f1dcb6fb"
+                                                         "hash":  "f770d313d204ceb0e7dcce70ba4ed114bdc024d2b4e27008c82f43b8b35a0192",
+                                                         "base_hash":  "f770d313d204ceb0e7dcce70ba4ed114bdc024d2b4e27008c82f43b8b35a0192"
                                                      },
                   "sops/research-investigate.md":  {
                                                        "hash":  "78f1b943e99024a195d3a446036002560f4f5bf11b1ce25dcc32bfdf4a906ecf",
