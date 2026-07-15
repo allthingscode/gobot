@@ -204,6 +204,96 @@ priority: "P1"
         Assert-Result -Name "backlog status resolved" -Condition ($backlogContent -match 'Resolved') -FailureMessage "expected Resolved status in BACKLOG.md row"
     }
 
+    function New-ResearchSpec {
+        param(
+            [Parameter(Mandatory=$true)]$Context,
+            [Parameter(Mandatory=$true)][string]$TaskId,
+            [Parameter(Mandatory=$true)][string]$Type,
+            [string]$OpenQuestions = ""
+        )
+        $specPath = Join-Path $Context.BacklogDir ("features/active/" + $TaskId + "_Investigate.md")
+        $body = @"
+---
+item_id: "$TaskId"
+type: "$Type"
+status: "Grooming"
+priority: "P1"
+---
+# Investigate
+"@
+        if (-not [string]::IsNullOrEmpty($OpenQuestions)) {
+            $body = $body + "`n`n## Open Questions`n`n" + $OpenQuestions + "`n"
+        }
+        Set-Content -LiteralPath $specPath -Value $body -Encoding UTF8
+        return $specPath
+    }
+
+    function New-GroomingClosureHandoff {
+        param([Parameter(Mandatory=$true)]$Context, [Parameter(Mandatory=$true)][string]$TaskId)
+        $handoffFile = Join-Path $Context.HandoffDir ($TaskId + "-handoff.json")
+        Write-TestHandoff -Path $handoffFile -Values @{
+            task_id = $TaskId
+            source_phase = "grooming"
+            target_phase = "done"
+            reason = "No deliverable"
+            cumulative_handoff_count = 1
+            budget_tier = "low"
+            handoff_retry_count = 0
+            prompt_version = "v1"
+        }
+        return (Get-Content $handoffFile -Raw | ConvertFrom-Json)
+    }
+
+    $results += Run-Test -Name "Research-misroute advisory warns when a Research-type task closes grooming -> done with no research lineage" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "misroute-type") -TaskId "F-001"
+        New-ResearchSpec -Context $ctx -TaskId "F-001" -Type "Research" | Out-Null
+        $handoff = New-GroomingClosureHandoff -Context $ctx -TaskId "F-001"
+
+        $advisory = Get-ResearchMisrouteAdvisory -Handoff $handoff -Context $ctx -ProjectRoot $ctx.RepoRoot
+        Assert-Result -Name "advisory returned" -Condition (-not [string]::IsNullOrEmpty($advisory)) -FailureMessage "expected a non-empty advisory for Research-type closure"
+        Assert-Result -Name "advisory names the task" -Condition ($advisory -match "F-001") -FailureMessage "advisory should name the task"
+        Assert-Result -Name "advisory flags premature closure" -Condition ($advisory -match "premature closure") -FailureMessage "advisory should flag premature closure"
+    }
+
+    $results += Run-Test -Name "Research-misroute advisory warns on a populated Open Questions section" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "misroute-oq") -TaskId "F-002"
+        New-ResearchSpec -Context $ctx -TaskId "F-002" -Type "Feature" -OpenQuestions "- Does the token survive a WAL replay?" | Out-Null
+        $handoff = New-GroomingClosureHandoff -Context $ctx -TaskId "F-002"
+
+        $advisory = Get-ResearchMisrouteAdvisory -Handoff $handoff -Context $ctx -ProjectRoot $ctx.RepoRoot
+        Assert-Result -Name "advisory returned for open questions" -Condition (-not [string]::IsNullOrEmpty($advisory)) -FailureMessage "expected advisory for populated Open Questions"
+        Assert-Result -Name "advisory cites open questions" -Condition ($advisory -match "Open Questions") -FailureMessage "advisory should cite the Open Questions signal"
+    }
+
+    $results += Run-Test -Name "Research-misroute advisory is silent when a research handoff exists in lineage" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "misroute-lineage") -TaskId "F-003"
+        New-ResearchSpec -Context $ctx -TaskId "F-003" -Type "Research" | Out-Null
+        $researchHandoff = Join-Path $ctx.HandoffDir "F-003-research-handoff.json"
+        Write-TestHandoff -Path $researchHandoff -Values @{
+            task_id = "F-003"
+            source_phase = "research"
+            target_phase = "grooming"
+            reason = "Research done"
+            cumulative_handoff_count = 1
+            budget_tier = "low"
+            handoff_retry_count = 0
+            prompt_version = "v1"
+        }
+        $handoff = New-GroomingClosureHandoff -Context $ctx -TaskId "F-003"
+
+        $advisory = Get-ResearchMisrouteAdvisory -Handoff $handoff -Context $ctx -ProjectRoot $ctx.RepoRoot
+        Assert-Result -Name "advisory silent with research lineage" -Condition ([string]::IsNullOrEmpty($advisory)) -FailureMessage "advisory should be silent when research lineage exists"
+    }
+
+    $results += Run-Test -Name "Research-misroute advisory is silent for a non-research task with no open questions" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "misroute-plain") -TaskId "F-004"
+        New-ResearchSpec -Context $ctx -TaskId "F-004" -Type "Feature" | Out-Null
+        $handoff = New-GroomingClosureHandoff -Context $ctx -TaskId "F-004"
+
+        $advisory = Get-ResearchMisrouteAdvisory -Handoff $handoff -Context $ctx -ProjectRoot $ctx.RepoRoot
+        Assert-Result -Name "advisory silent for plain feature" -Condition ([string]::IsNullOrEmpty($advisory)) -FailureMessage "advisory should be silent for a non-research task"
+    }
+
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

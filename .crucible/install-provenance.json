@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "073103d33a3a60562ee4a4b9dd0ac25f807620cc",
+    "source_commit":  "7f5fea7dac88e3587ebf3c9cde65a6dec97bbdef",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -195,8 +195,8 @@
                                                        "base_hash":  "9b788aee06a8ccc865a927a1fd25c1606c6070e1a1bd60f149e48f160565ae79"
                                                    },
                   "powershell/lib/factory-gates.ps1":  {
-                                                           "hash":  "858f45feb2d5ab33b7418426223133d028b14ed03b65c161e1ca1fdd822edf16",
-                                                           "base_hash":  "858f45feb2d5ab33b7418426223133d028b14ed03b65c161e1ca1fdd822edf16"
+                                                           "hash":  "08e1e1a88a3433769e44600eeab4b0fd40852726e09280969a55d23ad6d495ac",
+                                                           "base_hash":  "08e1e1a88a3433769e44600eeab4b0fd40852726e09280969a55d23ad6d495ac"
                                                        },
                   "powershell/lib/handoff.ps1":  {
                                                      "hash":  "7f69c612f50659748325039d569380c0362601098b25fd7883e23bd40c9f38b1",
@@ -375,8 +375,8 @@
                                                                     "base_hash":  "306588bbacde1774166652f1e963ab247b2337d86d0a24908f348242de6b143e"
                                                                 },
                   "powershell/tests/grooming-closure.tests.ps1":  {
-                                                                      "hash":  "4998112238de726b2e99f006688d0272de1602c111f242db5afddef089c437a0",
-                                                                      "base_hash":  "4998112238de726b2e99f006688d0272de1602c111f242db5afddef089c437a0"
+                                                                      "hash":  "c520a1df520bde42518bb9f988ea051db8dc15ab7901b5d67a35e8f7a0394757",
+                                                                      "base_hash":  "c520a1df520bde42518bb9f988ea051db8dc15ab7901b5d67a35e8f7a0394757"
                                                                   },
                   "powershell/tests/grooming-task-reason.tests.ps1":  {
                                                                           "hash":  "ccdf5cdefa1d6851d4ad43707a8f450624f29c9266fc4c6cb57b42b4859bcaae",

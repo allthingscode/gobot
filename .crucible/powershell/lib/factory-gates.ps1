@@ -2778,6 +2778,73 @@ function Get-GateReviewRange {
     return @{ BaseSha = $baseSha; BranchSha = $branchSha }
 }
 
+function Get-ResearchMisrouteAdvisory {
+    # Neutral defense-in-depth advisory. A grooming -> done closure of a task that
+    # looks like research (type: Research, or a populated ## Open Questions section)
+    # with NO research handoff or artifact anywhere in its lineage is a strong
+    # premature-closure signal (see the R-018 dogfood misroute). Returns a warning
+    # string when that pattern holds, else $null. Never blocks; legitimately obsolete
+    # research tasks can still be closed.
+    param(
+        [Parameter(Mandatory = $true)]$Handoff,
+        [Parameter(Mandatory = $true)][hashtable]$Context,
+        [string]$ProjectRoot = ""
+    )
+    try {
+        $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $Handoff.task_id -ProjectRoot $ProjectRoot
+        if ([string]::IsNullOrEmpty($specPath) -or -not (Test-Path -LiteralPath $specPath)) { return $null }
+        $specText = Get-Content -LiteralPath $specPath -Raw -Encoding UTF8
+
+        $isResearchType = ($specText -match '(?im)^\s*type:\s*["'']?research["'']?\s*$')
+
+        $hasOpenQuestions = $false
+        if ($specText -match '(?ims)^#{1,6}\s*Open Questions\s*\r?\n(.*?)(?:^#{1,6}\s|\Z)') {
+            foreach ($line in ($Matches[1] -split "\r?\n")) {
+                $t = $line.Trim()
+                if ($t -ne "" -and $t -notmatch '^#{1,6}\s' -and $t -notmatch '^(?:-\s*)?_?None\b') {
+                    $hasOpenQuestions = $true
+                    break
+                }
+            }
+        }
+
+        if (-not $isResearchType -and -not $hasOpenQuestions) { return $null }
+
+        $hasResearchLineage = $false
+        $handoffDir = $Context.HandoffDir
+        if (-not [string]::IsNullOrEmpty($handoffDir) -and (Test-Path $handoffDir)) {
+            $handoffFiles = @(Get-ChildItem -Path $handoffDir -Filter ($Handoff.task_id + "-*.json") -ErrorAction SilentlyContinue)
+            foreach ($file in $handoffFiles) {
+                try {
+                    $hObj = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                    if ($hObj.source_phase -eq "research" -or $hObj.target_phase -eq "research") {
+                        $hasResearchLineage = $true
+                        break
+                    }
+                } catch {}
+            }
+        }
+        if (-not $hasResearchLineage) {
+            $crucibleRoot = if ($Context.ContainsKey("CrucibleRoot")) { $Context.CrucibleRoot } else { "" }
+            if (-not [string]::IsNullOrEmpty($crucibleRoot)) {
+                $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $ProjectRoot $crucibleRoot }
+                $researchDir = Join-Path $resolvedCrucibleRoot "research"
+                if (Test-Path -LiteralPath $researchDir) {
+                    $artifact = Get-ChildItem -LiteralPath $researchDir -Filter ($Handoff.task_id + "*.md") -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($artifact) { $hasResearchLineage = $true }
+                }
+            }
+        }
+
+        if ($hasResearchLineage) { return $null }
+
+        $signal = if ($isResearchType) { "type: Research" } else { "a populated ## Open Questions section" }
+        return "Task $($Handoff.task_id) has $signal but is closing grooming -> done with no research handoff or artifact in its lineage. If research was expected, this may be a premature closure - confirm before accepting."
+    } catch {
+        return $null
+    }
+}
+
 function Invoke-HumanGate {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -2852,6 +2919,12 @@ function Invoke-HumanGate {
 
     # --- 3a. Human Gate ---
     $isGroomingClosure = ($handoff.source_phase -eq "grooming" -and $handoff.target_phase -eq "done")
+    if ($isGroomingClosure) {
+        $researchMisrouteAdvisory = Get-ResearchMisrouteAdvisory -Handoff $handoff -Context $Context -ProjectRoot $repoRoot
+        if (-not [string]::IsNullOrEmpty($researchMisrouteAdvisory)) {
+            Write-Host ("[ADVISORY] " + $researchMisrouteAdvisory) -ForegroundColor Yellow
+        }
+    }
     $shouldRunHumanGate = $false
     if ($handoff.source_phase -eq "deployment") {
         if (-not [string]::IsNullOrEmpty($GateOutcome)) {
