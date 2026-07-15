@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/dashboard"
@@ -64,7 +65,7 @@ func TestDashboardHandlers(t *testing.T) {
 		{"/dash/", http.StatusOK, []string{"GoBot Dashboard", "test-v1", "System Overview"}},
 		{"/dash/sessions", http.StatusOK, []string{"Active Sessions"}},
 		{"/dash/memory", http.StatusOK, []string{"Strategic Memory", "42"}},
-		{"/dash/metrics", http.StatusOK, []string{"Operator Metrics", "Latency P50/P99", "Process Memory"}},
+		{"/dash/metrics", http.StatusOK, []string{"Operator Metrics", "Latency P50/P99", "Process Memory", "Session Locks"}},
 		{"/dash/cron", http.StatusOK, []string{"Cron Jobs"}},
 		{"/dash/doctor", http.StatusOK, []string{"Doctor Diagnostics"}},
 		{"/dash/doctor?partial=true", http.StatusOK, []string{"Last checked:"}},
@@ -76,6 +77,90 @@ func TestDashboardHandlers(t *testing.T) {
 			t.Parallel()
 			validateDashboardResponse(t, h, tt.path, tt.status, tt.body)
 		})
+	}
+}
+
+func TestSessionLocksPanelStates(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name        string
+		metrics     map[string]agent.LockStatus
+		wantStatus  string
+		wantPrimary string
+		wantRows    int
+		wantParts   []string
+	}{
+		{
+			name:        "no locks",
+			metrics:     nil,
+			wantStatus:  metricStatusUnavailable,
+			wantPrimary: "No active locks",
+			wantRows:    0,
+		},
+		{
+			name: "locks healthy",
+			metrics: map[string]agent.LockStatus{
+				"session-beta": {ContentionCount: 1, MaxWaitTime: 50 * time.Millisecond, TotalHoldTime: time.Second},
+				"session-alpha": {
+					IsLocked:      true,
+					AcquiredAt:    now.Add(-30 * time.Second),
+					TotalHoldTime: 2 * time.Second,
+				},
+			},
+			wantStatus:  metricStatusOK,
+			wantPrimary: "2 locks observed",
+			wantRows:    2,
+			wantParts:   []string{"session-alpha", "held 30s", "session-beta", "unlocked"},
+		},
+		{
+			name: "stale lock warns",
+			metrics: map[string]agent.LockStatus{
+				"session-alpha": {
+					IsLocked:        true,
+					AcquiredAt:      now.Add(-2 * time.Minute),
+					ContentionCount: 3,
+					MaxWaitTime:     time.Second,
+					TotalHoldTime:   4 * time.Second,
+				},
+			},
+			wantStatus:  metricStatusWarn,
+			wantPrimary: "Stale lock detected",
+			wantRows:    1,
+			wantParts:   []string{"session-alpha", "stale held 2m0s", "contention 3", "max wait 1s", "total hold 4s"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			panel := sessionLocksPanel(tt.metrics, now)
+			assertSessionLocksPanel(t, panel, tt.wantStatus, tt.wantPrimary, tt.wantRows, tt.wantParts)
+		})
+	}
+}
+
+func assertSessionLocksPanel(t *testing.T, panel metricPanelView, wantStatus, wantPrimary string, wantRows int, wantParts []string) {
+	t.Helper()
+	if panel.Title != "Session Locks" {
+		t.Fatalf("Title = %q, want Session Locks", panel.Title)
+	}
+	if panel.Status != wantStatus {
+		t.Fatalf("Status = %q, want %q", panel.Status, wantStatus)
+	}
+	if panel.Primary != wantPrimary {
+		t.Fatalf("Primary = %q, want %q", panel.Primary, wantPrimary)
+	}
+	if len(panel.Rows) != wantRows {
+		t.Fatalf("Rows = %d, want %d", len(panel.Rows), wantRows)
+	}
+	rendered := fmt.Sprintf("%+v", panel)
+	for _, want := range wantParts {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("panel missing %q: %+v", want, panel)
+		}
 	}
 }
 

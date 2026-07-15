@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
@@ -1185,6 +1186,90 @@ func TestGetResults_IncludesStorageSizes(t *testing.T) {
 		}
 	}
 	t.Fatal("GetResults did not include a 'storage sizes' result")
+}
+
+func TestConcurrencyResult_LockStaleness(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name              string
+		status            agent.LockStatus
+		wantOK            bool
+		wantDetailParts   []string
+		wantRemediation   bool
+		notWantDetailPart string
+	}{
+		{
+			name:   "unlocked historical contention",
+			status: agent.LockStatus{ContentionCount: 2, MaxWaitTime: 150 * time.Millisecond, TotalHoldTime: 3 * time.Second},
+			wantOK: true,
+			wantDetailParts: []string{
+				"locked: false",
+				"held: n/a",
+				"contention: 2",
+				"max_wait: 150ms",
+				"total_hold: 3s",
+			},
+		},
+		{
+			name:   "currently held below threshold",
+			status: agent.LockStatus{IsLocked: true, AcquiredAt: now.Add(-30 * time.Second), ContentionCount: 1},
+			wantOK: true,
+			wantDetailParts: []string{
+				"locked: true",
+				"held: 30s",
+				"contention: 1",
+			},
+		},
+		{
+			name:   "currently held above threshold",
+			status: agent.LockStatus{IsLocked: true, AcquiredAt: now.Add(-2 * time.Minute), ContentionCount: 3, MaxWaitTime: time.Second, TotalHoldTime: 4 * time.Second},
+			wantOK: false,
+			wantDetailParts: []string{
+				"locked: true",
+				"held: 2m0s",
+				"contention: 3",
+				"max_wait: 1s",
+				"total_hold: 4s",
+			},
+			wantRemediation:   true,
+			notWantDetailPart: "goroutine",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := concurrencyResult("session-alpha", tt.status, now)
+			assertConcurrencyResult(t, result, tt.wantOK, tt.wantDetailParts, tt.wantRemediation, tt.notWantDetailPart)
+		})
+	}
+}
+
+func assertConcurrencyResult(t *testing.T, result Result, wantOK bool, wantDetailParts []string, wantRemediation bool, notWantDetailPart string) {
+	t.Helper()
+	if result.Name != "lock: session-alpha" {
+		t.Fatalf("Name = %q, want lock: session-alpha", result.Name)
+	}
+	if result.OK != wantOK {
+		t.Fatalf("OK = %v, want %v; detail=%q", result.OK, wantOK, result.Detail)
+	}
+	if result.Critical {
+		t.Fatal("stale lock warning must remain non-critical")
+	}
+	for _, want := range wantDetailParts {
+		if !strings.Contains(result.Detail, want) {
+			t.Fatalf("Detail missing %q: %s", want, result.Detail)
+		}
+	}
+	if wantRemediation && result.Remediation == "" {
+		t.Fatal("expected remediation for stale lock")
+	}
+	if notWantDetailPart != "" && strings.Contains(result.Detail, notWantDetailPart) {
+		t.Fatalf("Detail should not contain %q: %s", notWantDetailPart, result.Detail)
+	}
 }
 
 func TestCheckSecretsRoundtrip_NonWindowsSkip(t *testing.T) {

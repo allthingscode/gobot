@@ -22,6 +22,26 @@ type LockStatus struct {
 	MaxWaitTime     time.Duration `json:"max_wait_time"`
 }
 
+// StaleLockThreshold is the advisory age at which a held session lock is
+// reported as stale. It stays below the default 120s deadlock timeout.
+const StaleLockThreshold = 60 * time.Second
+
+// CurrentHoldDuration returns how long this lock has been held at now.
+func (s LockStatus) CurrentHoldDuration(now time.Time) time.Duration {
+	if !s.IsLocked || s.AcquiredAt.IsZero() || now.Before(s.AcquiredAt) {
+		return 0
+	}
+	return now.Sub(s.AcquiredAt)
+}
+
+// IsStale reports whether this lock has been continuously held past threshold.
+func (s LockStatus) IsStale(now time.Time, threshold time.Duration) bool {
+	if threshold <= 0 {
+		threshold = StaleLockThreshold
+	}
+	return s.CurrentHoldDuration(now) > threshold
+}
+
 //nolint:gochecknoglobals // Non-mutable: sync.Mutex protects map, used only for metrics collection
 var (
 	allLocks   = make(map[string]*sessionLock)
