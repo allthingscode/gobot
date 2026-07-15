@@ -138,18 +138,25 @@ function Get-CrucibleRoot {
 # Framework powershell/ directory — used to resolve sibling scripts regardless of CWD.
 $FRAMEWORK_POWERSHELL = $PSScriptRoot
 # Anchor paths to the project root (where .crucible/ lives).
-# -ProjectRoot overrides for explicit invocation from elsewhere; otherwise derive the
-# root from THIS script's location, never the caller's cwd. factory.ps1 ships to adopters
-# at <root>/.crucible/powershell/ and lives in the framework repo at <root>/powershell/,
-# so $PSScriptRoot names the target repo unambiguously no matter where the orchestrator
-# invoked us from. Defaulting to cwd silently targeted the wrong repo when the orchestrator
-# ran the gate from a different checkout.
+# -ProjectRoot overrides for explicit invocation from elsewhere; otherwise PREFER the root
+# derived from THIS script's location over the caller's cwd. factory.ps1 ships to adopters
+# at <root>/.crucible/powershell/ and lives in the framework repo at <root>/powershell/, so
+# $PSScriptRoot names the target repo unambiguously no matter where the orchestrator invoked
+# us from. Defaulting to cwd silently targeted the wrong repo when the gate ran from a
+# different checkout. The canonical framework copy derives the framework root, which is NOT
+# itself an adopter, so we fall back to cwd there (dev/test invocation against a fixture).
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $derivedParent = Split-Path -Path $PSScriptRoot -Parent
     if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
         $derivedParent = Split-Path -Path $derivedParent -Parent
     }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $derivedParent).Path
+    $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
+    if ((Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/backlog")) -or
+        (Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/config.yaml"))) {
+        $REPO_ROOT = $derivedRoot
+    } else {
+        $REPO_ROOT = (Get-Location).Path
+    }
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red

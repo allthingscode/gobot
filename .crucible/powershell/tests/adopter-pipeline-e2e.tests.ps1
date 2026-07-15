@@ -232,6 +232,51 @@ try {
             -FailureMessage ("factory wrote a .crucible under cwd " + $tempRoot + ", meaning it still resolved root from cwd")
     }
 
+    $results += Run-Test -Name "bundle new-handoff derives project root from script location, not cwd" -Body {
+        # Regression: new-handoff.ps1 used to default the project root to the caller's cwd and
+        # threw "current working directory is not a valid Crucible project" when the orchestrator
+        # bootstrapped a handoff from another checkout (the crucible repo dispatching into an
+        # adopter). The bundle's own new-handoff must resolve its project from $PSScriptRoot
+        # (<root>/.crucible/powershell) regardless of where it is invoked.
+        $cycle = "cycle-nh-derive"
+        $env:FACTORY_CYCLE_ID = $cycle
+        $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t-nh-derive") -Cycle $cycle
+        $bundleNewHandoff = Join-Path $projectRoot ".crucible/powershell/new-handoff.ps1"
+        $head = (git -C $projectRoot rev-parse HEAD).Trim()
+
+        # cwd is deliberately an UNRELATED directory with no .crucible/. If root fell back to
+        # cwd, new-handoff would throw the invalid-project error and exit non-zero.
+        Push-Location $tempRoot
+        try {
+            $hRun = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $bundleNewHandoff `
+                    -TaskId "F-900" -Source "grooming" -Target "implementation" `
+                    -Reason "derive-check bootstrap" -SessionCycleId $cycle -CycleId "initial" `
+                    -CommitHash $head
+            }
+        } finally {
+            Pop-Location
+        }
+
+        Assert-Result -Name "derive run exits 0" -Condition ($hRun.ExitCode -eq 0) `
+            -FailureMessage ("expected exit 0, got " + $hRun.ExitCode + ". Output: " + ($hRun.Output -join "`n"))
+
+        # The handoff must land in the SCRIPT-derived project, proving root != cwd. Distinguish
+        # it from the fixture's deployment->done handoff by the grooming->implementation transition.
+        $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
+        $handoffs = @(Get-ChildItem -Path $handoffDir -Filter "F-900-*.json" -ErrorAction SilentlyContinue)
+        $groomHandoff = $handoffs | Where-Object {
+            $j = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            $j.target_phase -eq "implementation"
+        }
+        Assert-Result -Name "handoff written into the script-derived project (not cwd)" -Condition ($null -ne $groomHandoff) `
+            -FailureMessage ("expected a grooming->implementation F-900 handoff under " + $handoffDir + " proving root derived from script location. Output: " + ($hRun.Output -join "`n"))
+
+        $cwdCrucible = Join-Path $tempRoot ".crucible"
+        Assert-Result -Name "no .crucible leaked into cwd" -Condition (-not (Test-Path -LiteralPath $cwdCrucible)) `
+            -FailureMessage ("new-handoff wrote a .crucible under cwd " + $tempRoot + ", meaning it still resolved root from cwd")
+    }
+
     $results += Run-Test -Name "Recording accepted stamps the gate decision with the firing cycle" -Body {
         $cycle = "cycle-e2e-2"
         $env:FACTORY_CYCLE_ID = $cycle

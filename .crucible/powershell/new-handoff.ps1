@@ -53,13 +53,29 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     if ($null -ne $repoRootVar) {
         $ProjectRoot = $repoRootVar.Value
     } else {
-        $cwd = (Get-Location).Path
-        $cwdBacklog = Join-Path $cwd ".crucible/backlog"
-        $cwdConfig = Join-Path $cwd ".crucible/config.yaml"
-        if (-not (Test-Path -LiteralPath $cwdBacklog) -and -not (Test-Path -LiteralPath $cwdConfig)) {
-            throw "ProjectRoot is omitted, REPO_ROOT is not set, and the current working directory '$cwd' is not a valid Crucible project (missing .crucible/backlog or .crucible/config.yaml)."
+        # Prefer the project derived from THIS script's location over the caller's cwd, so the
+        # orchestrator can bootstrap a handoff into an adopter while sitting in another checkout
+        # (the footgun that made new-handoff throw "cwd is not a valid Crucible project"). The
+        # bundle ships at <adopter>/.crucible/powershell/, so $PSScriptRoot names the adopter
+        # unambiguously. The canonical framework copy at <crucible>/powershell/ derives the
+        # framework root, which is NOT itself an adopter, so we fall back to cwd there.
+        $derivedParent = Split-Path -Path $PSScriptRoot -Parent
+        if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
+            $derivedParent = Split-Path -Path $derivedParent -Parent
         }
-        $ProjectRoot = $cwd
+        $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
+        if ((Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/backlog")) -or
+            (Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/config.yaml"))) {
+            $ProjectRoot = $derivedRoot
+        } else {
+            $cwd = (Get-Location).Path
+            $cwdBacklog = Join-Path $cwd ".crucible/backlog"
+            $cwdConfig = Join-Path $cwd ".crucible/config.yaml"
+            if (-not (Test-Path -LiteralPath $cwdBacklog) -and -not (Test-Path -LiteralPath $cwdConfig)) {
+                throw "ProjectRoot is omitted, REPO_ROOT is not set, the directory derived from this script ('$derivedRoot') is not a valid Crucible project, and neither is the current working directory ('$cwd') (missing .crucible/backlog or .crucible/config.yaml)."
+            }
+            $ProjectRoot = $cwd
+        }
     }
 }
 $REPO_ROOT = $ProjectRoot
