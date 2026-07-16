@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 )
 
 type fakeGmailService struct {
+	mu             sync.Mutex
 	summaries      []google.MessageSummary
 	messages       map[string]*google.Message
 	searchErr      error
@@ -27,6 +29,9 @@ type fakeGmailService struct {
 }
 
 func (f *fakeGmailService) SearchMessages(_ context.Context, query string, maxResults int) ([]google.MessageSummary, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	f.seenQuery = query
 	f.seenMaxResults = maxResults
 	if f.searchErr != nil {
@@ -36,6 +41,9 @@ func (f *fakeGmailService) SearchMessages(_ context.Context, query string, maxRe
 }
 
 func (f *fakeGmailService) GetMessage(_ context.Context, id string) (*google.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	f.seenMessageID = id
 	if f.getErrByID != nil {
 		if err := f.getErrByID[id]; err != nil {
@@ -46,6 +54,20 @@ func (f *fakeGmailService) GetMessage(_ context.Context, id string) (*google.Mes
 		return nil, f.getErr
 	}
 	return f.messages[id], nil
+}
+
+func (f *fakeGmailService) observedSearch() (query string, maxResults int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.seenQuery, f.seenMaxResults
+}
+
+func (f *fakeGmailService) observedMessageID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.seenMessageID
 }
 
 func fakeGmailServiceFactory(t *testing.T, svc gmailService) gmailServiceFactory {
@@ -267,11 +289,12 @@ func TestSearchGmailTool_Execute_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if fake.seenQuery != "from:alice@example.com" {
-		t.Errorf("query = %q, want from:alice@example.com", fake.seenQuery)
+	seenQuery, seenMaxResults := fake.observedSearch()
+	if seenQuery != "from:alice@example.com" {
+		t.Errorf("query = %q, want from:alice@example.com", seenQuery)
 	}
-	if fake.seenMaxResults != 7 {
-		t.Errorf("maxResults = %d, want 7", fake.seenMaxResults)
+	if seenMaxResults != 7 {
+		t.Errorf("maxResults = %d, want 7", seenMaxResults)
 	}
 	for _, want := range []string{
 		"Found 1 messages:",
@@ -371,8 +394,8 @@ func TestReadGmailTool_Execute_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if fake.seenMessageID != "msg-1" {
-		t.Errorf("messageID = %q, want msg-1", fake.seenMessageID)
+	if seenMessageID := fake.observedMessageID(); seenMessageID != "msg-1" {
+		t.Errorf("messageID = %q, want msg-1", seenMessageID)
 	}
 	for _, want := range []string{
 		"### Email Details (ID: msg-1)",

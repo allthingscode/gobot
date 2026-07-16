@@ -37,7 +37,7 @@ type gmailServiceFactory func(ctx context.Context, secretsRoot string) (gmailSer
 func newGoogleGmailService(ctx context.Context, secretsRoot string) (gmailService, error) {
 	svc, err := google.NewService(ctx, secretsRoot)
 	if err != nil {
-		return nil, fmt.Errorf("new gmail service: %w", err)
+		return nil, err //nolint:wrapcheck // preserve existing Execute-level auth error text
 	}
 	return svc, nil
 }
