@@ -1,4 +1,4 @@
-# Gobot Strategic Edition — Startup Script
+# Gobot - Startup Script
 # Usage: .\start_gobot.ps1
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -62,7 +62,7 @@ function Wait-ForNetwork {
     # (more firewall-robust than ICMP/Test-Connection, which some environments
     # block) up to 5 times at 3s intervals (~15s cap). Proceed on first success;
     # fall through after the cap regardless so the bot always starts and lets its
-    # in-process resilience recover. Never throws — every probe is caught.
+    # in-process resilience recover. Never throws; every probe is caught.
     $maxAttempts = 5
     $delaySeconds = 3
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
@@ -95,7 +95,7 @@ function Stop-GobotProcesses {
 }
 
 Write-Host ""
-Write-Host "--- Initializing Gobot Strategic Edition ---" -ForegroundColor Cyan
+Write-Host "--- Initializing Gobot ---" -ForegroundColor Cyan
 Write-Host "Log output: $LogDir\gobot.log" -ForegroundColor Gray
 Write-Host ""
 

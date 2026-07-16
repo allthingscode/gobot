@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# check_security.ps1 — Local security validation. Mirrors the CI govulncheck job.
+# check_security.ps1 - Local security validation. Mirrors the CI govulncheck job.
 # Usage: ./scripts/check_security.ps1
 
 Set-StrictMode -Version Latest
