@@ -3,12 +3,14 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -33,8 +35,8 @@ func TestDecode_NoBOM(t *testing.T) {
 func TestDecode_WithBOM(t *testing.T) {
 	t.Parallel()
 	bom := []byte{0xEF, 0xBB, 0xBF} //nolint:prealloc // BOM literal; preallocating would obscure intent
-	json := []byte(`{"providers":{"gemini":{"apiKey":"test-key"}}}`)
-	input := append(bom, json...) //nolint:gocritic // intentional: prepend BOM to original json bytes
+	jsonData := []byte(`{"providers":{"gemini":{"apiKey":"test-key"}}}`)
+	input := append(bom, jsonData...) //nolint:gocritic // intentional: prepend BOM to original json bytes
 
 	cfg, err := decode(bytes.NewReader(input))
 	if err != nil {
@@ -120,19 +122,90 @@ func TestStorageRoot_GobotHomeDerived(t *testing.T) {
 
 func TestSave(t *testing.T) {
 	t.Parallel()
-	tmp := filepath.Join(t.TempDir(), "config.json")
+	tmp := filepath.Join(t.TempDir(), "nested", "config.json")
 	cfg := &Config{
-		Runtime: RuntimeConfig{UserEmail: "test@example.com"},
+		Runtime: RuntimeConfig{StorageRoot: "storage-root", UserEmail: "test@example.com"},
+		Logging: LoggingConfig{Level: "DEBUG"},
 	}
 	if err := cfg.Save(tmp); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
-	cfg2, err := LoadFrom(tmp)
+	assertSavedConfigData(t, tmp)
+	assertSavedConfigValues(t, tmp)
+	assertOwnerOnlyMode(t, tmp)
+}
+
+func assertSavedConfigData(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if !bytes.HasPrefix(data, BOMPrefix) {
+		t.Fatal("saved config is missing UTF-8 BOM")
+	}
+	if !json.Valid(bytes.TrimPrefix(data, BOMPrefix)) {
+		t.Fatalf("saved config is not valid JSON:\n%s", data)
+	}
+}
+
+func assertSavedConfigValues(t *testing.T, path string) {
+	t.Helper()
+	cfg2, err := LoadFrom(path)
 	if err != nil {
 		t.Fatalf("LoadFrom failed: %v", err)
 	}
 	if cfg2.Runtime.UserEmail != "test@example.com" {
 		t.Errorf("got email %q, want %q", cfg2.Runtime.UserEmail, "test@example.com")
+	}
+	if cfg2.Runtime.StorageRoot != "storage-root" {
+		t.Errorf("got storage root %q, want %q", cfg2.Runtime.StorageRoot, "storage-root")
+	}
+	if cfg2.Logging.Level != "DEBUG" {
+		t.Errorf("got log level %q, want DEBUG", cfg2.Logging.Level)
+	}
+}
+
+func assertOwnerOnlyMode(t *testing.T, path string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat failed: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("file mode = %o, want 600", got)
+		}
+	}
+}
+
+func TestSaveOverwritesExistingConfig(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "config.json")
+	original := &Config{
+		Runtime: RuntimeConfig{UserEmail: "old@example.com"},
+	}
+	if err := original.Save(tmp); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	replacement := &Config{
+		Runtime: RuntimeConfig{UserEmail: "new@example.com"},
+		Agents:  AgentsConfig{Defaults: AgentDefaults{Model: "save-test-model"}},
+	}
+	if err := replacement.Save(tmp); err != nil {
+		t.Fatalf("replacement Save failed: %v", err)
+	}
+
+	got, err := LoadFrom(tmp)
+	if err != nil {
+		t.Fatalf("LoadFrom failed: %v", err)
+	}
+	if got.Runtime.UserEmail != "new@example.com" {
+		t.Errorf("got email %q, want new@example.com", got.Runtime.UserEmail)
+	}
+	if got.Agents.Defaults.Model != "save-test-model" {
+		t.Errorf("got model %q, want save-test-model", got.Agents.Defaults.Model)
 	}
 }
 
@@ -490,8 +563,8 @@ func TestLoad_DoesNotPanic(t *testing.T) {
 
 func TestTelegramConfig_AllowFrom(t *testing.T) {
 	t.Parallel()
-	json := `{"channels":{"telegram":{"token":"tok","allowFrom":["111","222"]}}}`
-	cfg, err := decode(bytes.NewReader([]byte(json)))
+	jsonData := `{"channels":{"telegram":{"token":"tok","allowFrom":["111","222"]}}}`
+	cfg, err := decode(bytes.NewReader([]byte(jsonData)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

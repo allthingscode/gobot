@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 // BOMPrefix is the UTF-8 byte order mark written by some Windows editors.
@@ -38,7 +40,7 @@ func (c *Config) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := state.WriteFileAtomic(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config file: %w", err)
 	}
 	return nil
