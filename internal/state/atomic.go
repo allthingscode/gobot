@@ -40,6 +40,11 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("setting file permissions: %w", err)
 	}
 
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("syncing temp file: %w", err)
+	}
+
 	if err := tempFile.Close(); err != nil {
 		return fmt.Errorf("closing temp file: %w", err)
 	}
