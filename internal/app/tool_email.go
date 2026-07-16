@@ -27,6 +27,21 @@ type SendEmailTool struct {
 
 const sendEmailToolName = "send_email"
 
+type gmailService interface {
+	SearchMessages(ctx context.Context, query string, maxResults int) ([]google.MessageSummary, error)
+	GetMessage(ctx context.Context, id string) (*google.Message, error)
+}
+
+type gmailServiceFactory func(ctx context.Context, secretsRoot string) (gmailService, error)
+
+func newGoogleGmailService(ctx context.Context, secretsRoot string) (gmailService, error) {
+	svc, err := google.NewService(ctx, secretsRoot)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // preserve existing Execute-level auth error text
+	}
+	return svc, nil
+}
+
 // newSendEmailTool returns a SendEmailTool that loads OAuth credentials from
 // secretsRoot/token.json and always sends to userEmail.
 func newSendEmailTool(secretsRoot, storageRoot, userEmail string, registry *ToolRegistry, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager) *SendEmailTool {
@@ -128,12 +143,13 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 const searchGmailToolName = "search_gmail"
 
 type SearchGmailTool struct {
-	secretsRoot string
-	tracer      *observability.DispatchTracer
+	secretsRoot    string
+	tracer         *observability.DispatchTracer
+	serviceFactory gmailServiceFactory
 }
 
 func newSearchGmailTool(secretsRoot string, tracer *observability.DispatchTracer) *SearchGmailTool {
-	return &SearchGmailTool{secretsRoot: secretsRoot, tracer: tracer}
+	return &SearchGmailTool{secretsRoot: secretsRoot, tracer: tracer, serviceFactory: newGoogleGmailService}
 }
 
 type searchGmailArgs struct {
@@ -159,7 +175,7 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 
 	maxResults := s.parseMaxResults(args)
 
-	svc, err := google.NewService(ctx, s.secretsRoot)
+	svc, err := s.serviceFactory(ctx, s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("search_gmail: auth: %w", err)
 	}
@@ -191,7 +207,7 @@ func (s *SearchGmailTool) parseMaxResults(args map[string]any) int {
 	return maxResults
 }
 
-func (s *SearchGmailTool) searchMessages(ctx context.Context, svc *google.Service, query string, maxResults int) ([]google.MessageSummary, error) {
+func (s *SearchGmailTool) searchMessages(ctx context.Context, svc gmailService, query string, maxResults int) ([]google.MessageSummary, error) {
 	var summaries []google.MessageSummary
 	var err error
 	if s.tracer != nil {
@@ -232,7 +248,7 @@ func (s *SearchGmailTool) formatResults(summaries []google.MessageSummary, messa
 	return sb.String()
 }
 
-func (s *SearchGmailTool) fetchDetails(ctx context.Context, svc *google.Service, summaries []google.MessageSummary) ([]*google.Message, error) {
+func (s *SearchGmailTool) fetchDetails(ctx context.Context, svc gmailService, summaries []google.MessageSummary) ([]*google.Message, error) {
 	messages := make([]*google.Message, len(summaries))
 	g, gctx := errgroup.WithContext(ctx)
 	var mu sync.Mutex
@@ -264,12 +280,13 @@ func (s *SearchGmailTool) fetchDetails(ctx context.Context, svc *google.Service,
 const readGmailToolName = "read_gmail"
 
 type ReadGmailTool struct {
-	secretsRoot string
-	tracer      *observability.DispatchTracer
+	secretsRoot    string
+	tracer         *observability.DispatchTracer
+	serviceFactory gmailServiceFactory
 }
 
 func newReadGmailTool(secretsRoot string, tracer *observability.DispatchTracer) *ReadGmailTool {
-	return &ReadGmailTool{secretsRoot: secretsRoot, tracer: tracer}
+	return &ReadGmailTool{secretsRoot: secretsRoot, tracer: tracer, serviceFactory: newGoogleGmailService}
 }
 
 func (s *ReadGmailTool) Name() string { return readGmailToolName }
@@ -292,7 +309,7 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[strin
 		return "", fmt.Errorf("read_gmail: message_id is required")
 	}
 
-	svc, err := google.NewService(ctx, s.secretsRoot)
+	svc, err := s.serviceFactory(ctx, s.secretsRoot)
 	if err != nil {
 		return "", fmt.Errorf("read_gmail: auth: %w", err)
 	}
