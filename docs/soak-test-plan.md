@@ -29,10 +29,10 @@ test is the current production binary used as-is (no source changes are in scope
 | Duration | 30 consecutive days (720 hours) |
 | Platform | Windows 11 / Windows 10, dedicated test machine |
 | Run account | The interactive Windows user that performed `gobot authorize` / `gobot reauth` |
-| Launch mechanism | Task Scheduler task "Gobot Strategic Edition" (`-AtLogOn`), registered via `scripts\install_task.ps1` |
+| Launch mechanism | Task Scheduler task "Gobot" (`-AtLogOn`), registered via `scripts\install_task.ps1` |
 | Heartbeat interval | Default 15 min (`config.HeartbeatInterval()` default; `Heartbeat.Interval` in `config.json`) |
 | LIVENESS staleness threshold | 2x heartbeat interval = 30 min (doctor `checkLivenessStaleness`) |
-| Storage root | `<GOBOT_STORAGE>` (or `~/gobot_data` default); referred to below as `<STORAGE>` |
+| Storage root | Resolved `runtime.storage_root` / `<GOBOT_STORAGE>` / `$GOBOT_HOME\data` / `~/gobot_data`; referred to below as `<STORAGE>` |
 | Key log | `<STORAGE>\logs\gobot.log` (rotated by lumberjack) |
 | Startup log | `<STORAGE>\logs\gobot-startup.log` |
 | Liveness file | `<STORAGE>\LIVENESS` |
@@ -108,9 +108,9 @@ the soak account first:
 ### 1.4 Environment validation (BLOCKING)
 
 - [ ] **Storage root is single and explicit.** Decide on `config.json`
-      (`strategic_edition.storage_root`) **or** `GOBOT_STORAGE`. Per
-      `docs/deployment.md`, prefer `config.json` so interactive and scheduled runs
-      never split-brain. Confirm with `.\bin\gobot.exe config storage-root`.
+      (`runtime.storage_root`) **or** `GOBOT_STORAGE`. Per `docs/deployment.md`,
+      prefer `config.json` so interactive and scheduled runs never split-brain.
+      Confirm with `.\bin\gobot.exe config storage-root`.
 - [ ] **API keys/secrets are in the vault, not plaintext config.** Doctor's
       `plaintext secrets` check must be `OK`.
 - [ ] **Authorization present.** Doctor `authorization` should report at least one
@@ -130,7 +130,7 @@ the soak account first:
 ### 1.5 Task registration & baseline
 
 - [ ] Register the task as the soak account: `.\scripts\install_task.ps1`
-      (registers "Gobot Strategic Edition", `-AtLogOn`, `RestartCount 5`,
+      (registers "Gobot", `-AtLogOn`, `RestartCount 5`,
       `RestartInterval 2 min`, `RunLevel Highest`). Confirm the printed
       `GOBOT_STORAGE` line matches your intended storage root.
 - [ ] Reboot (or log off/on) and confirm gobot starts automatically. Verify the
@@ -195,10 +195,10 @@ concrete on-disk or OS artifact gobot actually produces.
 
 ### 2.4 Task Scheduler run history
 
-- **Source:** Windows Task Scheduler history for task "Gobot Strategic Edition".
+- **Source:** Windows Task Scheduler history for task "Gobot".
 - **Collect daily:**
   ```powershell
-  Get-ScheduledTaskInfo -TaskName "Gobot Strategic Edition" |
+  Get-ScheduledTaskInfo -TaskName "Gobot" |
     Select-Object LastRunTime, LastTaskResult, NumberOfMissedRuns
   ```
 - **Healthy:** `LastTaskResult` is `0`, the task shows as Running, and there are no
@@ -273,7 +273,7 @@ only at the end):
 
 ```powershell
 Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" -MaxEvents 50 |
-  Where-Object { $_.Message -match "Gobot Strategic Edition" } |
+  Where-Object { $_.Message -match "Gobot" } |
   Select-Object TimeCreated, Id, LevelDisplayName, Message
 ```
 
@@ -344,7 +344,7 @@ code.
 roundtrip` flips to `WRN`/fail.
 
 **Rollback:**
-1. Stop the task (`Stop-ScheduledTask -TaskName "Gobot Strategic Edition"`).
+1. Stop the task (`Stop-ScheduledTask -TaskName "Gobot"`).
 2. Confirm the run account/SID is unchanged. If the account was renamed only (same
    SID), decryption should still work  -  re-test.
 3. If the SID/profile genuinely changed (new account, profile migration, reinstall),
@@ -364,8 +364,8 @@ doctor / `gobot.log`.
 1. Stop the task to halt further writes.
 2. Reclaim space: lumberjack already caps `gobot.log` (50 MB x 5 + compression), so
    the usual culprits are external  -  clear other apps' data, or move `<STORAGE>` to a
-   larger volume by updating `strategic_edition.storage_root` (the most robust option
-   per `docs/deployment.md`) and re-registering the task with `install_task.ps1`.
+   larger volume by updating `runtime.storage_root` (the most robust option per
+   `docs/deployment.md`) and re-registering the task with `install_task.ps1`.
 3. If the storage root moved, verify no split-brain (one storage root only) and that
    the DPAPI vault + databases moved with it.
 4. Re-run pre-soak checks; resume and restart the clock.

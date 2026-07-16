@@ -65,10 +65,10 @@ You must enable the specific APIs for each service you want Gobot to use:
 
 ## Customizing OAuth Scopes
 
-By default, `gobot reauth` requests full access to Gmail, Calendar, and Tasks. You can restrict the scopes by adding `google_scopes` to the `strategic_edition` section of your `config.json`:
+By default, `gobot reauth` requests full access to Gmail, Calendar, and Tasks. You can restrict the scopes by adding `google_scopes` to the `runtime` section of your `config.json`:
 
 ```json
-"strategic_edition": {
+"runtime": {
   "google_scopes": [
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/calendar",

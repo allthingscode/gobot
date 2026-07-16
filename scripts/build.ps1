@@ -1,4 +1,4 @@
-# scripts/build.ps1 — Build gobot with version injection
+# scripts/build.ps1 - Build gobot with version injection
 # Usage: .\scripts\build.ps1
 
 $VERSION = git describe --tags --always --dirty 2>$null
