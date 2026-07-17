@@ -166,6 +166,56 @@ $results += Run-Test "rebase_count backstop trips the recurring-conflict breaker
     }
 }
 
+$results += Run-Test "Conflict path survives ErrorActionPreference=Stop (git rebase stderr)" {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mr_d_" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    try {
+        $repo = New-MergeRepo -Root $root
+        "line0" | Set-Content -LiteralPath (Join-Path $repo "README.md") -Encoding UTF8
+        git -C $repo add . 2>$null | Out-Null
+        git -C $repo commit -m "base" 2>$null | Out-Null
+        git -C $repo checkout -b "task/T-004" 2>$null | Out-Null
+        "AAA" | Set-Content -LiteralPath (Join-Path $repo "README.md") -Encoding UTF8
+        git -C $repo add . 2>$null | Out-Null
+        git -C $repo commit -m "task change" 2>$null | Out-Null
+        git -C $repo checkout master 2>$null | Out-Null
+        "BBB" | Set-Content -LiteralPath (Join-Path $repo "README.md") -Encoding UTF8
+        git -C $repo add . 2>$null | Out-Null
+        git -C $repo commit -m "primary change" 2>$null | Out-Null
+
+        $wtPath = Join-Path $root "wt-T-004"
+        git -C $repo worktree add $wtPath "task/T-004" 2>$null | Out-Null
+
+        $marker = Join-Path $root "handoff-marker.txt"
+        $fakeHandoff = Join-Path $root "fake-new-handoff.ps1"
+        New-FakeHandoffScript -Path $fakeHandoff -MarkerPath $marker
+
+        function Get-ConfiguredPath { param($Key, $ProjectRoot) return (Split-Path -Parent $wtPath) }
+        function Resolve-ImplementationWorktreePath { param($TaskId, $WorkspacesDir) return $wtPath }
+
+        $handoff = [PSCustomObject]@{ rebase_count = 0 }
+
+        # Reproduce the production condition: the factory runs under 'Stop', where
+        # PS 5.1 turns git's stderr into a terminating error unless guarded.
+        Push-Location $repo
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "Stop"
+        try {
+            $result = Invoke-HumanGateMerge -TaskId "T-004" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $handoff -HandoffScript $fakeHandoff
+        } finally {
+            $ErrorActionPreference = $prev
+            Pop-Location
+        }
+
+        Assert-Result "stop-result" ($result -eq "rework") "Expected 'rework' under Stop, got '$result'"
+        Assert-Result "wt-not-mid-rebase" (-not (Test-Path (Join-Path $repo ".git/worktrees/wt-T-004/rebase-merge"))) "worktree left mid-rebase under Stop"
+        $status = @(git -C $repo status --porcelain)
+        Assert-Result "primary-clean" ($status.Count -eq 0) "master not clean under Stop: $($status -join ',')"
+    } finally {
+        Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+}
+
 $passed = @($results | Where-Object { $_ }).Count
 $total = $results.Count
 Write-Host ("`n[factory-gates-merge-rebase] {0}/{1} passed" -f $passed, $total) -ForegroundColor Cyan

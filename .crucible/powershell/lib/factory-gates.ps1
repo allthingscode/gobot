@@ -2089,13 +2089,22 @@ function Invoke-HumanGateMerge {
     $rebaseClean = $false
     if (Test-Path $wtPath) {
         Write-Quiet "[HUMAN GATE] Rebasing task/$TaskId onto $PrimaryBranch in $wtPath..."
-        $rebaseOut = & git -C $wtPath rebase $PrimaryBranch 2>&1
-        $rebaseExit = $LASTEXITCODE
-        foreach ($line in @($rebaseOut)) { Write-Quiet ([string]$line) }
-        if ($rebaseExit -eq 0) {
-            $rebaseClean = $true
-        } else {
-            & git -C $wtPath rebase --abort 2>&1 | Out-Null
+        # EAP guard: PS 5.1 wraps a native command's stderr as a terminating
+        # ErrorRecord under 'Stop'. git rebase writes progress/conflict text to
+        # stderr, so run it under Continue and gate purely on the exit code.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $rebaseOut = & git -C $wtPath rebase $PrimaryBranch 2>&1
+            $rebaseExit = $LASTEXITCODE
+            foreach ($line in @($rebaseOut)) { Write-Quiet ([string]$line) }
+            if ($rebaseExit -eq 0) {
+                $rebaseClean = $true
+            } else {
+                & git -C $wtPath rebase --abort 2>&1 | Out-Null
+            }
+        } finally {
+            $ErrorActionPreference = $prevEAP
         }
     }
 

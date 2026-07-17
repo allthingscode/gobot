@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "70557493c4cf86fb374abdda88f3e7cf60c608f6",
+    "source_commit":  "06acffdad19b8d553993893559a2afc36279e7ad",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -195,8 +195,8 @@
                                                        "base_hash":  "9b788aee06a8ccc865a927a1fd25c1606c6070e1a1bd60f149e48f160565ae79"
                                                    },
                   "powershell/lib/factory-gates.ps1":  {
-                                                           "hash":  "d5a55d7543c1637095194c9464e864be9fe1c309a38d2e7c1e4e72064831c96b",
-                                                           "base_hash":  "d5a55d7543c1637095194c9464e864be9fe1c309a38d2e7c1e4e72064831c96b"
+                                                           "hash":  "e77e66c8a2fd0993f7dc9e9ac7c5bb23d20892e9069d150fa181dd9964d795f4",
+                                                           "base_hash":  "e77e66c8a2fd0993f7dc9e9ac7c5bb23d20892e9069d150fa181dd9964d795f4"
                                                        },
                   "powershell/lib/handoff.ps1":  {
                                                      "hash":  "7f69c612f50659748325039d569380c0362601098b25fd7883e23bd40c9f38b1",
@@ -363,8 +363,8 @@
                                                                              "base_hash":  "985a2e17bb7d00d802f67702e8ab9c01b1ac5838d33d2d72e4d6dea8c88463e5"
                                                                          },
                   "powershell/tests/factory-gates-merge-rebase.tests.ps1":  {
-                                                                                "hash":  "eb3c9ed3bb3459838632fffdbf7821313d237c5777501446c8b3e54e13498b90",
-                                                                                "base_hash":  "eb3c9ed3bb3459838632fffdbf7821313d237c5777501446c8b3e54e13498b90"
+                                                                                "hash":  "4df02723e7aee1491ec527059e69dc0e6976657854b7f9df67bf709241bf8265",
+                                                                                "base_hash":  "4df02723e7aee1491ec527059e69dc0e6976657854b7f9df67bf709241bf8265"
                                                                             },
                   "powershell/tests/factory-gates-reject-abandon.tests.ps1":  {
                                                                                   "hash":  "1ce75348fe8550fe1c951d0c1f1fe7a91e86f99438651b4ac62e9f6bb852e2e9",
