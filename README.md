@@ -41,7 +41,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 
 | | **gobot** | **GoGogot** | **NeoClaw** | **PicoClaw** |
 |---|---|---|---|---|
-| **Stars (May 2026)** | — | ~115 | — | 12,000+ |
+| **Stars (July 2026)** | n/a (pre-release) | ~115 | — | 12,000+ |
 | **Storage** | SQLite + chromem-go | In-process notes | SQLite | Not specified |
 | **CGO** | None | None | None | None |
 | **LLM providers** | 4 | 6+ | 4 | MCP |
