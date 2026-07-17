@@ -97,8 +97,8 @@ func runLogs(cmd *cobra.Command, targetFile string, lines int, filter, since str
 		return err
 	}
 
-	filter = strings.ToUpper(filter)
-	filterFn := makeLogFilter(filter, sinceTime)
+	levelFilters := parseLogLevelFilters(filter)
+	filterFn := makeParsedLogFilter(levelFilters, sinceTime)
 
 	file, err := os.Open(latestPath)
 	if err != nil {
@@ -163,9 +163,30 @@ func parseSinceDuration(since string) (time.Time, error) {
 	return time.Now().Add(-d), nil
 }
 
+func parseLogLevelFilters(filter string) []string {
+	if strings.TrimSpace(filter) == "" {
+		return nil
+	}
+
+	levels := strings.Split(filter, ",")
+	filters := make([]string, 0, len(levels))
+	for _, level := range levels {
+		level = strings.ToUpper(strings.TrimSpace(level))
+		if level == "" {
+			continue
+		}
+		filters = append(filters, level)
+	}
+	return filters
+}
+
 func makeLogFilter(filter string, sinceTime time.Time) func(string) bool {
+	return makeParsedLogFilter(parseLogLevelFilters(filter), sinceTime)
+}
+
+func makeParsedLogFilter(levelFilters []string, sinceTime time.Time) func(string) bool {
 	return func(logLine string) bool {
-		if filter != "" && !strings.Contains(logLine, "level="+filter) {
+		if len(levelFilters) > 0 && !matchesLogLevel(logLine, levelFilters) {
 			return false
 		}
 
@@ -179,6 +200,15 @@ func makeLogFilter(filter string, sinceTime time.Time) func(string) bool {
 		}
 		return !t.Before(sinceTime)
 	}
+}
+
+func matchesLogLevel(logLine string, levelFilters []string) bool {
+	for _, filter := range levelFilters {
+		if strings.Contains(logLine, "level="+filter) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseLogTime(logLine string) (time.Time, bool) {
