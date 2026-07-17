@@ -3738,6 +3738,17 @@ function Resolve-FactoryTransition {
         }
     }
 
+    # A deployment -> implementation handoff carrying rebase_count >= 1 is a
+    # rebase-conflict re-entry from the accept gate (see Invoke-HumanGateMerge); its
+    # authorizing decision is "accepted", so recognize the rebase counter directly.
+    # Mirrors validate-handoff.ps1.
+    if (-not $isRework -and $handoff.PSObject.Properties["rebase_count"]) {
+        $rebaseCountVal = 0
+        if ([int]::TryParse([string]$handoff.rebase_count, [ref]$rebaseCountVal) -and $rebaseCountVal -ge 1) {
+            $isRework = $true
+        }
+    }
+
     if ($isRework) {
         $deploymentSuccessors.Add("implementation")
     }
