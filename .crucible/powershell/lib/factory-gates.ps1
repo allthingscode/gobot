@@ -2029,6 +2029,32 @@ function Invoke-HumanGateMerge {
         $HandoffScript = Join-Path (Split-Path -Parent $PSScriptRoot) "new-handoff.ps1"
     }
 
+    # The CLI gate persists an "accepted" decision BEFORE calling this action (the
+    # reject path's rework handoff depends on that ordering). When an accepted merge
+    # does not complete -- it routes to rework or trips the breaker -- that premature
+    # "accepted" record must be removed, or the deployment->done completion guard will
+    # see it on the next run and block the retry (commit not merged into primary).
+    $removePrematureAccept = {
+        try {
+            $sessDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
+            $gdDir = Join-Path $sessDir "global/gate_decisions"
+            if (Test-Path $gdDir) {
+                $candidates = @(Get-ChildItem -Path $gdDir -Filter ($TaskId + "-*.json") -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending)
+                foreach ($f in $candidates) {
+                    try {
+                        $d = Get-Content $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                        if ($d.outcome -eq "accepted") {
+                            Remove-Item -Path $f.FullName -Force
+                            Write-Quiet "[HUMAN GATE] Removed premature 'accepted' gate decision $($f.Name) (merge did not complete)."
+                            break
+                        }
+                    } catch {}
+                }
+            }
+        } catch {}
+    }
+
     Write-Quiet "[HUMAN GATE] Merging branch task/$TaskId into $PrimaryBranch..."
     Invoke-GitChecked { git checkout $PrimaryBranch } | Out-Null
     Invoke-GitChecked { git merge --no-ff --no-edit "task/$TaskId" } | Out-Null
@@ -2053,6 +2079,7 @@ function Invoke-HumanGateMerge {
         }
         Write-Host "`n[CIRCUIT BREAKER] Recurring Merge Conflicts: task/$TaskId rebased $currentRebase time(s) and still conflicts with $PrimaryBranch." -ForegroundColor Yellow
         Write-Host "[STOP] HUMAN INTERVENTION REQUIRED. Reduce scope or resolve the conflict manually." -ForegroundColor Red
+        & $removePrematureAccept
         return "breaker"
     }
 
@@ -2133,6 +2160,7 @@ function Invoke-HumanGateMerge {
         }
         & $HandoffScript @handoffParams | Out-Null
     }
+    & $removePrematureAccept
     return "rework"
 }
 
@@ -3166,7 +3194,9 @@ function Invoke-HumanGate {
             Write-Host ("`n[HUMAN GATE] Decision recorded via CLI flag: " + $GateOutcome) -ForegroundColor Green
             Write-Host ("Reason: " + $trimmedGateReason) -ForegroundColor Gray
 
-            # Execute push or reset based on automated CLI decision
+            # Execute push or reset based on automated CLI decision. An accepted merge
+            # that conflicts routes to rework and removes this premature decision itself
+            # (see Invoke-HumanGateMerge) so a non-completed accept cannot block a retry.
             Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $trimmedGateReason
 
             if ($GateOutcome -eq "abandoned") {
