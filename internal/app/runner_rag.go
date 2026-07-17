@@ -10,6 +10,19 @@ import (
 	"github.com/allthingscode/gobot/internal/memory/vector"
 )
 
+type ragMemorySearcher interface {
+	Search(context.Context, string, string, int) ([]map[string]any, error)
+}
+
+type hybridRagSearchFunc func(context.Context, ragMemorySearcher, *vector.Store, vector.EmbeddingProvider, string, string, int) ([]vector.HybridResult, error)
+
+// runHybridRagSearch is a package-private seam for app-level runner tests.
+//
+//nolint:gochecknoglobals // Package-private test seam; production default delegates to vector.HybridSearch.
+var runHybridRagSearch hybridRagSearchFunc = func(ctx context.Context, fts ragMemorySearcher, vec *vector.Store, embedProv vector.EmbeddingProvider, query, sessionKey string, limit int) ([]vector.HybridResult, error) {
+	return vector.HybridSearch(ctx, fts, vec, embedProv, query, sessionKey, limit)
+}
+
 func (r *AgentRunner) buildSystemPrompt(ctx context.Context, sessionKey string, messages []agentctx.StrategicMessage, memStore *memory.MemoryStore) string {
 	sysPrompt := r.SystemPrompt
 	if memStore != nil {
@@ -54,7 +67,7 @@ func (r *AgentRunner) hybridRagSearch(ctx context.Context, sessionKey, userText 
 	if r.Tracer != nil {
 		err = r.Tracer.TraceMemorySearch(ctx, "hybrid", func(ctx context.Context) error {
 			var err2 error
-			hybridResults, err2 = vector.HybridSearch(ctx, memStore, r.VecStore, r.EmbedProv, userText, sessionKey, 5)
+			hybridResults, err2 = runHybridRagSearch(ctx, memStore, r.VecStore, r.EmbedProv, userText, sessionKey, 5)
 			if err2 != nil {
 				return fmt.Errorf("hybrid search: %w", err2)
 			}
@@ -62,7 +75,7 @@ func (r *AgentRunner) hybridRagSearch(ctx context.Context, sessionKey, userText 
 		})
 	} else {
 		var err2 error
-		hybridResults, err2 = vector.HybridSearch(ctx, memStore, r.VecStore, r.EmbedProv, userText, sessionKey, 5)
+		hybridResults, err2 = runHybridRagSearch(ctx, memStore, r.VecStore, r.EmbedProv, userText, sessionKey, 5)
 		if err2 != nil {
 			err = fmt.Errorf("hybrid search: %w", err2)
 		}
