@@ -41,8 +41,48 @@ func TestLogsCommand(t *testing.T) { //nolint:paralleltest // uses global state 
 	if strings.Contains(out, "hello world") {
 		t.Errorf("Should not contain INFO line when filter=error")
 	}
+	if strings.Contains(out, "warning message") {
+		t.Errorf("Should not contain WARN line when filter=error")
+	}
 	if !strings.Contains(out, "an error occurred") {
 		t.Errorf("Should contain ERROR line")
+	}
+}
+
+func TestLogsCommand_MultiLevelFilter(t *testing.T) { //nolint:paralleltest // uses global state // modifies global env
+	_, logsDir := setupLogsTest(t)
+	createTestLogs(t, logsDir)
+
+	tests := []struct {
+		name   string
+		filter string
+	}{
+		{
+			name:   "comma separated",
+			filter: "ERROR,WARN",
+		},
+		{
+			name:   "comma separated with whitespace",
+			filter: "ERROR, WARN",
+		},
+	}
+
+	for _, tt := range tests { //nolint:paralleltest // uses global state // modifies global env
+		t.Run(tt.name, func(t *testing.T) {
+			out := runLogsCmd(t, []string{"--filter", tt.filter})
+			if !strings.Contains(out, "an error occurred") {
+				t.Errorf("Should contain ERROR line when filter=%q, got: %s", tt.filter, out)
+			}
+			if !strings.Contains(out, "warning message") {
+				t.Errorf("Should contain WARN line when filter=%q, got: %s", tt.filter, out)
+			}
+			if strings.Contains(out, "hello world") {
+				t.Errorf("Should not contain INFO line when filter=%q, got: %s", tt.filter, out)
+			}
+			if strings.Contains(out, "debug message") {
+				t.Errorf("Should not contain DEBUG line when filter=%q, got: %s", tt.filter, out)
+			}
+		})
 	}
 }
 
@@ -104,7 +144,9 @@ func createTestLogs(t *testing.T, logsDir string) {
 	timeStr2 := now.Add(-1 * time.Minute).Format(time.RFC3339Nano)
 
 	newerLog := filepath.Join(logsDir, fmt.Sprintf("gobot_%s.log", now.Format("20060102_150405")))
-	newerContent := fmt.Sprintf("time=%s level=INFO msg=\"hello world\"\ntime=%s level=ERROR msg=\"an error occurred\"\ntime=%s level=DEBUG msg=\"debug message\"\n", timeStr1, timeStr2, now.Format(time.RFC3339Nano))
+	timeStr3 := now.Add(-30 * time.Second).Format(time.RFC3339Nano)
+
+	newerContent := fmt.Sprintf("time=%s level=INFO msg=\"hello world\"\ntime=%s level=ERROR msg=\"an error occurred\"\ntime=%s level=WARN msg=\"warning message\"\ntime=%s level=DEBUG msg=\"debug message\"\n", timeStr1, timeStr2, timeStr3, now.Format(time.RFC3339Nano))
 
 	_ = os.WriteFile(newerLog, []byte(newerContent), 0o600)
 	_ = os.Chtimes(newerLog, now, now)
