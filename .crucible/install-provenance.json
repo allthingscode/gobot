@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "06acffdad19b8d553993893559a2afc36279e7ad",
+    "source_commit":  "dd11978155da654fd1733ed896161373589b2c08",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -494,6 +494,10 @@
                                                                       "hash":  "3208ce728a7fea7d15b1487db3aa77088fcd4c71198691d484abe3df95ece77f",
                                                                       "base_hash":  "3208ce728a7fea7d15b1487db3aa77088fcd4c71198691d484abe3df95ece77f"
                                                                   },
+                  "powershell/tests/validate-handoff-rebase-rework.tests.ps1":  {
+                                                                                    "hash":  "3df10b102e331527769030815a9ec45d7568c5dd0b68189c1ffbf0501e3b120c",
+                                                                                    "base_hash":  "3df10b102e331527769030815a9ec45d7568c5dd0b68189c1ffbf0501e3b120c"
+                                                                                },
                   "powershell/tests/worktree.tests.ps1":  {
                                                               "hash":  "d7709cdd28295b44a704c83eb51ad3f207f106cd4e28cb2a17b03199f711fe11",
                                                               "base_hash":  "d7709cdd28295b44a704c83eb51ad3f207f106cd4e28cb2a17b03199f711fe11"
@@ -519,8 +523,8 @@
                                                           "base_hash":  "d700e038041793c4bc213ab200dfa861d0888ca9cf2283b08abc190af5c7cd13"
                                                       },
                   "powershell/validate-handoff.ps1":  {
-                                                          "hash":  "4f7aeb886532dbc159138cec8d5e43bcfce89437a367d79335e2b7ca7d428a7e",
-                                                          "base_hash":  "4f7aeb886532dbc159138cec8d5e43bcfce89437a367d79335e2b7ca7d428a7e"
+                                                          "hash":  "e35b2bac9d0f46a7e1a0984f35d5dc75ac19d6c4eda0e6be50a5cd67887ed1a0",
+                                                          "base_hash":  "e35b2bac9d0f46a7e1a0984f35d5dc75ac19d6c4eda0e6be50a5cd67887ed1a0"
                                                       },
                   "powershell/watch-adopter-ci.ps1":  {
                                                           "hash":  "9bcbc2d00191e4d69fb6c3c62d8ec1e472da6efe0607acc66b222c81c2afa963",

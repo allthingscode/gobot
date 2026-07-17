@@ -275,6 +275,17 @@ if (-not [string]::IsNullOrEmpty($taskId) -and (Test-Path $gateDir)) {
     }
 }
 
+# A deployment -> implementation handoff carrying rebase_count >= 1 is a
+# rebase-conflict re-entry emitted by the accept gate when a merge could not be
+# auto-rebased cleanly (see Invoke-HumanGateMerge). The authorizing gate decision
+# is "accepted" (not "rejected"), so recognize the rebase counter directly.
+if (-not $isRework -and $null -ne $handoff -and $handoff.PSObject.Properties["rebase_count"]) {
+    $rebaseCountVal = 0
+    if ([int]::TryParse([string]$handoff.rebase_count, [ref]$rebaseCountVal) -and $rebaseCountVal -ge 1) {
+        $isRework = $true
+    }
+}
+
 if ($isRework) {
     $deploymentSuccessors.Add("implementation")
 }
