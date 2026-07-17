@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "705e2c4d567633af47f4c19052025a67e030792b",
+    "source_commit":  "70557493c4cf86fb374abdda88f3e7cf60c608f6",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -195,8 +195,8 @@
                                                        "base_hash":  "9b788aee06a8ccc865a927a1fd25c1606c6070e1a1bd60f149e48f160565ae79"
                                                    },
                   "powershell/lib/factory-gates.ps1":  {
-                                                           "hash":  "b54dbe7b76844714130537586d09f329746489694d72f313bd04f18961fc664f",
-                                                           "base_hash":  "b54dbe7b76844714130537586d09f329746489694d72f313bd04f18961fc664f"
+                                                           "hash":  "d5a55d7543c1637095194c9464e864be9fe1c309a38d2e7c1e4e72064831c96b",
+                                                           "base_hash":  "d5a55d7543c1637095194c9464e864be9fe1c309a38d2e7c1e4e72064831c96b"
                                                        },
                   "powershell/lib/handoff.ps1":  {
                                                      "hash":  "7f69c612f50659748325039d569380c0362601098b25fd7883e23bd40c9f38b1",
