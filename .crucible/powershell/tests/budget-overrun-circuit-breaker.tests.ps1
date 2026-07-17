@@ -120,6 +120,80 @@ created_at: "2026-05-25"
             -Condition ($blockedJson -match '"circuit_breaker":\s*"budget_exceeded"') `
             -FailureMessage "blocked record does not name 'budget_exceeded'. Content:`n$blockedJson"
     }
+
+    function Invoke-BudgetScenario {
+        param([string]$TaskId, [int]$RebaseCount, [int]$CumulativeCount)
+        $specDir = Join-Path $projectRoot ".crucible/backlog/chores/active"
+        New-Item -ItemType Directory -Path $specDir -Force | Out-Null
+        $specPath = Join-Path $specDir "${TaskId}_BudgetTest.md"
+        $specContent = @"
+---
+item_id: "$TaskId"
+priority: "P3"
+status: "Ready"
+target_phase: "grooming"
+budget_tier: "low"
+file_affinity: ["src/"]
+created_at: "2026-05-25"
+---
+# Spec
+"@
+        [System.IO.File]::WriteAllText($specPath, $specContent)
+        $backlogPath = Join-Path $projectRoot ".crucible/backlog/BACKLOG.md"
+        [System.IO.File]::AppendAllText($backlogPath, "`n| [$TaskId](chores/active/${TaskId}_BudgetTest.md) | Title |")
+
+        $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+        $handoffPath = Join-Path $handoffDir ("${TaskId}-${ts}.json")
+        $handoff = [ordered]@{
+            task_id                  = $TaskId
+            source_phase             = "grooming"
+            target_phase             = "implementation"
+            reason                   = "Implement"
+            handoff_retry_count      = 0
+            review_strike_count      = 0
+            rebase_count             = $RebaseCount
+            budget_tier              = "low"
+            cumulative_handoff_count = $CumulativeCount
+            prompt_version           = "test-v1"
+            session_cycle_id         = "test-cycle"
+            cycle_id                 = "test-cycle"
+            generated_by             = "new-handoff.ps1"
+            tool_version             = "1.0.0"
+            artifacts                = @($specPath)
+            file_affinity            = @("src/")
+        }
+        $handoff | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath -Encoding UTF8
+        $env:FACTORY_CYCLE_ID = "test-cycle"
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+                -Init -TaskId $TaskId -ProjectRoot $projectRoot
+        }
+        return $res
+    }
+
+    $results += Run-Test -Name "Rebase headroom: cum 11 with rebase_count 1 does NOT trip (effective ceiling 15)" -Body {
+        $res = Invoke-BudgetScenario -TaskId "C-BUDGET-RB" -RebaseCount 1 -CumulativeCount 11
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "No budget breaker in output" `
+            -Condition ($output -notmatch "Token Budget Exceeded") `
+            -FailureMessage ("budget breaker fired despite rebase headroom. Output:`n$output")
+        $blockedDir = Join-Path $projectRoot ".crucible/backlog/blocked"
+        $rb = @(Get-ChildItem -Path $blockedDir -Filter "C-BUDGET-RB-*.json" -ErrorAction SilentlyContinue)
+        Assert-Result -Name "No budget_exceeded record written" `
+            -Condition ($rb.Count -eq 0 -or -not ((Get-Content $rb[0].FullName -Raw) -match "budget_exceeded")) `
+            -FailureMessage "a budget_exceeded record was written despite rebase headroom"
+    }
+
+    $results += Run-Test -Name "Rebase headroom is bounded: cum 16 with rebase_count 1 still trips (effective ceiling 15)" -Body {
+        $res = Invoke-BudgetScenario -TaskId "C-BUDGET-RB2" -RebaseCount 1 -CumulativeCount 16
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "Factory exits 2 (blocked)" -Condition ($res.ExitCode -eq 2) `
+            -FailureMessage ("expected exit 2 for cum 16 over effective ceiling 15, got $($res.ExitCode). Output:`n$output")
+        Assert-Result -Name "Budget breaker fired" -Condition ($output -match "Token Budget Exceeded") `
+            -FailureMessage ("expected budget breaker. Output:`n$output")
+    }
 } finally {
     Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $tempRoot) {

@@ -1851,11 +1851,22 @@ function Invoke-CircuitBreakerGates {
             exit 1
         }
 
-        if ($handoff.cumulative_handoff_count -gt $ceiling) {
-            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "budget_exceeded" -Notes ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $ceiling)
-            Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "budget_exceeded" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $ceiling)
+        # Framework-forced rebase-conflict rework cycles are not quality churn; grant
+        # the task headroom per rebase_count so a line collision cannot trip the budget
+        # breaker on an otherwise-clean task (see Get-RebaseCycleAllowance).
+        $effectiveCeiling = $ceiling
+        $rebaseCycles = 0
+        if ($handoff.PSObject.Properties["rebase_count"] -and
+            [int]::TryParse([string]$handoff.rebase_count, [ref]$rebaseCycles) -and $rebaseCycles -gt 0) {
+            $allowance = if (Get-Command Get-RebaseCycleAllowance -ErrorAction SilentlyContinue) { Get-RebaseCycleAllowance } else { 5 }
+            $effectiveCeiling = $ceiling + ($rebaseCycles * $allowance)
+        }
+
+        if ($handoff.cumulative_handoff_count -gt $effectiveCeiling) {
+            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "budget_exceeded" -Notes ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling)
+            Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "budget_exceeded" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling)
             Write-Quiet "`n[CIRCUIT BREAKER] Token Budget Exceeded." -ForegroundColor Yellow
-            Write-Quiet ("Task " + $handoff.task_id + " has reached " + $handoff.cumulative_handoff_count + " handoffs. Ceiling: " + $ceiling + " for tier " + $handoff.budget_tier)
+            Write-Quiet ("Task " + $handoff.task_id + " has reached " + $handoff.cumulative_handoff_count + " handoffs. Ceiling: " + $effectiveCeiling + " for tier " + $handoff.budget_tier + " (base " + $ceiling + " + " + $rebaseCycles + " rebase cycle(s))")
             Write-Quiet ("Reason: " + $handoff.reason)
             Write-Host "`n[STOP] HUMAN INTERVENTION REQUIRED. Review costs before continuing." -ForegroundColor Red
             exit 2

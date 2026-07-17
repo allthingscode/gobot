@@ -26,6 +26,17 @@ $script:FACTORY_PHASES = @("research", "grooming", "implementation", "verificati
 $script:BUDGET_TIERS = @("low", "medium", "high", "extended")
 $script:BUDGET_CEILINGS = @{ low = 10; medium = 16; high = 28; extended = 40 }
 
+# A framework-forced rebase-conflict rework (accept-gate auto-rebase routing back to
+# implementation) consumes a full re-run -- re-entry -> implementation -> verification
+# -> deployment -> done, ~5 handoffs -- that is NOT quality churn. Each such cycle
+# (tracked by rebase_count) earns this much headroom on top of the tier ceiling so a
+# task that merely collided on a line is not blocked by the quality budget breaker.
+$script:REBASE_CYCLE_ALLOWANCE = 5
+
+function Get-RebaseCycleAllowance {
+    return $script:REBASE_CYCLE_ALLOWANCE
+}
+
 function Get-BudgetCeilings {
     return $script:BUDGET_CEILINGS.Clone()
 }
