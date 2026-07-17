@@ -270,7 +270,7 @@ function Invoke-UpdateBundle {
         $reportLines += ("{0}: {1}" -f $category, $results[$category].Count)
         $reportLines += @($results[$category].ToArray() | ForEach-Object { "  " + $_.AdopterPath })
     }
-    $reportLines | Out-File -LiteralPath $logPath -Encoding UTF8
+    [System.IO.File]::WriteAllText($logPath, (($reportLines -join "`r`n") + "`r`n"), [System.Text.UTF8Encoding]::new($false))
 
     Write-Report -Results $results
     Write-Host ("Log: " + $logPath)

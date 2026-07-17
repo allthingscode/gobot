@@ -105,9 +105,14 @@ function Get-VerificationTools {
         }
         if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
         if ($cmd -match 'replace-with|REPLACE_WITH') { continue }
+        # YAML block-scalar indicator (command: >- / |- etc.); the real command
+        # is on the following indented lines, not this one. Skip it.
+        if ($cmd -match '^[>|][+-]?[0-9]*$') { continue }
         $first = ($cmd -split '\s+')[0]
         if ([string]::IsNullOrWhiteSpace($first)) { continue }
-        $leaf = [System.IO.Path]::GetFileName($first)
+        # Manual leaf extraction: [IO.Path]::GetFileName throws on illegal path
+        # characters that are legal in a command token (e.g. quotes, redirects).
+        $leaf = $first -replace '^.*[\\/]', ''
         if ($shells -contains $leaf.ToLowerInvariant()) { continue }
         if (-not ($tools -contains $leaf)) { $tools.Add($leaf) | Out-Null }
     }

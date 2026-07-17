@@ -129,6 +129,32 @@ try {
         Assert-Result -Name "no golangci critical check" -Condition (-not ($output -match "\[golangci-lint")) -FailureMessage "adopter mode should not run the framework golangci-lint check. Output:`n$output"
     }
 
+    $results += Run-Test -Name "Doctor survives folded-scalar verification command (no illegal-path crash)" -Body {
+        $projectRoot = Join-Path $tempRoot "folded-scalar-project"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        @(
+            'crucible_root: ".crucible"',
+            'project:',
+            '  name: "Folded"',
+            '  default_branch: "main"',
+            'verification:',
+            '  full:',
+            '    - name: scoped coverage',
+            '      command: >-',
+            '        go test -cover -mod=readonly',
+            '        ./internal/...'
+        ) | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
+        }
+        $output = $res.Output -join "`n"
+
+        Assert-Result -Name "no illegal-path crash" -Condition (-not ($output -match "Illegal characters in path")) -FailureMessage "folded-scalar command crashed the doctor. Output:`n$output"
+        Assert-Result -Name "ran to completion" -Condition ($output -match "\[DOCTOR\] Result:") -FailureMessage "doctor did not complete with a folded-scalar command. Output:`n$output"
+        Assert-Result -Name "block-scalar indicator not treated as a tool" -Condition (-not ($output -match "verification\.tool\.[>|]")) -FailureMessage "the YAML block-scalar indicator was misparsed as a verification tool. Output:`n$output"
+    }
+
     $results += Run-Test -Name "Doctor reports unauthenticated gh as advisory, stays READY" -Body {
         $projectRoot = Join-Path $tempRoot "unauth-project"
         $binDir = Join-Path $tempRoot "fake-bin"

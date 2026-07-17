@@ -2002,6 +2002,140 @@ function Invoke-GitChecked {
     }
 }
 
+function Invoke-HumanGateMerge {
+    # Merges task/$TaskId into $PrimaryBranch at the accept gate. A clean merge returns
+    # "merged". On conflict it NEVER leaves the tree mid-merge: it aborts, then attempts
+    # to auto-rebase the task branch onto the advanced primary branch inside its worktree.
+    # A clean rebase (git resolved non-overlapping changes) is re-validated and the merge
+    # retried -> "merged". A genuine same-line conflict cannot be resolved mechanically, so
+    # the branch is left intact and the task is routed back to implementation via a
+    # sanctioned re-entry handoff with rebase_count bumped -> "rework". Once rebase_count
+    # would exceed MaxRebaseAttempts the recurring-conflict circuit breaker trips ->
+    # "breaker". Any unexpected post-rebase failure also routes to "rework".
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskId,
+        [Parameter(Mandatory = $true)][string]$PrimaryBranch,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        $Handoff = $null,
+        [int]$MaxRebaseAttempts = 3,
+        [string]$CheckScript = "",
+        [string]$HandoffScript = ""
+    )
+
+    if ([string]::IsNullOrEmpty($CheckScript)) {
+        $CheckScript = Join-Path (Split-Path -Parent $PSScriptRoot) "run-isolated-checks.ps1"
+    }
+    if ([string]::IsNullOrEmpty($HandoffScript)) {
+        $HandoffScript = Join-Path (Split-Path -Parent $PSScriptRoot) "new-handoff.ps1"
+    }
+
+    Write-Quiet "[HUMAN GATE] Merging branch task/$TaskId into $PrimaryBranch..."
+    Invoke-GitChecked { git checkout $PrimaryBranch } | Out-Null
+    Invoke-GitChecked { git merge --no-ff --no-edit "task/$TaskId" } | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        return "merged"
+    }
+
+    # Conflict: restore the tree first so the adopter is never left mid-merge.
+    Write-Host "[HUMAN GATE] task/$TaskId conflicts with $PrimaryBranch; aborting merge and attempting auto-rebase..." -ForegroundColor Yellow
+    Invoke-GitChecked { git merge --abort } | Out-Null
+
+    $currentRebase = 0
+    if ($null -ne $Handoff -and $Handoff.PSObject.Properties["rebase_count"]) {
+        $currentRebase = [int]$Handoff.rebase_count
+    }
+    $nextRebase = $currentRebase + 1
+
+    if ($nextRebase -gt $MaxRebaseAttempts) {
+        Write-EventLog -Event "circuit_breaker" -TaskId $TaskId -Specialist "deployment" -Outcome "blocked" -Notes "Recurring Merge Conflicts - $MaxRebaseAttempts strikes at human gate"
+        if (Get-Command Write-BlockedTaskRecord -ErrorAction SilentlyContinue) {
+            Write-BlockedTaskRecord -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
+        }
+        Write-Host "`n[CIRCUIT BREAKER] Recurring Merge Conflicts: task/$TaskId rebased $currentRebase time(s) and still conflicts with $PrimaryBranch." -ForegroundColor Yellow
+        Write-Host "[STOP] HUMAN INTERVENTION REQUIRED. Reduce scope or resolve the conflict manually." -ForegroundColor Red
+        return "breaker"
+    }
+
+    $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
+    $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+
+    $rebaseClean = $false
+    if (Test-Path $wtPath) {
+        Write-Quiet "[HUMAN GATE] Rebasing task/$TaskId onto $PrimaryBranch in $wtPath..."
+        $rebaseOut = & git -C $wtPath rebase $PrimaryBranch 2>&1
+        $rebaseExit = $LASTEXITCODE
+        foreach ($line in @($rebaseOut)) { Write-Quiet ([string]$line) }
+        if ($rebaseExit -eq 0) {
+            $rebaseClean = $true
+        } else {
+            & git -C $wtPath rebase --abort 2>&1 | Out-Null
+        }
+    }
+
+    if ($rebaseClean) {
+        Write-Quiet "[HUMAN GATE] Auto-rebase clean; re-running isolated checks before merge..."
+        $checksOk = $true
+        if (Test-Path $CheckScript) {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CheckScript -TaskId $TaskId -Mode full -ProjectRoot $ProjectRoot | Out-Null
+            if ($LASTEXITCODE -ne 0) { $checksOk = $false }
+        }
+        if ($checksOk) {
+            Invoke-GitChecked { git checkout $PrimaryBranch } | Out-Null
+            Invoke-GitChecked { git merge --no-ff --no-edit "task/$TaskId" } | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Quiet "[HUMAN GATE] Auto-rebase resolved the conflict; merge succeeded."
+                return "merged"
+            }
+            Invoke-GitChecked { git merge --abort } | Out-Null
+            Write-Host "[HUMAN GATE] Post-rebase merge still failed unexpectedly; routing to rework." -ForegroundColor Yellow
+        } else {
+            Write-Host "[HUMAN GATE] Isolated checks failed after rebase; routing to rework." -ForegroundColor Yellow
+        }
+    }
+
+    # Genuine conflict (or post-rebase failure): route back to implementation for a
+    # specialist to rebase and resolve. Leave $PrimaryBranch clean and unpushed.
+    Invoke-GitChecked { git checkout $PrimaryBranch } | Out-Null
+    $reason = "Rebase conflict: task/$TaskId no longer applies cleanly onto $PrimaryBranch (rebase attempt $nextRebase/$MaxRebaseAttempts). Rebase onto $PrimaryBranch in the worktree, resolve conflicts, and re-run the pipeline."
+    Write-Host "[HUMAN GATE] $reason" -ForegroundColor Yellow
+
+    if (-not (Test-Path $wtPath)) {
+        Invoke-GitChecked { git worktree prune } | Out-Null
+        Invoke-GitChecked { git worktree add $wtPath "task/$TaskId" } | Out-Null
+    }
+
+    if (Test-Path $HandoffScript) {
+        $sessionCycleId = ""
+        $artifacts = @()
+        if ($null -ne $Handoff) {
+            if ($Handoff.PSObject.Properties["session_cycle_id"]) {
+                $sessionCycleId = $Handoff.session_cycle_id
+            } elseif ($Handoff.PSObject.Properties["cycle_id"]) {
+                $sessionCycleId = $Handoff.cycle_id
+            }
+            if ($Handoff.PSObject.Properties["artifacts"]) {
+                $artifacts = $Handoff.artifacts
+            }
+        }
+        $handoffParams = @{
+            TaskId      = $TaskId
+            Source      = "deployment"
+            Target      = "implementation"
+            Reason      = $reason
+            RebaseCount = $nextRebase
+            ProjectRoot = $ProjectRoot
+        }
+        if (-not [string]::IsNullOrEmpty($sessionCycleId)) {
+            $handoffParams["SessionCycleId"] = $sessionCycleId
+        }
+        if ($artifacts.Count -gt 0) {
+            $handoffParams["Artifacts"] = @($artifacts)
+        }
+        & $HandoffScript @handoffParams | Out-Null
+    }
+    return "rework"
+}
+
 function Get-BacklogItemPathForTaskProjectRoot {
     param(
         [Parameter(Mandatory = $true)][string]$Task,
@@ -2369,10 +2503,18 @@ function Invoke-HumanGateAction {
                 $hasTaskBranch = $true
             }
             if ($hasTaskBranch) {
-                Write-Quiet "[HUMAN GATE] Merging branch task/$TaskId into $primaryBranch..."
-                Invoke-GitChecked { git checkout $primaryBranch }
-                Invoke-GitChecked { git merge --no-ff --no-edit "task/$TaskId" }
-                if ($LASTEXITCODE -ne 0) {
+                $gateHandoff = $null
+                $ghVar = Get-Variable -Name "handoff" -ErrorAction SilentlyContinue
+                if ($null -ne $ghVar) { $gateHandoff = $ghVar.Value }
+                $mergeResult = Invoke-HumanGateMerge -TaskId $TaskId -PrimaryBranch $primaryBranch -ProjectRoot $resolvedProjectRoot -Handoff $gateHandoff
+                if ($mergeResult -eq "rework") {
+                    # Auto-rebase hit a genuine conflict; task routed back to implementation.
+                    # Repo is clean and unpushed. Exit 3 signals "not shipped, rework queued".
+                    Write-Host "[HUMAN GATE] task/$TaskId routed back to implementation for rebase-conflict rework. Nothing was pushed; re-run the pipeline to resolve." -ForegroundColor Cyan
+                    exit 3
+                } elseif ($mergeResult -eq "breaker") {
+                    exit 2
+                } elseif ($mergeResult -ne "merged") {
                     Write-Host "[ERROR] git merge --no-ff --no-edit task/$TaskId failed!" -ForegroundColor Red
                     exit 1
                 }
