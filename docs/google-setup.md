@@ -51,9 +51,14 @@ You must enable the specific APIs for each service you want Gobot to use:
 ## 5. Install Credentials
 
 1.  Rename the downloaded JSON file to `client_secrets.json`.
-2.  Move it to your Gobot secrets directory. By default, this is:
-    *   **Windows**: `%USERPROFILE%\gobot_data\secrets\client_secrets.json`
-    *   **Linux/macOS**: `~/gobot_data/secrets/client_secrets.json`
+2.  Move it to the `secrets` directory under your resolved Gobot data root:
+    *   **Path**: `{data root}/secrets/client_secrets.json`
+
+    `gobot init` prints the resolved data root as `data:`. Gobot resolves that data root from
+    `runtime.storage_root`, then `GOBOT_STORAGE`, then `$GOBOT_HOME/data`, then the fallback default
+    `~/gobot_data`; see [Path Resolution](configuration.md#path-resolution). For example, the default
+    fallback path is `~/gobot_data/secrets/client_secrets.json`, while a `GOBOT_HOME` install uses
+    `$GOBOT_HOME/data/secrets/client_secrets.json`.
 3.  Run the re-authorization command:
     ```bash
     # Windows:
@@ -106,7 +111,15 @@ If you are using a personal `@gmail.com` account (External User Type) and your a
 *   **Alternative**: If you have a Google Workspace organization, use the **Internal** user type to avoid this expiration.
 
 ### Refresh Token Revocation
-If you need to force a full re-authorization, delete the `token.json` file in your `gobot_data` directory before running `gobot reauth`.
+If you need to force a full re-authorization, delete the Google OAuth token files under your resolved
+data root before running `gobot reauth` again:
+
+*   `{data root}/secrets/google_token.json`
+*   `{data root}/secrets/gmail/token.json`
+
+Use the `data:` path printed by `gobot init`, or resolve it from `runtime.storage_root`, `GOBOT_STORAGE`,
+`$GOBOT_HOME/data`, then the fallback default `~/gobot_data` as described in
+[Path Resolution](configuration.md#path-resolution).
 
 ## Internal vs. External Apps Summary
 
