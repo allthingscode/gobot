@@ -91,6 +91,19 @@ function Track-HandoffFile {
     return $null
 }
 
+# pwsh renders an uncaught 'throw' via ConciseView: ANSI color codes plus word-wrapping
+# to the host width, with '|' gutters on continuation lines. A long thrown message (e.g.
+# new-handoff's ProjectRoot-resolution error) gets split mid-phrase, so a literal -match
+# against the raw stderr fails on Linux while passing on Windows PowerShell 5.1 (no ANSI,
+# no wrap). Normalize before matching: strip ANSI, then collapse every run of non-word
+# characters (newlines, gutters, punctuation, spaces) to a single space.
+function ConvertTo-NormalizedOutput {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return "" }
+    $noAnsi = $Text -replace "$([char]0x1b)\[[0-9;]*m", ''
+    return ($noAnsi -replace '[^\w]+', ' ').Trim()
+}
+
 try {
     Invoke-Test -Name "grooming->implementation success" -Script {
         $taskId = New-TestTaskId "GA"
@@ -467,7 +480,7 @@ budget_tier: "low"
         if ($result.ExitCode -eq 0) {
             throw "Expected failure for task not in backlog, but succeeded"
         }
-        if ($result.Output -notmatch "not found in the bundle") {
+        if ((ConvertTo-NormalizedOutput $result.Output) -notmatch "not found in the bundle") {
             throw "Expected backlog search failure message, got: $($result.Output)"
         }
     }
@@ -500,7 +513,7 @@ budget_tier: "low"
         if ($result.ExitCode -eq 0) {
             throw "Expected failure when ProjectRoot omitted and CWD has no backlog, but succeeded. Output: $($result.Output)"
         }
-        if ($result.Output -notmatch "not a valid Crucible project") {
+        if ((ConvertTo-NormalizedOutput $result.Output) -notmatch "not a valid Crucible project") {
             throw "Expected CWD validation failure message, got: $($result.Output)"
         }
     }

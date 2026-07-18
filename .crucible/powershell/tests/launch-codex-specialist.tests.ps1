@@ -46,6 +46,14 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
         exit 0
     }
+    "echostdin" {
+        # Capture the prompt exactly as codex would receive it on stdin, so a test can prove the
+        # launcher feeds the prompt via stdin (not argv) and that embedded quotes survive intact.
+        $stdin = [Console]::In.ReadToEnd()
+        Write-Output ("STDIN_BEGIN>>>" + $stdin + "<<<STDIN_END")
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
+        exit 0
+    }
     "stdinprobe" {
         # Mimic real codex reading stdin: report whether stdin reaches EOF promptly.
         # If the launcher closes codex stdin (the fix), EOF is immediate -> STDIN_EOF.
@@ -289,6 +297,28 @@ try {
         Assert-Result -Name "root derived banner" -Condition ($res.Output -match "derived from script location") -FailureMessage "expected derived-root banner. Output:`n$($res.Output)"
         $sessionUnderProj = Join-Path $proj ".crucible/session/C-991/verification/codex-transcript.txt"
         Assert-Result -Name "session under derived root" -Condition (Test-Path -LiteralPath $sessionUnderProj) -FailureMessage "expected session dir under derived project root at $sessionUnderProj. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Prompt is fed on codex stdin, not argv" -Body {
+        # Regression: the prompt used to be appended as a positional codex arg. On Windows
+        # PowerShell 5.1, native-argument quoting does not escape interior double-quotes, so a
+        # prompt containing quotes was split at each quote and codex rejected the fragments
+        # ("unexpected argument ... found"), surfacing as a spurious LAUNCH_FAILED. The launcher
+        # now pipes the prompt on stdin. This test locks the delivery channel: the prompt body
+        # reaches codex on STDIN and never appears in the codex argv. (Exact embedded-quote
+        # survival is verified by the live dogfood, not here: this harness passes -PromptText
+        # across its own powershell.exe -File hop, which itself strips the quotes before the
+        # launcher runs -- the very hazard the stdin fix removes at the launcher->codex boundary.)
+        $projectRoot = Join-Path $tempRoot "proj-stdin-prompt"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-990", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "Verify task (C-990) and mark it now", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "prompt-on-stdin launch should succeed. Output:`n$($res.Output)"
+        $transcript = Get-Content -LiteralPath (Join-Path $projectRoot ".crucible/session/C-990/verification/codex-transcript.txt") -Raw
+        Assert-Result -Name "prompt arrived on stdin" -Condition ($transcript -match ([regex]::Escape('STDIN_BEGIN>>>Verify task (C-990) and mark it now'))) -FailureMessage "expected prompt body on stdin. Transcript:`n$transcript"
+        $argsLine = ($transcript -split "`n" | Where-Object { $_ -match "^ARGS:" }) -join "`n"
+        Assert-Result -Name "prompt not passed as argv" -Condition (-not ($argsLine -match ([regex]::Escape('(C-990)')))) -FailureMessage "prompt text must not appear in codex argv. ARGS:`n$argsLine"
     }
 
     $results += Run-Test -Name "Missing -Model is rejected" -Body {

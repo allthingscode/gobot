@@ -159,16 +159,18 @@ function Invoke-CodexExec {
     if (-not (Get-Command "codex" -ErrorAction SilentlyContinue)) {
         return [PSCustomObject]@{ ExitCode = 127; Output = "'codex' was not found on PATH." }
     }
-    $allArgs = @("exec") + $CodexArgs + @($Prompt)
+    $allArgs = @("exec") + $CodexArgs
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        # codex exec reads stdin IN ADDITION to the prompt arg and blocks on EOF. When this
-        # launcher runs with an inherited open stdin (the normal orchestrator/tool context),
-        # codex hangs forever on "Reading additional input from stdin...". Piping $null hands
-        # codex an immediately-closed stdin so it proceeds from the prompt arg alone. Required
-        # to prevent the hang; do not remove.
-        $output = $null | & codex @allArgs 2>&1 | Out-String
+        # Feed the prompt on STDIN, never as a positional argument. Windows PowerShell 5.1's
+        # native-argument quoting does not escape interior double-quotes, so a prompt passed as an
+        # arg is silently split at each embedded quote (e.g. a -PromptText override with "quoted"
+        # tokens) and codex's parser rejects the fragments; long prompts also blow the ~32K Windows
+        # command-line ceiling. codex exec reads its prompt from stdin when no positional PROMPT is
+        # given. Piping the string hands codex the full prompt followed by an immediate EOF, so it
+        # neither mis-parses the prompt nor hangs on "Reading additional input from stdin...".
+        $output = $Prompt | & codex @allArgs 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous

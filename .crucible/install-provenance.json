@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "c0b1f8507039d313ee2f66276945d92d08649538",
+    "source_commit":  "97b097b5a292317effd8c413d9d006bdc2925a15",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -171,8 +171,8 @@
                                                        "base_hash":  "540b4e86fd89abd9ba5233cef579833b5922d4ba9131b8dbcaefca13969a9696"
                                                    },
                   "powershell/launch-codex-specialist.ps1":  {
-                                                                 "hash":  "7ba0e2bff39a9e7acfe5aaec9bc4f8d140395ea2d44107cd45f5f6e90ac8258d",
-                                                                 "base_hash":  "7ba0e2bff39a9e7acfe5aaec9bc4f8d140395ea2d44107cd45f5f6e90ac8258d"
+                                                                 "hash":  "62b1213e7b6560b7a058f1d9a2f44212521ec6b2f8728b3d98bcad166bc82f59",
+                                                                 "base_hash":  "62b1213e7b6560b7a058f1d9a2f44212521ec6b2f8728b3d98bcad166bc82f59"
                                                              },
                   "powershell/lib/archive-task.ps1":  {
                                                           "hash":  "1f592f79198d77d998418f7f6aafd431fb87548119204e3f545b3ac67e480ae4",
@@ -415,16 +415,16 @@
                                                                       "base_hash":  "ada7e4a9b7da54b60f9522e0a4cf5c8fee5d28a35eef1ce77b6ad3e2e1c5fa65"
                                                                   },
                   "powershell/tests/launch-codex-specialist.tests.ps1":  {
-                                                                             "hash":  "1c25e6fc5cfe3ae4a15d618b96670be9cf84553dac93cc5994f9be0b78bf85a1",
-                                                                             "base_hash":  "1c25e6fc5cfe3ae4a15d618b96670be9cf84553dac93cc5994f9be0b78bf85a1"
+                                                                             "hash":  "5702e73bfd5f2b630fa61bd76c92cad1cf56cb23f8be2f53b8fffa21b587bc87",
+                                                                             "base_hash":  "5702e73bfd5f2b630fa61bd76c92cad1cf56cb23f8be2f53b8fffa21b587bc87"
                                                                          },
                   "powershell/tests/model-selection.tests.ps1":  {
                                                                      "hash":  "2a90afd1af42e033b808e6a419c7e2eced774acd9900e71e0749cd61906db2ef",
                                                                      "base_hash":  "2a90afd1af42e033b808e6a419c7e2eced774acd9900e71e0749cd61906db2ef"
                                                                  },
                   "powershell/tests/new-handoff.tests.ps1":  {
-                                                                 "hash":  "5f7a193a190f7d8090407849ede1a31709cb06cb84a7c2be245f9a6a177be17a",
-                                                                 "base_hash":  "5f7a193a190f7d8090407849ede1a31709cb06cb84a7c2be245f9a6a177be17a"
+                                                                 "hash":  "9ed827438d5c364c2709739643cceda78e69bf4775dc1642d652d8bac1971a84",
+                                                                 "base_hash":  "9ed827438d5c364c2709739643cceda78e69bf4775dc1642d652d8bac1971a84"
                                                              },
                   "powershell/tests/operator-merge-verification.tests.ps1":  {
                                                                                  "hash":  "ae42dd016c463de24d33496e71a04b286eb7b9d8fda26da3a43b6510e1dad764",
