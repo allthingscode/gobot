@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "a69e2498dee9fc2e8a8d4dc3cbc37e53b9a4366c",
+    "source_commit":  "c0b1f8507039d313ee2f66276945d92d08649538",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -243,8 +243,8 @@
                                                       "base_hash":  "2c37eb1dee335d2e9d83076d79a14dc038b40a045ff8cffaaca145bbb478c46e"
                                                   },
                   "powershell/new-handoff.ps1":  {
-                                                     "hash":  "a92c9057c98378628112c7ceac54d4cc93edc5d18616313f33f2154e44393bea",
-                                                     "base_hash":  "a92c9057c98378628112c7ceac54d4cc93edc5d18616313f33f2154e44393bea"
+                                                     "hash":  "4f2ea5bc4074f6bc6709e215cb9ea5b25051deaf0e99d328be01d2534a912c98",
+                                                     "base_hash":  "4f2ea5bc4074f6bc6709e215cb9ea5b25051deaf0e99d328be01d2534a912c98"
                                                  },
                   "powershell/record-research-gate.ps1":  {
                                                               "hash":  "7047808f011e8523503664bb2c333e3fd86068ed0e3b7cbaedd6e29073908cbe",
@@ -423,8 +423,8 @@
                                                                      "base_hash":  "2a90afd1af42e033b808e6a419c7e2eced774acd9900e71e0749cd61906db2ef"
                                                                  },
                   "powershell/tests/new-handoff.tests.ps1":  {
-                                                                 "hash":  "975aaa8533fcaffed9f9a072419a997b12429329b91d1428aaff1a25785834bd",
-                                                                 "base_hash":  "975aaa8533fcaffed9f9a072419a997b12429329b91d1428aaff1a25785834bd"
+                                                                 "hash":  "5f7a193a190f7d8090407849ede1a31709cb06cb84a7c2be245f9a6a177be17a",
+                                                                 "base_hash":  "5f7a193a190f7d8090407849ede1a31709cb06cb84a7c2be245f9a6a177be17a"
                                                              },
                   "powershell/tests/operator-merge-verification.tests.ps1":  {
                                                                                  "hash":  "ae42dd016c463de24d33496e71a04b286eb7b9d8fda26da3a43b6510e1dad764",

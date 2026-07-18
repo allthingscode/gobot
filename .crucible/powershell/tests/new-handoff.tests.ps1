@@ -811,6 +811,94 @@ budget_tier: "low"
         }
     }
 
+    function New-PriorHandoff {
+        param([string]$TaskId, [string]$SourcePhase, [string]$TargetPhase, [int]$Strike)
+        $handoffPath = Join-Path $handoffDir "$TaskId-20260530T120000Z.json"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $handoffPath) -Force | Out-Null
+        [ordered]@{
+            task_id = $TaskId
+            source_phase = $SourcePhase
+            target_phase = $TargetPhase
+            reason = "prior handoff"
+            generated_by = "new-handoff.ps1"
+            tool_version = "1.0.0"
+            handoff_retry_count = 0
+            review_strike_count = $Strike
+            rebase_count = 0
+            budget_tier = "low"
+            cumulative_handoff_count = 3
+            prompt_version = "verification_prompt-v26"
+            session_cycle_id = "cycle-strike"
+            artifacts = @("powershell/factory.ps1")
+            file_affinity = @("powershell/")
+        } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $script:createdFiles += $handoffPath
+    }
+
+    Invoke-Test -Name "verification->implementation auto-increments review_strike_count" -Script {
+        $taskId = New-TestTaskId "STRIKE-VI"
+        New-PriorHandoff -TaskId $taskId -SourcePhase "implementation" -TargetPhase "verification" -Strike 1
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "verification"
+            Target = "implementation"
+            Reason = "Changes requested"
+            PromptVersion = "verification_prompt-v26"
+            Artifacts = @("powershell/factory.ps1")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ([int]$obj.review_strike_count -ne 2) {
+            throw "Expected review_strike_count 2 (inherited 1 + 1), got: $($obj.review_strike_count)"
+        }
+    }
+
+    Invoke-Test -Name "explicit -ReviewStrikeCount overrides auto-increment on verification->implementation" -Script {
+        $taskId = New-TestTaskId "STRIKE-VI-OVERRIDE"
+        New-PriorHandoff -TaskId $taskId -SourcePhase "implementation" -TargetPhase "verification" -Strike 1
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "verification"
+            Target = "implementation"
+            Reason = "Changes requested"
+            ReviewStrikeCount = 0
+            PromptVersion = "verification_prompt-v26"
+            Artifacts = @("powershell/factory.ps1")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ([int]$obj.review_strike_count -ne 0) {
+            throw "Expected explicit review_strike_count 0 to win, got: $($obj.review_strike_count)"
+        }
+    }
+
+    Invoke-Test -Name "non verification->implementation transition inherits review_strike_count unchanged" -Script {
+        $taskId = New-TestTaskId "STRIKE-INHERIT"
+        New-PriorHandoff -TaskId $taskId -SourcePhase "grooming" -TargetPhase "implementation" -Strike 2
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "implementation"
+            Target = "verification"
+            Reason = "Implementation complete"
+            PromptVersion = "implementation_prompt-v29"
+            Artifacts = @("powershell/factory.ps1")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ([int]$obj.review_strike_count -ne 2) {
+            throw "Expected review_strike_count to inherit 2 unchanged, got: $($obj.review_strike_count)"
+        }
+    }
+
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
 } finally {
     Set-Location -LiteralPath $origLocation

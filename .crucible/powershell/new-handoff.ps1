@@ -163,12 +163,21 @@ $resolvedHandoffRetry = if ($HandoffRetryCount -ge 0) {
     0
 }
 
-$resolvedReviewStrike = if ($ReviewStrikeCount -ge 0) {
-    $ReviewStrikeCount
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["review_strike_count"]) {
+$inheritedReviewStrike = if ($null -ne $latest -and $latest.PSObject.Properties["review_strike_count"]) {
     [int]$latest.review_strike_count
 } else {
     0
+}
+# A reviewer sending work back (verification -> implementation) is a review failure:
+# auto-increment the strike so the review_stalemate breaker (strike >= 3) can fire on a
+# repeated review-bounce loop. The Human-Gate REJECT path passes -ReviewStrikeCount
+# explicitly; every other caller inherits unchanged.
+$resolvedReviewStrike = if ($ReviewStrikeCount -ge 0) {
+    $ReviewStrikeCount
+} elseif ($Source -eq "verification" -and $Target -eq "implementation") {
+    $inheritedReviewStrike + 1
+} else {
+    $inheritedReviewStrike
 }
 
 $resolvedRebase = if ($RebaseCount -ge 0) {
