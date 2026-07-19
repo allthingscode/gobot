@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - Comma-separated multi-level filtering for the `gobot logs --filter` command.
 
+### Changed
+
+- `config.json` is now written atomically to avoid partial writes on crash.
+
 ---
 
 ## [0.2.1] - 2026-04-19
