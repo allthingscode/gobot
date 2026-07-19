@@ -204,7 +204,9 @@ func (m *SessionManager) compactHistoryIfNeeded(sessionKey string, messages []ag
 
 	if m.storageRoot != "" {
 		entry := fmt.Sprintf("Session %s: compacted %d messages (kept %d)", sessionKey, dropped, len(compacted))
-		memory.WriteJournalEntry(m.storageRoot, entry)
+		if err := memory.WriteJournalEntryWithError(m.storageRoot, entry); err != nil {
+			slog.Warn("agent: journal append failed during compaction", logattr.SessionKey(sessionKey), logattr.Err(err))
+		}
 	}
 
 	return compacted

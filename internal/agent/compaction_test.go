@@ -2,6 +2,11 @@
 package agent
 
 import (
+	"bytes"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,6 +202,38 @@ func TestCompactMessages_StartsWithUser(t *testing.T) {
 	}
 	if got[0].Role != agentctx.RoleUser {
 		t.Errorf("result[0].Role = %q, want %q", got[0].Role, agentctx.RoleUser)
+	}
+}
+
+func TestSessionManagerCompactHistoryLogsJournalAppendFailure(t *testing.T) { //nolint:paralleltest // captures global slog default
+	var buf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "workspace"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := &SessionManager{
+		memoryWindow: DefaultKeepContextMessages + 1,
+		storageRoot:  root,
+	}
+	got := mgr.compactHistoryIfNeeded("session-1", makeMessages(DefaultKeepContextMessages+2, agentctx.RoleUser))
+
+	if len(got) == DefaultKeepContextMessages+2 {
+		t.Fatal("expected compaction to return a smaller message slice")
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "agent: journal append failed during compaction") {
+		t.Fatalf("logs = %q, want journal append warning", logs)
+	}
+	if !strings.Contains(logs, "session-1") {
+		t.Fatalf("logs = %q, want session key", logs)
+	}
+	if !strings.Contains(logs, "create journal directory") {
+		t.Fatalf("logs = %q, want wrapped journal error", logs)
 	}
 }
 

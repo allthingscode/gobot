@@ -119,6 +119,67 @@ func TestGetJournalContinuity_EmptyFileReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestGetJournalContinuityWithError_InitializesMissingJournal(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	got, err := memory.GetJournalContinuityWithError(root, 1000)
+	if err != nil {
+		t.Fatalf("GetJournalContinuityWithError returned error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("continuity = %q, want empty string", got)
+	}
+
+	journalPath := memory.DailyJournalPath(root, time.Now())
+	data, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatalf("read initialized journal: %v", err)
+	}
+	if !strings.HasPrefix(string(data), "# "+time.Now().Format("2006-01-02")) {
+		t.Fatalf("initialized journal = %q, want date header", string(data))
+	}
+}
+
+func TestGetJournalContinuityWithError_ReportsInitializationFailure(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "workspace"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := memory.GetJournalContinuityWithError(root, 1000)
+	if err == nil {
+		t.Fatal("expected initialization error")
+	}
+	if got != "" {
+		t.Fatalf("continuity = %q, want empty string", got)
+	}
+	if !strings.Contains(err.Error(), "create journal directory") {
+		t.Fatalf("error = %q, want journal directory context", err)
+	}
+}
+
+func TestGetJournalContinuityWithError_ReportsReadFailure(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	journalPath := memory.DailyJournalPath(root, time.Now())
+	if err := os.MkdirAll(filepath.Join(journalPath, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := memory.GetJournalContinuityWithError(root, 1000)
+	if err == nil {
+		t.Fatal("expected read error")
+	}
+	if got != "" {
+		t.Fatalf("continuity = %q, want empty string", got)
+	}
+	if !strings.Contains(err.Error(), "read journal") {
+		t.Fatalf("error = %q, want read journal context", err)
+	}
+}
+
 // ── WriteJournalEntry ─────────────────────────────────────────────────────────
 
 func TestWriteJournalEntry_CreatesAndAppends(t *testing.T) {
@@ -162,5 +223,41 @@ func TestWriteJournalEntry_ContainsCONSOLIDATIONHeader(t *testing.T) {
 	data, _ := os.ReadFile(journalPath)
 	if !strings.Contains(string(data), "### CONSOLIDATION [") {
 		t.Errorf("expected CONSOLIDATION header in journal, got:\n%s", string(data))
+	}
+}
+
+func TestWriteJournalEntryWithError_ReportsDirectoryFailure(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "workspace"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := memory.WriteJournalEntryWithError(root, "entry")
+	if err == nil {
+		t.Fatal("expected directory creation error")
+	}
+	if !strings.Contains(err.Error(), "create journal directory") {
+		t.Fatalf("error = %q, want journal directory context", err)
+	}
+	if memory.WriteJournalEntry(root, "entry") {
+		t.Fatal("compatibility wrapper should return false on failure")
+	}
+}
+
+func TestWriteJournalEntryWithError_ReportsOpenFailure(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	journalPath := memory.DailyJournalPath(root, time.Now())
+	if err := os.MkdirAll(journalPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := memory.WriteJournalEntryWithError(root, "entry")
+	if err == nil {
+		t.Fatal("expected open error")
+	}
+	if !strings.Contains(err.Error(), "open journal") {
+		t.Fatalf("error = %q, want open journal context", err)
 	}
 }
