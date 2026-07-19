@@ -21,21 +21,50 @@ func DailyJournalPath(storageRoot string, t time.Time) string {
 // When the journal is absent it is initialised with a date header so that
 // subsequent writes have a file to append to.
 func GetJournalContinuity(storageRoot string, maxChars int) string {
-	journalPath := DailyJournalPath(storageRoot, time.Now())
+	continuity, _ := GetJournalContinuityWithError(storageRoot, maxChars)
+	return continuity
+}
 
-	info, err := os.Stat(journalPath)
-	if err != nil || info.Size() == 0 {
-		// Initialise the journal file.
-		if mkErr := os.MkdirAll(filepath.Dir(journalPath), 0o755); mkErr == nil {
-			date := time.Now().Format("2006-01-02")
-			_ = os.WriteFile(journalPath, []byte("# "+date+"\n\n"), 0o600)
-		}
-		return ""
+// GetJournalContinuityWithError reads the current day's journal continuity block.
+// Missing and empty journals are expected non-errors and return an empty block.
+func GetJournalContinuityWithError(storageRoot string, maxChars int) (string, error) {
+	now := time.Now()
+	journalPath := DailyJournalPath(storageRoot, now)
+	hasContent, err := ensureJournalReady(journalPath, now)
+	if err != nil || !hasContent {
+		return "", err
 	}
 
+	return readJournalContinuity(journalPath, maxChars)
+}
+
+func ensureJournalReady(journalPath string, now time.Time) (bool, error) {
+	info, err := os.Stat(journalPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return false, fmt.Errorf("stat journal %s: %w", journalPath, err)
+		}
+		if initErr := initializeJournal(journalPath, now); initErr != nil {
+			return false, initErr
+		}
+		return false, nil
+	}
+	if !info.IsDir() && info.Size() == 0 {
+		if initErr := initializeJournal(journalPath, now); initErr != nil {
+			return false, initErr
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+func readJournalContinuity(journalPath string, maxChars int) (string, error) {
 	data, err := os.ReadFile(journalPath)
-	if err != nil || len(data) == 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("read journal %s: %w", journalPath, err)
+	}
+	if len(data) == 0 {
+		return "", nil
 	}
 
 	snippet := string(data)
@@ -47,28 +76,64 @@ func GetJournalContinuity(storageRoot string, maxChars int) string {
 		}
 	}
 
-	return "\n### RECENT CONTINUITY (FROM DAILY JOURNAL):\n..." + snippet + "\n"
+	return "\n### RECENT CONTINUITY (FROM DAILY JOURNAL):\n..." + snippet + "\n", nil
+}
+
+func initializeJournal(journalPath string, t time.Time) error {
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
+		return fmt.Errorf("create journal directory %s: %w", filepath.Dir(journalPath), err)
+	}
+	date := t.Format("2006-01-02")
+	if err := os.WriteFile(journalPath, []byte("# "+date+"\n\n"), 0o600); err != nil {
+		return fmt.Errorf("initialize journal %s: %w", journalPath, err)
+	}
+	return nil
 }
 
 // WriteJournalEntry appends a consolidation entry to the current day's journal.
 // Returns true on success.
 func WriteJournalEntry(storageRoot, entry string) bool {
-	journalPath := DailyJournalPath(storageRoot, time.Now())
-	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
-		return false
+	return WriteJournalEntryWithError(storageRoot, entry) == nil
+}
+
+// WriteJournalEntryWithError appends a consolidation entry to the current day's
+// journal and returns the underlying filesystem failure, if any.
+func WriteJournalEntryWithError(storageRoot, entry string) error {
+	return writeJournalEntry(storageRoot, entry, time.Now(), os.MkdirAll, openJournalFile)
+}
+
+type journalFile interface {
+	WriteString(string) (int, error)
+	Close() error
+}
+
+func openJournalFile(name string, flag int, perm os.FileMode) (journalFile, error) {
+	f, err := os.OpenFile(name, flag, perm)
+	if err != nil {
+		return nil, fmt.Errorf("open journal file: %w", err)
+	}
+	return f, nil
+}
+
+func writeJournalEntry(storageRoot, entry string, t time.Time, mkdirAll func(string, os.FileMode) error, openFile func(string, int, os.FileMode) (journalFile, error)) error {
+	journalPath := DailyJournalPath(storageRoot, t)
+	if err := mkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
+		return fmt.Errorf("create journal directory %s: %w", filepath.Dir(journalPath), err)
 	}
 
-	ts := time.Now().Format("15:04:05")
+	ts := t.Format("15:04:05")
 	line := fmt.Sprintf("\n### CONSOLIDATION [%s]\n%s\n", ts, entry)
 
-	f, err := os.OpenFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := openFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return false
+		return fmt.Errorf("open journal %s: %w", journalPath, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	_, err = f.WriteString(line)
-	return err == nil
+	if _, err = f.WriteString(line); err != nil {
+		return fmt.Errorf("write journal %s: %w", journalPath, err)
+	}
+	return nil
 }
 
 func indexOf(s string, b byte) int {

@@ -46,7 +46,11 @@ func LoadSystemPrompt(cfg *config.Config) string {
 		parts = append(parts, strings.TrimSpace(string(data)))
 	}
 
-	if continuity := memory.GetJournalContinuity(cfg.StorageRoot(), awarenessMaxJournalChars); continuity != "" {
+	continuity, err := memory.GetJournalContinuityWithError(cfg.StorageRoot(), awarenessMaxJournalChars)
+	if err != nil {
+		slog.Warn("awareness: journal continuity unavailable", "err", err)
+	}
+	if continuity != "" {
 		parts = append(parts, continuity)
 	}
 

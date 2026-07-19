@@ -2,6 +2,8 @@
 package app
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +143,38 @@ func TestLoadSystemPrompt(t *testing.T) {
 		"Google AI Search MCP tool first",
 		"prefer `browser_extract` first",
 	})
+}
+
+//nolint:paralleltest // uses global state // mocking package-level variable and slog default
+func TestLoadSystemPromptLogsJournalContinuityFailure(t *testing.T) {
+	origHome := userHomeDir
+	defer func() { userHomeDir = origHome }()
+	tmpHome := t.TempDir()
+	userHomeDir = func() (string, error) { return tmpHome, nil }
+
+	var buf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	tmpStorage := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = tmpStorage
+	journalPath := filepath.Join(tmpStorage, "workspace", "journal", time.Now().Format("2006-01-02")+".md")
+	mustMkdirAll(t, filepath.Join(journalPath, "child"))
+
+	got := LoadSystemPrompt(cfg)
+	if !strings.Contains(got, "Google AI Search MCP tool first") {
+		t.Fatalf("LoadSystemPrompt() should still return base guidance, got %q", got)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "awareness: journal continuity unavailable") {
+		t.Fatalf("logs = %q, want journal warning", logs)
+	}
+	if !strings.Contains(logs, "read journal") {
+		t.Fatalf("logs = %q, want wrapped read error", logs)
+	}
 }
 
 func seedPromptFiles(t *testing.T, tmpHome, tmpStorage string) {
