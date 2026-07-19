@@ -155,8 +155,12 @@ func TestGetJournalContinuityWithError_ReportsInitializationFailure(t *testing.T
 	if got != "" {
 		t.Fatalf("continuity = %q, want empty string", got)
 	}
-	if !strings.Contains(err.Error(), "create journal directory") {
-		t.Fatalf("error = %q, want journal directory context", err)
+	// Windows classifies a stat through a non-directory path component as
+	// IsNotExist and surfaces the failure when creating the journal directory;
+	// Linux/macOS return ENOTDIR from the initial stat. Both are valid surfacings.
+	if !strings.Contains(err.Error(), "create journal directory") &&
+		!strings.Contains(err.Error(), "stat journal") {
+		t.Fatalf("error = %q, want surfaced journal initialization failure", err)
 	}
 }
 
