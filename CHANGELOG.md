@@ -8,7 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
-No unreleased changes are recorded yet.
+### Added
+
+- Comma-separated multi-level filtering for the `gobot logs --filter` command.
 
 ---
 
