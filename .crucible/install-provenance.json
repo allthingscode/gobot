@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "97b097b5a292317effd8c413d9d006bdc2925a15",
+    "source_commit":  "943f88889db070908d874402d2bba32788065cb7",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -603,8 +603,8 @@
                                              "base_hash":  "e2f9458e53c2af104fe9c04bd305cebeb5a37bcd1ccc45f0d3a0ba5a7ee435c1"
                                          },
                   "sops/grooming.md":  {
-                                           "hash":  "a89f1ae1cb3a9b90a8b102078701ad8aa9006ec96e7e865a63e092e3b5174951",
-                                           "base_hash":  "a89f1ae1cb3a9b90a8b102078701ad8aa9006ec96e7e865a63e092e3b5174951"
+                                           "hash":  "1e3959dcc45847764bbf28c71f35ecbd536d4b572db8faf1774e54e5040c093b",
+                                           "base_hash":  "1e3959dcc45847764bbf28c71f35ecbd536d4b572db8faf1774e54e5040c093b"
                                        },
                   "sops/health-check.md":  {
                                                "hash":  "63cbae03aff81fe8eda060cb9ac90b1012ea3c5d900af750e1d5e266b4843c8a",

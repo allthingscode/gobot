@@ -57,6 +57,15 @@ Audit existing active items to ensure they meet the Definition of Ready (valid Y
 
 **Dependency Identification ({task_id}):** If the item depends on other active or recently completed tasks, add `depends_on: ["F-XXX", "C-YYY"]` to the YAML frontmatter.
 
+#### Scope Whole-File Quality Criteria to the Task's Own Changes
+Acceptance criteria that assert a whole-file property -- ASCII-clean, no BOM, lint-clean, formatting conventions, no trailing whitespace -- MUST be scoped to the content this task adds or edits, not the entire file, whenever the target file has pre-existing content the task is out of scope to modify. A file may already contain valid non-ASCII (for example a U+2014 em dash in an existing heading), a legacy formatting quirk, or a lint exception in a region this task must not touch. An unscoped "the file remains ASCII-clean" criterion then collides with a "do not modify existing sections" criterion and becomes unsatisfiable, so the Reviewer must bounce it -- costing a review strike over a spec defect, not a code defect.
+
+Write such criteria against the task's own additions:
+- Prefer: "The section/lines added by this task are ASCII-clean with no BOM."
+- Avoid: "The file remains ASCII-clean with no BOM." (whole-file; snares pre-existing content)
+
+When a whole-file property genuinely IS the deliverable (for example a dedicated encoding-cleanup chore), state that explicitly and widen the `## Scope` / out-of-scope lists to permit the required edits.
+
 ### Mid-Session Progress (Checkpointing)
 Specialists MUST log their progress mid-session to ensure state recovery in case of failure.
 - **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major sub-task or pass.
