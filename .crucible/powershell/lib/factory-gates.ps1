@@ -1812,7 +1812,12 @@ function Invoke-CircuitBreakerGates {
         exit 2
     }
 
-    # Handoff Retry Limit
+    # Handoff Retry Limit (defense-in-depth backstop).
+    # No same-phase (X -> X) transition exists in validate-handoff.ps1's $validTransitions
+    # map, so a schema-valid handoff can never satisfy source_phase == target_phase. This
+    # guard only fires if a same-phase handoff bypasses validation and reaches the breaker
+    # with retry > 2 -- an otherwise-impossible state we block rather than run. Persistent
+    # re-review failure is covered live by the review_stalemate breaker below.
     if ($handoff.handoff_retry_count -gt 2 -and $handoff.source_phase -eq $handoff.target_phase) {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Persistent Task Failure - Retry over 2"
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "handoff_retry_exceeded" -AttemptCount $handoff.handoff_retry_count -LastSpecialist $handoff.target_phase -Summary "Persistent Task Failure - Retry over 2"

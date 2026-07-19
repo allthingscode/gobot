@@ -19,15 +19,17 @@ Circuit breakers prevent "infinite loops" and budget escalation by blocking task
 | Breaker Type | Threshold / Trigger | Action |
 |--------------|---------------------|--------|
 | **Review Strike Rule** | 3 failed review cycles | BLOCK task; route to Human |
-| **Handoff Retry Limit** | > 2 consecutive retries to same phase | BLOCK task; route to Human |
-| **Token Budget (Low)** | 6 handoffs | BLOCK task; route to Human |
-| **Token Budget (Medium)** | 10 handoffs | BLOCK task; route to Human |
-| **Token Budget (High)** | 24 handoffs | BLOCK task; route to Human |
-| **Token Budget (Extended)** | 32 handoffs | BLOCK task; route to Human |
+| **Handoff Retry Limit** (backstop) | > 2 retries on a same-phase (`X -> X`) handoff | BLOCK task; route to Human |
+| **Token Budget (Low)** | > 10 handoffs | BLOCK task; route to Human |
+| **Token Budget (Medium)** | > 16 handoffs | BLOCK task; route to Human |
+| **Token Budget (High)** | > 28 handoffs | BLOCK task; route to Human |
+| **Token Budget (Extended)** | > 40 handoffs | BLOCK task; route to Human |
 | **Merge Conflict** | > 3 rebase attempts | BLOCK task; route to Human |
 | **Fabricated Artifacts** | Missing paths in `artifacts` field | BLOCK task; route to Human |
 | **Verification Failure** | `go test` fails after verification approval | BLOCK task; route to implementation |
 | **Git Hook Bypass** | Reports or references `--no-verify` or equivalent hook bypass | BLOCK task; route to Human |
+
+The **Handoff Retry Limit** is a defense-in-depth backstop, not a live-accruing breaker: no same-phase (`X -> X`) transition exists in the FSM's allowed-transition map, so a schema-valid handoff can never satisfy its `source_phase == target_phase` predicate. It fires only if a same-phase handoff bypasses validation and reaches the breaker with `handoff_retry_count > 2`. Persistent re-review failure — a task repeatedly bounced back for rework — is caught live by the **Review Strike Rule** instead.
 
 ### 2.1 Budget Overage Protocol
 

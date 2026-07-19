@@ -955,6 +955,295 @@ try {
         Assert-Result -Name "D57 Loop: Priority-Summary counts updated" -Condition $prioritySummaryMatches -FailureMessage ("expected P2 count 0, got BACKLOG.md: " + $backlogLines)
     }
 
+    $results += Run-Test -Name "D58: end-to-end redirect finalizes+pushes and records redirect_target" -Body {
+        # Redirect is an advancing outcome: it ships the current task exactly like
+        # accept (finalize -> merge -> push) AND records the redirect_target so the
+        # audit trail captures which item the human chose to work on next. The D37
+        # coverage only exercised a no-op push and never asserted either the
+        # finalization/push or the recorded redirect_target -- this locks both.
+        $FRAMEWORK_POWERSHELL = Join-Path $REPO_ROOT "powershell"
+        $caseRoot = Join-Path $tempRoot "d58-e2e-redirect"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "origin.git"
+        $localRepo = Join-Path $caseRoot "local"
+
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        Invoke-GitChecked { git -C $originRepo init --bare --initial-branch master } | Out-Null
+        Invoke-GitChecked { git clone $originRepo $localRepo } | Out-Null
+
+        "init" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add README.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "init" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo push origin master } | Out-Null
+
+        $backlogDir = Join-Path $localRepo ".crucible/backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/archived") -Force | Out-Null
+
+        $configContent = @"
+paths:
+  backlog: ".crucible/backlog"
+review:
+  auto_push: true
+"@
+        $configContent | Set-Content -LiteralPath (Join-Path $localRepo ".crucible/config.yaml") -Encoding UTF8
+
+        $specContent = @"
+---
+item_id: "F-555"
+type: "Feature"
+status: "Ready for Deploy"
+priority: "P2"
+target_phase: "deployment"
+created_at: "2026-06-04"
+---
+
+# Test Spec F-555
+"@
+        $specContent | Set-Content -LiteralPath (Join-Path $backlogDir "features/active/F-555_Test_Spec.md") -Encoding UTF8
+
+        $backlogContent = @"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | F-555 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-555](features/active/F-555_Test_Spec.md) | P2 | Ready for Deploy | Test Spec F-555 | Operator |
+"@
+        $backlogContent | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+        $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-555 } | Out-Null
+        "feature content" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add feature.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "feature commit" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        $beforeOriginHead = (Invoke-GitChecked { git -C $localRepo rev-parse origin/master }).Trim()
+
+        $scriptPath = Join-Path $caseRoot "run-redirect.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'redirected'
+    GateReason = 'ship F-555 and pivot to the hotfix next'
+    GateRedirectTarget = 'F-556'
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-555'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        artifacts = @('feature.md')
+        session_cycle_id = 'cycle-555'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D58 Redirect: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
+
+        # Redirect finalizes the current task exactly like accept.
+        $activeSpecExists = Test-Path (Join-Path $backlogDir "features/active/F-555_Test_Spec.md")
+        $archivedSpecExists = Test-Path (Join-Path $backlogDir "features/archived/F-555_Test_Spec.md")
+        Assert-Result -Name "D58 Redirect: current task archived (finalized)" -Condition ($archivedSpecExists -and -not $activeSpecExists) -FailureMessage "expected redirect to archive the current task like accept"
+
+        $specLines = Get-Content (Join-Path $backlogDir "features/archived/F-555_Test_Spec.md") -Raw
+        Assert-Result -Name "D58 Redirect: archived status is Production" -Condition ($specLines -match 'status:\s*"Production"') -FailureMessage "expected redirect to finalize the task as Production"
+
+        # Redirect pushes to origin (auto_push=true), same as accept.
+        $afterOriginHead = (Invoke-GitChecked { git -C $localRepo rev-parse origin/master }).Trim()
+        Assert-Result -Name "D58 Redirect: origin/master advanced (pushed)" -Condition ($afterOriginHead -ne $beforeOriginHead) -FailureMessage "expected redirect to push the merge to origin"
+
+        # The distinguishing behavior: redirect_target is recorded in the decision.
+        $decisions = @(Get-ChildItem -Path $gateDir -Filter "F-555-*.json" | Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" })
+        Assert-Result -Name "D58 Redirect: decision archived" -Condition ($decisions.Count -gt 0) -FailureMessage "expected a redirect decision file"
+        $decision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-Result -Name "D58 Redirect: outcome recorded as redirected" -Condition ($decision.outcome -eq "redirected") -FailureMessage ("expected outcome 'redirected', got " + $decision.outcome)
+        Assert-Result -Name "D58 Redirect: redirect_target recorded" -Condition ($decision.redirect_target -eq "F-556") -FailureMessage ("expected redirect_target 'F-556', got " + $decision.redirect_target)
+        Assert-Result -Name "D58 Redirect: rework_requested is false" -Condition ($decision.rework_requested -eq $false) -FailureMessage "expected rework_requested false for an advancing redirect"
+    }
+
+    $results += Run-Test -Name "D59: abandon of a pre-archived task marks it Abandoned in place" -Body {
+        # Symmetric to D57 reject-restore's already-archived branch: when a task was
+        # archived (e.g. as Production) BEFORE the gate runs, abandon must still flip
+        # the archived spec frontmatter AND the BACKLOG.md row to Abandoned rather
+        # than leaving a terminal-but-wrong status. This exercises the legacy
+        # already-archived branch of Invoke-HumanGateAction that had no coverage.
+        $FRAMEWORK_POWERSHELL = Join-Path $REPO_ROOT "powershell"
+        $caseRoot = Join-Path $tempRoot "d59-abandon-prearchived"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $originRepo = Join-Path $caseRoot "origin.git"
+        $localRepo = Join-Path $caseRoot "local"
+
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        Invoke-GitChecked { git -C $originRepo init --bare --initial-branch master } | Out-Null
+        Invoke-GitChecked { git clone $originRepo $localRepo } | Out-Null
+
+        "init" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add README.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "init" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo push origin master } | Out-Null
+
+        $backlogDir = Join-Path $localRepo ".crucible/backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/archived") -Force | Out-Null
+
+        $configContent = @"
+paths:
+  backlog: ".crucible/backlog"
+"@
+        $configContent | Set-Content -LiteralPath (Join-Path $localRepo ".crucible/config.yaml") -Encoding UTF8
+
+        $specContent = @"
+---
+item_id: "F-444"
+type: "Feature"
+status: "Ready for Deploy"
+priority: "P2"
+target_phase: "deployment"
+created_at: "2026-06-04"
+---
+
+# Test Spec F-444
+"@
+        $specContent | Set-Content -LiteralPath (Join-Path $backlogDir "features/active/F-444_Test_Spec.md") -Encoding UTF8
+
+        $backlogContent = @"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | F-444 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-444](features/active/F-444_Test_Spec.md) | P2 | Ready for Deploy | Test Spec F-444 | Operator |
+"@
+        $backlogContent | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+        $validateScript = Join-Path $FRAMEWORK_POWERSHELL "validate-backlog.ps1"
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $localRepo | Out-Null
+
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-444 } | Out-Null
+        "feature content" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add feature.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "feature commit" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        Invoke-GitChecked { git -C $localRepo merge --no-edit task/F-444 } | Out-Null
+
+        # Legacy path: archive the task as Production BEFORE the gate runs.
+        $archiveLibPath = Join-Path $FRAMEWORK_POWERSHELL "lib/archive-task.ps1"
+        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+            . $archiveLibPath
+        }
+        Invoke-BacklogTaskArchive -BacklogPath (Join-Path $backlogDir "BACKLOG.md") -SpecPath (Join-Path $backlogDir "features/active/F-444_Test_Spec.md") -Status "Production" | Out-Null
+        Assert-Result -Name "D59 Test: spec is pre-archived before abandon" -Condition (Test-Path (Join-Path $backlogDir "features/archived/F-444_Test_Spec.md")) -FailureMessage "expected spec to be pre-archived"
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-abandon.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    GateOutcome = 'abandoned'
+    GateReason = 'scope pulled; drop it'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-444'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        artifacts = @('feature.md')
+        session_cycle_id = 'cycle-444'
+    }
+}
+
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "D59 Abandon(pre-archived): exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
+
+        # Spec stays archived, but status is flipped from Production to Abandoned.
+        $activeSpecExists = Test-Path (Join-Path $backlogDir "features/active/F-444_Test_Spec.md")
+        $archivedSpecExists = Test-Path (Join-Path $backlogDir "features/archived/F-444_Test_Spec.md")
+        Assert-Result -Name "D59 Abandon(pre-archived): spec remains archived" -Condition ($archivedSpecExists -and -not $activeSpecExists) -FailureMessage "expected the pre-archived spec to stay archived"
+
+        $specLines = Get-Content (Join-Path $backlogDir "features/archived/F-444_Test_Spec.md") -Raw
+        Assert-Result -Name "D59 Abandon(pre-archived): frontmatter is Abandoned" -Condition ($specLines -match 'status:\s*"Abandoned"') -FailureMessage ("expected frontmatter status Abandoned, got: " + $specLines)
+
+        $backlogLines = Get-Content (Join-Path $backlogDir "BACKLOG.md") -Raw
+        $rowMatches = ($backlogLines -match '\[F-444\]\(features/archived/F-444_Test_Spec.md\)\s*\|\s*P2\s*\|\s*Abandoned')
+        Assert-Result -Name "D59 Abandon(pre-archived): BACKLOG.md row is Abandoned" -Condition $rowMatches -FailureMessage ("expected BACKLOG.md row to show Abandoned, got: " + $backlogLines)
+    }
+
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

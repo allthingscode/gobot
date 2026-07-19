@@ -516,6 +516,226 @@ verification:
         Assert-Result -Name "D38 no-worktree exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
     }
 
+    $results += Run-Test -Name "review_strike_count >= 3 trips the review_stalemate breaker" -Body {
+        $caseRoot = Join-Path $tempRoot "review-stalemate"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        $logFile = Join-Path $caseRoot "session/F-060/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+        $breakerBacklog = Join-Path $caseRoot "backlog"
+
+        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                BacklogDir = `$backlogDir
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-060'
+                    source_phase = 'verification'
+                    target_phase = 'implementation'
+                    cumulative_handoff_count = 4
+                    review_strike_count = 3
+                    handoff_retry_count = 0
+                    rebase_count = 0
+                    budget_tier = 'low'
+                    reason = 'Reviewer rejected: acceptance criterion still unmet (review attempt 3/3).'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "review_stalemate exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+
+        $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "review_stalemate logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
+        Assert-Result -Name "review_stalemate notes recorded" -Condition ($logContent -match "Review Stalemate - 3 strikes") -FailureMessage ("expected review-stalemate note. Log: " + $logContent)
+
+        $blockedDir = Join-Path $breakerBacklog "blocked"
+        Assert-Result -Name "review_stalemate blocked record written" -Condition (Test-Path -LiteralPath $blockedDir) -FailureMessage "expected blocked record directory"
+        $blockedContent = Get-ChildItem -LiteralPath $blockedDir -Filter "F-060-*.json" | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
+        $blockedText = ($blockedContent -join "`n")
+        Assert-Result -Name "review_stalemate breaker slug" -Condition ($blockedText -match '"circuit_breaker":\s*"review_stalemate"') -FailureMessage ("expected review_stalemate slug. Record: " + $blockedText)
+        Assert-Result -Name "review_stalemate attempt_count 3" -Condition ($blockedText -match '"attempt_count":\s*3') -FailureMessage ("expected attempt_count 3. Record: " + $blockedText)
+    }
+
+    $results += Run-Test -Name "backstop: same-phase handoff with retry > 2 trips the handoff_retry_exceeded breaker" -Body {
+        $caseRoot = Join-Path $tempRoot "handoff-retry"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        $logFile = Join-Path $caseRoot "session/F-061/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+        $breakerBacklog = Join-Path $caseRoot "backlog"
+
+        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                BacklogDir = `$backlogDir
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-061'
+                    source_phase = 'implementation'
+                    target_phase = 'implementation'
+                    cumulative_handoff_count = 4
+                    review_strike_count = 0
+                    handoff_retry_count = 3
+                    rebase_count = 0
+                    budget_tier = 'low'
+                    reason = 'Specialist re-dispatched into implementation after repeated self-handoffs (retry 3).'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "handoff_retry_exceeded exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+
+        $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "handoff_retry_exceeded logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
+        Assert-Result -Name "handoff_retry_exceeded notes recorded" -Condition ($logContent -match "Persistent Task Failure - Retry over 2") -FailureMessage ("expected persistent-failure note. Log: " + $logContent)
+
+        $blockedDir = Join-Path $breakerBacklog "blocked"
+        Assert-Result -Name "handoff_retry_exceeded blocked record written" -Condition (Test-Path -LiteralPath $blockedDir) -FailureMessage "expected blocked record directory"
+        $blockedContent = Get-ChildItem -LiteralPath $blockedDir -Filter "F-061-*.json" | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
+        $blockedText = ($blockedContent -join "`n")
+        Assert-Result -Name "handoff_retry_exceeded breaker slug" -Condition ($blockedText -match '"circuit_breaker":\s*"handoff_retry_exceeded"') -FailureMessage ("expected handoff_retry_exceeded slug. Record: " + $blockedText)
+        Assert-Result -Name "handoff_retry_exceeded attempt_count 3" -Condition ($blockedText -match '"attempt_count":\s*3') -FailureMessage ("expected attempt_count 3. Record: " + $blockedText)
+    }
+
+    $results += Run-Test -Name "anti-bypass: under-reported cumulative count is overridden from the log and still trips budget_exceeded" -Body {
+        $caseRoot = Join-Path $tempRoot "budget-bypass"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        $sessionDir = Join-Path $caseRoot "session"
+        $handoffDir = Join-Path $sessionDir "handoffs"
+        $logFile = Join-Path $sessionDir "F-062/pipeline.log.jsonl"
+        New-Item -ItemType Directory -Path $handoffDir, (Split-Path -Parent $logFile) -Force | Out-Null
+
+        # Agent under-reports cumulative_handoff_count = 3 to stay under the low ceiling (10).
+        $handoffPath = Join-Path $handoffDir "F-062-20260719T000000000Z.json"
+        [ordered]@{
+            task_id = "F-062"; source_phase = "grooming"; target_phase = "implementation"
+            reason = "Implement"; handoff_retry_count = 0; review_strike_count = 0
+            rebase_count = 0; budget_tier = "low"; cumulative_handoff_count = 3
+            prompt_version = "v1"; cycle_id = "prod-cycle"; session_cycle_id = "prod-cycle"
+            generated_by = "new-handoff.ps1"; tool_version = "1.0.0"
+        } | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath -Encoding UTF8
+
+        # The pipeline log holds 11 real (non-test-cycle) session_end events for the task.
+        1..11 | ForEach-Object {
+            $e = @{ event = "session_end"; task_id = "F-062"; phase = "implementation"; cycle_id = "prod-cycle" } | ConvertTo-Json -Compress
+            [System.IO.File]::AppendAllText($logFile, $e + "`n")
+        }
+
+        $breakerBacklog = Join-Path $caseRoot "backlog"
+
+        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$(Join-Path $sessionDir "global/circuit_breakers.jsonl")'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$($sessionDir.Replace("'", "''"))'
+                BacklogDir = `$backlogDir
+                LatestHandoff = (Get-Item -LiteralPath '$($handoffPath.Replace("'", "''"))')
+                BudgetCeilings = `$null
+                IsBootstrap = `$false
+                Handoff = `$null
+                CumulativeHandoffCount = 0
+                Ceiling = `$null
+                BudgetTierKey = ''
+                InvalidBudgetTier = ''
+                RelativeHandoffPath = `$null
+            }
+            Read-FactoryHandoffContext -Context `$ctx
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "budget bypass exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+
+        $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "budget bypass logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
+        Assert-Result -Name "budget bypass notes recorded" -Condition ($logContent -match "Token Budget Exceeded - 11 over 10") -FailureMessage ("expected overridden-count note. Log: " + $logContent)
+
+        $blockedDir = Join-Path $breakerBacklog "blocked"
+        Assert-Result -Name "budget bypass blocked record written" -Condition (Test-Path -LiteralPath $blockedDir) -FailureMessage "expected blocked record directory"
+        $blockedContent = Get-ChildItem -LiteralPath $blockedDir -Filter "F-062-*.json" | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
+        $blockedText = ($blockedContent -join "`n")
+        Assert-Result -Name "budget bypass breaker slug" -Condition ($blockedText -match '"circuit_breaker":\s*"budget_exceeded"') -FailureMessage ("expected budget_exceeded slug. Record: " + $blockedText)
+        Assert-Result -Name "budget bypass attempt_count 11" -Condition ($blockedText -match '"attempt_count":\s*11') -FailureMessage ("expected overridden attempt_count 11. Record: " + $blockedText)
+    }
+
+    $results += Run-Test -Name "anti-bypass: test-cycle session_end events are excluded from the log-derived count" -Body {
+        $caseRoot = Join-Path $tempRoot "budget-testcycle"
+        $sessionDir = Join-Path $caseRoot "session"
+        $handoffDir = Join-Path $sessionDir "handoffs"
+        $logFile = Join-Path $sessionDir "F-063/pipeline.log.jsonl"
+        New-Item -ItemType Directory -Path $handoffDir, (Split-Path -Parent $logFile) -Force | Out-Null
+
+        $handoffPath = Join-Path $handoffDir "F-063-20260719T000000000Z.json"
+        [ordered]@{
+            task_id = "F-063"; source_phase = "grooming"; target_phase = "implementation"
+            reason = "Implement"; handoff_retry_count = 0; review_strike_count = 0
+            rebase_count = 0; budget_tier = "low"; cumulative_handoff_count = 3
+            prompt_version = "v1"; cycle_id = "test-cycle"; session_cycle_id = "test-cycle"
+            generated_by = "new-handoff.ps1"; tool_version = "1.0.0"
+        } | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath -Encoding UTF8
+
+        # 11 session_end events, but all tagged test-cycle -> must NOT be counted.
+        1..11 | ForEach-Object {
+            $e = @{ event = "session_end"; task_id = "F-063"; phase = "implementation"; cycle_id = "test-cycle" } | ConvertTo-Json -Compress
+            [System.IO.File]::AppendAllText($logFile, $e + "`n")
+        }
+
+        $ctx = @{
+            RepoRoot = $caseRoot
+            LatestHandoff = (Get-Item -LiteralPath $handoffPath)
+            LogFile = $logFile
+            BudgetCeilings = $null
+            IsBootstrap = $false
+            Handoff = $null
+            CumulativeHandoffCount = 0
+            Ceiling = $null
+            BudgetTierKey = ""
+            InvalidBudgetTier = ""
+            RelativeHandoffPath = $null
+        }
+
+        Read-FactoryHandoffContext -Context $ctx
+
+        Assert-Result -Name "test-cycle events do not override reported count" -Condition ($ctx.Handoff.cumulative_handoff_count -eq 3) -FailureMessage ("expected reported count 3 preserved, got " + $ctx.Handoff.cumulative_handoff_count)
+    }
+
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
