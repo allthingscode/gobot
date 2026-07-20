@@ -326,6 +326,33 @@ try {
         Assert-Result -Name "model required exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2 for missing model, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "model required message" -Condition ($res.Output -match "-Model is required") -FailureMessage "expected model-required message. Output:`n$($res.Output)"
     }
+
+    $results += Run-Test -Name "Absolute -CrucibleRoot under the repo is relativized (D1)" -Body {
+        # Passing an absolute -CrucibleRoot used to produce a malformed Join-Path and a bare
+        # 'New-Item : The given path's format is not supported'. When it lives under the repo
+        # it must be relativized and the run must proceed normally.
+        $projectRoot = Join-Path $tempRoot "proj-crucroot-abs"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $absCrucible = (Resolve-Path -LiteralPath (Join-Path $projectRoot ".crucible")).Path
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-989", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-CrucibleRoot", $absCrucible, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "status success" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "absolute -CrucibleRoot under repo should be accepted. Output:`n$($res.Output)"
+        $sessionUnder = Join-Path $projectRoot ".crucible/session/C-989/verification/codex-transcript.txt"
+        Assert-Result -Name "session under relativized root" -Condition (Test-Path -LiteralPath $sessionUnder) -FailureMessage "expected session dir under relativized .crucible at $sessionUnder. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Absolute -CrucibleRoot outside the repo is rejected with a clear error (D1)" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-crucroot-out"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $outsideCrucible = Join-Path $tempRoot ("outside-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $outsideCrucible -Force | Out-Null
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-988", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-CrucibleRoot", $outsideCrucible, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2 for absolute -CrucibleRoot outside repo, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "clear error" -Condition ($res.Output -match "must be relative to the repo root") -FailureMessage "expected clear relativity error. Output:`n$($res.Output)"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

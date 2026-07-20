@@ -1548,6 +1548,7 @@ function Normalize-FactoryInputState {
 
     # --- 2a. Sanitize Inputs ---
     # Prevent prompt injection or confusing formatting in the reason
+    $handoff.reason = ConvertTo-AsciiSafeText -Text $handoff.reason
     $handoff.reason = $handoff.reason -replace '[\r\n]+', ' ' -replace '"', "'" -replace '[#*`]', ''
     $handoff.reason = $handoff.reason.Trim()
     if ($handoff.reason.Length -gt 250) {
@@ -2591,6 +2592,14 @@ function Invoke-HumanGateAction {
                     $ciTimeoutMinutes = $parsedTimeout
                 }
             }
+            $ciQueuedGraceVal = Get-ConfiguredReview -Key "ci_queued_grace_minutes" -ProjectRoot $resolvedProjectRoot
+            $ciQueuedGraceMinutes = 15
+            if (-not [string]::IsNullOrWhiteSpace($ciQueuedGraceVal)) {
+                $parsedGrace = 0
+                if ([int]::TryParse($ciQueuedGraceVal, [ref]$parsedGrace) -and $parsedGrace -gt 0) {
+                    $ciQueuedGraceMinutes = $parsedGrace
+                }
+            }
             $mergedSha = (git rev-parse HEAD 2>$null).Trim()
 
             if ($autoPush) {
@@ -2605,7 +2614,7 @@ function Invoke-HumanGateAction {
                     if ($requireGreenCi) {
                         $watchScript = Join-Path (Split-Path -Parent $PSScriptRoot) "watch-adopter-ci.ps1"
                         Write-Host ("[HUMAN GATE] Watching origin CI for " + $mergedSha + " before finalizing...") -ForegroundColor Cyan
-                        $ciOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript -Commit $mergedSha -TimeoutMinutes $ciTimeoutMinutes -CrucibleRoot $resolvedProjectRoot 2>&1)
+                        $ciOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript -Commit $mergedSha -TimeoutMinutes $ciTimeoutMinutes -QueuedGraceMinutes $ciQueuedGraceMinutes -CrucibleRoot $resolvedProjectRoot 2>&1)
                         $ciExitCode = $LASTEXITCODE
                         foreach ($line in $ciOutput) {
                             Write-Host $line
@@ -2615,6 +2624,21 @@ function Invoke-HumanGateAction {
                             exit 1
                         } elseif ($ciExitCode -eq 2) {
                             Write-Host ("[HUMAN GATE] CI did not finish before timeout for " + $mergedSha + "; finalizing while CI continues.") -ForegroundColor Yellow
+                            $originUrl = (git remote get-url origin 2>$null)
+                            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
+                                $originText = ([string]$originUrl).Trim()
+                                $actionsUrl = ""
+                                if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
+                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
+                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                } else {
+                                    $actionsUrl = $originText
+                                }
+                                Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
+                            }
+                        } elseif ($ciExitCode -eq 4) {
+                            Write-Host ("[HUMAN GATE] CI never left GitHub's queue for " + $mergedSha + " (no runner assigned within the grace window). This is likely a runner-availability outage, NOT a slow build. Finalizing, but re-check CI - and consider re-running the workflow - before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
                             $originUrl = (git remote get-url origin 2>$null)
                             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
                                 $originText = ([string]$originUrl).Trim()
@@ -3187,7 +3211,7 @@ function Invoke-HumanGate {
                 exit 1
             }
 
-            $trimmedGateReason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "" } else { $GateReason.Trim() }
+            $trimmedGateReason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "" } else { (ConvertTo-AsciiSafeText -Text $GateReason).Trim() }
             $normalizedGateReason = $trimmedGateReason.ToLowerInvariant()
             if ([string]::IsNullOrWhiteSpace($trimmedGateReason) -or ($lowSignalGateReasons -contains $normalizedGateReason)) {
                 Write-Host "Error: -GateReason is required and must be specific (not placeholder text like 'ok' or 'n/a')." -ForegroundColor Red

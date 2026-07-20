@@ -318,3 +318,28 @@ if (-not (Test-Path -LiteralPath $taskRewindPath)) {
 }
 . $taskRewindPath
 
+function ConvertTo-AsciiSafeText {
+    # Transliterate the smart punctuation agents routinely emit (em/en dashes, curly
+    # quotes, ellipsis, arrows, bullet, nbsp) to ASCII, then drop any remaining non-ASCII
+    # so a reason string survives a UTF-8 JSON round-trip without mojibake. Reasons are
+    # short human-readable strings, not content, so lossy transliteration is acceptable.
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $map = @{
+        [char]0x2013 = '-'; [char]0x2014 = '-'; [char]0x2012 = '-'; [char]0x2015 = '-'
+        [char]0x2018 = "'"; [char]0x2019 = "'"; [char]0x201A = "'"; [char]0x2032 = "'"
+        [char]0x201C = '"'; [char]0x201D = '"'; [char]0x201E = '"'; [char]0x2033 = '"'
+        [char]0x2026 = '...'; [char]0x2192 = '->'; [char]0x2190 = '<-'; [char]0x2022 = '*'
+        [char]0x00A0 = ' '
+    }
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $Text.ToCharArray()) {
+        if ($map.ContainsKey($ch)) {
+            [void]$sb.Append($map[$ch])
+        } elseif ([int]$ch -lt 128) {
+            [void]$sb.Append($ch)
+        }
+    }
+    return $sb.ToString()
+}
+

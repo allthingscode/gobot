@@ -53,6 +53,8 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
    Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod tidy -diff` for Go, or equivalent lockfile checks).
    
    Shortcut in worktree: `bash scripts/ci_check.sh` (same CI parity sequence with isolated caches/tmp).
+
+   **Cross-platform caveat:** the isolated checker runs on the orchestrator's host OS ONLY. If it prints a `[cross-platform]` advisory, the project's CI targets other OSes it did NOT exercise. A green local run is NOT proof of cross-platform correctness; origin CI (the gate's CI-watch) is the authoritative multi-OS signal. Scrutinize any changed test that asserts OS-divergent behavior (filesystem error text, path separators, line endings, case sensitivity) and require it to assert platform-independently.
 4. **Acceptance Criteria**: Review every item in the `Acceptance Criteria` section of the backlog spec for `{task_id}` and confirm implementation.
 5. **Quality Check**: Review the diff for idiomatic quality, error handling, and security.
 6. **Documentation**: Write findings to `.crucible/session/{task_id}/verification/review_report.md`.

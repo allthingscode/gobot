@@ -60,6 +60,7 @@ review:                                   # optional
   auto_push: false                        # optional; defaults to false
   require_green_ci: false                 # optional; defaults to false
   ci_timeout_minutes: 20                  # optional; defaults to 20
+  ci_queued_grace_minutes: 15             # optional; defaults to 15
 ```
 
 ---
@@ -304,7 +305,8 @@ Settings related to human review workflows.
 | `editor` | string | (empty) | Code editor command prefix for opening worktrees. |
 | `auto_push` | boolean | `false` | Whether to automatically push merged changes to `origin` remote upon acceptance. |
 | `require_green_ci` | boolean | `false` | Whether accepted, auto-pushed tasks must wait for adopter CI on the merge commit before finalizing. |
-| `ci_timeout_minutes` | integer | `20` | Maximum minutes to wait for adopter CI before treating unfinished runs as advisory timeout. |
+| `ci_timeout_minutes` | integer | `20` | Maximum minutes to wait for a *running* adopter CI build before treating unfinished runs as advisory timeout (`PENDING_TIMEOUT`). Time a run spends queued waiting for a runner is not charged against this budget. |
+| `ci_queued_grace_minutes` | integer | `15` | Maximum minutes to tolerate CI sitting entirely in GitHub's queue with no runner assigned before reporting a distinct `CI_NOT_STARTED` (likely runner-availability outage, not a slow build). |
 
 ---
 

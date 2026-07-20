@@ -226,6 +226,54 @@ try {
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -ne 0) -FailureMessage "expected folded command body to run and fail, got $($res.ExitCode). Output:`n$output"
     }
+
+    $results += Run-Test -Name "Cross-platform advisory names uncovered CI OS on a multi-OS matrix (D3)" -Body {
+        $wfDir = Join-Path $projectRoot ".github/workflows"
+        New-Item -ItemType Directory -Path $wfDir -Force | Out-Null
+        @(
+            "name: ci",
+            "on: [push]",
+            "jobs:",
+            "  test:",
+            "    strategy:",
+            "      matrix:",
+            "        os: [ubuntu-latest, windows-latest]",
+            "    runs-on: matrix.os"
+        ) | Set-Content -LiteralPath (Join-Path $wfDir "ci.yml") -Encoding UTF8
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot
+            }
+        } finally {
+            Remove-Item -LiteralPath (Join-Path $wfDir "ci.yml") -Force -ErrorAction SilentlyContinue
+        }
+        $output = $res.Output -join "`n"
+        $expectedUncovered = if (Test-PlatformIsWindows) { "linux" } else { "windows" }
+        Assert-Result -Name "advisory present" -Condition ($output -match "\[cross-platform\]") -FailureMessage "expected cross-platform advisory. Output:`n$output"
+        Assert-Result -Name "names uncovered os" -Condition ($output -match $expectedUncovered) -FailureMessage "expected advisory to name uncovered OS '$expectedUncovered'. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "No cross-platform advisory when CI targets only the host OS (D3)" -Body {
+        $wfDir = Join-Path $projectRoot ".github/workflows"
+        New-Item -ItemType Directory -Path $wfDir -Force | Out-Null
+        $onlyHost = if (Test-PlatformIsWindows) { "windows-latest" } else { "ubuntu-latest" }
+        @(
+            "name: ci",
+            "on: [push]",
+            "jobs:",
+            "  test:",
+            "    runs-on: $onlyHost"
+        ) | Set-Content -LiteralPath (Join-Path $wfDir "ci.yml") -Encoding UTF8
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot
+            }
+        } finally {
+            Remove-Item -LiteralPath (Join-Path $wfDir "ci.yml") -Force -ErrorAction SilentlyContinue
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "no advisory" -Condition ($output -notmatch "\[cross-platform\]") -FailureMessage "advisory should not fire when CI only targets host OS. Output:`n$output"
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath

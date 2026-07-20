@@ -246,6 +246,35 @@ if ($base) {
     }
 }
 
+# Cross-platform advisory. Isolated checks run only on THIS host's OS. When the adopter's CI
+# runs a multi-OS matrix, OS-divergent behavior (filesystem error text, path separators, line
+# endings, case sensitivity) can pass here yet fail on origin CI - exactly the class of failure
+# the gate's origin-CI watch exists to catch. Surface the gap so a green local run is not
+# mistaken for cross-platform coverage.
+. (Join-Path $PSScriptRoot "lib/platform.ps1")
+$hostOsFamily = if (Test-PlatformIsWindows) { "windows" } else { "linux" }
+$ciOsFamilies = New-Object System.Collections.Generic.List[string]
+$workflowDir = Join-Path $ProjectRoot ".github/workflows"
+if (Test-Path -LiteralPath $workflowDir) {
+    $sawWindows = $false; $sawLinux = $false; $sawMac = $false
+    foreach ($wf in (Get-ChildItem -LiteralPath $workflowDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in ".yml", ".yaml" })) {
+        $wfText = Get-Content -LiteralPath $wf.FullName -Raw -ErrorAction SilentlyContinue
+        if ($null -eq $wfText) { continue }
+        if ($wfText -match "(?i)windows-") { $sawWindows = $true }
+        if ($wfText -match "(?i)ubuntu-") { $sawLinux = $true }
+        if ($wfText -match "(?i)macos-") { $sawMac = $true }
+    }
+    if ($sawWindows) { $ciOsFamilies.Add("windows") }
+    if ($sawLinux) { $ciOsFamilies.Add("linux") }
+    if ($sawMac) { $ciOsFamilies.Add("macos") }
+}
+$uncoveredOs = @($ciOsFamilies | Where-Object { $_ -ne $hostOsFamily })
+if ($uncoveredOs.Count -gt 0) {
+    Write-Host ""
+    Write-Host ("[cross-platform] Isolated checks ran on this host ({0}) ONLY. Your CI matrix also targets: {1}." -f $hostOsFamily, ($uncoveredOs -join ", ")) -ForegroundColor Yellow
+    Write-Host "[cross-platform] OS-divergent behavior (filesystem error text, path separators, line endings, case sensitivity) can pass here yet fail on origin CI. Assert such behavior platform-independently; origin CI (the gate's CI-watch) is the authoritative cross-platform signal." -ForegroundColor Yellow
+}
+
 if ($commands.Count -eq 0) {
     Write-Host "No commands found for verification mode '${targetMode}'. Skipping checks." -ForegroundColor Yellow
     exit 0

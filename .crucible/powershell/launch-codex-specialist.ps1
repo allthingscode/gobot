@@ -183,6 +183,22 @@ function Invoke-CodexExec {
 
 $REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot
 
+# -CrucibleRoot is Join-Path'd onto the repo root AND embedded RELATIVELY in the bootstrap
+# prompt (.crucible/session/...). An absolute value breaks both and previously surfaced only
+# as an opaque "New-Item : The given path's format is not supported". Relativize an absolute
+# path that lives under the repo root; otherwise fail up front with a clear message.
+if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
+    $resolvedCrucibleRoot = $CrucibleRoot
+    try { $resolvedCrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot -ErrorAction Stop).Path } catch { }
+    $repoPrefix = $REPO_ROOT.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if ($resolvedCrucibleRoot.StartsWith($repoPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $CrucibleRoot = $resolvedCrucibleRoot.Substring($repoPrefix.Length)
+    } else {
+        Write-Host ("[CODEX] Error: -CrucibleRoot must be relative to the repo root (e.g. '.crucible'), not an absolute path outside it: " + $CrucibleRoot) -ForegroundColor Red
+        exit 2
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($Model)) {
     Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED MODEL] value from factory.ps1 -Init -Target codex)." -ForegroundColor Red
     exit 2

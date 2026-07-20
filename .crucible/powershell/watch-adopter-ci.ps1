@@ -4,6 +4,7 @@ param(
     [int]$TimeoutMinutes = 20,
     [string]$CrucibleRoot = "",
     [int]$NoRunsGraceMinutes = 2,
+    [int]$QueuedGraceMinutes = 15,
     [int]$PollSeconds = 10
 )
 
@@ -164,9 +165,11 @@ if ([string]::IsNullOrWhiteSpace($Repo)) {
     $Repo = Get-OriginGithubSlug -Root $CrucibleRoot
 }
 
-$deadline = (Get-Date).AddMinutes($TimeoutMinutes)
 $noRunsDeadline = (Get-Date).AddMinutes($NoRunsGraceMinutes)
+$queuedDeadline = (Get-Date).AddMinutes($QueuedGraceMinutes)
 $sawRuns = $false
+$sawStarted = $false
+$buildDeadline = $null
 $lastRuns = @()
 
 while ($true) {
@@ -221,7 +224,37 @@ while ($true) {
         exit 0
     }
 
-    if ((Get-Date) -ge $deadline) {
+    # A run still in queued/requested/waiting/pending has not been picked up by a
+    # runner yet. Do NOT charge that queue time to the build timeout (F1): the
+    # TimeoutMinutes budget is for a RUNNING build, not for GitHub's dispatch queue.
+    # The build clock starts only once a job actually leaves the queue. If nothing
+    # leaves the queue within QueuedGraceMinutes, that is a runner-availability
+    # stall, reported distinctly as CI_NOT_STARTED (F2) rather than masqueraded as a
+    # slow build (PENDING_TIMEOUT), so the caller can tell an infra outage from a
+    # genuinely long run.
+    $anyStarted = $false
+    foreach ($run in $lastRuns) {
+        $runStatus = [string]$run.status
+        if ($runStatus -ne "queued" -and $runStatus -ne "requested" -and $runStatus -ne "waiting" -and $runStatus -ne "pending") {
+            $anyStarted = $true
+        }
+    }
+    if ($anyStarted -and -not $sawStarted) {
+        $sawStarted = $true
+        $buildDeadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    }
+
+    if (-not $sawStarted) {
+        if ((Get-Date) -ge $queuedDeadline) {
+            Write-Host "[CI WATCH] STATUS=CI_NOT_STARTED"
+            Write-Host ("  commit: " + $Commit)
+            Write-Host ("  no CI job left the queue within " + $QueuedGraceMinutes + "m - likely a runner-availability outage, not a slow build.")
+            if (-not [string]::IsNullOrWhiteSpace($Repo)) {
+                Write-Host ("  runs: https://github.com/" + $Repo + "/actions")
+            }
+            exit 4
+        }
+    } elseif ((Get-Date) -ge $buildDeadline) {
         Write-Host "[CI WATCH] STATUS=PENDING_TIMEOUT"
         Write-Host ("  commit: " + $Commit)
         if (-not [string]::IsNullOrWhiteSpace($Repo)) {
