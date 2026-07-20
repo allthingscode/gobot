@@ -4,6 +4,7 @@ package cron
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -292,4 +293,79 @@ Hello`
 	if job.Payload.Agent != "" {
 		t.Errorf("expected empty Agent, got %q", job.Payload.Agent)
 	}
+}
+
+//nolint:cyclop // contract test checks scanning, malformed skip, and parsed fields together
+func TestLoadModularJobsScansMarkdownAndSkipsMalformedFiles(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	writeTestFile(t, filepath.Join(tmpDir, "alpha.md"), modularJobContent("alpha", "Alpha", "every(1h)", "alpha body"))
+	writeTestFile(t, filepath.Join(tmpDir, "broken.md"), "---\nid: broken\n---\nmissing schedule")
+	writeTestFile(t, filepath.Join(tmpDir, "notes.txt"), "not a modular job")
+	if err := os.Mkdir(filepath.Join(tmpDir, "nested.md"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(tmpDir, "zeta.MD"), modularJobContent("zeta", "Zeta", "every(30m)", "zeta body"))
+
+	jobs, err := LoadModularJobs(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadModularJobs() error = %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("LoadModularJobs() returned %d jobs, want 2: %+v", len(jobs), jobs)
+	}
+
+	got := map[string]Job{}
+	for _, job := range jobs {
+		got[job.ID] = job
+	}
+	for _, id := range []string{"alpha", "zeta"} {
+		if _, ok := got[id]; !ok {
+			t.Fatalf("LoadModularJobs() missing valid job %q in %+v", id, jobs)
+		}
+	}
+	if _, ok := got["broken"]; ok {
+		t.Fatalf("LoadModularJobs() loaded malformed job: %+v", got["broken"])
+	}
+	if got["alpha"].Payload.Message != "alpha body" {
+		t.Errorf("alpha message = %q, want %q", got["alpha"].Payload.Message, "alpha body")
+	}
+	if got["zeta"].Schedule.EveryMS == nil || *got["zeta"].Schedule.EveryMS != 1800000 {
+		t.Errorf("zeta EveryMS = %v, want 1800000", got["zeta"].Schedule.EveryMS)
+	}
+}
+
+func TestLoadModularJobsReportsDirectoryReadErrors(t *testing.T) {
+	t.Parallel()
+	missingDir := filepath.Join(t.TempDir(), "missing")
+
+	jobs, err := LoadModularJobs(missingDir)
+	if err == nil {
+		t.Fatal("LoadModularJobs() error = nil, want directory read error")
+	}
+	if jobs != nil {
+		t.Fatalf("LoadModularJobs() jobs = %+v, want nil", jobs)
+	}
+	if !strings.Contains(err.Error(), "read items dir") {
+		t.Fatalf("LoadModularJobs() error = %q, want read items dir context", err)
+	}
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func modularJobContent(id, name, schedule, body string) string {
+	return "---\n" +
+		"id: " + id + "\n" +
+		"name: " + name + "\n" +
+		"schedule: " + schedule + "\n" +
+		"specialist: telegram\n" +
+		"enabled: true\n" +
+		"---\n" +
+		body
 }
