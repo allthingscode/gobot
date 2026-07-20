@@ -488,6 +488,97 @@ func TestSchedulerReloadObservability(t *testing.T) {
 	}
 }
 
+//nolint:cyclop // contract test covers reload merge, malformed skip, and freshness marker behavior
+func TestSchedulerReloadModularJobsLoadsValidJobsAndPreservesState(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	itemsDir := filepath.Join(tmpDir, "items")
+	if err := os.Mkdir(itemsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, filepath.Join(itemsDir, "existing.md"),
+		modularJobContent("existing", "Updated Existing", "every(2h)", "updated body"))
+	writeTestFile(t, filepath.Join(itemsDir, "new.md"),
+		modularJobContent("new", "New Modular", "every(30m)", "new body"))
+	writeTestFile(t, filepath.Join(itemsDir, "broken.md"), "---\nid: broken\n---\nmissing schedule")
+
+	mtime := time.Date(2026, 7, 20, 1, 30, 0, 0, time.UTC)
+	for _, name := range []string{"existing.md", "new.md", "broken.md"} {
+		path := filepath.Join(itemsDir, name)
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oneHour := int64(time.Hour / time.Millisecond)
+	existingState := JobState{
+		LastRunAtMS: 100,
+		NextRunAtMS: 200,
+		RunCount:    3,
+	}
+	s := NewScheduler(filepath.Join(tmpDir, "jobs.json"), itemsDir, nil)
+	s.store = &Store{Jobs: []Job{
+		{
+			ID:       "existing",
+			Name:     "Original Existing",
+			Enabled:  true,
+			Schedule: Schedule{Kind: KindEvery, EveryMS: &oneHour},
+			Payload:  Payload{Channel: "telegram", Message: "old body"},
+			State:    existingState,
+		},
+	}}
+
+	s.reloadModularJobs()
+
+	firstReloadMtime := s.lastModularMtime
+	if firstReloadMtime <= 0 {
+		t.Fatalf("lastModularMtime = %d, want positive value after successful reload", firstReloadMtime)
+	}
+	jobs := jobsByID(s.Jobs())
+	if len(jobs) != 2 {
+		t.Fatalf("scheduler jobs = %+v, want 2 valid modular jobs", s.Jobs())
+	}
+	existing := jobs["existing"]
+	if existing.Name != "Updated Existing" {
+		t.Errorf("existing name = %q, want updated modular name", existing.Name)
+	}
+	if existing.Payload.Message != "updated body" {
+		t.Errorf("existing message = %q, want updated modular payload", existing.Payload.Message)
+	}
+	if existing.Schedule.EveryMS == nil || *existing.Schedule.EveryMS != int64(2*time.Hour/time.Millisecond) {
+		t.Errorf("existing EveryMS = %v, want 7200000", existing.Schedule.EveryMS)
+	}
+	if existing.State != existingState {
+		t.Errorf("existing state = %+v, want preserved %+v", existing.State, existingState)
+	}
+	if _, ok := jobs["new"]; !ok {
+		t.Fatalf("scheduler missing new modular job in %+v", s.Jobs())
+	}
+	if _, ok := jobs["broken"]; ok {
+		t.Fatalf("scheduler loaded malformed modular job: %+v", jobs["broken"])
+	}
+
+	s.reloadModularJobs()
+	if s.lastModularMtime != firstReloadMtime {
+		t.Errorf("lastModularMtime changed without detected modular change: got %d, want %d", s.lastModularMtime, firstReloadMtime)
+	}
+
+	s.itemsDir = filepath.Join(tmpDir, "missing")
+	s.reloadModularJobs()
+	if s.lastModularMtime != firstReloadMtime {
+		t.Errorf("lastModularMtime changed after unsuccessful modular reload: got %d, want %d", s.lastModularMtime, firstReloadMtime)
+	}
+}
+
+func jobsByID(jobs []Job) map[string]Job {
+	byID := make(map[string]Job, len(jobs))
+	for _, job := range jobs {
+		byID[job.ID] = job
+	}
+	return byID
+}
+
 type blockingDispatcher struct {
 	mu       sync.Mutex
 	delay    time.Duration
