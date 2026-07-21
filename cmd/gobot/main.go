@@ -24,6 +24,17 @@ var (
 	buildTime  = "unknown" // overridden at build time via -ldflags
 )
 
+//nolint:gochecknoglobals // Package-level hooks keep Cobra commands testable without live external probes.
+var doctorCommandDeps = struct {
+	loadConfig           func() (*config.Config, error)
+	runDoctorDiagnostics func(cfg *config.Config, probes *doctor.Probes) error
+	liveProbes           func() *doctor.Probes
+}{
+	loadConfig:           config.Load,
+	runDoctorDiagnostics: doctor.Run,
+	liveProbes:           app.LiveProbes,
+}
+
 func buildRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "gobot",
@@ -169,17 +180,27 @@ func isWorkspaceIncomplete(cfg *config.Config) bool {
 }
 
 func cmdDoctor() *cobra.Command {
-	return &cobra.Command{
+	var noInteractive bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run system health checks and diagnostics",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
+			cfg, err := doctorCommandDeps.loadConfig()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			return doctor.Run(cfg, app.LiveProbes())
+			var probes *doctor.Probes
+			if !noInteractive {
+				probes = doctorCommandDeps.liveProbes()
+			}
+			if err := doctorCommandDeps.runDoctorDiagnostics(cfg, probes); err != nil {
+				return fmt.Errorf("run doctor: %w", err)
+			}
+			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&noInteractive, "no-interactive", false, "Run local diagnostics without live service probes")
+	return cmd
 }
 
 func cmdRun() *cobra.Command {
