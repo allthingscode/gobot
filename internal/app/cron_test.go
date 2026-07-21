@@ -2,8 +2,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,23 @@ import (
 )
 
 const testMorningBriefingEmailSession = bot.SessionPrefixCron + "morning_briefing:email:user@example.com"
+
+func TestCronDispatcherRunTreatsContextCancellationAsGraceful(t *testing.T) { //nolint:paralleltest // captures global slog output
+	var buf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cd := &CronDispatcher{storageRoot: t.TempDir()}
+	cd.Run(ctx)
+
+	if strings.Contains(buf.String(), "cron: scheduler exited with error") {
+		t.Fatalf("CronDispatcher.Run logged scheduler error on graceful shutdown: %s", buf.String())
+	}
+}
 
 func TestResolveEmailSubject(t *testing.T) {
 	t.Parallel()
@@ -475,11 +494,11 @@ func TestRetryMorningBriefingFlow(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		dispatchErrs    []error
-		guardErrs       []error
-		wantDispatches  int
-		wantRetryKeys   []string
+		name             string
+		dispatchErrs     []error
+		guardErrs        []error
+		wantDispatches   int
+		wantRetryKeys    []string
 		wantFailureMails int
 	}{
 		{
