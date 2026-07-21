@@ -254,6 +254,7 @@ func (t *SpawnTool) tryConfiguredModelFallbacks(ctx context.Context, subKey, use
 			)
 			if m := toolMetaFromCtx(ctx); m != nil {
 				m.Set("agent_type", agentType)
+				m.Set("fallback_key", key)
 				m.Set("model", spec.Model)
 				m.Set("provider", altProv.Name())
 				m.Set("elapsed_ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
