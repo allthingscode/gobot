@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -49,6 +50,25 @@ type fallbackTestCase struct {
 	wantResult      string
 	wantErr         string
 	expectedRunners int
+}
+
+type configuredFallbackAttempt struct {
+	provider string
+	model    string
+}
+
+type configuredFallbackTestCase struct {
+	name             string
+	specialists      map[string]config.SpecialistConfig
+	resultsByModel   map[string]configuredFallbackResult
+	wantResult       string
+	wantAttempts     []configuredFallbackAttempt
+	wantMetaContains []string
+}
+
+type configuredFallbackResult struct {
+	response string
+	err      error
 }
 
 func runFallbackTest(t *testing.T, tt fallbackTestCase, defaultProv, specialistProv provider.Provider) {
@@ -170,5 +190,212 @@ func TestSpawnTool_Execute_Fallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			runFallbackTest(t, tt, defaultProv, specialistProv)
 		})
+	}
+}
+
+//nolint:paralleltest // uses global provider registry
+func TestSpawnTool_Execute_ConfiguredModelFallbacks(t *testing.T) {
+	const (
+		defaultProvName = "default-prov"
+		altProvName     = "alt-prov"
+	)
+
+	defaultProv := &mockNamedProvider{name: defaultProvName}
+	altProv := &mockNamedProvider{name: altProvName}
+
+	provider.ResetForTest()
+	t.Cleanup(provider.ResetForTest)
+	if err := provider.Register(defaultProv); err != nil {
+		t.Fatalf("register default provider: %v", err)
+	}
+	if err := provider.Register(altProv); err != nil {
+		t.Fatalf("register alt provider: %v", err)
+	}
+
+	for _, tt := range configuredFallbackTestCases(defaultProvName, altProvName) {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			runConfiguredFallbackTest(t, tt, defaultProv)
+		})
+	}
+}
+
+func configuredFallbackTestCases(defaultProvName, altProvName string) []configuredFallbackTestCase {
+	return []configuredFallbackTestCase{
+		configuredFallbackSuccessCase(defaultProvName),
+		configuredFallbackDuplicateSkipCase(defaultProvName),
+		configuredFallbackEscalationCase(defaultProvName),
+		configuredFallbackAlternateProviderCase(defaultProvName, altProvName),
+	}
+}
+
+func configuredFallbackSuccessCase(defaultProvName string) configuredFallbackTestCase {
+	const (
+		primaryModel  = "research-primary"
+		fallbackModel = "research-fallback"
+	)
+
+	return configuredFallbackTestCase{
+		name: "fallback succeeds after primary specialist model fails",
+		specialists: map[string]config.SpecialistConfig{
+			RoleResearcher:               {Model: primaryModel},
+			RoleResearcher + "_fallback": {Model: fallbackModel},
+		},
+		resultsByModel: map[string]configuredFallbackResult{
+			primaryModel:  {err: errors.New("primary failed")},
+			fallbackModel: {response: "fallback success"},
+		},
+		wantResult: "fallback success",
+		wantAttempts: []configuredFallbackAttempt{
+			{provider: defaultProvName, model: primaryModel},
+			{provider: defaultProvName, model: fallbackModel},
+		},
+		wantMetaContains: []string{
+			"agent_type: researcher",
+			"fallback_key: researcher_fallback",
+			"model: research-fallback",
+			"provider: default-prov",
+		},
+	}
+}
+
+func configuredFallbackDuplicateSkipCase(defaultProvName string) configuredFallbackTestCase {
+	const (
+		primaryModel    = "research-primary"
+		escalationModel = "research-escalation"
+	)
+
+	return configuredFallbackTestCase{
+		name: "duplicate fallback model is skipped before escalation succeeds",
+		specialists: map[string]config.SpecialistConfig{
+			RoleResearcher:                 {Model: primaryModel},
+			RoleResearcher + "_fallback":   {Model: primaryModel},
+			RoleResearcher + "_escalation": {Model: escalationModel},
+		},
+		resultsByModel: map[string]configuredFallbackResult{
+			primaryModel:    {err: errors.New("primary failed")},
+			escalationModel: {response: "escalation success"},
+		},
+		wantResult: "escalation success",
+		wantAttempts: []configuredFallbackAttempt{
+			{provider: defaultProvName, model: primaryModel},
+			{provider: defaultProvName, model: escalationModel},
+		},
+		wantMetaContains: []string{
+			"fallback_key: researcher_escalation",
+			"model: research-escalation",
+		},
+	}
+}
+
+func configuredFallbackEscalationCase(defaultProvName string) configuredFallbackTestCase {
+	const (
+		primaryModel    = "research-primary"
+		fallbackModel   = "research-fallback"
+		escalationModel = "research-escalation"
+	)
+
+	return configuredFallbackTestCase{
+		name: "fallback failure progresses to escalation",
+		specialists: map[string]config.SpecialistConfig{
+			RoleResearcher:                 {Model: primaryModel},
+			RoleResearcher + "_fallback":   {Model: fallbackModel},
+			RoleResearcher + "_escalation": {Model: escalationModel},
+		},
+		resultsByModel: map[string]configuredFallbackResult{
+			primaryModel:    {err: errors.New("primary failed")},
+			fallbackModel:   {err: errors.New("fallback failed")},
+			escalationModel: {response: "escalation success"},
+		},
+		wantResult: "escalation success",
+		wantAttempts: []configuredFallbackAttempt{
+			{provider: defaultProvName, model: primaryModel},
+			{provider: defaultProvName, model: fallbackModel},
+			{provider: defaultProvName, model: escalationModel},
+		},
+		wantMetaContains: []string{
+			"fallback_key: researcher_escalation",
+			"model: research-escalation",
+		},
+	}
+}
+
+func configuredFallbackAlternateProviderCase(defaultProvName, altProvName string) configuredFallbackTestCase {
+	const (
+		primaryModel  = "research-primary"
+		fallbackModel = "research-fallback"
+	)
+
+	return configuredFallbackTestCase{
+		name: "fallback uses its configured alternate provider",
+		specialists: map[string]config.SpecialistConfig{
+			RoleResearcher:               {Model: primaryModel},
+			RoleResearcher + "_fallback": {Model: fallbackModel, Provider: altProvName},
+		},
+		resultsByModel: map[string]configuredFallbackResult{
+			primaryModel:  {err: errors.New("primary failed")},
+			fallbackModel: {response: "alternate provider fallback success"},
+		},
+		wantResult: "alternate provider fallback success",
+		wantAttempts: []configuredFallbackAttempt{
+			{provider: defaultProvName, model: primaryModel},
+			{provider: altProvName, model: fallbackModel},
+		},
+		wantMetaContains: []string{
+			"fallback_key: researcher_fallback",
+			"model: research-fallback",
+			"provider: alt-prov",
+		},
+	}
+}
+
+func runConfiguredFallbackTest(t *testing.T, tt configuredFallbackTestCase, defaultProv provider.Provider) {
+	t.Helper()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Specialists: tt.specialists,
+		},
+	}
+
+	var attempts []configuredFallbackAttempt
+	tool := &SpawnTool{
+		RunnerFactory: func(prov provider.Provider, model, _ string) agent.Runner {
+			attempts = append(attempts, configuredFallbackAttempt{
+				provider: prov.Name(),
+				model:    model,
+			})
+			result := tt.resultsByModel[model]
+			return &mockFallbackRunner{
+				responses: []string{result.response},
+				errs:      []error{result.err},
+			}
+		},
+		DefaultProv:      defaultProv,
+		Model:            "default-model",
+		SpecialistModels: map[string]string{RoleResearcher: tt.specialists[RoleResearcher].Model},
+		Cfg:              cfg,
+	}
+
+	ctx, meta := withToolMeta(context.Background())
+	got, err := tool.Execute(ctx, "sess", "user", map[string]any{
+		"agent_type": RoleResearcher,
+		"objective":  "research something",
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if got != tt.wantResult {
+		t.Fatalf("Execute result = %q, want %q", got, tt.wantResult)
+	}
+	if !reflect.DeepEqual(attempts, tt.wantAttempts) {
+		t.Fatalf("attempts = %#v, want %#v", attempts, tt.wantAttempts)
+	}
+
+	formatted := formatToolMetaBlock(got, meta)
+	for _, want := range tt.wantMetaContains {
+		if !strings.Contains(formatted, want) {
+			t.Errorf("formatted metadata missing %q in:\n%s", want, formatted)
+		}
 	}
 }

@@ -56,7 +56,7 @@ func formatToolMetaBlock(result string, meta *ToolMeta) string {
 	var sb strings.Builder
 	sb.WriteString(result)
 	sb.WriteString("\n\n[tool_meta]\n")
-	for _, k := range []string{"agent_type", "model", "provider", "elapsed_ms", "iterations"} {
+	for _, k := range []string{"agent_type", "fallback_key", "model", "provider", "elapsed_ms", "iterations"} {
 		if v, ok := vals[k]; ok {
 			fmt.Fprintf(&sb, "%s: %s\n", k, v)
 		}
