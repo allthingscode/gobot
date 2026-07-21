@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 
@@ -70,7 +71,7 @@ func (cd *CronDispatcher) Run(ctx context.Context) {
 		filepath.Join(cd.storageRoot, "workspace", "jobs"),
 		cd,
 	)
-	if err := scheduler.Run(ctx); err != nil {
+	if err := scheduler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("cron: scheduler exited with error", "err", err)
 	}
 }
