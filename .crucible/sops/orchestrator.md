@@ -186,7 +186,7 @@ indicate: approved / deferred / rejected. I will pass your decisions to the Groo
 
 The Human Gate fires after every Operator session. The loop halts here.
 
-A task that merges code to trunk is not done until adopter CI for the merge commit is GREEN. After recording an accepted Human Gate that pushes task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>` and trust the `[CI WATCH] STATUS=...` value. `STATUS=RED` means the task is not done: fix forward and re-run the gate. `[CI WATCH] SKIPPED (gh unavailable)`, `STATUS=NO_RUNS`, and `STATUS=PENDING_TIMEOUT` are advisory unless project policy says otherwise.
+A task that merges code to trunk is not done until adopter CI for the merge commit is GREEN. An accepted merge publishes the primary branch ONLY after CI is confirmed GREEN on a staging ref (`crucible-ci/<TaskId>`); a confirmed-RED CI leaves the primary branch local and routes to fix-forward; inconclusive CI (timeout / not-started / no-runs) finalizes with a warning as before. After recording an accepted Human Gate that pushes task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>` and trust the `[CI WATCH] STATUS=...` value. `STATUS=RED` means the task is not done: fix forward and re-run the gate. `[CI WATCH] SKIPPED (gh unavailable)`, `STATUS=NO_RUNS`, and `STATUS=PENDING_TIMEOUT` are advisory unless project policy says otherwise.
 
 Present to the human:
 

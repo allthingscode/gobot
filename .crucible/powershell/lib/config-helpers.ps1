@@ -67,7 +67,7 @@ function Get-ConfiguredPath {
 function Get-ConfiguredReview {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("diff_tool", "editor", "auto_push", "require_green_ci", "ci_timeout_minutes", "ci_queued_grace_minutes")]
+        [ValidateSet("diff_tool", "editor", "auto_push", "require_green_ci", "ci_timeout_minutes", "ci_queued_grace_minutes", "ci_staging_branch_prefix")]
         [string]$Key,
         [string]$ProjectRoot = ""
     )

@@ -97,14 +97,15 @@ launch status.
    **Keep the dispatch prompt a one-line file pointer.** The launcher auto-generates the specialist
    prompt: a single "read and follow `.crucible/session/{task_id}/{phase}/prompt.md`" instruction plus
    the standard contract. **Rule: an external specialist ALWAYS gets a handoff/instruction file plus a
-   simple prompt that says to read and follow it.** A multi-line `-PromptText` carrying quotes, percent
+   simple prompt that says to read and follow it.** A multi-line prompt carrying quotes, percent
    signs, or newlines is shattered into separate argv tokens by PowerShell native-argument quoting and
-   codex rejects it (`error: unexpected argument ...`) — keep the prompt trivial and the file rich.
+   codex rejects it (`error: unexpected argument ...`) — use `-PromptFile <path>` for non-trivial prompt
+   overrides to keep the harness call clean and the prompt contents in a file.
 
-   For a **normal phase**, that file is the auto-generated `prompt.md` (no `-PromptText` needed). For a
+   For a **normal phase**, that file is the auto-generated `prompt.md` (neither `-PromptText` nor `-PromptFile` needed). For a
    **human gate continuation** (notably the **Research Gate**), do NOT append the decision to `prompt.md`
    — the phase SOP's present-and-wait step wins and the run re-presents with zero deliverables. Instead
-   generate a dedicated continuation file and pass a one-line pointer to it. For the Research Gate use
+   generate a dedicated continuation file and pass a pointer to it via `-PromptFile <path to gate-filing.md>`. For the Research Gate use
    `record-research-gate.ps1`:
 
    ```bash
@@ -113,8 +114,7 @@ launch status.
    ```
 
    It records the decision and writes `session/{task_id}/research/gate-filing.md`, then prints the
-   one-line dispatch pointer. Re-dispatch with `-PromptText "Researcher: {task_id} - read and follow all
-   instructions in <path to gate-filing.md>"` (a trivial one-line pointer — allowed). The specialist
+   dispatch pointer. Re-dispatch with `-PromptFile <path to gate-filing.md>` (or a trivial one-line `-PromptText`). The specialist
    then files the approved stubs and hands off without re-auditing.
 
 4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=SUCCESS` or

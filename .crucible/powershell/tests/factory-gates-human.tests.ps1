@@ -92,6 +92,7 @@ if (`$verb -eq "auth status") {
 if (`$verb -eq "run list") {
     if (`$Mode -eq "green") { Write-Output '[{"databaseId":201,"status":"completed","conclusion":"success"}]' }
     if (`$Mode -eq "red") { Write-Output '[{"databaseId":202,"status":"completed","conclusion":"failure"}]' }
+    if (`$Mode -eq "pending") { Write-Output '[{"databaseId":203,"status":"in_progress","conclusion":null}]' }
     exit 0
 }
 if (`$verb -eq "run view") {
@@ -1761,6 +1762,113 @@ try {
         Assert-Result -Name "ci absent reports skip" -Condition ($result.Output -match "\[CI WATCH\] SKIPPED \(gh unavailable\)") -FailureMessage $result.Output
         git -C $case.LocalRepo show-ref --quiet refs/heads/task/F-CIA
         Assert-Result -Name "ci absent deletes task branch" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task branch was not deleted after skipped CI watch"
+    }
+
+    $results += Run-Test -Name "F3: RED withholds the master push and deletes staging ref" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "f3-ci-red"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-RED"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "red" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-RED"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "f3 red exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "f3 red output indicates master not published" -Condition ($result.Output -match "master was NOT published \(still local only\)") -FailureMessage $result.Output
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "f3 red master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
+        git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-RED
+        Assert-Result -Name "f3 red deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on red CI"
+    }
+
+    $results += Run-Test -Name "F3: GREEN publishes master then deletes staging ref" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "f3-ci-green"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-GRN"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "green" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-GRN"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "f3 green exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "f3 green staging ref pushed" -Condition ($result.Output -match "Publishing CI staging ref origin/crucible-ci/F3-GRN") -FailureMessage $result.Output
+        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "f3 green master branch updated on origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
+        git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-GRN
+        Assert-Result -Name "f3 green deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on green CI"
+    }
+
+    $results += Run-Test -Name "F3: Timeout publishes master and emits warning" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "f3-ci-timeout"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-TMO"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+
+        $configYaml = (Get-Content -LiteralPath (Join-Path $case.LocalRepo ".crucible/config.yaml") -Raw) -replace "ci_timeout_minutes: 1", "ci_timeout_minutes: 0"
+        $configYaml | Set-Content -LiteralPath (Join-Path $case.LocalRepo ".crucible/config.yaml") -Encoding UTF8
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "pending" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-TMO"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "f3 timeout exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "f3 timeout warning emitted" -Condition ($result.Output -match "CI did not finish before timeout") -FailureMessage $result.Output
+        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "f3 timeout pushed master to origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
+        git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-TMO
+        Assert-Result -Name "f3 timeout deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on timeout CI"
+    }
+
+    $results += Run-Test -Name "F3: Staging push failure cleanly aborts without pushing master" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "f3-staging-fail"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-SPF"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+
+        git -C $case.LocalRepo remote set-url origin "invalid/path/repo.git"
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "green" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-SPF"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "f3 staging push fail exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "f3 staging push fail error message" -Condition ($result.Output -match "Failed to publish CI staging ref") -FailureMessage $result.Output
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "f3 staging push fail master tip unchanged on real origin" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
     }
 
 } finally {

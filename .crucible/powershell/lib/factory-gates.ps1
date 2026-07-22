@@ -2588,7 +2588,7 @@ function Invoke-HumanGateAction {
             $ciTimeoutMinutes = 20
             if (-not [string]::IsNullOrWhiteSpace($ciTimeoutVal)) {
                 $parsedTimeout = 0
-                if ([int]::TryParse($ciTimeoutVal, [ref]$parsedTimeout) -and $parsedTimeout -gt 0) {
+                if ([int]::TryParse($ciTimeoutVal, [ref]$parsedTimeout) -and $parsedTimeout -ge 0) {
                     $ciTimeoutMinutes = $parsedTimeout
                 }
             }
@@ -2596,7 +2596,7 @@ function Invoke-HumanGateAction {
             $ciQueuedGraceMinutes = 15
             if (-not [string]::IsNullOrWhiteSpace($ciQueuedGraceVal)) {
                 $parsedGrace = 0
-                if ([int]::TryParse($ciQueuedGraceVal, [ref]$parsedGrace) -and $parsedGrace -gt 0) {
+                if ([int]::TryParse($ciQueuedGraceVal, [ref]$parsedGrace) -and $parsedGrace -ge 0) {
                     $ciQueuedGraceMinutes = $parsedGrace
                 }
             }
@@ -2605,67 +2605,106 @@ function Invoke-HumanGateAction {
             if ($autoPush) {
                 $remotes = @(Invoke-GitChecked { git remote 2>$null })
                 if ($remotes -contains "origin") {
-                    Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
-                    Invoke-GitChecked { git push origin $primaryBranch }
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
-                        exit 1
-                    }
                     if ($requireGreenCi) {
+                        $ciStagingPrefixVal = Get-ConfiguredReview -Key "ci_staging_branch_prefix" -ProjectRoot $resolvedProjectRoot
+                        $ciStagingPrefix = "crucible-ci"
+                        if (-not [string]::IsNullOrWhiteSpace($ciStagingPrefixVal)) {
+                            $ciStagingPrefix = $ciStagingPrefixVal.TrimEnd('/')
+                        }
+                        $stagingBranch = "$ciStagingPrefix/$TaskId"
+
+                        Write-Host ("[HUMAN GATE] Publishing CI staging ref origin/" + $stagingBranch + "...") -ForegroundColor Cyan
+                        Invoke-GitChecked { git push origin ("$mergedSha" + ":refs/heads/" + $stagingBranch) --force }
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Host ("[ERROR] Failed to publish CI staging ref " + $stagingBranch + ". Please check network/credentials.") -ForegroundColor Red
+                            exit 1
+                        }
+
                         $watchScript = Join-Path (Split-Path -Parent $PSScriptRoot) "watch-adopter-ci.ps1"
-                        Write-Host ("[HUMAN GATE] Watching origin CI for " + $mergedSha + " before finalizing...") -ForegroundColor Cyan
+                        Write-Host ("[HUMAN GATE] Watching origin CI for " + $mergedSha + " on staging ref " + $stagingBranch + " before finalizing...") -ForegroundColor Cyan
                         $ciOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript -Commit $mergedSha -TimeoutMinutes $ciTimeoutMinutes -QueuedGraceMinutes $ciQueuedGraceMinutes -CrucibleRoot $resolvedProjectRoot 2>&1)
                         $ciExitCode = $LASTEXITCODE
                         foreach ($line in $ciOutput) {
                             Write-Host $line
                         }
-                        if ($ciExitCode -eq 1) {
-                            Write-Host ("[HUMAN GATE] CI is RED for " + $mergedSha + "; task " + $TaskId + " is NOT done. Fix forward and re-run the gate.") -ForegroundColor Red
+
+                        if ($ciExitCode -eq 0) {
+                            Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
+                            Invoke-GitChecked { git push origin $primaryBranch }
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                                exit 1
+                            }
+                            Invoke-GitChecked { git push origin --delete $stagingBranch }
+                        } elseif ($ciExitCode -eq 1) {
+                            Invoke-GitChecked { git push origin --delete $stagingBranch }
+                            Write-Host ("[HUMAN GATE] CI is RED for " + $mergedSha + "; task " + $TaskId + " is NOT done and master was NOT published (still local only). Fix forward and re-run the gate.") -ForegroundColor Red
                             exit 1
-                        } elseif ($ciExitCode -eq 2) {
-                            Write-Host ("[HUMAN GATE] CI did not finish before timeout for " + $mergedSha + "; finalizing while CI continues.") -ForegroundColor Yellow
-                            $originUrl = (git remote get-url origin 2>$null)
-                            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
-                                $originText = ([string]$originUrl).Trim()
-                                $actionsUrl = ""
-                                if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
-                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
-                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                } else {
-                                    $actionsUrl = $originText
-                                }
-                                Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
+                        } else {
+                            # Rationale: Only a CONFIRMED RED withholds the master push; inconclusive CI (timeout, CI_NOT_STARTED, NO_RUNS)
+                            # still finalizes-with-warning so an infrastructure stall does not wedge the pipeline (F1/F2 stance).
+                            Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
+                            Invoke-GitChecked { git push origin $primaryBranch }
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                                exit 1
                             }
-                        } elseif ($ciExitCode -eq 4) {
-                            Write-Host ("[HUMAN GATE] CI never left GitHub's queue for " + $mergedSha + " (no runner assigned within the grace window). This is likely a runner-availability outage, NOT a slow build. Finalizing, but re-check CI - and consider re-running the workflow - before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
-                            $originUrl = (git remote get-url origin 2>$null)
-                            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
-                                $originText = ([string]$originUrl).Trim()
-                                $actionsUrl = ""
-                                if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
-                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
-                                    $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                } else {
-                                    $actionsUrl = $originText
+
+                            if ($ciExitCode -eq 2) {
+                                Write-Host ("[HUMAN GATE] CI did not finish before timeout for " + $mergedSha + "; finalizing while CI continues.") -ForegroundColor Yellow
+                                $originUrl = (git remote get-url origin 2>$null)
+                                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
+                                    $originText = ([string]$originUrl).Trim()
+                                    $actionsUrl = ""
+                                    if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
+                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                    } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
+                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                    } else {
+                                        $actionsUrl = $originText
+                                    }
+                                    Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
                                 }
-                                Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
+                            } elseif ($ciExitCode -eq 4) {
+                                Write-Host ("[HUMAN GATE] CI never left GitHub's queue for " + $mergedSha + " (no runner assigned within the grace window). This is likely a runner-availability outage, NOT a slow build. Finalizing, but re-check CI - and consider re-running the workflow - before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
+                                $originUrl = (git remote get-url origin 2>$null)
+                                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
+                                    $originText = ([string]$originUrl).Trim()
+                                    $actionsUrl = ""
+                                    if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
+                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                    } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
+                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
+                                    } else {
+                                        $actionsUrl = $originText
+                                    }
+                                    Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
+                                }
+                            } elseif ($ciExitCode -eq 3) {
+                                Write-Host ("[HUMAN GATE] CI could not be confirmed for " + $mergedSha + ": no workflow runs registered within the grace window. Finalizing, but verify CI manually before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
                             }
-                        } elseif ($ciExitCode -eq 3) {
-                            Write-Host ("[HUMAN GATE] CI could not be confirmed for " + $mergedSha + ": no workflow runs registered within the grace window. Finalizing, but verify CI manually before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
+
+                            Invoke-GitChecked { git push origin --delete $stagingBranch }
+                        }
+                    } else {
+                        Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
+                        Invoke-GitChecked { git push origin $primaryBranch }
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                            exit 1
                         }
                     }
                 } else {
                     Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
                 }
             } else {
-                Write-Host "[HUMAN GATE] Refusing to push; merge remains LOCAL only. Run the following command to publish:" -ForegroundColor Yellow
-                Write-Host "  git push origin $primaryBranch" -ForegroundColor Cyan
+                Write-Host "[HUMAN GATE] Refusing to push; merge remains LOCAL only." -ForegroundColor Yellow
                 if ($requireGreenCi) {
-                    Write-Host "[HUMAN GATE] Then verify adopter CI for the merge commit:" -ForegroundColor Yellow
+                    Write-Host "[HUMAN GATE] Verify adopter CI for the merge commit BEFORE pushing:" -ForegroundColor Yellow
                     Write-Host ("  pwsh -File .crucible/powershell/watch-adopter-ci.ps1 -Commit " + $mergedSha) -ForegroundColor Cyan
                 }
+                Write-Host "Run the following command to publish:" -ForegroundColor Yellow
+                Write-Host "  git push origin $primaryBranch" -ForegroundColor Cyan
             }
 
             $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $resolvedProjectRoot

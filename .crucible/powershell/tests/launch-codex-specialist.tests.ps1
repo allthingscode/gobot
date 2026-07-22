@@ -353,6 +353,56 @@ try {
         Assert-Result -Name "exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2 for absolute -CrucibleRoot outside repo, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "clear error" -Condition ($res.Output -match "must be relative to the repo root") -FailureMessage "expected clear relativity error. Output:`n$($res.Output)"
     }
+
+    $results += Run-Test -Name "PromptFile content used verbatim" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-promptfile-verbatim"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $promptFilePath = Join-Path $tempRoot "override-prompt.md"
+        $promptContent = "Multi-line prompt body`nwith embedded --no-interactive flag`nand `"double-quoted phrase`"."
+        [System.IO.File]::WriteAllText($promptFilePath, $promptContent)
+
+        $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-987", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "promptfile launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "PromptFile launch should succeed. Output:`n$($res.Output)"
+        $transcript = Get-Content -LiteralPath (Join-Path $projectRoot ".crucible/session/C-987/verification/codex-transcript.txt") -Raw
+        Assert-Result -Name "promptfile contents delivered verbatim on stdin" -Condition ($transcript -match "--no-interactive" -and $transcript -match "double-quoted phrase") -FailureMessage "expected verbatim promptfile contents on stdin. Transcript:`n$transcript"
+    }
+
+    $results += Run-Test -Name "Missing PromptFile path exits 2 without codex invocation" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-promptfile-missing"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $missingPath = Join-Path $tempRoot "nonexistent-prompt.md"
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-986", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptFile", $missingPath, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "missing promptfile exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "missing promptfile error message" -Condition ($res.Output -match "-PromptFile path does not exist") -FailureMessage "expected missing promptfile error message. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Both -PromptText and -PromptFile exits 2 without codex invocation" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-promptfile-both"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $promptFilePath = Join-Path $tempRoot "dummy-prompt.md"
+        [System.IO.File]::WriteAllText($promptFilePath, "some prompt")
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-985", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "text prompt", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "both prompts exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "both prompts error message" -Condition ($res.Output -match "-PromptText and -PromptFile are mutually exclusive") -FailureMessage "expected mutually exclusive error message. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Empty PromptFile exits 2 without codex invocation" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-promptfile-empty"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $emptyFilePath = Join-Path $tempRoot "empty-prompt.md"
+        [System.IO.File]::WriteAllText($emptyFilePath, "   `r`n  `n ")
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-984", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptFile", $emptyFilePath, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "empty promptfile exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "empty promptfile error message" -Condition ($res.Output -match "-PromptFile is empty") -FailureMessage "expected empty promptfile error message. Output:`n$($res.Output)"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

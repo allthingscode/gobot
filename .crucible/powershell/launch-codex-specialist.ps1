@@ -47,6 +47,10 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$PromptText = "",
 
+    # Harness-safe file-sourced alternative to -PromptText; avoids -File argv re-tokenization of multi-line/flag-bearing prompts.
+    [Parameter(Mandatory = $false)]
+    [string]$PromptFile = "",
+
     # Reviewer phases only: enforce the structured review-verdict schema on Codex's final message.
     [switch]$ReviewSchema,
 
@@ -274,6 +278,24 @@ if ($ReviewSchema) {
         exit 2
     }
     $useSchema = $true
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PromptText) -and -not [string]::IsNullOrWhiteSpace($PromptFile)) {
+    Write-Host "[CODEX] Error: -PromptText and -PromptFile are mutually exclusive." -ForegroundColor Red
+    exit 2
+}
+if (-not [string]::IsNullOrWhiteSpace($PromptFile)) {
+    if (-not (Test-Path -LiteralPath $PromptFile)) {
+        Write-Host ("[CODEX] Error: -PromptFile path does not exist: " + $PromptFile) -ForegroundColor Red
+        exit 2
+    }
+    $resolvedPromptFile = (Resolve-Path -LiteralPath $PromptFile).Path
+    $fileContent = [System.IO.File]::ReadAllText($resolvedPromptFile)
+    if ([string]::IsNullOrWhiteSpace($fileContent)) {
+        Write-Host ("[CODEX] Error: -PromptFile is empty: " + $PromptFile) -ForegroundColor Red
+        exit 2
+    }
+    $PromptText = $fileContent
 }
 
 if ([string]::IsNullOrWhiteSpace($PromptText)) {

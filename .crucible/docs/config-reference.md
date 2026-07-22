@@ -61,6 +61,7 @@ review:                                   # optional
   require_green_ci: false                 # optional; defaults to false
   ci_timeout_minutes: 20                  # optional; defaults to 20
   ci_queued_grace_minutes: 15             # optional; defaults to 15
+  ci_staging_branch_prefix: crucible-ci/  # optional; defaults to crucible-ci/
 ```
 
 ---
@@ -307,6 +308,7 @@ Settings related to human review workflows.
 | `require_green_ci` | boolean | `false` | Whether accepted, auto-pushed tasks must wait for adopter CI on the merge commit before finalizing. |
 | `ci_timeout_minutes` | integer | `20` | Maximum minutes to wait for a *running* adopter CI build before treating unfinished runs as advisory timeout (`PENDING_TIMEOUT`). Time a run spends queued waiting for a runner is not charged against this budget. |
 | `ci_queued_grace_minutes` | integer | `15` | Maximum minutes to tolerate CI sitting entirely in GitHub's queue with no runner assigned before reporting a distinct `CI_NOT_STARTED` (likely runner-availability outage, not a slow build). |
+| `ci_staging_branch_prefix` | string | `crucible-ci/` | Staging branch prefix pushed to `origin` when watching CI before fast-forwarding the primary branch. |
 
 ---
 
