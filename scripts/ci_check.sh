@@ -32,7 +32,7 @@ echo "==> [3/4] gotestsum"
 gotestsum --format testdox -- -mod=readonly ./internal/... ./cmd/...
 
 echo "==> [4/4] doc-lint"
-go run scripts/doc_lint.go
+go run -mod=readonly scripts/doc_lint.go
 
 echo ""
 echo "All CI checks passed."
