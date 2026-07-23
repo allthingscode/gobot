@@ -12,18 +12,16 @@ if (Get-Command goversioninfo -ErrorAction SilentlyContinue) {
     goversioninfo -platform-specific -o resource.syso versioninfo.json
 }
 
-$MOD_FLAG = ""
-if (Test-Path "vendor") {
-    Write-Host "Using vendor directory..."
-    $MOD_FLAG = "-mod=vendor"
-} else {
-    Write-Host "Vendor directory missing. Downloading modules (this may take a minute)..."
-    go mod download
+Write-Host "Resolving modules in readonly mode..."
+go list -mod=readonly -m all > $null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Module resolution failed"
+    exit 1
 }
 
 if (-not (Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }
 Write-Host "Building gobot $VERSION ($COMMIT)..."
-go build $MOD_FLAG -ldflags $LDFLAGS -o bin/gobot.exe ./cmd/gobot
+go build -mod=readonly -ldflags $LDFLAGS -o bin/gobot.exe ./cmd/gobot
 $EXIT_CODE = $LASTEXITCODE
 
 if (Test-Path resource.syso) {

@@ -7,16 +7,10 @@ COMMIT=$(git rev-parse --short HEAD)
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS="-X main.version=${VERSION} -X main.commitHash=${COMMIT} -X main.buildTime=${BUILD_TIME}"
 
-MOD_FLAG=""
-if [ -d "vendor" ]; then
-    echo "Using vendor directory..."
-    MOD_FLAG="-mod=vendor"
-else
-    echo "Vendor directory missing. Downloading modules (this may take a minute)..."
-    go mod download
-fi
+echo "Resolving modules in readonly mode..."
+go list -mod=readonly -m all > /dev/null
 
 echo "Building gobot ${VERSION} (${COMMIT})..."
 mkdir -p bin
-go build ${MOD_FLAG} -ldflags "${LDFLAGS}" -o bin/gobot ./cmd/gobot
+go build -mod=readonly -ldflags "${LDFLAGS}" -o bin/gobot ./cmd/gobot
 echo "Build successful: bin/gobot"

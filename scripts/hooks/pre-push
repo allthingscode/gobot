@@ -1,6 +1,6 @@
 #!/bin/sh
 # gobot pre-push hook
-# Mirrors the CI vendor-check job — catches vendor drift before it reaches GitHub.
+# Enforces the no-vendor policy before changes reach GitHub.
 # A non-zero exit aborts the push.
 #
 # Install: cp scripts/hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
@@ -9,13 +9,17 @@ set -e
 
 cd "$(git rev-parse --show-toplevel)"
 
-echo "--- pre-push: verifying vendor consistency"
-go mod vendor
-if ! git diff --exit-code vendor/; then
+echo "--- pre-push: verifying no-vendor policy"
+TRACKED_VENDOR=$(git ls-files vendor)
+if [ -n "$TRACKED_VENDOR" ]; then
     echo ""
-    echo "ERROR: vendor/ is out of sync with go.mod/go.sum."
-    echo "       Stage and commit the updated vendor/ directory, then push again."
+    echo "ERROR: tracked vendor/ files are not allowed."
+    echo "       Remove tracked vendor/ files and rely on go.mod/go.sum with -mod=readonly."
     exit 1
+fi
+if [ -d vendor ]; then
+    echo "WARN: local vendor/ directory exists but is not tracked."
+    echo "      Go commands below use -mod=readonly so local vendor content is ignored."
 fi
 
 echo "--- pre-push: running security scan"
@@ -24,7 +28,7 @@ if command -v powershell.exe > /dev/null 2>&1; then
 else
     # Fallback for Linux/macOS if govulncheck is installed
     if command -v govulncheck > /dev/null 2>&1; then
-        govulncheck ./...
+        govulncheck ./internal/... ./cmd/...
     else
         echo "WARN: govulncheck not found; skipping local security scan (CI will enforce)"
     fi
@@ -65,11 +69,11 @@ cleanup() { rm -f "$TEMP_LOG"; }
 trap cleanup EXIT
 # Run tests with the race detector when a C compiler is available; fall back
 # gracefully when CGO is absent (e.g. bare Windows without WSL).
-if ! go test -race -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+if ! go test -race -mod=readonly ./internal/... ./cmd/... > "$TEMP_LOG" 2>&1; then
     if grep -q "requires cgo\|requires a C compiler" "$TEMP_LOG"; then
         echo "WARN: Race detector unavailable (no C compiler — CGO disabled)."
-        echo "      Run 'wsl -e go test -race -mod=readonly ./...' to catch data races."
-        if ! go test -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+        echo "      Run 'wsl -e go test -race -mod=readonly ./internal/... ./cmd/...' to catch data races."
+        if ! go test -mod=readonly ./internal/... ./cmd/... > "$TEMP_LOG" 2>&1; then
             echo "ERROR: go test failed"
             cat "$TEMP_LOG"
             exit 1
@@ -85,7 +89,7 @@ fi
 # On Linux/macOS this is a no-op (native GOOS already covers it).
 if [ "$(go env GOOS)" = "windows" ]; then
     echo "--- pre-push: GOOS=linux compile check"
-    if ! GOOS=linux go test -run=^$ -exec=echo -mod=readonly ./... > "$TEMP_LOG" 2>&1; then
+    if ! GOOS=linux go test -run=^$ -exec=echo -mod=readonly ./internal/... ./cmd/... > "$TEMP_LOG" 2>&1; then
         echo "ERROR: GOOS=linux compile check failed — code will not build on CI"
         cat "$TEMP_LOG"
         exit 1
@@ -99,12 +103,12 @@ fi
 
 echo "--- pre-push: validating config.json"
 # We check the default config path (~/.gobot/config.json)
-if ! go run ./cmd/gobot config reformat --check > /dev/null 2>&1; then
+if ! go run -mod=readonly ./cmd/gobot config reformat --check > /dev/null 2>&1; then
     echo "ERROR: config.json is not correctly formatted."
     echo "       Run 'go run ./cmd/gobot config reformat' to fix."
     exit 1
 fi
-if ! go run ./cmd/gobot config validate > /dev/null 2>&1; then
+if ! go run -mod=readonly ./cmd/gobot config validate > /dev/null 2>&1; then
     echo "ERROR: config.json validation failed."
     echo "       Run 'go run ./cmd/gobot config validate' for details."
     exit 1
