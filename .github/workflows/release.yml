@@ -36,16 +36,16 @@ jobs:
       - name: Build Windows binary
         run: |
           LDFLAGS="-X main.version=${VERSION} -X main.commitHash=${COMMIT} -X main.buildTime=${BUILD_TIME}"
-          GOOS=windows GOARCH=amd64 go build -mod=vendor -ldflags "${LDFLAGS}" -o gobot-${VERSION}-windows-amd64.exe ./cmd/gobot
+          GOOS=windows GOARCH=amd64 go build -mod=readonly -ldflags "${LDFLAGS}" -o gobot-${VERSION}-windows-amd64.exe ./cmd/gobot
 
       - name: Build Linux binary
         run: |
           LDFLAGS="-X main.version=${VERSION} -X main.commitHash=${COMMIT} -X main.buildTime=${BUILD_TIME}"
-          GOOS=linux GOARCH=amd64 go build -mod=vendor -ldflags "${LDFLAGS}" -o gobot-${VERSION}-linux-amd64 ./cmd/gobot
+          GOOS=linux GOARCH=amd64 go build -mod=readonly -ldflags "${LDFLAGS}" -o gobot-${VERSION}-linux-amd64 ./cmd/gobot
 
       - name: Pre-flight validation
         run: |
-          go run scripts/validate_release.go
+          go run -mod=readonly scripts/validate_release.go
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
