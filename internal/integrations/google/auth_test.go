@@ -178,6 +178,13 @@ func seedSecureStoreToken(t *testing.T, tt secureStoreRefreshCase, tokenURI stri
 	if err := store.Set("google_oauth_token", string(tokenJSON)); err != nil {
 		t.Fatalf("seed secure-store token: %v", err)
 	}
+	seeded := readSecureStoreToken(t, store, "seeded")
+	if seeded.Token != tt.oldAccessToken {
+		t.Fatalf("seeded secure-store token = %q, want %q", seeded.Token, tt.oldAccessToken)
+	}
+	if seeded.RefreshToken != tt.refreshToken {
+		t.Fatalf("seeded secure-store refresh token = %q, want %q", seeded.RefreshToken, tt.refreshToken)
+	}
 	return store, secretsRoot
 }
 
@@ -205,14 +212,7 @@ func assertRefreshForm(t *testing.T, gotForm url.Values, tt secureStoreRefreshCa
 func assertPersistedSecureStoreToken(t *testing.T, store secretsStore, tt secureStoreRefreshCase) {
 	t.Helper()
 
-	persistedJSON, err := store.Get("google_oauth_token")
-	if err != nil {
-		t.Fatalf("read persisted secure-store token: %v", err)
-	}
-	var persisted storedToken
-	if err := json.Unmarshal([]byte(persistedJSON), &persisted); err != nil {
-		t.Fatalf("unmarshal persisted secure-store token: %v", err)
-	}
+	persisted := readSecureStoreToken(t, store, "persisted")
 	if persisted.Token != tt.refreshedToken {
 		t.Errorf("persisted token = %q, want %q", persisted.Token, tt.refreshedToken)
 	}
@@ -222,6 +222,26 @@ func assertPersistedSecureStoreToken(t *testing.T, store secretsStore, tt secure
 	if time.Until(persisted.Expiry) < 50*time.Minute {
 		t.Errorf("persisted expiry = %s, want at least 50m in the future", persisted.Expiry)
 	}
+}
+
+func readSecureStoreToken(t *testing.T, store secretsStore, stage string) storedToken {
+	t.Helper()
+
+	persistedJSON, err := store.Get("google_oauth_token")
+	if err != nil {
+		t.Fatalf("read %s secure-store token: %v", stage, err)
+	}
+	if persistedJSON == "" {
+		// tryLoadTokenFromDPAPI treats a missing secure-store key as a normal
+		// fallback-to-file condition; this secure-store-specific test must fail
+		// at the setup/use boundary instead of later on google_token.json.
+		t.Fatalf("%s secure-store token is missing", stage)
+	}
+	var persisted storedToken
+	if err := json.Unmarshal([]byte(persistedJSON), &persisted); err != nil {
+		t.Fatalf("unmarshal %s secure-store token: %v", stage, err)
+	}
+	return persisted
 }
 
 func TestBearerToken_MissingFile(t *testing.T) {
