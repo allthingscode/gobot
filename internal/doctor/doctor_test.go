@@ -420,6 +420,45 @@ func TestGetResults_GoogleOAuthSecretsIsNonCritical(t *testing.T) {
 	}
 }
 
+func TestGetResultsWithConfigDiagnostics_DeprecatedKeysAreNonCritical(t *testing.T) {
+	t.Parallel()
+
+	results := GetResultsWithConfigDiagnostics(doctorTestCfg(t), nil, []config.DeprecatedKeyDiagnostic{
+		{
+			Section:       "gateway",
+			DeprecatedKey: "auth_token",
+			CanonicalKey:  "authToken",
+		},
+		{
+			Section:       "logging",
+			DeprecatedKey: "max_size_mb",
+			CanonicalKey:  "maxSizeMB",
+			Ignored:       true,
+		},
+	})
+	for _, result := range results {
+		if result.Name != "deprecated config keys" {
+			continue
+		}
+		if result.OK {
+			t.Fatal("deprecated config keys should render as a warning")
+		}
+		if result.Critical {
+			t.Fatal("deprecated config keys must be non-critical")
+		}
+		for _, want := range []string{"2 deprecated config key(s)", "gateway.auth_token -> authToken", "logging.max_size_mb -> maxSizeMB", "ignored because canonical key was also present"} {
+			if !strings.Contains(result.Detail, want) {
+				t.Fatalf("detail missing %q: %s", want, result.Detail)
+			}
+		}
+		if !strings.Contains(result.Remediation, "gobot config reformat") {
+			t.Fatalf("remediation should point to config reformat, got %q", result.Remediation)
+		}
+		return
+	}
+	t.Fatal("deprecated config keys result not found")
+}
+
 func TestCheckTokenFile_Missing(t *testing.T) {
 	t.Parallel()
 	r := checkTokenFile("test token", filepath.Join(t.TempDir(), "nonexistent.json"))

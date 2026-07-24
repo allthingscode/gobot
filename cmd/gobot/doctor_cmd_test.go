@@ -15,14 +15,14 @@ func TestCmdDoctorNoInteractiveUsesLocalOnlyProbes(t *testing.T) {
 
 	cfg := &config.Config{}
 	var gotProbes *doctor.Probes
-	doctorCommandDeps.loadConfig = func() (*config.Config, error) {
-		return cfg, nil
+	doctorCommandDeps.loadConfig = func() (*config.Config, []config.DeprecatedKeyDiagnostic, error) {
+		return cfg, nil, nil
 	}
 	doctorCommandDeps.liveProbes = func() *doctor.Probes {
 		t.Fatal("live probes must not be created in no-interactive mode")
 		return nil
 	}
-	doctorCommandDeps.runDoctorDiagnostics = func(gotCfg *config.Config, probes *doctor.Probes) error {
+	doctorCommandDeps.runDoctorDiagnostics = func(gotCfg *config.Config, probes *doctor.Probes, _ []config.DeprecatedKeyDiagnostic) error {
 		if gotCfg != cfg {
 			t.Fatal("doctor received unexpected config")
 		}
@@ -45,13 +45,13 @@ func TestCmdDoctorDefaultUsesLiveProbes(t *testing.T) {
 
 	liveProbes := &doctor.Probes{}
 	var gotProbes *doctor.Probes
-	doctorCommandDeps.loadConfig = func() (*config.Config, error) {
-		return &config.Config{}, nil
+	doctorCommandDeps.loadConfig = func() (*config.Config, []config.DeprecatedKeyDiagnostic, error) {
+		return &config.Config{}, nil, nil
 	}
 	doctorCommandDeps.liveProbes = func() *doctor.Probes {
 		return liveProbes
 	}
-	doctorCommandDeps.runDoctorDiagnostics = func(_ *config.Config, probes *doctor.Probes) error {
+	doctorCommandDeps.runDoctorDiagnostics = func(_ *config.Config, probes *doctor.Probes, _ []config.DeprecatedKeyDiagnostic) error {
 		gotProbes = probes
 		return nil
 	}
@@ -68,13 +68,13 @@ func TestCmdDoctorDefaultUsesLiveProbes(t *testing.T) {
 func TestCmdDoctorWrapsRunnerError(t *testing.T) {
 	restoreDoctorCommandDeps(t)
 
-	doctorCommandDeps.loadConfig = func() (*config.Config, error) {
-		return &config.Config{}, nil
+	doctorCommandDeps.loadConfig = func() (*config.Config, []config.DeprecatedKeyDiagnostic, error) {
+		return &config.Config{}, nil, nil
 	}
 	doctorCommandDeps.liveProbes = func() *doctor.Probes {
 		return nil
 	}
-	doctorCommandDeps.runDoctorDiagnostics = func(_ *config.Config, _ *doctor.Probes) error {
+	doctorCommandDeps.runDoctorDiagnostics = func(_ *config.Config, _ *doctor.Probes, _ []config.DeprecatedKeyDiagnostic) error {
 		return errors.New("boom")
 	}
 
@@ -85,6 +85,32 @@ func TestCmdDoctorWrapsRunnerError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "run doctor: boom") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCmdDoctorPassesConfigDiagnostics(t *testing.T) {
+	restoreDoctorCommandDeps(t)
+
+	wantDiagnostics := []config.DeprecatedKeyDiagnostic{
+		{Section: "gateway", DeprecatedKey: "auth_token", CanonicalKey: "authToken", Ignored: true},
+	}
+	doctorCommandDeps.loadConfig = func() (*config.Config, []config.DeprecatedKeyDiagnostic, error) {
+		return &config.Config{}, wantDiagnostics, nil
+	}
+	doctorCommandDeps.liveProbes = func() *doctor.Probes {
+		return nil
+	}
+	doctorCommandDeps.runDoctorDiagnostics = func(_ *config.Config, _ *doctor.Probes, gotDiagnostics []config.DeprecatedKeyDiagnostic) error {
+		if len(gotDiagnostics) != len(wantDiagnostics) || gotDiagnostics[0] != wantDiagnostics[0] {
+			t.Fatalf("diagnostics = %+v, want %+v", gotDiagnostics, wantDiagnostics)
+		}
+		return nil
+	}
+
+	cmd := cmdDoctor()
+	cmd.SetArgs([]string{"--no-interactive"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("doctor --no-interactive returned error: %v", err)
 	}
 }
 
