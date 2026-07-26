@@ -51,6 +51,12 @@ func Load() (*Config, error) {
 	return LoadFrom(DefaultConfigPath())
 }
 
+// LoadWithDiagnostics reads and parses the config from the default path, returning
+// structured diagnostics for deprecated keys normalized during load.
+func LoadWithDiagnostics() (*Config, []DeprecatedKeyDiagnostic, error) {
+	return LoadFromWithDiagnostics(DefaultConfigPath())
+}
+
 // ExplainLoadError renders a config.Load/LoadFrom failure as an actionable
 // problem/fix/path block (F-144 AC3). decode wraps malformed JSON and unknown
 // fields as "config: invalid field or syntax: ..."; this turns that into a
@@ -72,23 +78,37 @@ func ExplainLoadError(err error) string {
 
 // LoadFrom reads and parses a config file, stripping a leading UTF-8 BOM if present.
 func LoadFrom(path string) (*Config, error) {
+	cfg, _, err := LoadFromWithDiagnostics(path)
+	return cfg, err
+}
+
+// LoadFromWithDiagnostics reads and parses a config file, stripping a leading UTF-8
+// BOM if present, and returns diagnostics for deprecated keys normalized during load.
+func LoadFromWithDiagnostics(path string) (*Config, []DeprecatedKeyDiagnostic, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Config{}, nil
+			return &Config{}, nil, nil
 		}
-		return nil, fmt.Errorf("open config %s: %w", path, err)
+		return nil, nil, fmt.Errorf("open config %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	return decode(f)
+	return decodeWithDiagnostics(f)
 }
 
 // decode strips an optional BOM then JSON-decodes the reader into Config.
 func decode(r io.Reader) (*Config, error) {
+	cfg, _, err := decodeWithDiagnostics(r)
+	return cfg, err
+}
+
+// decodeWithDiagnostics strips an optional BOM then JSON-decodes the reader into
+// Config, returning deprecated-key diagnostics collected during normalization.
+func decodeWithDiagnostics(r io.Reader) (*Config, []DeprecatedKeyDiagnostic, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
+		return nil, nil, fmt.Errorf("read config: %w", err)
 	}
 
 	// Strip UTF-8 BOM if present
@@ -99,16 +119,16 @@ func decode(r io.Reader) (*Config, error) {
 		data = data[3:]
 	}
 
-	data = normalizeLegacyKeys(data)
+	data, diagnostics := normalizeLegacyKeysWithDiagnostics(data)
 
 	var cfg Config
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("config: invalid field or syntax: %w", err)
+		return nil, nil, fmt.Errorf("config: invalid field or syntax: %w", err)
 	}
 	applyGatewayDefaults(&cfg)
-	return &cfg, nil
+	return &cfg, diagnostics, nil
 }
 
 // applyGatewayDefaults enforces local-safe binding defaults (F-139).

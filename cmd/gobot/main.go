@@ -26,12 +26,12 @@ var (
 
 //nolint:gochecknoglobals // Package-level hooks keep Cobra commands testable without live external probes.
 var doctorCommandDeps = struct {
-	loadConfig           func() (*config.Config, error)
-	runDoctorDiagnostics func(cfg *config.Config, probes *doctor.Probes) error
+	loadConfig           func() (*config.Config, []config.DeprecatedKeyDiagnostic, error)
+	runDoctorDiagnostics func(cfg *config.Config, probes *doctor.Probes, diagnostics []config.DeprecatedKeyDiagnostic) error
 	liveProbes           func() *doctor.Probes
 }{
-	loadConfig:           config.Load,
-	runDoctorDiagnostics: doctor.Run,
+	loadConfig:           config.LoadWithDiagnostics,
+	runDoctorDiagnostics: doctor.RunWithConfigDiagnostics,
 	liveProbes:           app.LiveProbes,
 }
 
@@ -185,7 +185,7 @@ func cmdDoctor() *cobra.Command {
 		Use:   "doctor",
 		Short: "Run system health checks and diagnostics",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := doctorCommandDeps.loadConfig()
+			cfg, diagnostics, err := doctorCommandDeps.loadConfig()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
@@ -193,7 +193,7 @@ func cmdDoctor() *cobra.Command {
 			if !noInteractive {
 				probes = doctorCommandDeps.liveProbes()
 			}
-			if err := doctorCommandDeps.runDoctorDiagnostics(cfg, probes); err != nil {
+			if err := doctorCommandDeps.runDoctorDiagnostics(cfg, probes, diagnostics); err != nil {
 				return fmt.Errorf("run doctor: %w", err)
 			}
 			return nil

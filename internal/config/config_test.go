@@ -1102,25 +1102,67 @@ func TestMarshal_EmitsCanonicalKeysOnly(t *testing.T) {
 }
 
 // AC3: when both the legacy and canonical keys are present, the canonical value wins and
-// exactly one WARN naming the deprecated key is logged.
+// a structured diagnostic records that the legacy value was ignored.
 //
 //nolint:paralleltest // mutates the global slog default to capture warnings
-func TestNormalizeLegacyKeys_BothPresent_CanonicalWinsWarnsOnce(t *testing.T) {
+func TestNormalizeLegacyKeys_BothPresent_CanonicalWinsWithDiagnostic(t *testing.T) {
 	var logBuf bytes.Buffer
 	oldDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
 	t.Cleanup(func() { slog.SetDefault(oldDefault) })
 
 	input := `{"gateway":{"auth_token":"legacy","authToken":"canonical"}}`
-	cfg, err := decode(bytes.NewReader([]byte(input)))
+	cfg, diagnostics, err := decodeWithDiagnostics(bytes.NewReader([]byte(input)))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if cfg.Gateway.AuthToken != "canonical" {
 		t.Errorf("canonical did not win: got %q", cfg.Gateway.AuthToken)
 	}
-	if got := strings.Count(logBuf.String(), "deprecated_key=auth_token"); got != 1 {
-		t.Errorf("expected exactly one warn for auth_token, got %d; log:\n%s", got, logBuf.String())
+	if len(diagnostics) != 1 {
+		t.Fatalf("expected one diagnostic, got %d: %+v", len(diagnostics), diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Section != "gateway" || got.DeprecatedKey != "auth_token" || got.CanonicalKey != "authToken" || !got.Ignored {
+		t.Fatalf("unexpected diagnostic: %+v", got)
+	}
+	if strings.Contains(logBuf.String(), "deprecated_key=auth_token") {
+		t.Fatalf("expected legacy migration to avoid global slog warning, got:\n%s", logBuf.String())
+	}
+}
+
+func TestLoadFromWithDiagnostics_ReportsUsedLegacyKeys(t *testing.T) {
+	t.Parallel()
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	content := `{
+	  "logging": {"max_size_mb": 50},
+	  "resilience": {"circuit_breakers": {"llm": {"max_failures": 7}}}
+	}`
+	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, diagnostics, err := LoadFromWithDiagnostics(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadFromWithDiagnostics: %v", err)
+	}
+	if cfg.Logging.MaxSizeMB != 50 {
+		t.Fatalf("legacy logging.max_size_mb was not loaded, got %d", cfg.Logging.MaxSizeMB)
+	}
+	if got := cfg.Resilience.CircuitBreakers["llm"].MaxFailures; got != 7 {
+		t.Fatalf("legacy max_failures was not loaded, got %d", got)
+	}
+	want := map[DeprecatedKeyDiagnostic]bool{
+		{Section: "logging", DeprecatedKey: "max_size_mb", CanonicalKey: "maxSizeMB"}:                           true,
+		{Section: "resilience", DeprecatedKey: "circuit_breakers", CanonicalKey: "circuitBreakers"}:             true,
+		{Section: "resilience.circuitBreakers.llm", DeprecatedKey: "max_failures", CanonicalKey: "maxFailures"}: true,
+	}
+	if len(diagnostics) != len(want) {
+		t.Fatalf("diagnostics = %+v, want %d entries", diagnostics, len(want))
+	}
+	for _, diagnostic := range diagnostics {
+		if !want[diagnostic] {
+			t.Fatalf("unexpected diagnostic: %+v in %+v", diagnostic, diagnostics)
+		}
 	}
 }
 

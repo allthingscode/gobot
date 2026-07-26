@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -40,9 +41,15 @@ type Result struct {
 // Run performs all health checks and prints a report. Returns non-nil if any check fails.
 // Pass probes as nil to skip live connectivity checks.
 func Run(cfg *config.Config, probes *Probes) error {
+	return RunWithConfigDiagnostics(cfg, probes, nil)
+}
+
+// RunWithConfigDiagnostics performs all health checks and includes config-loader
+// diagnostics in the printed report.
+func RunWithConfigDiagnostics(cfg *config.Config, probes *Probes, configDiagnostics []config.DeprecatedKeyDiagnostic) error {
 	start := time.Now()
 
-	results := GetResults(cfg, probes)
+	results := GetResultsWithConfigDiagnostics(cfg, probes, configDiagnostics)
 
 	anyCriticalFail := printReport(results)
 
@@ -93,6 +100,12 @@ func geminiLiveChecks(key string, probe func(string) error, r func(Result, bool)
 // GetResults performs all health checks and returns the results.
 // Pass probes as nil to skip live connectivity checks.
 func GetResults(cfg *config.Config, probes *Probes) []Result {
+	return GetResultsWithConfigDiagnostics(cfg, probes, nil)
+}
+
+// GetResultsWithConfigDiagnostics performs all health checks and returns the results,
+// including advisory diagnostics collected while loading config.
+func GetResultsWithConfigDiagnostics(cfg *config.Config, probes *Probes, configDiagnostics []config.DeprecatedKeyDiagnostic) []Result {
 	var p Probes
 	if probes != nil {
 		p = *probes
@@ -137,6 +150,9 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 		r(checkCron(cfg), false),
 		r(checkStorageSizes(cfg), false),
 	}
+	if result, ok := checkDeprecatedConfigKeys(configDiagnostics); ok {
+		checks = append(checks, r(result, false))
+	}
 
 	// Only probe Gemini live if Gemini is actually configured.
 	checks = append(checks, geminiLiveChecks(geminiKey, p.ProbeGemini, r)...)
@@ -151,6 +167,36 @@ func GetResults(cfg *config.Config, probes *Probes) []Result {
 	}
 
 	return checks
+}
+
+func checkDeprecatedConfigKeys(diagnostics []config.DeprecatedKeyDiagnostic) (Result, bool) {
+	if len(diagnostics) == 0 {
+		return Result{}, false
+	}
+	keys := make([]string, 0, len(diagnostics))
+	ignored := 0
+	for _, d := range diagnostics {
+		section := d.Section
+		if section == "" {
+			section = "root"
+		}
+		status := "used"
+		if d.Ignored {
+			status = "ignored"
+			ignored++
+		}
+		keys = append(keys, fmt.Sprintf("%s.%s -> %s (%s)", section, d.DeprecatedKey, d.CanonicalKey, status))
+	}
+	detail := fmt.Sprintf("%d deprecated config key(s): %s", len(diagnostics), strings.Join(keys, ", "))
+	if ignored > 0 {
+		detail += fmt.Sprintf("; %d ignored because canonical key was also present", ignored)
+	}
+	return Result{
+		Name:        "deprecated config keys",
+		OK:          false,
+		Detail:      detail,
+		Remediation: "Run `gobot config reformat` to rewrite config.json with canonical keys.",
+	}, true
 }
 
 // getResilienceResults handles registration and health checks for circuit breakers.
