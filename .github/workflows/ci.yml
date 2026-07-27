@@ -32,7 +32,7 @@ jobs:
             -   name: Install govulncheck
                 run: go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
             -   name: Run govulncheck
-                run: govulncheck ./...
+                run: GOFLAGS="-mod=readonly" govulncheck ./internal/... ./cmd/...
  
     version-check:
         runs-on: ubuntu-latest

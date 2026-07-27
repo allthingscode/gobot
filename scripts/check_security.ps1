@@ -29,9 +29,17 @@ if (-not (Get-Command govulncheck -ErrorAction SilentlyContinue)) {
 
 # Run govulncheck with package scopes that work with this repository layout.
 # Avoid bare ./... from repo root due known package-pattern failures in scripts/.
-govulncheck ./internal/... ./cmd/...
+$oldGOFLAGS = $env:GOFLAGS
+$exitCode = 0
+try {
+    $env:GOFLAGS = (($oldGOFLAGS, "-mod=readonly") | Where-Object { $_ }) -join " "
+    govulncheck ./internal/... ./cmd/...
+    $exitCode = $LASTEXITCODE
+} finally {
+    $env:GOFLAGS = $oldGOFLAGS
+}
 
-if ($LASTEXITCODE -ne 0) {
+if ($exitCode -ne 0) {
     Write-Host "`nSECURITY: Reachable vulnerabilities detected. Fix before pushing." -ForegroundColor Red
     exit 1
 }

@@ -28,7 +28,7 @@ if command -v powershell.exe > /dev/null 2>&1; then
 else
     # Fallback for Linux/macOS if govulncheck is installed
     if command -v govulncheck > /dev/null 2>&1; then
-        govulncheck ./internal/... ./cmd/...
+        GOFLAGS="${GOFLAGS:+$GOFLAGS }-mod=readonly" govulncheck ./internal/... ./cmd/...
     else
         echo "WARN: govulncheck not found; skipping local security scan (CI will enforce)"
     fi
