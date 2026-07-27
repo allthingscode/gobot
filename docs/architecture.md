@@ -109,6 +109,11 @@ This document provides a deep dive into gobot's architecture, covering data flow
 
 **Impact:** gobot compiles to a single binary that runs on any platform without external C dependencies.
 
+**Verification impact:** The no-CGO product build does not remove race testing
+from the project. GitHub Actions remains the required CGO-capable race-detector
+lane, while Windows no-CGO agents use the scoped non-race verification commands
+documented in [Verification](verification.md).
+
 ---
 
 ### 2. WAL SQLite for Durability

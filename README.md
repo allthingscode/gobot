@@ -206,6 +206,7 @@ manual steps below.
 - [Security & Secrets](docs/security.md) — philosophy, secrets management, and encryption model
 - [Configuration Reference](docs/configuration.md) — all config fields with defaults and examples
 - [Locking Strategy](docs/locking-strategy.md) — session-scoped locking design and rationale
+- [Verification](docs/verification.md) - local no-CGO checks and CI race-detector expectations
 
 
 ## Contributing
@@ -226,6 +227,10 @@ $coverageText = $coverage.ToString("F1")
 Write-Host ("Total coverage: {0}%" -f $coverageText)
 if ($coverage -lt 80.0) { Write-Host ("Coverage {0}% is below 80.0% threshold" -f $coverageText); exit 1 }
 ```
+
+### Race Detector
+
+CI remains the required race-detector lane and runs `go test -race -mod=readonly ./...` on CGO-capable GitHub-hosted runners. Windows agents running with `CGO_ENABLED=0` should use the scoped non-race local verification path documented in [Verification](docs/verification.md); the pre-push hook warns when the race detector is unavailable for CGO reasons, then still fails on ordinary scoped test failures.
 
 ## What You Can Do With gobot
 
