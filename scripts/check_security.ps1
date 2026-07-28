@@ -21,7 +21,7 @@ if (-not (Get-Command govulncheck -ErrorAction SilentlyContinue)) {
         $env:PATH += ";$gopath\bin"
     } else {
         Write-Host "govulncheck not found. Installing..." -ForegroundColor Yellow
-        go install golang.org/x/vuln/cmd/govulncheck@latest
+        go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
         # Ensure it's in the PATH for this session
         $env:PATH += ";$gopath\bin"
     }
