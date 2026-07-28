@@ -10,7 +10,7 @@
 
 ## What Is This Space?
 
-[OpenClaw](https://github.com/openclaw/openclaw) is the canonical self-hosted AI personal assistant — a TypeScript bot that connects your messaging app to LLMs, tools, and memory. It has 347k+ stars and inspired a wave of Go and Rust reimplementations that trade OpenClaw's extensibility for a smaller binary, simpler deployment, or a tighter feature focus.
+[OpenClaw](https://github.com/openclaw/openclaw) is the canonical self-hosted AI personal assistant — a TypeScript bot that connects your messaging app to LLMs, tools, and memory. Its large GitHub community inspired a wave of Go and Rust reimplementations that trade OpenClaw's extensibility for a smaller binary, simpler deployment, or a tighter feature focus.
 
 gobot is one of those reimplementations. It is a **single-user, self-hosted AI assistant** built on Telegram, written in pure Go, with no external database dependencies. If you already know you want a Go-native OpenClaw alternative, the comparison tables below will help you pick the right one.
 
