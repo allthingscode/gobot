@@ -3,6 +3,7 @@ package context
 
 import (
 	stdctx "context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,6 +48,25 @@ func TestOpenDB(t *testing.T) { //nolint:paralleltest // modifies global environ
 		}
 		_ = db.Close()
 	})
+
+}
+
+func TestOpenDBFailsWhenWorkspaceParentIsFile(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	blocker := filepath.Join(tmpDir, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	db, err := openDB(blocker)
+	if err == nil {
+		if db != nil {
+			_ = db.Close()
+		}
+		t.Fatal("expected workspace mkdir error")
+	}
 }
 
 func TestInitSchema(t *testing.T) { //nolint:paralleltest // modifies global environment
@@ -86,4 +106,39 @@ func TestInitSchema(t *testing.T) { //nolint:paralleltest // modifies global env
 			t.Errorf("second initSchema failed: %v", err)
 		}
 	})
+}
+
+func TestAddTokenColumnsIfMissingAddsLegacyColumns(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "legacy.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(stdctx.Background(), `
+		CREATE TABLE threads (
+			thread_id TEXT PRIMARY KEY,
+			status TEXT DEFAULT 'active'
+		)
+	`); err != nil {
+		t.Fatalf("create legacy threads table: %v", err)
+	}
+
+	if err := addTokenColumnsIfMissing(db); err != nil {
+		t.Fatalf("addTokenColumnsIfMissing first call: %v", err)
+	}
+	if err := addTokenColumnsIfMissing(db); err != nil {
+		t.Fatalf("addTokenColumnsIfMissing second call: %v", err)
+	}
+	for _, col := range []string{"estimated_tokens", "last_compacted_at"} {
+		ok, err := hasColumn(db, col)
+		if err != nil {
+			t.Fatalf("hasColumn %s: %v", col, err)
+		}
+		if !ok {
+			t.Fatalf("expected column %s to exist", col)
+		}
+	}
 }

@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/secrets"
+	"github.com/spf13/cobra"
 )
 
 func setupTestHome(t *testing.T) string {
@@ -314,6 +316,90 @@ func TestCmdTasksRequireOAuthToken(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "google_token.json not found") {
 				t.Fatalf("expected deterministic auth error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestGoogleCommandArgumentValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		args []string
+		want string
+	}{
+		{name: "email requires subject and body", cmd: cmdEmail(), want: "accepts 2 arg"},
+		{name: "tasks add requires title", cmd: cmdTasks(), args: []string{"add"}, want: "requires at least 1 arg"},
+		{name: "authorize requires one arg", cmd: cmdAuthorize(), want: "accepts 1 arg"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.cmd.SetArgs(tc.args)
+			err := tc.cmd.Execute()
+			if err == nil {
+				t.Fatal("expected argument validation error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+//nolint:paralleltest // uses global env/config and cached checkpoint handles
+func TestCmdAuthorizeRejectsInvalidPairingOrChatID(t *testing.T) {
+	tempDir := setupTestHome(t)
+	writeTestConfig(t, tempDir)
+
+	cmd := cmdAuthorize()
+	cmd.SetArgs([]string{"not-a-code"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected invalid authorization argument error")
+	}
+	if !strings.Contains(err.Error(), "not a valid pairing code or numeric chat ID") {
+		t.Fatalf("expected invalid pairing/chat ID error, got %v", err)
+	}
+	agentctx.EvictCheckpointManagerForTest(tempDir)
+}
+
+//nolint:paralleltest // mutates global config environment
+func TestGoogleCommandsWrapConfigLoadErrors(t *testing.T) {
+	tempDir := setupTestHome(t)
+	configPath := filepath.Join(tempDir, ".gobot", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("{bad json"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		args []string
+		want string
+	}{
+		{name: "reauth", cmd: cmdReauth(), want: "config:"},
+		{name: "email", cmd: cmdEmail(), args: []string{"subject", "body"}, want: "config:"},
+		{name: "calendar", cmd: cmdCalendar(), want: "config:"},
+		{name: "tasks list", cmd: cmdTasks(), args: []string{"list"}, want: "config:"},
+		{name: "tasks add", cmd: cmdTasks(), args: []string{"add", "title"}, want: "config:"},
+		{name: "authorize", cmd: cmdAuthorize(), args: []string{"123"}, want: "config:"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.cmd.SetArgs(tc.args)
+			err := tc.cmd.Execute()
+			if err == nil {
+				t.Fatal("expected config load error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q in error, got %v", tc.want, err)
 			}
 		})
 	}
