@@ -9,12 +9,13 @@ GitHub Actions is the authoritative race-detector lane. The CI test job must
 continue to run:
 
 ```bash
-go test -race -mod=readonly ./...
+go test -race -mod=readonly ./internal/... ./cmd/...
 ```
 
 That job runs on GitHub-hosted runners with the CGO and compiler support needed
-by the Go race detector. A race-test failure in CI is a real verification
-failure and should be fixed before deployment.
+by the Go race detector. It uses the same scoped first-party package set as
+local verification and the pre-push hook. A race-test failure in CI is a real
+verification failure and should be fixed before deployment.
 
 ## Local No-CGO Lane
 
