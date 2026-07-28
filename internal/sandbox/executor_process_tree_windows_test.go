@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -146,13 +147,44 @@ func runTreeParentHelper(args []string) {
 		os.Exit(2)
 	}
 
-	if err := os.WriteFile(args[0], []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil { //nolint:gosec // test-controlled temp file path passed by parent test
+	if err := writeHelperPIDFile(args[0], cmd.Process.Pid); err != nil {
 		_ = cmd.Process.Kill()
 		fmt.Fprintf(os.Stderr, "write pid file: %v\n", err)
 		os.Exit(2)
 	}
 
 	sleepForever()
+}
+
+func writeHelperPIDFile(pidFile string, pid int) error {
+	dir := filepath.Dir(pidFile)
+	tmp, err := os.CreateTemp(dir, ".grandchild-*.pid")
+	if err != nil {
+		return fmt.Errorf("create temp PID file: %w", err)
+	}
+	tmpName := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.WriteString(strconv.Itoa(pid)); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp PID file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp PID file: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fmt.Errorf("chmod temp PID file: %w", err)
+	}
+	if err := os.Rename(tmpName, pidFile); err != nil {
+		return fmt.Errorf("rename temp PID file: %w", err)
+	}
+	removeTmp = false
+	return nil
 }
 
 func runMemoryHelper() {
@@ -182,23 +214,37 @@ func waitForHelperPID(t *testing.T, pidFile string) uint32 {
 	t.Helper()
 
 	deadline := time.Now().Add(5 * time.Second)
+	var lastRead string
+	var lastParseErr error
 	for time.Now().Before(deadline) {
 		raw, err := os.ReadFile(pidFile)
 		if err == nil {
-			pid, parseErr := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 32)
-			if parseErr != nil {
-				t.Fatalf("parse helper PID %q: %v", string(raw), parseErr)
+			lastRead = string(raw)
+			pidText := strings.TrimSpace(lastRead)
+			if pidText != "" {
+				pid, parseErr := strconv.ParseUint(pidText, 10, 32)
+				if parseErr == nil {
+					return uint32(pid)
+				}
+				lastParseErr = parseErr
 			}
-			return uint32(pid)
-		}
-		if !errors.Is(err, os.ErrNotExist) {
+		} else if !isPendingHelperPIDRead(err) {
 			t.Fatalf("read helper PID file: %v", err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 
+	if lastParseErr != nil {
+		t.Fatalf("helper did not report parseable grandchild PID before deadline; last read %q: %v", lastRead, lastParseErr)
+	}
 	t.Fatalf("helper did not report grandchild PID before deadline")
 	return 0
+}
+
+func isPendingHelperPIDRead(err error) bool {
+	return errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
+		errors.Is(err, windows.ERROR_LOCK_VIOLATION)
 }
 
 func waitForProcessExit(t *testing.T, pid uint32, timeout time.Duration) {
