@@ -41,7 +41,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 
 | | **gobot** | **GoGogot** | **NeoClaw** | **PicoClaw** |
 |---|---|---|---|---|
-| **GitHub Stars** | pre-release | ~115 | — | 12,000+ |
+| **GitHub Community** | pre-release | established niche project | — | large established project |
 | **Storage** | SQLite + chromem-go | In-process notes | SQLite | Not specified |
 | **CGO** | None | None | None | None |
 | **LLM providers** | 4 | 6+ | 4 | MCP |
@@ -71,7 +71,7 @@ gobot is one of those reimplementations. It is a **single-user, self-hosted AI a
 - **Ultra-low footprint** — runs with <10MB RAM and starts up in under 1 second
 - **Broad channel support** — 16+ messaging channels (Slack, Discord, Telegram, etc.) out of the box
 - **Model Context Protocol (MCP)** — native support for the MCP tool ecosystem
-- **A massive community** — over 12,000 stars on GitHub
+- **A large established community** — broad adoption in the Go assistant ecosystem
 
 #### gobot is the better choice if you need:
 - **Deep Google Workspace Integration** — Gmail, Calendar, and Tasks are deeply integrated as first-class tools with automated OAuth flows
