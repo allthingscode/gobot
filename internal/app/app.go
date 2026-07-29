@@ -74,7 +74,7 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 
 func validateRunPrerequisites(cfg *config.Config) error {
 	if cfg.Channels.Telegram.Enabled && cfg.TelegramToken() == "" {
-		return fmt.Errorf("TELEGRAM_APITOKEN must be set")
+		return fmt.Errorf("TELEGRAM_BOT_TOKEN must be set")
 	}
 	return nil
 }
