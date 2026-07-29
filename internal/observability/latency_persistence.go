@@ -5,49 +5,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/allthingscode/gobot/internal/state"
 )
 
 const LatencySnapshotVersion = 1
 
 // WriteLatencySnapshot persists the compact latency snapshot under workspace.
 func WriteLatencySnapshot(storageRoot string, snapshot LatencySnapshot) error {
+	return writeLatencySnapshot(storageRoot, snapshot, state.WriteFileJSON)
+}
+
+func writeLatencySnapshot(storageRoot string, snapshot LatencySnapshot, writeJSON func(string, any, os.FileMode) error) error {
 	path := LatencySnapshotPath(storageRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create latency snapshot directory: %w", err)
 	}
-
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal latency snapshot: %w", err)
+	if err := writeJSON(path, snapshot, 0o600); err != nil {
+		return fmt.Errorf("write latency snapshot: %w", err)
 	}
-	data = append(data, '\n')
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".latency-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create latency snapshot temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write latency snapshot temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close latency snapshot temp file: %w", err)
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove previous latency snapshot: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replace latency snapshot: %w", err)
-	}
-	cleanup = false
 	return nil
 }
 
