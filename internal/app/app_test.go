@@ -59,8 +59,8 @@ func TestSetupLogging(t *testing.T) {
 }
 
 func TestValidateRunPrerequisites(t *testing.T) {
-	t.Parallel()
 	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
 
 	// Case 1: Telegram disabled, no token needed
 	cfg.Channels.Telegram.Enabled = false
@@ -70,8 +70,18 @@ func TestValidateRunPrerequisites(t *testing.T) {
 
 	// Case 2: Telegram enabled, no token -> error
 	cfg.Channels.Telegram.Enabled = true
-	if err := validateRunPrerequisites(cfg); err == nil {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	err := validateRunPrerequisites(cfg)
+	if err == nil {
 		t.Error("expected error for missing token")
+	} else {
+		errText := err.Error()
+		if !strings.Contains(errText, "TELEGRAM_BOT_TOKEN") {
+			t.Errorf("expected error to mention TELEGRAM_BOT_TOKEN, got %q", errText)
+		}
+		if strings.Contains(errText, "TELEGRAM_APITOKEN") {
+			t.Errorf("expected error not to mention TELEGRAM_APITOKEN, got %q", errText)
+		}
 	}
 
 	// Case 3: Telegram enabled, token set -> ok
