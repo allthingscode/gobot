@@ -230,7 +230,7 @@ if ($coverage -lt 80.0) { Write-Host ("Coverage {0}% is below 80.0% threshold" -
 
 ### Race Detector
 
-CI remains the required race-detector lane and runs `go test -race -mod=readonly ./...` on CGO-capable GitHub-hosted runners. Windows agents running with `CGO_ENABLED=0` should use the scoped non-race local verification path documented in [Verification](docs/verification.md); the pre-push hook warns when the race detector is unavailable for CGO reasons, then still fails on ordinary scoped test failures.
+CI remains the required race-detector lane and runs `go test -race -mod=readonly ./internal/... ./cmd/...` on CGO-capable GitHub-hosted runners. Windows agents running with `CGO_ENABLED=0` should use the scoped non-race local verification path documented in [Verification](docs/verification.md); the pre-push hook warns when the race detector is unavailable for CGO reasons, then still fails on ordinary scoped test failures.
 
 ## What You Can Do With gobot
 
