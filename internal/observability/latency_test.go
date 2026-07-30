@@ -159,10 +159,59 @@ func TestLatencySnapshotPersistence(t *testing.T) {
 	if _, err := os.Stat(LatencySnapshotPath(root)); err != nil {
 		t.Fatalf("stat latency snapshot: %v", err)
 	}
+	data, err := os.ReadFile(LatencySnapshotPath(root))
+	if err != nil {
+		t.Fatalf("read latency snapshot bytes: %v", err)
+	}
+	if !bytes.HasSuffix(data, []byte("\n")) {
+		t.Fatalf("latency snapshot missing trailing newline: %q", data)
+	}
+	if !bytes.Contains(data, []byte("\n  \"version\": ")) {
+		t.Fatalf("latency snapshot is not indented JSON: %q", data)
+	}
 
 	snapshot, err := ReadLatencySnapshot(root)
 	if err != nil {
 		t.Fatalf("ReadLatencySnapshot: %v", err)
+	}
+	assertPercentiles(t, metricByName(t, snapshot, LatencyMetricAgentDispatch), 1, 123, 123)
+}
+
+func TestWriteLatencySnapshot_FailedReplacementKeepsPreviousSnapshot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	recorder := NewLatencyRecorder(5)
+	recorder.recordAt(LatencyMetricAgentDispatch, 123*time.Millisecond, time.Now())
+
+	if err := WriteLatencySnapshot(root, recorder.Snapshot()); err != nil {
+		t.Fatalf("WriteLatencySnapshot initial: %v", err)
+	}
+	path := LatencySnapshotPath(root)
+	wantBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read initial latency snapshot: %v", err)
+	}
+
+	wantErr := errors.New("injected replacement failure")
+	failWrite := func(string, any, os.FileMode) error {
+		return wantErr
+	}
+
+	recorder.recordAt(LatencyMetricToolExecute, 456*time.Millisecond, time.Now())
+	if err := writeLatencySnapshot(root, recorder.Snapshot(), failWrite); !errors.Is(err, wantErr) {
+		t.Fatalf("WriteLatencySnapshot replacement error = %v, want %v", err, wantErr)
+	}
+
+	gotBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read preserved latency snapshot: %v", err)
+	}
+	if !bytes.Equal(gotBytes, wantBytes) {
+		t.Fatalf("latency snapshot changed after failed replacement:\ngot  %q\nwant %q", gotBytes, wantBytes)
+	}
+	snapshot, err := ReadLatencySnapshot(root)
+	if err != nil {
+		t.Fatalf("ReadLatencySnapshot preserved snapshot: %v", err)
 	}
 	assertPercentiles(t, metricByName(t, snapshot, LatencyMetricAgentDispatch), 1, 123, 123)
 }
