@@ -204,6 +204,11 @@ function Get-BacklogItemPathForTask {
         if ($null -ne $rootMatch) {
             return $rootMatch.FullName
         }
+
+        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($Task + "_*.md") -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $archivedMatch) {
+            return $archivedMatch.FullName
+        }
     }
 
     return ""
@@ -298,6 +303,12 @@ if (-not (Test-Path -LiteralPath $worktreePath)) {
 }
 . $worktreePath
 
+$pipelineDagPath = Join-Path $PSScriptRoot "lib/pipeline-dag.ps1"
+if (-not (Test-Path -LiteralPath $pipelineDagPath)) {
+    throw "Required helper script not found at $pipelineDagPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $pipelineDagPath
+
 $factoryGatesPath = Join-Path $PSScriptRoot "lib/factory-gates.ps1"
 if (-not (Test-Path -LiteralPath $factoryGatesPath)) {
     throw "Required helper script not found at $factoryGatesPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
@@ -342,4 +353,3 @@ function ConvertTo-AsciiSafeText {
     }
     return $sb.ToString()
 }
-

@@ -109,6 +109,8 @@ This is not a formality. The human is the Pilot in Command. Every dispatch is a 
 
 ### Step 4 — Spawn the specialist
 
+**Pre-spawn tree check.** Run `git status` before spawning. The working tree must match what you expect. If it holds changes you did not author or authorize, STOP: do not dispatch onto an unknown tree, and do not later commit that work as if it were the specialist's. Establish provenance first (ask the human; inspect diffs and mtimes), because unexpected changes may embed decisions that are the human's to make.
+
 Use the sub-agent invocation mechanic for your environment (see tool-specific doc). The sub-agent receives:
 1. The content of `prompt.md`
 2. The checkpoint mandate:
@@ -133,6 +135,9 @@ After the sub-agent returns:
    A `STATUS=LAUNCH_FAILED` is an infrastructure failure (broken runtime/auth) — treat it as a Failure
    Protocol case (fix runtime, re-preflight, re-dispatch, or fall back to a Claude specialist). **Never**
    record a launch failure as a review `CHANGES_REQUESTED` or any other specialist verdict.
+   **Provenance, not presence:** a change already sitting in the working tree is not proof it was
+   blessed. Verify who authored it before trusting or committing it, because unexpected changes may
+   embed decisions that are the human's to make. This is verdict-not-label applied to the repo.
 1. Read `.crucible/session/{task_id}/{role}/task.md`
 2. Confirm `### CHECKPOINT` markers exist (required for non-trivial work)
 3. Confirm no required `- [ ]` items remain unchecked

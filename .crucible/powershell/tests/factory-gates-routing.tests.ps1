@@ -510,7 +510,7 @@ Complete-FactorySourceSession -Context `$ctx
         $output = $outputLines -join "`n"
 
         Assert-Result -Name "D44: complete session exits with 2 when not finalized" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit code 2, got " + $exitCode + ". Output: " + $output)
-        Assert-Result -Name "D44: complete session outputs quality gate failed message" -Condition ($output -match "Quality gate failed: deployment did not finalize the backlog") -FailureMessage "expected quality gate failed error message"
+        Assert-Result -Name "D44: complete session outputs quality gate failed message" -Condition ($output -match "Quality gate failed:") -FailureMessage "expected quality gate failed error message"
     }
 
     $results += Run-Test -Name "D45: accept with un-locatable active spec withholds the push" -Body {

@@ -5,7 +5,8 @@ param(
     [string]$CrucibleRoot = "",
     [int]$NoRunsGraceMinutes = 2,
     [int]$QueuedGraceMinutes = 15,
-    [int]$PollSeconds = 10
+    [int]$PollSeconds = 10,
+    [string]$RequiredJobs = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -217,6 +218,42 @@ while ($true) {
             Write-Host "  failed jobs:"
             Write-FailedJobs -Runs $lastRuns -RepoSlug $Repo
             exit 1
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($RequiredJobs)) {
+            $requiredList = @($RequiredJobs.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+            if ($requiredList.Count -gt 0) {
+                $observedJobs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                foreach ($run in $lastRuns) {
+                    $args = @("run", "view", ([string]$run.databaseId), "--json", "jobs")
+                    if (-not [string]::IsNullOrWhiteSpace($Repo)) {
+                        $args += @("-R", $Repo)
+                    }
+                    $view = Invoke-GhJson -Arguments $args
+                    if ($view.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($view.Output)) {
+                        try {
+                            $details = $view.Output | ConvertFrom-Json
+                            foreach ($job in @($details.jobs)) {
+                                if (-not [string]::IsNullOrWhiteSpace($job.name)) {
+                                    [void]$observedJobs.Add(([string]$job.name).Trim())
+                                }
+                            }
+                        } catch {}
+                    }
+                }
+                $missingRequired = @()
+                foreach ($req in $requiredList) {
+                    if (-not $observedJobs.Contains($req)) {
+                        $missingRequired += $req
+                    }
+                }
+                if ($missingRequired.Count -gt 0) {
+                    Write-Host "[CI WATCH] STATUS=MISSING_REQUIRED_JOBS"
+                    Write-Host ("  commit: " + $Commit)
+                    Write-Host ("  missing required jobs: " + ($missingRequired -join ", "))
+                    exit 5
+                }
+            }
         }
 
         Write-Host "[CI WATCH] STATUS=GREEN"

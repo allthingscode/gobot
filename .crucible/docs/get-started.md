@@ -32,11 +32,32 @@ cd crucible
 This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md.
 
 ### Run the sample task
+Commit the scaffold first so the factory does not flag the new instruction files as untracked:
+
+```powershell
+git add .crucible AGENTS.md CLAUDE.md GEMINI.md
+git commit -m "Add Crucible scaffold"
+```
+
 ```powershell
 cd <your-project-path>
 ./.crucible/powershell/factory.ps1 -Init -TaskId F-001
 ```
 Follow the prompts. The factory will scaffold a Groomer session and tell you the next agent command.
+
+Expected output excerpt:
+
+```
+[INIT] No handoff found for task F-001; auto-bootstrapped initial handoff from deployment to grooming at <abs path>/.crucible/session/handoffs/F-001-...
+...
+[CI] status unavailable (no GitHub remote, or gh could not reach the repo) - skipping
+[NEXT SESSION COMMAND] Run the following command:
+
+agent "Groomer: F-001 - read and follow all instructions in <abs path>/.crucible/session/F-001/grooming/prompt.md"
+[RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
+```
+
+The factory also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
 
 ---
 
@@ -49,7 +70,9 @@ Follow the prompts. The factory will scaffold a Groomer session and tell you the
 
 ---
 
-## Step 1 — Initialize Crucible in your project
+## Step 1 - Initialize Crucible in your project
+
+This section authors a second task by hand; if you ran the Quickstart above you already have F-001 - use F-002 here.
 
 From the Crucible framework directory, run:
 
@@ -61,21 +84,28 @@ This installs a complete, self-contained `.crucible/` bundle into your project. 
 
 ```
 my-api/
-├── .crucible/
-│   ├── config.yaml          ← edit this next
-│   ├── .gitignore           ← commit this; it separates durable intent from runtime state
-│   ├── backlog/
-│   │   ├── BACKLOG.md       ← master task index
-│   │   ├── features/        ← feature specs go here
-│   │   ├── bugs/            ← bug specs go here
-│   │   └── chores/          ← chore specs go here
-│   └── README.md
-└── <your source code>
+|-- .crucible/
+|   |-- config.yaml          # edit this next
+|   |-- .gitignore           # commit this; it separates durable intent from runtime state
+|   |-- backlog/
+|   |   |-- BACKLOG.md       # master task index
+|   |   |-- features/        # feature specs go here
+|   |   |-- bugs/            # bug specs go here
+|   |   `-- chores/          # chore specs go here
+|   `-- README.md
+`-- <your source code>
+```
+
+Commit the scaffold before running the factory:
+
+```powershell
+git add .crucible
+git commit -m "Add Crucible scaffold"
 ```
 
 ---
 
-## Step 2 — Configure for your project
+## Step 2 - Configure for your project
 
 Open `.crucible/config.yaml` and replace the placeholder commands:
 
@@ -114,13 +144,13 @@ A passing run confirms no placeholder commands remain.
 
 ---
 
-## Step 3 — Create your first backlog item
+## Step 3 - Create your backlog item
 
-Create `.crucible/backlog/features/F-001_Add_Health_Endpoint.md`:
+Create `.crucible/backlog/features/active/F-002_Add_Health_Endpoint.md`:
 
 ```markdown
 ---
-item_id: F-001
+item_id: F-002
 title: Add Health Endpoint
 status: Ready
 priority: P1
@@ -149,49 +179,49 @@ Add it to `.crucible/backlog/BACKLOG.md`:
 ```markdown
 | ID    | Title                  | Status | Priority | Specialist |
 |-------|------------------------|--------|----------|------------|
-| F-001 | Add Health Endpoint    | Ready  | P1       | Groomer    |
+| F-002 | Add Health Endpoint    | Ready  | P1       | Groomer    |
 ```
 
 ---
 
-## Step 4 — Run the factory for the first time
+## Step 4 - Run the factory for the task
 
 From your project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory.ps1" -Init -TaskId F-001
+./.crucible/powershell/factory.ps1 -Init -TaskId F-002
 ```
-*(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
+*(Linux/macOS: prefix the script path with `pwsh`.)*
 
-Expected output:
+Expected output excerpt:
 
 ```
-[FACTORY] Validating environment...
-[FACTORY] No incoming handoff found for F-001. Bootstrapping Groomer session.
-[FACTORY] Scaffolded: .crucible/session/F-001/grooming/task.md
-[FACTORY] Scaffolded: .crucible/session/F-001/grooming/prompt.md
+[INIT] No handoff found for task F-002; auto-bootstrapped initial handoff from deployment to grooming at <abs path>/.crucible/session/handoffs/F-002-...
+...
+[CI] status unavailable (no GitHub remote, or gh could not reach the repo) - skipping
+[NEXT SESSION COMMAND] Run the following command:
 
-[NEXT SESSION COMMAND]
-Start a Groomer agent session. Tell it:
-  Groomer: F-001 — read and follow all instructions in .crucible/session/F-001/grooming/prompt.md
-  Recommended model: fast/cost-effective
+agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/grooming/prompt.md"
+[RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
 ```
+
+The factory also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
 
 ---
 
-## Step 5 — Run the Groomer
+## Step 5 - Run the Groomer
 
 Open an AI agent session (Claude Code, Gemini CLI, Codex, etc.) in your project directory. Paste the command the factory produced:
 
 ```
-Groomer: F-001 — read and follow all instructions in .crucible/session/F-001/grooming/prompt.md
+agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/grooming/prompt.md"
 ```
 
 The Groomer will:
 1. Read your backlog item and config
 2. Write a detailed technical spec with implementation strategy and file scope
-3. Write `.crucible/session/handoffs/F-001-{timestamp}.json`
-4. Run `factory.ps1 -Init -TaskId F-001`
+3. Write `.crucible/session/handoffs/F-002-{timestamp}.json`
+4. Run `factory.ps1 -Init -TaskId F-002`
 5. Present the factory output to you
 
 You'll see something like:
@@ -199,31 +229,31 @@ You'll see something like:
 ```
 ### GROOMER TASK COMPLETE
 
-- Item: F-001 - Add Health Endpoint
+- Item: F-002 - Add Health Endpoint
 - Status: Ready for Implementation
-- Artifacts: .crucible/backlog/features/F-001_Add_Health_Endpoint.md (updated)
-- Next Priority: F-001 → Architect
+- Artifacts: .crucible/backlog/features/active/F-002_Add_Health_Endpoint.md (updated)
+- Next Priority: F-002 -> Architect
 
 [NEXT SESSION COMMAND]
-Architect: F-001 — read and follow all instructions in .crucible/session/F-001/architect/prompt.md
-Recommended model: high-capability
+agent "Architect: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/implementation/prompt.md"
+[RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
 ```
 
 Confirm with "go" (or "go" in a new session if you prefer a fresh context).
 
 ---
 
-## Step 6 — Run the Architect
+## Step 6 - Run the Architect
 
 Paste the command in an agent session:
 
 ```
-Architect: F-001 — read and follow all instructions in .crucible/session/F-001/architect/prompt.md
+agent "Architect: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/implementation/prompt.md"
 ```
 
 The Architect will:
 1. Read the Groomer's spec
-2. Implement the code inside an isolated git worktree at `.crucible/.agent-workspaces/architect-F-001/`
+2. Implement the code inside an isolated git worktree at `.crucible/.agent-workspaces/implementation-F-002/`
 3. Run your verification commands (`npm test`, etc.) inside the worktree
 4. Commit the changes inside the worktree
 5. Write the handoff and run the factory
@@ -232,7 +262,7 @@ You confirm, then run the Reviewer.
 
 ---
 
-## Step 7 — Reviewer and Operator
+## Step 7 - Reviewer and Operator
 
 Each runs the same pattern: paste the factory-generated command, agent does its work, presents the next command, you confirm.
 
@@ -241,10 +271,10 @@ The **Reviewer** checks the Architect's work against your spec and runs `npm tes
 The **Operator** merges the worktree branch to `main`, cleans up the worktree, updates the backlog to `Production`, and presents the **Human Gate**:
 
 ```
-1) Accept     — work looks good; pause after this item
-2) Reject     — something is wrong, rework
-3) Redirect   — accept this item and go work on a specific item next
-4) Abandon    — do not accept; stop the pipeline
+1) Accept     - work looks good; pause after this item
+2) Reject     - something is wrong, rework
+3) Redirect   - accept this item and go work on a specific item next
+4) Abandon    - do not accept; stop the pipeline
 ```
 
 Reply with a number. The cycle is complete.

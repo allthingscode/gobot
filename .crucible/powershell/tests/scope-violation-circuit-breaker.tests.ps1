@@ -131,6 +131,14 @@ try {
             -Condition ($exitCode -eq 2) `
             -FailureMessage ("expected exit 2 (scope violation block), got $exitCode. " +
                 "Output:`n$output")
+        Assert-Result -Name "Wedge sentinel emitted" -Condition ($output -match "\[STOP\] HUMAN INTERVENTION REQUIRED") `
+            -FailureMessage ("missing wedge sentinel. Output:`n$output")
+        Assert-Result -Name "Wedge breaker code emitted" -Condition ($output -match [regex]::Escape("(scope_violation)")) `
+            -FailureMessage ("missing scope_violation wedge code. Output:`n$output")
+        Assert-Result -Name "Wedge keeps out-of-scope file list" -Condition ($output -match [regex]::Escape("src/b.txt")) `
+            -FailureMessage ("missing out-of-scope file detail. Output:`n$output")
+        Assert-Result -Name "Wedge recovery emitted" -Condition ($output -match "(?m)^RECOVERY:\s+\S") `
+            -FailureMessage ("missing wedge recovery. Output:`n$output")
 
         $blockedDir = Join-Path $projectRoot ".crucible/backlog/blocked"
         Assert-Result -Name "Blocked dir created" -Condition (Test-Path $blockedDir) `

@@ -240,10 +240,6 @@ foreach ($field in $requiredFields) {
     }
 }
 
-$deploymentSuccessors = [System.Collections.Generic.List[string]]::new()
-$deploymentSuccessors.Add("grooming")
-$deploymentSuccessors.Add("done")
-
 $resolvedProjectRoot = $null
 $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
 if ($null -ne $repoRootVar) {
@@ -254,49 +250,8 @@ if ([string]::IsNullOrEmpty($resolvedProjectRoot)) {
 }
 
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $resolvedProjectRoot
-$gateDir = Join-Path $sessionDir "global/gate_decisions"
-$isRework = $false
-$taskId = ""
-if ($null -ne $handoff -and $null -ne $handoff.task_id) {
-    $taskId = ([string]$handoff.task_id).Trim()
-}
-
-if (-not [string]::IsNullOrEmpty($taskId) -and (Test-Path $gateDir)) {
-    $decisions = @(Get-ChildItem -Path $gateDir -Filter ($taskId + "-*.json") -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
-        Sort-Object LastWriteTime -Descending)
-    if ($decisions.Count -gt 0) {
-        try {
-            $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($latestDecision.outcome -eq "rejected" -and $latestDecision.rework_requested -eq $true) {
-                $isRework = $true
-            }
-        } catch {}
-    }
-}
-
-# A deployment -> implementation handoff carrying rebase_count >= 1 is a
-# rebase-conflict re-entry emitted by the accept gate when a merge could not be
-# auto-rebased cleanly (see Invoke-HumanGateMerge). The authorizing gate decision
-# is "accepted" (not "rejected"), so recognize the rebase counter directly.
-if (-not $isRework -and $null -ne $handoff -and $handoff.PSObject.Properties["rebase_count"]) {
-    $rebaseCountVal = 0
-    if ([int]::TryParse([string]$handoff.rebase_count, [ref]$rebaseCountVal) -and $rebaseCountVal -ge 1) {
-        $isRework = $true
-    }
-}
-
-if ($isRework) {
-    $deploymentSuccessors.Add("implementation")
-}
-
-$validTransitions = @{
-    grooming       = @("implementation", "research", "verification", "done")
-    implementation = @("verification")
-    verification   = @("deployment", "implementation")
-    deployment     = $deploymentSuccessors.ToArray()
-    research       = @("grooming")
-}
+$isRework = Test-DeploymentReworkReentry -Handoff $handoff -SessionDir $sessionDir
+$validTransitions = Get-PipelineValidTransitions -DeploymentRework $isRework
 
 $source = ([string]$handoff.source_phase).Trim().ToLowerInvariant()
 $target = ([string]$handoff.target_phase).Trim().ToLowerInvariant()

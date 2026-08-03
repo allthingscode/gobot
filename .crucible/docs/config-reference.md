@@ -62,6 +62,8 @@ review:                                   # optional
   ci_timeout_minutes: 20                  # optional; defaults to 20
   ci_queued_grace_minutes: 15             # optional; defaults to 15
   ci_staging_branch_prefix: crucible-ci/  # optional; defaults to crucible-ci/
+  ci_required_checks: ""                  # optional; comma-separated required job names
+  ci_post_push_watch: false               # optional; defaults to false
 ```
 
 ---

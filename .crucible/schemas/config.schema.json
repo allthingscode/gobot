@@ -178,6 +178,34 @@
         "editor": {
           "type": "string",
           "description": "The command or name of the editor to use for opening the worktree folder (e.g. 'zed' or 'code')."
+        },
+        "auto_push": {
+          "type": "boolean",
+          "description": "Whether to auto push merged changes to remote master after gate completion."
+        },
+        "require_green_ci": {
+          "type": "boolean",
+          "description": "Whether to require CI to pass on a staging ref before pushing to master."
+        },
+        "ci_timeout_minutes": {
+          "type": "integer",
+          "description": "Timeout in minutes for CI run execution."
+        },
+        "ci_queued_grace_minutes": {
+          "type": "integer",
+          "description": "Grace period in minutes before treating queued CI as unstarted."
+        },
+        "ci_staging_branch_prefix": {
+          "type": "string",
+          "description": "Prefix for CI staging branch."
+        },
+        "ci_required_checks": {
+          "type": "string",
+          "description": "Comma-separated list of required job names that must run during CI watch."
+        },
+        "ci_post_push_watch": {
+          "type": "boolean",
+          "description": "Whether to watch branch CI after fast-forwarding/pushing to primary branch."
         }
       }
     }

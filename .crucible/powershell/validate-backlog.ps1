@@ -19,6 +19,9 @@ param(
 $ErrorActionPreference = "Stop"
 $errors = @()
 
+$backlogIoPath = Join-Path (Join-Path $PSScriptRoot "lib") "backlog-io.ps1"
+if (Test-Path -LiteralPath $backlogIoPath) { . $backlogIoPath }
+
 function Write-Quiet {
     param(
         [Parameter(Mandatory=$true)][string]$Message,
@@ -649,7 +652,13 @@ try {
         $oldText = ($content -join "`n")
         $newText = ($newContent -join "`n")
         if ($oldText -ne $newText) {
-            [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
+            if (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue) {
+                Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
+                    [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
+                }
+            } else {
+                [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
+            }
             Write-Quiet "BACKLOG.md updated successfully."
         } else {
             Write-Quiet "BACKLOG.md Priority Summary already current; no changes written."

@@ -334,6 +334,36 @@ try {
         $validateOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
         Assert-Result -Name "validate-backlog exit 0 post-archive sole" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
     }
+
+    $results += Run-Test -Name "Spec path resolvers search archived directory and prioritize active" -Body {
+        . (Join-Path $REPO_ROOT "powershell/factory-lib.ps1")
+        . (Join-Path $REPO_ROOT "powershell/lib/factory-gates.ps1")
+
+        $root = Join-Path $tempRoot "resolver-test"
+        New-MinimalBacklogTree -Root $root
+        $configYaml = Join-Path $root ".crucible/config.yaml"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $configYaml) -Force | Out-Null
+        @"
+paths:
+  backlog: backlog
+"@ | Set-Content -LiteralPath $configYaml -Encoding UTF8
+
+        $backlogDir = Join-Path $root "backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "chores/active") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "chores/archived") -Force | Out-Null
+
+        $archivedSpec = Join-Path $backlogDir "chores/archived/C-999_Archived_Task.md"
+        "---`nitem_id: C-999`n---" | Set-Content -LiteralPath $archivedSpec -Encoding UTF8
+
+        $res1 = Get-BacklogItemPathForTaskProjectRoot -Task "C-999" -ProjectRoot $root
+        Assert-Result -Name "resolver finds archived spec when active missing" -Condition ($res1 -eq $archivedSpec) -FailureMessage ("expected archived spec path, got: " + $res1)
+
+        $activeSpec = Join-Path $backlogDir "chores/active/C-999_Archived_Task.md"
+        "---`nitem_id: C-999`n---" | Set-Content -LiteralPath $activeSpec -Encoding UTF8
+
+        $res2 = Get-BacklogItemPathForTaskProjectRoot -Task "C-999" -ProjectRoot $root
+        Assert-Result -Name "resolver prioritizes active spec over archived" -Condition ($res2 -eq $activeSpec) -FailureMessage ("expected active spec path, got: " + $res2)
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

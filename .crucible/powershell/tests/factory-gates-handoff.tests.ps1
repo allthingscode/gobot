@@ -120,6 +120,45 @@ budget_tier: medium
         Assert-Result -Name "budget_tier is read from spec" -Condition ($handoff.budget_tier -eq "medium") -FailureMessage "budget_tier was not read from spec"
     }
 
+    $results += Run-Test -Name "Resolve-FactoryInputHandoff auto-bootstraps from archived backlog spec" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "bootstrap-archived") -TaskId "C-381"
+        $archivedDir = Join-Path $ctx.BacklogDir "chores/archived/2026/07"
+        New-Item -ItemType Directory -Path $archivedDir -Force | Out-Null
+        @"
+---
+target_phase: deployment
+budget_tier: high
+---
+"@ | Set-Content -LiteralPath (Join-Path $archivedDir "C-381_stale_spec.md") -Encoding UTF8
+
+        Resolve-FactoryInputHandoff -Context $ctx
+
+        Assert-Result -Name "bootstrap flag for archived spec" -Condition ($ctx.IsBootstrap -eq $true) -FailureMessage "IsBootstrap was not set for archived spec"
+        Assert-Result -Name "bootstrap file created for archived spec" -Condition ($null -ne $ctx.LatestHandoff -and (Test-Path -LiteralPath $ctx.LatestHandoff.FullName)) -FailureMessage "bootstrap handoff was not created for archived spec"
+        $handoff = Get-Content -LiteralPath $ctx.LatestHandoff.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-Result -Name "budget_tier read from archived spec" -Condition ($handoff.budget_tier -eq "high") -FailureMessage "budget_tier was not read from archived spec"
+    }
+
+    $results += Run-Test -Name "Resolve-FactoryInputHandoff resolves latest handoff from archived handoffs folder" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "handoff-archived") -TaskId "C-381"
+        $archivedHandoffDir = Join-Path $ctx.HandoffDir "archived"
+        New-Item -ItemType Directory -Path $archivedHandoffDir -Force | Out-Null
+        $handoffPath = Join-Path $archivedHandoffDir "C-381-20260731T100000Z.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "C-381"
+            source_phase = "verification"
+            target_phase = "deployment"
+            cumulative_handoff_count = 3
+            budget_tier = "low"
+            reason = "deploy init test"
+            session_cycle_id = "cycle-c"
+        }
+
+        Resolve-FactoryInputHandoff -Context $ctx
+
+        Assert-Result -Name "archived handoff resolved" -Condition ($null -ne $ctx.LatestHandoff -and $ctx.LatestHandoff.FullName -eq $handoffPath) -FailureMessage "archived handoff was not resolved"
+    }
+
     $results += Run-Test -Name "Read-FactoryHandoffContext maps legacy specialist fields" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "legacy") -TaskId "F-002"
         $handoffPath = Join-Path $ctx.HandoffDir "F-002-20260526T120000Z.json"
@@ -219,7 +258,44 @@ Invoke-CircuitBreakerGates -Context `$ctx
 
         Assert-Result -Name "exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit 1, got $exitCode. Output:`n$outputText"
         Assert-Result -Name "invalid tier message" -Condition ($outputText -match "Invalid budget_tier") -FailureMessage "missing invalid tier message. Output:`n$outputText"
+        Assert-Result -Name "invalid tier wedge sentinel" -Condition ($outputText -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage "missing wedge sentinel. Output:`n$outputText"
+        Assert-Result -Name "invalid tier wedge code" -Condition ($outputText -match [regex]::Escape("(invalid_budget_tier)")) -FailureMessage "missing invalid_budget_tier wedge code. Output:`n$outputText"
+        Assert-Result -Name "invalid tier wedge recovery" -Condition ($outputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage "missing recovery line. Output:`n$outputText"
         Assert-Result -Name "no budget breaker" -Condition ($outputText -notmatch "budget_exceeded|Token Budget Exceeded") -FailureMessage "invalid tier was reported as budget breaker. Output:`n$outputText"
+    }
+
+    $results += Run-Test -Name "Invalid transition emits wedge output with valid transition guidance" -Body {
+        $caseRoot = Join-Path $tempRoot "invalid-transition"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-BADTRANS"
+        $ctx.Handoff = [PSCustomObject]@{
+            task_id = "F-BADTRANS"
+            source_phase = "grooming"
+            target_phase = "deployment"
+            cumulative_handoff_count = 1
+            handoff_retry_count = 0
+            review_strike_count = 0
+            rebase_count = 0
+            budget_tier = "low"
+            reason = "invalid transition"
+        }
+
+        $script:InvalidTransitionResult = $null
+        $outputLines = @(& {
+            $script:InvalidTransitionResult = Resolve-FactoryTransition -Context $ctx
+        } 6>&1)
+        $transitionResult = $script:InvalidTransitionResult
+        $script:InvalidTransitionResult = $null
+        $outputText = ($outputLines | ForEach-Object { [string]$_ }) -join "`n"
+
+        Assert-Result -Name "invalid transition should exit" -Condition ($transitionResult.ShouldExit -eq $true) -FailureMessage "expected ShouldExit true"
+        Assert-Result -Name "invalid transition exit code" -Condition ($transitionResult.ExitCode -eq 2) -FailureMessage ("expected exit 2, got " + $transitionResult.ExitCode)
+        Assert-Result -Name "invalid transition wedge sentinel" -Condition ($outputText -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage ("missing wedge sentinel. Output:`n" + $outputText)
+        Assert-Result -Name "invalid transition wedge code" -Condition ($outputText -match [regex]::Escape("(invalid_transition)")) -FailureMessage ("missing invalid_transition wedge code. Output:`n" + $outputText)
+        Assert-Result -Name "invalid transition why" -Condition ($outputText -match [regex]::Escape("grooming -> deployment")) -FailureMessage ("missing invalid transition detail. Output:`n" + $outputText)
+        Assert-Result -Name "invalid transition guidance" -Condition ($outputText -match [regex]::Escape("grooming -> implementation | research | verification | done")) -FailureMessage ("missing valid transition guidance. Output:`n" + $outputText)
+        Assert-Result -Name "invalid transition recovery" -Condition ($outputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage ("missing recovery line. Output:`n" + $outputText)
     }
 
     $results += Run-Test -Name "Invoke-HandoffPreflightValidation restores cycle id" -Body {
@@ -255,6 +331,75 @@ exit 0
         } finally {
             $env:FACTORY_CYCLE_ID = $previousCycleId
         }
+    }
+
+    $results += Run-Test -Name "Invoke-HandoffPreflightValidation emits wedge report on reason_code failure" -Body {
+        $caseRoot = Join-Path $tempRoot "preflight-fail"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $scriptPath = Join-Path $caseRoot "run-preflight-fail.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $script = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$sessionDir = Join-Path '$caseRoot' 'session'
+`$handoffDir = Join-Path `$sessionDir 'handoffs'
+`$frameworkDir = Join-Path '$caseRoot' 'powershell'
+New-Item -ItemType Directory -Path `$handoffDir, `$frameworkDir -Force | Out-Null
+`$handoffPath = Join-Path `$handoffDir 'F-PRE-20260526T120000Z.json'
+@{
+    task_id = 'F-PRE'
+    source_phase = 'grooming'
+    target_phase = 'implementation'
+    cumulative_handoff_count = 1
+    handoff_retry_count = 0
+    review_strike_count = 0
+    rebase_count = 0
+    budget_tier = 'low'
+    reason = 'preflight'
+    artifacts = @()
+    file_affinity = @()
+    prompt_version = '1.0.0'
+    generated_by = 'new-handoff.ps1'
+    tool_version = '1.0.0'
+} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath `$handoffPath -Encoding UTF8
+@'
+param([string]`$HandoffFile, [string]`$SchemaPath)
+Write-Output '{"ok":false,"reason_code":"invalid_field","message":"Handoff contains an invalid field."}'
+exit 1
+'@ | Set-Content -LiteralPath (Join-Path `$frameworkDir 'validate-handoff.ps1') -Encoding UTF8
+`$ctx = @{
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '.crucible'
+    FrameworkPowerShell = `$frameworkDir
+    SessionDir = `$sessionDir
+    HandoffDir = `$handoffDir
+    LogFile = (Join-Path `$sessionDir 'F-PRE/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path `$sessionDir 'global/circuit_breakers.jsonl')
+    TaskId = 'F-PRE'
+    Init = `$true
+    Quiet = `$true
+    LatestHandoff = (Get-Item -LiteralPath `$handoffPath)
+    Handoff = (Get-Content -LiteralPath `$handoffPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+}
+Invoke-HandoffPreflightValidation -Context `$ctx
+"@
+        $script | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "preflight wedge exits 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit 2, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "preflight wedge sentinel" -Condition ($outputText -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage "missing wedge sentinel. Output:`n$outputText"
+        Assert-Result -Name "preflight wedge code" -Condition ($outputText -match [regex]::Escape("(invalid_field)")) -FailureMessage "missing invalid_field wedge code. Output:`n$outputText"
+        Assert-Result -Name "preflight wedge recovery" -Condition ($outputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage "missing recovery line. Output:`n$outputText"
     }
 
     $results += Run-Test -Name "D31: missing optional counters defaulted without StrictMode crash" -Body {

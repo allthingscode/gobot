@@ -67,7 +67,7 @@ function Get-ConfiguredPath {
 function Get-ConfiguredReview {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("diff_tool", "editor", "auto_push", "require_green_ci", "ci_timeout_minutes", "ci_queued_grace_minutes", "ci_staging_branch_prefix")]
+        [ValidateSet("diff_tool", "editor", "auto_push", "require_green_ci", "ci_timeout_minutes", "ci_queued_grace_minutes", "ci_staging_branch_prefix", "ci_required_checks", "ci_post_push_watch")]
         [string]$Key,
         [string]$ProjectRoot = ""
     )
@@ -95,7 +95,7 @@ function Get-ConfiguredReview {
 
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath)) {
-        if ($Key -eq "auto_push" -or $Key -eq "require_green_ci") { return "false" }
+        if ($Key -eq "auto_push" -or $Key -eq "require_green_ci" -or $Key -eq "ci_post_push_watch") { return "false" }
         if ($Key -eq "ci_timeout_minutes") { return "20" }
         if ($Key -eq "ci_queued_grace_minutes") { return "15" }
         return ""
@@ -112,7 +112,7 @@ function Get-ConfiguredReview {
         }
     } catch {}
 
-    if ($Key -eq "auto_push" -or $Key -eq "require_green_ci") { return "false" }
+    if ($Key -eq "auto_push" -or $Key -eq "require_green_ci" -or $Key -eq "ci_post_push_watch") { return "false" }
     if ($Key -eq "ci_timeout_minutes") { return "20" }
     if ($Key -eq "ci_queued_grace_minutes") { return "15" }
     return ""

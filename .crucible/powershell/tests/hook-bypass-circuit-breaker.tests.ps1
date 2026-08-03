@@ -98,6 +98,14 @@ created_at: "2026-05-25"
 
         Assert-Result -Name "Factory exits 2 (blocked)" -Condition ($exitCode -eq 2) `
             -FailureMessage ("expected exit 2, got $exitCode. Output:`n$output")
+        Assert-Result -Name "Wedge sentinel emitted" -Condition ($output -match "\[STOP\] HUMAN INTERVENTION REQUIRED") `
+            -FailureMessage ("missing wedge sentinel. Output:`n$output")
+        Assert-Result -Name "Wedge breaker code emitted" -Condition ($output -match [regex]::Escape("(git_hook_bypass)")) `
+            -FailureMessage ("missing git_hook_bypass wedge code. Output:`n$output")
+        Assert-Result -Name "Wedge keeps bypass detail" -Condition ($output -match "--no-verify") `
+            -FailureMessage ("missing hook bypass detail. Output:`n$output")
+        Assert-Result -Name "Wedge recovery emitted" -Condition ($output -match "(?m)^RECOVERY:\s+\S") `
+            -FailureMessage ("missing wedge recovery. Output:`n$output")
 
         $blockedDir = Join-Path $projectRoot ".crucible/backlog/blocked"
         Assert-Result -Name "Blocked dir created" -Condition (Test-Path $blockedDir) `

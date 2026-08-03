@@ -135,7 +135,7 @@ function Get-CrucibleRoot {
     }
     return ".crucible"
 }
-# Framework powershell/ directory — used to resolve sibling scripts regardless of CWD.
+# Framework powershell/ directory - used to resolve sibling scripts regardless of CWD.
 $FRAMEWORK_POWERSHELL = $PSScriptRoot
 # Anchor paths to the project root (where .crucible/ lives).
 # -ProjectRoot overrides for explicit invocation from elsewhere; otherwise PREFER the root
@@ -557,3 +557,4 @@ Write-FactoryPromptOutput -Context $factoryContext
 Initialize-FactoryTargetSession -Context $factoryContext
 Write-FactoryCiStatusBanner -Context $factoryContext
 Start-FactoryTargetSessionLog -Context $factoryContext
+exit 0

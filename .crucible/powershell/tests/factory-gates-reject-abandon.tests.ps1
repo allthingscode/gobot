@@ -1244,6 +1244,490 @@ try {
         Assert-Result -Name "D59 Abandon(pre-archived): BACKLOG.md row is Abandoned" -Condition $rowMatches -FailureMessage ("expected BACKLOG.md row to show Abandoned, got: " + $backlogLines)
     }
 
+    $results += Run-Test -Name "F12 Restore-BacklogTask normalizes pre-gate mutated BACKLOG.md with bespoke tables and Production status" -Body {
+        $caseRoot = Join-Path $tempRoot "f12-normalize"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+        
+        $specPath = Join-Path $caseRoot "backlog/features/active/F-500_Spec.md"
+        @"
+---
+item_id: "F-500"
+title: Test Feature 500
+type: feature
+priority: P1
+status: In Progress
+---
+Spec content
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        @"
+# Project Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 1 | F-500 |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Features
+| ID | Title | Priority | Status | Spec |
+
+## Production Items
+| F-500 | Test Feature 500 | P1 | Production | [F-500_Spec.md](features/active/F-500_Spec.md) |
+"@ | Set-Content -LiteralPath $backlogPath -Encoding UTF8
+
+        Restore-BacklogTask -TaskId "F-500" -ProjectRoot $caseRoot -ActiveStatus "In Progress"
+
+        $backlogText = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+        Assert-Result -Name "F12 Production section removed" -Condition ($backlogText -notmatch '## Production Items') -FailureMessage "expected ## Production Items to be removed"
+        Assert-Result -Name "F12 row restored to active" -Condition ($backlogText -match '\| In Progress \|') -FailureMessage "expected row status to be In Progress"
+
+        $valScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
+        $valOutput = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $valScript -ProjectRoot $caseRoot 2>&1
+        Assert-Result -Name "F12 validate-backlog passes post-recovery" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validate-backlog exit 0, got $LASTEXITCODE. Output: " + ($valOutput | Out-String))
+    }
+
+    $results += Run-Test -Name "Restore-BacklogTask uses word boundaries when matching short task ids" -Body {
+        $caseRoot = Join-Path $tempRoot "restore-word-boundary"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active"), (Join-Path $caseRoot "backlog/features/archived") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot ".crucible/config.yaml"), "paths:`n  backlog: `"backlog`"`n", [System.Text.UTF8Encoding]::new($false))
+
+        $specOnePath = Join-Path $caseRoot "backlog/features/active/F-1_Spec.md"
+        @"
+---
+item_id: "F-1"
+title: Feature One
+type: feature
+priority: P1
+status: In Progress
+---
+Spec content
+"@ | ForEach-Object { [System.IO.File]::WriteAllText($specOnePath, $_, [System.Text.UTF8Encoding]::new($false)) }
+
+        $specFourteenPath = Join-Path $caseRoot "backlog/features/active/F-14_Spec.md"
+        @"
+---
+item_id: "F-14"
+title: Feature Fourteen
+type: feature
+priority: P0
+status: Ready for Review
+---
+Spec content
+"@ | ForEach-Object { [System.IO.File]::WriteAllText($specFourteenPath, $_, [System.Text.UTF8Encoding]::new($false)) }
+
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $f14Row = "| [F-14](features/active/F-14_Spec.md) | P0 | Ready for Review | Feature Fourteen | Casey |"
+        @"
+# Project Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 1 | F-14 |
+| **P1** | 1 | F-1 |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 2 active items.
+
+## Features
+| ID | Priority | Status | Title | Owner |
+| [F-1](features/active/F-1_Spec.md) | P1 | Production | Feature One | Riley |
+$f14Row
+"@ | ForEach-Object { [System.IO.File]::WriteAllText($backlogPath, $_, [System.Text.UTF8Encoding]::new($false)) }
+
+        Restore-BacklogTask -TaskId "F-1" -ProjectRoot $caseRoot -ActiveStatus "In Progress"
+
+        $backlogText = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+        Assert-Result -Name "Restore word boundary keeps F-14 row intact" -Condition ($backlogText.Contains($f14Row)) -FailureMessage ("expected F-14 row to remain intact, got: " + $backlogText)
+        Assert-Result -Name "Restore word boundary normalizes F-1 row" -Condition ($backlogText.Contains("| [F-1](features/active/F-1_Spec.md) | P1 | In Progress | Feature One | Riley |")) -FailureMessage ("expected F-1 row to be restored to In Progress, got: " + $backlogText)
+    }
+
+    $results += Run-Test -Name "F14 Deployment gate detects BOM encoding corruption in BACKLOG.md" -Body {
+        $caseRoot = Join-Path $tempRoot "f14-bom-guard"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $specPath = Join-Path $caseRoot "backlog/features/active/F-600_Spec.md"
+        @"
+---
+id: F-600
+status: Ready for Deploy
+---
+Spec content
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $textBytes = [System.Text.Encoding]::UTF8.GetBytes("# Project Backlog`n`n## Features`n| F-600 | Title | P1 | Ready for Deploy | [F-600_Spec.md](features/active/F-600_Spec.md) |`n")
+        $bomBytes = [byte[]]::new(3 + $textBytes.Length)
+        $bomBytes[0] = 0xEF; $bomBytes[1] = 0xBB; $bomBytes[2] = 0xBF
+        [System.Array]::Copy($textBytes, 0, $bomBytes, 3, $textBytes.Length)
+        [System.IO.File]::WriteAllBytes($backlogPath, $bomBytes)
+
+        $sessionDir = Join-Path $caseRoot "session"
+        $handoffDir = Join-Path $sessionDir "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-600-20260731.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "F-600"
+            source_phase = "verification"
+            target_phase = "deployment"
+            cumulative_handoff_count = 1
+        }
+
+        $scriptPath = Join-Path $caseRoot "run_test.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+`$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
+. (Join-Path `$REPO_ROOT 'powershell/lib/platform.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/factory-lib.ps1')
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '$caseRoot/.crucible'
+    LogFile = '$sessionDir/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = '$sessionDir/global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    BudgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-600'
+        source_phase = 'verification'
+        target_phase = 'deployment'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Complete-FactorySourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "F14 BOM exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on BOM corruption"
+        Assert-Result -Name "F14 BOM error message" -Condition (($output | Out-String) -match "BACKLOG.md encoding corruption detected") -FailureMessage "expected encoding corruption message"
+    }
+
+    $results += Run-Test -Name "F12 Deployment gate blocks premature Production status in BACKLOG.md" -Body {
+        $caseRoot = Join-Path $tempRoot "f12-premature-prod"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+        
+        $specPath = Join-Path $caseRoot "backlog/features/active/F-700_Spec.md"
+        @"
+---
+id: F-700
+status: Ready for Deploy
+---
+Spec content
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $backlogTextSetup = @"
+# Project Backlog
+
+## Priority Summary
+| Priority | Active | Done | Total |
+| P1 | 1 | 0 | 1 |
+
+## Features
+| ID | Title | Priority | Status | Spec |
+| F-700 | Title | P1 | Production | [F-700_Spec.md](features/active/F-700_Spec.md) |
+"@
+        [System.IO.File]::WriteAllText($backlogPath, $backlogTextSetup, [System.Text.UTF8Encoding]::new($false))
+
+        $sessionDir = Join-Path $caseRoot "session"
+        $taskSessionDir = Join-Path $sessionDir "F-700/deployment"
+        New-Item -ItemType Directory -Path $taskSessionDir -Force | Out-Null
+        $taskMd = Join-Path $taskSessionDir "task.md"
+        @"
+# Task List
+- [x] Step 1
+"@ | Set-Content -LiteralPath $taskMd -Encoding UTF8
+
+        $handoffDir = Join-Path $sessionDir "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-700-20260731.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "F-700"
+            source_phase = "deployment"
+            target_phase = "done"
+            cumulative_handoff_count = 1
+        }
+
+        $scriptPath = Join-Path $caseRoot "run_test.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+`$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
+. (Join-Path `$REPO_ROOT 'powershell/lib/platform.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/factory-lib.ps1')
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '$caseRoot/.crucible'
+    LogFile = '$sessionDir/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = '$sessionDir/global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    BudgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-700'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Complete-FactorySourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "F12 premature Production exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on premature Production status"
+        Assert-Result -Name "F12 premature Production error message" -Condition (($output | Out-String) -match "marked Production or Resolved in BACKLOG.md prior to human gate approval") -FailureMessage ("expected premature Production message, got: " + ($output | Out-String))
+    }
+
+    $results += Run-Test -Name "F14 Deployment gate detects U+FFFD replacement char corruption in BACKLOG.md" -Body {
+        $caseRoot = Join-Path $tempRoot "f14-fffd-guard"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $specPath = Join-Path $caseRoot "backlog/features/active/F-601_Spec.md"
+        @"
+---
+id: F-601
+status: Ready for Deploy
+---
+Spec content
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $corruptText = "# Project Backlog`n`n## Features`n| F-601 | Title " + [char]0xFFFD + " | P1 | Ready for Deploy | [F-601_Spec.md](features/active/F-601_Spec.md) |`n"
+        [System.IO.File]::WriteAllText($backlogPath, $corruptText, [System.Text.UTF8Encoding]::new($false))
+
+        $sessionDir = Join-Path $caseRoot "session"
+        $handoffDir = Join-Path $sessionDir "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-601-20260801.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "F-601"
+            source_phase = "verification"
+            target_phase = "deployment"
+            cumulative_handoff_count = 1
+        }
+
+        $scriptPath = Join-Path $caseRoot "run_test.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+`$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
+. (Join-Path `$REPO_ROOT 'powershell/lib/platform.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/factory-lib.ps1')
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '$caseRoot/.crucible'
+    LogFile = '$sessionDir/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = '$sessionDir/global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    BudgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-601'
+        source_phase = 'verification'
+        target_phase = 'deployment'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Complete-FactorySourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "F14 U+FFFD exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on U+FFFD corruption"
+        Assert-Result -Name "F14 U+FFFD error message" -Condition (($output | Out-String) -match "BACKLOG.md encoding corruption detected") -FailureMessage "expected encoding corruption message"
+    }
+
+    $results += Run-Test -Name "F12 Deployment gate allows task when Title contains Production but Status is Active" -Body {
+        $caseRoot = Join-Path $tempRoot "f12-title-prod-active"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $specPath = Join-Path $caseRoot "backlog/features/active/F-701_Spec.md"
+        @"
+---
+id: F-701
+status: Ready for Deploy
+---
+Spec content
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $backlogTextSetup = @"
+# Project Backlog
+
+## Priority Summary
+| Priority | Active | Done | Total |
+| P1 | 1 | 0 | 1 |
+
+## Features
+| ID | Title | Priority | Status | Spec |
+| F-701 | Harden production deploy pipeline | P1 | Ready for Deploy | [F-701_Spec.md](features/active/F-701_Spec.md) |
+"@
+        [System.IO.File]::WriteAllText($backlogPath, $backlogTextSetup, [System.Text.UTF8Encoding]::new($false))
+
+        $sessionDir = Join-Path $caseRoot "session"
+        $taskSessionDir = Join-Path $sessionDir "F-701/deployment"
+        New-Item -ItemType Directory -Path $taskSessionDir -Force | Out-Null
+        $taskMd = Join-Path $taskSessionDir "task.md"
+        @"
+# Task List
+- [x] Step 1
+"@ | Set-Content -LiteralPath $taskMd -Encoding UTF8
+
+        $handoffDir = Join-Path $sessionDir "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-701-20260801.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "F-701"
+            source_phase = "deployment"
+            target_phase = "done"
+            cumulative_handoff_count = 1
+        }
+
+        $scriptPath = Join-Path $caseRoot "run_test.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+`$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
+. (Join-Path `$REPO_ROOT 'powershell/lib/platform.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/factory-lib.ps1')
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '$caseRoot/.crucible'
+    LogFile = '$sessionDir/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = '$sessionDir/global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    BudgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-701'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Complete-FactorySourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "F12 title with Production exit code is not 2" -Condition ($exitCode -ne 2) -FailureMessage ("expected gate not to block with exit code 2 when Status is Active, got exit code: $exitCode. Output: " + ($output | Out-String))
+    }
+
+    $results += Run-Test -Name "F12 Deployment gate blocks premature Resolved status in BACKLOG.md" -Body {
+        $caseRoot = Join-Path $tempRoot "f12-premature-resolved"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+
+        $specPath = Join-Path $caseRoot "backlog/features/active/F-702_Spec.md"
+        @"
+---
+id: F-702
+status: Ready for Deploy
+---
+Spec content
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $backlogTextSetup = @"
+# Project Backlog
+
+## Priority Summary
+| Priority | Active | Done | Total |
+| P1 | 1 | 0 | 1 |
+
+## Features
+| ID | Title | Priority | Status | Spec |
+| F-702 | Title | P1 | Resolved | [F-702_Spec.md](features/active/F-702_Spec.md) |
+"@
+        [System.IO.File]::WriteAllText($backlogPath, $backlogTextSetup, [System.Text.UTF8Encoding]::new($false))
+
+        $sessionDir = Join-Path $caseRoot "session"
+        $taskSessionDir = Join-Path $sessionDir "F-702/deployment"
+        New-Item -ItemType Directory -Path $taskSessionDir -Force | Out-Null
+        $taskMd = Join-Path $taskSessionDir "task.md"
+        @"
+# Task List
+- [x] Step 1
+"@ | Set-Content -LiteralPath $taskMd -Encoding UTF8
+
+        $handoffDir = Join-Path $sessionDir "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-702-20260801.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "F-702"
+            source_phase = "deployment"
+            target_phase = "done"
+            cumulative_handoff_count = 1
+        }
+
+        $scriptPath = Join-Path $caseRoot "run_test.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+`$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
+. (Join-Path `$REPO_ROOT 'powershell/lib/platform.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/factory-lib.ps1')
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '$caseRoot/.crucible'
+    LogFile = '$sessionDir/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = '$sessionDir/global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    BudgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-702'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Complete-FactorySourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "F12 premature Resolved exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on premature Resolved status"
+        Assert-Result -Name "F12 premature Resolved error message" -Condition (($output | Out-String) -match "marked Production or Resolved in BACKLOG.md prior to human gate approval") -FailureMessage ("expected premature Resolved message, got: " + ($output | Out-String))
+    }
+
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

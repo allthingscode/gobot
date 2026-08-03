@@ -3,7 +3,7 @@
 
 **Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
 
-**Role:** Design and implement backlog items in an isolated worktree. Always hand off to Verification — never to any other phase.
+**Role:** Design and implement backlog items in an isolated worktree. Always hand off to Verification - never to any other phase.
 
 **Trigger form:** `Implementation: {task_id}`
 
@@ -25,21 +25,21 @@
 
 Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1 implementation` to clear stale state safely. Do not edit `session_state.json` manually.
 
-**Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a verification handoff — follow it directly. Do NOT redesign. Skip to Phase 2: Code.
+**Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a verification handoff - follow it directly. Do NOT redesign. Skip to Phase 2: Code.
 
 ---
 
-## Decision Tree (For New Features/Bugs — Not Review Fixes)
+## Decision Tree (For New Features/Bugs - Not Review Fixes)
 
 Read the backlog item spec, then:
 
 1. **Is it <20 lines AND straightforward?** (e.g., add log field, fix typo, rename variable)
-   - YES → Skip Phase 1, go directly to Phase 2: Code
-   - NO → Continue
+   - YES -> Skip Phase 1, go directly to Phase 2: Code
+   - NO -> Continue
 
 2. **Is the spec completely clear AND the change isolated AND <50 lines?**
-   - YES → Go directly to Phase 2: Code
-   - NO or >50 lines → Complete Phase 1 first
+   - YES -> Go directly to Phase 2: Code
+   - NO or >50 lines -> Complete Phase 1 first
 
 ---
 
@@ -61,7 +61,7 @@ Read the backlog item spec, then:
 
 ### Phase 2: Code
 
-**Step 0 — Navigate to worktree (mandatory before any edits):**
+**Step 0 - Navigate to worktree (mandatory before any edits):**
 ```bash
 cd .crucible/.agent-workspaces/implementation-{task_id}
 git status  # must show: On branch task/{task_id}
@@ -85,7 +85,7 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 - **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major sub-task or phase (e.g., "Phase 1 Design Complete").
 - **Example**: `### CHECKPOINT Phase 2: Logic implementation complete`
 
-Write table-driven tests as you go — not after. Run continuously:
+Write table-driven tests as you go - not after. Run continuously:
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"
 ```
@@ -107,10 +107,10 @@ Before marking ready for Verification:
    git add .
    git commit -m "feat(scope): implement {task_id}"
    ```
-4. Review your own diff — would you approve this in a PR?
+4. Review your own diff - would you approve this in a PR?
 5. Write completion summary to `.crucible/session/{task_id}/implementation/output.md`
 
-**Note on trivial changes**: Even for <20-line changes, you MUST route to Verification. `implementation → deployment` is not a valid pipeline transition — factory.ps1 will hard-block it. For truly trivial changes the Verification session will simply be fast.
+**Note on trivial changes**: Even for <20-line changes, you MUST route to Verification. `implementation -> deployment` is not a valid pipeline transition - factory.ps1 will hard-block it. For truly trivial changes the Verification session will simply be fast.
 
 ### Phase 4: Handoff to Verification
 
@@ -127,7 +127,7 @@ Before marking ready for Verification:
 4. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the handoff JSON file directly):
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete — ready for review"
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 5. Run factory and present output to human:
@@ -141,9 +141,10 @@ powershell.exe -ExecutionPolicy Bypass \
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `verification` (always — `implementation → deployment` is not a valid transition and will be hard-blocked by factory.ps1)
-- [ ] All edits are inside the worktree — nothing committed to `master`
+- [ ] Routing to: `verification` (always - `implementation -> deployment` is not a valid transition and will be hard-blocked by factory.ps1)
+- [ ] All edits are inside the worktree - nothing committed to `master`
 - [ ] NOT pushed to origin
 - [ ] `BACKLOG.md` not edited (that's the Reviewer/Operator's job)
 - [ ] `session_cycle_id` included in handoff
 - [ ] `task_id` in handoff matches the task I was given
+- [ ] Any skipped conditional checklist item in `task.md` is marked `[-]` (skipped/N/A) or listed under `## Optional Steps` so it does not block quality gate validation.

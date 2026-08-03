@@ -60,7 +60,15 @@ if (Test-Path $promptLib) {
 # 3. Verify no stray .crucible directory exists in the source repository root (Test Pollution check)
 $strayCrucible = Join-Path $REPO_ROOT ".crucible"
 if (Test-Path -LiteralPath $strayCrucible) {
-    $errors += "Test pollution detected: A stray '.crucible' directory exists at the repository root ($strayCrucible). Ensure tests run in isolated temp directories and clean up properly."
+    Push-Location $REPO_ROOT
+    try {
+        $tracked   = @(git ls-files -- .crucible 2>$null)
+        $stageable = @(git ls-files --others --exclude-standard -- .crucible 2>$null)
+    } finally { Pop-Location }
+    $committable = @(($tracked + $stageable) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($committable.Count -gt 0) {
+        $errors += "Test pollution detected: committable files exist under a stray '.crucible' at the repository root ($strayCrucible): " + ($committable -join ", ") + ". Remove them or ensure tests write to isolated temp dirs."
+    }
 }
 
 # 4. Assert no phase prompt/SOP instructs to write handoff JSON directly and each references new-handoff.ps1

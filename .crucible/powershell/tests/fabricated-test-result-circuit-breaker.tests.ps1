@@ -174,6 +174,11 @@ APPROVED
 
         # 9. Assertions
         Assert-Result -Name "Factory exits with block code 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit code 2, got " + $exitCode + ". Output: " + $output)
+        Assert-Result -Name "Wedge sentinel emitted" -Condition ($output -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage ("missing wedge sentinel. Output: " + $output)
+        Assert-Result -Name "Wedge breaker code emitted" -Condition ($output -match [regex]::Escape("(reviewer_verification_failed)")) -FailureMessage ("missing reviewer_verification_failed wedge code. Output: " + $output)
+        Assert-Result -Name "Wedge keeps failing check name" -Condition ($output -match [regex]::Escape("Failing Test Full")) -FailureMessage ("missing failing check detail. Output: " + $output)
+        Assert-Result -Name "Wedge keeps check output summary" -Condition ($output -match "Check output:") -FailureMessage ("missing check output summary. Output: " + $output)
+        Assert-Result -Name "Wedge recovery emitted" -Condition ($output -match "(?m)^RECOVERY:\s+\S") -FailureMessage ("missing wedge recovery. Output: " + $output)
         
         # Verify event log or block record
         $blockedDir = Join-Path $projectRoot ".crucible/backlog/blocked"

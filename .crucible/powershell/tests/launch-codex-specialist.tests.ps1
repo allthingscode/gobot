@@ -46,6 +46,19 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
         exit 0
     }
+    "vanishrestore" {
+        # Mimic a full-access codex run that deletes the gitignored session dir before the
+        # launcher writes its transcript. The launcher must recreate the dir, write the
+        # transcript, and still classify SUCCESS (non-schema exit-0). No last-message restore
+        # is needed - a missing last message is informational for a non-schema phase.
+        Write-Output "fake codex transcript CRUCIBLE_OK"
+        if ($outFile) {
+            $sessionDir = Split-Path -Parent $outFile
+            [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc)
+            Remove-Item -LiteralPath $sessionDir -Recurse -Force
+        }
+        exit 0
+    }
     "echostdin" {
         # Capture the prompt exactly as codex would receive it on stdin, so a test can prove the
         # launcher feeds the prompt via stdin (not argv) and that embedded quotes survive intact.
@@ -103,6 +116,35 @@ function Invoke-Launcher {
         $env:PATH = $originalPath
         $env:CODEX_FAKE_MODE = $originalMode
     }
+}
+
+function Invoke-TestGit {
+    param([string]$Directory, [string[]]$GitArgs)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & git -C $Directory @GitArgs 2>$null
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($exitCode -ne 0) {
+        throw ("git " + ($GitArgs -join " ") + " failed with exit " + $exitCode + ". Output:`n" + (($output | Out-String).Trim()))
+    }
+    return $output
+}
+
+function New-TestGitProject {
+    param([string]$Root)
+    New-Item -ItemType Directory -Path (Join-Path $Root ".crucible") -Force | Out-Null
+    Invoke-TestGit -Directory $Root -GitArgs @("init") | Out-Null
+    Invoke-TestGit -Directory $Root -GitArgs @("config", "user.email", "crucible-test@example.invalid") | Out-Null
+    Invoke-TestGit -Directory $Root -GitArgs @("config", "user.name", "Crucible Test") | Out-Null
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Join-Path $Root "README.md"), "clean baseline`n", $enc)
+    [System.IO.File]::WriteAllText((Join-Path $Root ".crucible/.keep"), "keep`n", $enc)
+    Invoke-TestGit -Directory $Root -GitArgs @("add", ".") | Out-Null
+    Invoke-TestGit -Directory $Root -GitArgs @("commit", "-m", "initial") | Out-Null
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-launch-codex-test-" + [guid]::NewGuid().ToString("N"))
@@ -205,6 +247,69 @@ try {
         Assert-Result -Name "transcript written" -Condition (Test-Path -LiteralPath $transcript) -FailureMessage "no transcript file"
     }
 
+    $results += Run-Test -Name "Dirty git tree blocks specialist dispatch without override" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-dirty-block"
+        New-TestGitProject -Root $projectRoot
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText((Join-Path $projectRoot "dirty.txt"), "uncommitted`n", $enc)
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-980", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        $transcript = Join-Path $projectRoot ".crucible/session/C-980/verification/codex-transcript.txt"
+        Assert-Result -Name "dirty guard exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "dirty guard error" -Condition ($res.Output -match "pre-dispatch tree check failed") -FailureMessage "expected tree-check error. Output:`n$($res.Output)"
+        Assert-Result -Name "dirty file surfaced" -Condition ($res.Output -match "dirty\.txt") -FailureMessage "expected porcelain dirty path. Output:`n$($res.Output)"
+        Assert-Result -Name "no specialist status" -Condition (-not ($res.Output -match "\[CODEX SPECIALIST\] STATUS=")) -FailureMessage "guard must block before specialist status. Output:`n$($res.Output)"
+        Assert-Result -Name "no transcript" -Condition (-not (Test-Path -LiteralPath $transcript)) -FailureMessage "guard must block before transcript is written at $transcript"
+    }
+
+    $results += Run-Test -Name "Dirty git tree dispatches with AllowDirtyTree override" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-dirty-override"
+        New-TestGitProject -Root $projectRoot
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText((Join-Path $projectRoot "dirty.txt"), "uncommitted`n", $enc)
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-979", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot, "-AllowDirtyTree")
+        Assert-Result -Name "override status line" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS with override. Output:`n$($res.Output)"
+        Assert-Result -Name "override exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Clean git tree dispatches normally" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-clean-git"
+        New-TestGitProject -Root $projectRoot
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-978", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "clean status line" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS on clean git tree. Output:`n$($res.Output)"
+        Assert-Result -Name "clean exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Non-git WorkingDir skips tree guard and dispatches" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-non-git-skip"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-977", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "skip note" -Condition ($res.Output -match "WorkingDir is not a git work tree") -FailureMessage "expected non-git skip note. Output:`n$($res.Output)"
+        Assert-Result -Name "non-git status line" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS for non-git WorkingDir. Output:`n$($res.Output)"
+        Assert-Result -Name "non-git exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Phase launch SUCCESS when session dir vanishes before transcript write" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-vanishrestore"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "vanishrestore" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-981", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "status line printed" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=") -FailureMessage "expected STATUS line after vanished session dir. Output:`n$($res.Output)"
+        Assert-Result -Name "status success" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS after vanished session dir. Output:`n$($res.Output)"
+        Assert-Result -Name "no unhandled transcript exception" -Condition (-not ($res.Output -match "DirectoryNotFoundException|Could not find a part of the path|Exception calling `"WriteAllText`"")) -FailureMessage "transcript write failure must not abort. Output:`n$($res.Output)"
+        Assert-Result -Name "exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+        $transcript = Join-Path $projectRoot ".crucible/session/C-981/verification/codex-transcript.txt"
+        Assert-Result -Name "transcript written after recreation" -Condition (Test-Path -LiteralPath $transcript) -FailureMessage "expected transcript at $transcript. Output:`n$($res.Output)"
+    }
+
     $results += Run-Test -Name "Arg assembly carries full-access flags + model + output capture" -Body {
         $projectRoot = Join-Path $tempRoot "proj-args"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
@@ -240,14 +345,14 @@ try {
         Assert-Result -Name "markerok exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
     }
 
-    $results += Run-Test -Name "Phase launch LAUNCH_FAILED when no final message captured" -Body {
+    $results += Run-Test -Name "Phase launch SUCCESS on exit 0 with empty final message (non-schema; repo state authoritative)" -Body {
         $projectRoot = Join-Path $tempRoot "proj-empty"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "empty" -BinDir $binDir -LauncherArgs @(
             "-TaskId", "C-996", "-Phase", "verification", "-Model", "gpt-5.5",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
-        Assert-Result -Name "status launch_failed empty" -Condition ($res.Output -match "STATUS=LAUNCH_FAILED") -FailureMessage "expected LAUNCH_FAILED. Output:`n$($res.Output)"
-        Assert-Result -Name "no final message reason" -Condition ($res.Output -match "no final message") -FailureMessage "expected 'no final message' reason. Output:`n$($res.Output)"
+        Assert-Result -Name "status success empty" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
+        Assert-Result -Name "empty exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
     }
 
     $results += Run-Test -Name "ReviewSchema accepts a conforming verdict" -Body {
@@ -268,6 +373,16 @@ try {
             "-PromptText", "REVIEW", "-ReviewSchema", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "schema bad launch_failed" -Condition ($res.Output -match "STATUS=LAUNCH_FAILED") -FailureMessage "non-verdict should be LAUNCH_FAILED. Output:`n$($res.Output)"
         Assert-Result -Name "verdict reason" -Condition ($res.Output -match "valid review verdict") -FailureMessage "expected verdict-validation reason. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "ReviewSchema rejects an empty final message" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-schema-empty"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "empty" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-993", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-PromptText", "REVIEW", "-ReviewSchema", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "schema empty launch_failed" -Condition ($res.Output -match "STATUS=LAUNCH_FAILED") -FailureMessage "empty verdict should be LAUNCH_FAILED. Output:`n$($res.Output)"
+        Assert-Result -Name "schema empty verdict reason" -Condition ($res.Output -match "valid review verdict") -FailureMessage "expected verdict-validation reason. Output:`n$($res.Output)"
     }
 
     $results += Run-Test -Name "Default project root derives from script location, not cwd" -Body {
@@ -402,6 +517,23 @@ try {
             "-PromptFile", $emptyFilePath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "empty promptfile exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "empty promptfile error message" -Condition ($res.Output -match "-PromptFile is empty") -FailureMessage "expected empty promptfile error message. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Deployment phase forces WorkingDir to project root and emits notice when worktree dir passed" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-deploy-wt"
+        $wtDir = Join-Path $projectRoot ".crucible/.agent-workspaces/deployment-C-983"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        New-Item -ItemType Directory -Path $wtDir -Force | Out-Null
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-983", "-Phase", "deployment", "-Model", "gpt-5.5",
+            "-PromptText", "DEPLOY", "-ProjectRoot", $projectRoot, "-WorkingDir", $wtDir)
+        Assert-Result -Name "deployment status success" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
+        Assert-Result -Name "deployment notice emitted" -Condition ($res.Output -match "\[CODEX\] Notice: Deployment phase forces WorkingDir to main repo root") -FailureMessage "expected notice about deployment WorkingDir override. Output:`n$($res.Output)"
+        $transcript = Join-Path $projectRoot ".crucible/session/C-983/deployment/codex-transcript.txt"
+        Assert-Result -Name "transcript exists" -Condition (Test-Path -LiteralPath $transcript) -FailureMessage "expected transcript at $transcript"
+        $tx = Get-Content -LiteralPath $transcript -Raw
+        $expectedC = "-C " + $projectRoot
+        Assert-Result -Name "codex launched with project root CWD" -Condition ($tx -match [regex]::Escape($expectedC)) -FailureMessage "expected codex -C to be $projectRoot. transcript=$tx"
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

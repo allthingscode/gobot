@@ -1,3 +1,10 @@
+if (-not (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue)) {
+    $backlogIoPath = Join-Path $PSScriptRoot "backlog-io.ps1"
+    if (Test-Path -LiteralPath $backlogIoPath) {
+        . $backlogIoPath
+    }
+}
+
 function Get-BacklogTerminalStatus {
     param([Parameter(Mandatory=$true)][string]$Type)
 
@@ -71,21 +78,23 @@ function Get-MarkdownTableStatusColumn {
 
     for ($i = $RowIndex - 1; $i -ge 0; $i--) {
         $line = $Lines[$i]
-        if ($line -notmatch '^\s*\|') { return -1 }
-        if ($line -notmatch '^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$') { continue }
-
-        $headerIndex = $i - 1
-        if ($headerIndex -lt 0) { return -1 }
-
-        $headerLine = $Lines[$headerIndex]
-        if ($headerLine -notmatch '^\s*\|') { return -1 }
-        if ($headerLine -match '^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$') { return -1 }
-
-        $cells = @($headerLine.Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
-        for ($j = 0; $j -lt $cells.Count; $j++) {
-            if ($cells[$j] -eq "Status") { return $j }
+        if ($line -match '^\s*##\s+') { return -1 }
+        if ($line -match '^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$') {
+            $headerIdx = $i - 1
+            if ($headerIdx -ge 0 -and $Lines[$headerIdx] -match '^\s*\|') {
+                $cells = @($Lines[$headerIdx].Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
+                for ($j = 0; $j -lt $cells.Count; $j++) {
+                    if ($cells[$j] -ieq "Status") { return $j }
+                }
+            }
+            return -1
         }
-        return -1
+        if ($line -match '^\s*\|') {
+            $cells = @($line.Trim().Trim("|").Split("|") | ForEach-Object { $_.Trim() })
+            for ($j = 0; $j -lt $cells.Count; $j++) {
+                if ($cells[$j] -ieq "Status") { return $j }
+            }
+        }
     }
     return -1
 }
@@ -98,46 +107,66 @@ function Update-BacklogArchiveRow {
         [Parameter(Mandatory=$true)][string]$Status
     )
 
-    if (-not (Test-Path -LiteralPath $BacklogPath -PathType Leaf)) {
-        throw "Backlog file not found: $BacklogPath"
-    }
-
-    $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
-        [void]$lines.Add($line)
-    }
-
-    $activeLink = $ActiveRelPath.Replace("\", "/")
-    $archivedLink = $ArchivedRelPath.Replace("\", "/")
-    $rowIndex = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].Contains("]($activeLink)")) {
-            $rowIndex = $i
-            break
+    Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
+        if (-not (Test-Path -LiteralPath $BacklogPath -PathType Leaf)) {
+            throw "Backlog file not found: $BacklogPath"
         }
-    }
-    if ($rowIndex -lt 0) {
-        throw "BACKLOG.md does not contain active spec link: $activeLink"
-    }
 
-    $lineArray = [string[]]$lines.ToArray()
-    $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $rowIndex
-    if ($statusColumn -lt 0) {
-        throw "Unable to locate Status column for BACKLOG.md row: $activeLink"
-    }
+        $lines = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
+            [void]$lines.Add($line)
+        }
 
-    $row = $lines[$rowIndex].Replace("]($activeLink)", "]($archivedLink)")
-    $cells = [System.Collections.Generic.List[string]]::new()
-    foreach ($cell in $row.Trim().Trim("|").Split("|")) {
-        [void]$cells.Add($cell.Trim())
-    }
-    if ($statusColumn -ge $cells.Count) {
-        throw "Status column index is outside BACKLOG.md row: $activeLink"
-    }
-    $cells[$statusColumn] = $Status
-    $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
+        $activeLink = $ActiveRelPath.Replace("\", "/")
+        $archivedLink = $ArchivedRelPath.Replace("\", "/")
+        $rowIndex = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].Contains("]($activeLink)")) {
+                $rowIndex = $i
+                break
+            }
+        }
+        if ($rowIndex -lt 0) {
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^\s*\|' -and $lines[$i] -match [regex]::Escape($ItemId)) {
+                    $rowIndex = $i
+                    break
+                }
+            }
+        }
+        if ($rowIndex -lt 0) {
+            $fileName = Split-Path -Leaf $ActiveRelPath
+            $taskIdFromFile = ($fileName -replace '_.*$', '') -replace '\.md$', ''
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^\s*\|' -and $lines[$i] -match [regex]::Escape($taskIdFromFile)) {
+                    $rowIndex = $i
+                    break
+                }
+            }
+        }
+        if ($rowIndex -lt 0) {
+            throw "BACKLOG.md does not contain active spec link: $activeLink"
+        }
 
-    [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        $lineArray = [string[]]$lines.ToArray()
+        $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $rowIndex
+        if ($statusColumn -lt 0) {
+            throw "Unable to locate Status column for BACKLOG.md row: $activeLink"
+        }
+
+        $row = $lines[$rowIndex].Replace("]($activeLink)", "]($archivedLink)")
+        $cells = [System.Collections.Generic.List[string]]::new()
+        foreach ($cell in $row.Trim().Trim("|").Split("|")) {
+            [void]$cells.Add($cell.Trim())
+        }
+        if ($statusColumn -ge $cells.Count) {
+            throw "Status column index is outside BACKLOG.md row: $activeLink"
+        }
+        $cells[$statusColumn] = $Status
+        $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
+
+        [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    }
 }
 
 function Update-BacklogPrioritySummary {
@@ -147,97 +176,99 @@ function Update-BacklogPrioritySummary {
         [string]$Priority
     )
 
-    if (-not (Test-Path -LiteralPath $BacklogPath -PathType Leaf)) {
-        throw "Backlog file not found: $BacklogPath"
-    }
+    Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
+        if (-not (Test-Path -LiteralPath $BacklogPath -PathType Leaf)) {
+            throw "Backlog file not found: $BacklogPath"
+        }
 
-    $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
-        [void]$lines.Add($line)
-    }
+        $lines = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
+            [void]$lines.Add($line)
+        }
 
-    # If priority is not provided, try to find which priority bucket in the file contains ItemId
-    $detectedPriority = $Priority
-    if ([string]::IsNullOrEmpty($detectedPriority)) {
+        # If priority is not provided, try to find which priority bucket in the file contains ItemId
+        $detectedPriority = $Priority
+        if ([string]::IsNullOrEmpty($detectedPriority)) {
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                if ($line -match '^\s*\|\s*\*\*(P[0-3])\*\*\s*\|') {
+                    $p = $Matches[1]
+                    $parts = $line -split '\|'
+                    if ($parts.Length -ge 4) {
+                        $itemIds = @($parts[3].Trim().Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+                        if ($itemIds -contains $ItemId) {
+                            $detectedPriority = $p
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        if ([string]::IsNullOrEmpty($detectedPriority)) {
+            # ItemId not found in any priority bucket, nothing to do (idempotent/safe)
+            return
+        }
+
+        # Now update the specific priority line in $lines
+        $modified = $false
         for ($i = 0; $i -lt $lines.Count; $i++) {
             $line = $lines[$i]
-            if ($line -match '^\s*\|\s*\*\*(P[0-3])\*\*\s*\|') {
-                $p = $Matches[1]
+            if ($line -match "^\s*\|\s*\*\*$detectedPriority\*\*\s*\|") {
                 $parts = $line -split '\|'
                 if ($parts.Length -ge 4) {
-                    $itemIds = @($parts[3].Trim().Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+                    # Split item IDs
+                    $itemIds = [System.Collections.Generic.List[string]]::new()
+                    foreach ($id in ($parts[3].Trim().Split(','))) {
+                        $trimmedId = $id.Trim()
+                        if ($trimmedId -ne "" -and $trimmedId -ne "-") {
+                            [void]$itemIds.Add($trimmedId)
+                        }
+                    }
+
                     if ($itemIds -contains $ItemId) {
-                        $detectedPriority = $p
-                        break
+                        [void]$itemIds.Remove($ItemId)
+                        # Sort remaining items for consistency with validate-backlog
+                        $sortedItems = @($itemIds.ToArray() | Sort-Object)
+                        $newCount = $sortedItems.Count
+                        $newItemsText = if ($newCount -gt 0) { $sortedItems -join ", " } else { "-" }
+                        
+                        $lines[$i] = "| **$detectedPriority** | $newCount | $newItemsText |"
+                        $modified = $true
                     }
                 }
-            }
-        }
-    }
-
-    if ([string]::IsNullOrEmpty($detectedPriority)) {
-        # ItemId not found in any priority bucket, nothing to do (idempotent/safe)
-        return
-    }
-
-    # Now update the specific priority line in $lines
-    $modified = $false
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
-        if ($line -match "^\s*\|\s*\*\*$detectedPriority\*\*\s*\|") {
-            $parts = $line -split '\|'
-            if ($parts.Length -ge 4) {
-                # Split item IDs
-                $itemIds = [System.Collections.Generic.List[string]]::new()
-                foreach ($id in ($parts[3].Trim().Split(','))) {
-                    $trimmedId = $id.Trim()
-                    if ($trimmedId -ne "" -and $trimmedId -ne "-") {
-                        [void]$itemIds.Add($trimmedId)
-                    }
-                }
-
-                if ($itemIds -contains $ItemId) {
-                    [void]$itemIds.Remove($ItemId)
-                    # Sort remaining items for consistency with validate-backlog
-                    $sortedItems = @($itemIds.ToArray() | Sort-Object)
-                    $newCount = $sortedItems.Count
-                    $newItemsText = if ($newCount -gt 0) { $sortedItems -join ", " } else { "-" }
-                    
-                    $lines[$i] = "| **$detectedPriority** | $newCount | $newItemsText |"
-                    $modified = $true
-                }
-            }
-            break
-        }
-    }
-
-    # Update Status Overview if we modified the priority bucket
-    if ($modified) {
-        # Let's count total active items across all P0-P3 lines in the newly updated $lines array
-        $totalActive = 0
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            $line = $lines[$i]
-            if ($line -match '^\s*\|\s*\*\*(P[0-3])\*\*\s*\|') {
-                $parts = $line -split '\|'
-                if ($parts.Length -ge 3) {
-                    $countVal = 0
-                    if ([int]::TryParse($parts[2].Trim(), [ref]$countVal)) {
-                        $totalActive += $countVal
-                    }
-                }
-            }
-        }
-        
-        # Replace the Status Overview line: **Status Overview**: <total> active items.
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match '^\*\*Status Overview\*\*:') {
-                $lines[$i] = "**Status Overview**: $totalActive active items."
                 break
             }
         }
 
-        # Write back to file as UTF-8 no-BOM
-        [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        # Update Status Overview if we modified the priority bucket
+        if ($modified) {
+            # Let's count total active items across all P0-P3 lines in the newly updated $lines array
+            $totalActive = 0
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                if ($line -match '^\s*\|\s*\*\*(P[0-3])\*\*\s*\|') {
+                    $parts = $line -split '\|'
+                    if ($parts.Length -ge 3) {
+                        $countVal = 0
+                        if ([int]::TryParse($parts[2].Trim(), [ref]$countVal)) {
+                            $totalActive += $countVal
+                        }
+                    }
+                }
+            }
+            
+            # Replace the Status Overview line: **Status Overview**: <total> active items.
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^\*\*Status Overview\*\*:') {
+                    $lines[$i] = "**Status Overview**: $totalActive active items."
+                    break
+                }
+            }
+
+            # Write back to file as UTF-8 no-BOM
+            [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        }
     }
 }
 

@@ -39,10 +39,15 @@ function ConvertTo-ManifestRelativePath {
     return $Path.Replace("\", "/").TrimStart("/")
 }
 
+function Get-MirrorStructuralDirs {
+    return @("docs", "prompts", "sops", "personas", "schemas", "powershell")
+}
+
 function Test-FrameworkDevOnlyFile {
     param([string]$Path)
     $normalized = $Path.Replace("\", "/").TrimStart("/")
     $devOnlyPaths = @(
+        "powershell/sync-example-mirror.ps1",
         "powershell/tests/examples-mirror-sync.tests.ps1",
         "powershell/tests/pre-push-hook.tests.ps1",
         "powershell/tests/init-project-core.tests.ps1",
@@ -52,7 +57,8 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/update-bundle-custom-regions.tests.ps1",
         "powershell/tests/update-bundle-rename-prune.tests.ps1",
         "powershell/tests/update-bundle-scope-snapshot.tests.ps1",
-        "powershell/tests/watch-adopter-ci.tests.ps1"
+        "powershell/tests/watch-adopter-ci.tests.ps1",
+        "powershell/tests/backlog-lock.tests.ps1"
     )
     return $devOnlyPaths -contains $normalized
 }

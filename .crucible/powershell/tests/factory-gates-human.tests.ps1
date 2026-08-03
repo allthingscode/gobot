@@ -233,6 +233,71 @@ try {
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-factory-gates-human-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
+    $results += Run-Test -Name "Write-WedgeReport formats recurring merge conflict recovery for human gate breakers" -Body {
+        $lines = @(Get-WedgeReportLines -TaskId "F-HUM" -SourcePhase "deployment" -TargetPhase "implementation" -BreakerCode "recurring_merge_conflicts" -Why "merge conflict persisted")
+        $text = $lines -join "`n"
+        Assert-Result -Name "human gate wedge sentinel" -Condition ($text -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage ("missing stop sentinel. Output:`n" + $text)
+        Assert-Result -Name "human gate wedge phase" -Condition ($text -match "PHASE:\s+deployment -> implementation") -FailureMessage ("missing phase line. Output:`n" + $text)
+        Assert-Result -Name "human gate wedge code" -Condition ($text -match [regex]::Escape("(recurring_merge_conflicts)")) -FailureMessage ("missing breaker code. Output:`n" + $text)
+        Assert-Result -Name "human gate wedge recovery" -Condition ($text -match "(?m)^RECOVERY:\s+\S") -FailureMessage ("missing recovery line. Output:`n" + $text)
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGateMerge recurring conflict breaker emits wedge output without handoff" -Body {
+        $caseRoot = Join-Path $tempRoot "merge-breaker-no-handoff"
+        $localRepo = Join-Path $caseRoot "local_repo"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --quiet
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+        git -C $localRepo config commit.gpgSign false
+
+        "base" | Set-Content -LiteralPath (Join-Path $localRepo "conflict.txt") -Encoding UTF8
+        git -C $localRepo add conflict.txt
+        git -C $localRepo commit -m "base" --quiet
+        git -C $localRepo branch -M master
+
+        git -C $localRepo checkout -b task/F-HUM-BREAK --quiet
+        "task" | Set-Content -LiteralPath (Join-Path $localRepo "conflict.txt") -Encoding UTF8
+        git -C $localRepo add conflict.txt
+        git -C $localRepo commit -m "task change" --quiet
+
+        git -C $localRepo checkout master --quiet
+        "primary" | Set-Content -LiteralPath (Join-Path $localRepo "conflict.txt") -Encoding UTF8
+        git -C $localRepo add conflict.txt
+        git -C $localRepo commit -m "primary change" --quiet
+
+        $script:LOG_FILE = Join-Path $localRepo ".crucible/session/F-HUM-BREAK/pipeline.log.jsonl"
+        $script:CB_HISTORY_FILE = Join-Path $localRepo ".crucible/session/global/circuit_breakers.jsonl"
+        $script:backlogDir = Join-Path $localRepo ".crucible/backlog"
+        $script:FRAMEWORK_POWERSHELL = Split-Path -Parent $FACTORY_LIB
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:LOG_FILE), (Split-Path -Parent $script:CB_HISTORY_FILE), $script:backlogDir -Force | Out-Null
+
+        $script:HumanGateMergeBreakerResult = $null
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            Push-Location $localRepo
+            $outputLines = @(& {
+                $script:HumanGateMergeBreakerResult = Invoke-HumanGateMerge -TaskId "F-HUM-BREAK" -PrimaryBranch "master" -ProjectRoot $localRepo -Handoff $null -MaxRebaseAttempts 0
+            } 6>&1)
+        } finally {
+            Pop-Location
+            $ErrorActionPreference = $previous
+        }
+        $mergeResult = $script:HumanGateMergeBreakerResult
+        $script:HumanGateMergeBreakerResult = $null
+        $outputText = ($outputLines | ForEach-Object { [string]$_ }) -join "`n"
+
+        Assert-Result -Name "human gate merge breaker result" -Condition ($mergeResult -eq "breaker") -FailureMessage ("expected breaker, got " + $mergeResult)
+        Assert-Result -Name "human gate merge wedge sentinel" -Condition ($outputText -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage ("missing wedge sentinel. Output:`n" + $outputText)
+        Assert-Result -Name "human gate merge wedge task" -Condition ($outputText -match "TASK:\s+F-HUM-BREAK") -FailureMessage ("missing task line. Output:`n" + $outputText)
+        Assert-Result -Name "human gate merge wedge phase" -Condition ($outputText -match "PHASE:\s+deployment -> deployment") -FailureMessage ("missing deployment phase line. Output:`n" + $outputText)
+        Assert-Result -Name "human gate merge wedge code" -Condition ($outputText -match [regex]::Escape("(recurring_merge_conflicts)")) -FailureMessage ("missing recurring_merge_conflicts wedge code. Output:`n" + $outputText)
+        Assert-Result -Name "human gate merge why keeps conflict detail" -Condition ($outputText -match [regex]::Escape("still conflicts with master")) -FailureMessage ("missing conflict detail. Output:`n" + $outputText)
+        Assert-Result -Name "human gate merge wedge recovery" -Condition ($outputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage ("missing recovery line. Output:`n" + $outputText)
+    }
+
     $results += Run-Test -Name "Invoke-HumanGate D22 regression: gate push and reset behavior" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "d22-regression"
@@ -1869,6 +1934,36 @@ try {
         Assert-Result -Name "f3 staging push fail error message" -Condition ($result.Output -match "Failed to publish CI staging ref") -FailureMessage $result.Output
         $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
         Assert-Result -Name "f3 staging push fail master tip unchanged on real origin" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
+    }
+
+    $results += Run-Test -Name "F3: MISSING_REQUIRED_JOBS withholds master push and deletes staging ref" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "f3-ci-missing-jobs"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-MSJ"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+
+        $configPath = Join-Path $case.LocalRepo ".crucible/config.yaml"
+        $configYaml = (Get-Content -LiteralPath $configPath -Raw) + "`n  ci_required_checks: coverage-windows"
+        $configYaml | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "green" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-MSJ"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "f3 missing jobs exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "f3 missing jobs output indicates refusing to publish" -Condition ($result.Output -match "MISSING_REQUIRED_JOBS: Staging CI run for .* is missing required jobs") -FailureMessage $result.Output
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "f3 missing jobs master tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
+        git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-MSJ
+        Assert-Result -Name "f3 missing jobs deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on missing required jobs"
     }
 
 } finally {

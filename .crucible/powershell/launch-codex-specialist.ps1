@@ -54,6 +54,9 @@ param(
     # Reviewer phases only: enforce the structured review-verdict schema on Codex's final message.
     [switch]$ReviewSchema,
 
+    # Bypass the pre-dispatch clean-tree provenance guard (dispatch onto a dirty tree deliberately).
+    [switch]$AllowDirtyTree,
+
     # Optional reasoning effort (none|minimal|low|medium|high|xhigh), applied via -c model_reasoning_effort.
     [Parameter(Mandatory = $false)]
     [ValidateSet("", "none", "minimal", "low", "medium", "high", "xhigh")]
@@ -154,6 +157,37 @@ function Test-InfraFailure {
     return $null
 }
 
+function Invoke-GitStdout {
+    param(
+        [string]$Directory,
+        [string[]]$GitArgs
+    )
+    if (-not (Get-Command "git" -ErrorAction SilentlyContinue)) {
+        return [PSCustomObject]@{ ExitCode = 127; Output = "" }
+    }
+    $allArgs = @("-C", $Directory) + $GitArgs
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & git @allArgs 2>$null
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    return [PSCustomObject]@{ ExitCode = $exitCode; Output = ($output -join "`n") }
+}
+
+function Test-GitWorkTree {
+    param([string]$Directory)
+    $res = Invoke-GitStdout -Directory $Directory -GitArgs @("rev-parse", "--is-inside-work-tree")
+    return (($res.ExitCode -eq 0) -and ($res.Output.Trim() -eq "true"))
+}
+
+function Get-GitPorcelainStatus {
+    param([string]$Directory)
+    return Invoke-GitStdout -Directory $Directory -GitArgs @("status", "--porcelain")
+}
+
 function Invoke-CodexExec {
     param(
         [string[]]$CodexArgs,
@@ -180,7 +214,15 @@ function Invoke-CodexExec {
         $ErrorActionPreference = $previous
     }
     if (-not [string]::IsNullOrWhiteSpace($TranscriptPath)) {
-        [System.IO.File]::WriteAllText($TranscriptPath, $output, (New-Object System.Text.UTF8Encoding($false)))
+        try {
+            $transcriptDir = Split-Path -Parent $TranscriptPath
+            if (-not [string]::IsNullOrWhiteSpace($transcriptDir) -and -not (Test-Path -LiteralPath $transcriptDir)) {
+                New-Item -ItemType Directory -Path $transcriptDir -Force | Out-Null
+            }
+            [System.IO.File]::WriteAllText($TranscriptPath, $output, (New-Object System.Text.UTF8Encoding($false)))
+        } catch {
+            Write-Warning ("Could not write Codex transcript to " + $TranscriptPath + ": " + $_.Exception.Message)
+        }
     }
     return [PSCustomObject]@{ ExitCode = $exitCode; Output = $output }
 }
@@ -259,6 +301,33 @@ if ([string]::IsNullOrWhiteSpace($WorkingDir)) {
     $WorkingDir = (Resolve-Path -LiteralPath $WorkingDir).Path
 }
 
+if ($Phase -eq "deployment") {
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDir) -and $WorkingDir -ne $REPO_ROOT) {
+        Write-Host ("[CODEX] Notice: Deployment phase forces WorkingDir to main repo root (" + $REPO_ROOT + "); ignoring passed WorkingDir (" + $WorkingDir + ").") -ForegroundColor Yellow
+    }
+    $WorkingDir = $REPO_ROOT
+}
+
+if ($AllowDirtyTree) {
+    Write-Host "[CODEX] Notice: pre-dispatch tree check overridden by -AllowDirtyTree." -ForegroundColor Yellow
+} elseif (-not (Test-GitWorkTree -Directory $WorkingDir)) {
+    Write-Host "[CODEX] Note: WorkingDir is not a git work tree; skipping pre-dispatch tree check."
+} else {
+    $gitStatus = Get-GitPorcelainStatus -Directory $WorkingDir
+    if ($gitStatus.ExitCode -ne 0) {
+        Write-Host "[CODEX] Note: WorkingDir is not a git work tree; skipping pre-dispatch tree check."
+    } elseif (-not [string]::IsNullOrWhiteSpace($gitStatus.Output)) {
+        Write-Host ("[CODEX] Error: pre-dispatch tree check failed. The working tree at " + $WorkingDir + " holds uncommitted changes the specialist did not author.") -ForegroundColor Red
+        foreach ($line in ($gitStatus.Output -split "`n")) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                Write-Host ("  " + $line)
+            }
+        }
+        Write-Host "Establish provenance first: commit or stash the changes, or pass -AllowDirtyTree to dispatch onto this tree deliberately (you then own its provenance)." -ForegroundColor Yellow
+        exit 2
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($Role)) {
     $Role = Get-RoleForPhase -PhaseName $Phase
 }
@@ -324,6 +393,10 @@ if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 
 $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
 
+if (-not (Test-Path -LiteralPath $sessionDir)) {
+    New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+}
+
 # --- Classification: SUCCESS vs LAUNCH_FAILED ---
 # A codex exec run that exits 0 AND captures a final message succeeded: codex's own auth/runtime
 # failures exit non-zero and write no last-message. The infra-marker scan is therefore consulted
@@ -347,18 +420,18 @@ if ($result.ExitCode -eq 127) {
     } else {
         $failReason = "non-zero exit code ($($result.ExitCode))"
     }
-} elseif ([string]::IsNullOrWhiteSpace($lastMsg)) {
-    $failReason = "no final message captured (--output-last-message empty)"
 } elseif ($useSchema) {
     $verdictOk = $false
-    try {
-        $parsed = $lastMsg | ConvertFrom-Json
-        if ($null -ne $parsed -and $parsed.PSObject.Properties["verdict"]) {
-            $v = [string]$parsed.verdict
-            if ($v -eq "APPROVED" -or $v -eq "CHANGES_REQUESTED") { $verdictOk = $true }
+    if (-not [string]::IsNullOrWhiteSpace($lastMsg)) {
+        try {
+            $parsed = $lastMsg | ConvertFrom-Json
+            if ($null -ne $parsed -and $parsed.PSObject.Properties["verdict"]) {
+                $v = [string]$parsed.verdict
+                if ($v -eq "APPROVED" -or $v -eq "CHANGES_REQUESTED") { $verdictOk = $true }
+            }
+        } catch {
+            $verdictOk = $false
         }
-    } catch {
-        $verdictOk = $false
     }
     if (-not $verdictOk) {
         $failReason = "final message is not a valid review verdict (verdict not APPROVED/CHANGES_REQUESTED)"

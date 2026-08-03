@@ -12,7 +12,7 @@ When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in 
 
 ## Sub-Agent Invocation
 
-Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are dispatched as `general-purpose` sub-agents. The Researcher uses `Explore` (read-only search tools, enforces the trust boundary at the toolset level). Sub-agents share the same working directory and git state — they are not sandboxed. Do not pass orchestrator session history to sub-agents.
+Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are dispatched as `general-purpose` sub-agents. The Researcher uses `Explore` (read-only search tools, enforces the trust boundary at the toolset level). Sub-agents share the same working directory and git state — they are not sandboxed. Do not pass orchestrator session history to sub-agents. Because of that shared state, run `git status` before every dispatch and confirm the tree matches expectation; never build on, or commit alongside, uncommitted changes you did not author -- establish their provenance first (see `sops/orchestrator.md` Step 4).
 
 ### Default Specialist Target: Codex
 
@@ -28,7 +28,7 @@ with that model. The canonical policy and the default/escalation table live in
 
 Quick reference: Sonnet is the default; Opus is reserved for Research (always), design-heavy
 or `high`/`extended`-tier Architect work (`design_required`), and `high`/`extended`-tier
-Grooming/Review; the Operator is Haiku; the orchestrator itself runs on Sonnet.
+Grooming/Review; the Operator now runs at the high-capability tier (raised from `fast`, since deployment mutates BACKLOG.md, merges, and gates and must not use the lightest model); the orchestrator itself runs on Sonnet.
 
 ### Standard Specialist Dispatch (Groomer, Architect, Reviewer, Operator)
 
@@ -116,6 +116,20 @@ launch status.
    It records the decision and writes `session/{task_id}/research/gate-filing.md`, then prints the
    dispatch pointer. Re-dispatch with `-PromptFile <path to gate-filing.md>` (or a trivial one-line `-PromptText`). The specialist
    then files the approved stubs and hands off without re-auditing.
+
+   > **Anti-pattern (dogfooding integrity): do NOT hand-hold a normal phase with a bespoke prompt.**
+   > It is tempting to write a detailed `-PromptFile` that restates the spec, dictates the exact
+   > `new-handoff.ps1` invocation, pre-bakes the commit message, or re-lists the scope. Don't. For any
+   > normal phase the auto-generated `prompt.md` **is the contract under test** — it already carries the
+   > readiness echo, SOP, checklist, scope boundary, and handoff mechanics. Substituting your own
+   > instructions **masks defects in `prompt.md`/the SOPs**: if the generated prompt were incomplete,
+   > your scaffolding would paper over it, and the run would prove only "factory + heavy orchestrator
+   > hand-holding works," never "the factory works." That is the opposite of what a dogfooding session
+   > must establish. A phase that stumbles on the bare `prompt.md` is a **finding to file, not a gap to
+   > pre-patch**. Reserve `-PromptFile`/`-PromptText` for exactly two cases: (a) an argv-hostile prompt
+   > the harness cannot pass cleanly, and (b) a human-gate continuation (e.g. the Research Gate's
+   > `gate-filing.md`). Everything the specialist needs for a normal phase belongs in the spec and the
+   > handoff — authored by the upstream phase — not in the dispatch call.
 
 4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=SUCCESS` or
    `STATUS=LAUNCH_FAILED`. A verdict is only valid when `STATUS=SUCCESS` **and** the handoff +

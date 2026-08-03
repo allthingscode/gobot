@@ -5,6 +5,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-handoff.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
 $SCHEMA_PATH = Join-Path $REPO_ROOT "schemas/handoff.schema.json"
@@ -96,7 +97,7 @@ function Ensure-TestBacklogArtifact {
 | {task_id}-HANDOFF | Test Task | Ready |
 | C-FACTORY-ISOLATED | Test Task | Ready |
 "@
-        $content | Out-File -LiteralPath $backlogPath -Encoding UTF8
+        [System.IO.File]::WriteAllText($backlogPath, $content, [System.Text.UTF8Encoding]::new($false))
         $script:tempArtifacts += $backlogPath
     }
 }
@@ -203,13 +204,84 @@ scope: "dev-factory-only"
 
 # Test Fixture
 "@
-    $content | Out-File -LiteralPath $path -Encoding UTF8
+    [System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
     $script:tempArtifacts += $path
 
     $backlogPath = Join-Path $tempRoot ".crucible/backlog/BACKLOG.md"
     if (Test-Path -LiteralPath $backlogPath) {
-        $backlogLine = "| [$TaskId](chores/active/$($TaskId)_FactoryTest.md) | Test Title | Ready |"
-        Add-Content -Path $backlogPath -Value $backlogLine -Encoding UTF8
+        $backlogLine = "`n| [$TaskId](chores/active/$($TaskId)_FactoryTest.md) | Test Title | Ready |"
+        [System.IO.File]::AppendAllText($backlogPath, $backlogLine, [System.Text.UTF8Encoding]::new($false))
+    }
+}
+
+function New-RemoteLessSampleProject {
+    param(
+        [Parameter(Mandatory=$true)][string]$Root,
+        [Parameter(Mandatory=$true)][string]$Name
+    )
+
+    $projectRoot = Join-Path $Root $Name
+    New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
+
+    Push-Location $projectRoot
+    try {
+        git init --quiet
+        git config user.name "Test"
+        git config user.email "test@example.com"
+        git config commit.gpgSign false
+        [System.IO.File]::WriteAllText((Join-Path $projectRoot "README.md"), "# Sample App`r`n", (New-Object System.Text.UTF8Encoding($false)))
+        git add README.md
+        git commit -m "initial commit" --quiet
+    } finally {
+        Pop-Location
+    }
+
+    $initRun = Invoke-ExternalCommand {
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+            -ProjectRoot $projectRoot `
+            -Language go `
+            -WithSampleTask `
+            -AppendInstructions `
+            -Quiet
+    }
+    if ($initRun.ExitCode -ne 0) {
+        throw ("init-project failed with exit code " + $initRun.ExitCode + ". Output: " + $initRun.Output)
+    }
+
+    Push-Location $projectRoot
+    try {
+        git add .crucible AGENTS.md CLAUDE.md GEMINI.md
+        git commit -m "add crucible scaffold" --quiet
+        $remotes = @(git remote)
+        if ($remotes.Count -ne 0) {
+            throw ("test fixture unexpectedly has git remotes: " + ($remotes -join ", "))
+        }
+    } finally {
+        Pop-Location
+    }
+
+    return $projectRoot
+}
+
+function Invoke-RemoteLessFactoryDirectCommand {
+    param([Parameter(Mandatory=$true)][string]$ProjectRoot)
+
+    $factoryPath = Join-Path $ProjectRoot ".crucible/powershell/factory.ps1"
+    $escapedProjectRoot = $ProjectRoot.Replace("'", "''")
+    $escapedFactoryPath = $factoryPath.Replace("'", "''")
+    $script = @"
+`$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '$escapedProjectRoot'
+& '$escapedFactoryPath' -Init -TaskId F-001 | Out-Null
+`$code = `$global:LASTEXITCODE
+if (`$null -eq `$code) {
+    `$code = 0
+}
+exit `$code
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+    return Invoke-ExternalCommand {
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded
     }
 }
 
@@ -394,6 +466,19 @@ Backup-Handoffs
 Backup-SessionState
 Ensure-TestBacklogArtifact
 try {
+    $results += Run-Test -Name "remote-less sample factory -Init exits 0 via -File and direct invocation" -Body {
+        $fileProjectRoot = New-RemoteLessSampleProject -Root $tempRoot -Name "first-run-file"
+        $fileFactoryPath = Join-Path $fileProjectRoot ".crucible/powershell/factory.ps1"
+        $fileRun = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $fileFactoryPath -Init -TaskId F-001
+        }
+        Assert-Result -Name "-File exit code" -Condition ($fileRun.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $fileRun.ExitCode + ". Output: " + $fileRun.Output)
+
+        $directProjectRoot = New-RemoteLessSampleProject -Root $tempRoot -Name "first-run-direct"
+        $directRun = Invoke-RemoteLessFactoryDirectCommand -ProjectRoot $directProjectRoot
+        Assert-Result -Name "direct invocation exit code" -Condition ($directRun.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $directRun.ExitCode + ". Output: " + $directRun.Output)
+    }
+
     $handoffT004 = Get-BaseHandoff "C-FACTORY-TASK"
     $handoffT004.suspicious_content = "external prompt override detected"
     $results += Run-FactoryInitTest -Name "Suspicious Content Circuit Breaker" -TaskId "C-FACTORY-TASK" -Handoff $handoffT004 -ExpectedExitCode 2 -ExpectedPattern "Suspicious Content detected"
@@ -420,6 +505,24 @@ try {
 - [/] Optional follow-up
 "@
     $results += Run-FactoryChecklistGateTest -Name "In-progress checklist marker counts as unchecked" -TaskId "C-FACTORY-CHECKLIST" -Handoff $handoffChecklist -TaskMarkdown $checklistTaskMd -ExpectedExitCode 2 -ExpectedPattern "unchecked: 1, malformed: 0"
+
+    $handoffChecklistSkip = Get-BaseHandoff "C-FACTORY-CHECKLIST-SKIP"
+    $handoffChecklistSkip.source_phase = "implementation"
+    $handoffChecklistSkip.target_phase = "verification"
+    $checklistSkipTaskMd = @"
+# C-FACTORY-CHECKLIST-SKIP
+
+## Task List
+
+- [x] Finish implementation
+- [-] Phase 1 (if needed): write implementation plan in task.md
+- [x] Record checkpoint
+
+## Optional Steps
+
+- [ ] Phase 1 (if needed): write implementation plan in task.md
+"@
+    $results += Run-FactoryChecklistGateTest -Name "Skipped conditional checklist item does not block implementation gate" -TaskId "C-FACTORY-CHECKLIST-SKIP" -Handoff $handoffChecklistSkip -TaskMarkdown $checklistSkipTaskMd -ExpectedExitCode 0 -ExpectedPattern ""
 
     # Regression: the checklist quality gate must keep blocking on a re-run with the
     # same incomplete task.md. Previously session_end was logged before the gate
@@ -707,7 +810,7 @@ created_at: "2026-05-08"
 | [DEP-OK](features/archived/DEP-OK.md) | Satisfied Dependency | Production |
 | [DEP-PEND](features/active/DEP-PEND.md) | Non-terminal Dependency | Ready |
 "@
-    $backlogContent | Out-File -LiteralPath $backlogPath -Encoding UTF8
+    [System.IO.File]::WriteAllText($backlogPath, $backlogContent, [System.Text.UTF8Encoding]::new($false))
 
     # Create the files referenced in BACKLOG.md so there are no broken links or orphans
     $depOkFile = Join-Path $tempRoot ".crucible/backlog/features/archived/DEP-OK.md"

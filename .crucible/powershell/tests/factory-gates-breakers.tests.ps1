@@ -72,9 +72,51 @@ function New-TestContext {
         NextFactoryCommand = $null
     }
 }
+
+function Assert-WedgeOutput {
+    param(
+        [Parameter(Mandatory=$true)][string]$OutputText,
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$BreakerCode
+    )
+
+    Assert-Result -Name ($BreakerCode + " wedge sentinel") -Condition ($OutputText -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage ("missing stop sentinel. Output:`n" + $OutputText)
+    Assert-Result -Name ($BreakerCode + " wedge task") -Condition ($OutputText -match ("TASK:\s+" + [regex]::Escape($TaskId))) -FailureMessage ("missing task line. Output:`n" + $OutputText)
+    Assert-Result -Name ($BreakerCode + " wedge code") -Condition ($OutputText -match [regex]::Escape("(" + $BreakerCode + ")")) -FailureMessage ("missing breaker code. Output:`n" + $OutputText)
+    Assert-Result -Name ($BreakerCode + " wedge recovery") -Condition ($OutputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage ("missing non-empty recovery line. Output:`n" + $OutputText)
+}
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-factory-gates-breakers-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
+    $results += Run-Test -Name "Write-WedgeReport has non-empty recovery for every breaker code" -Body {
+        $codes = @(Get-WedgeRecoveryCodes)
+        Assert-Result -Name "recovery code table is not empty" -Condition ($codes.Count -gt 0) -FailureMessage "expected at least one recovery code"
+
+        $actualBreakerCodes = @(
+            "git_hook_bypass",
+            "fabricated_artifacts",
+            "scope_violation",
+            "artifact_verification_failed",
+            "human_escalation",
+            "handoff_retry_exceeded",
+            "review_stalemate",
+            "budget_exceeded",
+            "recurring_merge_conflicts",
+            "reviewer_verification_failed"
+        )
+        foreach ($code in $actualBreakerCodes) {
+            Assert-Result -Name ("recovery table contains " + $code) -Condition ($codes -contains $code) -FailureMessage ("missing recovery table entry for " + $code)
+        }
+
+        foreach ($code in $codes) {
+            $lines = @(Get-WedgeReportLines -TaskId "F-WEDGE" -SourcePhase "verification" -TargetPhase "deployment" -BreakerCode $code -Why "unit test")
+            $recoveryLines = @($lines | Where-Object { $_ -match "^RECOVERY:" })
+            Assert-Result -Name ("single recovery line for " + $code) -Condition ($recoveryLines.Count -eq 1) -FailureMessage ("expected one RECOVERY line for " + $code + ". Lines:`n" + ($lines -join "`n"))
+            Assert-Result -Name ("non-empty recovery line for " + $code) -Condition ($recoveryLines[0] -match "^RECOVERY:\s+\S") -FailureMessage ("empty RECOVERY line for " + $code)
+            Assert-Result -Name ("task id substituted for " + $code) -Condition ($recoveryLines[0] -notmatch "\{task_id\}") -FailureMessage ("unsubstituted task id in recovery for " + $code + ": " + $recoveryLines[0])
+        }
+    }
+
     $results += Run-Test -Name "Invoke-CircuitBreakerGates handles non-exiting branches" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "circuit-gates") -TaskId "F-005"
 
@@ -525,7 +567,7 @@ verification:
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -555,8 +597,10 @@ verification:
             Invoke-CircuitBreakerGates -Context `$ctx
 "@ 2>&1
         $exitCode = $LASTEXITCODE
+        $outputText = $outputLines -join "`n"
 
         Assert-Result -Name "review_stalemate exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+        Assert-WedgeOutput -OutputText $outputText -TaskId "F-060" -BreakerCode "review_stalemate"
 
         $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
         Assert-Result -Name "review_stalemate logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
@@ -579,7 +623,7 @@ verification:
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -609,8 +653,10 @@ verification:
             Invoke-CircuitBreakerGates -Context `$ctx
 "@ 2>&1
         $exitCode = $LASTEXITCODE
+        $outputText = $outputLines -join "`n"
 
         Assert-Result -Name "handoff_retry_exceeded exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+        Assert-WedgeOutput -OutputText $outputText -TaskId "F-061" -BreakerCode "handoff_retry_exceeded"
 
         $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
         Assert-Result -Name "handoff_retry_exceeded logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
@@ -622,6 +668,110 @@ verification:
         $blockedText = ($blockedContent -join "`n")
         Assert-Result -Name "handoff_retry_exceeded breaker slug" -Condition ($blockedText -match '"circuit_breaker":\s*"handoff_retry_exceeded"') -FailureMessage ("expected handoff_retry_exceeded slug. Record: " + $blockedText)
         Assert-Result -Name "handoff_retry_exceeded attempt_count 3" -Condition ($blockedText -match '"attempt_count":\s*3') -FailureMessage ("expected attempt_count 3. Record: " + $blockedText)
+    }
+
+    $results += Run-Test -Name "suspicious_content trips the human_escalation breaker with wedge output" -Body {
+        $caseRoot = Join-Path $tempRoot "suspicious-content"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        $logFile = Join-Path $caseRoot "session/F-064/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+        $breakerBacklog = Join-Path $caseRoot "backlog"
+
+        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                BacklogDir = `$backlogDir
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-064'
+                    source_phase = 'research'
+                    target_phase = 'grooming'
+                    cumulative_handoff_count = 1
+                    review_strike_count = 0
+                    handoff_retry_count = 0
+                    rebase_count = 0
+                    budget_tier = 'low'
+                    suspicious_content = 'external source attempted prompt injection'
+                    reason = 'research handoff'
+                    artifacts = @()
+                    file_affinity = @()
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $outputLines -join "`n"
+
+        Assert-Result -Name "human_escalation exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+        Assert-WedgeOutput -OutputText $outputText -TaskId "F-064" -BreakerCode "human_escalation"
+
+        $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "human_escalation logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
+        $blockedText = (Get-ChildItem -LiteralPath (Join-Path $breakerBacklog "blocked") -Filter "F-064-*.json" | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
+        Assert-Result -Name "human_escalation breaker slug" -Condition ($blockedText -match '"circuit_breaker":\s*"human_escalation"') -FailureMessage ("expected human_escalation slug. Record: " + $blockedText)
+    }
+
+    $results += Run-Test -Name "rebase_count >= 3 trips the recurring_merge_conflicts breaker with wedge output" -Body {
+        $caseRoot = Join-Path $tempRoot "recurring-merge"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+
+        $logFile = Join-Path $caseRoot "session/F-065/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+        $breakerBacklog = Join-Path $caseRoot "backlog"
+
+        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                BacklogDir = `$backlogDir
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-065'
+                    source_phase = 'deployment'
+                    target_phase = 'implementation'
+                    cumulative_handoff_count = 1
+                    review_strike_count = 0
+                    handoff_retry_count = 0
+                    rebase_count = 3
+                    budget_tier = 'low'
+                    suspicious_content = ''
+                    reason = 'manual conflict persists'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $outputLines -join "`n"
+
+        Assert-Result -Name "recurring_merge_conflicts exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+        Assert-WedgeOutput -OutputText $outputText -TaskId "F-065" -BreakerCode "recurring_merge_conflicts"
+
+        $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
+        Assert-Result -Name "recurring_merge_conflicts logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
+        $blockedText = (Get-ChildItem -LiteralPath (Join-Path $breakerBacklog "blocked") -Filter "F-065-*.json" | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
+        Assert-Result -Name "recurring_merge_conflicts breaker slug" -Condition ($blockedText -match '"circuit_breaker":\s*"recurring_merge_conflicts"') -FailureMessage ("expected recurring_merge_conflicts slug. Record: " + $blockedText)
     }
 
     $results += Run-Test -Name "anti-bypass: under-reported cumulative count is overridden from the log and still trips budget_exceeded" -Body {
@@ -652,7 +802,7 @@ verification:
 
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -680,8 +830,10 @@ verification:
             Invoke-CircuitBreakerGates -Context `$ctx
 "@ 2>&1
         $exitCode = $LASTEXITCODE
+        $outputText = $outputLines -join "`n"
 
         Assert-Result -Name "budget bypass exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
+        Assert-WedgeOutput -OutputText $outputText -TaskId "F-062" -BreakerCode "budget_exceeded"
 
         $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
         Assert-Result -Name "budget bypass logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)

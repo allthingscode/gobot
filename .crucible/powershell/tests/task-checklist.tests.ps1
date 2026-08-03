@@ -112,6 +112,24 @@ try {
         Assert-Result -Name "required unchecked is empty" -Condition ($result.RequiredUnchecked.Count -eq 0) -FailureMessage "expected no unchecked items"
         Assert-Result -Name "required malformed is empty" -Condition ($result.RequiredMalformed.Count -eq 0) -FailureMessage "expected no malformed items"
     }
+
+    $results += Run-Test -Name "Conditional optional checklist item is non-blocking" -Body {
+        $taskPath = Join-Path $tempRoot "conditional-optional-task.md"
+        @"
+# Task
+
+## Task List
+- [x] Required implementation step
+
+## Optional Steps
+- [ ] Phase 1 (if needed): write implementation plan in task.md
+"@ | Set-Content -LiteralPath $taskPath -Encoding UTF8
+
+        $result = Get-TaskChecklistGateResult -TaskMdPath $taskPath
+        Assert-Result -Name "required unchecked is empty" -Condition ($result.RequiredUnchecked.Count -eq 0) -FailureMessage "expected no required unchecked items"
+        Assert-Result -Name "optional unchecked count" -Condition ($result.OptionalUnchecked.Count -eq 1) -FailureMessage "expected optional conditional item to be non-blocking"
+        Assert-Result -Name "optional unchecked text" -Condition ($result.OptionalUnchecked[0].text -eq "- [ ] Phase 1 (if needed): write implementation plan in task.md") -FailureMessage "optional conditional item text changed"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
