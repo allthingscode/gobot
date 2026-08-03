@@ -1,7 +1,0 @@
-time=2026-05-03T23:03:48.756-05:00 level=INFO msg="run: memory consolidation enabled"
-time=2026-05-03T23:03:48.828-05:00 level=INFO msg="run: DM pairing enabled"
-time=2026-05-03T23:03:48.871-05:00 level=INFO msg="bootstrap: multi-user memory isolation enabled"
-time=2026-05-03T23:03:48.911-05:00 level=INFO msg="bootstrap: multi-user memory isolation enabled"
-time=2026-05-03T23:03:48.928-05:00 level=INFO msg="bootstrap: multi-user checkpoint isolation enabled"
-time=2026-05-03T23:03:48.959-05:00 level=INFO msg="factory: cost routing initialized" manager=claude-3-haiku
-time=2026-05-03T23:03:48.959-05:00 level=INFO msg="dispatching specialist cron job" agent=researcher session=cron:researcher:job123:telegram:12345 channel=telegram

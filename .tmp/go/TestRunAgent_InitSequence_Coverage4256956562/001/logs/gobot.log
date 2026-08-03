@@ -1,5 +1,0 @@
-time=2026-05-03T23:08:52.939-05:00 level=INFO msg="dashboard: starting server" addr=127.0.0.1:0
-time=2026-05-03T23:08:52.959-05:00 level=INFO msg="gobot: drain complete, proceeding to shutdown"
-time=2026-05-03T23:08:52.960-05:00 level=INFO msg="gobot: heartbeat runner started"
-time=2026-05-03T23:08:52.970-05:00 level=INFO msg="gateway: starting server" addr=:0
-time=2026-05-03T23:08:52.981-05:00 level=INFO msg="resilience: all circuit breakers reset by user" session=sess

@@ -1,2 +1,0 @@
-time=2026-05-03T23:21:01.035-05:00 level=INFO msg="test text log message"
-{"time":"2026-05-03T23:21:01.0369903-05:00","level":"INFO","msg":"test json log message"}
