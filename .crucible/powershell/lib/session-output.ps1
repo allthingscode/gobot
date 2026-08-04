@@ -363,9 +363,9 @@ function Initialize-FactoryTargetSession {
             
             $candidates = @()
             foreach ($item in $readyItems) {
-                if ($item -match '\|\s*\[?([FBC]-[0-9]+)') {
+                if ($item -match '\|\s*\[?([FBCR]-[0-9]+[a-z]?)') {
                     $tid = $matches[1]
-                    $type = if ($tid -match "^F-") { "features" } elseif ($tid -match "^B-") { "bugs" } else { "chores" }
+                    $type = if ($tid -match "^[FR]-") { "features" } elseif ($tid -match "^B-") { "bugs" } else { "chores" } # R-* (research) specs are filed under features/ by convention.
                     $specFiles = Get-ChildItem -Path (Join-Path $backlogDir "$type/active") -Filter "$($tid)_*.md" -ErrorAction SilentlyContinue
                     if ($specFiles) {
                         $specFile = $specFiles | Select-Object -First 1

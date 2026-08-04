@@ -269,6 +269,87 @@ Spec body
         $bare = @($src | Where-Object { $_ -match 'git worktree add' -and $_ -notmatch 'Invoke-GitChecked' -and $_.TrimStart() -notmatch '^#' })
         Assert-Result -Name "no unwrapped worktree add" -Condition ($bare.Count -eq 0) -FailureMessage ("found bare git worktree add line(s): " + ($bare -join " | "))
     }
+    $results += Run-Test -Name "Groomer target task identification handles R-*, suffixed IDs, and B-*/F-*" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "groomer-target") -TaskId "R-029" -TargetPhase "grooming"
+        $ctx.TypeDir = "features"
+        $ctx.Handoff.source_phase = "grooming"
+        $ctx.Handoff.target_phase = "grooming"
+
+        $featActive = Join-Path $ctx.BacklogDir "features/active"
+        $bugActive = Join-Path $ctx.BacklogDir "bugs/active"
+        $choreActive = Join-Path $ctx.BacklogDir "chores/active"
+        New-Item -ItemType Directory -Path $featActive, $bugActive, $choreActive -Force | Out-Null
+
+        @"
+## Priority Summary
+| Priority | Active Count | Task IDs |
+| **P1** | 1 | R-029 |
+| **P2** | 1 | C-305a |
+| **P3** | 1 | B-101 |
+
+## Backlog Items
+| Task ID | Title | Status |
+| [R-029](features/active/R-029_Spec.md) | Quality Audit | Ready |
+| [C-305a](chores/active/C-305a_Soak.md) | Soak Test | Ready |
+| [B-101](bugs/active/B-101_Fix.md) | Bug Fix | Ready |
+"@ | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+
+        @"
+---
+priority: "P0"
+created_at: "2026-08-03"
+---
+Research spec
+"@ | Set-Content -LiteralPath (Join-Path $featActive "R-029_Spec.md") -Encoding UTF8
+
+        @"
+---
+priority: "P1"
+created_at: "2026-08-03"
+---
+Chore spec
+"@ | Set-Content -LiteralPath (Join-Path $choreActive "C-305a_Soak.md") -Encoding UTF8
+
+        @"
+---
+priority: "P1"
+created_at: "2026-08-03"
+---
+Bug spec
+"@ | Set-Content -LiteralPath (Join-Path $bugActive "B-101_Fix.md") -Encoding UTF8
+
+        $oldQuiet = $script:Quiet
+        try {
+            $script:Quiet = $false
+            # Test R-029 confirmation
+            $outputR29 = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            Assert-Result -Name "R-029 confirmed" -Condition ($outputR29 -match "\[INIT\] Confirmed task: R-029") -FailureMessage "R-029 was not confirmed; output: $outputR29"
+
+            # Test C-305a confirmation (suffixed ID) with backlog having only C-305a
+            @"
+## Backlog Items
+| Task ID | Title | Status |
+| [C-305a](chores/active/C-305a_Soak.md) | Soak Test | Ready |
+"@ | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+            $ctx.TaskId = "C-305a"
+            $ctx.Handoff.task_id = "C-305a"
+            $outputC305a = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            Assert-Result -Name "C-305a confirmed" -Condition ($outputC305a -match "\[INIT\] Confirmed task: C-305a") -FailureMessage "C-305a was not confirmed; output: $outputC305a"
+
+            # Test B-101 confirmation with backlog having only B-101
+            @"
+## Backlog Items
+| Task ID | Title | Status |
+| [B-101](bugs/active/B-101_Fix.md) | Bug Fix | Ready |
+"@ | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+            $ctx.TaskId = "B-101"
+            $ctx.Handoff.task_id = "B-101"
+            $outputB101 = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            Assert-Result -Name "B-101 confirmed" -Condition ($outputB101 -match "\[INIT\] Confirmed task: B-101") -FailureMessage "B-101 was not confirmed; output: $outputB101"
+        } finally {
+            $script:Quiet = $oldQuiet
+        }
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
