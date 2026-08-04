@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "5b31429a1d53de3fe3c16600086969f9f6870051",
+    "source_commit":  "2c97dece27f0eacdfbb34a310a49db4280988af1",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -239,8 +239,8 @@
                                                       "base_hash":  "8aaf1922742ce6c4793d54a16ad2bb7c444abf1080a9b7beb74f6a90314e2602"
                                                   },
                   "powershell/lib/session-output.ps1":  {
-                                                            "hash":  "f163bffc2be90cc6f6c5ba58e1cad9a08bd2c19d1bf2f62817ea619a6b1300f1",
-                                                            "base_hash":  "f163bffc2be90cc6f6c5ba58e1cad9a08bd2c19d1bf2f62817ea619a6b1300f1"
+                                                            "hash":  "c26c43859af941b36c4de510c004b1b4be91fdcc84018458b4b9561326306411",
+                                                            "base_hash":  "c26c43859af941b36c4de510c004b1b4be91fdcc84018458b4b9561326306411"
                                                         },
                   "powershell/lib/task-checklist.ps1":  {
                                                             "hash":  "537502fa3598604943e02dd536c3a08acc347527c46499b28db13b1fe03c877f",
@@ -483,8 +483,8 @@
                                                                                      "base_hash":  "709f322439244ac1f9456cd4d063f0574d9d8c3611bed52603df824e9e0c57f4"
                                                                                  },
                   "powershell/tests/session-output.tests.ps1":  {
-                                                                    "hash":  "0e1b5179b4fe381483f502396c0cdfb2d45f92325ef427756c99c987579a717c",
-                                                                    "base_hash":  "0e1b5179b4fe381483f502396c0cdfb2d45f92325ef427756c99c987579a717c"
+                                                                    "hash":  "2b63bbad8a0acff423a6d678e2a371febda8e04f16d703680ec885054d88bb22",
+                                                                    "base_hash":  "2b63bbad8a0acff423a6d678e2a371febda8e04f16d703680ec885054d88bb22"
                                                                 },
                   "powershell/tests/status-drift.tests.ps1":  {
                                                                   "hash":  "3e3753cf2ce4382df664f7934184f665723c0e04fec74016ae115b08ff580db2",
@@ -527,8 +527,8 @@
                                                               "base_hash":  "d7709cdd28295b44a704c83eb51ad3f207f106cd4e28cb2a17b03199f711fe11"
                                                           },
                   "powershell/update-bundle.ps1":  {
-                                                       "hash":  "edfd5503ae34ae05692478aad710070948a65c86886237175d6636ef7a1f473b",
-                                                       "base_hash":  "edfd5503ae34ae05692478aad710070948a65c86886237175d6636ef7a1f473b"
+                                                       "hash":  "10b3202fad387763642dea46ed9f1440b312261a6d44c4117fc9e6913e2a6e23",
+                                                       "base_hash":  "10b3202fad387763642dea46ed9f1440b312261a6d44c4117fc9e6913e2a6e23"
                                                    },
                   "powershell/update-session-state.ps1":  {
                                                               "hash":  "68c7f45ccae37006d8c20e00308065a9b218a4a2de4af7035a45e35885d45e05",
