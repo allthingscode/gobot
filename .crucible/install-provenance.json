@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "2c97dece27f0eacdfbb34a310a49db4280988af1",
+    "source_commit":  "9b17fcb84b41d762a69dabffb35823d9474ae26b",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -527,8 +527,8 @@
                                                               "base_hash":  "d7709cdd28295b44a704c83eb51ad3f207f106cd4e28cb2a17b03199f711fe11"
                                                           },
                   "powershell/update-bundle.ps1":  {
-                                                       "hash":  "10b3202fad387763642dea46ed9f1440b312261a6d44c4117fc9e6913e2a6e23",
-                                                       "base_hash":  "10b3202fad387763642dea46ed9f1440b312261a6d44c4117fc9e6913e2a6e23"
+                                                       "hash":  "f0ea556ea083e03f3d84339b67f07302a29e3a11a261322b15c0ea12e6bb7457",
+                                                       "base_hash":  "f0ea556ea083e03f3d84339b67f07302a29e3a11a261322b15c0ea12e6bb7457"
                                                    },
                   "powershell/update-session-state.ps1":  {
                                                               "hash":  "68c7f45ccae37006d8c20e00308065a9b218a4a2de4af7035a45e35885d45e05",

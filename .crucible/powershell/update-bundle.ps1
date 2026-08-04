@@ -309,28 +309,6 @@ function Invoke-UpdateBundle {
         if ($skippedCount -gt 0) {
             Write-Host ("Skipped " + $skippedCount + " item(s) with a missing framework source (likely renamed upstream; their current names are applied separately).") -ForegroundColor Yellow
         }
-        if ($appliedCount -gt 0) {
-            $isGitRepo = $false
-            $checkDir = $adopterRootResolved
-            while (-not [string]::IsNullOrEmpty($checkDir)) {
-                if (Test-Path -LiteralPath (Join-Path $checkDir ".git")) {
-                    $isGitRepo = $true
-                    break
-                }
-                $parent = Split-Path -Parent $checkDir
-                if ($parent -eq $checkDir -or [string]::IsNullOrEmpty($parent)) { break }
-                $checkDir = $parent
-            }
-            if ($isGitRepo) {
-                $old7 = if ($baselineCommit -and $baselineCommit.Length -ge 7) { $baselineCommit.Substring(0, 7) } else { "old" }
-                $new7 = if ($frameworkHead -and $frameworkHead.Length -ge 7) { $frameworkHead.Substring(0, 7) } else { "new" }
-                Write-Host "NEXT STEP (required): commit this bundle update in the adopter repo before running factory.ps1."
-                Write-Host "  git add .crucible"
-                Write-Host ("  git commit -m `"chore(crucible): update adopter bundle " + $old7 + " -> " + $new7 + "`"")
-                Write-Host "The framework-integrity circuit breaker treats uncommitted .crucible/ changes as a"
-                Write-Host "specialist modifying framework-owned files and will hard-stop factory.ps1 -Init with exit 2."
-            }
-        }
     }
 
     $pruneItems = @($results["review-removal"].ToArray())
@@ -354,6 +332,29 @@ function Invoke-UpdateBundle {
             }
         }
         Write-Host ("Pruned " + $prunedCount + " obsolete file(s).")
+    }
+
+    if ($appliedCount -gt 0 -or $prunedCount -gt 0) {
+        $isGitRepo = $false
+        $checkDir = $adopterRootResolved
+        while (-not [string]::IsNullOrEmpty($checkDir)) {
+            if (Test-Path -LiteralPath (Join-Path $checkDir ".git")) {
+                $isGitRepo = $true
+                break
+            }
+            $parent = Split-Path -Parent $checkDir
+            if ($parent -eq $checkDir -or [string]::IsNullOrEmpty($parent)) { break }
+            $checkDir = $parent
+        }
+        if ($isGitRepo) {
+            $old7 = if ($baselineCommit -and $baselineCommit.Length -ge 7) { $baselineCommit.Substring(0, 7) } else { "old" }
+            $new7 = if ($frameworkHead -and $frameworkHead.Length -ge 7) { $frameworkHead.Substring(0, 7) } else { "new" }
+            Write-Host "NEXT STEP (required): commit this bundle update in the adopter repo before running factory.ps1."
+            Write-Host "  git add .crucible"
+            Write-Host ("  git commit -m `"chore(crucible): update adopter bundle " + $old7 + " -> " + $new7 + "`"")
+            Write-Host "The framework-integrity circuit breaker treats uncommitted .crucible/ changes as a"
+            Write-Host "specialist modifying framework-owned files and will hard-stop factory.ps1 -Init with exit 2."
+        }
     }
 
     $shouldRestamp = $false
