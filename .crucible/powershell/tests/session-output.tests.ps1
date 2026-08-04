@@ -318,6 +318,14 @@ created_at: "2026-08-03"
 Bug spec
 "@ | Set-Content -LiteralPath (Join-Path $bugActive "B-101_Fix.md") -Encoding UTF8
 
+        @"
+---
+priority: "P1"
+created_at: "2026-08-03"
+---
+Feature spec
+"@ | Set-Content -LiteralPath (Join-Path $featActive "F-210_Feature.md") -Encoding UTF8
+
         $oldQuiet = $script:Quiet
         try {
             $script:Quiet = $false
@@ -346,6 +354,17 @@ Bug spec
             $ctx.Handoff.task_id = "B-101"
             $outputB101 = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
             Assert-Result -Name "B-101 confirmed" -Condition ($outputB101 -match "\[INIT\] Confirmed task: B-101") -FailureMessage "B-101 was not confirmed; output: $outputB101"
+
+            # Test F-210 confirmation with backlog having only F-210
+            @"
+## Backlog Items
+| Task ID | Title | Status |
+| [F-210](features/active/F-210_Feature.md) | New Feature | Ready |
+"@ | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+            $ctx.TaskId = "F-210"
+            $ctx.Handoff.task_id = "F-210"
+            $outputF210 = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            Assert-Result -Name "F-210 confirmed" -Condition ($outputF210 -match "\[INIT\] Confirmed task: F-210") -FailureMessage "F-210 was not confirmed; output: $outputF210"
         } finally {
             $script:Quiet = $oldQuiet
         }

@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "9b17fcb84b41d762a69dabffb35823d9474ae26b",
+    "source_commit":  "ed0fa34fe3850de08fdcb8252dac54c0b7c8c8f6",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -483,8 +483,8 @@
                                                                                      "base_hash":  "709f322439244ac1f9456cd4d063f0574d9d8c3611bed52603df824e9e0c57f4"
                                                                                  },
                   "powershell/tests/session-output.tests.ps1":  {
-                                                                    "hash":  "2b63bbad8a0acff423a6d678e2a371febda8e04f16d703680ec885054d88bb22",
-                                                                    "base_hash":  "2b63bbad8a0acff423a6d678e2a371febda8e04f16d703680ec885054d88bb22"
+                                                                    "hash":  "ecc53af574441b620d57557541b7e2d194f988a1aa361c707410ab032621c228",
+                                                                    "base_hash":  "ecc53af574441b620d57557541b7e2d194f988a1aa361c707410ab032621c228"
                                                                 },
                   "powershell/tests/status-drift.tests.ps1":  {
                                                                   "hash":  "3e3753cf2ce4382df664f7934184f665723c0e04fec74016ae115b08ff580db2",
