@@ -119,7 +119,7 @@ If there are no active items to implement:
 
 ---
 
-## Pattern C Close-Out (stub-only grooming pass)
+## Stub-Only Close-Out (stub-only grooming pass)
 
 When a Research Gate produces only stub backlog rows (no implementation spec and no implementation work to dispatch), hand off directly to `verification` instead of `implementation`. This allows the Verification phase to validate BACKLOG.md structure and parent-task closure before Deployment finalizes the cycle.
 
@@ -134,7 +134,7 @@ Write the handoff with `target_phase: "verification"` and **omit** `file_affinit
   "cumulative_handoff_count": N,
   "budget_tier": "low",
   "prompt_version": "groomer-sop-v1",
-  "reason": "Pattern C: stub rows filed, parent task closed — no implementation work",
+  "reason": "Stub-Only Close-Out: stub rows filed, parent task closed — no implementation work",
   "artifacts": ["{{backlog_dir}}/BACKLOG.md", "{{backlog_dir}}/{type}/active/{task_id}_*.md"],
   "suspicious_content": null
 }
@@ -159,10 +159,10 @@ When routing a task to the `research` phase, the Groomer defines the open questi
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `implementation`, `research`, `done` (closure path), or `verification` (Pattern C only) — not to myself
+- [ ] Routing to: `implementation`, `research`, `done` (closure path), or `verification` (Stub-Only Close-Out only) — not to myself
 - [ ] If routing to `implementation`: `file_affinity` is populated with package-level paths
-- [ ] If routing to `verification` (Pattern C): no `file_affinity` required; confirm no implementation spec was created
-- [ ] Spec file exists in `backlog/{type}/active/` with acceptance criteria (or stubs for Pattern C)
+- [ ] If routing to `verification` (Stub-Only Close-Out): no `file_affinity` required; confirm no implementation spec was created
+- [ ] Spec file exists in `backlog/{type}/active/` with acceptance criteria (or stubs for Stub-Only Close-Out)
 - [ ] `BACKLOG.md` status is updated
 - [ ] Backlog validation script passes
 - [ ] `task_id` in handoff matches the task being handed off

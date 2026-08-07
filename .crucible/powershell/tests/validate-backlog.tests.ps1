@@ -38,7 +38,8 @@ function New-SpecFile {
         [string]$Title = "Sample",
         [string]$Status = "Ready",
         [string[]]$FileAffinity = @(),
-        [string]$BudgetTier = ""
+        [string]$BudgetTier = "",
+        [string]$Type = "Chore"
     )
     $full = Join-Path $Root $RelPath
     New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
@@ -56,7 +57,7 @@ function New-SpecFile {
     @"
 ---
 item_id: "$ItemId"
-type: "Chore"
+type: "$Type"
 status: "$Status"
 priority: "$Priority"$affinityBlock$budgetBlock
 target_phase: "implementation"
@@ -176,9 +177,9 @@ try {
         Assert-Result -Name "templated exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 (commented example link should be skipped), got " + $r.ExitCode + ". Output: " + $r.Output)
     }
 
-    # --- Test 4: Pattern C - row Status=Stub + spec status=Stub passes ---
-    $results += Run-Test -Name "Pattern C: row Status=Stub matches spec status=Stub" -Body {
-        $root = Join-Path $tempRoot "patternc-ok"
+    # --- Test 4: Stub-Only Close-Out - row Status=Stub + spec status=Stub passes ---
+    $results += Run-Test -Name "Stub-Only Close-Out: row Status=Stub matches spec status=Stub" -Body {
+        $root = Join-Path $tempRoot "stub-only-closeout-ok"
         New-MinimalBacklogTree -Root $root
         New-SpecFile -Root $root -RelPath "chores/active/C-001_Stub_Item.md" -ItemId "C-001" -Priority "P2" -Title "Stub Item" -Status "Stub"
         $backlog = Join-Path $root "BACKLOG.md"
@@ -204,12 +205,12 @@ try {
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
         $r = Invoke-Validator -BacklogPath $backlog
-        Assert-Result -Name "patternc-ok exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "stub-only-closeout-ok exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
     }
 
     # --- Test 5 (REGRESSION): row says Stub but spec frontmatter says Ready (mislabeled stub) ---
     $results += Run-Test -Name "REGRESSION: mislabeled stub (row Stub, spec Ready) is caught" -Body {
-        $root = Join-Path $tempRoot "patternc-mislabeled"
+        $root = Join-Path $tempRoot "stub-only-closeout-mislabeled"
         New-MinimalBacklogTree -Root $root
         New-SpecFile -Root $root -RelPath "chores/active/C-001_Mislabeled.md" -ItemId "C-001" -Priority "P2" -Title "Mislabeled" -Status "Ready"
         $backlog = Join-Path $root "BACKLOG.md"
@@ -242,7 +243,7 @@ try {
 
     # --- Test 6 (REGRESSION): spec says status=Stub but BACKLOG row says Ready (orphan stub) ---
     $results += Run-Test -Name "REGRESSION: orphan stub spec (spec Stub, row Ready) is caught" -Body {
-        $root = Join-Path $tempRoot "patternc-orphan"
+        $root = Join-Path $tempRoot "stub-only-closeout-orphan"
         New-MinimalBacklogTree -Root $root
         New-SpecFile -Root $root -RelPath "chores/active/C-001_Orphan.md" -ItemId "C-001" -Priority "P2" -Title "Orphan" -Status "Stub"
         $backlog = Join-Path $root "BACKLOG.md"
@@ -675,6 +676,246 @@ created_at: "2026-05-25"
         $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
         Assert-Result -Name "comment line does not trip budget_tier check" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "no spurious budget_tier error" -Condition (-not ($r.Output -match "Invalid budget_tier")) -FailureMessage ("expected no budget_tier error from a comment line. Output: " + $r.Output)
+    }
+
+    # --- Test 14: valid type lowercase bare -> passes ---
+    $results += Run-Test -Name "valid type lowercase bare passes" -Body {
+        $root = Join-Path $tempRoot "type-valid-bare"
+        New-MinimalBacklogTree -Root $root
+
+        $spec = Join-Path $root "chores/active/C-011_Type_Bare.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $spec) -Force | Out-Null
+@"
+---
+item_id: "C-011"
+type: chore
+status: "Ready"
+priority: "P2"
+target_phase: "implementation"
+created_at: "2026-05-25"
+---
+
+# C-011 Type Bare
+"@ | Set-Content -LiteralPath $spec -Encoding UTF8
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-011 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-011](chores/active/C-011_Type_Bare.md) | P2 | Ready | Type Bare | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "bare type exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+    }
+
+    # --- Test 15: valid type quoted capitalized -> passes ---
+    $results += Run-Test -Name "valid type quoted capitalized passes" -Body {
+        $root = Join-Path $tempRoot "type-valid-quoted"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/active/C-012_Type_Quoted.md" -ItemId "C-012" -Priority "P2" -Title "Type Quoted" -Type "Research"
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-012 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-012](chores/active/C-012_Type_Quoted.md) | P2 | Ready | Type Quoted | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "quoted type exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+    }
+
+    # --- Test 16: invalid type value -> ERROR, non-zero exit ---
+    $results += Run-Test -Name "invalid type value is caught" -Body {
+        $root = Join-Path $tempRoot "type-invalid"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/active/C-013_Type_Bad.md" -ItemId "C-013" -Priority "P2" -Title "Type Bad" -Type "epic"
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-013 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-013](chores/active/C-013_Type_Bad.md) | P2 | Ready | Type Bad | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "invalid type exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "invalid type error message" -Condition ($r.Output -match "Invalid type.*'epic'") -FailureMessage ("expected invalid type error referencing 'epic'. Output: " + $r.Output)
+        Assert-Result -Name "invalid type lists allowed" -Condition ($r.Output -match "feature, bug, chore, research") -FailureMessage ("expected allowed values in error. Output: " + $r.Output)
+    }
+
+    # --- Test 17: missing type -> WARN, exit code 0 ---
+    $results += Run-Test -Name "missing type produces warning but passes" -Body {
+        $root = Join-Path $tempRoot "type-missing"
+        New-MinimalBacklogTree -Root $root
+
+        $spec = Join-Path $root "chores/active/C-014_Type_Missing.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $spec) -Force | Out-Null
+@"
+---
+item_id: "C-014"
+status: "Ready"
+priority: "P2"
+target_phase: "implementation"
+created_at: "2026-05-25"
+---
+
+# C-014 Type Missing
+"@ | Set-Content -LiteralPath $spec -Encoding UTF8
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-014 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-014](chores/active/C-014_Type_Missing.md) | P2 | Ready | Type Missing | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "missing type exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "missing type warns" -Condition ($r.Output -match '\[WARN\]') -FailureMessage ("expected [WARN] in output. Output: " + $r.Output)
+        Assert-Result -Name "missing type message" -Condition ($r.Output -match "Missing type") -FailureMessage ("expected 'Missing type' in output. Output: " + $r.Output)
+    }
+
+    # --- Test 18: type documentation comment above real declaration -> real declaration wins ---
+    $results += Run-Test -Name "type comment line does not false-positive" -Body {
+        $root = Join-Path $tempRoot "type-comment"
+        New-MinimalBacklogTree -Root $root
+
+        $spec = Join-Path $root "chores/active/C-020_Commented_Type.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $spec) -Force | Out-Null
+@"
+---
+item_id: "C-020"
+# type: feature|bug|chore|research
+type: "Chore"
+status: "Ready"
+priority: "P2"
+target_phase: "implementation"
+created_at: "2026-05-25"
+---
+
+# C-020 Commented Type
+"@ | Set-Content -LiteralPath $spec -Encoding UTF8
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-020 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-020](chores/active/C-020_Commented_Type.md) | P2 | Ready | Commented Type | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "comment line does not trip type check" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "no spurious type error" -Condition (-not ($r.Output -match "Invalid type")) -FailureMessage ("expected no type error from a comment line. Output: " + $r.Output)
+    }
+
+    # --- Test 19: archived spec with invalid type -> not flagged ---
+    $results += Run-Test -Name "archived spec with invalid type is not flagged" -Body {
+        $root = Join-Path $tempRoot "type-archived"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/archived/C-021_Archived_Type.md" -ItemId "C-021" -Priority "P2" -Title "Archived Type" -Status "Resolved" -Type "epic"
+
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 0 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-021](chores/archived/C-021_Archived_Type.md) | P2 | Resolved | Archived Type | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "archived invalid type exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "archived no type error" -Condition (-not ($r.Output -match "Invalid type")) -FailureMessage ("expected no type error for archived spec. Output: " + $r.Output)
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

@@ -44,6 +44,7 @@ try {
         $durablePaths = @(
             ".crucible/config.yaml",
             ".crucible/.gitignore",
+            ".crucible/.gitattributes",
             ".crucible/README.md",
             ".crucible/agent-instructions/AGENTS.md",
             ".crucible/agent-instructions/CLAUDE.md",
@@ -115,6 +116,7 @@ try {
             $durablePaths = @(
                 ".crucible/config.yaml",
                 ".crucible/.gitignore",
+                ".crucible/.gitattributes",
                 ".crucible/README.md",
                 ".crucible/agent-instructions/AGENTS.md",
                 ".crucible/agent-instructions/CLAUDE.md",

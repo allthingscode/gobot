@@ -26,7 +26,7 @@ Circuit breakers prevent "infinite loops" and budget escalation by blocking task
 | **Token Budget (Extended)** | > 40 handoffs | BLOCK task; route to Human |
 | **Merge Conflict** | > 3 rebase attempts | BLOCK task; route to Human |
 | **Fabricated Artifacts** | Missing paths in `artifacts` field | BLOCK task; route to Human |
-| **Verification Failure** | `go test` fails after verification approval | BLOCK task; route to implementation |
+| **Verification Failure** | The project's `verification.full` checks fail when the factory re-runs them in the worktree after the Reviewer reports APPROVED. The first failure is a retry, not a block; a repeat failure fires the breaker | BLOCK task; route to implementation |
 | **Git Hook Bypass** | Reports or references `--no-verify` or equivalent hook bypass | BLOCK task; route to Human |
 
 The **Handoff Retry Limit** is a defense-in-depth backstop, not a live-accruing breaker: no same-phase (`X -> X`) transition exists in the FSM's allowed-transition map, so a schema-valid handoff can never satisfy its `source_phase == target_phase` predicate. It fires only if a same-phase handoff bypasses validation and reaches the breaker with `handoff_retry_count > 2`. Persistent re-review failure — a task repeatedly bounced back for rework — is caught live by the **Review Strike Rule** instead.

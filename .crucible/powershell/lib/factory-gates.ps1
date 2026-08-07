@@ -385,14 +385,14 @@ function Resolve-FactoryInputHandoff {
 
                 $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
                 $bootstrapFile = Join-Path $HANDOFF_DIR "$TaskId-$timestamp.json"
-                $currentCommit = ""
+                $bootstrapBaseCommit = $null
                 if (Test-Path .git) {
                     try {
-                        $currentCommit = (git rev-parse HEAD 2>$null).Trim()
+                        $commit = (git rev-parse HEAD 2>$null)
+                        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($commit)) {
+                            $bootstrapBaseCommit = $commit.Trim()
+                        }
                     } catch {}
-                }
-                if (-not $currentCommit) {
-                    $currentCommit = "0000000000000000000000000000000000000000"
                 }
 
                 $bootstrapHandoff = [ordered]@{
@@ -409,7 +409,8 @@ function Resolve-FactoryInputHandoff {
                     file_affinity            = @()
                     prompt_version           = "1.0.0"
                     session_cycle_id         = "initial"
-                    commit_hash              = $currentCommit
+                    commit_hash              = $null
+                    base_commit              = $bootstrapBaseCommit
                     generated_by             = "new-handoff.ps1"
                     tool_version             = "1.0.0"
                 }
@@ -1654,75 +1655,86 @@ function Test-CompletionArtifactGate {
                 }
             }
             "deployment -> grooming" {
-                # Workaround for factory tasks (restricted folders like .crucible/ cannot be committed)
-                $isFactoryTask = $false
-                if ($handoff.psobject.Properties["file_affinity"]) {
-                    foreach ($aff in $handoff.file_affinity) {
-                        if ($aff -match '^\.crucible/|\.gemini/|\.antigravitycli/|\.agent-workspaces/') { $isFactoryTask = $true; break }
-                    }
-                }
-
-                if (-not $isFactoryTask) {
-                    if (-not $handoff.psobject.Properties["commit_hash"] -or [string]::IsNullOrWhiteSpace($handoff.commit_hash)) {
+                # Two distinct triggers share this edge:
+                #   1. Dependency-blocked at Step 1 (pre-merge): commit_hash must be absent
+                #   2. Production incident (post-deploy): commit_hash required + merge checks
+                $hasCommitHash = ($handoff.psobject.Properties["commit_hash"] -and -not [string]::IsNullOrWhiteSpace($handoff.commit_hash))
+                if ($hasCommitHash) {
+                    # Incident-shaped: commit_hash is populated -> must be a real merged commit
+                    $previousPreference = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
+                    $commitExists = git rev-parse --verify "$($handoff.commit_hash)^{commit}" 2>$null
+                    $commitExistsExitCode = $LASTEXITCODE
+                    $ErrorActionPreference = $previousPreference
+                    if ($commitExistsExitCode -ne 0 -or $commitExists -match "fatal") {
                         $verificationPassed = $false
-                        $errorMsg = "Handoff is missing 'commit_hash' metadata. Merge to master/main is mandatory."
+                        $errorMsg = "Incident handoff: commit hash $($handoff.commit_hash) does not exist."
                     } else {
-                        $previousPreference = $ErrorActionPreference
-                        $ErrorActionPreference = "Continue"
-                        $commitExists = git rev-parse --verify "$($handoff.commit_hash)^{commit}" 2>&1
-                        $commitExistsExitCode = $LASTEXITCODE
-                        $ErrorActionPreference = $previousPreference
-                        if ($commitExistsExitCode -ne 0 -or $commitExists -match "fatal") {
+                        $mainBranch = Get-PrimaryBranchName
+                        git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>$null
+                        if ($LASTEXITCODE -ne 0) {
                             $verificationPassed = $false
-                            $errorMsg = "Commit hash $($handoff.commit_hash) specified in handoff does not exist."
+                            $errorMsg = "Incident handoff: commit $($handoff.commit_hash) is not merged into $mainBranch."
                         } else {
-                            $mainBranch = Get-PrimaryBranchName
-
-                            $gatePassed = $false
-                            $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
-                            if (Test-Path $GATE_DIR) {
-                                $decisions = @(Get-ChildItem -Path $GATE_DIR -Filter ($handoff.task_id + "-*.json") |
-                                    Where-Object { $_.Name -notmatch "gate_decision_.*_pending.json" } |
-                                    Sort-Object LastWriteTime -Descending)
-                                if ($decisions.Count -gt 0) {
-                                    try {
-                                        $latestDecision = Get-Content $decisions[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-                                        $advancingOutcomes = @("accepted", "redirected")
-                                        if ($advancingOutcomes -contains $latestDecision.outcome) {
-                                            $gatePassed = $true
-                                        }
-                                    } catch {}
+                            # Reject baseline commits (same check as deployment -> done)
+                            $baseCommit = $null
+                            if ($handoff.psobject.Properties["base_commit"] -and -not [string]::IsNullOrWhiteSpace($handoff.base_commit)) {
+                                $baseCommit = [string]$handoff.base_commit
+                            } else {
+                                $taskBranchRef = "task/$($handoff.task_id)"
+                                git show-ref --verify --quiet "refs/heads/$taskBranchRef" 2>$null
+                                if ($LASTEXITCODE -eq 0) {
+                                    $mbOut = (git merge-base $mainBranch $taskBranchRef 2>$null)
+                                    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($mbOut)) {
+                                        $baseCommit = $mbOut.Trim()
+                                    }
                                 }
                             }
-
-                            if ($gatePassed) {
-                                git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
-                                if ($LASTEXITCODE -ne 0) {
+                            if (-not [string]::IsNullOrWhiteSpace($baseCommit)) {
+                                git merge-base --is-ancestor $($handoff.commit_hash) $baseCommit 2>$null
+                                if ($LASTEXITCODE -eq 0) {
                                     $verificationPassed = $false
-                                    $errorMsg = "Commit $($handoff.commit_hash) is not merged into $mainBranch."
+                                    $errorMsg = "Incident handoff: commit $($handoff.commit_hash) is a baseline commit and does not identify the bad deploy."
                                 }
                             }
                         }
                     }
                 }
+                # Dependency-blocked shape: commit_hash absent -> no checks needed, pass through
             }
             "deployment -> done" {
-                # Workaround for factory tasks (restricted folders like .crucible/ cannot be committed)
-                $isFactoryTask = $false
-                if ($handoff.psobject.Properties["file_affinity"]) {
-                    foreach ($aff in $handoff.file_affinity) {
-                        if ($aff -match '^\.crucible/|\.gemini/|\.antigravitycli/|\.agent-workspaces/') { $isFactoryTask = $true; break }
+                # No-Code Closure detection: research/grooming tasks with no code changes
+                # have no task branch and no merge to prove. The exemption must be
+                # *proven* from observable facts, not asserted by the handoff.
+                $isNoCodeClosure = $false
+                $noCodeClosureRepoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+                $noCodeClosureSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $handoff.task_id -ProjectRoot $noCodeClosureRepoRoot
+                if (-not [string]::IsNullOrEmpty($noCodeClosureSpecPath) -and (Test-Path -LiteralPath $noCodeClosureSpecPath)) {
+                    $noCodeClosureSpecText = Get-Content -LiteralPath $noCodeClosureSpecPath -Raw -Encoding UTF8
+                    $isExplicitResearchOrGroomingType = ($noCodeClosureSpecText -match '(?im)^\s*type:\s*["'']?(?:research|grooming)["'']?\s*$')
+                    $isResearchTaskId = ($handoff.task_id -match '(?i)^R-')
+                    $noCommitHashClaimed = (-not $handoff.psobject.Properties["commit_hash"] -or [string]::IsNullOrWhiteSpace($handoff.commit_hash))
+                    $qualifiesForNoCodeClosure = (($isExplicitResearchOrGroomingType -or $isResearchTaskId) -and $noCommitHashClaimed)
+
+                    if ($qualifiesForNoCodeClosure) {
+                        $taskBranchRef = "task/$($handoff.task_id)"
+                        git show-ref --verify --quiet "refs/heads/$taskBranchRef" 2>$null
+                        if ($LASTEXITCODE -ne 0) {
+                            # No task branch exists and no commit_hash claimed -> No-Code Closure proven
+                            $isNoCodeClosure = $true
+                            Write-Host "[INFO] No-Code Closure detected for $($handoff.task_id): research/grooming spec with no task branch and no commit_hash. Merge verification skipped." -ForegroundColor Cyan
+                        }
                     }
                 }
 
-                if (-not $isFactoryTask) {
+                if (-not $isNoCodeClosure) {
                     if (-not $handoff.psobject.Properties["commit_hash"] -or [string]::IsNullOrWhiteSpace($handoff.commit_hash)) {
                         $verificationPassed = $false
-                        $errorMsg = "Handoff is missing 'commit_hash' metadata. Merge to master/main is mandatory."
+                        $errorMsg = "Handoff is missing 'commit_hash' metadata. Merge to master/main is mandatory. If this is a research/grooming task with no code changes (No-Code Closure), ensure the spec has 'type: research' in its frontmatter or uses an R-* task ID with no task branch."
                     } else {
                         $previousPreference = $ErrorActionPreference
                         $ErrorActionPreference = "Continue"
-                        $commitExists = git rev-parse --verify "$($handoff.commit_hash)^{commit}" 2>&1
+                        $commitExists = git rev-parse --verify "$($handoff.commit_hash)^{commit}" 2>$null
                         $commitExistsExitCode = $LASTEXITCODE
                         $ErrorActionPreference = $previousPreference
                         if ($commitExistsExitCode -ne 0 -or $commitExists -match "fatal") {
@@ -1749,10 +1761,35 @@ function Test-CompletionArtifactGate {
                             }
 
                             if ($gatePassed) {
-                                git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>&1
+                                git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>$null
                                 if ($LASTEXITCODE -ne 0) {
                                     $verificationPassed = $false
                                     $errorMsg = "Commit $($handoff.commit_hash) is not merged into $mainBranch."
+                                } else {
+                                    $baseCommit = $null
+                                    if ($handoff.psobject.Properties["base_commit"] -and -not [string]::IsNullOrWhiteSpace($handoff.base_commit)) {
+                                        $baseCommit = [string]$handoff.base_commit
+                                    } else {
+                                        $taskBranchRef = "task/$($handoff.task_id)"
+                                        git show-ref --verify --quiet "refs/heads/$taskBranchRef" 2>$null
+                                        if ($LASTEXITCODE -eq 0) {
+                                            $mbOut = (git merge-base $mainBranch $taskBranchRef 2>$null)
+                                            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($mbOut)) {
+                                                $baseCommit = $mbOut.Trim()
+                                            }
+                                        }
+                                    }
+
+                                    if ([string]::IsNullOrWhiteSpace($baseCommit)) {
+                                        $verificationPassed = $false
+                                        $errorMsg = "Merge verification failed: cannot resolve base commit via base_commit property or task/$($handoff.task_id) branch merge-base. If this is a No-Code Closure (research/grooming, no code), the task branch should not exist and the spec should have 'type: research'."
+                                    } else {
+                                        git merge-base --is-ancestor $($handoff.commit_hash) $baseCommit 2>$null
+                                        if ($LASTEXITCODE -eq 0) {
+                                            $verificationPassed = $false
+                                            $errorMsg = "Commit $($handoff.commit_hash) is a baseline commit on $mainBranch and does not represent new merged work."
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -3539,34 +3576,34 @@ function Invoke-HumanGate {
         }
     }
 
-    # Resolve a concrete review pointer for Pattern-C (no-code) closures. Prefer a
+    # Resolve a concrete review pointer for a No-Code Closure. Prefer a
     # findings/.md artifact named in the handoff; else the newest research/.md file
     # matching the task id; else fall back to the archived spec.
-    $patternCReviewDoc = ""
+    $noCodeClosureReviewDoc = ""
     $reviewDocCandidates = @()
     if ($handoff.PSObject.Properties["artifacts"] -and $handoff.artifacts) {
         foreach ($artifact in $handoff.artifacts) {
             if ($artifact -and ([string]$artifact -match '\.md$')) { $reviewDocCandidates += [string]$artifact }
         }
     }
-    $patternCReviewDoc = $reviewDocCandidates | Where-Object { $_ -match '(?i)findings' } | Select-Object -First 1
-    if ([string]::IsNullOrEmpty($patternCReviewDoc)) {
-        $patternCReviewDoc = $reviewDocCandidates | Select-Object -First 1
+    $noCodeClosureReviewDoc = $reviewDocCandidates | Where-Object { $_ -match '(?i)findings' } | Select-Object -First 1
+    if ([string]::IsNullOrEmpty($noCodeClosureReviewDoc)) {
+        $noCodeClosureReviewDoc = $reviewDocCandidates | Select-Object -First 1
     }
-    if ([string]::IsNullOrEmpty($patternCReviewDoc) -and -not [string]::IsNullOrEmpty($crucibleRoot)) {
-        $patternCResearchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
-        if (Test-Path -LiteralPath $patternCResearchDir) {
-            $patternCFound = Get-ChildItem -LiteralPath $patternCResearchDir -Filter "$($handoff.task_id)*.md" -File -ErrorAction SilentlyContinue |
+    if ([string]::IsNullOrEmpty($noCodeClosureReviewDoc) -and -not [string]::IsNullOrEmpty($crucibleRoot)) {
+        $noCodeClosureResearchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
+        if (Test-Path -LiteralPath $noCodeClosureResearchDir) {
+            $noCodeClosureFound = Get-ChildItem -LiteralPath $noCodeClosureResearchDir -Filter "$($handoff.task_id)*.md" -File -ErrorAction SilentlyContinue |
                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($patternCFound) {
-                $patternCReviewDoc = ((Join-Path $crucibleRoot "research") + "/" + $patternCFound.Name) -replace '\\', '/'
+            if ($noCodeClosureFound) {
+                $noCodeClosureReviewDoc = ((Join-Path $crucibleRoot "research") + "/" + $noCodeClosureFound.Name) -replace '\\', '/'
             }
         }
     }
-    $patternCReviewHint = if (-not [string]::IsNullOrEmpty($patternCReviewDoc)) {
-        "Pattern-C closure - no code diff; review $patternCReviewDoc + filed stubs"
+    $noCodeClosureReviewHint = if (-not [string]::IsNullOrEmpty($noCodeClosureReviewDoc)) {
+        "No-Code Closure - no code diff; review $noCodeClosureReviewDoc + filed stubs"
     } else {
-        "Pattern-C closure - no code diff; review the archived spec + filed stubs"
+        "No-Code Closure - no code diff; review the archived spec + filed stubs"
     }
 
     # --- 3a. Human Gate ---
@@ -3829,7 +3866,7 @@ Copy-Item `$right `$rightCopy -Force
                                     Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
                                 }
                             } else {
-                                Write-Host "  - $patternCReviewHint" -ForegroundColor Cyan
+                                Write-Host "  - $noCodeClosureReviewHint" -ForegroundColor Cyan
                             }
 
                             # Write machine-readable signal file
@@ -3853,7 +3890,7 @@ Copy-Item `$right `$rightCopy -Force
                                     $menu += "    $wtPathDisplay`n`n"
                                 }
                             } else {
-                                $menu += "  - $patternCReviewHint`n`n"
+                                $menu += "  - $noCodeClosureReviewHint`n`n"
                             }
                             $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                             $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
@@ -3979,7 +4016,7 @@ Copy-Item `$right `$rightCopy -Force
                             Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
                         }
                     } else {
-                        Write-Host "  - $patternCReviewHint" -ForegroundColor Cyan
+                        Write-Host "  - $noCodeClosureReviewHint" -ForegroundColor Cyan
                     }
 
                     # Write machine-readable signal file
@@ -4003,7 +4040,7 @@ Copy-Item `$right `$rightCopy -Force
                             $menu += "    $wtPathDisplay`n`n"
                         }
                     } else {
-                        $menu += "  - $patternCReviewHint`n`n"
+                        $menu += "  - $noCodeClosureReviewHint`n`n"
                     }
                     $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
                     $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8

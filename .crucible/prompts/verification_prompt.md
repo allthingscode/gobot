@@ -69,14 +69,14 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 7. **CHANGES_REQUESTED**: If code requires fixes, write a concise fix spec to `.crucible/session/{task_id}/implementation/task.md`.
 8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
-### Pattern C: Pure Data-Grooming Review (grooming → verification Shortcut)
+### Stub-Only Close-Out: Pure Data-Grooming Review (grooming → verification Shortcut)
 (Use this workflow if the incoming handoff has `source_phase: grooming` and no implementation worktree/code changes exist.)
 1. **Validation Check (Mandatory)**: Run the backlog validator and verify it exits 0:
    ```bash
     powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"
    ```
    Paste the validator output into your session response. If the exit code is non-zero, you MUST reject the handoff (set `review_decision: CHANGES_REQUESTED` and write a handoff to `implementation` so the grooming phase can repair the backlog structure).
-2. **Stub-Row and Spec Consistency**: Verify every new stub row in `BACKLOG.md` has a corresponding spec file in `backlog/{type}/active/` and matches the stub-row convention (refer to `{{crucible_root}}/sops/verification.md` Pattern C Checklist).
+2. **Stub-Row and Spec Consistency**: Verify every new stub row in `BACKLOG.md` has a corresponding spec file in `backlog/{type}/active/` and matches the stub-row convention (refer to `{{crucible_root}}/sops/verification.md` Stub-Only Close-Out Checklist).
 3. **Documentation**: Write findings to `.crucible/session/{task_id}/verification/review_report.md` with the mandatory YAML header.
 4. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 

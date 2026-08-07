@@ -31,6 +31,7 @@ param(
     [string]$CycleId = "",
     [string]$SuspiciousContent = "",
     [string]$CommitHash = "",
+    [string]$BaseCommit = "",
     [string[]]$Artifacts = @(),
     [string[]]$FileAffinity = @(),
     [string[]]$ReviewerChecksPassed = @(),
@@ -246,6 +247,14 @@ $resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
     $null
 }
 
+$resolvedBaseCommit = if (-not [string]::IsNullOrWhiteSpace($BaseCommit)) {
+    $BaseCommit
+} elseif ($null -ne $latest -and $latest.PSObject.Properties["base_commit"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.base_commit)) {
+    [string]$latest.base_commit
+} else {
+    $null
+}
+
 $isGitRepo = $false
 $checkDir = $REPO_ROOT
 while (-not [string]::IsNullOrEmpty($checkDir)) {
@@ -259,7 +268,7 @@ while (-not [string]::IsNullOrEmpty($checkDir)) {
 }
 
 if ($isGitRepo) {
-    if ([string]::IsNullOrWhiteSpace($resolvedCommitHash)) {
+    if ([string]::IsNullOrWhiteSpace($resolvedBaseCommit)) {
         $taskBranch = "task/$TaskId"
         git show-ref --verify --quiet "refs/heads/$taskBranch" 2>$null
         if ($LASTEXITCODE -ne 0) {
@@ -269,7 +278,7 @@ if ($isGitRepo) {
             
             $primaryHead = (git rev-parse $primaryBranch 2>$null)
             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($primaryHead)) {
-                $resolvedCommitHash = $primaryHead.Trim()
+                $resolvedBaseCommit = $primaryHead.Trim()
             }
         }
     }
@@ -422,6 +431,7 @@ $payload = [ordered]@{
     cycle_id                 = $resolvedCycle
     suspicious_content       = if ([string]::IsNullOrWhiteSpace($SuspiciousContent)) { $null } else { $SuspiciousContent }
     commit_hash              = $resolvedCommitHash
+    base_commit              = $resolvedBaseCommit
     artifacts                = $resolvedArtifacts
 }
 

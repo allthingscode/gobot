@@ -520,7 +520,7 @@ verification:
         Assert-Result -Name "D38 success exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
     }
 
-    $results += Run-Test -Name "D38: Pattern C no worktree passes without checks" -Body {
+    $results += Run-Test -Name "D38: No-Code Closure no worktree passes without checks" -Body {
         $caseRoot = Join-Path $tempRoot "d38-test-no-wt"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $libPath = $FACTORY_LIB.Replace("'", "''")

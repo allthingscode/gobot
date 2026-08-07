@@ -34,7 +34,7 @@ if ($LASTEXITCODE -eq 0) { $mainBranch = "main" }
 # 1b. Verify task branch exists
 git -C $REPO_ROOT show-ref --verify --quiet "refs/heads/task/$TaskId"
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "No task branch (task/$TaskId) exists. Nothing to merge (Pattern C/no-code task)." -ForegroundColor Green
+    Write-Host "No task branch (task/$TaskId) exists. Nothing to merge (No-Code Closure)." -ForegroundColor Green
     exit 0
 }
 

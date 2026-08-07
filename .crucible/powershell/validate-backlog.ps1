@@ -4,7 +4,7 @@
 # Check 3 (Broken Links): Catch when BACKLOG.md has a table entry pointing to a missing file
 # Check 4 (Archived Status): Repair stale archived frontmatter when BACKLOG.md is already terminal;
 #                            otherwise catch archived files with incorrect or missing frontmatter status
-# Check 5 (Stub Convention): Catch Pattern C drift — BACKLOG.md Status='Stub' rows whose spec
+# Check 5 (Stub Convention): Catch Stub-Only Close-Out drift — BACKLOG.md Status='Stub' rows whose spec
 #                            frontmatter doesn't say status='Stub' (mislabeled stub), and active specs
 #                            with status='Stub' that aren't listed as Stub in BACKLOG.md (orphan stub).
 # Returns exit code 0 if consistent, non-zero if inconsistencies found
@@ -283,6 +283,28 @@ try {
                                 }
                             }
 
+                            # Validate type: item kind (feature, bug, chore, research).
+                            # Same per-line anchoring as budget_tier to skip comment lines.
+                            $specType = $null
+                            foreach ($fmLine in $frontmatter) {
+                                if ($fmLine -match '^\s*type:\s*"?([^"\s\r\n]+)"?') {
+                                    $specType = $matches[1]
+                                    break
+                                }
+                            }
+                            if ($null -ne $specType -and $specType -ne "") {
+                                $allowedTypes = @("feature", "bug", "chore", "research")
+                                if ($allowedTypes -notcontains $specType.ToLowerInvariant()) {
+                                    $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
+                                    $relPath = $relPath -replace '\\', '/'
+                                    $errors += "Invalid type in frontmatter of spec '$relPath': '$specType'. Allowed values: feature, bug, chore, research"
+                                }
+                            } else {
+                                $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
+                                $relPath = $relPath -replace '\\', '/'
+                                Write-Host "[WARN] Missing type in frontmatter of spec '$relPath'. Expected one of: feature, bug, chore, research" -ForegroundColor Yellow
+                            }
+
                             # Validate file_affinity paths exist (D46)
                             $specAffinity = @(Get-SpecFileAffinity -FilePath $file.FullName)
                             if ($specAffinity.Count -gt 0) {
@@ -424,8 +446,8 @@ try {
         }
     }
 
-    # Check D: Pattern C stub-row convention
-    # Enforces the rule documented in sops/reviewer.md (Pattern C Checklist):
+    # Check D: Stub-Only Close-Out stub-row convention
+    # Enforces the rule documented in sops/verification.md (Stub-Only Close-Out Checklist):
     #   "Every new stub row has: item_id, title, type, priority, status: Stub,
     #    and a link to its spec file. Every stub row in BACKLOG.md has a
     #    corresponding spec file in backlog/{type}/active/."
@@ -434,7 +456,7 @@ try {
     #   (b) Spec frontmatter says status=Stub but BACKLOG.md row doesn't say Status=Stub (orphan stub spec)
     # The third drift — BACKLOG.md row says Status=Stub but the spec file doesn't exist — is already caught
     # by Check B (Broken Links), so we just skip those rows here to avoid duplicate errors.
-    Write-Quiet "Validating Pattern C stub-row convention..."
+    Write-Quiet "Validating Stub-Only Close-Out stub-row convention..."
 
     # Locate the ## Active Items section, then find its header row to discover the Status column index.
     $activeItemsIdx = -1

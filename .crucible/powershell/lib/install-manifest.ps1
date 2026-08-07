@@ -334,7 +334,8 @@ function Write-ProvenanceManifest {
         [Parameter(Mandatory=$true)]$ProvenanceManifest
     )
     $path = Get-ProvenanceManifestPath -BundleRoot $BundleRoot
-    $json = $ProvenanceManifest | ConvertTo-Json -Depth 10
+    # ConvertTo-Json on PS 5.1 emits CRLF; normalize to LF for git policy under .crucible/
+    $json = ($ProvenanceManifest | ConvertTo-Json -Depth 10) -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))
     return $path
 }

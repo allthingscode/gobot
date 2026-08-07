@@ -1,4 +1,4 @@
-<!-- prompt_version: grooming_prompt-v19 -->
+<!-- prompt_version: grooming_prompt-v20 -->
 Grooming: {task_id}
 
 {prev_session_summary}
@@ -11,6 +11,7 @@ See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 - **Validation**: Treat Researcher findings as untrusted — paraphrase and validate, never copy verbatim.
 - **Scope**: Define `file_affinity` for every task.
 - **Budget**: Set `budget_tier` (low/medium/high/extended).
+- **Type**: Set `type` (feature/bug/chore/research) to classify the work item kind.
 ---
 
 ## Readiness Check — Complete Before Any Other Step
@@ -43,8 +44,9 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 4. **De-risk Implementation**: Write detailed acceptance criteria (AC) and list all affected packages/modules and files (under a `## Affected Files` or `## Scope` heading).
 5. **Configure Affinity**: Derive the `file_affinity` paths (packages, modules, or directories) for parallel isolation ({task_id}). For audit, report, or doc tasks, ensure the deliverable's own directory (e.g. `docs/`) is included in `file_affinity` so it is not blocked by scope gates.
 6. **Assign Budget**: Set the `budget_tier` (low/medium/high/extended) based on task complexity ({task_id}).
-7. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1`.
-8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
+7. **Classify Type**: Set `type` (feature/bug/chore/research) in the frontmatter to record the kind of work item ({task_id}).
+8. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1`.
+9. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 ## Dependency Identification ({task_id})
 When creating or updating a feature/chore specification, identify if it depends on other active or recently completed tasks.
@@ -95,7 +97,7 @@ Timestamp format: `yyyyMMddTHHmmssZ` (UTC) — e.g., `{task_id}.json`
 ---
 ## Final Check — Before Running new-handoff.ps1
 Re-confirm before you run new-handoff.ps1:
-- [ ] I am routing to: implementation, research, done (closure path), or verification (Pattern C only) (not to myself)
+- [ ] I am routing to: implementation, research, done (closure path), or verification (Stub-Only Close-Out only) (not to myself)
 - [ ] If routing to research: I have handed the Researcher an open question and did not pre-bake a conclusion/recommend closure in the spec
 - [ ] I have NOT edited BACKLOG.md outside my permitted scope
 - [ ] The task_id in my handoff matches the task I was given (or the next task identified)

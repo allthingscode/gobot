@@ -1232,9 +1232,9 @@ try {
         }
     }
 
-    $results += Run-Test -Name "Pattern-C closure (no task branch): gate prints Pattern-C message, not a diff/worktree surface" -Body {
+    $results += Run-Test -Name "No-Code Closure (no task branch): gate prints No-Code Closure message, not a diff/worktree surface" -Body {
         $ErrorActionPreference = "Continue"
-        $caseRoot = Join-Path $tempRoot "gate-pattern-c"
+        $caseRoot = Join-Path $tempRoot "gate-nocode-closure"
         $localRepo = Join-Path $caseRoot "local"
         New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
 
@@ -1262,11 +1262,11 @@ review:
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
         $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
 
-        # NOTE: deliberately NO task/R-900 branch is created (Pattern-C research closure).
+        # NOTE: deliberately NO task/R-900 branch is created (No-Code Closure research closure).
         $sessionDir = Join-Path $localRepo ".crucible/session"
         New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
 
-        $scriptPath = Join-Path $caseRoot "run-pattern-c.ps1"
+        $scriptPath = Join-Path $caseRoot "run-nocode-closure.ps1"
         $libPath = $FACTORY_LIB.Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
@@ -1294,20 +1294,20 @@ try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
         $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $outputText = $output -join "`n"
 
-        Assert-Result -Name "Pattern-C: gate prints the Pattern-C closure message" -Condition ($outputText -like "*Pattern-C closure*") -FailureMessage "expected 'Pattern-C closure' message, got:`n$outputText"
-        Assert-Result -Name "Pattern-C: no difftool command emitted (no task branch)" -Condition ($outputText -notlike "*difftool*") -FailureMessage "expected NO difftool command for a no-branch closure, got:`n$outputText"
-        Assert-Result -Name "Pattern-C: no text git-diff review command emitted" -Condition ($outputText -notlike "*diff $baseSha..$baseSha*") -FailureMessage "expected NO degenerate commit..commit diff command, got:`n$outputText"
+        Assert-Result -Name "No-Code Closure: gate prints the No-Code Closure message" -Condition ($outputText -like "*No-Code Closure*") -FailureMessage "expected 'No-Code Closure' message, got:`n$outputText"
+        Assert-Result -Name "No-Code Closure: no difftool command emitted (no task branch)" -Condition ($outputText -notlike "*difftool*") -FailureMessage "expected NO difftool command for a no-branch closure, got:`n$outputText"
+        Assert-Result -Name "No-Code Closure: no text git-diff review command emitted" -Condition ($outputText -notlike "*diff $baseSha..$baseSha*") -FailureMessage "expected NO degenerate commit..commit diff command, got:`n$outputText"
         $pendingFile = Join-Path $sessionDir "R-900/gate_pending.txt"
-        Assert-Result -Name "Pattern-C: gate_pending.txt written" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_pending.txt at $pendingFile"
+        Assert-Result -Name "No-Code Closure: gate_pending.txt written" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_pending.txt at $pendingFile"
         if (Test-Path $pendingFile) {
             $pendingText = Get-Content $pendingFile -Raw
-            Assert-Result -Name "Pattern-C: gate_pending menu carries the Pattern-C message" -Condition ($pendingText -like "*Pattern-C closure*") -FailureMessage "expected gate_pending.txt to contain the Pattern-C message, got:`n$pendingText"
+            Assert-Result -Name "No-Code Closure: gate_pending menu carries the No-Code Closure message" -Condition ($pendingText -like "*No-Code Closure*") -FailureMessage "expected gate_pending.txt to contain the No-Code Closure message, got:`n$pendingText"
         }
     }
 
-    $results += Run-Test -Name "Pattern-C closure resolves the actual findings doc path into the review hint" -Body {
+    $results += Run-Test -Name "No-Code Closure resolves the actual findings doc path into the review hint" -Body {
         $ErrorActionPreference = "Continue"
-        $caseRoot = Join-Path $tempRoot "gate-pattern-c-findings"
+        $caseRoot = Join-Path $tempRoot "gate-nocode-closure-findings"
         $localRepo = Join-Path $caseRoot "local"
         New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
 
@@ -1338,7 +1338,7 @@ project:
         $sessionDir = Join-Path $localRepo ".crucible/session"
         New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
 
-        $scriptPath = Join-Path $caseRoot "run-pattern-c-findings.ps1"
+        $scriptPath = Join-Path $caseRoot "run-nocode-closure-findings.ps1"
         $libPath = $FACTORY_LIB.Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
@@ -1366,8 +1366,8 @@ try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
         $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $outputText = $output -join "`n"
 
-        Assert-Result -Name "Pattern-C: review hint names the actual findings doc" -Condition ($outputText -like "*.crucible/research/R-901_findings.md*") -FailureMessage "expected the resolved findings path, got:`n$outputText"
-        Assert-Result -Name "Pattern-C: no literal placeholder remains" -Condition ($outputText -notlike "*<findings doc>*") -FailureMessage "expected no '<findings doc>' placeholder, got:`n$outputText"
+        Assert-Result -Name "No-Code Closure: review hint names the actual findings doc" -Condition ($outputText -like "*.crucible/research/R-901_findings.md*") -FailureMessage "expected the resolved findings path, got:`n$outputText"
+        Assert-Result -Name "No-Code Closure: no literal placeholder remains" -Condition ($outputText -notlike "*<findings doc>*") -FailureMessage "expected no '<findings doc>' placeholder, got:`n$outputText"
     }
 
     $results += Run-Test -Name "Human gate visual review affordances fall back to text git diff when diff_tool is unconfigured" -Body {

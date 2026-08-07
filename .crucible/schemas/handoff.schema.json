@@ -111,6 +111,10 @@
       "type": ["string", "null"],
       "description": "The merge commit hash on master when deployment is complete."
     },
+    "base_commit": {
+      "type": ["string", "null"],
+      "description": "The primary-branch commit hash from which the task was cut."
+    },
     "superseded": {
       "type": "boolean",
       "description": "Whether this handoff has been superseded by a newer duplicate handoff for the same transition key"
@@ -130,7 +134,7 @@
     "stub_specs_created": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Paths of newly-created stub spec files during a Pattern C grooming shortcut"
+      "description": "Paths of newly-created stub spec files during a Stub-Only Close-Out grooming shortcut"
     },
     "generated_by": {
       "type": "string",
@@ -253,12 +257,25 @@
       "if": {
         "properties": {
           "source_phase": { "const": "deployment" },
-          "target_phase": { "enum": ["done", "grooming"] }
+          "target_phase": { "const": "done" }
         },
         "required": ["source_phase", "target_phase"]
       },
       "then": {
         "required": ["commit_hash", "session_cycle_id"]
+      }
+    },
+    {
+      "description": "deployment -> grooming permits commit_hash to be omitted in static schema for pre-merge dependency-blocked handoffs. Runtime gate verification enforces commit_hash for incident handoffs when commit_hash is populated.",
+      "if": {
+        "properties": {
+          "source_phase": { "const": "deployment" },
+          "target_phase": { "const": "grooming" }
+        },
+        "required": ["source_phase", "target_phase"]
+      },
+      "then": {
+        "required": ["session_cycle_id"]
       }
     },
     {

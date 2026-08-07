@@ -322,7 +322,7 @@ func lintHandoffSchemaContracts(root string) []string {
 				out = append(out, "schemas/handoff.schema.json: research clause must require human_decisions")
 			}
 		case "grooming":
-			// file_affinity is required only for grooming->implementation (Pattern C omits it).
+			// file_affinity is required only for grooming->implementation (Stub-Only Close-Out omits it).
 			// Check that a dedicated grooming->implementation clause requiring file_affinity exists.
 			if target == "implementation" && !slices.Contains(required, "file_affinity") {
 				out = append(out, "schemas/handoff.schema.json: grooming->implementation clause must require file_affinity")

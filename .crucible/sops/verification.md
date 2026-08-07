@@ -135,21 +135,21 @@ powershell.exe -ExecutionPolicy Bypass \
 
 ---
 
-## Pattern C Close-Out (grooming → verification shortcut)
+## Stub-Only Close-Out (grooming → verification shortcut)
 
 When the incoming handoff has `source_phase: grooming` and **no** Architect worktree exists (i.e., this is a pure data-grooming pass with no implementation), run this abbreviated checklist instead of the full code-review workflow above.
 
-### Pattern C Checklist
+### Stub-Only Close-Out Checklist
 1. **BACKLOG.md structure** — run `validate-backlog.ps1` and confirm it exits 0.
 2. **Stub-row convention** — verify every new stub row has: `item_id`, `title`, `type`, `priority`, `status: Stub`, and a link to its spec file.
 3. **Parent-task closure** — confirm the parent task's spec frontmatter `status` matches its BACKLOG.md row, and that the closure reason is recorded in the spec.
 4. **No orphaned specs** — every stub row in BACKLOG.md has a corresponding spec file in `backlog/{type}/active/`.
 
-### Pattern C Handoff (to deployment)
+### Stub-Only Close-Out Handoff (to deployment)
 When all four checks pass, run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Pattern C close-out verified" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths>
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Stub-Only Close-Out verified" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths>
 ```
 
 ---

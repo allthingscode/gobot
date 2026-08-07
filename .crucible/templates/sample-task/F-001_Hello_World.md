@@ -1,6 +1,7 @@
 ---
 item_id: "F-001"
 title: "Hello World Smoke Test"
+type: "feature"
 status: "Ready"
 priority: "P1"
 # target_phase: The first activity phase to receive the task (typically grooming or research)

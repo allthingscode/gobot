@@ -92,6 +92,13 @@ my-api/
 |   |   |-- features/        # feature specs go here
 |   |   |-- bugs/            # bug specs go here
 |   |   `-- chores/          # chore specs go here
+|   |-- docs/                # installed manuals, policies, runbooks
+|   |-- personas/            # specialist identities; edit in place to customize
+|   |-- sops/                # per-phase workflows; edit in place to customize
+|   |-- prompts/             # prompt templates
+|   |-- schemas/             # handoff and config validation schemas
+|   |-- powershell/          # the runtime
+|   |-- agent-instructions/  # copy-ready snippets for AGENTS.md / CLAUDE.md / GEMINI.md
 |   `-- README.md
 `-- <your source code>
 ```
@@ -174,13 +181,20 @@ Add a `GET /health` endpoint that returns `{ status: "ok", version: "<semver>" }
 Version should be read from `package.json` at startup.
 ```
 
-Add it to `.crucible/backlog/BACKLOG.md`:
+Then register it in `.crucible/backlog/BACKLOG.md` by adding a row under the existing
+`## Active Items` heading. Keep the scaffolded header row exactly as-is - the backlog validator
+locates `## Active Items` and derives the Status column position from that header, so reordering
+or renaming the columns breaks it:
 
 ```markdown
-| ID    | Title                  | Status | Priority | Specialist |
-|-------|------------------------|--------|----------|------------|
-| F-002 | Add Health Endpoint    | Ready  | P1       | Groomer    |
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-002](features/active/F-002_Add_Health_Endpoint.md) | P1 | Ready | Add Health Endpoint | Groomer |
 ```
+
+`Target` is the specialist the item is waiting on next.
 
 ---
 

@@ -1,6 +1,7 @@
 ---
 item_id: "F-001"
 title: "Add Health Endpoint"
+type: "feature"
 status: "Ready"
 priority: "P1"
 # target_specialist: The first specialist to receive the task (typically Groomer or Researcher)

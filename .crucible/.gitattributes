@@ -1,0 +1,22 @@
+# Crucible bundle line-ending policy.
+#
+# Prevents "LF will be replaced by CRLF the next time Git touches it" warnings
+# on Windows checkouts where core.autocrlf=true is enabled. Pins line endings
+# to LF for all bundle text files within .crucible/.
+
+* text=auto eol=lf
+
+*.ps1   text eol=lf
+*.psm1  text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.sh    text eol=lf
+
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary

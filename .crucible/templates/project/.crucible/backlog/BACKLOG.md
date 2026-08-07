@@ -19,7 +19,7 @@
 
 ## Status Values
 
-- `Stub` — Pattern C placeholder; spec file exists but is intentionally minimal, awaiting per-item Groomer expansion
+- `Stub` — Stub-Only Close-Out placeholder; spec file exists but is intentionally minimal, awaiting per-item Groomer expansion
 - `Ready`
 - `Planning`
 - `In Progress`

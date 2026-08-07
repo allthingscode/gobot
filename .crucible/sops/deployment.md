@@ -36,7 +36,7 @@ Before touching `master`, run the merge simulation:
 ```
 
 > [!NOTE]
-> Pattern-C closures (research/grooming items with no code changes) have no task branch. `check-merge-conflicts.ps1` will automatically detect the missing branch, print a Pattern-C message, and exit successfully with code 0. You can proceed directly to the next step.
+> No-Code Closures (research/grooming items with no code changes) have no task branch. `check-merge-conflicts.ps1` will automatically detect the missing branch, print a No-Code Closure message, and exit successfully with code 0. At `deployment -> done`, the factory gate also detects proven No-Code Closures (spec has `type: research` or `type: grooming` in frontmatter or task ID uses `R-*` prefix, AND no `refs/heads/task/{task_id}` branch exists, AND `commit_hash` is null/absent) and skips merge verification. You can proceed directly to the next step.
 
 **If simulation fails:**
 - Set task status to `"Ready for Rebase"`
@@ -206,5 +206,5 @@ Pre-flight gate — confirm all are true before writing handoff:
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
 - [ ] Routing to: `done` (or `grooming` if production issue threshold met)
 - [ ] `task_id` in handoff matches the task I was given
-- [ ] `commit_hash` in handoff matches the task branch tip commit hash (or is inherited)
+- [ ] `commit_hash` rule: for `deployment -> done` with code changes, it matches the merge commit on the primary branch; for No-Code Closures (type: research/grooming or R-* task ID, no task branch, no commit_hash), it is null/absent; for `deployment -> grooming` incident handoffs, it identifies the merged commit that caused the production issue
 - [ ] Eval record written to `.crucible/session/eval/eval-{task_id}.json`

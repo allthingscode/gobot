@@ -54,7 +54,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
      ```powershell
       {{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id} -ProjectRoot "{project_root}"
      ```
-     (Note: Pattern-C closures have no task branch; the simulation will automatically detect this and report a clean exit).
+     (Note: No-Code Closures have no task branch; the simulation will automatically detect this and report a clean exit).
    - **If it fails**:
      - Status: Set task status to `"Ready for Rebase"`.
      - Target: Hand off to **implementation** (`target_phase: "implementation"`).

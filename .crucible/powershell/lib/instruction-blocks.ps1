@@ -34,6 +34,7 @@ Commit durable Crucible files:
 
 - `.crucible/config.yaml`
 - `.crucible/.gitignore`
+- `.crucible/.gitattributes`
 - `.crucible/README.md`
 - `.crucible/docs/`
 - `.crucible/personas/`

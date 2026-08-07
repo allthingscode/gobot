@@ -26,11 +26,11 @@ The first thing an agent does at session start is read `.crucible/config.yaml` t
 ```
 research -> [RESEARCH GATE] -> grooming -> implementation -> verification -> deployment -> [HUMAN GATE] -> research
                                      |                           ^
-                                     |                           | (Pattern C: stub-only grooming pass)
+                                     |                           | (Stub-Only Close-Out: stub-only grooming pass)
                                      +-> verification -----------+
 ```
 
-**Pattern C (Research Gate stub-only pass):** When the grooming phase processes a Research Gate whose approved findings produce only stub backlog rows (no implementation work), it hands off directly to `verification` instead of `implementation`. The Verification phase verifies BACKLOG.md structure, stub-row convention compliance, and parent-task closure consistency, then proceeds normally to deployment.
+**Stub-Only Close-Out (Research Gate stub-only pass):** When the grooming phase processes a Research Gate whose approved findings produce only stub backlog rows (no implementation work), it hands off directly to `verification` instead of `implementation`. The Verification phase verifies BACKLOG.md structure, stub-row convention compliance, and parent-task closure consistency, then proceeds normally to deployment.
 
 ### Design Note: FSM State Decoupling
 
@@ -253,7 +253,7 @@ See [policy.md](policy.md#2-circuit-breakers) §2 for the canonical breaker list
 
 In addition to the breakers listed above, the following types are tracked in the blocked record schema:
 - `fabricated_artifacts` — handoff listed artifact paths that do not exist
-- `reviewer_verification_failed` — Reviewer self-reported APPROVED but factory's independent `go test` failed
+- `reviewer_verification_failed` — Reviewer self-reported APPROVED but the factory's independent re-run of the project's `verification.full` checks failed
 - `recurring_merge_conflicts` — `rebase_count` ≥ 3
 
 ### Dead-Letter Handling (Blocked Tasks)

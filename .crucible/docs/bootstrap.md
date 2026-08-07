@@ -35,7 +35,7 @@ Runtime directories such as `session/`, `.agent-workspaces/`, `locks/`, `tmp/`, 
 From the Crucible source repository (on Linux/macOS, prefix the script with `pwsh`; see [get-started.md](get-started.md#prerequisites)):
 
 ```powershell
-./powershell/init-project.ps1 -ProjectRoot <project-root> -ProjectName "<name>"
+./powershell/init-project.ps1 -ProjectRoot <project-root> -ProjectName "<name>" -Language <go|node|python|rust> -WithSampleTask -AppendInstructions
 ```
 
 The script copies the self-contained template into `<project-root>/.crucible`, fills basic project metadata, and sets:
@@ -43,6 +43,14 @@ The script copies the self-contained template into `<project-root>/.crucible`, f
 ```yaml
 crucible_root: ".crucible"
 ```
+
+The three optional flags are worth passing on a first install:
+
+| Flag | Effect |
+|---|---|
+| `-Language <go\|node\|python\|rust>` | Fills `verification.quick` / `verification.full` with that language's usual commands. Omit it and those keys stay as `replace-with-...` placeholders that you must edit by hand before `validate-config.ps1` will pass. |
+| `-WithSampleTask` | Adds a runnable `F-001_Hello_World` item so you can exercise the pipeline end to end immediately. |
+| `-AppendInstructions` | Appends the Crucible block to the project's `AGENTS.md` / `CLAUDE.md` / `GEMINI.md`, which is otherwise a manual step (see "Agent Instruction Setup" below). |
 
 Re-running against an existing scaffold refuses to overwrite files unless `-Force` is passed.
 

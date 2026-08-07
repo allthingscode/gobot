@@ -665,8 +665,8 @@ try {
 
     $handoffT016 = Get-BaseHandoff "C-FACTORY-ISOLATED"
     $handoffT016.source_phase = "deployment"
-    $handoffT016.target_phase = "grooming"
-    $results += Run-ValidateJsonTest -Name "Operator->Groomer Missing Commit Hash" -Handoff $handoffT016 -ExpectedExitCode 1 -ExpectedOk $false -ExpectedReasonCode "missing_required_field"
+    $handoffT016.target_phase = "done"
+    $results += Run-ValidateJsonTest -Name "Operator->Done Missing Commit Hash" -Handoff $handoffT016 -ExpectedExitCode 1 -ExpectedOk $false -ExpectedReasonCode "missing_required_field"
 
     $handoffT017 = Get-BaseHandoff "C-FACTORY-ISOLATED"
     $handoffT017.source_phase = "deployment"
@@ -674,11 +674,23 @@ try {
     $handoffT017.commit_hash = "abcdef0123456789abcdef0123456789abcdef01"
     $results += Run-ValidateJsonTest -Name "Operator->Done Valid" -Handoff $handoffT017 -ExpectedExitCode 0 -ExpectedOk $true -ExpectedReasonCode ""
 
-    $currentHead = (git -C $tempRoot rev-parse HEAD).Trim()
+    Push-Location $tempRoot
+    try {
+        git checkout -b task/C-FACTORY-ISOLATED --quiet
+        Set-Content -LiteralPath "factory-isolated-work.txt" -Value "merged task work" -Encoding UTF8
+        git add factory-isolated-work.txt
+        git commit -m "isolated task work" --quiet
+        git checkout master --quiet
+        git merge task/C-FACTORY-ISOLATED --no-ff -m "merge isolated task work" --quiet
+        $mergedHead = (git rev-parse HEAD).Trim()
+    } finally {
+        Pop-Location
+    }
+
     $handoffT018 = Get-BaseHandoff "C-FACTORY-ISOLATED"
     $handoffT018.source_phase = "deployment"
     $handoffT018.target_phase = "done"
-    $handoffT018.commit_hash = $currentHead
+    $handoffT018.commit_hash = $mergedHead
 
     Write-Host "`nTest: Factory Operator->Done Early Exit" -ForegroundColor Cyan
     Ensure-TestBacklogItem -TaskId "C-FACTORY-ISOLATED" -BudgetTier ([string]$handoffT018.budget_tier)

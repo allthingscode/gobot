@@ -259,13 +259,13 @@ budget_tier: "low"
         }
     }
 
-    Invoke-Test -Name "groomer->reviewer success (Pattern C stub-only pass)" -Script {
+    Invoke-Test -Name "groomer->reviewer success (Stub-Only Close-Out stub-only pass)" -Script {
         $taskId = New-TestTaskId "GR"
         $result = Invoke-Generator -InputArgs @{
             TaskId = $taskId
             Source = "grooming"
             Target = "verification"
-            Reason = "Pattern C: stub rows filed, parent task closed - no implementation work"
+            Reason = "Stub-Only Close-Out: stub rows filed, parent task closed - no implementation work"
             PromptVersion = "groomer-sop-v1"
             Artifacts = @("powershell/factory.ps1")
             StubSpecsCreated = @("backlog/features/active/F-001_Stub.md")
@@ -760,7 +760,7 @@ budget_tier: "low"
             $result = Invoke-Generator -InputArgs @{
                 TaskId = $taskId
                 Source = "deployment"
-                Target = "done"
+                Target = "grooming"
                 Reason = "resolve task"
                 SessionCycleId = "cycle-test"
                 SchemaPath = $schemaPath
@@ -780,14 +780,69 @@ budget_tier: "low"
             }
             
             $obj = Get-Content -LiteralPath $latest.FullName -Raw | ConvertFrom-Json
-            if ($obj.commit_hash -ne $expectedHead) {
-                throw "Expected commit_hash to fall back to master HEAD ($expectedHead), got: $($obj.commit_hash)"
+            if ($null -ne $obj.commit_hash) {
+                throw "Expected commit_hash to stay null when no task branch exists, got: $($obj.commit_hash)"
+            }
+            if ($obj.base_commit -ne $expectedHead) {
+                throw "Expected base_commit to fall back to master HEAD ($expectedHead), got: $($obj.base_commit)"
             }
         } finally {
             $REPO_ROOT = $origRepoRoot
             Set-Location -LiteralPath $tempRoot
             if (Test-Path -LiteralPath $gitRepoDir) {
                 Remove-Item -Recurse -Force -LiteralPath $gitRepoDir -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Invoke-Test -Name "inherits genuine commit_hash and base_commit from prior handoff" -Script {
+        $taskId = New-TestTaskId "INHERIT-COMMIT"
+        $priorHandoff = [ordered]@{
+            task_id                  = $taskId
+            source_phase             = "implementation"
+            target_phase             = "verification"
+            reason                   = "initial handoff"
+            generated_by             = "new-handoff.ps1"
+            tool_version             = "1.0.0"
+            handoff_retry_count      = 0
+            review_strike_count      = 0
+            rebase_count             = 0
+            budget_tier              = "low"
+            cumulative_handoff_count = 1
+            prompt_version           = "test-v1"
+            session_cycle_id         = "cycle-test"
+            artifacts                = @()
+            commit_hash              = "1234567890abcdef1234567890abcdef12345678"
+            base_commit              = "abcdef1234567890abcdef1234567890abcdef12"
+        }
+        $sessionHandoffDir = Join-Path $REPO_ROOT ".crucible/session/handoffs"
+        New-Item -ItemType Directory -Path $sessionHandoffDir -Force | Out-Null
+        $priorPath = Join-Path $sessionHandoffDir ("${taskId}-20260803T120000Z.json")
+        try {
+            $priorHandoff | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $priorPath -Encoding UTF8
+
+            $result = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "grooming"
+                Target = "implementation"
+                Reason = "next phase"
+                SessionCycleId = "cycle-test"
+                SchemaPath = $schemaPath
+            }
+            if ($result.ExitCode -ne 0) {
+                throw "Generator failed: $($result.Output)"
+            }
+            $latest = Track-HandoffFile -TaskId $taskId
+            $obj = Get-Content -LiteralPath $latest -Raw | ConvertFrom-Json
+            if ($obj.commit_hash -ne "1234567890abcdef1234567890abcdef12345678") {
+                throw "Expected inherited commit_hash '1234567890abcdef1234567890abcdef12345678', got: $($obj.commit_hash)"
+            }
+            if ($obj.base_commit -ne "abcdef1234567890abcdef1234567890abcdef12") {
+                throw "Expected inherited base_commit 'abcdef1234567890abcdef1234567890abcdef12', got: $($obj.base_commit)"
+            }
+        } finally {
+            if (Test-Path -LiteralPath $priorPath) {
+                Remove-Item -LiteralPath $priorPath -Force -ErrorAction SilentlyContinue
             }
         }
     }

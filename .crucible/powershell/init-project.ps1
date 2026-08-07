@@ -100,7 +100,7 @@ function Set-CrucibleConfigStamp {
         if ($hasVersion) {
             $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $Version))
         } else {
-            $config = $config.TrimEnd() + "`r`ncrucible_version: " + (ConvertTo-YamlScalar -Value $Version) + "`r`n"
+            $config = $config.TrimEnd() + "`ncrucible_version: " + (ConvertTo-YamlScalar -Value $Version) + "`n"
         }
     } elseif ($hasVersion) {
         $config = $config -replace '(?m)^crucible_version: .+\r?\n', ''
@@ -110,7 +110,7 @@ function Set-CrucibleConfigStamp {
         if ($hasCommit) {
             $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $Commit))
         } else {
-            $config = $config.TrimEnd() + "`r`ncrucible_install_commit: " + (ConvertTo-YamlScalar -Value $Commit) + "`r`n"
+            $config = $config.TrimEnd() + "`ncrucible_install_commit: " + (ConvertTo-YamlScalar -Value $Commit) + "`n"
         }
     } elseif ($hasCommit) {
         $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
@@ -273,13 +273,13 @@ if (![string]::IsNullOrEmpty($Language)) {
     $presets = Get-LanguagePresets
     $preset = $presets[$Language.ToLower()]
     
-    $verifYaml = "verification:`r`n  quick:"
+    $verifYaml = "verification:`n  quick:"
     foreach ($step in $preset.quick) {
-        $verifYaml += "`r`n    - name: $($step.name)`r`n      command: $($step.command)"
+        $verifYaml += "`n    - name: $($step.name)`n      command: $($step.command)"
     }
-    $verifYaml += "`r`n  full:"
+    $verifYaml += "`n  full:"
     foreach ($step in $preset.full) {
-        $verifYaml += "`r`n    - name: $($step.name)`r`n      command: $($step.command)"
+        $verifYaml += "`n    - name: $($step.name)`n      command: $($step.command)"
     }
     
     $config = $config -replace '(?ms)^verification:.*?(?=\r?\n\r?\n|\z|\r?\n[a-zA-Z_])', $verifYaml
@@ -292,7 +292,7 @@ if ([string]::IsNullOrEmpty($finalBacklogDir) -and ![string]::IsNullOrEmpty($det
 
 if (![string]::IsNullOrEmpty($finalBacklogDir)) {
     $backlogVal = ConvertTo-YamlScalar -Value $finalBacklogDir
-    $pathsBlock = "`r`npaths:`r`n  backlog: $backlogVal`r`n  session: .crucible/session`r`n  workspaces: .crucible/.agent-workspaces`r`n  prompts: .crucible/prompts`r`n  personas: .crucible/personas`r`n  sops: .crucible/sops"
+    $pathsBlock = "`npaths:`n  backlog: $backlogVal`n  session: .crucible/session`n  workspaces: .crucible/.agent-workspaces`n  prompts: .crucible/prompts`n  personas: .crucible/personas`n  sops: .crucible/sops"
     $config += $pathsBlock
 }
 
@@ -427,6 +427,7 @@ Write-Info ("Crucible dir: " + $targetCrucible)
 Write-Info ""
 Write-Info "Committed by default (configuration and behavior):" -ForegroundColor Cyan
 Write-Info "  - .crucible/.gitignore"
+Write-Info "  - .crucible/.gitattributes"
 Write-Info "  - .crucible/README.md"
 Write-Info "  - .crucible/config.yaml"
 Write-Info "  - .crucible/agent-instructions/ (copy-ready root instruction snippets)"
