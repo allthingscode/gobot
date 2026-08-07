@@ -1,4 +1,4 @@
-﻿# Unit tests for update-session-state.ps1 stale-lock policy ({task_id}).
+# Unit tests for update-session-state.ps1 stale-lock policy ({task_id}).
 # Verifies AC1-3: stale lock auto-removed with [WARN], message includes path
 # and age, and second-stale (genuine concurrent) still triggers timeout error.
 
