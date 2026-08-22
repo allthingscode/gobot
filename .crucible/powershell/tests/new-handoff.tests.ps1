@@ -513,8 +513,16 @@ budget_tier: "low"
         if ($result.ExitCode -eq 0) {
             throw "Expected failure when ProjectRoot omitted and CWD has no backlog, but succeeded. Output: $($result.Output)"
         }
-        if ((ConvertTo-NormalizedOutput $result.Output) -notmatch "not a valid Crucible project") {
-            throw "Expected CWD validation failure message, got: $($result.Output)"
+        $derivedParent = Split-Path -Path (Split-Path -Path $generator -Parent) -Parent
+        $isBundle = (Split-Path -Path $derivedParent -Leaf) -eq ".crucible"
+        if ($isBundle) {
+            if ((ConvertTo-NormalizedOutput $result.Output) -notmatch "not found in the bundle") {
+                throw "Expected bundle root search failure message, got: $($result.Output)"
+            }
+        } else {
+            if ((ConvertTo-NormalizedOutput $result.Output) -notmatch "not a valid Crucible project") {
+                throw "Expected CWD validation failure message, got: $($result.Output)"
+            }
         }
     }
 

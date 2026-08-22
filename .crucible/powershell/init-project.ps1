@@ -329,23 +329,23 @@ if ($WithSampleTask) {
     # 1. Resolve sample criteria based on language
     $criteria = ""
     if ($Language -eq "go") {
-        $criteria = '  - [ ] Implement a function `GetHello` that returns "Hello, World!"' + "`r`n" +
-                    '  - [ ] Add a unit test verifying `GetHello` returns "Hello, World!"' + "`r`n" +
+        $criteria = '  - [ ] Implement a function `GetHello` that returns "Hello, World!"' + "`n" +
+                    '  - [ ] Add a unit test verifying `GetHello` returns "Hello, World!"' + "`n" +
                     '  - [ ] Verification command `go test ./...` passes'
     } elseif ($Language -eq "node") {
-        $criteria = '  - [ ] Implement a function `getHello` that returns "Hello, World!"' + "`r`n" +
-                    '  - [ ] Add a unit test verifying `getHello` returns "Hello, World!"' + "`r`n" +
+        $criteria = '  - [ ] Implement a function `getHello` that returns "Hello, World!"' + "`n" +
+                    '  - [ ] Add a unit test verifying `getHello` returns "Hello, World!"' + "`n" +
                     '  - [ ] Verification command `npm test` passes'
     } elseif ($Language -eq "python") {
-        $criteria = '  - [ ] Implement a function `get_hello` that returns "Hello, World!"' + "`r`n" +
-                    '  - [ ] Add a unit test verifying `get_hello` returns "Hello, World!"' + "`r`n" +
+        $criteria = '  - [ ] Implement a function `get_hello` that returns "Hello, World!"' + "`n" +
+                    '  - [ ] Add a unit test verifying `get_hello` returns "Hello, World!"' + "`n" +
                     '  - [ ] Verification command `pytest` passes'
     } elseif ($Language -eq "rust") {
-        $criteria = '  - [ ] Implement a function `get_hello` that returns "Hello, World!"' + "`r`n" +
-                    '  - [ ] Add a unit test verifying `get_hello` returns "Hello, World!"' + "`r`n" +
+        $criteria = '  - [ ] Implement a function `get_hello` that returns "Hello, World!"' + "`n" +
+                    '  - [ ] Add a unit test verifying `get_hello` returns "Hello, World!"' + "`n" +
                     '  - [ ] Verification command `cargo test` passes'
     } else {
-        $criteria = '  - [ ] Create a file named `hello.txt` at the root of the project' + "`r`n" +
+        $criteria = '  - [ ] Create a file named `hello.txt` at the root of the project' + "`n" +
                     '  - [ ] The file `hello.txt` must contain the text "Hello, World!"'
     }
 
@@ -367,7 +367,7 @@ if ($WithSampleTask) {
     if ((Test-Path -LiteralPath $targetTaskPath) -and -not $Force) {
         throw "Refusing to overwrite existing sample task: $targetTaskPath. Re-run with -Force to overwrite."
     }
-    $taskContent | Out-File -LiteralPath $targetTaskPath -Encoding UTF8
+    Write-Utf8NoBomFile -Path $targetTaskPath -Content $taskContent
 
     # 2. Update BACKLOG.md
     $backlogFilePath = Join-Path $backlogDir "BACKLOG.md"
@@ -375,11 +375,8 @@ if ($WithSampleTask) {
         $backlogContent = Get-Content -LiteralPath $backlogFilePath -Raw -Encoding UTF8
         $row = "| [F-001](features/active/F-001_Hello_World.md) | P1 | Ready | Hello World Smoke Test | Groomer |"
         
-        $newBacklogContent = $backlogContent -replace "(?m)(^\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*$)", "`$1`r`n$row"
-        if ($newBacklogContent -eq $backlogContent) {
-            $newBacklogContent = $backlogContent -replace "(?m)(^\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*$)", "`$1`n$row"
-        }
-        $newBacklogContent | Out-File -LiteralPath $backlogFilePath -Encoding UTF8
+        $newBacklogContent = $backlogContent -replace "(?m)(^\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*---\s*\|\s*$)", "`$1`n$row"
+        Write-Utf8NoBomFile -Path $backlogFilePath -Content $newBacklogContent
 
         # 3. Call validate-backlog.ps1 -FixSummary
         $validateQuiet = $true

@@ -137,6 +137,7 @@ Add a health endpoint.
             $newHandoffCmd = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
                     -NewHandoff `
+                    -ProjectRoot $projectRoot `
                     -TaskId "F-001" `
                     -HandoffSource "grooming" `
                     -HandoffTarget "implementation" `
@@ -163,7 +164,7 @@ Add a health endpoint.
         try {
             $factoryInitCmd = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
-                    -Init -TaskId "F-001"
+                    -Init -ProjectRoot $projectRoot -TaskId "F-001"
             }
         } finally {
             Pop-Location

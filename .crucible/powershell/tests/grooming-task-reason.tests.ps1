@@ -126,7 +126,7 @@ Separate ready item that must not rewrite another task's handoff reason.
         try {
             $factoryCmd = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
-                    -Init -TaskId "C-100" -Quiet
+                    -Init -ProjectRoot $projectRoot -TaskId "C-100" -Quiet
             }
         } finally {
             Pop-Location

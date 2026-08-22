@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "ac2357387077aeaac6c8356416889227ed4f4e41",
+    "source_commit":  "21fdb91b13669d3d2300807fc018ced51282f359",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "d79e4b4b5dc384c0eb2a1acc8b1907154957def82d452701ed5b659a9a606946",
@@ -167,8 +167,8 @@
                                                         "base_hash":  "e7e55e518efc23e9fa69d39b4ccd41e5531cc89a2879ebe495c23f9710fd35aa"
                                                     },
                   "powershell/init-project.ps1":  {
-                                                      "hash":  "4b31bb6f7e7a2d6074af126a54f543116d031f9914447794faf8e75150b8475d",
-                                                      "base_hash":  "4b31bb6f7e7a2d6074af126a54f543116d031f9914447794faf8e75150b8475d"
+                                                      "hash":  "decd776f152ad7d86740b4cb4a1d76bbc845d0a24903e03e7505bac74c9d1550",
+                                                      "base_hash":  "decd776f152ad7d86740b4cb4a1d76bbc845d0a24903e03e7505bac74c9d1550"
                                                   },
                   "powershell/install-hooks.ps1":  {
                                                        "hash":  "540b4e86fd89abd9ba5233cef579833b5922d4ba9131b8dbcaefca13969a9696",
@@ -279,8 +279,8 @@
                                                         "base_hash":  "2af3ef99c34912467c17e49102837b4c329473704fbf51f3c728216f0807fae9"
                                                     },
                   "powershell/tests/adopter-bootstrap.tests.ps1":  {
-                                                                       "hash":  "3f1c51aaf35d1fb657ce0d19794244a92bd2445d59ff3a97f7d4f486bc631460",
-                                                                       "base_hash":  "3f1c51aaf35d1fb657ce0d19794244a92bd2445d59ff3a97f7d4f486bc631460"
+                                                                       "hash":  "f7fd4efca3bce78508f8d8b261df1daf088076d1992de831a8f3cad573fc7317",
+                                                                       "base_hash":  "f7fd4efca3bce78508f8d8b261df1daf088076d1992de831a8f3cad573fc7317"
                                                                    },
                   "powershell/tests/adopter-pipeline-e2e.tests.ps1":  {
                                                                           "hash":  "4706ba279def9b7f14625818c7250f06cd3a0d330c3ebccd2e55a5da04511e92",
@@ -407,8 +407,8 @@
                                                                       "base_hash":  "c520a1df520bde42518bb9f988ea051db8dc15ab7901b5d67a35e8f7a0394757"
                                                                   },
                   "powershell/tests/grooming-task-reason.tests.ps1":  {
-                                                                          "hash":  "ccdf5cdefa1d6851d4ad43707a8f450624f29c9266fc4c6cb57b42b4859bcaae",
-                                                                          "base_hash":  "ccdf5cdefa1d6851d4ad43707a8f450624f29c9266fc4c6cb57b42b4859bcaae"
+                                                                          "hash":  "08a211942a52d0797ec1dbe8a61a562e12eb419d8b9cf5554f93dafd6a118131",
+                                                                          "base_hash":  "08a211942a52d0797ec1dbe8a61a562e12eb419d8b9cf5554f93dafd6a118131"
                                                                       },
                   "powershell/tests/handoff.tests.ps1":  {
                                                              "hash":  "981e7862f2e2873cf320b142e73472ce7af093bba83f70f2651beb2f2e78c5d6",
@@ -443,8 +443,8 @@
                                                                      "base_hash":  "2a90afd1af42e033b808e6a419c7e2eced774acd9900e71e0749cd61906db2ef"
                                                                  },
                   "powershell/tests/new-handoff.tests.ps1":  {
-                                                                 "hash":  "8e8bf261b7e710be0314d6b05e418b6b6f3ff5c8cdcddb70d1b65a5feb11be59",
-                                                                 "base_hash":  "8e8bf261b7e710be0314d6b05e418b6b6f3ff5c8cdcddb70d1b65a5feb11be59"
+                                                                 "hash":  "74473f5cde2a5694fb250218167b2a048840175964f7f759b4bff0531bb114e6",
+                                                                 "base_hash":  "74473f5cde2a5694fb250218167b2a048840175964f7f759b4bff0531bb114e6"
                                                              },
                   "powershell/tests/operator-merge-verification.tests.ps1":  {
                                                                                  "hash":  "6f495df01d1c22669884e69055b036978a89d935898c79d47bde73b11fcce8ce",
