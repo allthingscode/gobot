@@ -1,3 +1,4 @@
+. (Join-Path $PSScriptRoot "platform.ps1")
 . (Join-Path $PSScriptRoot "injection-detector.ps1")
 . (Join-Path $PSScriptRoot "backlog-io.ps1")
 
@@ -1301,13 +1302,17 @@ function Invoke-FactoryRuntimeValidation {
 
     # Git Hook Bypass Prevention
     $handoffSecurityText = Get-HandoffTextForSecurityScan -HandoffObj $handoff
-    if ($handoffSecurityText -match '(?i)(^|\s)--no-verify(\s|$)' -or $handoffSecurityText -match '(?i)\bno[- ]verify\b') {
+    # Scans handoff text only. An on-disk bypass record must never feed this breaker:
+    # nothing in the pipeline clears such a file, so one bypass would wedge every later
+    # task in the repo, and adopters cannot produce it at all (the Linux leg is a
+    # framework-dev tool, excluded from the install manifest).
+    if ($handoffSecurityText -match '(?i)(^|\s)--no-verify(\s|$)' -or $handoffSecurityText -match '(?i)\bno[- ]verify\b' -or $handoffSecurityText -match '(?i)CRUCIBLE_BYPASS_LINUX_LEG') {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
             -Outcome "git_hook_bypass" -Notes "Handoff reported or referenced a git hook bypass attempt."
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
-            -LastSpecialist $handoff.source_phase -Summary "Handoff reported or referenced use of --no-verify, which bypasses required git hooks."
+            -LastSpecialist $handoff.source_phase -Summary "Handoff reported or referenced use of --no-verify or CRUCIBLE_BYPASS_LINUX_LEG, which bypass required git hooks."
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "git_hook_bypass" `
-            -Why "Git hook bypass attempt detected. '--no-verify' and equivalent hook bypasses require human review. Fix the hook failure instead of bypassing it."
+            -Why "Git hook bypass attempt detected. '--no-verify' and CRUCIBLE_BYPASS_LINUX_LEG require human review. Fix the hook failure or complete Linux leg verification instead of bypassing it."
         exit 2
     }
 
@@ -1600,17 +1605,18 @@ function Test-CompletionArtifactGate {
             "implementation -> verification" {
                 $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id
                 if (Test-Path $wtPath) {
-                    $branchCheck = git -C $wtPath branch --show-current 2>&1
-                    if ($branchCheck -ne "task/$($handoff.task_id)") {
+                    $branchRes = Invoke-Git -Directory $wtPath branch --show-current
+                    $branchCheck = $branchRes.Raw.Trim()
+                    if ($branchRes.ExitCode -ne 0 -or $branchCheck -ne "task/$($handoff.task_id)") {
                         $verificationPassed = $false
                         $errorMsg = "Architect worktree is not on mandatory task branch 'task/$($handoff.task_id)' (found '$branchCheck')."
                     } else {
                         $mainBranch = Get-PrimaryBranchName
-                        $commits = git -C $wtPath log "$mainBranch..task/$($handoff.task_id)" --oneline 2>&1
-                        if ([string]::IsNullOrWhiteSpace($commits) -or $commits -match "fatal") {
+                        $commitsRes = Invoke-Git -Directory $wtPath log "$mainBranch..task/$($handoff.task_id)" --oneline
+                        if ($commitsRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($commitsRes.Raw)) {
                             # Workaround for factory tasks (ignored files in .crucible/ cannot be committed easily)
-                            $status = git status --ignored --porcelain .crucible/ 2>&1
-                            if ([string]::IsNullOrWhiteSpace($status)) {
+                            $statusRes = Invoke-Git status --ignored --porcelain .crucible/
+                            if ($statusRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($statusRes.Raw)) {
                                 $verificationPassed = $false
                                 $errorMsg = "No commits found on branch 'task/$($handoff.task_id)' and no local changes detected in .crucible/."
                             }
@@ -2462,22 +2468,12 @@ function Invoke-HumanGateMerge {
     $rebaseClean = $false
     if (Test-Path $wtPath) {
         Write-Quiet "[HUMAN GATE] Rebasing task/$TaskId onto $PrimaryBranch in $wtPath..."
-        # EAP guard: PS 5.1 wraps a native command's stderr as a terminating
-        # ErrorRecord under 'Stop'. git rebase writes progress/conflict text to
-        # stderr, so run it under Continue and gate purely on the exit code.
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $rebaseOut = & git -C $wtPath rebase $PrimaryBranch 2>&1
-            $rebaseExit = $LASTEXITCODE
-            foreach ($line in @($rebaseOut)) { Write-Quiet ([string]$line) }
-            if ($rebaseExit -eq 0) {
-                $rebaseClean = $true
-            } else {
-                & git -C $wtPath rebase --abort 2>&1 | Out-Null
-            }
-        } finally {
-            $ErrorActionPreference = $prevEAP
+        $rebaseRes = Invoke-Git -Directory $wtPath rebase $PrimaryBranch
+        foreach ($line in $rebaseRes.Lines) { Write-Quiet $line }
+        if ($rebaseRes.ExitCode -eq 0) {
+            $rebaseClean = $true
+        } else {
+            Invoke-Git -Directory $wtPath rebase --abort | Out-Null
         }
     }
 
@@ -2869,6 +2865,10 @@ function Invoke-HumanGateAction {
         $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
         if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
     }
+    $logVar = Get-Variable -Name "LOG_FILE" -ErrorAction SilentlyContinue
+    $resolvedLogFile = if ($null -ne $logVar) { $logVar.Value } else { $null }
+    $cbVar = Get-Variable -Name "CB_HISTORY_FILE" -ErrorAction SilentlyContinue
+    $resolvedCBHistoryFile = if ($null -ne $cbVar) { $cbVar.Value } else { $null }
 
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
 
@@ -2933,14 +2933,8 @@ function Invoke-HumanGateAction {
         if (-not $finalizationOk) {
             Write-Host "[D44] STOP: Auto-finalization failed for $TaskId; refusing to push. The merge remains LOCAL only. Run archive-task.ps1 for $TaskId, then re-run the gate with -GateOutcome accepted." -ForegroundColor Red
             
-            $logVar = Get-Variable -Name "LOG_FILE" -ErrorAction SilentlyContinue
-            $resolvedLogFile = if ($null -ne $logVar) { $logVar.Value } else { $null }
-
             if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
                 try {
-                    $cbVar = Get-Variable -Name "CB_HISTORY_FILE" -ErrorAction SilentlyContinue
-                    $resolvedCBHistoryFile = if ($null -ne $cbVar) { $cbVar.Value } else { $null }
-                    
                     Write-EventLog -Event "quality_gate_retry" -TaskId $TaskId -Phase "deployment" `
                         -Outcome "retry_required" -Notes "Auto-finalization failed at human gate; push withheld" `
                         -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
@@ -3054,10 +3048,24 @@ function Invoke-HumanGateAction {
                                 }
                                 if ($postPushExitCode -eq 1) {
                                     Write-Host ("[CI WATCH] STATUS=POST_PUSH_RED: Commit " + $mergedSha + " passed staging CI but failed branch CI on " + $primaryBranch + "!") -ForegroundColor Red
-                                    Write-EventLog -Event "post_push_ci_red" -TaskId $TaskId -Specialist "factory" -Outcome "warning" -Notes ("Commit " + $mergedSha + " failed post-push branch CI.")
+                                    if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
+                                        try {
+                                            Write-EventLog -Event "post_push_ci_red" -TaskId $TaskId -Specialist "factory" -Outcome "warning" -Notes ("Commit " + $mergedSha + " failed post-push branch CI.") `
+                                                -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
+                                        } catch {
+                                            Write-Host "[HUMAN GATE] WARNING: Failed to write post_push_ci_red event: $_" -ForegroundColor Yellow
+                                        }
+                                    }
                                 } elseif ($postPushExitCode -eq 5) {
                                     Write-Host ("[CI WATCH] STATUS=POST_PUSH_MISSING_REQUIRED_JOBS: Commit " + $mergedSha + " branch CI run is missing required jobs (" + $ciRequiredChecks + ")!") -ForegroundColor Red
-                                    Write-EventLog -Event "post_push_ci_missing_required_jobs" -TaskId $TaskId -Specialist "factory" -Outcome "warning" -Notes ("Post-push branch CI for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks)
+                                    if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
+                                        try {
+                                            Write-EventLog -Event "post_push_ci_missing_required_jobs" -TaskId $TaskId -Specialist "factory" -Outcome "warning" -Notes ("Post-push branch CI for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks) `
+                                                -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
+                                        } catch {
+                                            Write-Host "[HUMAN GATE] WARNING: Failed to write post_push_ci_missing_required_jobs event: $_" -ForegroundColor Yellow
+                                        }
+                                    }
                                 }
                             }
                         } elseif ($ciExitCode -eq 1) {
@@ -3067,10 +3075,29 @@ function Invoke-HumanGateAction {
                         } elseif ($ciExitCode -eq 5) {
                             Invoke-GitChecked { git push origin --delete $stagingBranch }
                             Write-Host ("[HUMAN GATE] MISSING_REQUIRED_JOBS: Staging CI run for " + $mergedSha + " is missing required jobs (" + $ciRequiredChecks + "); refusing to publish master. Fix CI config/workflow and re-run the gate.") -ForegroundColor Red
-                            Write-EventLog -Event "ci_missing_required_jobs" -TaskId $TaskId -Specialist "factory" -Outcome "blocked" -Notes ("Staging CI run for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks)
+                            if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
+                                try {
+                                    Write-EventLog -Event "ci_missing_required_jobs" -TaskId $TaskId -Specialist "factory" -Outcome "blocked" -Notes ("Staging CI run for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks) `
+                                        -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
+                                } catch {
+                                    Write-Host "[HUMAN GATE] WARNING: Failed to write ci_missing_required_jobs event: $_" -ForegroundColor Yellow
+                                }
+                            }
+                            exit 1
+                        } elseif ($ciExitCode -notin @(2, 3, 4)) {
+                            Invoke-GitChecked { git push origin --delete $stagingBranch }
+                            Write-Host ("[HUMAN GATE] CI_CHECK_FAILED: Could not verify CI for " + $mergedSha + " (exit code " + $ciExitCode + "); refusing to publish " + $primaryBranch + " because require_green_ci is enabled. Fix gh CLI authentication/permissions or network and re-run the gate.") -ForegroundColor Red
+                            if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
+                                try {
+                                    Write-EventLog -Event "ci_check_failed" -TaskId $TaskId -Specialist "factory" -Outcome "blocked" -Notes ("Could not verify CI for " + $mergedSha + ": watch-adopter-ci exited with code " + $ciExitCode) `
+                                        -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
+                                } catch {
+                                    Write-Host "[HUMAN GATE] WARNING: Failed to write ci_check_failed event: $_" -ForegroundColor Yellow
+                                }
+                            }
                             exit 1
                         } else {
-                            # Rationale: Only a CONFIRMED RED withholds the master push; inconclusive CI (timeout, CI_NOT_STARTED, NO_RUNS)
+                            # Rationale: Only a CONFIRMED RED or API/tool failure withholds the master push; genuine inconclusive CI (timeout, CI_NOT_STARTED, NO_RUNS)
                             # still finalizes-with-warning so an infrastructure stall does not wedge the pipeline (F1/F2 stance).
                             Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
                             Invoke-GitChecked { git push origin $primaryBranch }
@@ -3280,8 +3307,8 @@ function Invoke-HumanGateAction {
             # (e.g. the previously-accepted task), resetting $primaryBranch to a stale
             # reflog entry.
             $primaryAhead = $false
-            git rev-parse --verify --quiet "origin/$primaryBranch" > $null 2>&1
-            if ($LASTEXITCODE -eq 0) {
+            $originRevRes = Invoke-Git rev-parse --verify --quiet "origin/$primaryBranch"
+            if ($originRevRes.ExitCode -eq 0) {
                 $aheadCount = (Invoke-GitChecked { git rev-list --count "origin/$primaryBranch..$primaryBranch" }).Trim()
                 if ($aheadCount -match '^\d+$' -and [int]$aheadCount -gt 0) { $primaryAhead = $true }
             } elseif ($parentList.Count -ge 2) {
@@ -3293,11 +3320,12 @@ function Invoke-HumanGateAction {
                 $resetTarget = "origin/$primaryBranch"
 
                 # Derive pre-merge tip using reflog as primary defense in depth (for both merge and FF)
-                $reflogTip = (Invoke-GitChecked { git rev-parse --verify --quiet "${primaryBranch}@{1}" 2>$null }).Trim()
-                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
+                $reflogRes = Invoke-Git rev-parse --verify --quiet "${primaryBranch}@{1}"
+                $reflogTip = $reflogRes.Raw.Trim()
+                if ($reflogRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
                     # Verify that $reflogTip is indeed an ancestor of $currentHead
-                    git merge-base --is-ancestor $reflogTip $currentHead 2>$null
-                    if ($LASTEXITCODE -eq 0) {
+                    $isAncestorRes = Invoke-Git merge-base --is-ancestor $reflogTip $currentHead
+                    if ($isAncestorRes.ExitCode -eq 0) {
                         $resetTarget = $reflogTip
                     }
                 }
@@ -3556,6 +3584,12 @@ function Invoke-HumanGate {
     $crucibleRoot = $Context.CrucibleRoot
     $Quiet = [bool]$Context.Quiet
     $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+    if ($Context.ContainsKey("LogFile") -and -not [string]::IsNullOrEmpty($Context.LogFile)) {
+        $LOG_FILE = $Context.LogFile
+    }
+    if ($Context.ContainsKey("CircuitBreakerHistoryFile") -and -not [string]::IsNullOrEmpty($Context.CircuitBreakerHistoryFile)) {
+        $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
+    }
 
     $taskBranchExists = $false
     $isGit = $false
@@ -4099,7 +4133,8 @@ function Invoke-RepositoryIntegrityGates {
     # Runs when a fresh task enters its first phase (grooming) via factory.ps1 -Init.
     $Init = if ($Context.ContainsKey("Init")) { [bool]$Context.Init } else { $false }
     if ($Init -and $handoff.target_phase -eq "grooming") {
-        $rawStatus = git status --porcelain 2>&1
+        $statusRes = Invoke-Git status --porcelain
+        $rawStatus = $statusRes.Lines
         $strayFiles = @()
         foreach ($line in $rawStatus) {
             if ($line.Length -lt 3) { continue }
@@ -4171,7 +4206,8 @@ function Invoke-RepositoryIntegrityGates {
     # --- 3d. Workspace Cleanliness Gate ---
     # Block Operator handoff if untracked files exist outside of private/ignored dirs.
     if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -ne "implementation" -and $handoff.task_id -notmatch '^C-FACTORY-' -and -not $isBootstrap) {
-        $rawStatus = git status --porcelain 2>&1
+        $statusRes = Invoke-Git status --porcelain
+        $rawStatus = $statusRes.Lines
         $strayFiles = @()
         foreach ($line in $rawStatus) {
             if ($line.Length -lt 3) { continue }

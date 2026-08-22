@@ -5,7 +5,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 
-$SCRIPT = Join-Path $REPO_ROOT "powershell/tests/check-policy-drift.ps1"
+$SCRIPT = Join-Path $REPO_ROOT "powershell/gates/check-policy-drift.ps1"
 $results = @()
 
 function Invoke-TestGit {
@@ -41,8 +41,8 @@ function New-PolicyDriftFixture {
         [string]$Root,
         [bool]$IgnoreCrucible
     )
-    New-Item -ItemType Directory -Path (Join-Path $Root "powershell/tests") -Force | Out-Null
-    Copy-Item -LiteralPath $SCRIPT -Destination (Join-Path $Root "powershell/tests/check-policy-drift.ps1") -Force
+    New-Item -ItemType Directory -Path (Join-Path $Root "powershell/gates") -Force | Out-Null
+    Copy-Item -LiteralPath $SCRIPT -Destination (Join-Path $Root "powershell/gates/check-policy-drift.ps1") -Force
     Write-Utf8NoBom -Path (Join-Path $Root "docs/policy.md") -Content "# Policy`n"
     if ($IgnoreCrucible) {
         Write-Utf8NoBom -Path (Join-Path $Root ".gitignore") -Content ".crucible/`n"
@@ -54,7 +54,7 @@ function New-PolicyDriftFixture {
 
 function Invoke-PolicyDriftCheck {
     param([string]$Root)
-    $scriptPath = Join-Path $Root "powershell/tests/check-policy-drift.ps1"
+    $scriptPath = Join-Path $Root "powershell/gates/check-policy-drift.ps1"
     return Invoke-ExternalCommand {
         & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath
     }

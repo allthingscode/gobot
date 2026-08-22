@@ -14,6 +14,18 @@ FRAMEWORK_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
+# Git feeds the push refs to this hook on stdin exactly once. More than one step
+# consumes them, and a second `while read` would reach EOF and silently run nothing -
+# a step that reports success having checked no refs at all. Capture the refs to a
+# file so every consumer reads the same input. Guarded on a tty because an
+# interactive run has no refs to read and `cat` would block forever.
+PUSH_REFS_FILE=""
+if [ ! -t 0 ]; then
+    PUSH_REFS_FILE="$(mktemp)"
+    trap 'rm -f "$PUSH_REFS_FILE"' EXIT
+    cat > "$PUSH_REFS_FILE"
+fi
+
 echo "--- Crucible pre-push verification started"
 
 if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
@@ -58,6 +70,89 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # 8. Example bundle sync guard (examples/gobot mirror vs canonical)
     echo "Running examples mirror sync tests..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/examples-mirror-sync.tests.ps1
+
+    # 9. Assertion Deletion gate check
+    echo "Running assertion deletion check..."
+    if [ -t 0 ]; then
+        # Manual invocation: git always pipes ref data, so stdin being a terminal means
+        # a human ran the hook by hand. Check what HEAD is ahead of its upstream rather
+        # than the index, which at push time holds nothing worth inspecting.
+        MANUAL_BASE="$(git rev-parse --verify --quiet '@{u}' 2>/dev/null || true)"
+        if [ -n "$MANUAL_BASE" ]; then
+            "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-assertion-deletion.ps1 -BaseRef "$MANUAL_BASE" -HeadRef HEAD
+        else
+            # No upstream: scan the branch's whole history. -Staged would be a silent
+            # pass here, because at push time the index is normally empty.
+            echo "Pre-push: HEAD has no upstream; scanning branch history instead."
+            "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-assertion-deletion.ps1 -HeadRef HEAD
+        fi
+    else
+        while read -r local_ref local_sha remote_ref remote_sha; do
+            if [ -z "$local_sha" ]; then
+                continue
+            fi
+            if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+                continue
+            fi
+
+            if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+                BASE_REF=""
+                if git rev-parse --verify origin/main >/dev/null 2>&1; then
+                    BASE_REF="$(git merge-base origin/main "$local_sha" 2>/dev/null || true)"
+                elif git rev-parse --verify main >/dev/null 2>&1; then
+                    BASE_REF="$(git merge-base main "$local_sha" 2>/dev/null || true)"
+                fi
+                if [ -n "$BASE_REF" ]; then
+                    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-assertion-deletion.ps1 -BaseRef "$BASE_REF" -HeadRef "$local_sha"
+                else
+                    # Nothing to compare against: scan the branch's whole history. Naming
+                    # a base of "$local_sha~1" here would abort on a root commit.
+                    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-assertion-deletion.ps1 -HeadRef "$local_sha"
+                fi
+            else
+                "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-assertion-deletion.ps1 -BaseRef "$remote_sha" -HeadRef "$local_sha"
+            fi
+        done < "$PUSH_REFS_FILE"
+    fi
+
+    # 10. Linux leg verification gate check
+    echo "Running Linux leg verification check..."
+    if [ -t 0 ]; then
+        MANUAL_BASE="$(git rev-parse --verify --quiet '@{u}' 2>/dev/null || true)"
+        if [ -n "$MANUAL_BASE" ]; then
+            "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-linux-leg.ps1 -BaseRef "$MANUAL_BASE" -HeadRef HEAD
+        else
+            # No upstream: scan the branch's whole history. -Staged would be a silent
+            # pass here, because at push time the index is normally empty.
+            echo "Pre-push: HEAD has no upstream; scanning branch history instead."
+            "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-linux-leg.ps1 -HeadRef HEAD
+        fi
+    else
+        while read -r local_ref local_sha remote_ref remote_sha; do
+            if [ -z "$local_sha" ]; then
+                continue
+            fi
+            if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+                continue
+            fi
+
+            if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+                BASE_REF=""
+                if git rev-parse --verify origin/main >/dev/null 2>&1; then
+                    BASE_REF="$(git merge-base origin/main "$local_sha" 2>/dev/null || true)"
+                elif git rev-parse --verify main >/dev/null 2>&1; then
+                    BASE_REF="$(git merge-base main "$local_sha" 2>/dev/null || true)"
+                fi
+                if [ -n "$BASE_REF" ]; then
+                    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-linux-leg.ps1 -BaseRef "$BASE_REF" -HeadRef "$local_sha"
+                else
+                    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-linux-leg.ps1 -HeadRef "$local_sha"
+                fi
+            else
+                "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-linux-leg.ps1 -BaseRef "$remote_sha" -HeadRef "$local_sha"
+            fi
+        done < "$PUSH_REFS_FILE"
+    fi
 
     # NOTE: This hook intentionally does not delete any working-tree files. Test
     # suites isolate into temp dirs and clean up after themselves; a verification

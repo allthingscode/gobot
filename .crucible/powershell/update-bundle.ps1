@@ -37,7 +37,7 @@ function Write-ConfigScalar {
     if ($content -match ('(?m)^' + [regex]::Escape($Key) + ':')) {
         $content = $content -replace ('(?m)^' + [regex]::Escape($Key) + ': .+$'), ($Key + ': ' + $escaped)
     } else {
-        $content = $content.TrimEnd() + "`r`n" + $Key + ': ' + $escaped + "`r`n"
+        $content = $content.TrimEnd() + "`n" + $Key + ': ' + $escaped + "`n"
     }
     [System.IO.File]::WriteAllText($ConfigPath, $content, [System.Text.UTF8Encoding]::new($false))
 }
@@ -152,6 +152,16 @@ function Invoke-UpdateBundle {
     $sourcePaths = @($baselineFiles + $headFiles | Sort-Object -Unique)
     $results = New-ClassificationResult
 
+    # Build the set of expected adopter-relative paths that should exist (framework-owned at HEAD)
+    $expected = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($src in $headFiles) {
+        foreach ($ap in @(Get-AdopterPathsForSource -SourcePath $src -Manifest $manifest)) {
+            if (-not [string]::IsNullOrWhiteSpace($ap)) {
+                [void]$expected.Add((ConvertTo-RelativeSlashPath -Path $ap))
+            }
+        }
+    }
+
     foreach ($sourcePath in $sourcePaths) {
         foreach ($adopterPath in @(Get-AdopterPathsForSource -SourcePath $sourcePath -Manifest $manifest)) {
             if ([string]::IsNullOrWhiteSpace($adopterPath)) { continue }
@@ -185,6 +195,10 @@ function Invoke-UpdateBundle {
             # 1. If not present at framework HEAD
             if ($null -eq $hHead) {
                 if ($null -ne $hAdopter) {
+                    $relPath = ConvertTo-RelativeSlashPath -Path $adopterPath
+                    if ($expected.Contains($relPath)) {
+                        continue
+                    }
                     if ($null -ne $hManifestBase -and $hAdopterBase -ne $hManifestBase) {
                         Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
                     } else {
@@ -221,16 +235,6 @@ function Invoke-UpdateBundle {
                 Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
             } else {
                 Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
-            }
-        }
-    }
-
-    # Build the set of expected adopter-relative paths that should exist (framework-owned at HEAD)
-    $expected = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($src in $headFiles) {
-        foreach ($ap in @(Get-AdopterPathsForSource -SourcePath $src -Manifest $manifest)) {
-            if (-not [string]::IsNullOrWhiteSpace($ap)) {
-                [void]$expected.Add((ConvertTo-RelativeSlashPath -Path $ap))
             }
         }
     }
@@ -325,6 +329,10 @@ function Invoke-UpdateBundle {
     $prunedCount = 0
     if ($shouldPrune) {
         foreach ($item in $pruneItems) {
+            $relPath = ConvertTo-RelativeSlashPath -Path $item.AdopterPath
+            if ($expected.Contains($relPath)) {
+                continue
+            }
             $pathToDelete = Join-Path $adopterCrucibleRoot $item.AdopterPath
             if (Test-Path -LiteralPath $pathToDelete -PathType Leaf) {
                 Remove-Item -LiteralPath $pathToDelete -Force

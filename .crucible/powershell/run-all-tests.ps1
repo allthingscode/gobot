@@ -10,6 +10,12 @@ $env:CRUCIBLE_SKIP_PROVENANCE = 'true'
 $testsDir = Join-Path $PSScriptRoot "tests"
 $testFiles = Get-ChildItem -Path $testsDir -Filter '*test*.ps1' | Sort-Object Name
 
+if (@($testFiles).Count -eq 0) {
+    Write-Host "No test files discovered under $testsDir" -ForegroundColor Red
+    exit 1
+}
+
+
 # Determine throttle limit if not provided
 if ($ThrottleLimit -le 0) {
     if ($env:CRUCIBLE_TEST_JOBS -match '^\d+$') {
@@ -50,28 +56,90 @@ try {
         Write-Host "Warning: Failed to pre-stage shared adopter fixture: $_" -ForegroundColor Yellow
     }
 
+    $shell = (Get-Process -Id $PID).Path
+    if (-not $shell) {
+        $isWindows = ($PSVersionTable.PSEdition -ne 'Core') -or ($env:OS -match 'Windows_NT')
+        $shell = if ($isWindows) { 'powershell.exe' } else { 'pwsh' }
+    }
+
+    # Scans child standard output for harness failure signatures (EXCEPTION OCCURRED:, SOME TESTS FAILED, FAILED:).
+    function Test-OutputHasFailure {
+        param([string]$Output)
+
+        if ([string]::IsNullOrWhiteSpace($Output)) {
+            return $false
+        }
+
+        return ($Output -cmatch 'EXCEPTION OCCURRED:' -or $Output -cmatch 'SOME TESTS FAILED' -or $Output -cmatch '\bFAILED:')
+    }
+
+    function Start-TestProcess {
+        param($file)
+
+        # These two run 190s-265s standalone and swing near 2x under parallel load,
+        # so the default 360s cap makes them flake as timeouts rather than failures.
+        $timeout = 360
+        if ($file.Name -in @('factory-gates.tests.ps1', 'factory-gates-human.tests.ps1')) {
+            $timeout = 600
+        }
+
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $shell
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($file.FullName)`""
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $p = New-Object System.Diagnostics.Process
+        $p.StartInfo = $psi
+        [void]$p.Start()
+
+        $outTask = $p.StandardOutput.ReadToEndAsync()
+        $errTask = $p.StandardError.ReadToEndAsync()
+
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+        return [PSCustomObject]@{
+            File = $file
+            Proc = $p
+            OutTask = $outTask
+            ErrTask = $errTask
+            Stopwatch = $sw
+            Timeout = $timeout
+        }
+    }
+
     if ($Serial) {
         Write-Host "Running tests in serial mode..." -ForegroundColor Cyan
         $failedTests = @()
         $passCount = 0
 
-        # Run each file in its own child process (same shell edition) so cross-file
-        # state (cwd, env, dot-sourced functions) cannot leak between tests. This keeps
-        # serial mode one-at-a-time and readable while matching parallel isolation.
-        $shell = (Get-Process -Id $PID).Path
-        if (-not $shell) {
-            $isWindows = ($PSVersionTable.PSEdition -ne 'Core') -or ($env:OS -match 'Windows_NT')
-            $shell = if ($isWindows) { 'powershell.exe' } else { 'pwsh' }
-        }
-
         foreach ($file in $testFiles) {
             Write-Host "Running $($file.Name)..." -ForegroundColor Cyan
 
+            $item = Start-TestProcess -file $file
+            $proc = $item.Proc
+            $proc.WaitForExit()
+
+            $outText = $item.OutTask.Result
+            $errText = $item.ErrTask.Result
+
+            if ($null -eq $outText) { $outText = "" }
+            if ($null -eq $errText) { $errText = "" }
+
+            if (-not [string]::IsNullOrWhiteSpace($outText)) {
+                Write-Host $outText
+            }
+            if (-not [string]::IsNullOrWhiteSpace($errText)) {
+                Write-Host $errText -ForegroundColor Red
+            }
+
             $testFailed = $false
-            & $shell -NoProfile -ExecutionPolicy Bypass -File $file.FullName
-            if ($LASTEXITCODE -ne 0) {
+            if ($proc.ExitCode -ne 0 -or (Test-OutputHasFailure -Output $outText)) {
                 $testFailed = $true
             }
+            $proc.Dispose()
 
             if ($testFailed) {
                 $failedTests += $file.Name
@@ -93,12 +161,6 @@ try {
         }
     } else {
         Write-Host "Running tests in parallel (ThrottleLimit = $ThrottleLimit)..." -ForegroundColor Cyan
-
-        $shell = (Get-Process -Id $PID).Path
-        if (-not $shell) {
-            $isWindows = ($PSVersionTable.PSEdition -ne 'Core') -or ($env:OS -match 'Windows_NT')
-            $shell = if ($isWindows) { 'powershell.exe' } else { 'pwsh' }
-        }
 
         # Static scheduling weights (in seconds) based on Windows CI execution times.
         # Unknown/new tests will default to 0 weight and sort alphabetically.
@@ -151,41 +213,6 @@ try {
                 0
             }
         }; Descending = $true}, @{Expression = { $_.Name }; Ascending = $true})
-
-        function Start-TestProcess {
-            param($file)
-
-            $timeout = 360
-            if ($file.Name -eq 'factory-gates.tests.ps1') {
-                $timeout = 600
-            }
-
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = $shell
-            $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($file.FullName)`""
-            $psi.UseShellExecute = $false
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $psi.CreateNoWindow = $true
-
-            $p = New-Object System.Diagnostics.Process
-            $p.StartInfo = $psi
-            [void]$p.Start()
-
-            $outTask = $p.StandardOutput.ReadToEndAsync()
-            $errTask = $p.StandardError.ReadToEndAsync()
-
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
-
-            return [PSCustomObject]@{
-                File = $file
-                Proc = $p
-                OutTask = $outTask
-                ErrTask = $errTask
-                Stopwatch = $sw
-                Timeout = $timeout
-            }
-        }
 
         $running = @()
         $completed = @()
@@ -317,11 +344,15 @@ try {
                             $exitCodeValue = $proc.ExitCode
                         }
 
-                        if ($exitCodeValue -eq 0) {
+                        $hasOutputFailure = ($exitCodeValue -eq 0) -and (Test-OutputHasFailure -Output $outText)
+
+                        if ($exitCodeValue -eq 0 -and -not $hasOutputFailure) {
                             Write-Host "PASS  $($file.Name) ($($duration)s)" -ForegroundColor Green
                         } else {
                             if ($isTimeout) {
                                 Write-Host "FAIL  $($file.Name) (TIMEOUT after $($item.Timeout)s)" -ForegroundColor Red
+                            } elseif ($hasOutputFailure) {
+                                Write-Host "FAIL  $($file.Name) ($($duration)s, Output Failure Signature)" -ForegroundColor Red
                             } else {
                                 Write-Host "FAIL  $($file.Name) ($($duration)s, ExitCode: $exitCodeValue)" -ForegroundColor Red
                             }
@@ -369,7 +400,7 @@ try {
         }
 
         # 3. Print detailed failures
-        $failedItems = @($completed | Where-Object { $_.ExitCode -ne 0 })
+        $failedItems = @($completed | Where-Object { $_.ExitCode -ne 0 -or (Test-OutputHasFailure -Output $_.Output) })
         if ($failedItems.Count -gt 0) {
             Write-Host ""
             Write-Host "=== Detailed Failures ===" -ForegroundColor Red
@@ -378,8 +409,10 @@ try {
                 Write-Host "Failure in: $($item.File.Name)" -ForegroundColor Red
                 if ($item.IsTimeout) {
                     Write-Host "Status: TIMEOUT after $($item.Timeout) seconds" -ForegroundColor Red
-                } else {
+                } elseif ($item.ExitCode -ne 0) {
                     Write-Host "Status: Failed with Exit Code $($item.ExitCode) in $($item.Duration)s" -ForegroundColor Red
+                } else {
+                    Write-Host "Status: Failed with output failure signature (Exit Code 0) in $($item.Duration)s" -ForegroundColor Red
                 }
                 Write-Host "--------------------------------------------------" -ForegroundColor Red
 
@@ -400,7 +433,7 @@ try {
         $failedTests = @()
         $passCount = 0
         foreach ($item in $completed) {
-            if ($item.ExitCode -eq 0) {
+            if ($item.ExitCode -eq 0 -and -not (Test-OutputHasFailure -Output $item.Output)) {
                 $passCount++
             } else {
                 $failedTests += $item.File.Name

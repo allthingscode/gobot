@@ -832,7 +832,7 @@ created_at: "2026-05-25"
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
         $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
-        Assert-Result -Name "missing type exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        Assert-Result -Name "missing type exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage (Format-ProcessExitMessage -ExitCode $r.ExitCode -ExpectedExitCode 0 -Output $r.Output)
         Assert-Result -Name "missing type warns" -Condition ($r.Output -match '\[WARN\]') -FailureMessage ("expected [WARN] in output. Output: " + $r.Output)
         Assert-Result -Name "missing type message" -Condition ($r.Output -match "Missing type") -FailureMessage ("expected 'Missing type' in output. Output: " + $r.Output)
     }

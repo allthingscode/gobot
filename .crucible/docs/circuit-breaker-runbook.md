@@ -225,9 +225,11 @@ Is another task actively modifying the same files?
 
 ## Breaker 8 — Git Hook Bypass Attempt
 
-**Trigger**: An agent used `--no-verify` or equivalent to bypass pre-commit hooks.
+**Trigger**: The handoff text reports `--no-verify`, an equivalent hook bypass, or `CRUCIBLE_BYPASS_LINUX_LEG`.
 
 **What it means**: This is a security violation, not a normal operational block. Pre-commit hooks enforce code quality and prevent bad commits from reaching the pipeline.
+
+The breaker reads the handoff text only. It deliberately does not key off any on-disk bypass record: nothing in the pipeline clears such a file, so a single bypass would wedge every later task in the repo. If you are chasing an unexplained `git_hook_bypass`, the cause is in the handoff, not in `.private/`.
 
 **Action**: Do not re-dispatch the specialist automatically. Review:
 1. Why the agent used `--no-verify`.
@@ -236,6 +238,8 @@ Is another task actively modifying the same files?
 
 If the hook is broken: fix the hook, then re-dispatch.
 If the agent was cutting corners: re-dispatch with an explicit instruction: "You are not permitted to use --no-verify. Fix the underlying hook failure."
+
+**Linux leg bypass** (framework repo only): `CRUCIBLE_BYPASS_LINUX_LEG` skips the pre-push Linux verification gate and drops a record at `.private/linux-leg-bypass.json`. That record is evidence for the human, not a gate input; a successful `scripts/test-linux.ps1` run clears it. Treat a handoff that mentions the variable the same way as `--no-verify`: find out why the Linux leg could not run, then require a real run before the work lands.
 
 ---
 

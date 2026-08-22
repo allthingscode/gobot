@@ -50,3 +50,14 @@ function Get-SharedAdopterFixture {
     $script:SharedAdopterFixturePath = $tempPath
     return $tempPath
 }
+
+function Invoke-GitCommit {
+    param(
+        [Parameter(Mandatory=$true)][string]$Repo,
+        [Parameter(Mandatory=$true)][string]$Message
+    )
+    . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+    Invoke-Git -Directory $Repo add -A | Out-Null
+    Invoke-Git -Directory $Repo @("-c", "user.name=Crucible Tests", "-c", "user.email=tests@example.invalid", "commit", "-m", $Message, "--quiet") | Out-Null
+    return (Invoke-Git -Directory $Repo rev-parse HEAD).Raw.Trim()
+}

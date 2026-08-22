@@ -26,7 +26,7 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
 
     # 1. Policy Drift check
     echo "Running policy drift check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-policy-drift.ps1
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-policy-drift.ps1
 
     # 2. Mojibake check
     # Scan the framework's real top-level content dirs explicitly. A bare
@@ -34,7 +34,7 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # that do not exist in the framework root, which previously left powershell/,
     # sops/, docs/, and personas/ unscanned and let mojibake hide there.
     echo "Running mojibake check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md
 
     # 3. Go Factory Lint check
     echo "Running factory lint checks..."
@@ -102,7 +102,7 @@ else
         # Pass files positionally (not via -Paths): in powershell.exe -File mode a named
         # array param binds only the first token; ValueFromRemainingArguments collects all
         # positional args. Regression: check-mojibake.tests.ps1.
-        "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/tests/check-mojibake.ps1" $STAGED_FILES_MOJIBAKE
+        "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/gates/check-mojibake.ps1" $STAGED_FILES_MOJIBAKE
     fi
 fi
 

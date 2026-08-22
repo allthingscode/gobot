@@ -39,3 +39,63 @@ function Get-PwshCommand {
         return "pwsh"
     }
 }
+
+function Invoke-Git {
+    <#
+    .SYNOPSIS
+        Executes a git command safely across platforms without PowerShell 5.1 NativeCommandError traps.
+    .DESCRIPTION
+        Under $ErrorActionPreference = "Stop", Windows PowerShell 5.1 promotes native stderr output
+        to terminating NativeCommandError exceptions. Invoke-Git sets ErrorActionPreference to
+        'Continue' during execution, redirects stderr with 2>$null, and returns a structured object
+        containing ExitCode, Lines, and Raw output. Success should always be judged by ExitCode -eq 0.
+    .PARAMETER GitArgs
+        The arguments to pass to git.
+    .PARAMETER Directory
+        Optional working directory (-C <Directory>). Also aliased as -Repo.
+    .OUTPUTS
+        [PSCustomObject]@{ ExitCode = [int]; Lines = [string[]]; Raw = [string] }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Position=0, ValueFromRemainingArguments=$true)]
+        [object[]]$GitArgs = @(),
+        [Alias("Repo")]
+        [string]$Directory = ""
+    )
+
+    $flattenedArgs = @()
+    foreach ($arg in $GitArgs) {
+        if ($arg -is [System.Collections.IEnumerable] -and $arg -isnot [string]) {
+            foreach ($sub in $arg) { $flattenedArgs += [string]$sub }
+        } else {
+            $flattenedArgs += [string]$arg
+        }
+    }
+
+    $allArgs = @()
+    if (-not [string]::IsNullOrWhiteSpace($Directory)) {
+        $allArgs += @("-C", $Directory)
+    }
+    if ($flattenedArgs.Count -gt 0) {
+        $allArgs += $flattenedArgs
+    }
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $rawOutput = @(& git @allArgs 2>$null)
+        $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+
+    $lines = [string[]]@($rawOutput | ForEach-Object { [string]$_ })
+    $raw = $lines -join "`n"
+
+    return [PSCustomObject]@{
+        ExitCode = $exitCode
+        Lines    = $lines
+        Raw      = $raw
+    }
+}

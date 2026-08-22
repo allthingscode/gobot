@@ -89,6 +89,80 @@ if (`$verb -eq "auth status") {
     if (`$Mode -eq "unauth") { exit 1 }
     exit 0
 }
+if (`$verb -eq "api repos" -or (`$args.Count -ge 1 -and `$args[0] -eq "api")) {
+    `$endpoint = `$args[1]
+    if (`$endpoint -match "actions/workflows$") {
+        if (`$Mode -eq "api-error" -or `$Mode -eq "404") {
+            Write-Output "HTTP 404: Not Found"
+            exit 1
+        }
+        Write-Output '{"total_count":1,"workflows":[{"id":2001,"name":"CI","state":"active"}]}'
+        exit 0
+    }
+    if (`$endpoint -match "actions/workflows/(\d+)/runs") {
+        if (`$Mode -eq "api-error" -or `$Mode -eq "404") {
+            Write-Output "HTTP 404: Not Found"
+            exit 1
+        }
+        if (`$Mode -eq "green") { Write-Output '{"total_count":1,"workflow_runs":[{"id":201,"status":"completed","conclusion":"success","name":"CI"}]}' }
+        if (`$Mode -eq "red") { Write-Output '{"total_count":1,"workflow_runs":[{"id":202,"status":"completed","conclusion":"failure","name":"CI"}]}' }
+        if (`$Mode -eq "pending") { Write-Output '{"total_count":1,"workflow_runs":[{"id":203,"status":"in_progress","conclusion":null,"name":"CI"}]}' }
+        if (`$Mode -eq "post-push-red") {
+            `$runsFile = Join-Path `$PSScriptRoot "runs_count.txt"
+            `$count = 0
+            if (Test-Path `$runsFile) {
+                `$count = [int](Get-Content `$runsFile -Raw)
+            }
+            `$count++
+            `$count | Set-Content `$runsFile
+            if (`$count -eq 1) {
+                Write-Output '{"total_count":1,"workflow_runs":[{"id":201,"status":"completed","conclusion":"success","name":"CI"}]}'
+            } else {
+                Write-Output '{"total_count":1,"workflow_runs":[{"id":202,"status":"completed","conclusion":"failure","name":"CI"}]}'
+            }
+        }
+        if (`$Mode -eq "post-push-missing-jobs") {
+            Write-Output '{"total_count":1,"workflow_runs":[{"id":201,"status":"completed","conclusion":"success","name":"CI"}]}'
+        }
+        exit 0
+    }
+    if (`$endpoint -match "actions/runs/(\d+)/jobs") {
+        if (`$Mode -eq "api-error" -or `$Mode -eq "404") {
+            Write-Output "HTTP 404: Not Found"
+            exit 1
+        }
+        if (`$Mode -eq "red") {
+            Write-Output '{"total_count":1,"jobs":[{"name":"windows-ci","conclusion":"failure"}]}'
+            exit 0
+        }
+        if (`$Mode -eq "post-push-red") {
+            `$runId = `$Matches[1]
+            if (`$runId -eq "202") {
+                Write-Output '{"total_count":1,"jobs":[{"name":"windows-ci","conclusion":"failure"}]}'
+                exit 0
+            }
+            Write-Output '{"total_count":1,"jobs":[{"name":"windows-ci","conclusion":"success"}]}'
+            exit 0
+        }
+        if (`$Mode -eq "post-push-missing-jobs") {
+            `$jobsFile = Join-Path `$PSScriptRoot "jobs_count.txt"
+            `$count = 0
+            if (Test-Path `$jobsFile) {
+                `$count = [int](Get-Content `$jobsFile -Raw)
+            }
+            `$count++
+            `$count | Set-Content `$jobsFile
+            if (`$count -eq 1) {
+                Write-Output '{"total_count":1,"jobs":[{"name":"coverage-windows","conclusion":"success"}]}'
+            } else {
+                Write-Output '{"total_count":1,"jobs":[{"name":"other-job","conclusion":"success"}]}'
+            }
+            exit 0
+        }
+        Write-Output '{"total_count":1,"jobs":[{"name":"windows-ci","conclusion":"success"}]}'
+        exit 0
+    }
+}
 if (`$verb -eq "run list") {
     if (`$Mode -eq "green") { Write-Output '[{"databaseId":201,"status":"completed","conclusion":"success"}]' }
     if (`$Mode -eq "red") { Write-Output '[{"databaseId":202,"status":"completed","conclusion":"failure"}]' }
@@ -134,7 +208,8 @@ function New-CiGateCase {
     git -C $localRepo init --initial-branch=master 2>$null | Out-Null
     git -C $localRepo config user.name "Tester"
     git -C $localRepo config user.email "test@example.com"
-    git -C $localRepo remote add origin $originRepo
+    git -C $localRepo remote add origin "https://github.com/crucible-fixture/gate-tests.git"
+    git -C $localRepo remote set-url --push origin $originRepo
 
     "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
     git -C $localRepo add README.md 2>$null | Out-Null
@@ -187,19 +262,34 @@ review:
 function Invoke-CiGateCase {
     param(
         [Parameter(Mandatory=$true)]$Case,
-        [Parameter(Mandatory=$true)][string]$TaskId
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [switch]$OmitLogFile
     )
     $scriptPath = Join-Path (Split-Path -Parent $Case.LocalRepo) ("run-" + $TaskId + ".ps1")
     $libPath = $FACTORY_LIB.Replace("'", "''")
     $localRepo = $Case.LocalRepo.Replace("'", "''")
     $sessionDir = $Case.SessionDir.Replace("'", "''")
+    $logFile = (Join-Path $Case.SessionDir ($TaskId + "/pipeline.log.jsonl")).Replace("'", "''")
+    $cbFile = (Join-Path $Case.SessionDir "global/circuit_breakers.jsonl").Replace("'", "''")
+
+    $logSetup = ""
+    $ctxLogEntries = ""
+    if (-not $OmitLogFile) {
+        $ctxLogEntries = @"
+    LogFile = '$logFile'
+    CircuitBreakerHistoryFile = '$cbFile'
+"@
+    }
+
     $scriptContent = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
 . '$libPath'
+$logSetup
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+$ctxLogEntries
     GateOutcome = 'accepted'
     GateReason = 'ci gate coverage'
     GateRedirectTarget = `$null
@@ -228,6 +318,7 @@ try {
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = ($outputLines -join "`n")
+        LogFile = (Join-Path $Case.SessionDir ($TaskId + "/pipeline.log.jsonl"))
     }
 }
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-factory-gates-human-test-" + [guid]::NewGuid().ToString("N"))
@@ -1805,11 +1896,14 @@ try {
         Assert-Result -Name "ci green deletes task branch" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task branch was not deleted after green CI"
     }
 
-    $results += Run-Test -Name "Invoke-HumanGate require_green_ci finalizes when gh is absent" -Body {
+    $results += Run-Test -Name "Invoke-HumanGate require_green_ci blocks when gh is unauthenticated" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "ci-gh-absent"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-CIA"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+
         # Simulate "gh unavailable" with a shim whose `auth status` fails, rather
         # than stripping gh's dir from PATH -- on CI/Linux gh lives in /usr/bin
         # alongside git, so removing it would also remove git and break the gate.
@@ -1823,10 +1917,46 @@ try {
             $env:PATH = $oldPath
         }
 
-        Assert-Result -Name "ci absent exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
-        Assert-Result -Name "ci absent reports skip" -Condition ($result.Output -match "\[CI WATCH\] SKIPPED \(gh unavailable\)") -FailureMessage $result.Output
+        Assert-Result -Name "ci unauth exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "ci unauth reports failure" -Condition ($result.Output -match "\[HUMAN GATE\] CI_CHECK_FAILED") -FailureMessage $result.Output
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "ci unauth master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
         git -C $case.LocalRepo show-ref --quiet refs/heads/task/F-CIA
-        Assert-Result -Name "ci absent deletes task branch" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task branch was not deleted after skipped CI watch"
+        Assert-Result -Name "ci unauth keeps task branch" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch was deleted after failed CI watch"
+        $logLines = @()
+        if (Test-Path -LiteralPath $result.LogFile) {
+            $logLines = @(Get-Content -LiteralPath $result.LogFile -Encoding UTF8 | Where-Object { $_ -match '"event":"ci_check_failed"' })
+        }
+        Assert-Result -Name "ci unauth writes ci_check_failed event to log" -Condition ($logLines.Count -ge 1) -FailureMessage ("expected ci_check_failed in " + $result.LogFile + ", got: " + (Get-Content -LiteralPath $result.LogFile -ErrorAction SilentlyContinue | Out-String))
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate require_green_ci blocks when gh returns API 404" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "ci-api-404"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-404"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "404" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F-404"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "ci 404 exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "ci 404 reports failure" -Condition ($result.Output -match "\[HUMAN GATE\] CI_CHECK_FAILED") -FailureMessage $result.Output
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "ci 404 master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
+        $logLines = @()
+        if (Test-Path -LiteralPath $result.LogFile) {
+            $logLines = @(Get-Content -LiteralPath $result.LogFile -Encoding UTF8 | Where-Object { $_ -match '"event":"ci_check_failed"' })
+        }
+        Assert-Result -Name "ci 404 writes ci_check_failed event to log" -Condition ($logLines.Count -ge 1) -FailureMessage ("expected ci_check_failed in " + $result.LogFile + ", got: " + (Get-Content -LiteralPath $result.LogFile -ErrorAction SilentlyContinue | Out-String))
     }
 
     $results += Run-Test -Name "F3: RED withholds the master push and deletes staging ref" -Body {
@@ -1918,7 +2048,7 @@ try {
         $originRepo = Join-Path $caseRoot "remote_origin"
         $preMergeSha = (git -C $originRepo rev-parse master).Trim()
 
-        git -C $case.LocalRepo remote set-url origin "invalid/path/repo.git"
+        git -C $case.LocalRepo remote set-url --push origin "invalid/path/repo.git"
 
         $binDir = Join-Path $caseRoot "bin"
         New-FakeGhForGate -Dir $binDir -Mode "green" | Out-Null
@@ -1964,6 +2094,107 @@ try {
         Assert-Result -Name "f3 missing jobs master tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
         git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-MSJ
         Assert-Result -Name "f3 missing jobs deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on missing required jobs"
+        $logLines = @()
+        if (Test-Path -LiteralPath $result.LogFile) {
+            $logLines = @(Get-Content -LiteralPath $result.LogFile -Encoding UTF8 | Where-Object { $_ -match '"event":"ci_missing_required_jobs"' })
+        }
+        Assert-Result -Name "f3 missing jobs writes ci_missing_required_jobs event to log" -Condition ($logLines.Count -ge 1) -FailureMessage ("expected ci_missing_required_jobs in " + $result.LogFile + ", got: " + (Get-Content -LiteralPath $result.LogFile -ErrorAction SilentlyContinue | Out-String))
+    }
+
+    $results += Run-Test -Name "F3: ci_post_push_watch records post_push_ci_red event and keeps going" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "f3-post-push-red"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-PPR"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+
+        $configPath = Join-Path $case.LocalRepo ".crucible/config.yaml"
+        $configYaml = (Get-Content -LiteralPath $configPath -Raw) + "`n  ci_post_push_watch: true"
+        $configYaml | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "post-push-red" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-PPR"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "post push red exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "post push red reports status" -Condition ($result.Output -match "\[CI WATCH\] STATUS=POST_PUSH_RED") -FailureMessage $result.Output
+        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "post push red master branch updated on origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
+        $logLines = @()
+        if (Test-Path -LiteralPath $result.LogFile) {
+            $logLines += @(Get-Content -LiteralPath $result.LogFile -Encoding UTF8)
+        }
+        $archivedLogs = @(Get-ChildItem -Path (Join-Path $case.SessionDir "archived") -Filter "pipeline-F3-PPR-*.log.jsonl" -File -ErrorAction SilentlyContinue)
+        foreach ($f in $archivedLogs) {
+            $logLines += @(Get-Content -LiteralPath $f.FullName -Encoding UTF8)
+        }
+        $matchedLines = @($logLines | Where-Object { $_ -match '"event":"post_push_ci_red"' })
+        Assert-Result -Name "post push red writes post_push_ci_red event to log" -Condition ($matchedLines.Count -ge 1) -FailureMessage ("expected post_push_ci_red in log, found: " + ($logLines -join "`n"))
+    }
+
+    $results += Run-Test -Name "F3: ci_post_push_watch records post_push_ci_missing_required_jobs event and keeps going" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "f3-post-push-msj"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-PMS"
+        $originRepo = Join-Path $caseRoot "remote_origin"
+
+        $configPath = Join-Path $case.LocalRepo ".crucible/config.yaml"
+        $configYaml = (Get-Content -LiteralPath $configPath -Raw) + "`n  ci_post_push_watch: true`n  ci_required_checks: coverage-windows"
+        $configYaml | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "post-push-missing-jobs" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-PMS"
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "post push missing jobs exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "post push missing jobs reports status" -Condition ($result.Output -match "\[CI WATCH\] STATUS=POST_PUSH_MISSING_REQUIRED_JOBS") -FailureMessage $result.Output
+        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
+        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        Assert-Result -Name "post push missing jobs master branch updated on origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
+        $logLines = @()
+        if (Test-Path -LiteralPath $result.LogFile) {
+            $logLines += @(Get-Content -LiteralPath $result.LogFile -Encoding UTF8)
+        }
+        $archivedLogs = @(Get-ChildItem -Path (Join-Path $case.SessionDir "archived") -Filter "pipeline-F3-PMS-*.log.jsonl" -File -ErrorAction SilentlyContinue)
+        foreach ($f in $archivedLogs) {
+            $logLines += @(Get-Content -LiteralPath $f.FullName -Encoding UTF8)
+        }
+        $matchedLines = @($logLines | Where-Object { $_ -match '"event":"post_push_ci_missing_required_jobs"' })
+        Assert-Result -Name "post push missing jobs writes post_push_ci_missing_required_jobs event to log" -Condition ($matchedLines.Count -ge 1) -FailureMessage ("expected post_push_ci_missing_required_jobs in log, found: " + ($logLines -join "`n"))
+    }
+
+    $results += Run-Test -Name "Invoke-HumanGate bare invocation without LOG_FILE does not throw under strict mode" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "ci-no-logfile"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-NOL"
+        $binDir = Join-Path $caseRoot "bin"
+        New-FakeGhForGate -Dir $binDir -Mode "unauth" | Out-Null
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
+            $result = Invoke-CiGateCase -Case $case -TaskId "F-NOL" -OmitLogFile
+        } finally {
+            $env:PATH = $oldPath
+        }
+
+        Assert-Result -Name "ci unauth without logfile exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "ci unauth without logfile reports failure" -Condition ($result.Output -match "\[HUMAN GATE\] CI_CHECK_FAILED") -FailureMessage $result.Output
+        Assert-Result -Name "ci unauth without logfile does not throw variable not set" -Condition ($result.Output -notmatch "The variable '\`$LOG_FILE' cannot be retrieved" -and $result.Output -notmatch "(?m)^FAILED:\s") -FailureMessage $result.Output
     }
 
 } finally {

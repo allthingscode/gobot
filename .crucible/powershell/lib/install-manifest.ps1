@@ -48,8 +48,12 @@ function Test-FrameworkDevOnlyFile {
     $normalized = $Path.Replace("\", "/").TrimStart("/")
     $devOnlyPaths = @(
         "powershell/sync-example-mirror.ps1",
+        "powershell/lib/linux-leg-stamp.ps1",
+        "powershell/gates/check-assertion-deletion.ps1",
+        "powershell/gates/check-linux-leg.ps1",
         "powershell/tests/examples-mirror-sync.tests.ps1",
         "powershell/tests/pre-push-hook.tests.ps1",
+        "powershell/tests/check-assertion-deletion.tests.ps1",
         "powershell/tests/init-project-core.tests.ps1",
         "powershell/tests/init-project-instructions.tests.ps1",
         "powershell/tests/init-project-config-version.tests.ps1",
@@ -58,9 +62,29 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/update-bundle-rename-prune.tests.ps1",
         "powershell/tests/update-bundle-scope-snapshot.tests.ps1",
         "powershell/tests/watch-adopter-ci.tests.ps1",
-        "powershell/tests/backlog-lock.tests.ps1"
+        "powershell/tests/backlog-lock.tests.ps1",
+        "powershell/tests/adopter-install-materialization.tests.ps1",
+        "powershell/tests/adopter-update-materialization.tests.ps1",
+        "powershell/tests/check-linux-leg.tests.ps1"
     )
-    return $devOnlyPaths -contains $normalized
+    if ($devOnlyPaths -contains $normalized) {
+        return $true
+    }
+
+    # Artifacts of building Crucible, not of using it. They name Crucible's own
+    # internals and are meaningless inside an adopter project, so they neither
+    # ship on install nor mirror into examples/gobot.
+    $devOnlyPrefixes = @(
+        "docs/investigations/",
+        "docs/proposals/"
+    )
+    foreach ($prefix in $devOnlyPrefixes) {
+        if ($normalized.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 function Get-FrameworkOwnedFiles {
@@ -109,7 +133,7 @@ function Get-FrameworkOwnedFiles {
             $rel = $_.FullName.Substring($FrameworkRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
             # Exclude gitignored runtime state that can accumulate under a
             # framework source dir's own nested .crucible/ (e.g. powershell/.crucible/).
-            -not (($rel -split '[\\/]') -contains ".crucible")
+            -not (Test-NestedCrucibleRuntimePath -RelativePath $rel -Manifest $manifest)
         } | ForEach-Object {
             $relative = $_.FullName.Substring($FrameworkRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
             ConvertTo-ManifestRelativePath -Path $relative
@@ -130,7 +154,11 @@ function Convert-FrameworkPathToAdopter {
         return ""
     }
     if ($source.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $source.Substring($scaffold.Length + 1)
+        $rel = $source.Substring($scaffold.Length + 1)
+        if ($rel -eq "gitignore") {
+            return ".gitignore"
+        }
+        return $rel
     }
 
     foreach ($rootFile in @($Manifest.root_files)) {
@@ -236,7 +264,23 @@ function Test-ScaffoldSnapshotPath {
     )
     $path = ConvertTo-ManifestRelativePath -Path $RelativePath
     $scaffold = (ConvertTo-ManifestRelativePath -Path ([string]$Manifest.scaffold_source)).TrimEnd("/")
-    return $path.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)
+    return $path -eq $scaffold -or $path.StartsWith($scaffold + "/", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-NestedCrucibleRuntimePath {
+    param(
+        [Parameter(Mandatory=$true)][string]$RelativePath,
+        $Manifest
+    )
+    $path = ConvertTo-ManifestRelativePath -Path $RelativePath
+    $segments = $path -split '[\\/]'
+    if (-not ($segments -contains ".crucible")) {
+        return $false
+    }
+    if ($null -ne $Manifest -and (Test-ScaffoldSnapshotPath -RelativePath $path -Manifest $Manifest)) {
+        return $false
+    }
+    return $true
 }
 
 $script:ProvenanceManifestVersion = 1
@@ -347,6 +391,155 @@ function Read-ProvenanceManifest {
         return $null
     }
     return Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+function Get-ExpectedScaffoldFiles {
+    [CmdletBinding()]
+    param(
+        [string]$FrameworkRoot = "",
+        $Manifest = $null
+    )
+
+    if ([string]::IsNullOrWhiteSpace($FrameworkRoot)) {
+        $FrameworkRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")).Path
+    } else {
+        $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+    }
+
+    if ($null -eq $Manifest) {
+        $Manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
+    }
+
+    $scaffoldPrefix = (ConvertTo-ManifestRelativePath -Path ([string]$Manifest.scaffold_source)).TrimEnd("/") + "/"
+    $expectedScaffoldRelPaths = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    $source = ""
+
+    # 1. Check provenance manifest if present
+    $prov = Read-ProvenanceManifest -BundleRoot $FrameworkRoot
+    if ($null -ne $prov -and $null -ne $prov.files) {
+        foreach ($prop in $prov.files.PSObject.Properties) {
+            $path = ConvertTo-ManifestRelativePath -Path $prop.Name
+            if ($path.StartsWith($scaffoldPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $relInScaffold = $path.Substring($scaffoldPrefix.Length)
+                [void]$expectedScaffoldRelPaths.Add($relInScaffold)
+            }
+        }
+    }
+    if ($expectedScaffoldRelPaths.Count -gt 0) {
+        $source = "provenance"
+    } else {
+        # 2. Check git ls-tree if in a git repo
+        $gitRoot = $null
+        $dir = [System.IO.Path]::GetFullPath($FrameworkRoot)
+        while ($null -ne $dir) {
+            if (Test-Path -LiteralPath (Join-Path $dir ".git")) {
+                $gitRoot = $dir
+                break
+            }
+            $parent = Split-Path -Parent $dir
+            if ($parent -eq $dir -or [string]::IsNullOrEmpty($parent)) {
+                break
+            }
+            $dir = $parent
+        }
+
+        if ($null -ne $gitRoot) {
+            $treeOutput = @(git -C $FrameworkRoot ls-files -- $scaffoldPrefix 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $treeOutput.Count -gt 0) {
+                foreach ($line in $treeOutput) {
+                    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                    $path = ConvertTo-ManifestRelativePath -Path $line
+                    if ($path.StartsWith($scaffoldPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $relInScaffold = $path.Substring($scaffoldPrefix.Length)
+                        [void]$expectedScaffoldRelPaths.Add($relInScaffold)
+                    }
+                }
+            }
+        }
+        if ($expectedScaffoldRelPaths.Count -gt 0) {
+            $source = "git"
+        }
+    }
+
+    # 3. Fallback to disk walk if neither provenance nor git gave expected files
+    if ($expectedScaffoldRelPaths.Count -eq 0) {
+        $source = "disk-walk"
+        $scaffoldAbs = Join-Path $FrameworkRoot $scaffoldPrefix
+        if (Test-Path -LiteralPath $scaffoldAbs) {
+            $items = Get-ChildItem -LiteralPath $scaffoldAbs -Force -Recurse -File
+            foreach ($item in $items) {
+                $rel = $item.FullName.Substring($scaffoldAbs.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+                [void]$expectedScaffoldRelPaths.Add((ConvertTo-ManifestRelativePath -Path $rel))
+            }
+        }
+    }
+
+    return @{
+        Files = @($expectedScaffoldRelPaths | Sort-Object -Unique)
+        Source = $source
+    }
+}
+
+function Test-ScaffoldTemplateComplete {
+    [CmdletBinding()]
+    param(
+        [string]$FrameworkRoot = "",
+        $Manifest = $null
+    )
+
+    if ([string]::IsNullOrWhiteSpace($FrameworkRoot)) {
+        $FrameworkRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")).Path
+    } else {
+        $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+    }
+
+    if ($null -eq $Manifest) {
+        $Manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
+    }
+
+    $templateRoot = Join-Path $FrameworkRoot ([string]$Manifest.scaffold_source)
+    if (-not (Test-Path -LiteralPath $templateRoot)) {
+        return @{
+            IsComplete = $false
+            MissingFiles = @("Directory missing: $templateRoot")
+            ExpectedCount = 0
+            OnDiskCount = 0
+            Source = "none"
+            IsAuthoritative = $false
+        }
+    }
+
+    $expectedResult = Get-ExpectedScaffoldFiles -FrameworkRoot $FrameworkRoot -Manifest $Manifest
+    $expectedRelFiles = @($expectedResult.Files)
+    $source = [string]$expectedResult.Source
+    $isAuthoritative = ($source -ne "disk-walk")
+
+    $missing = @()
+    $missingFileCount = 0
+
+    foreach ($relFile in $expectedRelFiles) {
+        $fullPath = Join-Path $templateRoot $relFile
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            $missing += $relFile
+            $missingFileCount++
+        }
+    }
+
+    $backlogDir = Join-Path $templateRoot "backlog"
+    if (-not (Test-Path -LiteralPath $backlogDir)) {
+        if ($missing -notcontains "backlog/") {
+            $missing += "backlog/"
+        }
+    }
+
+    return @{
+        IsComplete = ($missing.Count -eq 0)
+        MissingFiles = $missing
+        ExpectedCount = $expectedRelFiles.Count
+        OnDiskCount = ($expectedRelFiles.Count - $missingFileCount)
+        Source = $source
+        IsAuthoritative = $isAuthoritative
+    }
 }
 
 function Get-DriftClassification {

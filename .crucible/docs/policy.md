@@ -185,3 +185,4 @@ In addition to circuit breakers, `factory.ps1` enforces runtime validation gates
 - **Budget Tier Cross-Validation**: `factory.ps1` reads the backlog spec frontmatter at task initialization and overrides the handoff's `budget_tier` if it mismatches. Specialists cannot escalate their own budget tier.
 - **Log-Derived Handoff Count**: `factory.ps1` counts `session_end` events in the task-scoped pipeline log and overrides the agent-reported `cumulative_handoff_count` if it is lower (preventing budget under-reporting).
 - **Scan Limit**: `factory.ps1` auto-kickoff scans at most 5 items in a single run.
+- **Assertion-Deletion Gate**: Pre-push checks (`check-assertion-deletion.ps1`) diff test files (`*.tests.ps1`) for dropped `Assert-Result` calls. Pushes containing deleted or renamed assertions are rejected unless every removing commit carries a non-empty `Assertions-Removed: <reason>` trailer.

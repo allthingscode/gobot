@@ -147,6 +147,46 @@ function New-BootstrapPrompt {
     return ($lines -join "`n")
 }
 
+$platformLib = Join-Path $PSScriptRoot "lib/platform.ps1"
+if (-not (Test-Path -LiteralPath $platformLib)) {
+    $platformLib = Join-Path (Split-Path -Parent $PSScriptRoot) "powershell/lib/platform.ps1"
+}
+if (Test-Path -LiteralPath $platformLib) {
+    . $platformLib
+}
+if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
+    function Invoke-Git {
+        [CmdletBinding()]
+        param(
+            [Parameter(Position=0, ValueFromRemainingArguments=$true)]
+            [object[]]$GitArgs = @(),
+            [Alias("Repo")]
+            [string]$Directory = ""
+        )
+        $flattenedArgs = @()
+        foreach ($arg in $GitArgs) {
+            if ($arg -is [System.Collections.IEnumerable] -and $arg -isnot [string]) {
+                foreach ($sub in $arg) { $flattenedArgs += [string]$sub }
+            } else {
+                $flattenedArgs += [string]$arg
+            }
+        }
+        $allArgs = @()
+        if (-not [string]::IsNullOrWhiteSpace($Directory)) { $allArgs += @("-C", $Directory) }
+        if ($flattenedArgs.Count -gt 0) { $allArgs += $flattenedArgs }
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $rawOutput = @(& git @allArgs 2>$null)
+            $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+        } finally {
+            $ErrorActionPreference = $prevEAP
+        }
+        $lines = [string[]]@($rawOutput | ForEach-Object { [string]$_ })
+        return [PSCustomObject]@{ ExitCode = $exitCode; Lines = $lines; Raw = ($lines -join "`n") }
+    }
+}
+
 function Test-InfraFailure {
     param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
@@ -157,35 +197,16 @@ function Test-InfraFailure {
     return $null
 }
 
-function Invoke-GitStdout {
-    param(
-        [string]$Directory,
-        [string[]]$GitArgs
-    )
-    if (-not (Get-Command "git" -ErrorAction SilentlyContinue)) {
-        return [PSCustomObject]@{ ExitCode = 127; Output = "" }
-    }
-    $allArgs = @("-C", $Directory) + $GitArgs
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & git @allArgs 2>$null
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previous
-    }
-    return [PSCustomObject]@{ ExitCode = $exitCode; Output = ($output -join "`n") }
-}
-
 function Test-GitWorkTree {
     param([string]$Directory)
-    $res = Invoke-GitStdout -Directory $Directory -GitArgs @("rev-parse", "--is-inside-work-tree")
-    return (($res.ExitCode -eq 0) -and ($res.Output.Trim() -eq "true"))
+    $res = Invoke-Git -Directory $Directory rev-parse --is-inside-work-tree
+    return (($res.ExitCode -eq 0) -and ($res.Raw.Trim() -eq "true"))
 }
 
 function Get-GitPorcelainStatus {
     param([string]$Directory)
-    return Invoke-GitStdout -Directory $Directory -GitArgs @("status", "--porcelain")
+    $res = Invoke-Git -Directory $Directory status --porcelain
+    return [PSCustomObject]@{ ExitCode = $res.ExitCode; Output = $res.Raw }
 }
 
 function Invoke-CodexExec {

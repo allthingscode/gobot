@@ -17,7 +17,11 @@ function Get-CurrentCommit {
     if (-not [string]::IsNullOrWhiteSpace($Root)) {
         $args += @("-C", $Root)
     }
-    $sha = & git @args rev-parse HEAD 2>$null
+    try {
+        $sha = & git @args rev-parse HEAD 2>$null
+    } catch {
+        return ""
+    }
     if ($LASTEXITCODE -ne 0) {
         return ""
     }
@@ -52,24 +56,52 @@ function Resolve-FullCommitSha {
     return $CommitSha
 }
 
-function Get-OriginGithubSlug {
+function Get-OriginRepoIdentity {
     param([string]$Root)
     $args = @()
     if (-not [string]::IsNullOrWhiteSpace($Root)) {
         $args += @("-C", $Root)
     }
-    $url = & git @args remote get-url origin 2>$null
+    try {
+        $url = & git @args remote get-url origin 2>$null
+    } catch {
+        return $null
+    }
     if ($LASTEXITCODE -ne 0) {
-        return ""
+        return $null
     }
     $remote = ([string]$url).Trim()
-    if ($remote -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
-        return $Matches[1]
+    if ($remote -match '^https?://(?:[^@/:]+@)?([^/:]+)(?::\d+)?/([^/]+)/([^/]+?)(\.git)?/?$') {
+        $owner = $Matches[2]
+        $name = $Matches[3]
+        return [pscustomobject]@{
+            Host  = $Matches[1]
+            Owner = $owner
+            Name  = $name
+            Slug  = "$owner/$name"
+        }
     }
-    if ($remote -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
-        return $Matches[1]
+    if ($remote -match '^git@([^/:]+):([^/]+)/([^/]+?)(\.git)?/?$') {
+        $owner = $Matches[2]
+        $name = $Matches[3]
+        return [pscustomobject]@{
+            Host  = $Matches[1]
+            Owner = $owner
+            Name  = $name
+            Slug  = "$owner/$name"
+        }
     }
-    return ""
+    if ($remote -match '^ssh://(?:[^@/:]+@)?([^/:]+)(?::\d+)?/([^/]+)/([^/]+?)(\.git)?/?$') {
+        $owner = $Matches[2]
+        $name = $Matches[3]
+        return [pscustomobject]@{
+            Host  = $Matches[1]
+            Owner = $owner
+            Name  = $name
+            Slug  = "$owner/$name"
+        }
+    }
+    return $null
 }
 
 function Invoke-GhJson {
@@ -82,72 +114,164 @@ function Invoke-GhJson {
     }
 }
 
+$script:LastGhError = ""
+
 function Get-RunList {
     param(
         [string]$CommitSha,
-        [string]$RepoSlug
+        [string]$RepoSlug,
+        [string]$HostName = "github.com"
     )
-    $args = @("run", "list", "--commit", $CommitSha, "--json", "databaseId,status,conclusion")
-    if (-not [string]::IsNullOrWhiteSpace($RepoSlug)) {
-        $args += @("-R", $RepoSlug)
+    $script:LastGhError = ""
+    $repoPrefix = "repos/$RepoSlug"
+
+    # Step 1: Enumerate workflows for the repository.
+    # Enumerate workflows then query per-workflow runs: 'gh run list' returned 404 against
+    # private repos on 2026-08-17 (transient; 200 again on 2026-08-18). The two-step query
+    # worked through both, so it stays.
+    $wfArgs = @("api")
+    if (-not [string]::IsNullOrWhiteSpace($HostName) -and $HostName -ne "github.com") {
+        $wfArgs += @("--hostname", $HostName)
     }
-    $result = Invoke-GhJson -Arguments $args
-    if ($result.ExitCode -ne 0) {
+    $wfArgs += "$repoPrefix/actions/workflows"
+    $wfResult = Invoke-GhJson -Arguments $wfArgs
+    if ($wfResult.ExitCode -ne 0) {
+        $script:LastGhError = $wfResult.Output.Trim()
         return $null
     }
-    # Return $null ONLY for gh failure above. Normalize parsed runs to a real
-    # array and return it via the unary comma so PowerShell does not unroll an
-    # empty result to $null on assignment. Cross-platform hazard: pwsh emits
-    # nothing for "[]" (assignment yields $null) while Windows PS 5.1 returns
-    # "[]" as a single array object; branching on $null -eq $parsed normalizes
-    # both to count 0, so the caller correctly reports NO_RUNS (not SKIP/timeout).
-    $parsed = $null
-    if (-not [string]::IsNullOrWhiteSpace($result.Output)) {
-        $parsed = $result.Output | ConvertFrom-Json
+
+    $wfData = $null
+    if (-not [string]::IsNullOrWhiteSpace($wfResult.Output)) {
+        try {
+            $wfData = $wfResult.Output | ConvertFrom-Json
+        } catch {
+            $script:LastGhError = "Failed to parse workflows JSON: $_"
+            return $null
+        }
     }
-    if ($null -eq $parsed) {
+    if ($null -eq $wfData -or $null -eq $wfData.workflows) {
         return ,@()
     }
-    return ,@($parsed)
+
+    $workflows = @($wfData.workflows | Where-Object { [string]$_.state -eq "active" })
+    if ($workflows.Count -eq 0) {
+        return ,@()
+    }
+
+    # Step 2: Query runs for each active workflow matching $CommitSha.
+    $allRuns = @()
+    foreach ($wf in $workflows) {
+        $wfId = [string]$wf.id
+        $runArgs = @("api")
+        if (-not [string]::IsNullOrWhiteSpace($HostName) -and $HostName -ne "github.com") {
+            $runArgs += @("--hostname", $HostName)
+        }
+        $runArgs += "$repoPrefix/actions/workflows/$wfId/runs?head_sha=$CommitSha"
+        $runResult = Invoke-GhJson -Arguments $runArgs
+        if ($runResult.ExitCode -ne 0) {
+            $script:LastGhError = $runResult.Output.Trim()
+            return $null
+        }
+
+        $runData = $null
+        if (-not [string]::IsNullOrWhiteSpace($runResult.Output)) {
+            try {
+                $runData = $runResult.Output | ConvertFrom-Json
+            } catch {
+                $script:LastGhError = "Failed to parse workflow runs JSON: $_"
+                return $null
+            }
+        }
+        if ($null -ne $runData -and $null -ne $runData.workflow_runs) {
+            foreach ($r in @($runData.workflow_runs)) {
+                $allRuns += [pscustomobject]@{
+                    databaseId = $r.id
+                    id         = $r.id
+                    status     = $r.status
+                    conclusion = $r.conclusion
+                    name       = $r.name
+                    html_url   = $r.html_url
+                }
+            }
+        }
+    }
+
+    return ,@($allRuns)
 }
 
 function Write-FailedJobs {
     param(
         [object[]]$Runs,
-        [string]$RepoSlug
+        [string]$RepoSlug,
+        [string]$HostName = "github.com"
     )
     $badConclusions = @("failure", "timed_out", "cancelled")
+    $repoPrefix = "repos/$RepoSlug"
     foreach ($run in $Runs) {
         if ($badConclusions -notcontains ([string]$run.conclusion)) {
             continue
         }
-        $args = @("run", "view", ([string]$run.databaseId), "--json", "jobs")
-        if (-not [string]::IsNullOrWhiteSpace($RepoSlug)) {
-            $args += @("-R", $RepoSlug)
+        $runId = if ($run.databaseId) { $run.databaseId } else { $run.id }
+        $browserUrl = ""
+        if (-not [string]::IsNullOrWhiteSpace([string]$run.html_url)) {
+            $browserUrl = [string]$run.html_url
+        } else {
+            $browserHost = if (-not [string]::IsNullOrWhiteSpace($HostName)) { $HostName } else { "github.com" }
+            $browserUrl = "https://" + $browserHost + "/" + $RepoSlug + "/actions/runs/" + $runId
         }
-        $view = Invoke-GhJson -Arguments $args
+
+        $jobArgs = @("api")
+        if (-not [string]::IsNullOrWhiteSpace($HostName) -and $HostName -ne "github.com") {
+            $jobArgs += @("--hostname", $HostName)
+        }
+        $jobArgs += "$repoPrefix/actions/runs/$runId/jobs"
+        $view = Invoke-GhJson -Arguments $jobArgs
         if ($view.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($view.Output)) {
-            Write-Host ("  run " + $run.databaseId + ": failed job details unavailable")
+            $rawErr = if ($null -ne $view.Output) { $view.Output.Trim() } else { "" }
+            $statusMsg = "HTTP error"
+            if ($rawErr -match '(HTTP\s+\d+)') {
+                $statusMsg = $Matches[1]
+            } elseif (-not [string]::IsNullOrWhiteSpace($rawErr)) {
+                $statusMsg = $rawErr
+            }
+            Write-Host ("  run " + $runId + ": job details unavailable (GET actions/runs/" + $runId + "/jobs -> " + $statusMsg + ")")
+            Write-Host ("  run " + $runId + ": view in browser: " + $browserUrl)
             continue
         }
-        $details = $view.Output | ConvertFrom-Json
-        foreach ($job in @($details.jobs)) {
-            if ($badConclusions -contains ([string]$job.conclusion)) {
-                Write-Host ("  " + $job.name)
+        $details = $null
+        try {
+            $details = $view.Output | ConvertFrom-Json
+        } catch {
+            Write-Host ("  run " + $runId + ": job details unavailable (jobs response was not valid JSON)")
+            Write-Host ("  run " + $runId + ": view in browser: " + $browserUrl)
+            continue
+        }
+        if ($null -ne $details -and $null -ne $details.jobs) {
+            foreach ($job in @($details.jobs)) {
+                if ($badConclusions -contains ([string]$job.conclusion)) {
+                    Write-Host ("  " + $job.name)
+                }
             }
         }
     }
 }
 
 if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
-    Write-Host "[CI WATCH] SKIPPED (gh unavailable)"
-    exit 0
+    Write-Host "[CI WATCH] STATUS=UNAVAILABLE"
+    Write-Host "  gh command not found on PATH"
+    exit 6
 }
 
 $auth = & gh auth status 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[CI WATCH] SKIPPED (gh unavailable)"
-    exit 0
+    Write-Host "[CI WATCH] STATUS=UNAVAILABLE"
+    $authText = ($auth -join " ").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($authText)) {
+        Write-Host ("  gh authentication failed: " + $authText)
+    } else {
+        Write-Host "  gh authentication failed"
+    }
+    exit 6
 }
 
 if ([string]::IsNullOrWhiteSpace($CrucibleRoot)) {
@@ -157,14 +281,40 @@ if (Test-Path -LiteralPath $CrucibleRoot) {
     $CrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot).Path
 }
 
+$repoIdentity = $null
+if (-not [string]::IsNullOrWhiteSpace($Repo)) {
+    $trimmedRepo = $Repo.Trim()
+    if ($trimmedRepo -match '^([^/:]+)/([^/]+)/([^/]+)$') {
+        $repoIdentity = [pscustomobject]@{
+            Host  = $Matches[1]
+            Owner = $Matches[2]
+            Name  = $Matches[3]
+            Slug  = "$($Matches[2])/$($Matches[3])"
+        }
+    } elseif ($trimmedRepo -match '^([^/]+)/([^/]+)$') {
+        $repoIdentity = [pscustomobject]@{
+            Host  = "github.com"
+            Owner = $Matches[1]
+            Name  = $Matches[2]
+            Slug  = "$($Matches[1])/$($Matches[2])"
+        }
+    }
+}
+if ($null -eq $repoIdentity) {
+    $repoIdentity = Get-OriginRepoIdentity -Root $CrucibleRoot
+}
+if ($null -eq $repoIdentity) {
+    Write-Host "[CI WATCH] STATUS=UNAVAILABLE"
+    Write-Host ("  could not determine the GitHub repository for " + $CrucibleRoot)
+    Write-Host "  pass -Repo <owner>/<name>"
+    exit 6
+}
+
 if ([string]::IsNullOrWhiteSpace($Commit)) {
     $Commit = Get-CurrentCommit -Root $CrucibleRoot
 }
-# gh run list --commit matches full SHAs only.
+# The head_sha= query matches full SHAs only.
 $Commit = Resolve-FullCommitSha -CommitSha $Commit -Root $CrucibleRoot
-if ([string]::IsNullOrWhiteSpace($Repo)) {
-    $Repo = Get-OriginGithubSlug -Root $CrucibleRoot
-}
 
 $noRunsDeadline = (Get-Date).AddMinutes($NoRunsGraceMinutes)
 $queuedDeadline = (Get-Date).AddMinutes($QueuedGraceMinutes)
@@ -174,10 +324,16 @@ $buildDeadline = $null
 $lastRuns = @()
 
 while ($true) {
-    $runs = Get-RunList -CommitSha $Commit -RepoSlug $Repo
+    $runs = Get-RunList -CommitSha $Commit -RepoSlug $repoIdentity.Slug -HostName $repoIdentity.Host
     if ($null -eq $runs) {
-        Write-Host "[CI WATCH] SKIPPED (gh unavailable)"
-        exit 0
+        Write-Host "[CI WATCH] STATUS=API_ERROR"
+        Write-Host ("  commit: " + $Commit)
+        if (-not [string]::IsNullOrWhiteSpace($script:LastGhError)) {
+            Write-Host ("  gh query failed: " + $script:LastGhError)
+        } else {
+            Write-Host "  could not retrieve workflow runs from GitHub API"
+        }
+        exit 6
     }
     $lastRuns = @($runs)
 
@@ -216,7 +372,7 @@ while ($true) {
             Write-Host "[CI WATCH] STATUS=RED"
             Write-Host ("  commit: " + $Commit)
             Write-Host "  failed jobs:"
-            Write-FailedJobs -Runs $lastRuns -RepoSlug $Repo
+            Write-FailedJobs -Runs $lastRuns -RepoSlug $repoIdentity.Slug -HostName $repoIdentity.Host
             exit 1
         }
 
@@ -224,12 +380,15 @@ while ($true) {
             $requiredList = @($RequiredJobs.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
             if ($requiredList.Count -gt 0) {
                 $observedJobs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                $repoPrefix = "repos/" + $repoIdentity.Slug
                 foreach ($run in $lastRuns) {
-                    $args = @("run", "view", ([string]$run.databaseId), "--json", "jobs")
-                    if (-not [string]::IsNullOrWhiteSpace($Repo)) {
-                        $args += @("-R", $Repo)
+                    $runId = if ($run.databaseId) { $run.databaseId } else { $run.id }
+                    $jobArgs = @("api")
+                    if (-not [string]::IsNullOrWhiteSpace($repoIdentity.Host) -and $repoIdentity.Host -ne "github.com") {
+                        $jobArgs += @("--hostname", $repoIdentity.Host)
                     }
-                    $view = Invoke-GhJson -Arguments $args
+                    $jobArgs += "$repoPrefix/actions/runs/$runId/jobs"
+                    $view = Invoke-GhJson -Arguments $jobArgs
                     if ($view.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($view.Output)) {
                         try {
                             $details = $view.Output | ConvertFrom-Json
@@ -286,17 +445,15 @@ while ($true) {
             Write-Host "[CI WATCH] STATUS=CI_NOT_STARTED"
             Write-Host ("  commit: " + $Commit)
             Write-Host ("  no CI job left the queue within " + $QueuedGraceMinutes + "m - likely a runner-availability outage, not a slow build.")
-            if (-not [string]::IsNullOrWhiteSpace($Repo)) {
-                Write-Host ("  runs: https://github.com/" + $Repo + "/actions")
-            }
+            $browserHost = if (-not [string]::IsNullOrWhiteSpace($repoIdentity.Host)) { $repoIdentity.Host } else { "github.com" }
+            Write-Host ("  runs: https://" + $browserHost + "/" + $repoIdentity.Slug + "/actions")
             exit 4
         }
     } elseif ((Get-Date) -ge $buildDeadline) {
         Write-Host "[CI WATCH] STATUS=PENDING_TIMEOUT"
         Write-Host ("  commit: " + $Commit)
-        if (-not [string]::IsNullOrWhiteSpace($Repo)) {
-            Write-Host ("  runs: https://github.com/" + $Repo + "/actions")
-        }
+        $browserHost = if (-not [string]::IsNullOrWhiteSpace($repoIdentity.Host)) { $repoIdentity.Host } else { "github.com" }
+        Write-Host ("  runs: https://" + $browserHost + "/" + $repoIdentity.Slug + "/actions")
         exit 2
     }
 

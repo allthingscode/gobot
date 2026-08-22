@@ -11,6 +11,8 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+. (Join-Path $PSScriptRoot "lib/platform.ps1")
+
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = (Get-Location).Path
 } else {
@@ -27,9 +29,10 @@ if (-not (Test-Path -LiteralPath $worktree)) {
 }
 $worktree = (Resolve-Path -LiteralPath $worktree).Path
 
-$branch = (& git -C $worktree rev-parse --abbrev-ref HEAD 2>$null).Trim()
+$branchRes = Invoke-Git -Directory $worktree rev-parse --abbrev-ref HEAD
+$branch = $branchRes.Raw.Trim()
 $expectedBranch = "task/$TaskId"
-if ($branch -ne $expectedBranch) {
+if ($branchRes.ExitCode -ne 0 -or $branch -ne $expectedBranch) {
     Write-Error ("Worktree branch mismatch. Expected '{0}', found '{1}'." -f $expectedBranch, $branch)
 }
 
@@ -196,25 +199,27 @@ function Invoke-Check {
 # and never flags pre-existing debt. Determine the branch fork point to diff against.
 $defaultBranch = $null
 foreach ($candidate in @("main", "master")) {
-    & git -C $worktree rev-parse --verify --quiet ("refs/heads/" + $candidate) 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { $defaultBranch = $candidate; break }
+    $candRes = Invoke-Git -Directory $worktree rev-parse --verify --quiet ("refs/heads/" + $candidate)
+    if ($candRes.ExitCode -eq 0) { $defaultBranch = $candidate; break }
 }
 $base = $null
 if ($defaultBranch) {
-    $mergeBase = (& git -C $worktree merge-base HEAD $defaultBranch 2>$null)
-    if ($mergeBase) { $base = $mergeBase.Trim() }
+    $mergeBaseRes = Invoke-Git -Directory $worktree merge-base HEAD $defaultBranch
+    if ($mergeBaseRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($mergeBaseRes.Raw)) {
+        $base = $mergeBaseRes.Raw.Trim()
+    }
 }
 
 $changedRel = New-Object System.Collections.Generic.List[string]
 if ($base) {
-    foreach ($f in (& git -C $worktree diff --name-only --diff-filter=d $base HEAD)) {
+    foreach ($f in (Invoke-Git -Directory $worktree diff --name-only --diff-filter=d $base HEAD).Lines) {
         if ($f) { $changedRel.Add($f) }
     }
 }
-foreach ($f in (& git -C $worktree diff --name-only --diff-filter=d HEAD)) {
+foreach ($f in (Invoke-Git -Directory $worktree diff --name-only --diff-filter=d HEAD).Lines) {
     if ($f) { $changedRel.Add($f) }
 }
-foreach ($f in (& git -C $worktree diff --name-only --cached --diff-filter=d)) {
+foreach ($f in (Invoke-Git -Directory $worktree diff --name-only --cached --diff-filter=d).Lines) {
     if ($f) { $changedRel.Add($f) }
 }
 
@@ -226,8 +231,10 @@ foreach ($rel in ($changedRel | Sort-Object -Unique)) {
     }
 }
 
-Write-Host "==> Encoding guard (BOM/mojibake/whitespace on changed files)"
-$mojibakeScript = Join-Path $PSScriptRoot "tests/check-mojibake.ps1"
+$mojibakeScript = Join-Path $PSScriptRoot "gates/check-mojibake.ps1"
+if (-not (Test-Path -LiteralPath $mojibakeScript)) {
+    $mojibakeScript = Join-Path $PSScriptRoot "tests/check-mojibake.ps1"
+}
 if ($scanFiles.Count -gt 0 -and (Test-Path -LiteralPath $mojibakeScript)) {
     $host_exe = (Get-Process -Id $PID).Path
     & $host_exe -NoProfile -ExecutionPolicy Bypass -File $mojibakeScript @scanFiles
@@ -239,8 +246,8 @@ if ($scanFiles.Count -gt 0 -and (Test-Path -LiteralPath $mojibakeScript)) {
 # Introduced-whitespace check over the task's own diff (trailing whitespace, blank line
 # at EOF, space-before-tab). Only meaningful when the fork point is known.
 if ($base) {
-    & git -C $worktree diff --check $base HEAD
-    if ($LASTEXITCODE -ne 0) {
+    $diffCheck = Invoke-Git -Directory $worktree diff --check $base HEAD
+    if ($diffCheck.ExitCode -ne 0) {
         Write-Host "Check failed: Encoding guard (whitespace)"
         throw "Check failed: Encoding guard (whitespace)"
     }
@@ -251,7 +258,6 @@ if ($base) {
 # endings, case sensitivity) can pass here yet fail on origin CI - exactly the class of failure
 # the gate's origin-CI watch exists to catch. Surface the gap so a green local run is not
 # mistaken for cross-platform coverage.
-. (Join-Path $PSScriptRoot "lib/platform.ps1")
 $hostOsFamily = if (Test-PlatformIsWindows) { "windows" } else { "linux" }
 $ciOsFamilies = New-Object System.Collections.Generic.List[string]
 $workflowDir = Join-Path $ProjectRoot ".github/workflows"

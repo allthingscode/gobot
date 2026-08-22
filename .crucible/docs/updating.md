@@ -171,4 +171,37 @@ Use manual copying only when you intentionally want a single upstream file outsi
 
 ---
 
+## Migrating Existing Adopters (2026-08-10 Gitignore Anchoring & Scaffold Snapshot)
+
+Existing adopters installed prior to 2026-08-10 may have an unanchored `.crucible/.gitignore` and a nested scaffold snapshot (`.crucible/templates/project/.crucible/`) where backlog files were ignored during `git add -A`.
+
+To migrate an existing adopter repository:
+
+1. **Update bundle files from upstream:**
+   Run the updater from your project root:
+
+   ```powershell
+   powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\update-bundle.ps1" `
+     -FrameworkSource "C:\path\to\crucible-source" `
+     -AdopterRoot . `
+     -Mode auto-safe `
+     -Prune
+   ```
+
+   Run the source checkout's copy of `update-bundle.ps1`, not your bundled `.crucible/powershell/update-bundle.ps1`. Your bundled copy predates this change and would classify the live `.crucible/.gitignore` for removal, deleting it.
+
+   This replaces `.crucible/.gitignore` with the anchored version and prunes the retired `.crucible/templates/project/.crucible/.gitignore` snapshot file while installing `.crucible/templates/project/.crucible/gitignore`. Confirm `.crucible/.gitignore` still exists on disk before proceeding.
+
+2. **Force-add any untracked scaffold snapshot files:**
+   Because git ignored nested backlog files under `.crucible/templates/project/.crucible/` in older commits, force-stage all snapshot files so your repository tracks the complete 15-file scaffold:
+   ```powershell
+   git add -f .crucible/templates/project/.crucible
+   ```
+
+3. **Verify and commit:**
+   Run `.crucible/powershell/run-all-tests.ps1` and verify `git ls-files .crucible/templates/project/.crucible` returns 15 tracked files. Then commit the updated bundle.
+
+---
+
 For the initial install, see [get-started.md](get-started.md).
+

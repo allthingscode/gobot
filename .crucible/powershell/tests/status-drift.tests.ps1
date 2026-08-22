@@ -3,16 +3,11 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $PSScriptRoot '_fixtures.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/install-manifest.ps1")
 $STATUS_SCRIPT = Join-Path $REPO_ROOT "powershell/factory-status.ps1"
 $results = @()
-
-
-
-
-
-
 
 function Write-Utf8File {
     param([Parameter(Mandatory=$true)][string]$Path, [Parameter(Mandatory=$true)][string]$Content)
@@ -21,13 +16,6 @@ function Write-Utf8File {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
     [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
-}
-
-function Invoke-GitCommit {
-    param([Parameter(Mandatory=$true)][string]$Repo, [Parameter(Mandatory=$true)][string]$Message)
-    git -C $Repo add -A | Out-Null
-    git -C $Repo -c user.name="Crucible Tests" -c user.email="tests@example.invalid" commit -m $Message --quiet | Out-Null
-    return ((git -C $Repo rev-parse HEAD) | Out-String).Trim()
 }
 
 function New-FrameworkFixture {

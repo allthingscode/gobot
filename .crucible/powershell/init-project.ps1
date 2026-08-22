@@ -123,7 +123,8 @@ function Copy-TemplateDirectory {
     param(
         [Parameter(Mandatory=$true)][string]$Source,
         [Parameter(Mandatory=$true)][string]$Destination,
-        [Parameter(Mandatory=$true)][bool]$AllowOverwrite
+        [Parameter(Mandatory=$true)][bool]$AllowOverwrite,
+        $Manifest
     )
 
     if (-not (Test-Path -LiteralPath $Destination)) {
@@ -135,22 +136,25 @@ function Copy-TemplateDirectory {
     foreach ($entry in $entries) {
         $relative = $entry.FullName.Substring($sourceRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 
-        # Never copy a nested .crucible directory. Framework source dirs (e.g.
-        # powershell/) can accumulate gitignored runtime state under their own
-        # .crucible/ when the framework is exercised in place; -Recurse -Force
-        # would otherwise drag that stale state into every adopter install.
-        if (($relative -split '[\\/]') -contains ".crucible") {
-            continue
-        }
-
         if ($entry.FullName.StartsWith($REPO_ROOT, [System.StringComparison]::OrdinalIgnoreCase)) {
             $repoRel = $entry.FullName.Substring($REPO_ROOT.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Replace("\", "/")
+            if (Test-NestedCrucibleRuntimePath -RelativePath $repoRel -Manifest $Manifest) {
+                continue
+            }
             if (Test-FrameworkDevOnlyFile -Path $repoRel) {
+                continue
+            }
+        } else {
+            if (Test-NestedCrucibleRuntimePath -RelativePath $relative -Manifest $Manifest) {
                 continue
             }
         }
 
-        $target = Join-Path $Destination $relative
+        $targetRelative = $relative
+        if ($relative -eq "gitignore") {
+            $targetRelative = ".gitignore"
+        }
+        $target = Join-Path $Destination $targetRelative
 
         if ($entry.PSIsContainer) {
             if (-not (Test-Path -LiteralPath $target)) {
@@ -176,6 +180,16 @@ if (-not (Test-Path -LiteralPath $templateRoot)) {
     throw "Crucible project template not found: $templateRoot"
 }
 $installManifest = Get-InstallManifest -FrameworkRoot $REPO_ROOT
+
+$scaffoldCheck = Test-ScaffoldTemplateComplete -FrameworkRoot $REPO_ROOT -Manifest $installManifest
+if (-not $scaffoldCheck.IsComplete) {
+    throw ("Crucible project template at $templateRoot is incomplete or corrupt (" +
+        $scaffoldCheck.OnDiskCount + " of " + $scaffoldCheck.ExpectedCount + " expected files present). Missing file(s): " +
+        ($scaffoldCheck.MissingFiles -join ", "))
+}
+if (-not $scaffoldCheck.IsAuthoritative) {
+    Write-Info "[WARNING] Scaffold completeness verdict is not authoritative (source: $($scaffoldCheck.Source)). Could not verify against a provenance manifest or git index." -ForegroundColor Yellow
+}
 
 $resolvedProjectRoot = $ProjectRoot
 if (Test-Path -LiteralPath $ProjectRoot) {
@@ -221,13 +235,13 @@ if (Test-Path -LiteralPath $existingConfigPath) {
 if ((Test-Path -LiteralPath (Join-Path $targetCrucible "config.yaml")) -and -not $Force) {
     throw "An installed Crucible bundle already exists at $targetCrucible. To update individual files, see docs/updating.md (selective-copy workflow). To reinstall from scratch, delete .crucible/ first or pass -Force."
 }
-Copy-TemplateDirectory -Source $templateRoot -Destination $targetCrucible -AllowOverwrite ([bool]$Force)
+Copy-TemplateDirectory -Source $templateRoot -Destination $targetCrucible -AllowOverwrite ([bool]$Force) -Manifest $installManifest
 
 # Copy active framework directories to make the installation self-contained
 foreach ($dirName in @($installManifest.copied_dirs)) {
     $srcDir = Join-Path $REPO_ROOT $dirName
     $destDir = Join-Path $targetCrucible $dirName
-    Copy-TemplateDirectory -Source $srcDir -Destination $destDir -AllowOverwrite ([bool]$Force)
+    Copy-TemplateDirectory -Source $srcDir -Destination $destDir -AllowOverwrite ([bool]$Force) -Manifest $installManifest
 }
 
 foreach ($fileName in @($installManifest.root_files)) {

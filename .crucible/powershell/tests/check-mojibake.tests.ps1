@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
-$scriptPath = Join-Path $PSScriptRoot "check-mojibake.ps1"
+$scriptPath = Join-Path $REPO_ROOT "powershell/gates/check-mojibake.ps1"
 $psExe = (Get-Process -Id $PID).Path  # the same PowerShell host running this test
 
 $failures = 0

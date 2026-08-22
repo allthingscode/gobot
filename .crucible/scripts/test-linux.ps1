@@ -82,6 +82,48 @@ if ($WslDir.StartsWith('~')) {
     $dest = "$($wslHome.Trim())$($WslDir.Substring(1))"
 }
 
+$stampLib = Join-Path $repoRoot 'powershell/lib/linux-leg-stamp.ps1'
+if (-not (Test-Path -LiteralPath $stampLib)) {
+    $stampLib = Join-Path $repoRoot 'powershell/tests/linux-leg-stamp.ps1'
+}
+. $stampLib
+
+# Capture start-of-run state before rsync
+$saved = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$headAtStartRaw = & git -C $repoRoot rev-parse HEAD 2>$null
+$gitCode = $LASTEXITCODE
+$ErrorActionPreference = $saved
+if ($gitCode -ne 0 -or [string]::IsNullOrWhiteSpace($headAtStartRaw)) {
+    Write-Error 'Could not resolve HEAD before test run; cannot verify state.'
+    exit 1
+}
+$headAtStart = ([string]$headAtStartRaw).Trim()
+
+try {
+    $digestAtStart = Get-LinuxLegWorkingTreeDigest -RepoRoot $repoRoot
+} catch {
+    Write-Error "Could not compute working tree digest before test run: $_"
+    exit 1
+}
+
+$saved = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$untrackedFiles = @(git -C $repoRoot ls-files -o --exclude-standard -- powershell scripts/hooks 2>$null)
+$gitCode = $LASTEXITCODE
+$ErrorActionPreference = $saved
+
+if ($gitCode -eq 0 -and $untrackedFiles.Count -gt 0) {
+    $nonEmptyUntracked = @($untrackedFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($nonEmptyUntracked.Count -gt 0) {
+        Write-Host ("[WARN] " + $nonEmptyUntracked.Count + " untracked file(s) under powershell/ or scripts/hooks/ were included in the Linux run but are not covered by the verification digest (they cannot be pushed):") -ForegroundColor Yellow
+        foreach ($uf in $nonEmptyUntracked) {
+            $normUf = $uf.Trim().Replace('\', '/')
+            Write-Host "    - $normUf" -ForegroundColor Yellow
+        }
+    }
+}
+
 Write-Host "Syncing working tree -> $dest (WSL)..."
 $syncScript = "set -e`nmkdir -p '$dest'`nrsync -a --delete --exclude=.git/index.lock '$wslSrc/' '$dest/'"
 Invoke-WslBash $syncScript
@@ -92,4 +134,37 @@ if ($SyncOnly) { Write-Host 'Sync complete (-SyncOnly); skipping tests.'; exit 0
 Write-Host "Running suite under pwsh 7 (CRUCIBLE_TEST_JOBS=$Jobs)..."
 $runScript = "cd '$dest'`nCRUCIBLE_TEST_JOBS=$Jobs pwsh -NoProfile -File powershell/run-all-tests.ps1"
 Invoke-WslBash $runScript
-exit $LASTEXITCODE
+$exitCode = $LASTEXITCODE
+
+# Guard against HEAD or working tree moving during the run (D4)
+$saved = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$headAtEndRaw = & git -C $repoRoot rev-parse HEAD 2>$null
+$gitCode = $LASTEXITCODE
+$ErrorActionPreference = $saved
+$headAtEnd = if ($gitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($headAtEndRaw)) { ([string]$headAtEndRaw).Trim() } else { '' }
+
+$digestAtEnd = $null
+try {
+    $digestAtEnd = Get-LinuxLegWorkingTreeDigest -RepoRoot $repoRoot
+} catch {
+    Write-Host "[FAIL] Could not recompute working tree digest after test run." -ForegroundColor Red
+}
+
+if ($headAtEnd -ne $headAtStart) {
+    Write-Host "[FAIL] HEAD moved during the Linux test run (started at $headAtStart, now at $headAtEnd); refusing to stamp." -ForegroundColor Red
+    $finalExit = if ($exitCode -ne 0) { $exitCode } else { 1 }
+    exit $finalExit
+}
+
+if ($null -eq $digestAtEnd -or $digestAtEnd.Digest -ne $digestAtStart.Digest) {
+    Write-Host "[FAIL] Working tree content changed during the Linux test run; refusing to stamp." -ForegroundColor Red
+    $finalExit = if ($exitCode -ne 0) { $exitCode } else { 1 }
+    exit $finalExit
+}
+
+if (Set-LinuxLegStamp -RepoRoot $repoRoot -ExitCode $exitCode -Commit $headAtStart -ContentDigest $digestAtStart.Digest -PathCount $digestAtStart.PathCount -Paths $digestAtStart.Map) {
+    Write-Host "[OK] Linux leg verification stamp recorded at .private/linux-leg-stamp.json." -ForegroundColor Green
+}
+
+exit $exitCode
