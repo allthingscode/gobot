@@ -1,0 +1,34 @@
+# gobot repo line-ending policy.
+#
+# The repo stores text files with LF. Without an explicit policy git is forced
+# to guess on Windows checkouts (where autocrlf=true is the default), producing
+# "LF will be replaced by CRLF the next time Git touches it" warnings on every
+# edit and letting CRLF leak into tracked files.
+#
+# eol=lf means: store LF in the repo, check out LF in the working tree.
+#
+# Unlike the Crucible repo, adopting this file DID require a renormalization
+# pass: 20 tracked files held CRLF or mixed endings when it was added. The
+# .crucible/ subtree keeps its own .gitattributes and is unaffected.
+
+* text=auto eol=lf
+
+*.go    text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf
+*.ps1   text eol=lf
+*.sh    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.js    text eol=lf
+
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
