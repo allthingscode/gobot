@@ -37,14 +37,16 @@ vendor/
 _current_task.md
 .aider*
 
-# Personal planning notes (Claude conversations)
-CLAUDE.md
-GEMINI.md
-AGENTS.md
-opencode.json
+# Root-level agent instruction files. Anchored with a leading slash: bare
+# patterns match at EVERY depth and were silently ignoring .crucible/ bundle
+# files that Crucible commits by default (see docs/git-policy.md).
+/CLAUDE.md
+/GEMINI.md
+/AGENTS.md
+/opencode.json
 
 # Backlog lives in .crucible/backlog/ (gitignored as data) - root copy must never exist
-BACKLOG.md
+/BACKLOG.md
 
 # Claude local settings
 .claude/
@@ -79,8 +81,3 @@ oc_main.json
 
 # Temporary files
 .tmp/
-
-# Crucible installed docs whose filenames collide with root personal-note
-# ignores on case-insensitive filesystems.
-!.crucible/docs/orchestrators/claude.md
-!.crucible/docs/orchestrators/gemini.md
