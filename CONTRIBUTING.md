@@ -37,6 +37,7 @@ golangci-lint run --modules-download-mode=readonly
 
 ## Coding Standards
 - **Configuration**: `config.json` must be formatted with 4-space indentation and a UTF-8 BOM. Use `go run ./cmd/gobot config reformat` to fix formatting and `go run ./cmd/gobot config validate` to check for errors.
+- **Line endings**: `.gitattributes` pins all text to LF (`* text=auto eol=lf`). Commit LF and let git handle the checkout; do not set `core.autocrlf=true` for this repo. This does not affect the `config.json` BOM above - `eol=lf` normalizes line endings, not byte-order marks. Two traps when auditing this on Windows: `git status` reports working-tree drift, not what the repo stores, so settle line-ending questions against the blob (`git cat-file blob HEAD:<path>`); and `sed -i` silently strips every CR from a CRLF file, so edit one with a byte-preserving read/replace/write instead.
 - **Wrap all errors**: `fmt.Errorf("context: %w", err)` — never return naked errors from external calls.
 - **Context usage**: Pass `context.Context` as the first parameter to every function that performs I/O.
 - **No panics**: Avoid `panic()` in `internal/` packages; return errors instead.
