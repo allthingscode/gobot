@@ -535,6 +535,75 @@ try {
         $expectedC = "-C " + $projectRoot
         Assert-Result -Name "codex launched with project root CWD" -Condition ($tx -match [regex]::Escape($expectedC)) -FailureMessage "expected codex -C to be $projectRoot. transcript=$tx"
     }
+
+    $results += Run-Test -Name "-PromptFile alone dispatches and names the session after the file" -Body {
+        # On the -PromptFile path, -TaskId/-Phase select no content: New-BootstrapPrompt is never
+        # reached. They were still hard-required, so dispatching work that has no task ID (the
+        # framework's own TODO items) meant inventing a fake ID to satisfy an argument that only
+        # named a directory. Both are now optional here and the session is named after the file.
+        $projectRoot = Join-Path $tempRoot "proj-promptfile-adhoc"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $promptFilePath = Join-Path $tempRoot "item-30-brief.md"
+        [System.IO.File]::WriteAllText($promptFilePath, "Do the framework work described here.")
+        $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
+            "-Model", "gpt-5.5", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "adhoc launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS without -TaskId/-Phase. Output:`n$($res.Output)"
+        Assert-Result -Name "adhoc exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "adhoc banner names the prompt file" -Condition ($res.Output -match "Launching Specialist for item-30-brief \(ad-hoc prompt\)") -FailureMessage "expected ad-hoc banner. Output:`n$($res.Output)"
+        $transcript = Join-Path $projectRoot ".crucible/session/adhoc/item-30-brief/codex-transcript.txt"
+        Assert-Result -Name "adhoc session dir derived from prompt basename" -Condition (Test-Path -LiteralPath $transcript) -FailureMessage "expected transcript at $transcript. Output:`n$($res.Output)"
+        $tx = Get-Content -LiteralPath $transcript -Raw
+        Assert-Result -Name "adhoc prompt still delivered on stdin" -Condition ($tx -match ([regex]::Escape("Do the framework work described here."))) -FailureMessage "expected prompt body on stdin. Transcript:`n$tx"
+    }
+
+    $results += Run-Test -Name "Ad-hoc session cannot collide with a task session dir" -Body {
+        # session/adhoc/ is not decorative. factory-health treats a top-level
+        # session/<F|B|C>-<n>/ dir as a task session and archives it when the backlog says that
+        # task is done, so a prompt file named F-001.md must NOT land at session/F-001/.
+        $projectRoot = Join-Path $tempRoot "proj-promptfile-collide"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $promptFilePath = Join-Path $tempRoot "F-001.md"
+        [System.IO.File]::WriteAllText($promptFilePath, "prompt that happens to be named like a task")
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-Model", "gpt-5.5", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "collide launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
+        $taskShaped = Join-Path $projectRoot ".crucible/session/F-001"
+        Assert-Result -Name "no task-shaped session dir created" -Condition (-not (Test-Path -LiteralPath $taskShaped)) -FailureMessage "ad-hoc prompt must not create a task-shaped session dir at $taskShaped"
+        $adhoc = Join-Path $projectRoot ".crucible/session/adhoc/F-001/codex-transcript.txt"
+        Assert-Result -Name "landed under session/adhoc instead" -Condition (Test-Path -LiteralPath $adhoc) -FailureMessage "expected transcript at $adhoc. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "-PromptFile with only one of -TaskId/-Phase exits 2" -Body {
+        # All-or-nothing: -TaskId alone would name session/<id>/ with no phase segment, a shape
+        # nothing else in the factory writes or reads.
+        $projectRoot = Join-Path $tempRoot "proj-promptfile-halfid"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $promptFilePath = Join-Path $tempRoot "half-id-brief.md"
+        [System.IO.File]::WriteAllText($promptFilePath, "prompt body")
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-982", "-Model", "gpt-5.5", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "half-specified exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "half-specified names the missing arg" -Condition ($res.Output -match "-Phase is required") -FailureMessage "expected -Phase required message. Output:`n$($res.Output)"
+        Assert-Result -Name "half-specified explains the ad-hoc alternative" -Condition ($res.Output -match "Omit both -TaskId and -Phase") -FailureMessage "expected the omit-both hint. Output:`n$($res.Output)"
+        Assert-Result -Name "half-specified dispatches nothing" -Condition (-not ($res.Output -match "\[CODEX SPECIALIST\] STATUS=")) -FailureMessage "must exit before dispatch. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Bootstrap path still requires -TaskId and -Phase" -Body {
+        # The fix must not leak into the path where those two DO select content: without a
+        # prompt override, New-BootstrapPrompt builds the prompt out of TaskId and Phase.
+        $projectRoot = Join-Path $tempRoot "proj-bootstrap-required"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-Model", "gpt-5.5", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "bootstrap missing taskid exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "bootstrap missing taskid message" -Condition ($res.Output -match "-TaskId is required") -FailureMessage "expected -TaskId required message. Output:`n$($res.Output)"
+
+        # -PromptText has no base name to derive a session directory from, so it does not get
+        # the ad-hoc treatment and the two stay required there too.
+        $res2 = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-Model", "gpt-5.5", "-PromptText", "inline prompt", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "prompttext without taskid exit 2" -Condition ($res2.ExitCode -eq 2) -FailureMessage "expected exit 2 for -PromptText without -TaskId, got $($res2.ExitCode). Output:`n$($res2.Output)"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

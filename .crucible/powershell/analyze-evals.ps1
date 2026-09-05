@@ -14,14 +14,18 @@ $HandoffDirs = @(".crucible/session/handoffs", ".crucible/session/handoffs/archi
 
 $AutoReasonPattern = "Automated gate passage via CLI flag"
 
+. (Join-Path $PSScriptRoot "lib/time.ps1")
+. (Join-Path $PSScriptRoot "lib/handoff.ps1")
+. (Join-Path $PSScriptRoot "lib/event-log.ps1")
 # ?? Gate Decisions ????????????????????????????????????????????????????????????
 $latest = @{}
 Get-ChildItem "$GateDir/*.json" -ErrorAction SilentlyContinue | ForEach-Object {
 	try {
 		$d = Get-Content $_.FullName -Raw | ConvertFrom-Json
 		if ($d.task_id) {
-			if (-not $latest[$d.task_id] -or
-				[string]$d.gate_fired_at -gt [string]$latest[$d.task_id].gate_fired_at) {
+			$firedAt = Get-IsoTimestamp $d.gate_fired_at
+			if (-not $latest.ContainsKey($d.task_id) -or
+				[string]::CompareOrdinal($firedAt, (Get-IsoTimestamp $latest[$d.task_id].gate_fired_at)) -gt 0) {
 				$latest[$d.task_id] = $d
 			}
 		}
@@ -32,12 +36,32 @@ $total     = $decisions.Count
 
 # ?? Pipeline Logs ?????????????????????????????????????????????????????????????
 $pipelineMetrics = @{}
-$durationStats   = @{} # specialist -> [active durations, when explicitly logged]
-$phaseWallStats  = @{} # specialist -> [phase-open wall times]
-$anomalies       = @() # {tid, specialist, type, duration}
+$phaseWallStats  = @{} # phase -> [phase-open wall times]
+$phaseWallNewest = @{} # phase -> newest contributing event timestamp
+$anomalies       = @() # {tid, specialist, type}
+$degradedByKind  = @{}
+$unverifiableGateEventsTotal = 0
+$unverifiableGateKindsByTask = @{}
+
+function Add-Count {
+	param(
+		[hashtable]$Table,
+		[string]$Key
+	)
+	if (-not $Table[$Key]) { $Table[$Key] = 0 }
+	$Table[$Key]++
+}
+
+function Format-KindCounts {
+	param([hashtable]$Counts)
+	if (-not $Counts -or $Counts.Count -eq 0) { return "none" }
+	return (($Counts.Keys | Sort-Object | ForEach-Object { "$($_): $($Counts[$_])" }) -join ", ")
+}
 
 Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | ForEach-Object {
 	$tid = $null; $archSessions = 0; $degraded = 0; $budgetPct = $null; $budgetCeiling = $null
+	$taskDegradedByKind = @{}
+	$taskUnverifiableGateKinds = @{}
 	Get-Content $_.FullName | ForEach-Object {
 		try {
 			$cleaned = $_ -replace "^$([char]0xFEFF)", ""
@@ -45,17 +69,18 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 			if (-not $tid -and $e.task_id) { $tid = $e.task_id }
 			
 			if ($e.event -eq "session_end") {
-				$logPhase = if ($e.PSObject.Properties["phase"]) { $e.phase } else { $e.specialist }
+				$logPhase = Get-EntryPhase $e
 				if ($logPhase -eq "implementation" -or $logPhase -eq "architect") { $archSessions++ }
 				
-				# Capture duration ({task_id})
-				if ($null -ne $e.duration_seconds) {
-					if (-not $durationStats[$logPhase]) { $durationStats[$logPhase] = @() }
-					$durationStats[$logPhase] += $e.duration_seconds
-				}
 				if ($e.metrics -and $null -ne $e.metrics.phase_wall_seconds) {
-					if (-not $phaseWallStats[$logPhase]) { $phaseWallStats[$logPhase] = @() }
+					if (-not $phaseWallStats.ContainsKey($logPhase)) { $phaseWallStats[$logPhase] = @() }
 					$phaseWallStats[$logPhase] += $e.metrics.phase_wall_seconds
+					$eventIso = Get-IsoTimestamp $e.timestamp
+					if ($eventIso -and (
+						-not $phaseWallNewest.ContainsKey($logPhase) -or
+						[string]::CompareOrdinal($eventIso, $phaseWallNewest[$logPhase]) -gt 0)) {
+						$phaseWallNewest[$logPhase] = $eventIso
+					}
 				}
 
 				# Capture anomalies ({task_id})
@@ -64,7 +89,6 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 						task_id    = $e.task_id
 						specialist = $logPhase
 						type       = $e.metrics.duration_anomaly
-						duration   = if ($null -ne $e.duration_seconds) { $e.duration_seconds } else { $e.metrics.phase_wall_seconds }
 					}
 				}
 
@@ -73,30 +97,45 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 					$budgetCeiling = $e.metrics.budget_ceiling
 				}
 			}
-			if ($e.event -eq "degraded") { $degraded++ }
+			if ($e.event -eq "degraded") {
+				$degraded++
+				$kind = "unknown"
+				if ($e.PSObject.Properties["kind"] -and -not [string]::IsNullOrWhiteSpace([string]$e.kind)) {
+					$kind = [string]$e.kind
+				}
+				Add-Count -Table $degradedByKind -Key $kind
+				Add-Count -Table $taskDegradedByKind -Key $kind
+				if ($kind -ne "unknown" -and $e.PSObject.Properties["outcome"] -and $e.outcome -eq "unverifiable") {
+					$unverifiableGateEventsTotal++
+					$taskUnverifiableGateKinds[$kind] = $true
+				}
+			}
 		} catch { }
 	}
 	if ($tid -and (-not $pipelineMetrics[$tid] -or $pipelineMetrics[$tid].budget_pct -eq $null)) {
 		$pipelineMetrics[$tid] = @{
 			review_cycles  = $archSessions
 			degraded       = $degraded
+			degraded_by_kind = $taskDegradedByKind
+			unverifiable_gate_kinds = @($taskUnverifiableGateKinds.Keys | Sort-Object)
 			budget_pct     = $budgetPct
 			budget_ceiling = $budgetCeiling
 		}
 	}
+	if ($tid -and $taskUnverifiableGateKinds.Count -gt 0) {
+		if (-not $unverifiableGateKindsByTask[$tid]) { $unverifiableGateKindsByTask[$tid] = @{} }
+		foreach ($kind in $taskUnverifiableGateKinds.Keys) {
+			$unverifiableGateKindsByTask[$tid][$kind] = $true
+		}
+	}
 }
 
-# Specialist duration averages ({task_id})
-$specialistDurationSummary = $durationStats.GetEnumerator() | ForEach-Object {
-	$avg = if ($_.Value.Count) { [math]::Round(($_.Value | Measure-Object -Average).Average / 60, 1) } else { 0 }
-	$confidence = if ($_.Value.Count -ge 5) { "High" } elseif ($_.Value.Count -ge 3) { "Medium" } else { "Low" }
-	[PSCustomObject]@{ specialist = $_.Key; avg_minutes = $avg; count = $_.Value.Count; confidence = $confidence }
-} | Sort-Object avg_minutes -Descending
-
-$phaseWallSummary = $phaseWallStats.GetEnumerator() | ForEach-Object {
-	$avg = if ($_.Value.Count) { [math]::Round(($_.Value | Measure-Object -Average).Average / 60, 1) } else { 0 }
-	[PSCustomObject]@{ specialist = $_.Key; avg_minutes = $avg; count = $_.Value.Count }
-} | Sort-Object avg_minutes -Descending
+$phaseWallSummary = @(
+	$phaseWallStats.GetEnumerator() | ForEach-Object {
+		$avg = if ($_.Value.Count) { [math]::Round(($_.Value | Measure-Object -Average).Average / 60, 1) } else { 0 }
+		[PSCustomObject]@{ phase = $_.Key; avg_minutes = $avg; events = $_.Value.Count; newest_event = $phaseWallNewest[$_.Key] }
+	} | Sort-Object avg_minutes -Descending
+)
 
 # ?? Operator Eval Records ?????????????????????????????????????????????????????
 $evalResults = @{}
@@ -188,12 +227,21 @@ $versionSummary = $versionStats.GetEnumerator() | ForEach-Object {
 } | Sort-Object version
 
 # Duplicate/Superseded Handoff Metrics
-$dedupeCandidates = @($handoffRecords | Where-Object {
-	$_.task_id -and $_.source_phase -and $_.target_phase
-})
-$dedupeGroups = @($dedupeCandidates | Group-Object -Property {
-	"{0}|{1}|{2}|{3}|{4}|{5}" -f $_.task_id, $_.source_phase, $_.target_phase, [string]$_.review_strike_count, [string]$_.rebase_count, [string]$_.handoff_retry_count
-})
+#
+# Keyed by Get-HandoffDedupeKey, the same function the factory uses to decide which
+# handoffs are duplicates of each other. This file used to build the key inline, and
+# the two drifted: the copy here neither trimmed nor lowercased, so a handoff whose
+# phase field differed only in case or whitespace counted as a distinct transition and
+# the report understated the duplicates the factory had already superseded. The records
+# are grouped on the projected objects rather than the raw JSON so the legacy
+# specialist-to-phase mapping above still applies.
+#
+# An unkeyable record - no task_id, no source, no target - is discarded by dropping the
+# null-key group rather than by a filter of this file's own devising, so what counts as
+# unkeyable is defined in exactly one place too.
+$dedupeGroups = @($handoffRecords |
+	Group-Object -Property { Get-HandoffDedupeKey $_ } |
+	Where-Object { -not [string]::IsNullOrEmpty($_.Name) })
 $duplicateGroups = @($dedupeGroups | Where-Object { $_.Count -gt 1 })
 $duplicateGroupCount = $duplicateGroups.Count
 $duplicateHandoffsTotal = (@($duplicateGroups | ForEach-Object { $_.Count - 1 }) | Measure-Object -Sum).Sum
@@ -267,20 +315,35 @@ $avgBudget = if ($budgets.Count -gt 0) { [math]::Round(($budgets | Measure-Objec
 
 $multiCycle   = @($pipelineMetrics.GetEnumerator() | Where-Object { $_.Value.review_cycles -gt 1 } | ForEach-Object { $_.Key } | Sort-Object)
 $highDegraded = @($pipelineMetrics.GetEnumerator() | Where-Object { $_.Value.degraded -gt 2      } | ForEach-Object { $_.Key } | Sort-Object)
+$unverifiableGateTasks = @(
+	$unverifiableGateKindsByTask.Keys |
+		Sort-Object |
+		ForEach-Object {
+			[PSCustomObject]@{
+				task_id = $_
+				kinds   = @($unverifiableGateKindsByTask[$_].Keys | Sort-Object)
+			}
+		}
+)
 
 if ($Json) {
 	@{
-		generated_at         = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+		generated_at         = Get-UtcTimestamp
 		total_tasks          = $total
 		gate_outcomes        = @{ accepted = $accepted; rejected = $rejected; redirected = $redir; abandoned = $abandon }
 		rework_count         = $rework
 		signal_quality       = @{ with_qualitative_reason = $withSignal; auto_placeholder = $noSignal; coverage_pct = $signalPct }
 		avg_budget_pct       = $avgBudget
-		avg_duration_minutes = @($specialistDurationSummary)
 		avg_phase_wall_minutes = @($phaseWallSummary)
 		duration_anomalies   = @($anomalies)
 		multi_cycle_tasks    = $multiCycle
 		high_degraded        = $highDegraded
+		degraded_by_kind     = $degradedByKind
+		enforcement_coverage = @{
+			gates_unverifiable_total = $unverifiableGateEventsTotal
+			tasks_with_unverifiable_gate = $unverifiableGateTasks.Count
+			tasks = @($unverifiableGateTasks)
+		}
 		handoff_quality      = @{
 			total_handoffs            = $handoffRecords.Count
 			duplicate_handoffs_total  = $duplicateHandoffsTotal
@@ -303,7 +366,7 @@ $pct = if ($total -gt 0) { { param($n) [math]::Round($n / $total * 100, 1) } } e
 
 $report = @()
 $report += "# Dev Factory - Eval Report"
-$report += "Generated: $((Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm")) UTC"
+$report += "Generated: $((Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm", [System.Globalization.CultureInfo]::InvariantCulture)) UTC"
 $report += ""
 
 # Gate Summary
@@ -321,7 +384,7 @@ if ($rework -gt 0) {
 	$report += ""
 	$report += "### Rework Tasks"
 	$decisions | Where-Object { $_.rework_requested -eq $true } | ForEach-Object {
-		$date = if ($_.gate_fired_at) { ($_.gate_fired_at -replace 'T.*','') } else { "unknown" }
+		$date = if ($_.gate_fired_at) { ((Get-IsoTimestamp $_.gate_fired_at) -replace 'T.*','') } else { "unknown" }
 		$report += "- **$($_.task_id)** ($date): $($_.reason)"
 	}
 }
@@ -337,7 +400,7 @@ if ($noSignal -gt 0) {
 	$report += "Tasks lacking qualitative gate signal:"
 	$decisions | Where-Object { -not $_.reason -or $_.reason -eq $AutoReasonPattern } |
 		Select-Object -Last 10 | ForEach-Object {
-			$date = if ($_.gate_fired_at) { ($_.gate_fired_at -replace 'T.*','') } else { "?" }
+			$date = if ($_.gate_fired_at) { ((Get-IsoTimestamp $_.gate_fired_at) -replace 'T.*','') } else { "?" }
 			$report += "- $($_.task_id) ($date) [$($_.outcome)]"
 		}
 	if ($noSignal -gt 10) { $report += "  ... and $($noSignal - 10) more" }
@@ -349,24 +412,28 @@ $report += "## Pipeline Health"
 $report += "**Average budget used at completion:** $(if ($null -ne $avgBudget) { "$avgBudget%" } else { "n/a (no pipeline logs)" })"
 $report += "**Tasks with pipeline data:** $($pipelineMetrics.Count)"
 $report += ""
-$report += "### Average Session Duration (minutes)"
-if ($specialistDurationSummary.Count -gt 0) {
-	$report += "| Specialist | Avg Minutes | Count | Confidence |"
-	$report += "|------------|-------------|-------|------------|"
-	foreach ($s in $specialistDurationSummary) {
-		$report += "| $($s.specialist) | $($s.avg_minutes) | $($s.count) | $($s.confidence) |"
+$report += "### DEGRADED Events by Kind"
+$report += "$(Format-KindCounts -Counts $degradedByKind)"
+$report += ""
+$report += "## Enforcement Coverage"
+if ($unverifiableGateTasks.Count -gt 0) {
+	$report += "Gates declined to run: **$unverifiableGateEventsTotal** event(s) across **$($unverifiableGateTasks.Count)** task(s)"
+	$unverifiableGateTasks | ForEach-Object {
+		$report += "- **$($_.task_id)**: $(($_.kinds) -join ", ")"
 	}
 } else {
-	$report += "(no duration data available)"
+	$report += ("No enforcement gate reported " + [char]96 + 'outcome: "unverifiable"' + [char]96 + ".")
 }
-
 $report += ""
 $report += "### Average Phase-Open Wall Time (minutes)"
+$report += ""
+$report += "Wall time from phase open to handoff, including idle time. This is not specialist active work time; the factory does not measure that."
+$report += ""
 if ($phaseWallSummary.Count -gt 0) {
-	$report += "| Specialist | Avg Minutes | Count |"
-	$report += "|------------|-------------|-------|"
+	$report += "| Phase | Avg Minutes | Events | Newest Event |"
+	$report += "|-------|-------------|--------|--------------|"
 	foreach ($s in $phaseWallSummary) {
-		$report += "| $($s.specialist) | $($s.avg_minutes) | $($s.count) |"
+		$report += "| $($s.phase) | $($s.avg_minutes) | $($s.events) | $($s.newest_event) |"
 	}
 } else {
 	$report += "(no phase wall-time data available)"
@@ -375,10 +442,10 @@ if ($phaseWallSummary.Count -gt 0) {
 if ($anomalies.Count -gt 0) {
 	$report += ""
 	$report += "### Duration Anomalies"
-	$report += "| Task | Specialist | Type | Duration (s) |"
-	$report += "|------|------------|------|--------------|"
+	$report += "| Task | Specialist | Type |"
+	$report += "|------|------------|------|"
 	foreach ($a in $anomalies) {
-		$report += "| $($a.task_id) | $($a.specialist) | $($a.type) | $($a.duration) |"
+		$report += "| $($a.task_id) | $($a.specialist) | $($a.type) |"
 	}
 }
 
@@ -387,7 +454,7 @@ if ($multiCycle.Count -gt 0) {
 	$report += "### Multi-Cycle Tasks (Architect sent back for rework)"
 	$multiCycle | ForEach-Object {
 		$m = $pipelineMetrics[$_]
-		$report += "- **$_**: $($m.review_cycles) architect sessions, $($m.degraded) DEGRADED events, $(if ($null -ne $m.budget_pct) { "$($m.budget_pct)% budget" } else { 'budget n/a' })"
+		$report += "- **$_**: $($m.review_cycles) architect sessions, $($m.degraded) DEGRADED events ($(Format-KindCounts -Counts $m.degraded_by_kind)), $(if ($null -ne $m.budget_pct) { "$($m.budget_pct)% budget" } else { 'budget n/a' })"
 	}
 }
 
@@ -395,7 +462,7 @@ if ($highDegraded.Count -gt 0) {
 	$report += ""
 	$report += "### High DEGRADED Event Count (>2)"
 	$highDegraded | ForEach-Object {
-		$report += "- **$_**: $($pipelineMetrics[$_].degraded) DEGRADED events"
+		$report += "- **$_**: $($pipelineMetrics[$_].degraded) DEGRADED events ($(Format-KindCounts -Counts $pipelineMetrics[$_].degraded_by_kind))"
 	}
 }
 

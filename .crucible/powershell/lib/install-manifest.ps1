@@ -51,6 +51,15 @@ function Test-FrameworkDevOnlyFile {
         "powershell/lib/linux-leg-stamp.ps1",
         "powershell/gates/check-assertion-deletion.ps1",
         "powershell/gates/check-linux-leg.ps1",
+        "powershell/gates/check-culture-sensitive-time.ps1",
+        # Checks Crucible's own docs against Crucible's own constants. Its predecessor,
+        # check-policy-drift.ps1, was absent from this list and so shipped by default -
+        # runnable in an adopter bundle, invoked by nothing, checking the bundle against
+        # itself. That accident is what TODO item 15 asked about; being listed here is
+        # the answer stated rather than inferred.
+        "powershell/gates/check-generated-docs.ps1",
+        "powershell/tests/check-generated-docs.tests.ps1",
+        "powershell/tests/factory-lint-authoring.tests.ps1",
         "powershell/tests/examples-mirror-sync.tests.ps1",
         "powershell/tests/pre-push-hook.tests.ps1",
         "powershell/tests/check-assertion-deletion.tests.ps1",
@@ -65,7 +74,8 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/backlog-lock.tests.ps1",
         "powershell/tests/adopter-install-materialization.tests.ps1",
         "powershell/tests/adopter-update-materialization.tests.ps1",
-        "powershell/tests/check-linux-leg.tests.ps1"
+        "powershell/tests/check-linux-leg.tests.ps1",
+        "powershell/tests/check-culture-sensitive-time.tests.ps1"
     )
     if ($devOnlyPaths -contains $normalized) {
         return $true

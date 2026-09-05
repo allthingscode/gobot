@@ -12,6 +12,12 @@ if (-not (Test-Path -LiteralPath $taskChecklistPath)) {
 }
 . $taskChecklistPath
 
+$timePath = Join-Path $PSScriptRoot "lib/time.ps1"
+if (-not (Test-Path -LiteralPath $timePath)) {
+    throw "Required helper script not found at $timePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $timePath
+
 # Canonical runtime FSM phase list. PowerShell ValidateSet attributes still need
 # string literals, so keep those literals synchronized with this constant.
 $script:FACTORY_PHASES = @("research", "grooming", "implementation", "verification", "deployment")
@@ -248,20 +254,39 @@ function Invoke-FileLock {
         [Parameter(Mandatory = $true)][string]$LockPath,
         [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
         [int]$TimeoutMs = 5000,
-        [string]$TimeoutMessage = "[LOCK] Timeout reached; removing stale lock."
+        [string]$TimeoutMessage = "[LOCK] Timeout reached; waiting for the exclusive lock holder."
     )
 
     $lockAcquired = $false
     $lockWaitTime = 0
+    $totalWaitMs = 0
+    $fileStream = $null
     while (-not $lockAcquired) {
         try {
-            $fileStream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew)
-            $fileStream.Close()
+            # The handle, rather than the file's name, is the lock. FileShare.None prevents
+            # another process from opening it until this owner disposes the handle. DeleteOnClose
+            # removes the path on both normal exit and process death, so no waiter ever needs to
+            # guess whether a slow holder is stale or remove a lock owned by somebody else.
+            # OpenOrCreate also recovers a pathname left by the old create-and-delete convention:
+            # an orphaned file has no open handle and is therefore immediately acquirable.
+            $fileStream = New-Object System.IO.FileStream(
+                $LockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None,
+                1,
+                [System.IO.FileOptions]::DeleteOnClose
+            )
             $lockAcquired = $true
         } catch [System.IO.IOException] {
             if ($lockWaitTime -ge $TimeoutMs) {
-                Write-Quiet $TimeoutMessage -ForegroundColor Yellow
-                Remove-Item $LockPath -Force -ErrorAction SilentlyContinue
+                # The wait is deliberately unbounded: a crashed holder's handle is closed by the
+                # OS and DeleteOnClose frees the path, so anything still held after this long is a
+                # live holder that is stuck. That is worth waiting out rather than corrupting the
+                # file, but it has to be diagnosable - name the lock and the elapsed wait, because
+                # this message repeats forever and a bare one says nothing about which lock.
+                $totalWaitMs += $lockWaitTime
+                Write-Quiet ($TimeoutMessage + " Lock: " + $LockPath + ". Waited " + [int]($totalWaitMs / 1000) + "s so far; a holder still present has not crashed, it is stuck.") -ForegroundColor Yellow
                 $lockWaitTime = 0
             } else {
                 Start-Sleep -Milliseconds 100
@@ -273,11 +298,17 @@ function Invoke-FileLock {
     try {
         & $ScriptBlock
     } finally {
-        if (Test-Path $LockPath) {
-            Remove-Item $LockPath -Force -ErrorAction SilentlyContinue
+        if ($null -ne $fileStream) {
+            $fileStream.Dispose()
         }
     }
 }
+
+$factoryContextPath = Join-Path $PSScriptRoot "lib/factory-context.ps1"
+if (-not (Test-Path -LiteralPath $factoryContextPath)) {
+    throw "Required helper script not found at $factoryContextPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $factoryContextPath
 
 $eventLogPath = Join-Path $PSScriptRoot "lib/event-log.ps1"
 if (-not (Test-Path -LiteralPath $eventLogPath)) {

@@ -11,7 +11,7 @@ function Invoke-TaskRewind {
         [Parameter(Mandatory=$true)][string]$WorkspacesDir
     )
 
-    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+    $timestamp = Get-UtcFileTimestamp
     $taskDir = Join-Path $SessionDir $TaskId
     $archiveDir = Join-Path $taskDir ("rewinds/" + $timestamp)
 

@@ -297,7 +297,7 @@ try {
         if ($Cleanup) {
             Write-Quiet ' '
             Write-Quiet '--- Cleanup Operations ---' -ForegroundColor Cyan
-            $archiveTs = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+            $archiveTs = Get-UtcFileTimestamp
             $staleTaskArchiveRoot = ".crucible/session/archived/stale-task-sessions"
             $handoffArchiveDir = ".crucible/session/handoffs/archived"
             $blockedArchiveDir = Join-Path $backlogDir "blocked/archived"

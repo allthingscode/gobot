@@ -68,6 +68,7 @@ Write a structured eval record before archiving the pipeline log. This feeds `{{
 # Replace {task_id} with the actual task ID
 $log = Get-Content ".crucible/session/{task_id}/pipeline.log.jsonl" | ForEach-Object { $_ | ConvertFrom-Json }
 $archSessions = @($log | Where-Object { $_.event -eq "session_end" -and $_.phase -eq "implementation" }).Count
+# Reduced-assurance events only. Duplicate handoff bookkeeping is reported separately by analyze-evals.ps1 handoff_quality.
 $degraded     = @($log | Where-Object { $_.event -eq "degraded" }).Count
 $finalMetrics = ($log | Where-Object { $_.event -eq "session_end" -and $_.metrics } | Select-Object -Last 1).metrics
 

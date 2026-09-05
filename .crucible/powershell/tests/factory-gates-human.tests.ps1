@@ -90,7 +90,7 @@ if (`$verb -eq "auth status") {
     exit 0
 }
 if (`$verb -eq "api repos" -or (`$args.Count -ge 1 -and `$args[0] -eq "api")) {
-    `$endpoint = `$args[1]
+    `$endpoint = `$args[`$args.Count - 1]
     if (`$endpoint -match "actions/workflows$") {
         if (`$Mode -eq "api-error" -or `$Mode -eq "404") {
             Write-Output "HTTP 404: Not Found"
@@ -208,7 +208,11 @@ function New-CiGateCase {
     git -C $localRepo init --initial-branch=master 2>$null | Out-Null
     git -C $localRepo config user.name "Tester"
     git -C $localRepo config user.email "test@example.com"
-    git -C $localRepo remote add origin "https://github.com/crucible-fixture/gate-tests.git"
+    # Identity string only - the next line overrides the push URL to a local bare repo, so this
+    # is never dialed. Keep the host github.com so these cases exercise the github.com path in
+    # Get-OriginRepoIdentity (watch-adopter-ci.ps1:74-83); GHES host dispatch is covered by
+    # watch-adopter-ci.tests.ps1.
+    git -C $localRepo remote add origin "https://github.com/gate-fixture-owner/gate-fixture-repo.git"
     git -C $localRepo remote set-url --push origin $originRepo
 
     "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
@@ -324,6 +328,15 @@ try {
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-factory-gates-human-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
+    $results += Run-Test -Name "New-FakeGhForGate parses endpoint when flags precede endpoint" -Body {
+        $caseRoot = Join-Path $tempRoot "fake-gh-flags"
+        $binDir = Join-Path $caseRoot "bin"
+        $ghPath = New-FakeGhForGate -Dir $binDir -Mode "green"
+        $out = & $ghPath api --hostname ghe.example.com repos/o/r/actions/workflows
+        Assert-Result -Name "fake gh api exit code with preceding flag" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit code 0, got $LASTEXITCODE. Output:`n$out")
+        Assert-Result -Name "fake gh api output matches workflows with preceding flag" -Condition ($out -match "workflows") -FailureMessage ("expected output matching 'workflows', got:`n$out")
+    }
+
     $results += Run-Test -Name "Write-WedgeReport formats recurring merge conflict recovery for human gate breakers" -Body {
         $lines = @(Get-WedgeReportLines -TaskId "F-HUM" -SourcePhase "deployment" -TargetPhase "implementation" -BreakerCode "recurring_merge_conflicts" -Why "merge conflict persisted")
         $text = $lines -join "`n"
@@ -370,7 +383,8 @@ try {
         try {
             Push-Location $localRepo
             $outputLines = @(& {
-                $script:HumanGateMergeBreakerResult = Invoke-HumanGateMerge -TaskId "F-HUM-BREAK" -PrimaryBranch "master" -ProjectRoot $localRepo -Handoff $null -MaxRebaseAttempts 0
+                $script:HumanGateMergeBreakerResult = Invoke-HumanGateMerge -TaskId "F-HUM-BREAK" -PrimaryBranch "master" -ProjectRoot $localRepo -Handoff $null -MaxRebaseAttempts 0 `
+                    -LogFile $script:LOG_FILE -CircuitBreakerHistoryFile $script:CB_HISTORY_FILE
             } 6>&1)
         } finally {
             Pop-Location
@@ -473,6 +487,8 @@ review:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'work looks beautiful'
     GateRedirectTarget = `$null
@@ -527,6 +543,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'needs rework'
     GateRedirectTarget = `$null
@@ -638,6 +656,8 @@ review:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'verification of acceptance criteria passed'
     GateRedirectTarget = `$null
@@ -679,6 +699,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'redirected'
     GateReason = 'redirect to new'
     GateRedirectTarget = 'F-101'
@@ -725,6 +747,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'commit push verification'
     GateRedirectTarget = `$null
@@ -771,6 +795,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'this should fail push'
     GateRedirectTarget = `$null
@@ -827,6 +853,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'needs rework'
     GateRedirectTarget = `$null
@@ -914,6 +942,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'unwind test'
     GateRedirectTarget = `$null
@@ -999,6 +1029,8 @@ finally {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'unwind FF test'
     GateRedirectTarget = `$null
@@ -1064,6 +1096,8 @@ finally {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -1146,6 +1180,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'reject on unmerged branch'
     GateRedirectTarget = `$null
@@ -1242,6 +1278,8 @@ review:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -1323,6 +1361,164 @@ try {
         }
     }
 
+    $results += Run-Test -Name "Human gate re-run on an unfilled pending template prints the review surface" -Body {
+        # Invoke-HumanGate builds the review surface in two arms: one when no pending
+        # template exists yet (create it and print), one when a template exists with its
+        # outcome still unfilled - the operator re-ran factory.ps1 before answering. The
+        # two arms are the same 87 lines twice, and only the first was covered: an
+        # unconditional throw at the top of the second failed nothing in this file. Two
+        # copies that nothing compares can drift, and the tested copy stays green while
+        # the operator-facing one rots. This drives the second arm.
+        #
+        # It also pins the one real difference between them. The unfilled-template arm
+        # must PREFER the base_sha/branch_sha already recorded in the template over a
+        # fresh Get-GateReviewRange computation, so the human reviews the range the gate
+        # fired on rather than a range that moved underneath them. The recorded branch
+        # sha below is deliberately an ancestor of the task tip, so "read the template"
+        # and "recompute" give different answers and the assertion can tell them apart.
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-pending-template"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $configYaml = @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+roles:
+  researcher:
+    model_tier: fast
+  groomer:
+    model_tier: fast
+  architect:
+    model_tier: fast
+  reviewer:
+    model_tier: fast
+  operator:
+    model_tier: fast
+verification:
+  quick:
+    - name: test
+      command: echo quick
+  full:
+    - name: test
+      command: echo full
+project_mandates:
+  - rules
+review:
+  diff_tool: "zed"
+  editor: "code"
+"@
+        $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        git -C $localRepo checkout -b task/F-890 2>$null | Out-Null
+        "first" | Set-Content -LiteralPath (Join-Path $localRepo "one.txt") -Encoding UTF8
+        git -C $localRepo add one.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "first commit on task branch" 2>$null | Out-Null
+        $recordedSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        "second" | Set-Content -LiteralPath (Join-Path $localRepo "two.txt") -Encoding UTF8
+        git -C $localRepo add two.txt 2>$null | Out-Null
+        git -C $localRepo commit -m "second commit on task branch" 2>$null | Out-Null
+        $tipSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        Assert-Result -Name "recorded sha differs from the task tip" -Condition ($recordedSha -ne $tipSha) -FailureMessage "the test needs two distinct task-branch commits for the range assertions below to mean anything"
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+
+        # The template as the previous gate firing left it: outcome still the placeholder
+        # the human is meant to overwrite.
+        $pendingTemplate = Join-Path $gateDir "gate_decision_F-890_pending.json"
+        $templateJson = @"
+{
+    "task_id":  "F-890",
+    "backlog_item":  "F-890",
+    "gate_fired_at":  "2026-01-01T00:00:00Z",
+    "outcome":  "accepted | rejected | redirected | abandoned",
+    "reason":  "Brief human description of why",
+    "rework_requested":  false,
+    "redirect_target":  null,
+    "base_sha":  "$baseSha",
+    "branch_sha":  "$recordedSha"
+}
+"@
+        $templateJson | Set-Content -LiteralPath $pendingTemplate -Encoding UTF8
+
+        $scriptPath = Join-Path $caseRoot "run-pending-template-test.ps1"
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-890'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$tipSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$localRepo'
+try {
+    Invoke-HumanGate -Context `$ctx
+} finally {
+    Pop-Location
+}
+"@
+        $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "unfilled template prompts the human to complete the decision" -Condition ($outputText -like "*Action Required*") -FailureMessage "expected the unfilled-template arm to ask for the gate decision, got:`n$outputText"
+        Assert-Result -Name "unfilled template arm emits the visual diff tool command" -Condition ($outputText -like "*difftool*") -FailureMessage "expected output to contain 'difftool', got:`n$outputText"
+        Assert-Result -Name "unfilled template arm emits the editor command" -Condition ($outputText -like "*code*") -FailureMessage "expected output to contain 'code' (from editor configuration), got:`n$outputText"
+
+        $helperPath = Join-Path $sessionDir "F-890/review-diff.ps1"
+        Assert-Result -Name "unfilled template arm generates review-diff.ps1" -Condition (Test-Path $helperPath) -FailureMessage "expected $helperPath to exist"
+
+        $menuPath = Join-Path $sessionDir "F-890/gate_pending.txt"
+        Assert-Result -Name "unfilled template arm writes the machine-readable menu" -Condition (Test-Path $menuPath) -FailureMessage "expected $menuPath to exist"
+        if (Test-Path $menuPath) {
+            $menuText = Get-Content -LiteralPath $menuPath -Raw
+            Assert-Result -Name "menu offers all four outcomes" -Condition (($menuText -like "*1) Accept*") -and ($menuText -like "*2) Reject*") -and ($menuText -like "*3) Redirect*") -and ($menuText -like "*4) Abandon*")) -FailureMessage "expected the four-outcome menu, got:`n$menuText"
+        }
+
+        # The range the human is shown must be the template's, not a recomputed one.
+        $textDiffLines = @($outputText -split "`n" | Where-Object { $_.Trim() -like "git -C *" -and $_ -notlike "*difftool*" })
+        Assert-Result -Name "found exactly one emitted text diff command" -Condition ($textDiffLines.Count -eq 1) -FailureMessage "expected exactly 1 plain git diff command line, found $($textDiffLines.Count):`n$outputText"
+        if ($textDiffLines.Count -eq 1) {
+            $emittedRange = $textDiffLines[0].Trim()
+            Assert-Result -Name "review range comes from the pending template" -Condition ($emittedRange -like "*$baseSha..$recordedSha") -FailureMessage "expected the emitted range to end with the template's $baseSha..$recordedSha, got:`n$emittedRange"
+            Assert-Result -Name "review range was not recomputed to the task tip" -Condition ($emittedRange -notlike "*$tipSha*") -FailureMessage "the emitted range used the task branch tip $tipSha, so the template's recorded branch_sha was ignored:`n$emittedRange"
+        }
+    }
+
     $results += Run-Test -Name "No-Code Closure (no task branch): gate prints No-Code Closure message, not a diff/worktree surface" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "gate-nocode-closure"
@@ -1366,6 +1562,8 @@ review:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -1438,6 +1636,8 @@ project:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -1530,6 +1730,8 @@ project_mandates:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -1687,6 +1889,8 @@ review:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'work looks beautiful'
     GateRedirectTarget = `$null
@@ -1813,6 +2017,8 @@ review:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     FrameworkPowerShell = '$fwPwsh'
     GateOutcome = 'accepted'
     GateReason = 'work looks complete and correct'
@@ -2033,6 +2239,10 @@ try {
 
         Assert-Result -Name "f3 timeout exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "f3 timeout warning emitted" -Condition ($result.Output -match "CI did not finish before timeout") -FailureMessage $result.Output
+        # The advisory after the timeout warning is the operator's only pointer to the
+        # still-running CI. It comes from Write-GateCiRunUrl, deduplicated out of the
+        # timeout and queue-stall arms; nothing named its output before.
+        Assert-Result -Name "f3 timeout advisory points at the CI run" -Condition ($result.Output -match "CI run URL:") -FailureMessage $result.Output
         $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
         $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
         Assert-Result -Name "f3 timeout pushed master to origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
@@ -2177,7 +2387,13 @@ try {
         Assert-Result -Name "post push missing jobs writes post_push_ci_missing_required_jobs event to log" -Condition ($matchedLines.Count -ge 1) -FailureMessage ("expected post_push_ci_missing_required_jobs in log, found: " + ($logLines -join "`n"))
     }
 
-    $results += Run-Test -Name "Invoke-HumanGate bare invocation without LOG_FILE does not throw under strict mode" -Body {
+    # This test used to assert the opposite: that a context with no LogFile ran through
+    # to a CI_CHECK_FAILED verdict without a StrictMode "variable cannot be retrieved"
+    # crash. Tolerating the omission is what let Invoke-HumanGateAction resolve its five
+    # event destinations out of an ancestor frame, or drop the events entirely. The real
+    # concern behind the original test survives - a bare context must not surface as an
+    # unhelpful variable error - and is now met by naming the missing key instead.
+    $results += Run-Test -Name "Invoke-HumanGate rejects a context with no log destination, naming the key" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "ci-no-logfile"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
@@ -2192,9 +2408,110 @@ try {
             $env:PATH = $oldPath
         }
 
-        Assert-Result -Name "ci unauth without logfile exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
-        Assert-Result -Name "ci unauth without logfile reports failure" -Condition ($result.Output -match "\[HUMAN GATE\] CI_CHECK_FAILED") -FailureMessage $result.Output
-        Assert-Result -Name "ci unauth without logfile does not throw variable not set" -Condition ($result.Output -notmatch "The variable '\`$LOG_FILE' cannot be retrieved" -and $result.Output -notmatch "(?m)^FAILED:\s") -FailureMessage $result.Output
+        Assert-Result -Name "no-logfile context exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "no-logfile context names the missing key" -Condition ($result.Output -match "Required key 'LogFile' is missing from FactoryContext") -FailureMessage $result.Output
+        Assert-Result -Name "no-logfile context fails before reaching the CI verdict" -Condition ($result.Output -notmatch "\[HUMAN GATE\] CI_CHECK_FAILED") -FailureMessage ("the gate ran to a CI verdict on a context with no log destination:`n" + $result.Output)
+        Assert-Result -Name "no-logfile context does not surface a StrictMode variable error" -Condition ($result.Output -notmatch "The variable '\`$LOG_FILE' cannot be retrieved") -FailureMessage $result.Output
+    }
+
+    $results += Run-Test -Name "Get-ActionsUrlFromOriginUrl maps GitHub remotes to their Actions page" -Body {
+        # The gate prints this URL when it finalizes without a confirmed CI verdict, so
+        # a wrong translation sends the human to somebody else's runs - or to nothing.
+        # A remote that is not recognizably GitHub comes back untouched rather than
+        # bent into a github.com URL that was never checked.
+        $cases = @(
+            @{ In = "git@github.com:allthingscode/crucible.git"; Out = "https://github.com/allthingscode/crucible/actions" },
+            @{ In = "git@github.com:allthingscode/crucible"; Out = "https://github.com/allthingscode/crucible/actions" },
+            @{ In = "https://github.com/allthingscode/crucible.git"; Out = "https://github.com/allthingscode/crucible/actions" },
+            @{ In = "https://github.com/allthingscode/crucible"; Out = "https://github.com/allthingscode/crucible/actions" },
+            @{ In = "https://github.com/allthingscode/crucible/"; Out = "https://github.com/allthingscode/crucible/actions" },
+            @{ In = "  git@github.com:allthingscode/crucible.git  "; Out = "https://github.com/allthingscode/crucible/actions" },
+            @{ In = "git@gitlab.com:someone/thing.git"; Out = "git@gitlab.com:someone/thing.git" },
+            @{ In = "https://example.com/someone/thing.git"; Out = "https://example.com/someone/thing.git" },
+            @{ In = "C:/mirrors/local-remote.git"; Out = "C:/mirrors/local-remote.git" },
+            @{ In = ""; Out = "" }
+        )
+
+        foreach ($case in $cases) {
+            $actual = Get-ActionsUrlFromOriginUrl -OriginUrl $case.In
+            Assert-Result -Name "origin [$($case.In)] maps to [$($case.Out)]" -Condition ($actual -ceq $case.Out) -FailureMessage "expected [$($case.Out)], got [$actual]"
+        }
+    }
+
+    $results += Run-Test -Name "Gate accept description tracks the auto_push setting" -Body {
+        # "1) Accept" must not promise a push that will not happen. With review.auto_push
+        # off the merge stays local, and a menu claiming it reached origin tells the human
+        # the work shipped when it is still sitting on their machine.
+        $descRoot = Join-Path $tempRoot "accept-desc"
+        $cases = @(
+            @{ Dir = "on"; Value = "true"; Expect = "and pushes to origin"; Reject = "(local only)" },
+            @{ Dir = "off"; Value = "false"; Expect = "(local only)"; Reject = "and pushes to origin" }
+        )
+
+        foreach ($case in $cases) {
+            $root = Join-Path $descRoot $case.Dir
+            $cfgDir = Join-Path $root ".crucible"
+            New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+            $cfg = @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+review:
+  auto_push: $($case.Value)
+"@
+            $cfg | Set-Content -LiteralPath (Join-Path $cfgDir "config.yaml") -Encoding UTF8
+
+            $desc = Get-GateAcceptDescription -PrimaryBranch "master" -ProjectRoot $root
+            Assert-Result -Name "auto_push=$($case.Value) description says [$($case.Expect)]" -Condition ($desc -like "*$($case.Expect)*") -FailureMessage "got: $desc"
+            Assert-Result -Name "auto_push=$($case.Value) description does not say [$($case.Reject)]" -Condition ($desc -notlike "*$($case.Reject)*") -FailureMessage "got: $desc"
+            Assert-Result -Name "auto_push=$($case.Value) description names the primary branch" -Condition ($desc -like "*master*") -FailureMessage "got: $desc"
+        }
+    }
+
+    $results += Run-Test -Name "An outcome matching no dispatch arm is refused, not passed over" -Body {
+        # In process, deliberately: the refusal path does not exit, which is what makes
+        # the whole outcome observable from here. Before the fix this call returned 0
+        # having written nothing, and Invoke-HumanGate read that silence as success -
+        # archiving the decision, deleting the pending template, and printing
+        # "Decision recorded" in green for an outcome no arm had acted on.
+        $root = Join-Path $tempRoot "bad-outcome"
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $logFile = Join-Path $root "events.jsonl"
+        $cbFile = Join-Path $root "circuit-breaker.jsonl"
+
+        $message = ""
+        try {
+            Invoke-HumanGateAction -TaskId "F-BAD" -Outcome "accpeted" -ProjectRoot $root `
+                -LogFile $logFile -CircuitBreakerHistoryFile $cbFile | Out-Null
+        } catch {
+            $message = [string]$_.Exception.Message
+        }
+
+        Assert-Result -Name "a misspelled outcome throws" -Condition ($message -ne "") `
+            -FailureMessage "Invoke-HumanGateAction returned normally for outcome 'accpeted'"
+        Assert-Result -Name "the message quotes what was received" -Condition ($message -match "accpeted") `
+            -FailureMessage ("expected the rejected outcome to be named, got: " + $message)
+        foreach ($valid in (Get-HumanGateOutcomes)) {
+            Assert-Result -Name "the message offers '$valid'" -Condition ($message -match $valid) `
+                -FailureMessage ("expected the message to list $valid, got: " + $message)
+        }
+        Assert-Result -Name "no event was recorded for an outcome nothing acted on" `
+            -Condition (-not (Test-Path -LiteralPath $logFile) -and -not (Test-Path -LiteralPath $cbFile)) `
+            -FailureMessage "a refused outcome still wrote to the event log or circuit-breaker history"
+    }
+
+    $results += Run-Test -Name "Every outcome the CLI accepts reaches a dispatch arm" -Body {
+        # The pairing the fix above depends on: -GateOutcome validates against
+        # Get-HumanGateOutcomes, so any value on that list which the dispatcher does not
+        # recognize would pass validation and then throw as unrecognized. Asserting the
+        # two agree is cheaper than asserting it four times by hand.
+        $dispatcher = (Get-Command Invoke-HumanGateAction).ScriptBlock.ToString()
+        foreach ($valid in (Get-HumanGateOutcomes)) {
+            Assert-Result -Name "'$valid' is dispatched" -Condition ($dispatcher -match ('"' + $valid + '"')) `
+                -FailureMessage "$valid passes -GateOutcome validation but appears in no arm of Invoke-HumanGateAction"
+        }
     }
 
 } finally {

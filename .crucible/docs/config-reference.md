@@ -1,4 +1,4 @@
-# Config Reference — `.crucible/config.yaml`
+# Config Reference - `.crucible/config.yaml`
 
 This is the authoritative reference for every key in `.crucible/config.yaml`. The machine-readable schema is at [`schemas/config.schema.json`](../schemas/config.schema.json). Validation is run by `powershell/validate-config.ps1`.
 
@@ -115,7 +115,7 @@ If omitted, default paths are automatically resolved by the framework. If specif
 |-----|---------|-------------|
 | `backlog` | `.crucible/backlog` | Contains `BACKLOG.md`, `features/`, `bugs/`, `chores/`, `blocked/`. |
 | `session` | `.crucible/session` | Runtime state: handoffs, scratchpads, event logs, global session state. Gitignored. |
-| `workspaces` | `.crucible/.agent-workspaces` | Root for Architect git worktrees — one per in-flight task. Gitignored. |
+| `workspaces` | `.crucible/.agent-workspaces` | Root for Architect git worktrees - one per in-flight task. Gitignored. |
 | `prompts` | `.crucible/prompts` | Installed prompt templates for this project. Edit deliberately when the project needs customized behavior. |
 | `personas` | `.crucible/personas` | Installed specialist persona definitions for this project. Edit deliberately when the project needs customized behavior. |
 | `sops` | `.crucible/sops` | Installed standard operating procedures for this project. Edit deliberately when the project needs customized behavior. |
@@ -149,7 +149,7 @@ Assigns a model tier to each specialist. All five roles are required.
 
 ### `models` (optional)
 
-Concrete models per CLI target and capability tier. The factory computes an abstract tier (`strong` / `default` / `light`) from the phase, `budget_tier`, and `design_required` (see `docs/policy.md` §2.3), then resolves it **here** for the active `-Target`. This block is the single source of truth the `[RECOMMENDED MODEL]` line reads, and is the place to edit as providers release new models.
+Concrete models per CLI target and capability tier. The factory computes an abstract tier (`strong` / `default` / `light`) from the phase, `budget_tier`, and `design_required` (see `docs/policy.md` section 2.3), then resolves it **here** for the active `-Target`. This block is the single source of truth the `[RECOMMENDED MODEL]` line reads, and is the place to edit as providers release new models.
 
 ```yaml
 models:
@@ -170,20 +170,20 @@ models:
 ```
 
 - **Targets**: `claude` | `codex` | `antigravity`. The default `-Target agent` uses the `claude` row.
-- **Resolution order**: a value in this block wins; if absent, the framework default map (same values shown above) applies; an unknown target/tier degrades to the tier token rather than throwing. The block is optional — omit it and the defaults apply.
+- **Resolution order**: a value in this block wins; if absent, the framework default map (same values shown above) applies; an unknown target/tier degrades to the tier token rather than throwing. The block is optional - omit it and the defaults apply.
 - **Quoting**: quote any value containing spaces (e.g. the Antigravity labels).
-- **Codex auth note**: `-codex`-suffixed slugs (`gpt-5.x-codex`) require an API-key account. ChatGPT-login Codex accepts the plain `gpt-5.x` slugs; reasoning effort is set separately in `~/.codex/config.toml`, not in the model slug.
-- **Dispatching Codex as a specialist**: when a phase is run by Codex (not Claude), the orchestrator launches it with `powershell/launch-codex-specialist.ps1`, which wraps `codex exec -s danger-full-access` and reports an explicit `STATUS=SUCCESS`/`STATUS=LAUNCH_FAILED` (so a broken runtime is never mistaken for a verdict). Run `launch-codex-specialist.ps1 -Preflight -Model <codex-model>` first. See `docs/orchestrators/CLAUDE.md` and `docs/orchestrators/codex.md`.
+- **Codex model availability (ChatGPT login)**: measured 2026-09-02 with `powershell/launch-codex-specialist.ps1 -Preflight -Model <slug>`. Plain `gpt-5.5` -> PASS and plain `gpt-5.4` -> PASS. For 5.6, `gpt-5.6-terra` -> PASS and `gpt-5.6-sol` -> PASS, while plain `gpt-5.6` -> FAIL, `gpt-5.6-codex` -> FAIL, and `gpt-5.6-mini` -> FAIL. Do not generalize a result across families: preflight the exact slug on the account that will run it. Reasoning effort is set separately in `~/.codex/config.toml`, not in the model slug.
+- **Dispatching Codex as a specialist**: when a phase is run by Codex (not Claude), the orchestrator launches it with `powershell/launch-codex-specialist.ps1`, which wraps `codex exec -s danger-full-access` and reports an explicit `STATUS=SUCCESS`/`STATUS=LAUNCH_FAILED` (so a broken runtime is never mistaken for a verdict). Run `launch-codex-specialist.ps1 -Preflight -Model <codex-model>` first. See `docs/orchestrators/claude.md` and `docs/orchestrators/codex.md`.
 
 ---
 
 ### `verification` (required)
 
-Shell commands the Reviewer runs to verify Architect work. These must match your project's language and toolchain exactly. The factory does not supply defaults — every project configures its own commands.
+Shell commands the Reviewer runs to verify Architect work. These must match your project's language and toolchain exactly. The factory does not supply defaults - every project configures its own commands.
 
 #### `verification.quick`
 
-Run after every Architect commit. Kept fast — typically just the test suite.
+Run after every Architect commit. Kept fast - typically just the test suite.
 
 ```yaml
 verification:
@@ -285,7 +285,7 @@ Write mandates as declarative constraints, not instructions. The Architect reads
 
 ### `file_affinity_examples` (optional)
 
-Illustrative examples of package paths or glob patterns used in `file_affinity` declarations. These are documentation for the Groomer, not enforcement — they show what path scopes look like in this project.
+Illustrative examples of package paths or glob patterns used in `file_affinity` declarations. These are documentation for the Groomer, not enforcement - they show what path scopes look like in this project.
 
 ```yaml
 file_affinity_examples:
@@ -322,14 +322,14 @@ Run before starting any pipeline work:
 ./powershell/validate-config.ps1 -ConfigPath .crucible/config.yaml
 ```
 
-**Errors** (exit 2 — pipeline will not start):
+**Errors** (exit 2 - pipeline will not start):
 - Any required section or field is missing
 - `crucible_root` is absolute, contains `..` path traversal segments, or does not point to a complete installed Crucible bundle (missing `docs`, `prompts`, `personas`, `schemas`, `sops`, or `powershell` directories)
 - Any path under `paths` (except `backlog`) does not start with `.crucible/`
 - `paths.backlog` is absolute or contains `..` path traversal segments
 - Any `verification` command still contains a scaffold placeholder (`replace-with-...`)
 
-**Warnings** (exit 0 — pipeline starts, but check these):
+**Warnings** (exit 0 - pipeline starts, but check these):
 - Neither `fast` nor `high-capability` is used by any role
 - `project_mandates` still contains the scaffold placeholder text
 
@@ -339,7 +339,7 @@ Run before starting any pipeline work:
 
 The project-local `.crucible/.gitignore` (created by `init-project.ps1`) handles this automatically. See [git-policy.md](git-policy.md) for the full rationale.
 
-**Principle**: configuration in, data out. Treat `.crucible/` like an app directory — commit how the system is set up, ignore its operational data.
+**Principle**: configuration in, data out. Treat `.crucible/` like an app directory - commit how the system is set up, ignore its operational data.
 
 | Path | Commit | Why |
 |------|--------|-----|

@@ -336,8 +336,11 @@ try {
     }
 
     $results += Run-Test -Name "Spec path resolvers search archived directory and prioritize active" -Body {
+        # factory-lib.ps1 loads the whole lib chain, so the second dot-source that used to
+        # sit here - reaching directly into powershell/lib/factory-gates.ps1 for one path
+        # helper - was already redundant. Get-BacklogItemPathForTaskProjectRoot now lives in
+        # lib/backlog-io.ps1 and arrives the same way everything else in this test does.
         . (Join-Path $REPO_ROOT "powershell/factory-lib.ps1")
-        . (Join-Path $REPO_ROOT "powershell/lib/factory-gates.ps1")
 
         $root = Join-Path $tempRoot "resolver-test"
         New-MinimalBacklogTree -Root $root

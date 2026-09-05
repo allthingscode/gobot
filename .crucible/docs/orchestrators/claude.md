@@ -117,6 +117,15 @@ launch status.
    dispatch pointer. Re-dispatch with `-PromptFile <path to gate-filing.md>` (or a trivial one-line `-PromptText`). The specialist
    then files the approved stubs and hands off without re-auditing.
 
+   For work that is **not a backlog task at all** — Crucible's own `TODO.md` items, or any one-off
+   with no task ID — omit `-TaskId` and `-Phase` entirely and pass only `-PromptFile`. On that path
+   they select no content anyway (the auto-generated prompt is skipped), so the launcher names the
+   session after the prompt file instead: `.crucible/session/adhoc/{prompt-file-basename}/`, where
+   the transcript and last message land. Do **not** invent a task ID to satisfy the arguments — a
+   fake ID names a directory the backlog knows nothing about, and `factory-health` reads a
+   top-level `session/{F|B|C}-{n}/` directory as a real task session and will archive it. Passing
+   only one of `-TaskId`/`-Phase` is rejected; pass both or neither.
+
    > **Anti-pattern (dogfooding integrity): do NOT hand-hold a normal phase with a bespoke prompt.**
    > It is tempting to write a detailed `-PromptFile` that restates the spec, dictates the exact
    > `new-handoff.ps1` invocation, pre-bakes the commit message, or re-lists the scope. Don't. For any
@@ -126,10 +135,11 @@ launch status.
    > your scaffolding would paper over it, and the run would prove only "factory + heavy orchestrator
    > hand-holding works," never "the factory works." That is the opposite of what a dogfooding session
    > must establish. A phase that stumbles on the bare `prompt.md` is a **finding to file, not a gap to
-   > pre-patch**. Reserve `-PromptFile`/`-PromptText` for exactly two cases: (a) an argv-hostile prompt
-   > the harness cannot pass cleanly, and (b) a human-gate continuation (e.g. the Research Gate's
-   > `gate-filing.md`). Everything the specialist needs for a normal phase belongs in the spec and the
-   > handoff — authored by the upstream phase — not in the dispatch call.
+   > pre-patch**. Reserve `-PromptFile`/`-PromptText` for exactly three cases: (a) an argv-hostile prompt
+   > the harness cannot pass cleanly, (b) a human-gate continuation (e.g. the Research Gate's
+   > `gate-filing.md`), and (c) a dispatch with no backlog task behind it, such as a Crucible `TODO.md`
+   > item (see the ad-hoc form above). Everything the specialist needs for a normal phase belongs in the
+   > spec and the handoff — authored by the upstream phase — not in the dispatch call.
 
 4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=SUCCESS` or
    `STATUS=LAUNCH_FAILED`. A verdict is only valid when `STATUS=SUCCESS` **and** the handoff +
@@ -191,6 +201,29 @@ Wait for the sub-agent to return. Read the reported task ID. Ask the human for c
 
 ---
 
+## Picking Up a Backlog Item
+
+A backlog item is a claim someone made earlier, not a fact. Before any work starts on
+one:
+
+1. **Re-validate the premise.** Confirm the defect still exists, by running it. A file
+   the item names may have been deleted or split; the code it describes may be
+   unreachable; the numbers it quotes may be stale. An item written against code that
+   has since changed can be entirely false while still reading as urgent.
+2. **Re-decide the solution.** The fix the item proposes was chosen against the old
+   state of the tree and without a survey. Check it against how the problem is normally
+   solved before building it, and prefer the established pattern to a local invention.
+3. **Say so when the item is wrong.** If the premise does not hold, stop and report
+   rather than silently redefining the work. Whether to delete the item, narrow it, or
+   replace it is the human's call.
+
+Both halves have been wrong in practice. Item 28 was filed against a code path that
+turned out to be unreachable, and closed as a deletion rather than the refactor it
+asked for. Item 27's first design measured the wrong thing and used an unevidenced
+threshold; measurement moved it.
+
+---
+
 ## Running Factory Commands
 
 Factory commands run via Bash tool using the PowerShell invocation:
@@ -208,26 +241,11 @@ The orchestrator runs `factory.ps1 -Init` at two points per specialist cycle:
 
 ## After Each Sub-Agent Returns
 
-Run these checks before advancing:
+Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (run factory and check for gates). A gate signal at `.crucible/session/{task_id}/gate_pending.txt` goes straight to the Gate Protocol before anything else.
 
-```
-1. Check for gate signal:
-   - Read .crucible/session/{task_id}/gate_pending.txt
-   - If present → Gate Protocol (stop, present to human)
+Step 5 carries checks worth knowing are there before you reach it: verdict-not-label and provenance for a non-Claude specialist, the `task.md` checkpoint and checklist checks, the handoff check, and the **budget ladder** that warns, then escalates and waits, then presents the ceiling as a Circuit Breaker Gate. Read its thresholds from the SOP; they are not repeated here, so they cannot go stale here.
 
-2. Verify task.md:
-   - Read .crucible/session/{task_id}/{role}/task.md
-   - Confirm ### CHECKPOINT markers exist for non-trivial work
-   - Confirm no required - [ ] items remain unchecked
-
-3. Confirm handoff exists:
-   - Glob .crucible/session/handoffs/{task_id}-*.json
-   - Newest timestamp = latest handoff for this task
-
-4. If all checks pass:
-   - Run factory.ps1 -Init -TaskId {task_id} -Quiet
-   - Read output — gate signal? circuit breaker? next prompt?
-```
+None of that is Claude-specific, so it lives in the SOP alone. This section used to restate it as a four-item block, and the copy had already drifted: it dropped the budget check, so an orchestrator following this document never warned the human on spend and met the ceiling as an unexplained `factory.ps1` block. Point at Step 5 here; do not re-inline it.
 
 ---
 

@@ -47,7 +47,9 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$PromptText = "",
 
-    # Harness-safe file-sourced alternative to -PromptText; avoids -File argv re-tokenization of multi-line/flag-bearing prompts.
+    # Harness-safe file-sourced alternative to -PromptText; avoids -File argv re-tokenization of
+    # multi-line/flag-bearing prompts. Supplying this makes -TaskId/-Phase optional: the session
+    # is then named after the prompt file (.crucible/session/adhoc/<basename>/).
     [Parameter(Mandatory = $false)]
     [string]$PromptFile = "",
 
@@ -303,13 +305,56 @@ if ($Preflight) {
 }
 
 # --- Specialist phase mode ---
-if ([string]::IsNullOrWhiteSpace($TaskId)) {
-    Write-Host "[CODEX] Error: -TaskId is required for a specialist phase launch." -ForegroundColor Red
+
+# Resolve the prompt source BEFORE validating -TaskId/-Phase. On the -PromptFile path those two
+# select no content at all - New-BootstrapPrompt is never reached, so no spec, handoff or backlog
+# entry is read by way of them - and their only remaining job is to name the session directory.
+# The prompt file's own base name can do that, which is what lets work with no task ID (the
+# framework's own TODO items) be dispatched without inventing a task ID to satisfy an argument.
+if (-not [string]::IsNullOrWhiteSpace($PromptText) -and -not [string]::IsNullOrWhiteSpace($PromptFile)) {
+    Write-Host "[CODEX] Error: -PromptText and -PromptFile are mutually exclusive." -ForegroundColor Red
     exit 2
 }
-if ([string]::IsNullOrWhiteSpace($Phase)) {
-    Write-Host "[CODEX] Error: -Phase is required for a specialist phase launch." -ForegroundColor Red
-    exit 2
+$adhocLabel = ""
+if (-not [string]::IsNullOrWhiteSpace($PromptFile)) {
+    if (-not (Test-Path -LiteralPath $PromptFile)) {
+        Write-Host ("[CODEX] Error: -PromptFile path does not exist: " + $PromptFile) -ForegroundColor Red
+        exit 2
+    }
+    $resolvedPromptFile = (Resolve-Path -LiteralPath $PromptFile).Path
+    $fileContent = [System.IO.File]::ReadAllText($resolvedPromptFile)
+    if ([string]::IsNullOrWhiteSpace($fileContent)) {
+        Write-Host ("[CODEX] Error: -PromptFile is empty: " + $PromptFile) -ForegroundColor Red
+        exit 2
+    }
+    $PromptText = $fileContent
+    $adhocLabel = [System.IO.Path]::GetFileNameWithoutExtension($resolvedPromptFile)
+}
+
+# -TaskId and -Phase remain required on the bootstrap path, where they do select content. They
+# are optional on the -PromptFile path, but all-or-nothing: supplying one without the other
+# would name a session directory (session/<id>/ or session//<phase>/) in a shape nothing else
+# in the factory writes or reads.
+$usingAdhocSession = $false
+if (-not [string]::IsNullOrWhiteSpace($PromptFile) -and [string]::IsNullOrWhiteSpace($TaskId) -and [string]::IsNullOrWhiteSpace($Phase)) {
+    if ([string]::IsNullOrWhiteSpace($adhocLabel)) {
+        Write-Host ("[CODEX] Error: cannot derive a session name from -PromptFile: " + $PromptFile) -ForegroundColor Red
+        Write-Host "Give the prompt file a base name, or pass -TaskId and -Phase explicitly." -ForegroundColor Yellow
+        exit 2
+    }
+    $usingAdhocSession = $true
+} else {
+    $adhocHint = "Omit both -TaskId and -Phase only when -PromptFile supplies the prompt; the session is then named after that file."
+    if ([string]::IsNullOrWhiteSpace($TaskId)) {
+        Write-Host "[CODEX] Error: -TaskId is required for a specialist phase launch." -ForegroundColor Red
+        Write-Host $adhocHint -ForegroundColor Yellow
+        exit 2
+    }
+    if ([string]::IsNullOrWhiteSpace($Phase)) {
+        Write-Host "[CODEX] Error: -Phase is required for a specialist phase launch." -ForegroundColor Red
+        Write-Host $adhocHint -ForegroundColor Yellow
+        exit 2
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($WorkingDir)) {
@@ -353,7 +398,17 @@ if ([string]::IsNullOrWhiteSpace($Role)) {
     $Role = Get-RoleForPhase -PhaseName $Phase
 }
 
-$sessionDir = Join-Path $REPO_ROOT (Join-Path $CrucibleRoot (Join-Path "session" (Join-Path $TaskId $Phase)))
+# Ad-hoc sessions nest under session/adhoc/ rather than sitting at session/<name>/ so they
+# cannot collide with a task's own directory. factory-health treats a top-level
+# session/<F|B|C>-<n>/ dir as a task session and archives it once the backlog says that task is
+# finished, and it deletes scratchpads and prompts at session/<phase-name>/. A prompt file named
+# `F-001.md` or `implementation.md` would otherwise land in either line of fire; session/adhoc/
+# matches neither.
+if ($usingAdhocSession) {
+    $sessionDir = Join-Path $REPO_ROOT (Join-Path $CrucibleRoot (Join-Path "session" (Join-Path "adhoc" $adhocLabel)))
+} else {
+    $sessionDir = Join-Path $REPO_ROOT (Join-Path $CrucibleRoot (Join-Path "session" (Join-Path $TaskId $Phase)))
+}
 if (-not (Test-Path -LiteralPath $sessionDir)) {
     New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
 }
@@ -368,24 +423,6 @@ if ($ReviewSchema) {
         exit 2
     }
     $useSchema = $true
-}
-
-if (-not [string]::IsNullOrWhiteSpace($PromptText) -and -not [string]::IsNullOrWhiteSpace($PromptFile)) {
-    Write-Host "[CODEX] Error: -PromptText and -PromptFile are mutually exclusive." -ForegroundColor Red
-    exit 2
-}
-if (-not [string]::IsNullOrWhiteSpace($PromptFile)) {
-    if (-not (Test-Path -LiteralPath $PromptFile)) {
-        Write-Host ("[CODEX] Error: -PromptFile path does not exist: " + $PromptFile) -ForegroundColor Red
-        exit 2
-    }
-    $resolvedPromptFile = (Resolve-Path -LiteralPath $PromptFile).Path
-    $fileContent = [System.IO.File]::ReadAllText($resolvedPromptFile)
-    if ([string]::IsNullOrWhiteSpace($fileContent)) {
-        Write-Host ("[CODEX] Error: -PromptFile is empty: " + $PromptFile) -ForegroundColor Red
-        exit 2
-    }
-    $PromptText = $fileContent
 }
 
 if ([string]::IsNullOrWhiteSpace($PromptText)) {
@@ -406,7 +443,8 @@ if (-not [string]::IsNullOrWhiteSpace($Effort)) {
 }
 
 Write-Host ""
-Write-Host ("[CODEX SPECIALIST] Launching " + $Role + " for " + $TaskId + " (" + $Phase + ")") -ForegroundColor Cyan
+$launchTarget = if ($usingAdhocSession) { $adhocLabel + " (ad-hoc prompt)" } else { $TaskId + " (" + $Phase + ")" }
+Write-Host ("[CODEX SPECIALIST] Launching " + $Role + " for " + $launchTarget) -ForegroundColor Cyan
 $rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from script location" } else { "from -ProjectRoot" }
 Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
 Write-Host ("  model: " + $Model + "  |  access: danger-full-access  |  workdir: " + $WorkingDir)

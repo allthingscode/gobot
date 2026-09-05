@@ -29,6 +29,7 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
     throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
 }
 . $helpersPath
+. (Join-Path $PSScriptRoot "lib/time.ps1")
 
 if ($Drift) {
     . (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
@@ -192,7 +193,7 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
             
             # Track latest specialist/phase by timestamp
             if ($spec.timestamp) {
-                $ts = [DateTime]::Parse($spec.timestamp)
+                $ts = (ConvertFrom-IsoTimestamp -Value $spec.timestamp).UtcDateTime
                 if ($ts -gt $latestTs) {
                     $latestTs = $ts
                     $currentSpec = $specName
@@ -234,7 +235,7 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
                 if ($logs) {
                     $lastStart = $logs | Where-Object { $_.event -eq "session_start" } | Select-Object -Last 1
                     if ($lastStart) {
-                        $startTime = [DateTime]::Parse($lastStart.timestamp)
+                        $startTime = (ConvertFrom-IsoTimestamp -Value $lastStart.timestamp).UtcDateTime
                         $elapsed = [DateTime]::UtcNow - $startTime.ToUniversalTime()
                         $duration = "$([Math]::Floor($elapsed.TotalHours))h $($elapsed.Minutes)m"
                     }
@@ -344,14 +345,14 @@ if ($cbEventsAll.Count -eq 0) {
 $cbRecentCutoff = (Get-Date).ToUniversalTime().AddHours(-1 * $RECENT_CB_WINDOW_HOURS)
 $cbEvents = @(
     $cbEventsAll | Where-Object {
-        $eventTs = [DateTime]::Parse($_.timestamp)
+        $eventTs = (ConvertFrom-IsoTimestamp -Value $_.timestamp).UtcDateTime
         ($eventTs -ge $cbRecentCutoff) -or ($blockedTaskIds -contains $_.task_id)
-    } | Sort-Object { [DateTime]::Parse($_.timestamp) }
+    } | Sort-Object { (ConvertFrom-IsoTimestamp -Value $_.timestamp).UtcDateTime }
 )
 
 # Merge Conflicts (Last 7 Days)
-$cutoff = (Get-Date).AddDays(-7)
-$conflictEvents = @($cbEvents | Where-Object { $_.outcome -match "conflict" -and [DateTime]::Parse($_.timestamp) -gt $cutoff })
+$cutoff = (Get-Date).ToUniversalTime().AddDays(-7)
+$conflictEvents = @($cbEvents | Where-Object { $_.outcome -match "conflict" -and (ConvertFrom-IsoTimestamp -Value $_.timestamp).UtcDateTime -gt $cutoff })
 $conflictRate = 0
 if ($totalManaged -gt 0) {
     $conflictRate = ($conflictEvents.Count / $totalManaged) * 100
@@ -361,7 +362,7 @@ if ($totalManaged -gt 0) {
 
 if ($ExportJSON) {
     $report = [PSCustomObject]@{
-        timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        timestamp = Get-UtcTimestamp
         tasks = $allTasks
         stats = @{
             total = $totalManaged
@@ -402,7 +403,7 @@ if (-not $Tasks -or $Summary) {
         Write-Host ("No circuit breaker events in the last " + $RECENT_CB_WINDOW_HOURS + "h and no unresolved blocked tasks.") -ForegroundColor Gray
     } else {
         $cbEvents | Select-Object -Last 5 | ForEach-Object {
-            $ts = [DateTime]::Parse($_.timestamp).ToString("MM-dd HH:mm")
+            $ts = (ConvertFrom-IsoTimestamp -Value $_.timestamp).UtcDateTime.ToString("MM-dd HH:mm", [System.Globalization.CultureInfo]::InvariantCulture)
             Write-Host "[$ts] $($_.task_id): $($_.outcome) - $($_.notes)" -ForegroundColor Yellow
         }
     }

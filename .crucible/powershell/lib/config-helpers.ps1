@@ -1,3 +1,178 @@
+# --- config.yaml reader -------------------------------------------------------
+# One parser backs every accessor below. It keeps three outcomes distinct, because
+# collapsing the third into the second is what let a valid config silently disable a
+# gate: every accessor used to pin the indent to exactly two spaces, so a 3- or
+# 4-space `review:` block read as absent and `require_green_ci` fell back to false.
+#   - key present and readable -> the value
+#   - key genuinely absent     -> $null, and the caller's default is legitimate
+#   - key present, unreadable  -> throw
+# Indent is compared relatively rather than pinned, so 2-space, 3-space, 4-space and
+# tab-indented YAML all read alike.
+
+function Get-ConfigEntries {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content)
+
+    $entries = @()
+    if ([string]::IsNullOrEmpty($Content)) { return $entries }
+
+    # A UTF-8 BOM survives Get-Content -Raw on Windows PowerShell and would otherwise be
+    # glued to the first key, making line 1 unmatchable.
+    $text = $Content -replace '^\uFEFF', ''
+
+    foreach ($line in ($text -split '\r?\n')) {
+        if ($line -match '^[ \t]*$') { continue }
+        if ($line -match '^[ \t]*#') { continue }
+
+        $indent = 0
+        while ($indent -lt $line.Length -and ($line[$indent] -eq ' ' -or $line[$indent] -eq "`t")) { $indent++ }
+
+        $key = $null
+        $value = $null
+        if ($line -match '^[ \t]*([A-Za-z0-9_.-]+):[ \t]*(.*)$') {
+            $key = $Matches[1]
+            $value = $Matches[2]
+        }
+
+        $entries += [pscustomobject]@{
+            Indent = $indent
+            Key    = $key
+            Value  = $value
+            Text   = $line.Trim()
+        }
+    }
+
+    return $entries
+}
+
+# Unquote a scalar and drop a trailing comment. A quoted value is taken verbatim so a
+# '#' inside it survives.
+function ConvertFrom-ConfigScalar {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+
+    $text = $Raw.Trim()
+    if ($text -match '^"([^"]*)"') { return $Matches[1] }
+    if ($text -match "^'([^']*)'") { return $Matches[1] }
+    if ($text -match '^(.*?)[ \t]+#') { $text = $Matches[1] }
+    return $text.Trim()
+}
+
+# A key the caller asked for that appears in the block but is not a 'key: value' pair is
+# a malformed config, not an absent one. Saying so is the whole point of item 34.
+function Assert-ReadableConfigKey {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Entries,
+        [Parameter(Mandatory = $true)][int]$Start,
+        [Parameter(Mandatory = $true)][int]$End,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Source
+    )
+
+    for ($i = $Start; $i -lt $End; $i++) {
+        if ($null -ne $Entries[$i].Key) { continue }
+        if ($Entries[$i].Text -match ('^' + [regex]::Escape($Key) + '\b')) {
+            throw ("Unreadable " + $Source + ": line '" + $Entries[$i].Text + "' names '" + $Key + "' but is not a 'key: value' pair.")
+        }
+    }
+}
+
+# Walk Path as nested mapping keys. Returns $null when a key along the path is absent,
+# or the matched entry's index plus the span of its child lines.
+function Find-ConfigNode {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Entries,
+        [Parameter(Mandatory = $true)][string[]]$Path,
+        [Parameter(Mandatory = $true)][string]$Source
+    )
+
+    $start = 0
+    $end = $Entries.Count
+    $parentIndent = -1
+    $matchIdx = -1
+
+    foreach ($key in $Path) {
+        $childIndent = -1
+        $matchIdx = -1
+        for ($i = $start; $i -lt $end; $i++) {
+            $entry = $Entries[$i]
+            if ($entry.Indent -le $parentIndent) { break }
+            if ($childIndent -lt 0) { $childIndent = $entry.Indent }
+            if ($entry.Indent -ne $childIndent) { continue }
+            if ($entry.Key -eq $key) { $matchIdx = $i; break }
+        }
+
+        if ($matchIdx -lt 0) {
+            Assert-ReadableConfigKey -Entries $Entries -Start $start -End $end -Key $key -Source $Source
+            return $null
+        }
+
+        $parentIndent = $Entries[$matchIdx].Indent
+        $start = $matchIdx + 1
+        $span = $start
+        while ($span -lt $end -and $Entries[$span].Indent -gt $parentIndent) { $span++ }
+        $end = $span
+    }
+
+    return [pscustomobject]@{
+        Index     = $matchIdx
+        SpanStart = $start
+        SpanEnd   = $end
+    }
+}
+
+function Get-ConfigBlockValue {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory = $true)][string[]]$Path,
+        [Parameter(Mandatory = $true)][string]$Source
+    )
+
+    $entries = @(Get-ConfigEntries -Content $Content)
+    $node = Find-ConfigNode -Entries $entries -Path $Path -Source $Source
+    if ($null -eq $node) { return $null }
+
+    $value = ConvertFrom-ConfigScalar $entries[$node.Index].Value
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        throw ("Unreadable " + $Source + ": '" + ($Path -join ".") + "' is present but carries no value.")
+    }
+    return $value
+}
+
+function Get-ConfigBlockList {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory = $true)][string[]]$Path,
+        [Parameter(Mandatory = $true)][string]$Source
+    )
+
+    $entries = @(Get-ConfigEntries -Content $Content)
+    $node = Find-ConfigNode -Entries $entries -Path $Path -Source $Source
+    if ($null -eq $node) { return $null }
+
+    $items = @()
+    $inline = $entries[$node.Index].Value
+    if (-not [string]::IsNullOrWhiteSpace($inline)) {
+        if (-not ($inline.Trim() -match '^\[(.*)\]$')) {
+            throw ("Unreadable " + $Source + ": '" + ($Path -join ".") + "' is not a list.")
+        }
+        foreach ($part in ($Matches[1] -split ',')) {
+            $clean = ConvertFrom-ConfigScalar $part
+            if (-not [string]::IsNullOrWhiteSpace($clean)) { $items += $clean }
+        }
+        return $items
+    }
+
+    for ($i = $node.SpanStart; $i -lt $node.SpanEnd; $i++) {
+        if ($entries[$i].Text -match '^-[ \t]*(.*)$') {
+            $clean = ConvertFrom-ConfigScalar $Matches[1]
+            if (-not [string]::IsNullOrWhiteSpace($clean)) { $items += $clean }
+        }
+    }
+    if ($items.Count -eq 0) {
+        throw ("Unreadable " + $Source + ": '" + ($Path -join ".") + "' is present but holds no entries.")
+    }
+    return $items
+}
+
 function Get-ConfiguredPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -45,21 +220,14 @@ function Get-ConfiguredPath {
         return (Join-Path $root $defaults[$Key])
     }
 
-    # Parse config.yaml manually to extract the key value
-    try {
-        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-        # Search for: key: value inside paths: block
-        if ($content -match '(?ms)^paths:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
-            $pathsBlock = $Matches[1]
-            if ($pathsBlock -match ('(?m)^\s{2}' + [regex]::Escape($Key) + ':\s*["'']?([^"''\r\n]+)["'']?\s*$')) {
-                $val = $Matches[1].Trim()
-                if ([System.IO.Path]::IsPathRooted($val)) {
-                    return $val
-                }
-                return (Join-Path $root $val)
-            }
+    $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $val = Get-ConfigBlockValue -Content $content -Path @("paths", $Key) -Source $configPath
+    if ($null -ne $val) {
+        if ([System.IO.Path]::IsPathRooted($val)) {
+            return $val
         }
-    } catch {}
+        return (Join-Path $root $val)
+    }
 
     return (Join-Path $root $defaults[$Key])
 }
@@ -94,23 +262,11 @@ function Get-ConfiguredReview {
     }
 
     $configPath = Join-Path $root ".crucible/config.yaml"
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        if ($Key -eq "auto_push" -or $Key -eq "require_green_ci" -or $Key -eq "ci_post_push_watch") { return "false" }
-        if ($Key -eq "ci_timeout_minutes") { return "20" }
-        if ($Key -eq "ci_queued_grace_minutes") { return "15" }
-        return ""
-    }
-
-    try {
+    if (Test-Path -LiteralPath $configPath) {
         $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-        # Search for: key: value inside review: block
-        if ($content -match '(?ms)^review:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
-            $reviewBlock = $Matches[1]
-            if ($reviewBlock -match ('(?m)^\s{2}' + [regex]::Escape($Key) + ':\s*["'']?([^"''\r\n]+)["'']?\s*$')) {
-                return $Matches[1].Trim()
-            }
-        }
-    } catch {}
+        $val = Get-ConfigBlockValue -Content $content -Path @("review", $Key) -Source $configPath
+        if ($null -ne $val) { return $val }
+    }
 
     if ($Key -eq "auto_push" -or $Key -eq "require_green_ci" -or $Key -eq "ci_post_push_watch") { return "false" }
     if ($Key -eq "ci_timeout_minutes") { return "20" }
@@ -148,36 +304,11 @@ function Get-ConfiguredManifestFiles {
         return @()
     }
 
-    try {
-        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-        if ($content -match '(?ms)^manifest_files:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
-            $block = $Matches[1]
-            $list = @()
-            $lines = $block -split '\r?\n'
-            foreach ($line in $lines) {
-                if ($line -match '^\s*-\s*(.*)$') {
-                    $item = $Matches[1].Trim().Trim('"' + "'")
-                    if (-not [string]::IsNullOrWhiteSpace($item)) {
-                        $list += $item
-                    }
-                }
-            }
-            if ($list.Count -gt 0) {
-                return $list
-            }
-        }
-        if ($content -match '(?m)^manifest_files:\s*\[(.*?)\]\s*$') {
-            $items = $Matches[1] -split ','
-            $list = @()
-            foreach ($item in $items) {
-                $clean = $item.Trim().Trim('"' + "'")
-                if (-not [string]::IsNullOrWhiteSpace($clean)) {
-                    $list += $clean
-                }
-            }
-            return $list
-        }
-    } catch {}
+    $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $list = Get-ConfigBlockList -Content $content -Path @("manifest_files") -Source $configPath
+    if ($null -ne $list) {
+        return $list
+    }
 
     return @()
 }
@@ -218,8 +349,8 @@ function Get-ConfiguredModel {
     return $tier
 }
 
-# Read models.targets.<target>.<tier> from config.yaml. Returns "" when absent. The block is
-# 2-space-indented YAML: models: (0) > targets: (2) > <target>: (4) > <tier>: (6).
+# Read models.targets.<target>.<tier> from config.yaml. Returns "" when absent. Nesting is
+# models: > targets: > <target>: > <tier>:, at whatever indent width the file uses.
 function Get-ModelFromConfig {
     param(
         [Parameter(Mandatory = $true)][string]$Target,
@@ -240,20 +371,9 @@ function Get-ModelFromConfig {
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath)) { return "" }
 
-    try {
-        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-        if ($content -match '(?ms)^models:[ \t]*\r?\n(.*?)(?=\r?\n\S|\z)') {
-            $modelsBlock = $Matches[1]
-            $targetPattern = '(?ms)^[ ]{4}' + [regex]::Escape($Target) + ':[ \t]*\r?\n(.*?)(?=\r?\n[ ]{0,4}\S|\z)'
-            if ($modelsBlock -match $targetPattern) {
-                $targetBlock = $Matches[1]
-                $tierPattern = '(?m)^[ ]{6}' + [regex]::Escape($Tier) + ':[ \t]*["'']?([^"''\r\n]+)["'']?[ \t]*$'
-                if ($targetBlock -match $tierPattern) {
-                    return $Matches[1].Trim()
-                }
-            }
-        }
-    } catch {}
+    $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $val = Get-ConfigBlockValue -Content $content -Path @("models", "targets", $Target, $Tier) -Source $configPath
+    if ($null -ne $val) { return $val }
 
     return ""
 }

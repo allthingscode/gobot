@@ -66,7 +66,7 @@ When your work is complete:
    - Acceptance-criteria mapping: enumerate every AC from the backlog spec and map it to concrete implementation artifacts (specific changed file paths and tests) plus verification evidence.
    - Scope boundary confirmation: confirm every changed file is inside the declared `file_affinity` boundary.
    - Duplicate-handoff prevention: check existing `.crucible/session/handoffs/{task_id}-*.json`; if resubmitting the same transition, include a `supersede` field referencing the prior handoff and provide an updated reason.
-   - Local validation gate: run required local verification before handoff (`powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"`) and task-specific required validation such as `go run {{crucible_root}}/scripts/factory_lint.go` when prompt templates change.
+   - Local validation gate: run required local verification before handoff (`powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"`) and task-specific required validation such as `go run {{crucible_root}}/scripts/factory_lint.go -framework-root {{crucible_root}} -backlog-dir <path>` when prompt templates change, where `<path>` comes from `{{crucible_root}}/powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "{project_root}"`.
 2. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
    ```bash
    powershell.exe -ExecutionPolicy Bypass \

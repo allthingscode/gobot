@@ -47,26 +47,22 @@ if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot "platform.ps1")
 }
 
-function Assert-FactorySessionOutputContext {
-    param(
-        [Parameter(Mandatory=$true)][AllowNull()][hashtable]$Context,
-        [Parameter(Mandatory=$true)][string[]]$RequiredKeys
-    )
+if (-not (Get-Command Assert-FactoryContextKeys -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "factory-context.ps1")
+}
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    foreach ($key in $RequiredKeys) {
-        if (-not $Context.ContainsKey($key) -or $null -eq $Context[$key]) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+# This file has always called Invoke-GitChecked across a file boundary; before TODO item 14
+# step A the boundary was factory-gates.ps1, and it resolved because dot-sourcing flattens
+# scope, not because anything declared the dependency. Naming it makes the load order the
+# binder's problem rather than a reader's.
+if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "git.ps1")
 }
 
 function New-FactoryPromptText {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    Assert-FactorySessionOutputContext -Context $Context -RequiredKeys @(
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "LatestHandoff", "PromptLib", "SessionDir", "TaskId", "Ceiling", "LogFile", "CircuitBreakerHistoryFile", "WorkspacesDir", "CrucibleRoot", "RepoRoot"
     )
 
@@ -284,7 +280,7 @@ function New-FactoryPromptText {
 function Write-FactoryPromptOutput {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    Assert-FactorySessionOutputContext -Context $Context -RequiredKeys @(
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "SessionDir", "TaskId", "PromptText", "PromptVersion", "Ceiling"
     )
 
@@ -334,7 +330,7 @@ function Write-FactoryPromptOutput {
 function Initialize-FactoryTargetSession {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    Assert-FactorySessionOutputContext -Context $Context -RequiredKeys @(
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "SessionDir", "BacklogDir", "RepoRoot", "CrucibleRoot", "FrameworkPowerShell", "TaskId",
         "Init", "TypeDir", "BudgetCeilings", "Ceiling", "RelativeHandoffPath", "WorkspacesDir"
     )
@@ -564,7 +560,7 @@ function Initialize-FactoryTargetSession {
             if (-not [string]::IsNullOrEmpty($TaskId)) {
                 $contextFile = Join-Path $targetDir "context.md"
                 $contextContent = "# Context Bundle: $($handoff.task_id)`n" +
-                           "Generated: $((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))`n" +
+                           "Generated: $(Get-UtcTimestamp)`n" +
                            "Phase: $($handoff.target_phase)`n" +
                            "Role: $($roleVal)`n" +
                            "Cycle ID: $env:FACTORY_CYCLE_ID`n`n" +
@@ -592,7 +588,7 @@ function Initialize-FactoryTargetSession {
 function Write-FactoryCiStatusBanner {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    Assert-FactorySessionOutputContext -Context $Context -RequiredKeys @(
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "Target", "PromptFilePath", "AutoAdvance", "IsBootstrap", "NextFactoryCommand", "SessionDir"
     )
 
@@ -667,7 +663,7 @@ function Write-FactoryCiStatusBanner {
 function Start-FactoryTargetSessionLog {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    Assert-FactorySessionOutputContext -Context $Context -RequiredKeys @("Handoff", "Recover", "LogFile", "CircuitBreakerHistoryFile")
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @("Handoff", "Recover", "LogFile", "CircuitBreakerHistoryFile")
 
     $handoff = $Context.Handoff
     $Recover = [bool]$Context.Recover

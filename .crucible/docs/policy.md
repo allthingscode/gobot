@@ -20,10 +20,7 @@ Circuit breakers prevent "infinite loops" and budget escalation by blocking task
 |--------------|---------------------|--------|
 | **Review Strike Rule** | 3 failed review cycles | BLOCK task; route to Human |
 | **Handoff Retry Limit** (backstop) | > 2 retries on a same-phase (`X -> X`) handoff | BLOCK task; route to Human |
-| **Token Budget (Low)** | > 10 handoffs | BLOCK task; route to Human |
-| **Token Budget (Medium)** | > 16 handoffs | BLOCK task; route to Human |
-| **Token Budget (High)** | > 28 handoffs | BLOCK task; route to Human |
-| **Token Budget (Extended)** | > 40 handoffs | BLOCK task; route to Human |
+| **Token Budget** | `cumulative_handoff_count` exceeds the task's tier ceiling (see 2.1) | BLOCK task; route to Human |
 | **Merge Conflict** | > 3 rebase attempts | BLOCK task; route to Human |
 | **Fabricated Artifacts** | Missing paths in `artifacts` field | BLOCK task; route to Human |
 | **Verification Failure** | The project's `verification.full` checks fail when the factory re-runs them in the worktree after the Reviewer reports APPROVED. The first failure is a retry, not a block; a repeat failure fires the breaker | BLOCK task; route to implementation |
@@ -33,14 +30,45 @@ The **Handoff Retry Limit** is a defense-in-depth backstop, not a live-accruing 
 
 ### 2.1 Budget Overage Protocol
 
+A task's `budget_tier` sets the ceiling on its `cumulative_handoff_count`. The table
+below is generated from `$script:BUDGET_CEILINGS` in `powershell/factory-lib.ps1`;
+change the ceilings there and run `powershell/gates/check-generated-docs.ps1 -Write`.
+
+<!-- crucible:generated budget-tier-ceilings -->
+| Tier | Handoff ceiling |
+|---|---|
+| `low` | 10 |
+| `medium` | 16 |
+| `high` | 28 |
+| `extended` | 40 |
+<!-- crucible:end budget-tier-ceilings -->
+
 When a circuit breaker for **Token Budget** is triggered:
 1. **Mandatory Stop**: The agent MUST NOT proceed, modify the budget tier in the spec, or attempt to bypass the block.
 2. **Justification**: The agent MUST provide a concise justification for why the initial budget was insufficient and what remains to be done.
 3. **Approval**: A budget increase MUST be explicitly approved by a human. Agents are prohibited from "auto-increasing" or silently adjusting tiers to keep the pipeline moving.
 
-### 2.2 Strike-2 DEGRADED Signal
+### 2.2 DEGRADED Signal Taxonomy
 
-When `review_strike_count` reaches 2, `factory.ps1` emits a visible DEGRADED warning and logs a `degraded` event. The Architect MUST treat this as a directive to reduce scope — split the task, defer the contentious part, or simplify — rather than attempting a full re-implementation. If the blocker requires human input, escalate before consuming the last strike.
+A `degraded` event means the pipeline continued with reduced assurance. The event's `kind` names which check spoke, and `outcome` names whether that check ran. `outcome: "unverifiable"` means the check could not run and its finding MUST NOT be read as a pass. Historical events without `kind` are classified as `unknown` for reporting compatibility and are not counted as unverifiable gates.
+
+Known degraded kinds:
+
+| Kind | Outcome | Meaning |
+|---|---|---|
+| `review_strike_2` | `warned` | When `review_strike_count` reaches 2, `factory.ps1` emits a visible DEGRADED warning and logs a `degraded` event. The Architect MUST treat this as a directive to reduce scope - split the task, defer the contentious part, or simplify - rather than attempting a full re-implementation. If the blocker requires human input, escalate before consuming the last strike. |
+| `file_affinity_unverifiable` | `unverifiable` | The scope-violation gate could not run because the spec declared no affected-files section. Human review is the remaining scope check. |
+| `file_affinity_scope` | `warned` | The scope gate ran and the handoff `file_affinity` listed paths the spec did not mention. |
+| `task_checklist` | `warned` | `task.md` checklist content had malformed or unchecked optional items. |
+| `session_cycle_id_mismatch` | `warned` | The agent may not have read the current `task.md`. |
+| `review_report_format` | `warned` | The review report had no YAML header; a plain-text APPROVED report was accepted. |
+| `unreadable_retry_history` | `warned` | A retry-history scan skipped pipeline-log lines that would not parse; `notes` carries the count. Emitted whether or not the scan then blocked. When the skipped lines meant a repeat failure could not be ruled out, a `circuit_breaker` of the same name accompanies it - see docs/circuit-breaker-runbook.md 'Breaker 12 - Unreadable Retry History'. |
+| `unreadable_handoff_history` | `unverifiable` | The server-side handoff count skipped pipeline-log lines that would not parse, so it is a lower bound and the agent-reported count could not be checked against it; `notes` carries the count of skipped lines. Emitted on every run where any line is skipped. When the skipped lines could account for crossing the tier ceiling, a `circuit_breaker` of the same name accompanies it - see docs/circuit-breaker-runbook.md 'Breaker 13 - Unverifiable Handoff Count'. |
+| `unreadable_gate_decision` | `unverifiable` | The newest human-gate decision file would not parse, so gate state is unknown. The checks that key off it - backlog finalization and deployment-to-done merge verification - were enforced as though the gate had passed, because the alternative reading skips them entirely. |
+| `framework_integrity_no_baseline` | `unverifiable` | The framework-integrity gate resolved no task baseline - the handoff carries no `base_commit` and no task-branch merge-base resolves - so it checked the working tree only. A framework edit committed during the task would not be seen. |
+| `unknown` | `warned` | Backward-compatible reporting bucket for archived pre-taxonomy events with no `kind`. |
+
+Duplicate handoffs are reported under handoff quality. They are not a degradation and MUST NOT emit `degraded`.
 
 ### 2.3 Model Selection
 

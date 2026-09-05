@@ -69,7 +69,8 @@ $results += Run-Test "Clean merge returns 'merged' and lands the branch" {
 
         Push-Location $repo
         try {
-            $result = Invoke-HumanGateMerge -TaskId "T-001" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $null
+            $result = Invoke-HumanGateMerge -TaskId "T-001" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $null `
+                -LogFile (Join-Path $repo "pipeline.log.jsonl") -CircuitBreakerHistoryFile (Join-Path $repo "circuit_breakers.jsonl")
         } finally { Pop-Location }
 
         Assert-Result "clean-merge-result" ($result -eq "merged") "Expected 'merged', got '$result'"
@@ -112,7 +113,8 @@ $results += Run-Test "Same-line conflict routes to 'rework', leaves tree clean, 
 
         Push-Location $repo
         try {
-            $result = Invoke-HumanGateMerge -TaskId "T-002" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $handoff -HandoffScript $fakeHandoff
+            $result = Invoke-HumanGateMerge -TaskId "T-002" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $handoff -HandoffScript $fakeHandoff `
+                -LogFile (Join-Path $repo "pipeline.log.jsonl") -CircuitBreakerHistoryFile (Join-Path $repo "circuit_breakers.jsonl")
         } finally { Pop-Location }
 
         Assert-Result "conflict-result" ($result -eq "rework") "Expected 'rework', got '$result'"
@@ -154,13 +156,85 @@ $results += Run-Test "rebase_count backstop trips the recurring-conflict breaker
 
         Push-Location $repo
         try {
-            $result = Invoke-HumanGateMerge -TaskId "T-003" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $handoff -MaxRebaseAttempts 3
+            $result = Invoke-HumanGateMerge -TaskId "T-003" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $handoff -MaxRebaseAttempts 3 `
+                -LogFile (Join-Path $repo "pipeline.log.jsonl") -CircuitBreakerHistoryFile (Join-Path $repo "circuit_breakers.jsonl")
         } finally { Pop-Location }
 
         Assert-Result "breaker-result" ($result -eq "breaker") "Expected 'breaker', got '$result'"
         Assert-Result "no-merge-head" (-not (Test-Path (Join-Path $repo ".git/MERGE_HEAD"))) "master left mid-merge after breaker"
         $status = @(git -C $repo status --porcelain)
         Assert-Result "worktree-clean" ($status.Count -eq 0) "master working tree not clean after breaker: $($status -join ',')"
+    } finally {
+        Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+}
+
+$results += Run-Test "D40: accepted-decision removal failure stops before stale approval can be honored" {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mr_d40_" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    try {
+        $repo = New-MergeRepo -Root $root
+        "base" | Set-Content -LiteralPath (Join-Path $repo "README.md") -Encoding UTF8
+        git -C $repo add . 2>$null | Out-Null
+        git -C $repo commit -m "base" 2>$null | Out-Null
+
+        git -C $repo checkout -b "task/T-040" 2>$null | Out-Null
+        "task" | Set-Content -LiteralPath (Join-Path $repo "README.md") -Encoding UTF8
+        git -C $repo add . 2>$null | Out-Null
+        git -C $repo commit -m "task change" 2>$null | Out-Null
+        git -C $repo checkout master 2>$null | Out-Null
+        "primary" | Set-Content -LiteralPath (Join-Path $repo "README.md") -Encoding UTF8
+        git -C $repo add . 2>$null | Out-Null
+        git -C $repo commit -m "primary change" 2>$null | Out-Null
+
+        $decisionRoot = Join-Path $root "session"
+        $decisionDir = Join-Path $decisionRoot "global/gate_decisions"
+        New-Item -ItemType Directory -Path $decisionDir -Force | Out-Null
+        $acceptedPath = Join-Path $decisionDir "T-040-20260902T120000Z.json"
+        '{"task_id":"T-040","outcome":"accepted"}' | Set-Content -LiteralPath $acceptedPath -Encoding UTF8
+
+        function Get-ConfiguredPath { param($Key, $ProjectRoot) return $decisionRoot }
+        # Permit the parser's read, but force the delete itself to fail, after the
+        # accepted outcome has been established. A shared-read file handle denies
+        # delete sharing on Windows, but Linux unlink() is unaffected by an open
+        # handle, so that trick cannot reproduce the failure cross-platform. Shadow
+        # Remove-Item instead: deterministic on every OS, and scoped to this
+        # scriptblock the same way Get-ConfiguredPath is shadowed above.
+        function Remove-Item {
+            param(
+                [Parameter(Position = 0)][string]$Path,
+                [string]$LiteralPath,
+                [switch]$Force,
+                [switch]$Recurse
+            )
+            $target = if ($LiteralPath) { $LiteralPath } else { $Path }
+            if ($target -eq $acceptedPath) {
+                throw [System.UnauthorizedAccessException]::new("Access to the path '$target' is denied.")
+            }
+            $callParams = @{}
+            if ($LiteralPath) { $callParams["LiteralPath"] = $LiteralPath }
+            if ($Path) { $callParams["Path"] = $Path }
+            if ($Force) { $callParams["Force"] = $true }
+            if ($Recurse) { $callParams["Recurse"] = $true }
+            if ($PSBoundParameters.ContainsKey("ErrorAction")) { $callParams["ErrorAction"] = $PSBoundParameters["ErrorAction"] }
+            Microsoft.PowerShell.Management\Remove-Item @callParams
+        }
+        $caught = $null
+        $result = ""
+        Push-Location $repo
+        try {
+            try {
+                $result = Invoke-HumanGateMerge -TaskId "T-040" -PrimaryBranch "master" -ProjectRoot $repo -Handoff ([PSCustomObject]@{ rebase_count = 3 }) -MaxRebaseAttempts 3 `
+                    -LogFile (Join-Path $repo "pipeline.log.jsonl") -CircuitBreakerHistoryFile (Join-Path $repo "circuit_breakers.jsonl")
+            } catch {
+                $caught = $_
+            }
+        } finally {
+            Pop-Location
+        }
+
+        Assert-Result "accepted-cleanup-failure-surfaces" ($null -ne $caught) ("expected a removal failure to surface, got '" + $result + "'")
+        Assert-Result "accepted-cleanup-failure-is-honest" ($caught.Exception.Message -match "Could not inspect or remove premature accepted gate decisions") ("expected an honest cleanup failure, got '" + $caught.Exception.Message + "'")
     } finally {
         Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
     }
@@ -201,7 +275,8 @@ $results += Run-Test "Conflict path survives ErrorActionPreference=Stop (git reb
         $prev = $ErrorActionPreference
         $ErrorActionPreference = "Stop"
         try {
-            $result = Invoke-HumanGateMerge -TaskId "T-004" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $handoff -HandoffScript $fakeHandoff
+            $result = Invoke-HumanGateMerge -TaskId "T-004" -PrimaryBranch "master" -ProjectRoot $repo -Handoff $handoff -HandoffScript $fakeHandoff `
+                -LogFile (Join-Path $repo "pipeline.log.jsonl") -CircuitBreakerHistoryFile (Join-Path $repo "circuit_breakers.jsonl")
         } finally {
             $ErrorActionPreference = $prev
             Pop-Location

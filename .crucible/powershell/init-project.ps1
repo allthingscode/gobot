@@ -221,15 +221,16 @@ if ($StampVersionOnly) {
 $detectedBacklogDir = ""
 $existingConfigPath = $configPath
 if (Test-Path -LiteralPath $existingConfigPath) {
-    try {
-        $existingContent = Get-Content -LiteralPath $existingConfigPath -Raw -Encoding UTF8
-        if ($existingContent -match '(?ms)^paths:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
-            $pathsBlock = $Matches[1]
-            if ($pathsBlock -match '(?m)^\s{2}backlog:\s*["''\r\n]?([^"''\r\n]+)["''\r\n]?\s*$') {
-                $detectedBacklogDir = $Matches[1].Trim()
-            }
-        }
-    } catch {}
+    # Read through the one config parser. This used to be its own pinned regex wrapped
+    # in an empty catch, so a paths.backlog it could not read - a trailing comment, a
+    # non-2-space block - was indistinguishable from no custom backlog at all. The
+    # config was then rewritten without the key, silently relocating the adopter's
+    # backlog to the default on the next -Force install.
+    $existingContent = Get-Content -LiteralPath $existingConfigPath -Raw -Encoding UTF8
+    $detected = Get-ConfigBlockValue -Content $existingContent -Path @("paths", "backlog") -Source $existingConfigPath
+    if ($null -ne $detected) {
+        $detectedBacklogDir = $detected
+    }
 }
 
 if ((Test-Path -LiteralPath (Join-Path $targetCrucible "config.yaml")) -and -not $Force) {

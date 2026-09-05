@@ -85,6 +85,72 @@ function Write-Report {
     }
 }
 
+function Write-ScaffoldNotice {
+    # Instantiated scaffold content is the only part of the bundle an adopter may
+    # decline, and the only signal that it is declinable. It fires on preview runs
+    # too: the documented workflow previews before applying, so the preview is
+    # where the adopter first sees the path.
+    param(
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$Instantiated,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$Recreated,
+        [Parameter(Mandatory=$true)][bool]$Applied
+    )
+    $optOut = @(
+        "To decline a scaffold file, delete it AND add its path to your .gitignore;",
+        "Crucible will not recreate an ignored path. Deleting alone is not an opt-out."
+    )
+    if ($Instantiated.Count -gt 0) {
+        $verb = if ($Applied) { "Instantiated" } else { "Would instantiate" }
+        Write-Host ""
+        Write-Host ($verb + " " + $Instantiated.Count + " scaffold file(s) into your bundle:") -ForegroundColor Cyan
+        foreach ($path in $Instantiated) { Write-Host ("  .crucible/" + $path) }
+        Write-Host "Scaffold content is seed material and is opt-in."
+        foreach ($line in $optOut) { Write-Host $line }
+    }
+    if ($Recreated.Count -gt 0) {
+        $verb = if ($Applied) { "Recreated" } else { "Would recreate" }
+        Write-Host ""
+        Write-Host ($verb + " " + $Recreated.Count + " scaffold file(s) that are missing from your bundle:") -ForegroundColor Yellow
+        foreach ($path in $Recreated) { Write-Host ("  .crucible/" + $path) }
+        Write-Host "These were shipped at your recorded baseline, so a deletion is the likely cause."
+        foreach ($line in $optOut) { Write-Host $line }
+    }
+}
+
+function Remove-EmptiedBundleDirectory {
+    param(
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$Candidates,
+        [Parameter(Mandatory=$true)][string]$BundleRoot
+    )
+    # Pruning the last file out of a directory leaves the directory advertising a
+    # part of the bundle Crucible no longer ships. Git cannot flag it, since it
+    # tracks files and not directories. Walk up from each pruned file's parent,
+    # stopping at the first level that still holds something and never at or above
+    # the bundle root.
+    $rootFull = [System.IO.Path]::GetFullPath($BundleRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $removed = 0
+    $ordered = @($Candidates | Select-Object -Unique | Sort-Object -Property Length -Descending)
+    foreach ($candidate in $ordered) {
+        $current = $candidate
+        while (-not [string]::IsNullOrEmpty($current)) {
+            $currentFull = [System.IO.Path]::GetFullPath($current).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+            # Containment also covers the root itself: rootFull never starts with
+            # rootFull + separator, so the walk stops there without a second check.
+            if (-not $currentFull.StartsWith($rootFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+            if (-not (Test-Path -LiteralPath $currentFull -PathType Container)) {
+                $current = Split-Path -Path $currentFull -Parent
+                continue
+            }
+            # -Force so a directory holding only hidden files counts as non-empty.
+            if (@(Get-ChildItem -LiteralPath $currentFull -Force).Count -ne 0) { break }
+            Remove-Item -LiteralPath $currentFull -Force
+            $removed++
+            $current = Split-Path -Path $currentFull -Parent
+        }
+    }
+    return $removed
+}
+
 function Copy-FrameworkFileToAdopter {
     param(
         [Parameter(Mandatory=$true)][string]$FrameworkRoot,
@@ -134,6 +200,7 @@ function Invoke-UpdateBundle {
 
     $scriptRoot = Split-Path -Parent $PSCommandPath
     . (Join-Path $scriptRoot "lib/install-manifest.ps1")
+    . (Join-Path $scriptRoot "lib/update-classification.ps1")
     $manifest = Get-InstallManifest -FrameworkRoot $frameworkRoot
 
     $baselineCommit = Read-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit"
@@ -151,6 +218,8 @@ function Invoke-UpdateBundle {
     $headFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $frameworkRoot -AtCommit $frameworkHead)
     $sourcePaths = @($baselineFiles + $headFiles | Sort-Object -Unique)
     $results = New-ClassificationResult
+    $instantiatedScaffold = @()
+    $recreatedScaffold = @()
 
     # Build the set of expected adopter-relative paths that should exist (framework-owned at HEAD)
     $expected = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
@@ -176,7 +245,8 @@ function Invoke-UpdateBundle {
             
             $hManifest = $null
             $hManifestBase = $null
-            if ($null -ne $provManifest -and $null -ne $provManifest.files -and $null -ne $provManifest.files.$adopterPath) {
+            $inProvenance = ($null -ne $provManifest -and $null -ne $provManifest.files -and $null -ne $provManifest.files.$adopterPath)
+            if ($inProvenance) {
                 $hManifest = $provManifest.files.$adopterPath.hash
                 if ($provManifest.files.$adopterPath.base_hash) {
                     $hManifestBase = $provManifest.files.$adopterPath.base_hash
@@ -190,51 +260,37 @@ function Invoke-UpdateBundle {
             }
 
             $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
-            $hHeadBase = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath -WithoutCustomRegions
 
-            # 1. If not present at framework HEAD
-            if ($null -eq $hHead) {
-                if ($null -ne $hAdopter) {
-                    $relPath = ConvertTo-RelativeSlashPath -Path $adopterPath
-                    if ($expected.Contains($relPath)) {
-                        continue
-                    }
-                    if ($null -ne $hManifestBase -and $hAdopterBase -ne $hManifestBase) {
-                        Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
-                    } else {
-                        Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath $sourcePath -AdopterPath $adopterPath
-                    }
-                }
+            # Every git lookup and manifest predicate is resolved here; the lattice
+            # itself is a pure function in lib/update-classification.ps1, so that
+            # update-classification.tests.ps1 can reach every branch in milliseconds
+            # instead of by installing a framework into a throwaway repo.
+            #
+            # The two predicates below were previously evaluated inside the branches that
+            # needed them. Both are cheap - a HashSet lookup and a manifest string match -
+            # and hoisting them still removed work per pair, because $hHeadBase was
+            # computed on this line and never read by any branch.
+            $verdict = Get-BundleFileClassification `
+                -HeadHash $hHead `
+                -AdopterHash $hAdopter `
+                -AdopterBaseHash $hAdopterBase `
+                -BaselineHash $hManifest `
+                -BaselineBaseHash $hManifestBase `
+                -IsExpectedPath ($expected.Contains((ConvertTo-RelativeSlashPath -Path $adopterPath))) `
+                -InProvenance $inProvenance `
+                -SourceIsScaffoldSnapshot (Test-ScaffoldSnapshotPath -RelativePath $sourcePath -Manifest $manifest) `
+                -AdopterIsScaffoldSnapshot (Test-ScaffoldSnapshotPath -RelativePath $adopterPath -Manifest $manifest)
+
+            if ($verdict.Category -eq "skip") {
                 continue
             }
-            
-            # 2. If not present on the adopter
-            if ($null -eq $hAdopter) {
-                Add-ClassifiedItem -Results $results -Category "add" -SourcePath $sourcePath -AdopterPath $adopterPath
-                continue
-            }
-            
-            # 3. If present on both:
-            if ($hAdopter -eq $hHead) {
-                Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
-                continue
-            }
-            
-            # If the adopter only modified the file inside the custom regions (or didn't modify it at all):
-            if ($null -ne $hManifestBase -and $hAdopterBase -eq $hManifestBase) {
-                if ($hManifest -ne $hHead) {
-                    Add-ClassifiedItem -Results $results -Category "safe-overwrite" -SourcePath $sourcePath -AdopterPath $adopterPath
-                } else {
-                    Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
-                }
-                continue
-            }
-            
-            # If the adopter has modified the file outside the custom regions (or there is no manifest base):
-            if ($hManifest -eq $hHead) {
-                Add-ClassifiedItem -Results $results -Category "no-op" -SourcePath $sourcePath -AdopterPath $adopterPath
-            } else {
-                Add-ClassifiedItem -Results $results -Category "needs-merge" -SourcePath $sourcePath -AdopterPath $adopterPath
+
+            Add-ClassifiedItem -Results $results -Category $verdict.Category -SourcePath $sourcePath -AdopterPath $adopterPath
+
+            if ($verdict.ScaffoldAction -eq "recreated") {
+                $recreatedScaffold += (ConvertTo-RelativeSlashPath -Path $adopterPath)
+            } elseif ($verdict.ScaffoldAction -eq "instantiated") {
+                $instantiatedScaffold += (ConvertTo-RelativeSlashPath -Path $adopterPath)
             }
         }
     }
@@ -267,7 +323,7 @@ function Invoke-UpdateBundle {
     if (-not (Test-Path -LiteralPath $sessionDir)) {
         New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
     }
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss", [System.Globalization.CultureInfo]::InvariantCulture)
     $logPath = Join-Path $sessionDir ("update-bundle-" + $timestamp + ".log")
     $reportLines = @()
     foreach ($category in @("no-op", "safe-overwrite", "needs-merge", "add", "review-removal")) {
@@ -315,6 +371,11 @@ function Invoke-UpdateBundle {
         }
     }
 
+    Write-ScaffoldNotice `
+        -Instantiated @($instantiatedScaffold | Sort-Object -Unique) `
+        -Recreated @($recreatedScaffold | Sort-Object -Unique) `
+        -Applied $shouldApply
+
     $pruneItems = @($results["review-removal"].ToArray())
     $shouldPrune = $false
     if ($Prune -and -not $effectiveDryRun -and $pruneItems.Count -gt 0) {
@@ -328,6 +389,7 @@ function Invoke-UpdateBundle {
 
     $prunedCount = 0
     if ($shouldPrune) {
+        $emptiedParents = @()
         foreach ($item in $pruneItems) {
             $relPath = ConvertTo-RelativeSlashPath -Path $item.AdopterPath
             if ($expected.Contains($relPath)) {
@@ -337,9 +399,14 @@ function Invoke-UpdateBundle {
             if (Test-Path -LiteralPath $pathToDelete -PathType Leaf) {
                 Remove-Item -LiteralPath $pathToDelete -Force
                 $prunedCount++
+                $emptiedParents += (Split-Path -Path $pathToDelete -Parent)
             }
         }
+        $removedDirs = Remove-EmptiedBundleDirectory -Candidates $emptiedParents -BundleRoot $adopterCrucibleRoot
         Write-Host ("Pruned " + $prunedCount + " obsolete file(s).")
+        if ($removedDirs -gt 0) {
+            Write-Host ("Removed " + $removedDirs + " directory/directories left empty by the prune.")
+        }
     }
 
     if ($appliedCount -gt 0 -or $prunedCount -gt 0) {

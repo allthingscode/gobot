@@ -32,6 +32,7 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
     throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
 }
 . $helpersPath
+. (Join-Path $PSScriptRoot "lib/time.ps1")
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
 $StateFile = Join-Path $sessionDir "global/session_state.json"
 $LockFile = Join-Path $sessionDir "global/session_state.lock"
@@ -144,24 +145,24 @@ try {
                 }
             }
             if (-not $targetStateMap.$Specialist.PSObject.Properties["timestamp"]) {
-                $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-UtcTimestamp)
             } else {
-                $targetStateMap.$Specialist.timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                $targetStateMap.$Specialist.timestamp = Get-UtcTimestamp
             }
         } else {
             # Overwrite or create new section
             $targetStateMap | Add-Member -MemberType NoteProperty -Name $Specialist -Value $updateObj -Force
             if (-not $targetStateMap.$Specialist.PSObject.Properties["timestamp"]) {
-                $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-UtcTimestamp)
             } else {
-                $targetStateMap.$Specialist.timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                $targetStateMap.$Specialist.timestamp = Get-UtcTimestamp
             }
         }
     }
 
     # Update global fields if formalized schema is detected
     if ($state.PSObject.Properties["version"]) {
-        $nowStamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $nowStamp = Get-UtcTimestamp
         if ($state.PSObject.Properties["timestamp"]) {
             $state.timestamp = $nowStamp
         } else {

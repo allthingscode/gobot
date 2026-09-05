@@ -24,23 +24,40 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
-    # 1. Policy Drift check
-    echo "Running policy drift check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-policy-drift.ps1
+    # 1. Generated documentation check
+    # The budget tiers in docs/ are rendered from $script:BUDGET_CEILINGS and verified
+    # by byte comparison. This replaced check-policy-drift.ps1, whose tier comparison
+    # sourced its expectation from the policy table by regex, never matched, and so
+    # reported "synchronized" on every commit since the initial one. The remaining
+    # policy rules it carried now live in factory_lint below.
+    echo "Running generated documentation check..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-generated-docs.ps1
 
     # 2. Mojibake check
-    # Scan the framework's real top-level content dirs explicitly. A bare
-    # invocation defaults to adopter-oriented paths (.crucible/personas, etc.)
-    # that do not exist in the framework root, which previously left powershell/,
-    # sops/, docs/, and personas/ unscanned and let mojibake hide there.
+    # The scope is listed explicitly so this gate's reach is reviewable in the hook
+    # itself rather than inferred from the script's defaults. It must stay in sync with
+    # the framework branch of check-mojibake.ps1; check-mojibake.tests.ps1 pins both
+    # against the tracked root *.md files so a new root doc cannot silently fall out.
+    # This leg scans a fixed path list, not the staged files - the adopter leg below is
+    # the one that scans what is being committed.
     echo "Running mojibake check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md TODO.md
 
-    # 3. Go Factory Lint check
+    # 3. Culture-sensitive timestamp check
+    echo "Running culture-sensitive timestamp check..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-culture-sensitive-time.ps1
+
+    # 4. Go Factory Lint check
+    # The backlog directory is resolved here, by the one config parser, and handed to
+    # the linter. factory_lint used to re-derive it from config.yaml with a second
+    # parser that only matched a 2-space paths: block; anything else fell back to the
+    # default directory, which does not exist, and all three backlog lints passed
+    # without looking at anything. tr strips the CR that powershell.exe appends.
     echo "Running factory lint checks..."
-    go run scripts/factory_lint.go
+    BACKLOG_DIR="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "$REPO_ROOT" | tr -d '\r')"
+    go run scripts/factory_lint.go -framework-root "$FRAMEWORK_ROOT" -backlog-dir "$BACKLOG_DIR"
 
-    # 4. Unresolved Merge Conflict check
+    # 5. Unresolved Merge Conflict check
     echo "Scanning staged files for unresolved merge conflict markers..."
     STAGED_FILES=$(git diff --cached --name-only)
     if [ -n "$STAGED_FILES" ]; then

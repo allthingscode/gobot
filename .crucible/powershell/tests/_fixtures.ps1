@@ -3,6 +3,13 @@
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 
+# Get-TestRunRoot decides where this fixture is built. Guarded because a caller that
+# dot-sources only this file would otherwise fail on the first fixture request;
+# _harness.ps1 is idempotent, so loading it twice costs nothing.
+if (-not (Get-Command "Get-TestRunRoot" -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "_harness.ps1")
+}
+
 # Cache the path in a script-scope variable
 $script:SharedAdopterFixturePath = $null
 
@@ -18,7 +25,11 @@ function Get-SharedAdopterFixture {
     }
 
     # 3. Otherwise, build it once (fallback for standalone runs)
-    $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-shared-adopter-" + [guid]::NewGuid().ToString("N"))
+    # Inside the run root, so the fixture needs no owner marking of its own: the root
+    # carries the owning pid and collecting the root collects this with it. The guid
+    # stays because processes SHARE a run root - two children that both fell through to
+    # building their own fixture would otherwise git-init over each other.
+    $tempPath = Join-Path (Get-TestRunRoot) ("shared-adopter-" + [guid]::NewGuid().ToString("N"))
 
     . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 

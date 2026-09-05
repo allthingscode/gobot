@@ -4,6 +4,7 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+. (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-handoff.ps1"
@@ -28,7 +29,7 @@ try {
 
 $HANDOFF_DIR = Join-Path $tempRoot ".crucible/session/handoffs"
 $BACKUP_ROOT = Join-Path $tempRoot ".crucible/session/hb"
-$BACKUP_DIR = Join-Path $BACKUP_ROOT ((Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ"))
+$BACKUP_DIR = Join-Path $BACKUP_ROOT (Get-UtcFileTimestampMs)
 $STATE_FILE = Join-Path $tempRoot ".crucible/session/global/session_state.json"
 $STATE_BACKUP = Join-Path $tempRoot ".crucible/session/global/session_state.factory-test-backup.json"
 $results = @()
@@ -177,7 +178,7 @@ function Write-HandoffFixture {
         [hashtable]$Handoff
     )
     Remove-Item -Path (Join-Path $HANDOFF_DIR ($TaskId + "-*.json")) -ErrorAction SilentlyContinue
-    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+    $timestamp = Get-UtcFileTimestampMs
     $handoffFile = Join-Path $HANDOFF_DIR ($TaskId + "-" + $timestamp + ".json")
     $Handoff | ConvertTo-Json -Depth 12 | Out-File -LiteralPath $handoffFile -Encoding UTF8
     return $handoffFile

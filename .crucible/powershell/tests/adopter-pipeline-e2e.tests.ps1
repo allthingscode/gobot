@@ -12,6 +12,7 @@ Set-StrictMode -Version Latest
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+. (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
@@ -131,7 +132,7 @@ function Write-PipelineHandoff {
 
     $handoffDir = Join-Path $ProjectRoot ".crucible/session/handoffs"
     New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
-    $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+    $ts = Get-UtcFileTimestampMs
     $path = Join-Path $handoffDir ($TaskId + "-" + $ts + ".json")
     ($h | ConvertTo-Json -Depth 12) | Set-Content -Path $path -Encoding UTF8
     return $path

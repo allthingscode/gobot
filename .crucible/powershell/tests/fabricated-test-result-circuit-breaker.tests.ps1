@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+. (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $pwshCmd = Get-PwshCommand
@@ -114,7 +115,7 @@ APPROVED
         # 7. Write Reviewer->Operator handoff JSON (Reviewer APPROVED)
         $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
         New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
-        $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+        $timestamp = Get-UtcFileTimestampMs
         $handoffPath = Join-Path $handoffDir ("C-FABRICATED-" + $timestamp + ".json")
         $handoffData = [ordered]@{
             task_id                  = "C-FABRICATED"
@@ -145,7 +146,7 @@ APPROVED
         $logDir = Join-Path $projectRoot ".crucible/session/C-FABRICATED"
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
         $logFile = Join-Path $logDir "pipeline.log.jsonl"
-        $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $now = Get-UtcTimestamp
         $retryEvent = @{
             event = "quality_gate_retry"
             task_id = "C-FABRICATED"

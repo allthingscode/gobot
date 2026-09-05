@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+. (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $INIT_SCRIPT    = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 
@@ -95,7 +96,7 @@ try {
         # 5. Handoff: architect -> reviewer (spec only declares src/a.txt)
         $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
         New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
-        $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+        $ts = Get-UtcFileTimestampMs
         $handoffPath = Join-Path $handoffDir ("${taskId}-${ts}.json")
         $handoff = [ordered]@{
             task_id                  = $taskId
@@ -224,7 +225,7 @@ try {
         # 5. Handoff: architect -> reviewer (empty file_affinity)
         $handoffDir2 = Join-Path $projectRoot2 ".crucible/session/handoffs"
         New-Item -ItemType Directory -Path $handoffDir2 -Force | Out-Null
-        $ts2 = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+        $ts2 = Get-UtcFileTimestampMs
         $handoffPath2 = Join-Path $handoffDir2 ("${taskId2}-${ts2}.json")
         $handoff2 = [ordered]@{
             task_id                  = $taskId2

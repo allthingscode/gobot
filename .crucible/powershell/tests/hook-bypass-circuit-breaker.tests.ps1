@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+. (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 
 $results = @()
@@ -65,7 +66,7 @@ created_at: "2026-05-25"
 
         $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
         New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
-        $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+        $ts = Get-UtcFileTimestampMs
         $handoffPath = Join-Path $handoffDir ("${taskId}-${ts}.json")
         $handoff = [ordered]@{
             task_id                  = $taskId

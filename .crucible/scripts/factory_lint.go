@@ -10,14 +10,23 @@
 //     be mentioned (by filename) in BACKLOG.md.
 //  3. Backlog item YAML frontmatter must contain a valid status field.
 //  4. Specialist protocol enforcement: handoff schema, stale locks, session JSON.
-//  5. Policy drift: ensure factory logic and prompts match POLICY.md.
+//  5. Every phase prompt carries the mandatory policy enforcement block.
+//  6. Every phase prompt and SOP routes handoffs through new-handoff.ps1.
+//  7. No committable files under a stray .crucible/ at the framework repo root.
+//
+// The budget-tier comparison that used to live here is gone. It sourced its
+// expectation from the docs/policy.md table by regex, never matched, and reported
+// success on every run since the initial commit; the tiers are now generated into the
+// docs by powershell/gates/check-generated-docs.ps1 and verified by byte comparison.
 package main
 
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -31,22 +40,36 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cannot determine working directory: %v\n", err)
 		os.Exit(1)
 	}
-	frameworkRoot := projectRoot
-	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
-		frameworkRoot = os.Args[1]
+	frameworkRoot := flag.String("framework-root", projectRoot,
+		"root of the Crucible framework checkout (defaults to the working directory)")
+	backlogDir := flag.String("backlog-dir", "",
+		"resolved backlog directory; required, obtain it from powershell/resolve-config-path.ps1")
+	flag.Parse()
+
+	// The backlog path is an input, not something this tool re-derives. Resolving it
+	// here needed a second config parser, and that parser is what let a custom
+	// paths.backlog silently disable all three backlog lints: it fell back to the
+	// default directory, found nothing there, and reported success. Requiring the
+	// caller to state the path removes the parser and the failure mode with it.
+	if strings.TrimSpace(*backlogDir) == "" {
+		fmt.Fprintln(os.Stderr, "factory_lint: -backlog-dir is required")
+		flag.Usage()
+		os.Exit(2)
 	}
 
 	var failures []string
-	failures = append(failures, lintStaleReferences(projectRoot)...)
-	failures = append(failures, lintBacklogIndex(projectRoot)...)
-	failures = append(failures, lintBacklogStatus(projectRoot)...)
+	failures = append(failures, lintStaleReferences(projectRoot, *backlogDir)...)
+	failures = append(failures, lintBacklogIndex(*backlogDir)...)
+	failures = append(failures, lintBacklogStatus(*backlogDir)...)
 	failures = append(failures, lintSpecialistProtocols(projectRoot)...)
-	failures = append(failures, lintHandoffSchemaContracts(frameworkRoot)...)
-	failures = append(failures, lintHandoffValidationFixtures(frameworkRoot)...)
-	failures = append(failures, lintPolicyDrift(frameworkRoot)...)
-	failures = append(failures, lintDebugPrints(frameworkRoot)...)
-	failures = append(failures, lintFactorySelfReference(frameworkRoot)...)
-	failures = append(failures, lintRegexHygiene(frameworkRoot)...)
+	failures = append(failures, lintHandoffSchemaContracts(*frameworkRoot)...)
+	failures = append(failures, lintHandoffValidationFixtures(*frameworkRoot)...)
+	failures = append(failures, lintPromptPolicyBlocks(*frameworkRoot)...)
+	failures = append(failures, lintPhaseDocHandoffTool(*frameworkRoot)...)
+	failures = append(failures, lintTestPollution(*frameworkRoot)...)
+	failures = append(failures, lintDebugPrints(*frameworkRoot)...)
+	failures = append(failures, lintFactorySelfReference(*frameworkRoot)...)
+	failures = append(failures, lintRegexHygiene(*frameworkRoot)...)
 
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "\n--- factory_lint: %d issue(s) found ---\n", len(failures))
@@ -63,31 +86,10 @@ func main() {
 // contains a directory separator AND a recognized file extension.
 var pathRefRe = regexp.MustCompile("`((?:[a-zA-Z0-9_.-]+/)+[a-zA-Z0-9_.-]+\\.(?:go|yml|yaml|json|md|ps1|sh|toml))`")
 
-func getBacklogDir(root string) string {
-	configPath := filepath.Join(root, ".crucible", "config.yaml")
-	data, err := os.ReadFile(configPath)
-	if err == nil {
-		content := string(data)
-		pathsBlockRe := regexp.MustCompile(`(?ms)^paths:\s*\r?\n(.*?)(?:\r?\n\S|\z)`)
-		if m := pathsBlockRe.FindStringSubmatch(content); len(m) > 1 {
-			backlogRe := regexp.MustCompile(`(?m)^\s{2}backlog:\s*["']?([^"'\r\n]+)["']?\s*$`)
-			if bm := backlogRe.FindStringSubmatch(m[1]); len(bm) > 1 {
-				val := strings.TrimSpace(bm[1])
-				if filepath.IsAbs(val) {
-					return val
-				}
-				return filepath.Join(root, filepath.FromSlash(val))
-			}
-		}
-	}
-	return filepath.Join(root, ".crucible", "backlog")
-}
-
-// lintStaleReferences scans non-archived .md files under the resolved backlog directory
-// for backtick-quoted file paths and verifies each exists relative to root.
-func lintStaleReferences(root string) []string {
+// lintStaleReferences scans non-archived .md files under backlogDir for
+// backtick-quoted file paths and verifies each exists relative to root.
+func lintStaleReferences(root string, backlogDir string) []string {
 	var out []string
-	backlogDir := getBacklogDir(root)
 	if _, err := os.Stat(backlogDir); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -124,9 +126,8 @@ func lintStaleReferences(root string) []string {
 
 // lintBacklogIndex ensures every .md in features/, bugs/, and chores/ is
 // referenced (by filename) somewhere in BACKLOG.md.
-func lintBacklogIndex(root string) []string {
+func lintBacklogIndex(backlogDir string) []string {
 	var out []string
-	backlogDir := getBacklogDir(root)
 	backlogMd := filepath.Join(backlogDir, "BACKLOG.md")
 	data, err := os.ReadFile(backlogMd)
 	if err != nil {
@@ -175,9 +176,8 @@ var validStatuses = map[string]bool{
 }
 
 // lintBacklogStatus checks that each backlog item has a valid YAML status.
-func lintBacklogStatus(root string) []string {
+func lintBacklogStatus(backlogDir string) []string {
 	var out []string
-	backlogDir := getBacklogDir(root)
 	for _, subDir := range []string{"features", "bugs", "chores"} {
 		dir := filepath.Join(backlogDir, subDir, "active")
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
@@ -425,71 +425,141 @@ func lintHandoffValidationFixtures(root string) []string {
 	return out
 }
 
-// lintPolicyDrift ensures that the framework's orchestration logic and templates
-// stay synchronized with the canonical docs/policy.md.
-func lintPolicyDrift(root string) []string {
+// phaseDocs are the per-phase prompt templates and SOPs. The three lints below key
+// off this one list rather than each enumerating by pattern, and a listed file that
+// does not exist is a failure. check-policy-drift.ps1 wrapped the equivalent loop in
+// `if (Test-Path $fullPath)`, so a renamed doc removed its own coverage silently.
+var phaseDocs = []string{
+	"prompts/research_prompt.md",
+	"prompts/grooming_prompt.md",
+	"prompts/implementation_prompt.md",
+	"prompts/verification_prompt.md",
+	"prompts/deployment_prompt.md",
+	"sops/research.md",
+	"sops/grooming.md",
+	"sops/implementation.md",
+	"sops/verification.md",
+	"sops/deployment.md",
+}
+
+const policyEnforcementHeading = "## POLICY ENFORCEMENT (Mandatory)"
+
+// directHandoffWriteRe matches an instruction to write a handoff JSON by hand, which
+// bypasses new-handoff.ps1 and its schema validation.
+var directHandoffWriteRe = regexp.MustCompile("(?i)Write\\s+`[^`]*(?:handoffs/[^`]*\\.json|handoff\\.json)`")
+
+// requiredPromptFiles returns the prompts/ entries of phaseDocs, by base name.
+func requiredPromptFiles() []string {
 	var out []string
-	policyPath := filepath.Join(root, "docs", "policy.md")
-	data, err := os.ReadFile(policyPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []string{"docs/policy.md: missing canonical policy file"}
-		}
-		return []string{fmt.Sprintf("docs/policy.md: cannot read: %v", err)}
-	}
-	policy := string(data)
-
-	// 1. Check Budget Tiers in factory.ps1
-	factoryPath := filepath.Join(root, "powershell", "factory.ps1")
-	if factoryData, err := os.ReadFile(factoryPath); err == nil {
-		factory := string(factoryData)
-
-		tiers := []struct {
-			name string
-			re   *regexp.Regexp
-		}{
-			{"Low", regexp.MustCompile(`Token Budget \(Low\)\s*\|\s*(\d+)`)},
-			{"Medium", regexp.MustCompile(`Token Budget \(Medium\)\s*\|\s*(\d+)`)},
-			{"High", regexp.MustCompile(`Token Budget \(High\)\s*\|\s*(\d+)`)},
-		}
-
-		for _, t := range tiers {
-			m := t.re.FindStringSubmatch(policy)
-			if m != nil {
-				val := m[1]
-				var check string
-				switch t.name {
-				case "Low":
-					check = fmt.Sprintf("$budgetCeilings = @{ low = %s;", val)
-				case "Medium":
-					check = fmt.Sprintf("medium = %s;", val)
-				case "High":
-					check = fmt.Sprintf("high = %s }", val)
-				}
-				if !strings.Contains(factory, check) {
-					out = append(out, fmt.Sprintf("powershell/factory.ps1: budget tier %s mismatch with POLICY.md (expected %s)", t.name, val))
-				}
-			}
+	for _, rel := range phaseDocs {
+		if name, ok := strings.CutPrefix(rel, "prompts/"); ok {
+			out = append(out, name)
 		}
 	}
-
-	// 2. Check Prompt Templates for Policy Enforcement block
-	promptDir := filepath.Join(root, "prompts")
-	if entries, err := os.ReadDir(promptDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), "_prompt.md") {
-				continue
-			}
-			path := filepath.Join(promptDir, e.Name())
-			if promptData, err := os.ReadFile(path); err == nil {
-				if !strings.Contains(string(promptData), "## POLICY ENFORCEMENT (Mandatory)") {
-					out = append(out, fmt.Sprintf("prompts/%s: missing mandatory Policy Enforcement block", e.Name()))
-				}
-			}
-		}
-	}
-
 	return out
+}
+
+// lintPromptPolicyBlocks verifies that every phase prompt carries the mandatory policy
+// enforcement heading, and that the enumeration found the prompts it was supposed to.
+// The cardinality pin is the point: this check reads its subject set from the
+// filesystem, and an enumeration that matches nothing otherwise passes - the same
+// "found nothing, therefore fine" shape as the tier regex it replaced.
+func lintPromptPolicyBlocks(root string) []string {
+	var out []string
+	promptDir := filepath.Join(root, "prompts")
+	entries, err := os.ReadDir(promptDir)
+	if err != nil {
+		return []string{fmt.Sprintf("prompts/: cannot enumerate prompt templates: %v", err)}
+	}
+
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_prompt.md") {
+			continue
+		}
+		seen[e.Name()] = true
+		data, readErr := os.ReadFile(filepath.Join(promptDir, e.Name()))
+		if readErr != nil {
+			out = append(out, fmt.Sprintf("prompts/%s: cannot read: %v", e.Name(), readErr))
+			continue
+		}
+		if !strings.Contains(string(data), policyEnforcementHeading) {
+			out = append(out, fmt.Sprintf("prompts/%s: missing mandatory Policy Enforcement block", e.Name()))
+		}
+	}
+
+	for _, name := range requiredPromptFiles() {
+		if !seen[name] {
+			out = append(out, fmt.Sprintf("prompts/%s: expected phase prompt was not found, so nothing checked it for the Policy Enforcement block", name))
+		}
+	}
+	return out
+}
+
+// lintPhaseDocHandoffTool asserts that every phase prompt and SOP routes handoffs
+// through new-handoff.ps1 and none of them instructs writing the JSON directly.
+func lintPhaseDocHandoffTool(root string) []string {
+	var out []string
+	for _, rel := range phaseDocs {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			out = append(out, fmt.Sprintf("%s: cannot read phase doc: %v", rel, err))
+			continue
+		}
+		content := string(data)
+		if directHandoffWriteRe.MatchString(content) {
+			out = append(out, fmt.Sprintf("%s: instructs writing handoff JSON directly instead of using new-handoff.ps1", rel))
+		}
+		if !strings.Contains(content, "new-handoff.ps1") {
+			out = append(out, fmt.Sprintf("%s: missing reference to new-handoff.ps1", rel))
+		}
+	}
+	return out
+}
+
+// lintTestPollution fails when committable files sit under a stray .crucible/ at the
+// framework repo root. This is framework test hygiene rather than policy - it means a
+// test wrote its runtime state into the checkout instead of an isolated temp dir - and
+// it was filed under "policy drift" only because that is where it was written.
+//
+// It keys off the framework root, never the working directory. In an adopter a root
+// .crucible/ is the product, not pollution; there the framework root is that bundle
+// and .crucible/.crucible does not exist, so this correctly finds nothing.
+func lintTestPollution(root string) []string {
+	if _, err := os.Stat(filepath.Join(root, ".crucible")); err != nil {
+		return nil
+	}
+	// Outside a work tree nothing can be committed, so the condition does not apply.
+	// This is not a fail-open: the check has an answer, and the answer is "clean".
+	if err := exec.Command("git", "-C", root, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+		return nil
+	}
+
+	var committable []string
+	for _, args := range [][]string{
+		{"ls-files", "--", ".crucible"},
+		{"ls-files", "--others", "--exclude-standard", "--", ".crucible"},
+	} {
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).Output()
+		if err != nil {
+			return []string{fmt.Sprintf(".crucible: cannot enumerate a stray root .crucible (git %s): %v", strings.Join(args, " "), err)}
+		}
+		for line := range strings.SplitSeq(string(out), "\n") {
+			if trimmed := strings.TrimSpace(line); trimmed != "" {
+				committable = append(committable, trimmed)
+			}
+		}
+	}
+	if len(committable) == 0 {
+		return nil
+	}
+
+	shown := committable
+	if len(shown) > 10 {
+		shown = shown[:10]
+	}
+	return []string{fmt.Sprintf(".crucible: test pollution - %d committable file(s) under a stray root .crucible (%s); tests must write runtime state to isolated temp dirs",
+		len(committable), strings.Join(shown, ", "))}
 }
 
 // collectRoleRequiredFields reads the schema and returns, per source_phase,

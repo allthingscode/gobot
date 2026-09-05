@@ -45,14 +45,50 @@ Bump `VERSION` BEFORE tagging. The tag references the commit that contains the n
 
 4. **Commit:** `chore(release): vX.Y.Z` (single commit covering the CHANGELOG promotion + VERSION bump).
 
-5. **Tag the commit** with an annotated tag:
-   ```powershell
-   git tag -a "vX.Y.Z" -m "Release vX.Y.Z"
-   ```
+Under the batched push cadence in [../CONTRIBUTING.md](../CONTRIBUTING.md), the
+release commit can sit locally for days before it is pushed, and CI runs only on
+push - and only on the pushed tip, not on every commit in the batch. So the
+release commit is usually not the commit CI verifies: later commits land on top
+of it while the batch waits. Do not create the tag while the release is
+unpushed, and do not tag the release commit by hash. Push first, then tag the
+verified tip. Steps 5 and 6 interleave accordingly.
 
-6. **Push the commit and tag:**
+Tagging the tip rather than the `chore(release)` commit is correct only while
+nothing else in the batch touched the release's own content. New entries under
+`## [Unreleased]` are not that, and are expected: under the batched cadence,
+work keeps landing on top of the release commit for as long as it waits. So a
+file-level check on `CHANGELOG.md` fires on every batch, and a check that always
+fires is one the operator learns to wave through. Compare the released section
+itself:
+
+```powershell
+$rel = "<release-commit>"
+$v   = (Get-Content VERSION).Trim()
+$pat = "(?ms)^## \[" + [regex]::Escape($v) + "\].*?(?=^## \[|\z)"
+function Get-Released($text) { [regex]::Match(($text -replace "`r`n", "`n"), $pat).Value }
+
+$old = Get-Released ((git show "${rel}:CHANGELOG.md") -join "`n")
+$new = Get-Released (Get-Content CHANGELOG.md -Raw)
+
+git diff --quiet "$rel..HEAD" -- VERSION   # quoted: PowerShell reads $rel..HEAD as property access
+if     ($LASTEXITCODE -ne 0) { "STOP: VERSION moved since the release commit" }
+elseif (-not $old)           { "STOP: no released section for v$v in $rel" }
+elseif ($old -ne $new)       { "STOP: the released section for v$v changed" }
+else                         { "OK: released section intact, tag the tip" }
+```
+
+On `STOP`, re-cut the release rather than tagging over it.
+
+5. **Push the commit, then wait for the matrix.**
    ```powershell
    git push origin main
+   ```
+   Wait for the Windows and Linux legs to pass on the resulting tip. Do not
+   continue while either leg is red or still running.
+
+6. **Tag the verified tip, then push the tag:**
+   ```powershell
+   git tag -a "vX.Y.Z" -m "Release vX.Y.Z"   # HEAD is the CI-verified tip
    git push origin vX.Y.Z
    ```
 

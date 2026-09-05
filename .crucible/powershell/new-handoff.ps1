@@ -455,7 +455,7 @@ if (@($HumanApproved).Count -gt 0 -or @($HumanDeferred).Count -gt 0 -or @($Human
     }
 }
 
-$timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+$timestamp = Get-UtcFileTimestamp
 $resolvedOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath
 } else {

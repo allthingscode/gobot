@@ -102,6 +102,111 @@ try {
         $gotEmpty = Get-ConfiguredManifestFiles -ProjectRoot $proj
         Assert-Result -Name "missing manifests empty" -Condition (@($gotEmpty).Count -eq 0) -FailureMessage "expected empty array when key is missing"
     }
+
+    # --- indent-agnostic parsing (TODO item 34) ------------------------------
+    # Every accessor used to pin the indent to exactly two spaces, so a 3-space,
+    # 4-space, tab-indented or BOM-prefixed config - all valid YAML - read as absent
+    # and silently took the default. For require_green_ci that default is "false",
+    # which switches the publish gate off while the file says it is on.
+
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    $bomEnc = New-Object System.Text.UTF8Encoding($true)
+    function New-ConfigProject($Name, $Text, [switch]$WithBom) {
+        $proj = Join-Path $tempRoot $Name
+        New-Item -ItemType Directory -Path (Join-Path $proj ".crucible") -Force | Out-Null
+        $writer = if ($WithBom) { $bomEnc } else { $enc }
+        [System.IO.File]::WriteAllText((Join-Path $proj ".crucible/config.yaml"), $Text, $writer)
+        return $proj
+    }
+
+    $indentCases = @(
+        @{ Name = "2space"; Indent = "  " },
+        @{ Name = "3space"; Indent = "   " },
+        @{ Name = "4space"; Indent = "    " },
+        @{ Name = "tab";    Indent = "`t" }
+    )
+
+    $results += Run-Test -Name "Get-ConfiguredPath reads any indent width" -Body {
+        foreach ($case in $indentCases) {
+            $proj = New-ConfigProject ("indent-path-" + $case.Name) ("paths:`n" + $case.Indent + "backlog: work/items`n")
+            $got = Get-ConfiguredPath -Key "backlog" -ProjectRoot $proj
+            $expected = Join-Path (Resolve-Path -LiteralPath $proj).Path "work/items"
+            Assert-Result -Name ($case.Name + " backlog") -Condition ($got -eq $expected) -FailureMessage ("expected '$expected', got '$got'")
+        }
+    }
+
+    $results += Run-Test -Name "Get-ConfiguredReview reads any indent width" -Body {
+        foreach ($case in $indentCases) {
+            $proj = New-ConfigProject ("indent-review-" + $case.Name) ("review:`n" + $case.Indent + "require_green_ci: true`n")
+            $got = Get-ConfiguredReview -Key "require_green_ci" -ProjectRoot $proj
+            Assert-Result -Name ($case.Name + " require_green_ci") -Condition ($got -eq "true") -FailureMessage ("expected 'true', got '$got' - the CI publish gate would be off")
+        }
+    }
+
+    $results += Run-Test -Name "Get-ModelFromConfig reads any indent width" -Body {
+        foreach ($case in $indentCases) {
+            $i = $case.Indent
+            $yaml = "models:`n" + $i + "targets:`n" + $i + $i + "claude:`n" + $i + $i + $i + "strong: opus-probe`n"
+            $proj = New-ConfigProject ("indent-model-" + $case.Name) $yaml
+            $got = Get-ConfiguredModel -Target "claude" -Tier "strong" -ProjectRoot $proj
+            Assert-Result -Name ($case.Name + " model") -Condition ($got -eq "opus-probe") -FailureMessage ("expected 'opus-probe', got '$got'")
+        }
+    }
+
+    $results += Run-Test -Name "Get-ConfiguredManifestFiles reads any indent width" -Body {
+        foreach ($case in $indentCases) {
+            $proj = New-ConfigProject ("indent-manifest-" + $case.Name) ("manifest_files:`n" + $case.Indent + "- go.mod`n" + $case.Indent + "- go.sum`n")
+            $got = @(Get-ConfiguredManifestFiles -ProjectRoot $proj)
+            Assert-Result -Name ($case.Name + " manifest") -Condition (($got -join ",") -eq "go.mod,go.sum") -FailureMessage ("expected 'go.mod,go.sum', got '" + ($got -join ",") + "'")
+        }
+    }
+
+    $results += Run-Test -Name "A UTF-8 BOM does not hide the first key" -Body {
+        $proj = New-ConfigProject "bom-config" "paths:`n  backlog: work/items`n" -WithBom
+        $got = Get-ConfiguredPath -Key "backlog" -ProjectRoot $proj
+        $expected = Join-Path (Resolve-Path -LiteralPath $proj).Path "work/items"
+        Assert-Result -Name "bom backlog" -Condition ($got -eq $expected) -FailureMessage ("expected '$expected', got '$got'")
+    }
+
+    $results += Run-Test -Name "A trailing comment is not part of the value" -Body {
+        $proj = New-ConfigProject "inline-comment" "review:`n  diff_tool: zed  # the reviewer's editor`n"
+        $got = Get-ConfiguredReview -Key "diff_tool" -ProjectRoot $proj
+        Assert-Result -Name "comment stripped" -Condition ($got -eq "zed") -FailureMessage ("expected 'zed', got '$got'")
+    }
+
+    $results += Run-Test -Name "An absent key still takes the documented default" -Body {
+        $proj = New-ConfigProject "absent-keys" "project:`n  name: `"x`"`n"
+        Assert-Result -Name "review default" -Condition ((Get-ConfiguredReview -Key "require_green_ci" -ProjectRoot $proj) -eq "false") -FailureMessage "absent require_green_ci should default to false"
+        $expected = Join-Path (Resolve-Path -LiteralPath $proj).Path ".crucible/backlog"
+        Assert-Result -Name "path default" -Condition ((Get-ConfiguredPath -Key "backlog" -ProjectRoot $proj) -eq $expected) -FailureMessage "absent backlog should default"
+        Assert-Result -Name "manifest default" -Condition (@(Get-ConfiguredManifestFiles -ProjectRoot $proj).Count -eq 0) -FailureMessage "absent manifest_files should be empty"
+    }
+
+    $results += Run-Test -Name "A key present but unreadable throws instead of defaulting" -Body {
+        $valueless = New-ConfigProject "unreadable-valueless" "review:`n  require_green_ci:`n"
+        $threw = $false
+        try { $null = Get-ConfiguredReview -Key "require_green_ci" -ProjectRoot $valueless } catch { $threw = $true }
+        Assert-Result -Name "valueless key throws" -Condition $threw -FailureMessage "a key with no value must not fall back to the default"
+
+        $malformed = New-ConfigProject "unreadable-malformed" "paths:`n  backlog `"work/items`"`n"
+        $threw = $false
+        try { $null = Get-ConfiguredPath -Key "backlog" -ProjectRoot $malformed } catch { $threw = $true }
+        Assert-Result -Name "malformed line throws" -Condition $threw -FailureMessage "a key line missing its colon must not read as absent"
+
+        $notAList = New-ConfigProject "unreadable-list" "manifest_files: go.mod`n"
+        $threw = $false
+        try { $null = Get-ConfiguredManifestFiles -ProjectRoot $notAList } catch { $threw = $true }
+        Assert-Result -Name "non-list throws" -Condition $threw -FailureMessage "a scalar manifest_files must not read as an empty list"
+    }
+
+    $results += Run-Test -Name "The shipped template config parses through the primitive" -Body {
+        $template = Join-Path $REPO_ROOT "templates/project/.crucible/config.yaml"
+        $content = Get-Content -LiteralPath $template -Raw -Encoding UTF8
+        $got = Get-ConfigBlockValue -Content $content -Path @("models", "targets", "antigravity", "strong") -Source $template
+        Assert-Result -Name "quoted nested value" -Condition ($got -eq "Gemini 3.1 Pro (High)") -FailureMessage ("expected the quoted antigravity strong model, got '$got'")
+        $absent = Get-ConfigBlockValue -Content $content -Path @("review", "require_green_ci") -Source $template
+        Assert-Result -Name "commented-out block is absent" -Condition ($null -eq $absent) -FailureMessage "a commented-out review block must read as absent, not as a value"
+    }
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

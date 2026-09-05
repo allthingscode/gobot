@@ -122,9 +122,50 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory-statu
 - `.gemini/`
 - `.private/`
 - `.agent-workspaces/`
-- Anything ignored by the adopter repo under `.crucible/`
+- Anything ignored by the adopter repo under `.crucible/`, except the scaffold snapshot under `.crucible/templates/project/.crucible/` (see below)
 
 For customized framework files, the updater uses the recorded `crucible_install_commit` to distinguish safe upstream changes from local edits that need manual merge.
+
+---
+
+## Scaffold content and how to decline it
+
+Files under `.crucible/templates/project/.crucible/` in the source repo are the **scaffold**. Each one reaches your bundle twice:
+
+- as a **snapshot**, at the same path (`.crucible/templates/project/.crucible/README.md`) - this is framework-owned reference material and is always restored if missing;
+- as an **instantiated** copy, at the bundle root (`.crucible/README.md`) - this is seed material for your project to own and edit.
+
+`update-bundle.ps1` creates instantiated scaffold files that are absent, including ones added upstream after you installed. When it does, it names them:
+
+```
+Instantiated 1 scaffold file(s) into your bundle:
+  .crucible/agent-instructions/AGENTS.md
+```
+
+If the path was already shipped at your recorded baseline, the wording changes, because the likely cause is that you deleted it:
+
+```
+Recreated 1 scaffold file(s) that are missing from your bundle:
+  .crucible/agent-instructions/AGENTS.md
+```
+
+Both notices appear on `-Mode report-only` and `-DryRun` runs too, phrased as "Would instantiate" / "Would recreate", so a preview tells you which paths are yours to decline before anything is written.
+
+**Deleting an instantiated scaffold file is not an opt-out.** The updater decides what to write purely from presence on disk: a missing file is restored, full stop. The two wordings above come from the provenance manifest and change nothing about that - a deleted file is recreated on the next update and on every update after that.
+
+To decline a scaffold file permanently, delete it **and** ignore its path in your repo:
+
+```powershell
+Remove-Item .crucible/agent-instructions/AGENTS.md
+Add-Content .gitignore ".crucible/agent-instructions/AGENTS.md"
+```
+
+The updater consults `git check-ignore` for instantiated paths, so full gitignore syntax works - directory patterns (`.crucible/agent-instructions/`), globs, and negations. The declaration lives in a file you own, survives updates, and shows up in a diff.
+
+Two limits worth knowing:
+
+- The exemption does not apply to the snapshot under `.crucible/templates/project/.crucible/`. Ignoring a snapshot path does not stop it being restored; that content is framework-owned.
+- Ignoring a path means you get no file at all. There is currently no way to keep an instantiated scaffold file present but untracked.
 
 ---
 

@@ -14,6 +14,7 @@ $VALIDATE_CONFIG = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
 $FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
 $FACTORY_LINT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
+$RESOLVE_PATH = Join-Path $REPO_ROOT "powershell/resolve-config-path.ps1"
 
 $results = @()
 
@@ -106,10 +107,12 @@ Add a health endpoint.
 
         # Run the same pre-commit lint used by adopters. It requires active backlog item
         # filenames to appear in BACKLOG.md, so Active Items must use markdown links.
+        $backlogDir = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot
+        Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         Push-Location $projectRoot
         try {
             $factoryLintCmd = Invoke-ExternalCommand {
-                go run $FACTORY_LINT $REPO_ROOT
+                go run $FACTORY_LINT -framework-root $REPO_ROOT -backlog-dir $backlogDir
             }
         } finally {
             Pop-Location

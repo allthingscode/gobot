@@ -130,6 +130,44 @@ try {
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code under StrictMode" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
     }
+
+    $results += Run-Test -Name "Merge conflict window excludes event just over seven days old" -Body {
+        $statePath = Join-Path $projectRoot ".crucible/session/global/session_state.json"
+        $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $state.tasks | Add-Member -MemberType NoteProperty -Name "F-005" -Value ([pscustomobject]@{
+            status = "blocked"
+        }) -Force
+        $state | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $statePath -Encoding UTF8
+
+        $eventInstant = [DateTimeOffset]::UtcNow.AddDays(-7).AddMinutes(-1).ToOffset([TimeSpan]::FromHours(-5))
+        $eventTimestamp = $eventInstant.ToString("yyyy-MM-ddTHH:mm:sszzz", [System.Globalization.CultureInfo]::InvariantCulture)
+        $cbPath = Join-Path $projectRoot ".crucible/session/global/circuit_breakers.jsonl"
+        $event = [ordered]@{
+            event = "circuit_breaker"
+            timestamp = $eventTimestamp
+            task_id = "F-005"
+            outcome = "merge_conflict"
+            notes = "older than seven days in UTC"
+        }
+        $event | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $cbPath -Encoding UTF8
+
+        Push-Location $projectRoot
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -ExportJSON
+            }
+        } finally {
+            Pop-Location
+        }
+
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "seven day boundary status exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+        $json = $output | ConvertFrom-Json
+        Assert-Result -Name "seven day boundary excludes stale conflict" -Condition ($json.stats.conflict_rate -eq 0) -FailureMessage "expected conflict_rate=0 for stale event. Output:`n$output"
+
+        $statusSource = Get-Content -LiteralPath $STATUS_SCRIPT -Raw -Encoding UTF8
+        Assert-Result -Name "seven day boundary cutoff is UTC based" -Condition ($statusSource -match '\(Get-Date\)\.ToUniversalTime\(\)\.AddDays\(-7\)') -FailureMessage "merge conflict cutoff must compare UTC to UTC"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

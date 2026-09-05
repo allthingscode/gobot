@@ -27,6 +27,18 @@ if (-not (Test-Path -LiteralPath $platformLibPath)) {
     throw "Required helper script not found at $platformLibPath; your Crucible bundle is incomplete."
 }
 . $platformLibPath
+
+$gitignoreLibPath = Join-Path $PSScriptRoot "lib/gitignore-conformance.ps1"
+if (-not (Test-Path -LiteralPath $gitignoreLibPath)) {
+    throw "Required helper script not found at $gitignoreLibPath; your Crucible bundle is incomplete."
+}
+. $gitignoreLibPath
+
+$lineEndingLibPath = Join-Path $PSScriptRoot "lib/line-ending-conformance.ps1"
+if (-not (Test-Path -LiteralPath $lineEndingLibPath)) {
+    throw "Required helper script not found at $lineEndingLibPath; your Crucible bundle is incomplete."
+}
+. $lineEndingLibPath
 Push-Location $REPO_ROOT
 
 $minimumGoVersion = "1.25.7"
@@ -291,6 +303,52 @@ if ($frameworkMode) {
         if (Test-Path -LiteralPath $resolvedBundle -PathType Container) {
             Add-DoctorResult -Check "bundle.root" -Status "pass" -Severity "critical" `
                 -Details ("Bundle directory exists at " + $resolvedBundle + ".")
+
+            # Adopter ignore rules can silently override Crucible's commit-by-default
+            # list: an unanchored root pattern matches at EVERY depth, so `AGENTS.md`
+            # also swallows .crucible/agent-instructions/AGENTS.md. Advisory, because
+            # docs/git-policy.md states the list is a recommendation an adopter may
+            # deliberately override; a deliberate choice must not read as NOT READY.
+            $conformance = Test-GitignoreConformance -ProjectRoot $REPO_ROOT -BundleRoot $resolvedBundle
+            if ($conformance.Status -eq "skipped") {
+                Add-DoctorResult -Check "gitignore.conformance" -Status "warn" -Severity "advisory" `
+                    -Details ("Could not check ignore rules against the bundle: " + $conformance.Reason) `
+                    -Remediation "Run the doctor inside the project's git work tree with git on PATH."
+            } elseif ($conformance.Status -eq "error") {
+                Add-DoctorResult -Check "gitignore.conformance" -Status "warn" -Severity "advisory" `
+                    -Details ("Ignore-rule check did not complete: " + $conformance.Reason) `
+                    -Remediation "The check made no finding either way; report this with your git version."
+            } elseif (@($conformance.Violations).Count -eq 0) {
+                Add-DoctorResult -Check "gitignore.conformance" -Status "pass" -Severity "advisory" `
+                    -Details ("All " + $conformance.Checked + " commit-by-default bundle files are committable; no ignore rule outside the bundle excludes them.")
+            } else {
+                Add-DoctorResult -Check "gitignore.conformance" -Status "warn" -Severity "advisory" `
+                    -Details ([string](@($conformance.Violations).Count) + " of " + $conformance.Checked + " commit-by-default bundle files are excluded by ignore rules outside the bundle: " + (Format-GitignoreConformanceDetail -Violations @($conformance.Violations))) `
+                    -Remediation "Anchor the pattern to the repo root with a leading slash (e.g. '/AGENTS.md' not 'AGENTS.md'), or negate the bundle path. See .crucible/docs/git-policy.md."
+            }
+
+            # .crucible/.gitattributes governs only the bundle subtree, so the adopter's
+            # own tree keeps whatever core.autocrlf stored. Advisory, because this is a
+            # pre-existing condition of the adopter's repo and not something a Crucible
+            # task introduced; blocking would hold a task hostage to unrelated history.
+            $lineEndings = Test-LineEndingConformance -ProjectRoot $REPO_ROOT -BundleRoot $resolvedBundle
+            $lineEndingRemediation = "These blobs will check out with CRLF on every machine regardless of local config, which breaks shell scripts and Makefiles on Linux runners. Add a root .gitattributes with '* text=auto eol=lf' and renormalize with 'git add --renormalize .' in a dedicated commit. Crucible will not write this file for you: it governs paths Crucible does not own."
+            if ($lineEndings.Status -eq "skipped") {
+                Add-DoctorResult -Check "lineendings.conformance" -Status "warn" -Severity "advisory" `
+                    -Details ("Could not check index line endings: " + $lineEndings.Reason) `
+                    -Remediation "Run the doctor inside the project's git work tree with git on PATH."
+            } elseif ($lineEndings.Status -eq "error") {
+                Add-DoctorResult -Check "lineendings.conformance" -Status "warn" -Severity "advisory" `
+                    -Details ("Line-ending check did not complete: " + $lineEndings.Reason) `
+                    -Remediation "The check made no finding either way; report this with your git version."
+            } elseif (@($lineEndings.Violations).Count -eq 0) {
+                Add-DoctorResult -Check "lineendings.conformance" -Status "pass" -Severity "advisory" `
+                    -Details ("All " + $lineEndings.Checked + " tracked files outside the bundle store LF in the index.")
+            } else {
+                Add-DoctorResult -Check "lineendings.conformance" -Status "warn" -Severity "advisory" `
+                    -Details ([string](@($lineEndings.Violations).Count) + " of " + $lineEndings.Checked + " tracked files outside the bundle store CRLF or mixed line endings in the index: " + (Format-LineEndingConformanceDetail -Violations @($lineEndings.Violations))) `
+                    -Remediation $lineEndingRemediation
+            }
         } else {
             Add-DoctorResult -Check "bundle.root" -Status "fail" -Severity "critical" `
                 -Details ("crucible_root points to a missing directory: " + $resolvedBundle + ".") `

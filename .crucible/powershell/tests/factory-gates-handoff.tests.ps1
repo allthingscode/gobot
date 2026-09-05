@@ -37,7 +37,24 @@ function New-TestContext {
     $handoffDir = Join-Path $sessionDir "handoffs"
     $backlogDir = Join-Path $TempRoot "backlog"
     $frameworkDir = Join-Path $TempRoot "powershell"
-    New-Item -ItemType Directory -Path $handoffDir, $backlogDir, $frameworkDir -Force | Out-Null
+    $crucibleDir = Join-Path $TempRoot ".crucible"
+    New-Item -ItemType Directory -Path $handoffDir, $backlogDir, $frameworkDir, $crucibleDir -Force | Out-Null
+
+    # Invoke-HandoffPreflightValidation runs the framework-integrity gate, which reads a
+    # real bundle directory in a real git tree and blocks when it cannot. This context
+    # declared CrucibleRoot = ".crucible" without creating it, and passed only because
+    # the gate used to report "clean" for a tree it had never read. Same reason
+    # factory-gates-affinity.tests.ps1 inits a repo in its fixtures.
+    if (-not (Test-Path -LiteralPath (Join-Path $TempRoot ".git"))) {
+        git -C $TempRoot init --quiet | Out-Null
+        git -C $TempRoot config user.name "Test" | Out-Null
+        git -C $TempRoot config user.email "test@example.com" | Out-Null
+        git -C $TempRoot config core.autocrlf false | Out-Null
+        git -C $TempRoot config commit.gpgSign false | Out-Null
+        "test fixture" | Set-Content -LiteralPath (Join-Path $crucibleDir "README.md") -Encoding UTF8
+        git -C $TempRoot add -A | Out-Null
+        git -C $TempRoot commit -m "init" --quiet | Out-Null
+    }
 
     return @{
         RepoRoot = $TempRoot
@@ -345,7 +362,18 @@ exit 0
 `$sessionDir = Join-Path '$caseRoot' 'session'
 `$handoffDir = Join-Path `$sessionDir 'handoffs'
 `$frameworkDir = Join-Path '$caseRoot' 'powershell'
-New-Item -ItemType Directory -Path `$handoffDir, `$frameworkDir -Force | Out-Null
+`$crucibleDir = Join-Path '$caseRoot' '.crucible'
+New-Item -ItemType Directory -Path `$handoffDir, `$frameworkDir, `$crucibleDir -Force | Out-Null
+# The framework-integrity gate inside preflight reads a real bundle in a real git
+# tree and blocks when it cannot; it used to report "clean" for a tree it never read.
+git -C '$caseRoot' init --quiet | Out-Null
+git -C '$caseRoot' config user.name 'Test' | Out-Null
+git -C '$caseRoot' config user.email 'test@example.com' | Out-Null
+git -C '$caseRoot' config core.autocrlf false | Out-Null
+git -C '$caseRoot' config commit.gpgSign false | Out-Null
+'fixture' | Set-Content -LiteralPath (Join-Path `$crucibleDir 'README.md') -Encoding UTF8
+git -C '$caseRoot' add -A | Out-Null
+git -C '$caseRoot' commit -m 'init' --quiet | Out-Null
 `$handoffPath = Join-Path `$handoffDir 'F-PRE-20260526T120000Z.json'
 @{
     task_id = 'F-PRE'

@@ -121,14 +121,11 @@ function Mark-DuplicateHandoffsAsSuperseded {
 
     if ($records.Count -lt 2) { return }
 
-    $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $now = Get-UtcTimestamp
     $activeRecords = @($records | Where-Object { -not ($_.Obj.PSObject.Properties["superseded"] -and $_.Obj.superseded -eq $true) })
     $groups = $activeRecords | Group-Object -Property Key
-    $duplicateCandidateCount = 0
-    $supersedeOps = 0
     foreach ($group in $groups) {
         if ($group.Count -le 1) { continue }
-        $duplicateCandidateCount += $group.Count
         $sorted = @($group.Group | Sort-Object @{ Expression = { $_.Ts }; Descending = $true }, @{ Expression = { $_.File.Name }; Descending = $true })
         $winner = $sorted[0]
         $winnerFileName = $winner.File.Name
@@ -154,14 +151,8 @@ function Mark-DuplicateHandoffsAsSuperseded {
             $loserObj | Add-Member -MemberType NoteProperty -Name superseded_reason -Value "deterministic_duplicate_transition" -Force
             $loserObj | ConvertTo-Json -Depth 12 | Set-Content -Path $loser.File.FullName -Encoding UTF8
 
-            Write-EventLog -Event "degraded" -TaskId $TaskId -Specialist "factory" -Outcome "warned" -Notes ("Superseded duplicate handoff: " + $loser.File.Name + " -> " + $winnerFileName)
             Write-Quiet ("[HANDOFF] Superseded duplicate: " + $loser.File.Name + " -> " + $winnerFileName) -ForegroundColor Yellow
-            $supersedeOps++
         }
-    }
-
-    if ($duplicateCandidateCount -gt 0) {
-        Write-EventLog -Event "degraded" -TaskId $TaskId -Specialist "factory" -Outcome "warned" -Notes ("Duplicate candidates: " + $duplicateCandidateCount + "; supersede operations: " + $supersedeOps)
     }
 }
 

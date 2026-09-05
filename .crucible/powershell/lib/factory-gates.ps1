@@ -1,150 +1,9 @@
 . (Join-Path $PSScriptRoot "platform.ps1")
 . (Join-Path $PSScriptRoot "injection-detector.ps1")
 . (Join-Path $PSScriptRoot "backlog-io.ps1")
-
-$script:WEDGE_RECOVERY_BY_CODE = @{
-    human_escalation = "Review the flagged external source or handoff content, make a human allow/block decision, archive the blocked record, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    handoff_retry_exceeded = "Follow docs/circuit-breaker-runbook.md section 'Breaker 3 - Handoff Retry Limit', archive the blocked record, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    review_stalemate = "Follow docs/circuit-breaker-runbook.md section 'Breaker 1 - Review Stalemate (3-Strike Rule)', archive the blocked record, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    budget_exceeded = "Approve a budget_tier escalation, reduce scope, or abandon per docs/circuit-breaker-runbook.md section 'Breaker 4 - Token Budget Exceeded'; after the human decision, run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    recurring_merge_conflicts = "Follow docs/circuit-breaker-runbook.md section 'Breaker 7 - Recurring Merge Conflicts', archive the blocked record, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    reviewer_verification_failed = "Follow docs/circuit-breaker-runbook.md section 'Breaker 5 - Reviewer Verification Failure'; route the exact failing check back to Reviewer or Architect, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    git_hook_bypass = "Follow docs/circuit-breaker-runbook.md section 'Breaker 8 - Git Hook Bypass Attempt'; fix the hook failure without bypassing hooks, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    fabricated_artifacts = "Follow docs/circuit-breaker-runbook.md section 'Breaker 6 - Fabricated Artifacts'; create the missing artifact or correct the handoff JSON, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    scope_violation = "Follow docs/circuit-breaker-runbook.md section 'Breaker 9 - Scope Boundary Violation'; expand file_affinity or revert out-of-scope edits, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    artifact_verification_failed = "Inspect completion artifacts and gate decision state, correct the artifact or decision record, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id} -Recover"
-    missing_isolated_checks_script = "Restore powershell/run-isolated-checks.ps1 from the Crucible bundle, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    missing_required_field = "Correct the handoff JSON to include the required field, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    invalid_field = "Correct the invalid handoff field according to schemas/handoff.schema.json, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    invalid_json = "Fix the handoff JSON syntax or restore the schema file, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    invalid_transition = "Correct source_phase and target_phase to an allowed pipeline transition, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    invalid_budget_tier = "Set budget_tier to one of: low, medium, high, extended; then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    budget_tier_mismatch = "Make the handoff budget_tier match the spec frontmatter, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-    missing_artifact = "Create the missing artifact or correct the handoff artifact path, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId {task_id}"
-}
-
-$script:WEDGE_GUARD_NAME_BY_CODE = @{
-    human_escalation = "Human Escalation"
-    handoff_retry_exceeded = "Handoff Retry Limit"
-    review_stalemate = "Review Stalemate"
-    budget_exceeded = "Token Budget Enforcement"
-    recurring_merge_conflicts = "Recurring Merge Conflicts"
-    reviewer_verification_failed = "Reviewer Verification Failure"
-    git_hook_bypass = "Git Hook Bypass Prevention"
-    fabricated_artifacts = "Artifact Integrity Gate"
-    scope_violation = "Scope Boundary Gate"
-    artifact_verification_failed = "Completion Artifact Verification"
-    missing_isolated_checks_script = "Isolated Checks Script Required"
-    missing_required_field = "Preflight Validation"
-    invalid_field = "Preflight Validation"
-    invalid_json = "Preflight Validation"
-    invalid_transition = "Preflight Validation"
-    invalid_budget_tier = "Budget Tier Validation"
-    budget_tier_mismatch = "Budget Tier Validation"
-    missing_artifact = "Preflight Validation"
-}
-
-function Get-WedgeRecoveryCodes {
-    return [string[]]($script:WEDGE_RECOVERY_BY_CODE.Keys | Sort-Object)
-}
-
-function Get-WedgeRecovery {
-    param(
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$BreakerCode,
-        [AllowEmptyString()][string]$TaskId = "",
-        [AllowEmptyString()][string]$RecoveryOverride = ""
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($RecoveryOverride)) {
-        return $RecoveryOverride
-    }
-
-    $code = ""
-    if ($null -ne $BreakerCode) {
-        $code = $BreakerCode.Trim()
-    }
-
-    $recovery = ""
-    if (-not [string]::IsNullOrWhiteSpace($code) -and $script:WEDGE_RECOVERY_BY_CODE.ContainsKey($code)) {
-        $recovery = [string]$script:WEDGE_RECOVERY_BY_CODE[$code]
-    } else {
-        $recovery = "No automated recovery is defined. Read docs/circuit-breaker-runbook.md and choose a human resolution before rerunning factory.ps1."
-    }
-
-    $replacementTaskId = "{task_id}"
-    if (-not [string]::IsNullOrWhiteSpace($TaskId)) {
-        $replacementTaskId = $TaskId
-    }
-    return $recovery.Replace("{task_id}", $replacementTaskId)
-}
-
-function Get-WedgeBreakerName {
-    param([Parameter(Mandatory=$true)][AllowEmptyString()][string]$BreakerCode)
-
-    $code = ""
-    if ($null -ne $BreakerCode) {
-        $code = $BreakerCode.Trim()
-    }
-    if (-not [string]::IsNullOrWhiteSpace($code) -and $script:WEDGE_GUARD_NAME_BY_CODE.ContainsKey($code)) {
-        return [string]$script:WEDGE_GUARD_NAME_BY_CODE[$code]
-    }
-    if ([string]::IsNullOrWhiteSpace($code)) {
-        return "Factory Gate"
-    }
-    return ($code -replace "_", " ")
-}
-
-function Get-WedgeReportLines {
-    param(
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$TaskId,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$SourcePhase,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$TargetPhase,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$BreakerCode,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Why,
-        [AllowEmptyString()][string]$RecoveryOverride = ""
-    )
-
-    $guardName = Get-WedgeBreakerName -BreakerCode $BreakerCode
-    $recovery = Get-WedgeRecovery -BreakerCode $BreakerCode -TaskId $TaskId -RecoveryOverride $RecoveryOverride
-    $whyLine = $Why
-    if ([string]::IsNullOrWhiteSpace($whyLine)) {
-        $whyLine = "No reason supplied."
-    }
-    $whyLine = $whyLine -replace '[\r\n]+', ' '
-    $recovery = $recovery -replace '[\r\n]+', ' '
-
-    return @(
-        "",
-        "[STOP] HUMAN INTERVENTION REQUIRED",
-        ("TASK:     " + $TaskId),
-        ("PHASE:    " + $SourcePhase + " -> " + $TargetPhase),
-        ("HALTED BY: " + $guardName + " (" + $BreakerCode + ")"),
-        ("WHY:      " + $whyLine),
-        ("RECOVERY: " + $recovery)
-    )
-}
-
-function Write-WedgeReport {
-    param(
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$TaskId,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$SourcePhase,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$TargetPhase,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$BreakerCode,
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Why,
-        [AllowEmptyString()][string]$RecoveryOverride = ""
-    )
-
-    $lines = Get-WedgeReportLines -TaskId $TaskId -SourcePhase $SourcePhase -TargetPhase $TargetPhase -BreakerCode $BreakerCode -Why $Why -RecoveryOverride $RecoveryOverride
-    foreach ($line in $lines) {
-        if ($line -match "^\[STOP\]") {
-            Write-Host $line -ForegroundColor Red
-        } elseif ($line -match "^RECOVERY:") {
-            Write-Host $line -ForegroundColor Cyan
-        } else {
-            Write-Host $line -ForegroundColor Yellow
-        }
-    }
-}
+. (Join-Path $PSScriptRoot "factory-context.ps1")
+. (Join-Path $PSScriptRoot "git.ps1")
+. (Join-Path $PSScriptRoot "factory-gates-wedge-report.ps1")
 
 function Get-RootRelativePath {
     # Cross-platform relative path of $Path under $Root. Avoids [System.Uri]/MakeRelativeUri:
@@ -288,6 +147,10 @@ function Move-TaskHandoffsToArchive {
 function Resolve-FactoryInputHandoff {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    Assert-FactoryContextKeys -Context $Context `
+        -RequiredKeys @("TaskId", "HandoffDir", "BacklogDir", "Quiet") `
+        -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")
+
     $TaskId = $Context.TaskId
     $HANDOFF_DIR = $Context.HandoffDir
     $backlogDir = $Context.BacklogDir
@@ -384,7 +247,7 @@ function Resolve-FactoryInputHandoff {
                     }
                 }
 
-                $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+                $timestamp = Get-UtcFileTimestamp
                 $bootstrapFile = Join-Path $HANDOFF_DIR "$TaskId-$timestamp.json"
                 $bootstrapBaseCommit = $null
                 if (Test-Path .git) {
@@ -466,13 +329,100 @@ function Test-CrucibleAdopterOwnedPath {
     return $false
 }
 
+function Get-CrucibleFrameworkOwnedRelativePath {
+    # Returns the repo-relative path when $PathText names a framework-owned file inside
+    # the bundle, or $null when it is outside the bundle or adopter-owned. Shared by the
+    # working-tree and committed legs so one exclusion rule governs both.
+    param(
+        [Parameter(Mandatory=$true)][string]$PathText,
+        [Parameter(Mandatory=$true)][string]$CruciblePrefix,
+        [Parameter(Mandatory=$true)][string[]]$AdopterOwnedExcludes
+    )
+
+    $normalized = $PathText.Trim()
+    if ($normalized -match ' -> ') {
+        $normalized = ($normalized -split ' -> ')[-1].Trim()
+    }
+    $normalized = $normalized.Trim('"').Replace("\", "/")
+    if (-not $normalized.StartsWith($CruciblePrefix)) { return $null }
+
+    $relative = $normalized.Substring($CruciblePrefix.Length)
+    if ([string]::IsNullOrWhiteSpace($relative)) { return $null }
+    if (Test-CrucibleAdopterOwnedPath -RelativePath $relative -AdopterOwnedExcludes $AdopterOwnedExcludes) { return $null }
+
+    return $normalized
+}
+
+function Resolve-CrucibleIntegrityBase {
+    # The commit this task started from. Resolution order matches the merge path at
+    # :1687-1698 and :1776-1787 so the two agree about what "this task" spans: the
+    # handoff's base_commit first, then the task branch's merge-base with the primary
+    # branch.
+    #
+    # Returns $null when neither resolves, and that is deliberate rather than a
+    # concession. base_commit is optional and nullable in handoff.schema.json and is
+    # absent from the top-level required list, so an agent-written handoff on a task
+    # with no task/<id> branch is a legitimate shape, not a broken one - and this gate
+    # runs on every factory invocation, including the first bootstrap. Failing here
+    # would block valid pipelines, which is a worse defect than the one being fixed.
+    # The caller reports the missing baseline as an unverifiable gate instead, so the
+    # narrowing is counted rather than silent.
+    param(
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [Parameter(Mandatory=$false)]$Handoff = $null,
+        [Parameter(Mandatory=$false)][string]$TaskId = ""
+    )
+
+    if ($null -ne $Handoff -and $Handoff.PSObject.Properties["base_commit"] -and -not [string]::IsNullOrWhiteSpace([string]$Handoff.base_commit)) {
+        return ([string]$Handoff.base_commit).Trim()
+    }
+
+    $resolvedTaskId = $TaskId
+    if ([string]::IsNullOrWhiteSpace($resolvedTaskId) -and $null -ne $Handoff -and $Handoff.PSObject.Properties["task_id"]) {
+        $resolvedTaskId = [string]$Handoff.task_id
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($resolvedTaskId)) {
+        $branchRef = "task/$resolvedTaskId"
+        $mergeBase = ""
+        $mergeBaseExit = 1
+        # Resolved against $RepoRoot rather than through Get-PrimaryBranchName, which
+        # reads the process working directory. This gate is a function of the repo it
+        # was handed, not of wherever the caller happens to be standing.
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        git -C $RepoRoot show-ref --verify --quiet ("refs/heads/" + $branchRef) 2>$null
+        $hasBranch = ($LASTEXITCODE -eq 0)
+        if ($hasBranch) {
+            git -C $RepoRoot show-ref --verify --quiet refs/heads/main 2>$null
+            $primaryBranch = if ($LASTEXITCODE -eq 0) { "main" } else { "master" }
+            $mergeBase = (git -C $RepoRoot merge-base $primaryBranch $branchRef 2>$null)
+            $mergeBaseExit = $LASTEXITCODE
+        }
+        $ErrorActionPreference = $previousPreference
+
+        if ($hasBranch -and $mergeBaseExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($mergeBase)) {
+            return ([string]$mergeBase).Trim()
+        }
+    }
+
+    return $null
+}
+
 function Get-CrucibleFrameworkStatusChanges {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # Every failure below throws. An empty array means one thing only - the tree was
+    # read and no framework-owned file had changed. It used to also mean "the check
+    # could not run", which the caller cannot tell apart from clean, so the circuit
+    # breaker reported a passing integrity check on a tree it had never looked at.
     $repoRoot = $Context.RepoRoot
     $crucibleRoot = $Context.CrucibleRoot
-    if ([string]::IsNullOrWhiteSpace($repoRoot) -or [string]::IsNullOrWhiteSpace($crucibleRoot)) {
-        return @()
+    if ([string]::IsNullOrWhiteSpace($repoRoot)) {
+        throw "Framework integrity check cannot run: Context.RepoRoot is empty."
+    }
+    if ([string]::IsNullOrWhiteSpace($crucibleRoot)) {
+        throw "Framework integrity check cannot run: Context.CrucibleRoot is empty."
     }
 
     $cruciblePath = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) {
@@ -481,7 +431,7 @@ function Get-CrucibleFrameworkStatusChanges {
         Join-Path $repoRoot $crucibleRoot
     }
     if (-not (Test-Path -LiteralPath $cruciblePath)) {
-        return @()
+        throw ("Framework integrity check cannot run: no Crucible bundle at " + $cruciblePath + ". Re-run init-project.ps1, or correct crucible_root in .crucible/config.yaml.")
     }
 
     $manifestPath = Join-Path $cruciblePath "install-manifest.json"
@@ -501,32 +451,74 @@ function Get-CrucibleFrameworkStatusChanges {
         }
     }
 
+    # git writes to stderr when it fails, and under the $ErrorActionPreference = "Stop"
+    # that factory.ps1 sets at :112 that becomes a terminating NativeCommandError. So
+    # the exit-code guard below never ran in production - a non-repository surfaced as
+    # a raw "fatal: not a git repository" crash rather than a gate verdict, and the
+    # intended empty-array return was reachable only where the preference was relaxed.
+    # Relaxing it here makes the exit code the signal, as the guard always intended.
+    # Still no 2>&1: merging native stderr into the success stream would corrupt the
+    # porcelain lines this function parses by column offset.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     $statusLines = @(git -C $repoRoot status --porcelain -- $crucibleRoot 2>$null)
-    if ($LASTEXITCODE -ne 0) {
-        return @()
+    $statusExit = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($statusExit -ne 0) {
+        throw ("Framework integrity check cannot run: 'git status' exited " + $statusExit + " in " + $repoRoot + ". The gate cannot confirm that framework-owned files are unmodified.")
     }
 
-    $changes = @()
+    # The working tree is only half the question. A specialist that edits a vendored
+    # framework file and then commits it leaves a clean tree, and this gate saw nothing
+    # - while the remediation text below actively told them to commit. Diffing against
+    # the task baseline closes that, and asking "what changed during THIS task" ignores
+    # pre-existing adopter customization by construction, which is why the gate does not
+    # want a provenance check here: that would flag customization adopters are allowed.
+    $handoff = if ($Context.ContainsKey("Handoff")) { $Context.Handoff } else { $null }
+    $contextTaskId = if ($Context.ContainsKey("TaskId")) { [string]$Context.TaskId } else { "" }
+    $baseCommit = Resolve-CrucibleIntegrityBase -RepoRoot $repoRoot -Handoff $handoff -TaskId $contextTaskId
+    # Recorded on the context so the caller can report an unrun leg. $null here means
+    # the committed leg was skipped, which is a narrower check than this gate claims to
+    # perform and must not be reported as a clean pass.
+    $Context["FrameworkIntegrityBaseline"] = $baseCommit
+
+    $diffLines = @()
+    if ($null -ne $baseCommit) {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $diffLines = @(git -C $repoRoot diff --name-only ($baseCommit + "..HEAD") -- $crucibleRoot 2>$null)
+        $diffExit = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($diffExit -ne 0) {
+            throw ("Framework integrity check cannot run: 'git diff " + $baseCommit + "..HEAD' exited " + $diffExit + " in " + $repoRoot + ". The gate cannot confirm that framework-owned files are unmodified.")
+        }
+    }
+
     $cruciblePrefix = $crucibleRoot.Replace("\", "/").TrimEnd("/") + "/"
+    $flagged = [ordered]@{}
+
     foreach ($line in $statusLines) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -lt 4) { continue }
         $statusCode = $line.Substring(0, 2)
-        $pathText = $line.Substring(3).Trim()
-        if ($pathText -match ' -> ') {
-            $pathText = ($pathText -split ' -> ')[-1].Trim()
-        }
-        $pathText = $pathText.Trim('"').Replace("\", "/")
-        if (-not $pathText.StartsWith($cruciblePrefix)) { continue }
+        $owned = Get-CrucibleFrameworkOwnedRelativePath -PathText $line.Substring(3) -CruciblePrefix $cruciblePrefix -AdopterOwnedExcludes $adopterOwnedExcludes
+        if ($null -eq $owned) { continue }
+        $flagged[$owned] = $statusCode
+    }
 
-        $relative = $pathText.Substring($cruciblePrefix.Length)
-        if ([string]::IsNullOrWhiteSpace($relative)) {
-            continue
+    foreach ($line in $diffLines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $owned = Get-CrucibleFrameworkOwnedRelativePath -PathText $line -CruciblePrefix $cruciblePrefix -AdopterOwnedExcludes $adopterOwnedExcludes
+        if ($null -eq $owned) { continue }
+        if ($flagged.Contains($owned)) {
+            $flagged[$owned] = ($flagged[$owned] + "+committed")
+        } else {
+            $flagged[$owned] = "committed"
         }
-        if (Test-CrucibleAdopterOwnedPath -RelativePath $relative -AdopterOwnedExcludes $adopterOwnedExcludes) {
-            continue
-        }
+    }
 
-        $changes += ("$statusCode $pathText")
+    $changes = @()
+    foreach ($path in $flagged.Keys) {
+        $changes += ($flagged[$path] + " " + $path)
     }
 
     return @($changes)
@@ -535,14 +527,57 @@ function Get-CrucibleFrameworkStatusChanges {
 function Assert-CrucibleFrameworkIntegrity {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    $changes = @(Get-CrucibleFrameworkStatusChanges -Context $Context)
+    # A check that could not run is not a check that passed. Both outcomes stop the
+    # pipeline; they are kept apart so the event log and the operator can tell a real
+    # violation from a broken environment, and so the remediation text differs.
+    try {
+        $changes = @(Get-CrucibleFrameworkStatusChanges -Context $Context)
+    } catch {
+        $reason = $_.Exception.Message
+        $failTaskId = if ($Context.ContainsKey("TaskId") -and -not [string]::IsNullOrWhiteSpace($Context.TaskId)) { $Context.TaskId } else { "unknown" }
+        # The verdict is already decided by the time we get here, and the operator needs
+        # to read the reason. A context too malformed to name a log file must not turn
+        # that message into a second, less useful crash - so logging is best-effort and
+        # the block below is not.
+        try {
+            Write-EventLog -Event "circuit_breaker" -TaskId $failTaskId -Specialist "crucible" `
+                -Outcome "framework_integrity_check_failed" -Notes $reason `
+                -LogFile $Context.LogFile -CircuitBreakerHistoryFile $Context.CircuitBreakerHistoryFile
+        } catch {
+            Write-Host ("[CIRCUIT BREAKER] Could not write the integrity-check event: " + $_.Exception.Message) -ForegroundColor DarkYellow
+        }
+
+        Write-Host "`n[CIRCUIT BREAKER] Framework integrity check could not run." -ForegroundColor Red
+        Write-Host ("  " + $reason) -ForegroundColor Yellow
+        Write-Host "`n[STOP] Resolve the condition above and re-run. This gate does not pass on a tree it cannot read." -ForegroundColor Red
+        exit 2
+    }
+
+    # A gate that could only check half of what it claims is reported on the channel
+    # built for exactly that - degraded/unverifiable with a machine-readable kind - so
+    # analyze-evals.ps1 counts it under enforcement_coverage instead of it passing as a
+    # clean check. This fires before the early return below: "nothing changed in the
+    # working tree" is not the same statement as "nothing changed during this task".
+    if ($Context.ContainsKey("FrameworkIntegrityBaseline") -and $null -eq $Context["FrameworkIntegrityBaseline"]) {
+        $degradedTaskId = if ($Context.ContainsKey("TaskId") -and -not [string]::IsNullOrWhiteSpace($Context.TaskId)) { $Context.TaskId } else { "unknown" }
+        try {
+            Write-EventLog -Event "degraded" -TaskId $degradedTaskId -Specialist "crucible" `
+                -Outcome "unverifiable" -Kind "framework_integrity_no_baseline" `
+                -Notes "No task baseline (handoff carries no base_commit and no task branch merge-base resolves); only the working tree was checked." `
+                -LogFile $Context.LogFile -CircuitBreakerHistoryFile $Context.CircuitBreakerHistoryFile
+        } catch {
+            Write-Quiet ("[INTEGRITY] Could not record the unverifiable-baseline event: " + $_.Exception.Message) -ForegroundColor DarkYellow
+        }
+        Write-Quiet "[INTEGRITY] No task baseline resolved; only the working tree was checked. A framework edit committed during this task would not be seen." -ForegroundColor Yellow
+    }
+
     if ($changes.Count -eq 0) {
         return
     }
 
     $handoff = $Context.Handoff
     $joined = $changes -join ", "
-    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
+    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
         -Outcome "framework_integrity_violation" -Notes ("Framework-owned .crucible files changed before handoff: " + $joined) `
         -LogFile $Context.LogFile -CircuitBreakerHistoryFile $Context.CircuitBreakerHistoryFile
 
@@ -551,12 +586,23 @@ function Assert-CrucibleFrameworkIntegrity {
     foreach ($change in $changes) {
         Write-Host ("  - " + $change) -ForegroundColor Yellow
     }
-    Write-Host "`n[STOP] Revert framework-owned bundle edits or commit a deliberate bundle update before continuing." -ForegroundColor Red
+    # Committing is no longer an escape - the gate now diffs the task baseline, so a
+    # committed bundle edit is flagged too. A deliberate bundle update is therefore
+    # cleared by re-baselining the task onto it, which leaves the decision recorded in
+    # the handoff instead of hidden in a commit the old check could not see.
+    Write-Host "`n[STOP] Revert the framework-owned edits above before continuing." -ForegroundColor Red
+    Write-Host "       If this was a deliberate bundle update, commit it and re-baseline the task:" -ForegroundColor Red
+    Write-Host "         new-handoff.ps1 -TaskId <id> -BaseCommit <commit-of-the-bundle-update>" -ForegroundColor Red
     exit 2
 }
 
 function Read-FactoryHandoffContext {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # No CircuitBreakerHistoryFile: this function reads the pipeline log and writes no
+    # event, so requiring the breaker path would be a contract it never exercises.
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @("BudgetCeilings") `
+        -NonNullKeys @("LatestHandoff", "LogFile")
 
     $latestHandoff = $Context.LatestHandoff
     $handoffFile = $latestHandoff.FullName
@@ -627,14 +673,26 @@ function Read-FactoryHandoffContext {
     }
 
     # Server-side handoff count - agent-reported values cannot be trusted for circuit breakers (Fix 2)
+    # A line that will not parse is a session_end this scan may never see, so the result is a
+    # lower bound rather than a count, and the override below can fail to fire. Carry the miss
+    # count out instead of absorbing it; Invoke-CircuitBreakerGates decides whether the gap is
+    # wide enough to change the ceiling answer. Blank lines are skipped before the parse:
+    # ConvertFrom-Json rejects an empty string, and under $ErrorActionPreference = "Stop" that
+    # reaches the catch, so a log ending in a stray newline would otherwise report a miss and
+    # spend a task's remaining headroom on its own formatting.
     $logDerivedCount = 0
+    $logParseFailureCount = 0
     if (Test-Path $LOG_FILE) {
         Get-Content $LOG_FILE -Encoding UTF8 | ForEach-Object {
-            try {
-                $cleanedLine = $_ -replace "^$([char]0xFEFF)", ""
-                $entry = $cleanedLine | ConvertFrom-Json
-                if ($entry.task_id -eq $handoff.task_id -and $entry.event -eq "session_end" -and $entry.cycle_id -ne "test-cycle") { $logDerivedCount++ }
-            } catch {}
+            if (-not [string]::IsNullOrWhiteSpace($_)) {
+                try {
+                    $cleanedLine = $_ -replace "^$([char]0xFEFF)", ""
+                    $entry = $cleanedLine | ConvertFrom-Json
+                    if ($entry.task_id -eq $handoff.task_id -and $entry.event -eq "session_end" -and $entry.cycle_id -ne "test-cycle") { $logDerivedCount++ }
+                } catch {
+                    $logParseFailureCount++
+                }
+            }
         }
     }
     if ($logDerivedCount -gt [int]$handoff.cumulative_handoff_count) {
@@ -648,6 +706,7 @@ function Read-FactoryHandoffContext {
     $Context.BudgetTierKey = $tierKey
     $Context.InvalidBudgetTier = $invalidBudgetTier
     $Context.CumulativeHandoffCount = [int]$handoff.cumulative_handoff_count
+    $Context.HandoffLogParseFailureCount = $logParseFailureCount
     $resolvedRoot = (Resolve-Path -LiteralPath $Context.RepoRoot).Path.TrimEnd("\", "/")
     $resolvedPath = (Resolve-Path -LiteralPath $handoffFile).Path
     $Context.RelativeHandoffPath = Get-RootRelativePath -Root $resolvedRoot -Path $resolvedPath
@@ -655,6 +714,10 @@ function Read-FactoryHandoffContext {
 
 function Invoke-HandoffPreflightValidation {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    Assert-FactoryContextKeys -Context $Context `
+        -RequiredKeys @("TaskId", "SessionDir", "HandoffDir", "CrucibleRoot", "Init", "Quiet", "LatestHandoff") `
+        -NonNullKeys @("FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile")
 
     $TaskId = $Context.TaskId
     $sessionDir = $Context.SessionDir
@@ -686,7 +749,7 @@ function Invoke-HandoffPreflightValidation {
                 $mpItem = Get-Item $mp
                 if ($mpItem.LastWriteTime -gt $latestHandoff.LastWriteTime) {
                     Write-Host "[WARN] Misplaced handoff at $mp (newer than active handoff) - agent wrote to wrong location. Auto-recovering by moving to handoffs directory." -ForegroundColor Yellow
-                    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+                    $timestamp = Get-UtcFileTimestamp
                     $newPath = Join-Path $HANDOFF_DIR "$TaskId-$timestamp.json"
                     Move-Item -Path $mp -Destination $newPath -Force
                     $latestHandoff = Get-Item $newPath
@@ -707,7 +770,7 @@ function Invoke-HandoffPreflightValidation {
     if (-not (Test-Path $preflightScript)) {
         $missingReasonCode = "missing_required_field"
         $handoffFileName = Split-Path -Leaf $handoffFile
-        Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "factory" `
+        Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "crucible" `
             -Outcome $missingReasonCode -Notes ("reason_code=" + $missingReasonCode + "; handoff_file=" + $handoffFileName + "; message=Validator script missing") `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $missingReasonCode `
@@ -753,7 +816,7 @@ function Invoke-HandoffPreflightValidation {
             Write-Quiet "[PREFLIGHT] Deferring operator commit_hash enforcement to merge-verification gate." -ForegroundColor DarkGray
         } else {
             $handoffFileName = Split-Path -Leaf $handoffFile
-            Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "factory" `
+            Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "crucible" `
                 -Outcome $reasonCode -Notes ("reason_code=" + $reasonCode + "; handoff_file=" + $handoffFileName + "; message=" + $errorMessage) `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $reasonCode `
@@ -828,8 +891,8 @@ function Invoke-HandoffPreflightValidation {
                         $joinedOverbroad = $overbroad -join ", "
                         $joinedSpec = $specTopLevels -join ", "
                         Write-Host "[WARN] Handoff file_affinity ($joinedOverbroad) lists top-level directories absent from the spec's 'affected files' section ($joinedSpec)." -ForegroundColor Yellow
-                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
-                            -Outcome "warned" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec ($joinedSpec)" `
+                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                            -Outcome "warned" -Kind "file_affinity_scope" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec ($joinedSpec)" `
                             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                     }
                 }
@@ -913,8 +976,8 @@ function Invoke-HandoffPreflightValidation {
                             $joinedOverbroad = $overbroad -join ", "
                             $joinedSpec = $specTopLevels -join ", "
                             Write-Host "[WARN] Handoff file_affinity ($joinedOverbroad) lists top-level directories absent from the spec's frontmatter file_affinity ($joinedSpec)." -ForegroundColor Yellow
-                            Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
-                                -Outcome "warned" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec frontmatter ($joinedSpec)" `
+                            Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                                -Outcome "warned" -Kind "file_affinity_scope" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec frontmatter ($joinedSpec)" `
                                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                         } else {
                             Write-Host "[INFO] Handoff file_affinity validated against spec's frontmatter file_affinity." -ForegroundColor Green
@@ -922,15 +985,15 @@ function Invoke-HandoffPreflightValidation {
                     } else {
                         # Frontmatter parsed but has no valid top-level directories - fall through to the warning
                         Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
-                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
-                            -Outcome "warned" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
+                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                            -Outcome "unverifiable" -Kind "file_affinity_unverifiable" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
                             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                     }
                 } else {
                     # D23: Spec has no affected-files/packages section to validate file_affinity against
                     Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
-                    Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
-                        -Outcome "warned" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
+                    Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                        -Outcome "unverifiable" -Kind "file_affinity_unverifiable" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
                         -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 }
             }
@@ -984,6 +1047,9 @@ function Invoke-HandoffPreflightValidation {
 
 function Complete-FactorySourceSession {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @("Ceiling", "Quiet") `
+        -NonNullKeys @("SessionDir", "Handoff", "LogFile", "CircuitBreakerHistoryFile")
 
     $sessionDir = $Context.SessionDir
     $handoff = $Context.Handoff
@@ -1148,6 +1214,7 @@ function Complete-FactorySourceSession {
                     # Determine if the human gate has already passed.
                     # We only enforce this finalization gate when transitioning to done (which requires the gate to have passed).
                     $gateAlreadyPassed = $false
+                    $gateDecisionUnreadable = $false
                     if (-not [string]::IsNullOrEmpty($sessionDir)) {
                         $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
                         if (Test-Path $GATE_DIR) {
@@ -1161,9 +1228,24 @@ function Complete-FactorySourceSession {
                                     if ($advancingOutcomes -contains $latestDecision.outcome) {
                                         $gateAlreadyPassed = $true
                                     }
-                                } catch {}
+                                } catch {
+                                    # A decision exists but will not parse, so gate state is
+                                    # unknown. Enforce as though it passed: this flag only ever
+                                    # turns an additional check on, so the reading that skips it
+                                    # is the one an unreadable file cannot justify. If the
+                                    # backlog is genuinely finalized this still advances.
+                                    $gateAlreadyPassed = $true
+                                    $gateDecisionUnreadable = $true
+                                }
                             }
                         }
+                    }
+
+                    if ($gateDecisionUnreadable) {
+                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                            -Outcome "unverifiable" -Kind "unreadable_gate_decision" `
+                            -Notes "The latest gate decision would not parse; the backlog finalization gate was enforced without confirming the human gate passed." `
+                            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                     }
 
                     if ($gateAlreadyPassed) {
@@ -1209,7 +1291,7 @@ function Complete-FactorySourceSession {
 
             if ($requiredMalformedCount -gt 0 -or $optionalUncheckedCount -gt 0) {
                 Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-                    -Outcome "warned" -Notes ("Task checklist summary: required_unchecked=" + $requiredUncheckedCount + "; required_malformed=" + $requiredMalformedCount + "; optional_unchecked=" + $optionalUncheckedCount) `
+                    -Outcome "warned" -Kind "task_checklist" -Notes ("Task checklist summary: required_unchecked=" + $requiredUncheckedCount + "; required_malformed=" + $requiredMalformedCount + "; optional_unchecked=" + $optionalUncheckedCount) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             }
 
@@ -1230,7 +1312,7 @@ function Complete-FactorySourceSession {
 
         $effectiveStart = $null
         if ($lastStart -and $lastRecovery) {
-            if ([DateTimeOffset]::Parse($lastStart.timestamp) -gt [DateTimeOffset]::Parse($lastRecovery.timestamp)) {
+            if ((ConvertFrom-IsoTimestamp -Value $lastStart.timestamp) -gt (ConvertFrom-IsoTimestamp -Value $lastRecovery.timestamp)) {
                 $effectiveStart = $lastStart
             } else {
                 $effectiveStart = $lastRecovery
@@ -1242,7 +1324,7 @@ function Complete-FactorySourceSession {
         $duration = 0
         $anomaly = $null
         if ($effectiveStart) {
-            $startTime = [DateTimeOffset]::Parse($effectiveStart.timestamp).UtcDateTime
+            $startTime = (ConvertFrom-IsoTimestamp -Value $effectiveStart.timestamp).UtcDateTime
             $duration = [int](([DateTime]::UtcNow - $startTime).TotalSeconds)
 
             # Guard rails for missing/out-of-order events
@@ -1286,15 +1368,8 @@ if (-not (Get-Command Get-PrimaryBranchName -ErrorAction SilentlyContinue)) {
 function Invoke-FactoryRuntimeValidation {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    $requiredKeys = @("Handoff", "LogFile", "CircuitBreakerHistoryFile")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key) -or $null -eq $Context[$key]) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() `
+        -NonNullKeys @("Handoff", "LogFile", "CircuitBreakerHistoryFile")
 
     $handoff = $Context.Handoff
     $LOG_FILE = $Context.LogFile
@@ -1308,7 +1383,8 @@ function Invoke-FactoryRuntimeValidation {
     # framework-dev tool, excluded from the install manifest).
     if ($handoffSecurityText -match '(?i)(^|\s)--no-verify(\s|$)' -or $handoffSecurityText -match '(?i)\bno[- ]verify\b' -or $handoffSecurityText -match '(?i)CRUCIBLE_BYPASS_LINUX_LEG') {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-            -Outcome "git_hook_bypass" -Notes "Handoff reported or referenced a git hook bypass attempt."
+            -Outcome "git_hook_bypass" -Notes "Handoff reported or referenced a git hook bypass attempt." `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
             -LastSpecialist $handoff.source_phase -Summary "Handoff reported or referenced use of --no-verify or CRUCIBLE_BYPASS_LINUX_LEG, which bypass required git hooks."
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "git_hook_bypass" `
@@ -1407,14 +1483,20 @@ function Invoke-FactoryRuntimeValidation {
 
             # Check if this is a retry (prior missing-artifact quality_gate_retry in event log)
             $hasPriorRetry = $false
+            $retryHistoryParseFailureCount = 0
             if (Test-Path $LOG_FILE) {
                 $lines = @(Get-Content $LOG_FILE -Tail 200 -Encoding UTF8)
                 for ($i = $lines.Length - 1; $i -ge 0; $i--) {
+                    # A blank line is formatting, not a miss. ConvertFrom-Json rejects an empty
+                    # string and $ErrorActionPreference = "Stop" turns that into a throw, so
+                    # without this skip a log ending in a stray newline reaches the fail-closed
+                    # branch below and blocks a task that did nothing wrong.
+                    if ([string]::IsNullOrWhiteSpace($lines[$i])) { continue }
                     try {
                         $cleanedLine = $lines[$i] -replace "^$([char]0xFEFF)", ""
                         $entry = $cleanedLine | ConvertFrom-Json
-                        $logPhase = if ($entry.PSObject.Properties["phase"]) { $entry.phase } else { $entry.specialist }
-                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq "factory") {
+                        $logPhase = Get-EntryPhase $entry
+                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq "crucible") {
                             continue
                         }
                         if ($entry.task_id -eq $handoff.task_id -and $logPhase -ne $handoff.source_phase) {
@@ -1427,16 +1509,36 @@ function Invoke-FactoryRuntimeValidation {
                             $hasPriorRetry = $true
                             break
                         }
-                    } catch { continue }
+                    } catch {
+                        $retryHistoryParseFailureCount += 1
+                        continue
+                    }
                 }
+            }
+
+            if ($retryHistoryParseFailureCount -gt 0) {
+                Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                    -Outcome "warned" -Kind "unreadable_retry_history" -Notes ("Retry history scan skipped " + $retryHistoryParseFailureCount + " unparseable line(s).") `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             }
 
             if ($hasPriorRetry) {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-                    -Outcome "blocked" -Notes ("Fabricated artifact path(s) in handoff: " + $joined)
+                    -Outcome "blocked" -Notes ("Fabricated artifact path(s) in handoff: " + $joined) `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "fabricated_artifacts" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary ("Handoff listed artifact paths that do not exist: " + $joined) -Artifacts $missingArtifacts
                 Write-Host "[STOP] Artifact integrity gate failed. Fabricated artifact paths must be corrected before handoff can proceed." -ForegroundColor Red
+                exit 2
+            } elseif ($retryHistoryParseFailureCount -gt 0) {
+                $unreadableRetryHistoryReason = "Retry history is unreadable: " + $retryHistoryParseFailureCount + " unparseable line(s) prevented determining whether this is a repeat artifact-integrity failure."
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                    -Outcome "unreadable_retry_history" -Notes $unreadableRetryHistoryReason `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count `
+                    -LastSpecialist $handoff.source_phase -Summary $unreadableRetryHistoryReason -Artifacts $missingArtifacts
+                Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
+                    -Why $unreadableRetryHistoryReason
                 exit 2
             } else {
                 Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
@@ -1454,7 +1556,8 @@ function Invoke-FactoryRuntimeValidation {
     if ($handoff.psobject.Properties["session_cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.session_cycle_id)) {
         if ($handoff.session_cycle_id -ne $env:FACTORY_CYCLE_ID) {
             Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
-                -Outcome "warned" -Notes "session_cycle_id mismatch - agent may not have read task.md"
+                -Outcome "warned" -Kind "session_cycle_id_mismatch" -Notes "session_cycle_id mismatch - agent may not have read task.md" `
+                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-Host ("[STOP] session_cycle_id mismatch for $($handoff.source_phase). Expected: $($env:FACTORY_CYCLE_ID), Got: $($handoff.session_cycle_id)") -ForegroundColor Red
             Write-Host "       All specialists must read task.md and echo its Cycle ID before handing off." -ForegroundColor Red
             exit 2
@@ -1467,15 +1570,8 @@ function Invoke-FactoryRuntimeValidation {
 function Invoke-FactoryScopeGates {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    $requiredKeys = @("Handoff", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile", "BacklogDir", "WorkspacesDir")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key) -or $null -eq $Context[$key]) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() `
+        -NonNullKeys @("Handoff", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile", "BacklogDir", "WorkspacesDir")
 
     $handoff = $Context.Handoff
     $FRAMEWORK_POWERSHELL = $Context.FrameworkPowerShell
@@ -1491,8 +1587,9 @@ function Invoke-FactoryScopeGates {
             & $affinityScript -TaskId $handoff.task_id -Affinity $handoff.file_affinity
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "Error: File affinity overlap detected with another active task." -ForegroundColor Red
-                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
-                    -Outcome "file_affinity_conflict" -Notes "Handoff blocked due to overlapping file affinity."
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
+                    -Outcome "file_affinity_conflict" -Notes "Handoff blocked due to overlapping file affinity." `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 exit 1
             }
         }
@@ -1515,8 +1612,9 @@ function Invoke-FactoryScopeGates {
             }
             if ($outOfScopeFiles.Count -gt 0) {
                 $joined = ($outOfScopeFiles -join ", ")
-                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
-                    -Outcome "scope_violation" -Notes ("Architect modified files outside file_affinity: " + $joined)
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
+                    -Outcome "scope_violation" -Notes ("Architect modified files outside file_affinity: " + $joined) `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "scope_violation" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary ("Architect modified files outside declared file_affinity: " + $joined) -Artifacts $outOfScopeFiles
                 Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "scope_violation" `
@@ -1555,8 +1653,9 @@ function Invoke-FactoryScopeGates {
             }
             if ($modifiedFiles.Count -gt 0) {
                 $joined = ($modifiedFiles -join ", ")
-                Write-EventLog -Event "security_warning" -TaskId $handoff.task_id -Specialist "factory" `
-                    -Outcome "warned" -Notes ("research_scope_violation: " + $joined)
+                Write-EventLog -Event "security_warning" -TaskId $handoff.task_id -Specialist "crucible" `
+                    -Outcome "warned" -Notes ("research_scope_violation: " + $joined) `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 
                 Write-Quiet "`n[SECURITY WARNING] Research phase modified files outside the read-only boundary:" -ForegroundColor Yellow
                 foreach ($file in $modifiedFiles) {
@@ -1573,15 +1672,8 @@ function Invoke-FactoryScopeGates {
 function Test-CompletionArtifactGate {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    $requiredKeys = @("Handoff", "BacklogDir", "SessionDir", "LogFile", "CircuitBreakerHistoryFile", "RepoRoot", "WorkspacesDir")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key) -or $null -eq $Context[$key]) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() `
+        -NonNullKeys @("Handoff", "BacklogDir", "SessionDir", "LogFile", "CircuitBreakerHistoryFile", "RepoRoot", "WorkspacesDir")
 
     $handoff = $Context.Handoff
     $backlogDir = $Context.BacklogDir
@@ -1654,8 +1746,9 @@ function Test-CompletionArtifactGate {
                             # Plain-text APPROVED without YAML frontmatter: warn but accept.
                             # "APPROVED" presence was already confirmed above; don't hard-block on formatting.
                             Write-Host "[WARN] Review report has no YAML frontmatter (review_decision: APPROVED). Accepted on plain-text APPROVED - Reviewer MUST use YAML format going forward." -ForegroundColor Yellow
-                            Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "factory" `
-                                -Outcome "warned" -Notes "Review report missing YAML header - accepted plain-text APPROVED"
+                            Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                                -Outcome "warned" -Kind "review_report_format" -Notes "Review report missing YAML header - accepted plain-text APPROVED" `
+                                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                         }
                     }
                 }
@@ -1750,6 +1843,7 @@ function Test-CompletionArtifactGate {
                             $mainBranch = Get-PrimaryBranchName
 
                             $gatePassed = $false
+                            $gateDecisionUnreadable = $false
                             $GATE_DIR = Join-Path $sessionDir "global/gate_decisions"
                             if (Test-Path $GATE_DIR) {
                                 $decisions = @(Get-ChildItem -Path $GATE_DIR -Filter ($handoff.task_id + "-*.json") |
@@ -1762,8 +1856,23 @@ function Test-CompletionArtifactGate {
                                         if ($advancingOutcomes -contains $latestDecision.outcome) {
                                             $gatePassed = $true
                                         }
-                                    } catch {}
+                                    } catch {
+                                        # Same reading as the finalization gate in
+                                        # Complete-FactorySourceSession: an unreadable decision
+                                        # leaves gate state unknown, and the branch this flag
+                                        # guards is the entire merge verification. Skipping it
+                                        # would let a commit reach done unverified, so enforce.
+                                        $gatePassed = $true
+                                        $gateDecisionUnreadable = $true
+                                    }
                                 }
+                            }
+
+                            if ($gateDecisionUnreadable) {
+                                Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                                    -Outcome "unverifiable" -Kind "unreadable_gate_decision" `
+                                    -Notes "The latest gate decision would not parse; merge verification was enforced without confirming the human gate passed." `
+                                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                             }
 
                             if ($gatePassed) {
@@ -1807,8 +1916,9 @@ function Test-CompletionArtifactGate {
         if (-not $verificationPassed) {
             Write-Host "`nError: Completion artifact verification failed for transition $transition" -ForegroundColor Red
             Write-Host "Reason: $errorMsg" -ForegroundColor Red
-            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" `
-                -Outcome "artifact_verification_failed" -Notes ("Artifact verification failed: " + $errorMsg)
+            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
+                -Outcome "artifact_verification_failed" -Notes ("Artifact verification failed: " + $errorMsg) `
+                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "artifact_verification_failed" -AttemptCount $handoff.cumulative_handoff_count `
                 -LastSpecialist $handoff.source_phase -Summary $errorMsg
             exit 1
@@ -1819,15 +1929,8 @@ function Test-CompletionArtifactGate {
 function Normalize-FactoryInputState {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    $requiredKeys = @("Handoff", "LatestHandoff", "SessionDir", "Recover", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key) -or $null -eq $Context[$key]) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    Assert-FactoryContextKeys -Context $Context -RequiredKeys @() `
+        -NonNullKeys @("Handoff", "LatestHandoff", "SessionDir", "Recover", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile")
 
     $handoff = $Context.Handoff
     $latestHandoff = $Context.LatestHandoff
@@ -1928,7 +2031,8 @@ function Normalize-FactoryInputState {
     $detectedMatches = Get-InjectionMatches -Text $handoffRaw
     if ($detectedMatches.Count -gt 0) {
         foreach ($match in $detectedMatches) {
-            Write-EventLog -Event "security_warning" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "warned" -Notes ("Injection pattern detected: " + $match.RuleId)
+            Write-EventLog -Event "security_warning" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "warned" -Notes ("Injection pattern detected: " + $match.RuleId) `
+                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-Quiet "`n[SECURITY WARNING] Potential injection pattern detected in handoff from $($handoff.source_phase)." -ForegroundColor Yellow
             Write-Quiet ("Pattern matched: " + $match.RuleId) -ForegroundColor Yellow
             Write-Quiet ("Review handoff file: " + $handoffFile) -ForegroundColor White
@@ -2009,7 +2113,8 @@ function Normalize-FactoryInputState {
         & "$FRAMEWORK_POWERSHELL/update-session-state.ps1" -Specialist $handoff.target_phase -TaskId $handoff.task_id -UpdateJson $updateJson -Merge $true -ProjectRoot $repoRoot
 
         # Log recovery_start for recoverable sessions.
-        Write-EventLog -Event "recovery_start" -TaskId $handoff.task_id -Phase $handoff.target_phase -Notes "Recovering from: $recoveryMarker"
+        Write-EventLog -Event "recovery_start" -TaskId $handoff.task_id -Phase $handoff.target_phase -Notes "Recovering from: $recoveryMarker" `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
     }
 
     $validPhases = @($script:FACTORY_PHASES)
@@ -2026,15 +2131,9 @@ function Normalize-FactoryInputState {
 function Invoke-CircuitBreakerGates {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    $requiredKeys = @("Handoff", "Ceiling", "LogFile", "CircuitBreakerHistoryFile", "FrameworkPowerShell", "RepoRoot", "WorkspacesDir")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key)) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    Assert-FactoryContextKeys -Context $Context `
+        -RequiredKeys @("Handoff", "Ceiling", "FrameworkPowerShell", "RepoRoot", "WorkspacesDir") `
+        -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")
 
     $handoff = $Context.Handoff
     # Default missing optional counters to prevent StrictMode crash (Part C)
@@ -2067,13 +2166,18 @@ function Invoke-CircuitBreakerGates {
         
         $crucibleRoot = ".crucible"
         $configPath = Join-Path $repoRoot ".crucible/config.yaml"
+        $configUnreadable = $false
+        $configReadError = ""
         if (Test-Path -LiteralPath $configPath) {
             try {
                 $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
                 if ($content -match '(?m)^crucible_root:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
                     $crucibleRoot = $Matches[1].Trim()
                 }
-            } catch {}
+            } catch {
+                $configUnreadable = $true
+                $configReadError = $_.Exception.Message
+            }
         }
         $researchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
 
@@ -2091,6 +2195,10 @@ function Invoke-CircuitBreakerGates {
         $detectedFile = ""
         $detectedRule = ""
         $hasBlockMatch = $false
+        $scanFailed = $false
+        $scanFailedFile = ""
+        $scanFailedError = ""
+        $scanFailureKind = ""
 
         # Scan handoff text
         $handoffMatches = Get-InjectionMatches -Text $handoffText
@@ -2101,6 +2209,24 @@ function Invoke-CircuitBreakerGates {
                 $detectedRule = $m.RuleId
                 break
             }
+        }
+
+        # The configured root determines which research artifacts this detector is
+        # allowed to scan. Falling back to .crucible after a read failure would
+        # silently leave the configured research directory outside the scan.
+        # Guarded like the artifact scan below: a block match already found in the handoff
+        # text is a real detection, and it outranks this. Without the guard an unreadable
+        # config overwrote that finding, so the refusal described a configuration problem
+        # instead of the injection it had actually caught - and took the config path's
+        # skipped blocked-task record with it.
+        if ($configUnreadable -and -not $hasBlockMatch) {
+            $scanFailed = $true
+            $scanFailureKind = "config"
+            $scanFailedFile = ".crucible/config.yaml"
+            $scanFailedError = $configReadError
+            $detectedFile = $scanFailedFile
+            $detectedRule = ""
+            $hasBlockMatch = $true
         }
 
         # Scan artifacts
@@ -2126,7 +2252,15 @@ function Invoke-CircuitBreakerGates {
                                     break
                                 }
                             }
-                        } catch {}
+                        } catch {
+                            $scanFailed = $true
+                            $scanFailureKind = "research_input"
+                            $scanFailedFile = $art
+                            $scanFailedError = $_.Exception.Message
+                            $detectedFile = $scanFailedFile
+                            $detectedRule = ""
+                            $hasBlockMatch = $true
+                        }
                     }
                 }
                 if ($hasBlockMatch) { break }
@@ -2151,20 +2285,48 @@ function Invoke-CircuitBreakerGates {
                             break
                         }
                     }
-                } catch {}
+                } catch {
+                    $scanFailed = $true
+                    $scanFailureKind = "research_input"
+                    $scanFailedFile = Get-RootRelativePath -Root $repoRoot -Path $sessionTaskMd
+                    if ([string]::IsNullOrEmpty($scanFailedFile)) {
+                        $scanFailedFile = ".crucible/session/$($handoff.task_id)/research/task.md"
+                    }
+                    $scanFailedError = $_.Exception.Message
+                    $detectedFile = $scanFailedFile
+                    $detectedRule = ""
+                    $hasBlockMatch = $true
+                }
             }
         }
 
         if ($hasBlockMatch) {
             if ($null -eq $handoff.psobject.Properties["suspicious_content"] -or $handoff.suspicious_content -eq "") {
-                $distinctNotes = "researcher_silent_detector_hit: ${detectedFile}:$detectedRule"
-                $summaryMsg = "Silent injection match in ${detectedFile}: $detectedRule (researcher silent detector hit)"
+                if ($scanFailed) {
+                    if ($scanFailureKind -eq "config") {
+                        $distinctNotes = "researcher_config_unreadable: $scanFailedFile"
+                        $summaryMsg = "Could not determine the configured research directory because $scanFailedFile could not be read: $scanFailedError. Research input cannot be scanned without it."
+                        $wedgeWhy = $summaryMsg + " Reason: Configuration read failure."
+                        $recoveryOverride = "Restore read access to " + $scanFailedFile + ", verify the configured research directory, archive the blocked record, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                    } else {
+                        $distinctNotes = "researcher_artifact_unscannable: $scanFailedFile"
+                        $summaryMsg = "Could not scan $scanFailedFile for prompt injection: $scanFailedError. Unscannable research input is treated as a block."
+                        $wedgeWhy = $summaryMsg + " Reason: Scan failure."
+                        $recoveryOverride = "Review external sources before continuing. File: " + $scanFailedFile + "; Scan failure: " + $scanFailedError + ". Then archive the blocked record and run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                    }
+                } else {
+                    $distinctNotes = "researcher_silent_detector_hit: ${detectedFile}:$detectedRule"
+                    $summaryMsg = "Silent injection match in ${detectedFile}: $detectedRule (researcher silent detector hit)"
+                    $wedgeWhy = $summaryMsg + ". Reason: Silent corroboration."
+                    $recoveryOverride = "Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                }
 
-                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes $distinctNotes
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes $distinctNotes `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $summaryMsg
                 Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
-                    -Why ($summaryMsg + ". Reason: Silent corroboration.") `
-                    -RecoveryOverride ("Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover")
+                    -Why $wedgeWhy `
+                    -RecoveryOverride $recoveryOverride
                 exit 2
             }
         }
@@ -2172,7 +2334,8 @@ function Invoke-CircuitBreakerGates {
 
     # Suspicious Content (Prompt Injection Defense - {task_id})
     if ($null -ne $handoff.psobject.Properties["suspicious_content"] -and $null -ne $handoff.suspicious_content -and $handoff.suspicious_content -ne "") {
-        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes ("Suspicious Content Flagged: " + $handoff.suspicious_content)
+        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes ("Suspicious Content Flagged: " + $handoff.suspicious_content) `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Suspicious content flagged in handoff: " + $handoff.suspicious_content)
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
             -Why ("Suspicious Content detected. Suspicious content flagged in handoff: " + $handoff.suspicious_content) `
@@ -2187,7 +2350,8 @@ function Invoke-CircuitBreakerGates {
     # with retry > 2 -- an otherwise-impossible state we block rather than run. Persistent
     # re-review failure is covered live by the review_stalemate breaker below.
     if ($handoff.handoff_retry_count -gt 2 -and $handoff.source_phase -eq $handoff.target_phase) {
-        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Persistent Task Failure - Retry over 2"
+        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Persistent Task Failure - Retry over 2" `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "handoff_retry_exceeded" -AttemptCount $handoff.handoff_retry_count -LastSpecialist $handoff.target_phase -Summary "Persistent Task Failure - Retry over 2"
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "handoff_retry_exceeded" `
             -Why ("Task " + $handoff.task_id + " has been handed off to " + $handoff.target_phase + " " + $handoff.handoff_retry_count + " times. Reason: " + $handoff.reason)
@@ -2197,7 +2361,8 @@ function Invoke-CircuitBreakerGates {
     # Review Strike-2 DEGRADED Warning
     if ($handoff.review_strike_count -eq 2 -and $handoff.target_phase -eq "implementation") {
         Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.target_phase `
-            -Outcome "warned" -Notes "Review strike 2 of 3: Architect should reduce scope"
+            -Outcome "warned" -Kind "review_strike_2" -Notes "Review strike 2 of 3: Architect should reduce scope" `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-Quiet ("`n[DEGRADED] Task " + $handoff.task_id + " has failed review twice.") -ForegroundColor Yellow
         Write-Quiet "  Strike count: 2 of 3. One more failure will BLOCK this task." -ForegroundColor Yellow
         Write-Quiet "  Architect DIRECTIVE: Do not attempt a full re-implementation." -ForegroundColor White
@@ -2206,11 +2371,27 @@ function Invoke-CircuitBreakerGates {
 
     # Review 3-Strike Rule
     if ($handoff.review_strike_count -ge 3) {
-        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Review Stalemate - 3 strikes"
+        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Review Stalemate - 3 strikes" `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "review_stalemate" -AttemptCount $handoff.review_strike_count -LastSpecialist $handoff.target_phase -Summary "Review Stalemate - 3 strikes"
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "review_stalemate" `
             -Why ("Task " + $handoff.task_id + " has failed review " + $handoff.review_strike_count + " times. Reason: " + $handoff.reason)
         exit 2
+    }
+
+    # The server-side handoff count that guards this ceiling is a lower bound whenever the
+    # pipeline log had lines it could not parse. Say so on every run, whether or not the gap
+    # changes the answer below: a count that silently skipped its evidence is exactly the
+    # shape this ceiling exists to catch.
+    $handoffLogParseFailureCount = 0
+    if ($Context.ContainsKey("HandoffLogParseFailureCount")) {
+        $handoffLogParseFailureCount = [int]$Context.HandoffLogParseFailureCount
+    }
+    if ($handoffLogParseFailureCount -gt 0) {
+        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.target_phase `
+            -Outcome "unverifiable" -Kind "unreadable_handoff_history" `
+            -Notes ("Server-side handoff count skipped " + $handoffLogParseFailureCount + " unparseable pipeline-log line(s); the count is a lower bound.") `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
     }
 
     # Token Budget Enforcement
@@ -2233,17 +2414,31 @@ function Invoke-CircuitBreakerGates {
         }
 
         if ($handoff.cumulative_handoff_count -gt $effectiveCeiling) {
-            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "budget_exceeded" -Notes ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling)
+            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "budget_exceeded" -Notes ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling) `
+                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "budget_exceeded" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling)
             Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "budget_exceeded" `
                 -Why ("Task " + $handoff.task_id + " has reached " + $handoff.cumulative_handoff_count + " handoffs. Ceiling: " + $effectiveCeiling + " for tier " + $handoff.budget_tier + " (base " + $ceiling + " + " + $rebaseCycles + " rebase cycle(s)). Reason: " + $handoff.reason)
+            exit 2
+        } elseif ($handoffLogParseFailureCount -gt 0 -and
+                  ([int]$handoff.cumulative_handoff_count + $handoffLogParseFailureCount) -gt $effectiveCeiling) {
+            # Counted handoffs are under the ceiling, but not by more than the number of lines
+            # the count could not read. Each unreadable line may be a session_end, so passing
+            # here would be asserting a budget check that the evidence does not support.
+            $unreadableHandoffReason = "Handoff count is unverifiable: " + $handoffLogParseFailureCount + " unparseable pipeline-log line(s) could each hide a session_end, and " + $handoff.cumulative_handoff_count + " counted handoff(s) plus those lines would exceed the ceiling of " + $effectiveCeiling + "."
+            Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "unreadable_handoff_history" -Notes $unreadableHandoffReason `
+                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+            Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "unreadable_handoff_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $unreadableHandoffReason
+            Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_handoff_history" `
+                -Why $unreadableHandoffReason
             exit 2
         }
     }
 
     # Recurring Merge Conflicts
     if ($handoff.psobject.Properties["rebase_count"] -and $handoff.rebase_count -ge 3) {
-        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Recurring Merge Conflicts - 3 strikes"
+        Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Recurring Merge Conflicts - 3 strikes" `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $handoff.rebase_count -LastSpecialist $handoff.target_phase -Summary "Recurring Merge Conflicts - 3 strikes. Task requires manual intervention."
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "recurring_merge_conflicts" `
             -Why ("Task " + $handoff.task_id + " has been rebased " + $handoff.rebase_count + " times and still conflicts.")
@@ -2282,14 +2477,18 @@ function Invoke-CircuitBreakerGates {
 
                 # Check if this is a retry (prior quality_gate_retry in event log)
                 $hasPriorRetry = $false
+                $retryHistoryParseFailureCount = 0
                 if (Test-Path $LOG_FILE) {
                     $lines = @(Get-Content $LOG_FILE -Tail 200 -Encoding UTF8)
                     for ($i = $lines.Length - 1; $i -ge 0; $i--) {
+                        # A blank line is formatting, not a miss - see the matching skip in
+                        # Invoke-FactoryRuntimeValidation.
+                        if ([string]::IsNullOrWhiteSpace($lines[$i])) { continue }
                         try {
                             $cleanedLine = $lines[$i] -replace "^$([char]0xFEFF)", ""
                             $entry = $cleanedLine | ConvertFrom-Json
-                            $logPhase = if ($entry.PSObject.Properties["phase"]) { $entry.phase } else { $entry.specialist }
-                             if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq "factory") {
+                            $logPhase = Get-EntryPhase $entry
+                             if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq "crucible") {
                                  continue
                              }
                              if ($entry.task_id -eq $handoff.task_id -and $logPhase -ne $handoff.source_phase) {
@@ -2305,12 +2504,22 @@ function Invoke-CircuitBreakerGates {
                                 $hasPriorRetry = $true
                                 break
                             }
-                        } catch { continue }
+                        } catch {
+                            $retryHistoryParseFailureCount += 1
+                            continue
+                        }
                     }
                 }
 
+                if ($retryHistoryParseFailureCount -gt 0) {
+                    Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                        -Outcome "warned" -Kind "unreadable_retry_history" -Notes ("Retry history scan skipped " + $retryHistoryParseFailureCount + " unparseable line(s).") `
+                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                }
+
                 if ($hasPriorRetry) {
-                    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "factory" -Outcome "reviewer_verification_failed" -Notes "Independent verification failed after Reviewer APPROVED again: $failedCheck"
+                    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "reviewer_verification_failed" -Notes "Independent verification failed after Reviewer APPROVED again: $failedCheck" `
+                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                     Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "reviewer_verification_failed" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary "Verification command failed in worktree after Reviewer self-reported APPROVED: $failedCheck"
                     $reviewerVerificationWhy = "Independent verification check failed on retry: " + $failedCheck + ". Route back to Architect."
                     if ($testOutput) {
@@ -2319,6 +2528,14 @@ function Invoke-CircuitBreakerGates {
                     }
                     Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "reviewer_verification_failed" `
                         -Why $reviewerVerificationWhy
+                    exit 2
+                } elseif ($retryHistoryParseFailureCount -gt 0) {
+                    $unreadableRetryHistoryReason = "Retry history is unreadable: " + $retryHistoryParseFailureCount + " unparseable line(s) prevented determining whether this is a repeat independent-verification failure."
+                    Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "unreadable_retry_history" -Notes $unreadableRetryHistoryReason `
+                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                    Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary $unreadableRetryHistoryReason
+                    Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
+                        -Why $unreadableRetryHistoryReason
                     exit 2
                 } else {
                     Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
@@ -2334,50 +2551,11 @@ function Invoke-CircuitBreakerGates {
                 }
             }
             Write-Quiet "[VERIFY] isolated verification passed independently. APPROVED handoff accepted." -ForegroundColor Green
-            Write-EventLog -Event "verified" -TaskId $handoff.task_id -Specialist "factory" -Outcome "tests_passed" -Notes "Independent isolated verification passed before Operator handoff"
+            Write-EventLog -Event "verified" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "tests_passed" -Notes "Independent isolated verification passed before Operator handoff" `
+                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         } else {
             Write-Quiet "[VERIFY] WARN: Worktree not found at $wtPath - skipping independent test verification." -ForegroundColor Yellow
         }
-    }
-}
-
-function Invoke-GitChecked {
-    param(
-        [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock
-    )
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $stdout = @()
-        $stderr = @()
-        
-        $pipeline = & $ScriptBlock 2>&1
-        
-        foreach ($item in $pipeline) {
-            if ($item -is [System.Management.Automation.ErrorRecord]) {
-                $stderr += $item.ToString()
-            } else {
-                $stdout += $item
-            }
-        }
-        
-        $exitCode = $LASTEXITCODE
-        
-        if ($stderr.Count -gt 0) {
-            $errMessage = $stderr -join "`n"
-            if ($exitCode -eq 0) {
-                Write-Quiet $errMessage.Trim()
-            } else {
-                Write-Error -Message $errMessage.Trim() -ErrorAction Continue
-            }
-        }
-        
-        if ($stdout.Count -gt 0) {
-            $stdout
-        }
-    } finally {
-        $ErrorActionPreference = $prevEAP
-        $global:LASTEXITCODE = $exitCode
     }
 }
 
@@ -2395,6 +2573,12 @@ function Invoke-HumanGateMerge {
         [Parameter(Mandatory = $true)][string]$TaskId,
         [Parameter(Mandatory = $true)][string]$PrimaryBranch,
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        # Declared rather than inherited. This function is called from inside
+        # Invoke-HumanGateAction, so its event destination used to be two frames of
+        # dynamic scope away from anything that chose it - and the one event it writes
+        # is a circuit breaker, the record least tolerable to misfile.
+        [Parameter(Mandatory = $true)][string]$LogFile,
+        [Parameter(Mandatory = $true)][string]$CircuitBreakerHistoryFile,
         $Handoff = $null,
         [int]$MaxRebaseAttempts = 3,
         [string]$CheckScript = "",
@@ -2417,21 +2601,30 @@ function Invoke-HumanGateMerge {
         try {
             $sessDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
             $gdDir = Join-Path $sessDir "global/gate_decisions"
-            if (Test-Path $gdDir) {
-                $candidates = @(Get-ChildItem -Path $gdDir -Filter ($TaskId + "-*.json") -ErrorAction SilentlyContinue |
+            if (Test-Path -LiteralPath $gdDir -ErrorAction Stop) {
+                $candidates = @(Get-ChildItem -LiteralPath $gdDir -Filter ($TaskId + "-*.json") -ErrorAction Stop |
                     Sort-Object LastWriteTime -Descending)
                 foreach ($f in $candidates) {
                     try {
-                        $d = Get-Content $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-                        if ($d.outcome -eq "accepted") {
-                            Remove-Item -Path $f.FullName -Force
-                            Write-Quiet "[HUMAN GATE] Removed premature 'accepted' gate decision $($f.Name) (merge did not complete)."
-                            break
+                        $d = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+                    } catch {
+                        Write-Quiet "[HUMAN GATE] Warning: Could not inspect gate decision $($f.Name) while removing premature acceptance: $($_.Exception.Message)" -ForegroundColor Yellow
+                        continue
+                    }
+                    if ($d.outcome -eq "accepted") {
+                        try {
+                            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
+                        } catch {
+                            throw ("Could not inspect or remove premature accepted gate decisions before returning the merge outcome: " + $_.Exception.Message)
                         }
-                    } catch {}
+                        Write-Quiet "[HUMAN GATE] Removed premature 'accepted' gate decision $($f.Name) (merge did not complete)."
+                        break
+                    }
                 }
             }
-        } catch {}
+        } catch {
+            throw ("Could not inspect or remove premature accepted gate decisions before returning the merge outcome: " + $_.Exception.Message)
+        }
     }
 
     Write-Quiet "[HUMAN GATE] Merging branch task/$TaskId into $PrimaryBranch..."
@@ -2452,7 +2645,8 @@ function Invoke-HumanGateMerge {
     $nextRebase = $currentRebase + 1
 
     if ($nextRebase -gt $MaxRebaseAttempts) {
-        Write-EventLog -Event "circuit_breaker" -TaskId $TaskId -Specialist "deployment" -Outcome "blocked" -Notes "Recurring Merge Conflicts - $MaxRebaseAttempts strikes at human gate"
+        Write-EventLog -Event "circuit_breaker" -TaskId $TaskId -Specialist "deployment" -Outcome "blocked" -Notes "Recurring Merge Conflicts - $MaxRebaseAttempts strikes at human gate" `
+            -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
         if (Get-Command Write-BlockedTaskRecord -ErrorAction SilentlyContinue) {
             Write-BlockedTaskRecord -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
         }
@@ -2540,49 +2734,6 @@ function Invoke-HumanGateMerge {
     }
     & $removePrematureAccept
     return "rework"
-}
-
-function Get-BacklogItemPathForTaskProjectRoot {
-    param(
-        [Parameter(Mandatory = $true)][string]$Task,
-        [string]$ProjectRoot = ""
-    )
-
-    $typeDir = if ($Task -match "^F-") {
-        "features"
-    } elseif ($Task -match "^B-") {
-        "bugs"
-    } elseif ($Task -match "^C-") {
-        "chores"
-    } else {
-        ""
-    }
-
-    $typeDirs = if ([string]::IsNullOrWhiteSpace($typeDir)) {
-        @("features", "bugs", "chores")
-    } else {
-        @($typeDir)
-    }
-
-    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
-    foreach ($dir in $typeDirs) {
-        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $activeMatch) {
-            return $activeMatch.FullName
-        }
-
-        $rootMatch = Get-ChildItem -Path (Join-Path $backlogDir $dir) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $rootMatch) {
-            return $rootMatch.FullName
-        }
-
-        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($Task + "_*.md") -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $archivedMatch) {
-            return $archivedMatch.FullName
-        }
-    }
-
-    return ""
 }
 
 function Get-TaskFinalizationDetails {
@@ -2850,10 +3001,51 @@ function Restore-BacklogTask {
     }
 }
 
+function Get-ActionsUrlFromOriginUrl {
+    # Maps a GitHub remote (SSH or HTTPS, with or without .git) to its Actions page.
+    # An unrecognized remote is handed back unchanged rather than guessed at, so the
+    # operator sees a real URL or the literal remote, never a fabricated one.
+    param([Parameter(Mandatory=$true)][AllowEmptyString()][string]$OriginUrl)
+
+    $originText = ([string]$OriginUrl).Trim()
+    if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
+        return "https://github.com/" + $Matches[1] + "/actions"
+    }
+    if ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
+        return "https://github.com/" + $Matches[1] + "/actions"
+    }
+    return $originText
+}
+
+function Write-GateCiRunUrl {
+    # Emitted when CI could not be confirmed before finalizing, so the human has a
+    # place to go and check. A missing or unreadable origin is not worth failing the
+    # gate over: the advisory is simply omitted.
+    $originUrl = (git remote get-url origin 2>$null)
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
+        Write-Host ("[HUMAN GATE] CI run URL: " + (Get-ActionsUrlFromOriginUrl -OriginUrl $originUrl)) -ForegroundColor Yellow
+    }
+}
+
+function Get-HumanGateOutcomes {
+    # The one list. Invoke-HumanGate validates -GateOutcome against it and
+    # Invoke-HumanGateAction names it when it refuses one. A second copy is how a
+    # value comes to pass one check and match no dispatch arm.
+    return @("accepted", "rejected", "redirected", "abandoned")
+}
+
 function Invoke-HumanGateAction {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
         [Parameter(Mandatory=$true)][string]$Outcome,
+        # Declared rather than looked up with Get-Variable. The lookup walked the
+        # caller's scope chain, and its one caller - Invoke-HumanGate - only bound
+        # $LOG_FILE when the context happened to carry the key. When it did not, all
+        # five events below were skipped outright by an IsNullOrEmpty guard: a
+        # circuit_breaker and three CI-verification blocks silently unwritten, on the
+        # one path where the operator most needs the record.
+        [Parameter(Mandatory=$true)][string]$LogFile,
+        [Parameter(Mandatory=$true)][string]$CircuitBreakerHistoryFile,
         [string]$ProjectRoot = "",
         [string]$SourcePhase = "deployment",
         [string]$GateReason = ""
@@ -2865,595 +3057,610 @@ function Invoke-HumanGateAction {
         $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
         if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
     }
-    $logVar = Get-Variable -Name "LOG_FILE" -ErrorAction SilentlyContinue
-    $resolvedLogFile = if ($null -ne $logVar) { $logVar.Value } else { $null }
-    $cbVar = Get-Variable -Name "CB_HISTORY_FILE" -ErrorAction SilentlyContinue
-    $resolvedCBHistoryFile = if ($null -ne $cbVar) { $cbVar.Value } else { $null }
 
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
+        Invoke-HumanGateAcceptRedirect -TaskId $TaskId -Outcome $Outcome -LogFile $LogFile `
+            -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile -ProjectRoot $resolvedProjectRoot `
+            -PrimaryBranch $primaryBranch -SourcePhase $SourcePhase
+    } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
+        Invoke-HumanGateRejectAbandon -TaskId $TaskId -Outcome $Outcome -ProjectRoot $resolvedProjectRoot `
+            -PrimaryBranch $primaryBranch -SourcePhase $SourcePhase -GateReason $GateReason
+    } else {
+        # Without this arm the function returned, having done nothing, and its caller
+        # read that as the work being done: it archived the decision, deleted the
+        # pending template, printed "Decision recorded" in green and let the pipeline
+        # past the gate. A typo in the outcome field bought a pass. Nothing above this
+        # point has a side effect, so throwing here leaves the pending file in place
+        # for the operator to correct.
+        throw ("Unrecognized gate outcome '" + $Outcome + "'. Expected one of: " + ((Get-HumanGateOutcomes) -join ", ") + ".")
+    }
+}
 
-        $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
-        $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+function Invoke-HumanGateAcceptRedirect {
+    # The accept/redirect arm, lifted verbatim out of Invoke-HumanGateAction. It
+    # finalizes work the human approved: backlog finalization, merge, CI
+    # verification, worktree and branch cleanup, archival, session-state pruning.
+    #
+    # LogFile and CircuitBreakerHistoryFile are mandatory here and absent from the
+    # reject/abandon arm because only this arm writes events. On the single function
+    # both were mandatory and the reject path was made to supply two values it never
+    # read; the split puts that in the signature where a caller can see it.
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$Outcome,
+        [Parameter(Mandatory=$true)][string]$LogFile,
+        [Parameter(Mandatory=$true)][string]$CircuitBreakerHistoryFile,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot,
+        [Parameter(Mandatory=$true)][string]$PrimaryBranch,
+        [string]$SourcePhase = "deployment"
+    )
 
-        $finalizationOk = $true
-        if (Test-Path -LiteralPath $backlogPath) {
-            $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-            if ($backlogContent -match [regex]::Escape($TaskId)) {
-                $finalization = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $resolvedProjectRoot
-                if (-not $finalization.IsFinalized) {
-                    Write-Host "`n[D44] INFO: Task $TaskId was not explicitly finalized before accept/push. Auto-finalizing fallback now..." -ForegroundColor Yellow
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+    $backlogPath = Join-Path $backlogDir "BACKLOG.md"
 
-                    # Locate active spec
-                    $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $resolvedProjectRoot
-                    if ([string]::IsNullOrEmpty($activeSpecPath) -or -not (Test-Path -LiteralPath $activeSpecPath)) {
-                        Write-Host "[D44] ERROR: Active spec path not found for task $TaskId. Auto-finalization failed." -ForegroundColor Red
+    $finalizationOk = $true
+    if (Test-Path -LiteralPath $backlogPath) {
+        $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+        if ($backlogContent -match [regex]::Escape($TaskId)) {
+            $finalization = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $ProjectRoot
+            if (-not $finalization.IsFinalized) {
+                Write-Host "`n[D44] INFO: Task $TaskId was not explicitly finalized before accept/push. Auto-finalizing fallback now..." -ForegroundColor Yellow
+
+                # Locate active spec
+                $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $ProjectRoot
+                if ([string]::IsNullOrEmpty($activeSpecPath) -or -not (Test-Path -LiteralPath $activeSpecPath)) {
+                    Write-Host "[D44] ERROR: Active spec path not found for task $TaskId. Auto-finalization failed." -ForegroundColor Red
+                    $finalizationOk = $false
+                } elseif ($activeSpecPath -match '(?i)[/\\]archived[/\\]') {
+                    Write-Host "[D44] INFO: Task spec for $TaskId is already archived at $activeSpecPath." -ForegroundColor Green
+                } else {
+                    # Load archive-task helper
+                    $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+                    if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                        if (Test-Path -LiteralPath $archiveLibPath) {
+                            . $archiveLibPath
+                        } else {
+                            throw "archive-task helper not found at $archiveLibPath"
+                        }
+                    }
+
+                    # Perform archival
+                    try {
+                        $archiveParams = @{
+                            BacklogPath = $backlogPath
+                            SpecPath = $activeSpecPath
+                        }
+                        if ($SourcePhase -eq "grooming") {
+                            $archiveParams["Status"] = "Resolved"
+                        }
+                        $archiveResult = Invoke-BacklogTaskArchive @archiveParams
+                        Write-Host ("[D44] SUCCESS: Auto-archived task as {0} (status {1}): {2}" -f $archiveResult.Type, $archiveResult.Status, $archiveResult.ArchivedRelPath) -ForegroundColor Green
+                    } catch {
+                        Write-Host ("[D44] ERROR: Archival failed for task $TaskId. Error: " + $_.Exception.Message) -ForegroundColor Red
                         $finalizationOk = $false
-                    } elseif ($activeSpecPath -match '(?i)[/\\]archived[/\\]') {
-                        Write-Host "[D44] INFO: Task spec for $TaskId is already archived at $activeSpecPath." -ForegroundColor Green
-                    } else {
-                        # Load archive-task helper
-                        $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-                        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
-                            if (Test-Path -LiteralPath $archiveLibPath) {
-                                . $archiveLibPath
-                            } else {
-                                throw "archive-task helper not found at $archiveLibPath"
-                            }
-                        }
+                    }
 
-                        # Perform archival
-                        try {
-                            $archiveParams = @{
-                                BacklogPath = $backlogPath
-                                SpecPath = $activeSpecPath
-                            }
-                            if ($SourcePhase -eq "grooming") {
-                                $archiveParams["Status"] = "Resolved"
-                            }
-                            $archiveResult = Invoke-BacklogTaskArchive @archiveParams
-                            Write-Host ("[D44] SUCCESS: Auto-archived task as {0} (status {1}): {2}" -f $archiveResult.Type, $archiveResult.Status, $archiveResult.ArchivedRelPath) -ForegroundColor Green
-                        } catch {
-                            Write-Host ("[D44] ERROR: Archival failed for task $TaskId. Error: " + $_.Exception.Message) -ForegroundColor Red
+                    # Re-verify after archiving
+                    if ($finalizationOk) {
+                        $reverify = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $ProjectRoot
+                        if (-not $reverify.IsFinalized) {
+                            Write-Host "[D44] ERROR: Task $TaskId is still not finalized after archival attempt. Details: $($reverify | ConvertTo-Json -Compress)" -ForegroundColor Red
                             $finalizationOk = $false
-                        }
-
-                        # Re-verify after archiving
-                        if ($finalizationOk) {
-                            $reverify = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $resolvedProjectRoot
-                            if (-not $reverify.IsFinalized) {
-                                Write-Host "[D44] ERROR: Task $TaskId is still not finalized after archival attempt. Details: $($reverify | ConvertTo-Json -Compress)" -ForegroundColor Red
-                                $finalizationOk = $false
-                            }
                         }
                     }
                 }
             }
         }
+    }
 
-        if (-not $finalizationOk) {
-            Write-Host "[D44] STOP: Auto-finalization failed for $TaskId; refusing to push. The merge remains LOCAL only. Run archive-task.ps1 for $TaskId, then re-run the gate with -GateOutcome accepted." -ForegroundColor Red
-            
-            if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
-                try {
-                    Write-EventLog -Event "quality_gate_retry" -TaskId $TaskId -Phase "deployment" `
-                        -Outcome "retry_required" -Notes "Auto-finalization failed at human gate; push withheld" `
-                        -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
-                } catch {
-                    Write-Host "[D44] WARNING: Failed to write quality_gate_retry event: $_" -ForegroundColor Yellow
-                }
+    if (-not $finalizationOk) {
+        Write-Host "[D44] STOP: Auto-finalization failed for $TaskId; refusing to push. The merge remains LOCAL only. Run archive-task.ps1 for $TaskId, then re-run the gate with -GateOutcome accepted." -ForegroundColor Red
+        
+        try {
+            Write-EventLog -Event "quality_gate_retry" -TaskId $TaskId -Phase "deployment" `
+                -Outcome "retry_required" -Notes "Auto-finalization failed at human gate; push withheld" `
+                -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+        } catch {
+            Write-Host "[D44] WARNING: Failed to write quality_gate_retry event: $_" -ForegroundColor Yellow
+        }
+        exit 2
+    }
+
+    if ($SourcePhase -ne "grooming") {
+        $hasTaskBranch = $false
+        git show-ref --quiet "refs/heads/task/$TaskId"
+        if ($LASTEXITCODE -eq 0) {
+            $hasTaskBranch = $true
+        }
+        if ($hasTaskBranch) {
+            $gateHandoff = $null
+            $ghVar = Get-Variable -Name "handoff" -ErrorAction SilentlyContinue
+            if ($null -ne $ghVar) { $gateHandoff = $ghVar.Value }
+            $mergeResult = Invoke-HumanGateMerge -TaskId $TaskId -PrimaryBranch $PrimaryBranch -ProjectRoot $ProjectRoot -Handoff $gateHandoff `
+        -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+            if ($mergeResult -eq "rework") {
+                # Auto-rebase hit a genuine conflict; task routed back to implementation.
+                # Repo is clean and unpushed. Exit 3 signals "not shipped, rework queued".
+                Write-Host "[HUMAN GATE] task/$TaskId routed back to implementation for rebase-conflict rework. Nothing was pushed; re-run the pipeline to resolve." -ForegroundColor Cyan
+                exit 3
+            } elseif ($mergeResult -eq "breaker") {
+                exit 2
+            } elseif ($mergeResult -ne "merged") {
+                Write-Host "[ERROR] git merge --no-ff --no-edit task/$TaskId failed!" -ForegroundColor Red
+                exit 1
             }
-            exit 2
         }
 
-        if ($SourcePhase -ne "grooming") {
-            $hasTaskBranch = $false
-            git show-ref --quiet "refs/heads/task/$TaskId"
-            if ($LASTEXITCODE -eq 0) {
-                $hasTaskBranch = $true
+        $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $ProjectRoot
+        $autoPush = $false
+        if ($autoPushVal -eq "true") {
+            $autoPush = $true
+        }
+        $requireGreenCiVal = Get-ConfiguredReview -Key "require_green_ci" -ProjectRoot $ProjectRoot
+        $requireGreenCi = $false
+        if ($requireGreenCiVal -eq "true") {
+            $requireGreenCi = $true
+        }
+        $ciTimeoutVal = Get-ConfiguredReview -Key "ci_timeout_minutes" -ProjectRoot $ProjectRoot
+        $ciTimeoutMinutes = 20
+        if (-not [string]::IsNullOrWhiteSpace($ciTimeoutVal)) {
+            $parsedTimeout = 0
+            if ([int]::TryParse($ciTimeoutVal, [ref]$parsedTimeout) -and $parsedTimeout -ge 0) {
+                $ciTimeoutMinutes = $parsedTimeout
             }
-            if ($hasTaskBranch) {
-                $gateHandoff = $null
-                $ghVar = Get-Variable -Name "handoff" -ErrorAction SilentlyContinue
-                if ($null -ne $ghVar) { $gateHandoff = $ghVar.Value }
-                $mergeResult = Invoke-HumanGateMerge -TaskId $TaskId -PrimaryBranch $primaryBranch -ProjectRoot $resolvedProjectRoot -Handoff $gateHandoff
-                if ($mergeResult -eq "rework") {
-                    # Auto-rebase hit a genuine conflict; task routed back to implementation.
-                    # Repo is clean and unpushed. Exit 3 signals "not shipped, rework queued".
-                    Write-Host "[HUMAN GATE] task/$TaskId routed back to implementation for rebase-conflict rework. Nothing was pushed; re-run the pipeline to resolve." -ForegroundColor Cyan
-                    exit 3
-                } elseif ($mergeResult -eq "breaker") {
-                    exit 2
-                } elseif ($mergeResult -ne "merged") {
-                    Write-Host "[ERROR] git merge --no-ff --no-edit task/$TaskId failed!" -ForegroundColor Red
-                    exit 1
-                }
+        }
+        $ciQueuedGraceVal = Get-ConfiguredReview -Key "ci_queued_grace_minutes" -ProjectRoot $ProjectRoot
+        $ciQueuedGraceMinutes = 15
+        if (-not [string]::IsNullOrWhiteSpace($ciQueuedGraceVal)) {
+            $parsedGrace = 0
+            if ([int]::TryParse($ciQueuedGraceVal, [ref]$parsedGrace) -and $parsedGrace -ge 0) {
+                $ciQueuedGraceMinutes = $parsedGrace
             }
+        }
+        $ciRequiredChecks = Get-ConfiguredReview -Key "ci_required_checks" -ProjectRoot $ProjectRoot
+        $ciPostPushWatchVal = Get-ConfiguredReview -Key "ci_post_push_watch" -ProjectRoot $ProjectRoot
+        $ciPostPushWatch = ($ciPostPushWatchVal -eq "true")
+        $mergedSha = (git rev-parse HEAD 2>$null).Trim()
 
-            $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $resolvedProjectRoot
-            $autoPush = $false
-            if ($autoPushVal -eq "true") {
-                $autoPush = $true
-            }
-            $requireGreenCiVal = Get-ConfiguredReview -Key "require_green_ci" -ProjectRoot $resolvedProjectRoot
-            $requireGreenCi = $false
-            if ($requireGreenCiVal -eq "true") {
-                $requireGreenCi = $true
-            }
-            $ciTimeoutVal = Get-ConfiguredReview -Key "ci_timeout_minutes" -ProjectRoot $resolvedProjectRoot
-            $ciTimeoutMinutes = 20
-            if (-not [string]::IsNullOrWhiteSpace($ciTimeoutVal)) {
-                $parsedTimeout = 0
-                if ([int]::TryParse($ciTimeoutVal, [ref]$parsedTimeout) -and $parsedTimeout -ge 0) {
-                    $ciTimeoutMinutes = $parsedTimeout
-                }
-            }
-            $ciQueuedGraceVal = Get-ConfiguredReview -Key "ci_queued_grace_minutes" -ProjectRoot $resolvedProjectRoot
-            $ciQueuedGraceMinutes = 15
-            if (-not [string]::IsNullOrWhiteSpace($ciQueuedGraceVal)) {
-                $parsedGrace = 0
-                if ([int]::TryParse($ciQueuedGraceVal, [ref]$parsedGrace) -and $parsedGrace -ge 0) {
-                    $ciQueuedGraceMinutes = $parsedGrace
-                }
-            }
-            $ciRequiredChecks = Get-ConfiguredReview -Key "ci_required_checks" -ProjectRoot $resolvedProjectRoot
-            $ciPostPushWatchVal = Get-ConfiguredReview -Key "ci_post_push_watch" -ProjectRoot $resolvedProjectRoot
-            $ciPostPushWatch = ($ciPostPushWatchVal -eq "true")
-            $mergedSha = (git rev-parse HEAD 2>$null).Trim()
+        if ($autoPush) {
+            $remotes = @(Invoke-GitChecked { git remote 2>$null })
+            if ($remotes -contains "origin") {
+                if ($requireGreenCi) {
+                    $ciStagingPrefixVal = Get-ConfiguredReview -Key "ci_staging_branch_prefix" -ProjectRoot $ProjectRoot
+                    $ciStagingPrefix = "crucible-ci"
+                    if (-not [string]::IsNullOrWhiteSpace($ciStagingPrefixVal)) {
+                        $ciStagingPrefix = $ciStagingPrefixVal.TrimEnd('/')
+                    }
+                    $stagingBranch = "$ciStagingPrefix/$TaskId"
 
-            if ($autoPush) {
-                $remotes = @(Invoke-GitChecked { git remote 2>$null })
-                if ($remotes -contains "origin") {
-                    if ($requireGreenCi) {
-                        $ciStagingPrefixVal = Get-ConfiguredReview -Key "ci_staging_branch_prefix" -ProjectRoot $resolvedProjectRoot
-                        $ciStagingPrefix = "crucible-ci"
-                        if (-not [string]::IsNullOrWhiteSpace($ciStagingPrefixVal)) {
-                            $ciStagingPrefix = $ciStagingPrefixVal.TrimEnd('/')
-                        }
-                        $stagingBranch = "$ciStagingPrefix/$TaskId"
+                    Write-Host ("[HUMAN GATE] Publishing CI staging ref origin/" + $stagingBranch + "...") -ForegroundColor Cyan
+                    Invoke-GitChecked { git push origin ("$mergedSha" + ":refs/heads/" + $stagingBranch) --force }
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host ("[ERROR] Failed to publish CI staging ref " + $stagingBranch + ". Please check network/credentials.") -ForegroundColor Red
+                        exit 1
+                    }
 
-                        Write-Host ("[HUMAN GATE] Publishing CI staging ref origin/" + $stagingBranch + "...") -ForegroundColor Cyan
-                        Invoke-GitChecked { git push origin ("$mergedSha" + ":refs/heads/" + $stagingBranch) --force }
-                        if ($LASTEXITCODE -ne 0) {
-                            Write-Host ("[ERROR] Failed to publish CI staging ref " + $stagingBranch + ". Please check network/credentials.") -ForegroundColor Red
-                            exit 1
-                        }
+                    $watchScript = Join-Path (Split-Path -Parent $PSScriptRoot) "watch-adopter-ci.ps1"
+                    Write-Host ("[HUMAN GATE] Watching origin CI for " + $mergedSha + " on staging ref " + $stagingBranch + " before finalizing...") -ForegroundColor Cyan
+                    $watchCmdArgs = @("-Commit", $mergedSha, "-TimeoutMinutes", $ciTimeoutMinutes, "-QueuedGraceMinutes", $ciQueuedGraceMinutes, "-CrucibleRoot", $ProjectRoot)
+                    if (-not [string]::IsNullOrWhiteSpace($ciRequiredChecks)) {
+                        $watchCmdArgs += @("-RequiredJobs", $ciRequiredChecks)
+                    }
+                    $ciOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
+                    $ciExitCode = $LASTEXITCODE
+                    foreach ($line in $ciOutput) {
+                        Write-Host $line
+                    }
 
-                        $watchScript = Join-Path (Split-Path -Parent $PSScriptRoot) "watch-adopter-ci.ps1"
-                        Write-Host ("[HUMAN GATE] Watching origin CI for " + $mergedSha + " on staging ref " + $stagingBranch + " before finalizing...") -ForegroundColor Cyan
-                        $watchCmdArgs = @("-Commit", $mergedSha, "-TimeoutMinutes", $ciTimeoutMinutes, "-QueuedGraceMinutes", $ciQueuedGraceMinutes, "-CrucibleRoot", $resolvedProjectRoot)
-                        if (-not [string]::IsNullOrWhiteSpace($ciRequiredChecks)) {
-                            $watchCmdArgs += @("-RequiredJobs", $ciRequiredChecks)
-                        }
-                        $ciOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
-                        $ciExitCode = $LASTEXITCODE
-                        foreach ($line in $ciOutput) {
-                            Write-Host $line
-                        }
-
-                        if ($ciExitCode -eq 0) {
-                            Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
-                            Invoke-GitChecked { git push origin $primaryBranch }
-                            if ($LASTEXITCODE -ne 0) {
-                                Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
-                                exit 1
-                            }
-                            Invoke-GitChecked { git push origin --delete $stagingBranch }
-
-                            if ($ciPostPushWatch) {
-                                Write-Host ("[HUMAN GATE] Watching origin CI post-push on " + $primaryBranch + " for " + $mergedSha + "...") -ForegroundColor Cyan
-                                $postPushOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
-                                $postPushExitCode = $LASTEXITCODE
-                                foreach ($line in $postPushOutput) {
-                                    Write-Host $line
-                                }
-                                if ($postPushExitCode -eq 1) {
-                                    Write-Host ("[CI WATCH] STATUS=POST_PUSH_RED: Commit " + $mergedSha + " passed staging CI but failed branch CI on " + $primaryBranch + "!") -ForegroundColor Red
-                                    if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
-                                        try {
-                                            Write-EventLog -Event "post_push_ci_red" -TaskId $TaskId -Specialist "factory" -Outcome "warning" -Notes ("Commit " + $mergedSha + " failed post-push branch CI.") `
-                                                -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
-                                        } catch {
-                                            Write-Host "[HUMAN GATE] WARNING: Failed to write post_push_ci_red event: $_" -ForegroundColor Yellow
-                                        }
-                                    }
-                                } elseif ($postPushExitCode -eq 5) {
-                                    Write-Host ("[CI WATCH] STATUS=POST_PUSH_MISSING_REQUIRED_JOBS: Commit " + $mergedSha + " branch CI run is missing required jobs (" + $ciRequiredChecks + ")!") -ForegroundColor Red
-                                    if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
-                                        try {
-                                            Write-EventLog -Event "post_push_ci_missing_required_jobs" -TaskId $TaskId -Specialist "factory" -Outcome "warning" -Notes ("Post-push branch CI for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks) `
-                                                -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
-                                        } catch {
-                                            Write-Host "[HUMAN GATE] WARNING: Failed to write post_push_ci_missing_required_jobs event: $_" -ForegroundColor Yellow
-                                        }
-                                    }
-                                }
-                            }
-                        } elseif ($ciExitCode -eq 1) {
-                            Invoke-GitChecked { git push origin --delete $stagingBranch }
-                            Write-Host ("[HUMAN GATE] CI is RED for " + $mergedSha + "; task " + $TaskId + " is NOT done and master was NOT published (still local only). Fix forward and re-run the gate.") -ForegroundColor Red
-                            exit 1
-                        } elseif ($ciExitCode -eq 5) {
-                            Invoke-GitChecked { git push origin --delete $stagingBranch }
-                            Write-Host ("[HUMAN GATE] MISSING_REQUIRED_JOBS: Staging CI run for " + $mergedSha + " is missing required jobs (" + $ciRequiredChecks + "); refusing to publish master. Fix CI config/workflow and re-run the gate.") -ForegroundColor Red
-                            if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
-                                try {
-                                    Write-EventLog -Event "ci_missing_required_jobs" -TaskId $TaskId -Specialist "factory" -Outcome "blocked" -Notes ("Staging CI run for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks) `
-                                        -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
-                                } catch {
-                                    Write-Host "[HUMAN GATE] WARNING: Failed to write ci_missing_required_jobs event: $_" -ForegroundColor Yellow
-                                }
-                            }
-                            exit 1
-                        } elseif ($ciExitCode -notin @(2, 3, 4)) {
-                            Invoke-GitChecked { git push origin --delete $stagingBranch }
-                            Write-Host ("[HUMAN GATE] CI_CHECK_FAILED: Could not verify CI for " + $mergedSha + " (exit code " + $ciExitCode + "); refusing to publish " + $primaryBranch + " because require_green_ci is enabled. Fix gh CLI authentication/permissions or network and re-run the gate.") -ForegroundColor Red
-                            if (-not [string]::IsNullOrEmpty($resolvedLogFile)) {
-                                try {
-                                    Write-EventLog -Event "ci_check_failed" -TaskId $TaskId -Specialist "factory" -Outcome "blocked" -Notes ("Could not verify CI for " + $mergedSha + ": watch-adopter-ci exited with code " + $ciExitCode) `
-                                        -LogFile $resolvedLogFile -CircuitBreakerHistoryFile $resolvedCBHistoryFile
-                                } catch {
-                                    Write-Host "[HUMAN GATE] WARNING: Failed to write ci_check_failed event: $_" -ForegroundColor Yellow
-                                }
-                            }
-                            exit 1
-                        } else {
-                            # Rationale: Only a CONFIRMED RED or API/tool failure withholds the master push; genuine inconclusive CI (timeout, CI_NOT_STARTED, NO_RUNS)
-                            # still finalizes-with-warning so an infrastructure stall does not wedge the pipeline (F1/F2 stance).
-                            Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
-                            Invoke-GitChecked { git push origin $primaryBranch }
-                            if ($LASTEXITCODE -ne 0) {
-                                Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
-                                exit 1
-                            }
-
-                            if ($ciExitCode -eq 2) {
-                                Write-Host ("[HUMAN GATE] CI did not finish before timeout for " + $mergedSha + "; finalizing while CI continues.") -ForegroundColor Yellow
-                                $originUrl = (git remote get-url origin 2>$null)
-                                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
-                                    $originText = ([string]$originUrl).Trim()
-                                    $actionsUrl = ""
-                                    if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
-                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                    } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
-                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                    } else {
-                                        $actionsUrl = $originText
-                                    }
-                                    Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
-                                }
-                            } elseif ($ciExitCode -eq 4) {
-                                Write-Host ("[HUMAN GATE] CI never left GitHub's queue for " + $mergedSha + " (no runner assigned within the grace window). This is likely a runner-availability outage, NOT a slow build. Finalizing, but re-check CI - and consider re-running the workflow - before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
-                                $originUrl = (git remote get-url origin 2>$null)
-                                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
-                                    $originText = ([string]$originUrl).Trim()
-                                    $actionsUrl = ""
-                                    if ($originText -match '^git@github\.com:([^/]+/[^/]+?)(\.git)?$') {
-                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                    } elseif ($originText -match '^https://github\.com/([^/]+/[^/]+?)(\.git)?/?$') {
-                                        $actionsUrl = "https://github.com/" + $Matches[1] + "/actions"
-                                    } else {
-                                        $actionsUrl = $originText
-                                    }
-                                    Write-Host ("[HUMAN GATE] CI run URL: " + $actionsUrl) -ForegroundColor Yellow
-                                }
-                            } elseif ($ciExitCode -eq 3) {
-                                Write-Host ("[HUMAN GATE] CI could not be confirmed for " + $mergedSha + ": no workflow runs registered within the grace window. Finalizing, but verify CI manually before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
-                            }
-
-                            Invoke-GitChecked { git push origin --delete $stagingBranch }
-                        }
-                    } else {
-                        Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$primaryBranch..."
-                        Invoke-GitChecked { git push origin $primaryBranch }
+                    if ($ciExitCode -eq 0) {
+                        Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$PrimaryBranch..."
+                        Invoke-GitChecked { git push origin $PrimaryBranch }
                         if ($LASTEXITCODE -ne 0) {
                             Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
                             exit 1
                         }
-                    }
-                } else {
-                    Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
-                }
-            } else {
-                Write-Host "[HUMAN GATE] Refusing to push; merge remains LOCAL only." -ForegroundColor Yellow
-                if ($requireGreenCi) {
-                    Write-Host "[HUMAN GATE] Verify adopter CI for the merge commit BEFORE pushing:" -ForegroundColor Yellow
-                    Write-Host ("  pwsh -File .crucible/powershell/watch-adopter-ci.ps1 -Commit " + $mergedSha) -ForegroundColor Cyan
-                }
-                Write-Host "Run the following command to publish:" -ForegroundColor Yellow
-                Write-Host "  git push origin $primaryBranch" -ForegroundColor Cyan
-            }
+                        Invoke-GitChecked { git push origin --delete $stagingBranch }
 
-            $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $resolvedProjectRoot
-            $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
-            if (Test-Path $wtPath) {
-                Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
-                Invoke-GitChecked { git worktree prune }
-                if (Test-Path $wtPath) {
-                    try {
-                        $null = git worktree remove --force $wtPath 2>$null
-                        if (Test-Path $wtPath) {
-                            Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
-                        }
-                    } catch {
-                        if (Test-Path $wtPath) {
-                            Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
-                        }
-                    }
-                }
-            }
-            if ($hasTaskBranch) {
-                Write-Quiet "[HUMAN GATE] Deleting task branch task/$TaskId..."
-                Invoke-GitChecked { git branch -d "task/$TaskId" }
-            }
-        }
-
-        $sessionDir = Join-Path $resolvedProjectRoot ".crucible/session"
-        $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-
-        # Move pipeline log to archived if it exists
-        $pipelineLogPath = Join-Path $sessionDir "$TaskId/pipeline.log.jsonl"
-        if (Test-Path -LiteralPath $pipelineLogPath) {
-            $archivedDir = Join-Path $sessionDir "archived"
-            if (-not (Test-Path $archivedDir)) {
-                New-Item -ItemType Directory -Force -Path $archivedDir | Out-Null
-            }
-            $destPath = Join-Path $archivedDir "pipeline-$TaskId-$timestamp.log.jsonl"
-            Move-Item -LiteralPath $pipelineLogPath -Destination $destPath -Force
-            Write-Quiet "[HUMAN GATE] Archived pipeline log to $destPath"
-        }
-
-        $archivedHandoffs = @(Move-TaskHandoffsToArchive -TaskId $TaskId -SessionDir $sessionDir -Timestamp $timestamp)
-        if ($archivedHandoffs.Count -gt 0) {
-            Write-Quiet ("[HUMAN GATE] Archived " + $archivedHandoffs.Count + " handoff file(s) for " + $TaskId)
-        }
-
-        # Prune the finalized task from session_state.json so -Status does not render it
-        # as a ghost "In Progress" entry. The deployment/grooming done-handoff path prunes
-        # via the same call; the accept finalize path must too, otherwise a task archived
-        # here (and later invisible to the backlog parser) falls through to "In Progress".
-        try {
-            $updateStateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "update-session-state.ps1"
-            & $updateStateScript -Specialist done -TaskId $TaskId -UpdateJson "{}" -Merge $false -ProjectRoot $resolvedProjectRoot | Out-Null
-        } catch {
-            Write-Quiet ("[HUMAN GATE] Could not prune session state for " + $TaskId + ": " + $_.Exception.Message)
-        }
-    } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
-        if ($SourcePhase -ne "grooming") {
-            if ($Outcome -eq "rejected") {
-                # Restore backlog state if it was archived
-                Restore-BacklogTask -TaskId $TaskId -ProjectRoot $resolvedProjectRoot -ActiveStatus "In Progress"
-            } elseif ($Outcome -eq "abandoned") {
-                # Archive the abandoned task as Abandoned
-                $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
-                $backlogPath = Join-Path $backlogDir "BACKLOG.md"
-                if (Test-Path -LiteralPath $backlogPath) {
-                    $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $resolvedProjectRoot
-                    if (-not [string]::IsNullOrEmpty($activeSpecPath) -and (Test-Path -LiteralPath $activeSpecPath) -and ($activeSpecPath -match '(?i)[/\\]active[/\\]')) {
-                        $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-                        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
-                            if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
-                        }
-                        if (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue) {
-                            try {
-                                $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status "Abandoned"
-                                Write-Host ("[D57] SUCCESS: Auto-archived abandoned task as $($archiveResult.Type) (status Abandoned): $($archiveResult.ArchivedRelPath)") -ForegroundColor Green
-                            } catch {
-                                Write-Host ("[D57] WARNING: Failed to archive abandoned task: " + $_.Exception.Message) -ForegroundColor Yellow
+                        if ($ciPostPushWatch) {
+                            Write-Host ("[HUMAN GATE] Watching origin CI post-push on " + $PrimaryBranch + " for " + $mergedSha + "...") -ForegroundColor Cyan
+                            $postPushOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
+                            $postPushExitCode = $LASTEXITCODE
+                            foreach ($line in $postPushOutput) {
+                                Write-Host $line
+                            }
+                            if ($postPushExitCode -eq 1) {
+                                Write-Host ("[CI WATCH] STATUS=POST_PUSH_RED: Commit " + $mergedSha + " passed staging CI but failed branch CI on " + $PrimaryBranch + "!") -ForegroundColor Red
+                                try {
+                                    Write-EventLog -Event "post_push_ci_red" -TaskId $TaskId -Specialist "crucible" -Outcome "warning" -Notes ("Commit " + $mergedSha + " failed post-push branch CI.") `
+                                        -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+                                } catch {
+                                    Write-Host "[HUMAN GATE] WARNING: Failed to write post_push_ci_red event: $_" -ForegroundColor Yellow
+                                }
+                            } elseif ($postPushExitCode -eq 5) {
+                                Write-Host ("[CI WATCH] STATUS=POST_PUSH_MISSING_REQUIRED_JOBS: Commit " + $mergedSha + " branch CI run is missing required jobs (" + $ciRequiredChecks + ")!") -ForegroundColor Red
+                                try {
+                                    Write-EventLog -Event "post_push_ci_missing_required_jobs" -TaskId $TaskId -Specialist "crucible" -Outcome "warning" -Notes ("Post-push branch CI for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks) `
+                                        -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+                                } catch {
+                                    Write-Host "[HUMAN GATE] WARNING: Failed to write post_push_ci_missing_required_jobs event: $_" -ForegroundColor Yellow
+                                }
                             }
                         }
+                    } elseif ($ciExitCode -eq 1) {
+                        Invoke-GitChecked { git push origin --delete $stagingBranch }
+                        Write-Host ("[HUMAN GATE] CI is RED for " + $mergedSha + "; task " + $TaskId + " is NOT done and master was NOT published (still local only). Fix forward and re-run the gate.") -ForegroundColor Red
+                        exit 1
+                    } elseif ($ciExitCode -eq 5) {
+                        Invoke-GitChecked { git push origin --delete $stagingBranch }
+                        Write-Host ("[HUMAN GATE] MISSING_REQUIRED_JOBS: Staging CI run for " + $mergedSha + " is missing required jobs (" + $ciRequiredChecks + "); refusing to publish master. Fix CI config/workflow and re-run the gate.") -ForegroundColor Red
+                        try {
+                            Write-EventLog -Event "ci_missing_required_jobs" -TaskId $TaskId -Specialist "crucible" -Outcome "blocked" -Notes ("Staging CI run for " + $mergedSha + " missing required jobs: " + $ciRequiredChecks) `
+                                -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+                        } catch {
+                            Write-Host "[HUMAN GATE] WARNING: Failed to write ci_missing_required_jobs event: $_" -ForegroundColor Yellow
+                        }
+                        exit 1
+                    } elseif ($ciExitCode -notin @(2, 3, 4)) {
+                        Invoke-GitChecked { git push origin --delete $stagingBranch }
+                        Write-Host ("[HUMAN GATE] CI_CHECK_FAILED: Could not verify CI for " + $mergedSha + " (exit code " + $ciExitCode + "); refusing to publish " + $PrimaryBranch + " because require_green_ci is enabled. Fix gh CLI authentication/permissions or network and re-run the gate.") -ForegroundColor Red
+                        try {
+                            Write-EventLog -Event "ci_check_failed" -TaskId $TaskId -Specialist "crucible" -Outcome "blocked" -Notes ("Could not verify CI for " + $mergedSha + ": watch-adopter-ci exited with code " + $ciExitCode) `
+                                -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+                        } catch {
+                            Write-Host "[HUMAN GATE] WARNING: Failed to write ci_check_failed event: $_" -ForegroundColor Yellow
+                        }
+                        exit 1
                     } else {
-                        # If it was already archived (legacy flow), set frontmatter and BACKLOG.md row to Abandoned
-                        $typeDirs = @("features", "bugs", "chores")
-                        foreach ($dir in $typeDirs) {
-                            $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
-                            if ($null -ne $archivedMatch) {
-                                $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-                                if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+                        # Rationale: Only a CONFIRMED RED or API/tool failure withholds the master push; genuine inconclusive CI (timeout, CI_NOT_STARTED, NO_RUNS)
+                        # still finalizes-with-warning so an infrastructure stall does not wedge the pipeline (F1/F2 stance).
+                        Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$PrimaryBranch..."
+                        Invoke-GitChecked { git push origin $PrimaryBranch }
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                            exit 1
+                        }
+
+                        if ($ciExitCode -eq 2) {
+                            Write-Host ("[HUMAN GATE] CI did not finish before timeout for " + $mergedSha + "; finalizing while CI continues.") -ForegroundColor Yellow
+                            Write-GateCiRunUrl
+                        } elseif ($ciExitCode -eq 4) {
+                            Write-Host ("[HUMAN GATE] CI never left GitHub's queue for " + $mergedSha + " (no runner assigned within the grace window). This is likely a runner-availability outage, NOT a slow build. Finalizing, but re-check CI - and consider re-running the workflow - before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
+                            Write-GateCiRunUrl
+                        } elseif ($ciExitCode -eq 3) {
+                            Write-Host ("[HUMAN GATE] CI could not be confirmed for " + $mergedSha + ": no workflow runs registered within the grace window. Finalizing, but verify CI manually before treating " + $TaskId + " as shipped.") -ForegroundColor Yellow
+                        }
+
+                        Invoke-GitChecked { git push origin --delete $stagingBranch }
+                    }
+                } else {
+                    Write-Quiet "[HUMAN GATE] Pushing merged changes to origin/$PrimaryBranch..."
+                    Invoke-GitChecked { git push origin $PrimaryBranch }
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host "[ERROR] git push failed. Please check network/credentials or run manually." -ForegroundColor Red
+                        exit 1
+                    }
+                }
+            } else {
+                Write-Quiet "[HUMAN GATE] No remote 'origin' configured. Skipping git push."
+            }
+        } else {
+            Write-Host "[HUMAN GATE] Refusing to push; merge remains LOCAL only." -ForegroundColor Yellow
+            if ($requireGreenCi) {
+                Write-Host "[HUMAN GATE] Verify adopter CI for the merge commit BEFORE pushing:" -ForegroundColor Yellow
+                Write-Host ("  pwsh -File .crucible/powershell/watch-adopter-ci.ps1 -Commit " + $mergedSha) -ForegroundColor Cyan
+            }
+            Write-Host "Run the following command to publish:" -ForegroundColor Yellow
+            Write-Host "  git push origin $PrimaryBranch" -ForegroundColor Cyan
+        }
+
+        $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
+        $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+        if (Test-Path $wtPath) {
+            Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
+            Invoke-GitChecked { git worktree prune }
+            if (Test-Path $wtPath) {
+                try {
+                    $null = git worktree remove --force $wtPath 2>$null
+                    if (Test-Path $wtPath) {
+                        Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
+                    }
+                } catch {
+                    if (Test-Path $wtPath) {
+                        Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
+                    }
+                }
+            }
+        }
+        if ($hasTaskBranch) {
+            Write-Quiet "[HUMAN GATE] Deleting task branch task/$TaskId..."
+            Invoke-GitChecked { git branch -d "task/$TaskId" }
+        }
+    }
+
+    $sessionDir = Join-Path $ProjectRoot ".crucible/session"
+    $timestamp = Get-UtcFileTimestamp
+
+    # Move pipeline log to archived if it exists
+    $pipelineLogPath = Join-Path $sessionDir "$TaskId/pipeline.log.jsonl"
+    if (Test-Path -LiteralPath $pipelineLogPath) {
+        $archivedDir = Join-Path $sessionDir "archived"
+        if (-not (Test-Path $archivedDir)) {
+            New-Item -ItemType Directory -Force -Path $archivedDir | Out-Null
+        }
+        $destPath = Join-Path $archivedDir "pipeline-$TaskId-$timestamp.log.jsonl"
+        Move-Item -LiteralPath $pipelineLogPath -Destination $destPath -Force
+        Write-Quiet "[HUMAN GATE] Archived pipeline log to $destPath"
+    }
+
+    $archivedHandoffs = @(Move-TaskHandoffsToArchive -TaskId $TaskId -SessionDir $sessionDir -Timestamp $timestamp)
+    if ($archivedHandoffs.Count -gt 0) {
+        Write-Quiet ("[HUMAN GATE] Archived " + $archivedHandoffs.Count + " handoff file(s) for " + $TaskId)
+    }
+
+    # Prune the finalized task from session_state.json so -Status does not render it
+    # as a ghost "In Progress" entry. The deployment/grooming done-handoff path prunes
+    # via the same call; the accept finalize path must too, otherwise a task archived
+    # here (and later invisible to the backlog parser) falls through to "In Progress".
+    try {
+        $updateStateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "update-session-state.ps1"
+        & $updateStateScript -Specialist done -TaskId $TaskId -UpdateJson "{}" -Merge $false -ProjectRoot $ProjectRoot | Out-Null
+    } catch {
+        Write-Quiet ("[HUMAN GATE] Could not prune session state for " + $TaskId + ": " + $_.Exception.Message)
+    }
+}
+
+function Invoke-HumanGateRejectAbandon {
+    # The reject/abandon arm, lifted verbatim out of Invoke-HumanGateAction. It
+    # returns unaccepted work: backlog restore or Abandoned archival, then the
+    # rework handoff back to implementation.
+    #
+    # GateReason is mandatory to this arm in practice and unused by the other one:
+    # a rejection the operator gave no reason for is the thing the rework handoff
+    # has nothing to carry. It stays optional here only because the caller's own
+    # validation is what enforces it today.
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$Outcome,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot,
+        [Parameter(Mandatory=$true)][string]$PrimaryBranch,
+        [string]$SourcePhase = "deployment",
+        [string]$GateReason = ""
+    )
+    if ($SourcePhase -ne "grooming") {
+        if ($Outcome -eq "rejected") {
+            # Restore backlog state if it was archived
+            Restore-BacklogTask -TaskId $TaskId -ProjectRoot $ProjectRoot -ActiveStatus "In Progress"
+        } elseif ($Outcome -eq "abandoned") {
+            # Archive the abandoned task as Abandoned
+            $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+            $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+            if (Test-Path -LiteralPath $backlogPath) {
+                $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $ProjectRoot
+                if (-not [string]::IsNullOrEmpty($activeSpecPath) -and (Test-Path -LiteralPath $activeSpecPath) -and ($activeSpecPath -match '(?i)[/\\]active[/\\]')) {
+                    $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+                    if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                        if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
+                    }
+                    if (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue) {
+                        try {
+                            $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status "Abandoned"
+                            Write-Host ("[D57] SUCCESS: Auto-archived abandoned task as $($archiveResult.Type) (status Abandoned): $($archiveResult.ArchivedRelPath)") -ForegroundColor Green
+                        } catch {
+                            Write-Host ("[D57] WARNING: Failed to archive abandoned task: " + $_.Exception.Message) -ForegroundColor Yellow
+                        }
+                    }
+                } else {
+                    # If it was already archived (legacy flow), set frontmatter and BACKLOG.md row to Abandoned
+                    $typeDirs = @("features", "bugs", "chores")
+                    foreach ($dir in $typeDirs) {
+                        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+                        if ($null -ne $archivedMatch) {
+                            $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
+                            if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+                                if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
+                            }
+                            if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
+                                Set-BacklogSpecFrontmatterStatus -Path $archivedMatch.FullName -Status "Abandoned"
+                            }
+                            $relativeArchived = "$dir/archived/$($archivedMatch.Name)"
+                            $lines = [System.Collections.Generic.List[string]]::new()
+                            foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
+                                [void]$lines.Add($line)
+                            }
+                            $archivedLink = $relativeArchived.Replace("\", "/")
+                            $rowIndex = -1
+                            for ($i = 0; $i -lt $lines.Count; $i++) {
+                                if ($lines[$i].Contains("]($archivedLink)")) {
+                                    $rowIndex = $i
+                                    break
+                                }
+                            }
+                            if ($rowIndex -ge 0) {
+                                $lineArray = [string[]]$lines.ToArray()
+                                if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
                                     if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
                                 }
-                                if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
-                                    Set-BacklogSpecFrontmatterStatus -Path $archivedMatch.FullName -Status "Abandoned"
-                                }
-                                $relativeArchived = "$dir/archived/$($archivedMatch.Name)"
-                                $lines = [System.Collections.Generic.List[string]]::new()
-                                foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
-                                    [void]$lines.Add($line)
-                                }
-                                $archivedLink = $relativeArchived.Replace("\", "/")
-                                $rowIndex = -1
-                                for ($i = 0; $i -lt $lines.Count; $i++) {
-                                    if ($lines[$i].Contains("]($archivedLink)")) {
-                                        $rowIndex = $i
-                                        break
-                                    }
-                                }
-                                if ($rowIndex -ge 0) {
-                                    $lineArray = [string[]]$lines.ToArray()
-                                    if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
-                                        if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
-                                    }
-                                    if (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue) {
-                                        $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $rowIndex
-                                        if ($statusColumn -ge 0) {
-                                            $cells = [System.Collections.Generic.List[string]]::new()
-                                            foreach ($cell in $lines[$rowIndex].Trim().Trim("|").Split("|")) {
-                                                [void]$cells.Add($cell.Trim())
-                                            }
-                                            if ($statusColumn -lt $cells.Count) {
-                                                $cells[$statusColumn] = "Abandoned"
-                                                $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
-                                                Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
-                                                    [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
-                                                }
+                                if (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue) {
+                                    $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $rowIndex
+                                    if ($statusColumn -ge 0) {
+                                        $cells = [System.Collections.Generic.List[string]]::new()
+                                        foreach ($cell in $lines[$rowIndex].Trim().Trim("|").Split("|")) {
+                                            [void]$cells.Add($cell.Trim())
+                                        }
+                                        if ($statusColumn -lt $cells.Count) {
+                                            $cells[$statusColumn] = "Abandoned"
+                                            $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
+                                            Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
+                                                [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
                                             }
                                         }
                                     }
                                 }
-                                break
                             }
+                            break
                         }
                     }
                 }
             }
+        }
 
-            $currentHead = (Invoke-GitChecked { git rev-parse HEAD }).Trim()
-            $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
-            $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
+        $currentHead = (Invoke-GitChecked { git rev-parse HEAD }).Trim()
+        $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
+        $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
 
-            # Only unwind a local merge if the gate actually advanced $primaryBranch
-            # beyond origin. In the review-before-merge flow the task branch is not
-            # merged until accept, so on reject/abandon there is typically nothing to
-            # unwind -- a blind reset would discard unrelated, already-pushed history
-            # (e.g. the previously-accepted task), resetting $primaryBranch to a stale
-            # reflog entry.
-            $primaryAhead = $false
-            $originRevRes = Invoke-Git rev-parse --verify --quiet "origin/$primaryBranch"
-            if ($originRevRes.ExitCode -eq 0) {
-                $aheadCount = (Invoke-GitChecked { git rev-list --count "origin/$primaryBranch..$primaryBranch" }).Trim()
-                if ($aheadCount -match '^\d+$' -and [int]$aheadCount -gt 0) { $primaryAhead = $true }
-            } elseif ($parentList.Count -ge 2) {
-                # No origin tracking ref to compare against: only unwind a genuine merge commit.
-                $primaryAhead = $true
+        # Only unwind a local merge if the gate actually advanced $PrimaryBranch
+        # beyond origin. In the review-before-merge flow the task branch is not
+        # merged until accept, so on reject/abandon there is typically nothing to
+        # unwind -- a blind reset would discard unrelated, already-pushed history
+        # (e.g. the previously-accepted task), resetting $PrimaryBranch to a stale
+        # reflog entry.
+        $primaryAhead = $false
+        $originRevRes = Invoke-Git rev-parse --verify --quiet "origin/$PrimaryBranch"
+        if ($originRevRes.ExitCode -eq 0) {
+            $aheadCount = (Invoke-GitChecked { git rev-list --count "origin/$PrimaryBranch..$PrimaryBranch" }).Trim()
+            if ($aheadCount -match '^\d+$' -and [int]$aheadCount -gt 0) { $primaryAhead = $true }
+        } elseif ($parentList.Count -ge 2) {
+            # No origin tracking ref to compare against: only unwind a genuine merge commit.
+            $primaryAhead = $true
+        }
+
+        if ($primaryAhead) {
+            $resetTarget = "origin/$PrimaryBranch"
+
+            # Derive pre-merge tip using reflog as primary defense in depth (for both merge and FF)
+            $reflogRes = Invoke-Git rev-parse --verify --quiet "${primaryBranch}@{1}"
+            $reflogTip = $reflogRes.Raw.Trim()
+            if ($reflogRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
+                # Verify that $reflogTip is indeed an ancestor of $currentHead
+                $isAncestorRes = Invoke-Git merge-base --is-ancestor $reflogTip $currentHead
+                if ($isAncestorRes.ExitCode -eq 0) {
+                    $resetTarget = $reflogTip
+                }
             }
 
-            if ($primaryAhead) {
-                $resetTarget = "origin/$primaryBranch"
+            # If reflog check failed or wasn't ancestor, fall back to parent checking for merge commits
+            if ($resetTarget -eq "origin/$PrimaryBranch" -and $parentList.Count -ge 2) {
+                $resetTarget = $parentList[0]
+            }
 
-                # Derive pre-merge tip using reflog as primary defense in depth (for both merge and FF)
-                $reflogRes = Invoke-Git rev-parse --verify --quiet "${primaryBranch}@{1}"
-                $reflogTip = $reflogRes.Raw.Trim()
-                if ($reflogRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
-                    # Verify that $reflogTip is indeed an ancestor of $currentHead
-                    $isAncestorRes = Invoke-Git merge-base --is-ancestor $reflogTip $currentHead
-                    if ($isAncestorRes.ExitCode -eq 0) {
-                        $resetTarget = $reflogTip
-                    }
-                }
-
-                # If reflog check failed or wasn't ancestor, fall back to parent checking for merge commits
-                if ($resetTarget -eq "origin/$primaryBranch" -and $parentList.Count -ge 2) {
-                    $resetTarget = $parentList[0]
-                }
-
-                if ($resetTarget -eq "origin/$primaryBranch") {
-                    Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to origin/$primaryBranch..."
-                } else {
-                    Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $primaryBranch to pre-merge tip ($resetTarget)..."
-                }
-
-                Invoke-GitChecked { git checkout $primaryBranch }
-                Invoke-GitChecked { git reset --hard $resetTarget }
+            if ($resetTarget -eq "origin/$PrimaryBranch") {
+                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $PrimaryBranch to origin/$PrimaryBranch..."
             } else {
-                Write-Quiet "[HUMAN GATE] No local merge to unwind ($primaryBranch is not ahead of origin/$primaryBranch); leaving $primaryBranch untouched."
-                Invoke-GitChecked { git checkout $primaryBranch }
+                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $PrimaryBranch to pre-merge tip ($resetTarget)..."
             }
 
-            if ($Outcome -eq "rejected") {
-                Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
-                if ($LASTEXITCODE -ne 0) {
-                    if ($parentList.Count -ge 2) {
-                        Invoke-GitChecked { git branch "task/$TaskId" $parentList[1] }
-                    } else {
-                        Invoke-GitChecked { git branch "task/$TaskId" $currentHead }
-                    }
-                    Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
-                }
+            Invoke-GitChecked { git checkout $PrimaryBranch }
+            Invoke-GitChecked { git reset --hard $resetTarget }
+        } else {
+            Write-Quiet "[HUMAN GATE] No local merge to unwind ($PrimaryBranch is not ahead of origin/$PrimaryBranch); leaving $PrimaryBranch untouched."
+            Invoke-GitChecked { git checkout $PrimaryBranch }
+        }
 
-                # Auto-recreate the implementation worktree from the restored branch
-                $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $resolvedProjectRoot
-                $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
-                
-                # Prune stale worktrees first
-                Invoke-GitChecked { git worktree prune }
-
-                if (-not (Test-Path $wtPath)) {
-                    Invoke-GitChecked { git worktree add $wtPath "task/$TaskId" }
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-Host "Warning: Failed to recreate implementation worktree at $wtPath" -ForegroundColor Yellow
-                    } else {
-                        $prev = $ErrorActionPreference
-                        $ErrorActionPreference = 'Continue'
-                        $hasWorktreeConfig = (git config extensions.worktreeConfig 2>$null) -eq "true"
-                        $ErrorActionPreference = $prev
-                        if (-not $hasWorktreeConfig) {
-                            Invoke-GitChecked { git config extensions.worktreeConfig true }
-                        }
-                        $adopterHook = Join-Path $PSScriptRoot "..\..\scripts\hooks\architect"
-                        $repoHook = Join-Path $resolvedProjectRoot "scripts/hooks/architect"
-                        $hookDir = if (Test-Path $adopterHook) { $adopterHook } else { $repoHook }
-                        if (-not (Test-Path $hookDir)) {
-                            New-Item -ItemType Directory -Force -Path $hookDir | Out-Null
-                        }
-                        Invoke-GitChecked { git -C $wtPath config --worktree core.hooksPath $hookDir }
-                        Write-Quiet "[HUMAN GATE] Recreated implementation worktree at $wtPath"
-                    }
-                }
-
-                # Check if the task is present in the backlog before running new-handoff.ps1
-                $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
-                $backlogPath = Join-Path $backlogDir "BACKLOG.md"
-                $hasTaskInBacklog = $false
-                if (Test-Path -LiteralPath $backlogPath) {
-                    try {
-                        $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-                        if ($backlogContent -match [regex]::Escape($TaskId)) {
-                            $hasTaskInBacklog = $true
-                        }
-                    } catch {}
-                }
-
-                if ($hasTaskInBacklog) {
-                    # Calculate next strike count
-                    $nextStrike = 1
-                    $handoffVar = Get-Variable -Name "handoff" -ErrorAction SilentlyContinue
-                    $activeHandoff = $null
-                    if ($null -ne $handoffVar -and $null -ne $handoffVar.Value) {
-                        $activeHandoff = $handoffVar.Value
-                        if ($activeHandoff.PSObject.Properties["review_strike_count"]) {
-                            $nextStrike = [int]$activeHandoff.review_strike_count + 1
-                        }
-                    }
-
-                    # Write a sanctioned re-entry handoff into implementation
-                    $generatorScript = Join-Path (Split-Path -Parent $PSScriptRoot) "new-handoff.ps1"
-                    if (Test-Path $generatorScript) {
-                        $reasonMsg = if ([string]::IsNullOrWhiteSpace($GateReason)) { "Deployment rejected. Rework requested." } else { "Deployment rejected: $GateReason" }
-                        Write-Quiet "[HUMAN GATE] Generating sanctioned re-entry handoff targeting implementation..."
-                        
-                        # Extract values from current handoff
-                        $sessionCycleId = ""
-                        $artifacts = @()
-                        if ($null -ne $activeHandoff) {
-                            if ($activeHandoff.PSObject.Properties["session_cycle_id"]) {
-                                $sessionCycleId = $activeHandoff.session_cycle_id
-                            } elseif ($activeHandoff.PSObject.Properties["cycle_id"]) {
-                                $sessionCycleId = $activeHandoff.cycle_id
-                            }
-                            if ($activeHandoff.PSObject.Properties["artifacts"]) {
-                                $artifacts = $activeHandoff.artifacts
-                            }
-                        }
-
-                        $handoffParams = @{
-                            TaskId = $TaskId
-                            Source = "deployment"
-                            Target = "implementation"
-                            Reason = $reasonMsg
-                            ReviewStrikeCount = $nextStrike
-                            ProjectRoot = $resolvedProjectRoot
-                        }
-                        if (-not [string]::IsNullOrEmpty($sessionCycleId)) {
-                            $handoffParams["SessionCycleId"] = $sessionCycleId
-                        }
-                        if ($artifacts.Count -gt 0) {
-                            $handoffParams["Artifacts"] = @($artifacts)
-                        }
-                        
-                        & $generatorScript @handoffParams
-                    }
+        if ($Outcome -eq "rejected") {
+            Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
+            if ($LASTEXITCODE -ne 0) {
+                if ($parentList.Count -ge 2) {
+                    Invoke-GitChecked { git branch "task/$TaskId" $parentList[1] }
                 } else {
-                    Write-Quiet "[HUMAN GATE] Task $TaskId not found in backlog; skipping handoff generation."
+                    Invoke-GitChecked { git branch "task/$TaskId" $currentHead }
                 }
+                Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
+            }
+
+            # Auto-recreate the implementation worktree from the restored branch
+            $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
+            $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+            
+            # Prune stale worktrees first
+            Invoke-GitChecked { git worktree prune }
+
+            if (-not (Test-Path $wtPath)) {
+                Invoke-GitChecked { git worktree add $wtPath "task/$TaskId" }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "Warning: Failed to recreate implementation worktree at $wtPath" -ForegroundColor Yellow
+                } else {
+                    $prev = $ErrorActionPreference
+                    $ErrorActionPreference = 'Continue'
+                    $hasWorktreeConfig = (git config extensions.worktreeConfig 2>$null) -eq "true"
+                    $ErrorActionPreference = $prev
+                    if (-not $hasWorktreeConfig) {
+                        Invoke-GitChecked { git config extensions.worktreeConfig true }
+                    }
+                    $adopterHook = Join-Path $PSScriptRoot "..\..\scripts\hooks\architect"
+                    $repoHook = Join-Path $ProjectRoot "scripts/hooks/architect"
+                    $hookDir = if (Test-Path $adopterHook) { $adopterHook } else { $repoHook }
+                    if (-not (Test-Path $hookDir)) {
+                        New-Item -ItemType Directory -Force -Path $hookDir | Out-Null
+                    }
+                    Invoke-GitChecked { git -C $wtPath config --worktree core.hooksPath $hookDir }
+                    Write-Quiet "[HUMAN GATE] Recreated implementation worktree at $wtPath"
+                }
+            }
+
+            # Check if the task is present in the backlog before running new-handoff.ps1
+            $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+            $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+            $hasTaskInBacklog = $false
+            if (Test-Path -LiteralPath $backlogPath) {
+                try {
+                    $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+                    if ($backlogContent -match [regex]::Escape($TaskId)) {
+                        $hasTaskInBacklog = $true
+                    }
+                } catch {}
+            }
+
+            if ($hasTaskInBacklog) {
+                # Calculate next strike count
+                $nextStrike = 1
+                $handoffVar = Get-Variable -Name "handoff" -ErrorAction SilentlyContinue
+                $activeHandoff = $null
+                if ($null -ne $handoffVar -and $null -ne $handoffVar.Value) {
+                    $activeHandoff = $handoffVar.Value
+                    if ($activeHandoff.PSObject.Properties["review_strike_count"]) {
+                        $nextStrike = [int]$activeHandoff.review_strike_count + 1
+                    }
+                }
+
+                # Write a sanctioned re-entry handoff into implementation
+                $generatorScript = Join-Path (Split-Path -Parent $PSScriptRoot) "new-handoff.ps1"
+                if (Test-Path $generatorScript) {
+                    $reasonMsg = if ([string]::IsNullOrWhiteSpace($GateReason)) { "Deployment rejected. Rework requested." } else { "Deployment rejected: $GateReason" }
+                    Write-Quiet "[HUMAN GATE] Generating sanctioned re-entry handoff targeting implementation..."
+                    
+                    # Extract values from current handoff
+                    $sessionCycleId = ""
+                    $artifacts = @()
+                    if ($null -ne $activeHandoff) {
+                        if ($activeHandoff.PSObject.Properties["session_cycle_id"]) {
+                            $sessionCycleId = $activeHandoff.session_cycle_id
+                        } elseif ($activeHandoff.PSObject.Properties["cycle_id"]) {
+                            $sessionCycleId = $activeHandoff.cycle_id
+                        }
+                        if ($activeHandoff.PSObject.Properties["artifacts"]) {
+                            $artifacts = $activeHandoff.artifacts
+                        }
+                    }
+
+                    $handoffParams = @{
+                        TaskId = $TaskId
+                        Source = "deployment"
+                        Target = "implementation"
+                        Reason = $reasonMsg
+                        ReviewStrikeCount = $nextStrike
+                        ProjectRoot = $ProjectRoot
+                    }
+                    if (-not [string]::IsNullOrEmpty($sessionCycleId)) {
+                        $handoffParams["SessionCycleId"] = $sessionCycleId
+                    }
+                    if ($artifacts.Count -gt 0) {
+                        $handoffParams["Artifacts"] = @($artifacts)
+                    }
+                    
+                    & $generatorScript @handoffParams
+                }
+            } else {
+                Write-Quiet "[HUMAN GATE] Task $TaskId not found in backlog; skipping handoff generation."
             }
         }
     }
@@ -3562,18 +3769,148 @@ function Get-ResearchMisrouteAdvisory {
     }
 }
 
+function Get-GateAcceptDescription {
+    # What "1) Accept" promises depends on review.auto_push: with it off the merge
+    # stays local, and the menu must not offer a push that will not happen.
+    param(
+        [Parameter(Mandatory=$true)][string]$PrimaryBranch,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot
+    )
+
+    $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $ProjectRoot
+    if ($autoPushVal -eq "true") {
+        return "work looks good; merges to $PrimaryBranch and pushes to origin; pause after this item"
+    }
+    return "work looks good; merges to $PrimaryBranch (local only); pause after this item"
+}
+
+function Write-GatePendingSurface {
+    # The gate reaches this surface from two directions: a first firing, which creates
+    # the pending decision template, and a re-run against a template whose outcome is
+    # still unfilled. Both must show the operator the same thing, and for a long time
+    # both did so by carrying the same 87 lines twice - with only one copy under test.
+    #
+    # The review range is a parameter rather than something derived here. The two
+    # callers derive it differently on purpose: a re-run prefers the shas the gate
+    # actually fired on over a freshly computed range that has moved underneath the
+    # human. Deriving it here would silently pick one of those and discard the other.
+    param(
+        [Parameter(Mandatory=$true)][hashtable]$Context,
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [Parameter(Mandatory=$true)][string]$SessionDir,
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$PendingFilePath,
+        [Parameter(Mandatory=$true)][bool]$TaskBranchExists,
+        [string]$BaseSha = "",
+        [string]$BranchSha = "",
+        [string]$NoCodeReviewHint = "",
+        [string]$AcceptDesc = ""
+    )
+
+    $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $RepoRoot }
+    $wtPath = Join-Path $workspacesDir ("implementation-" + $TaskId)
+    $wtPathDisplay = $wtPath -replace '\\', '/'
+
+    $diffTool = Get-ConfiguredReview -Key "diff_tool" -ProjectRoot $RepoRoot
+    $editor = Get-ConfiguredReview -Key "editor" -ProjectRoot $RepoRoot
+
+    $diffToolCommand = ""
+    $editorOpenCommand = ""
+
+    if (![string]::IsNullOrEmpty($diffTool)) {
+        $resolvedDiffTool = Get-ConfiguredEditorCommand -EditorOrToolName $diffTool
+        $taskSessionDir = Join-Path $SessionDir $TaskId
+        if (-not (Test-Path $taskSessionDir)) {
+            New-Item -ItemType Directory -Force -Path $taskSessionDir | Out-Null
+        }
+        $helperScriptPath = Join-Path $taskSessionDir "review-diff.ps1"
+        $resolvedDiffToolEscaped = $resolvedDiffTool -replace '"', '`"'
+        $scriptContent = @"
+`$left = `$args[0]
+`$right = `$args[1]
+`$tmp = Join-Path `$env:TEMP "crucible-review/$TaskId"
+if (-not (Test-Path `$tmp)) { New-Item -ItemType Directory -Path `$tmp -Force | Out-Null }
+`$leftCopy = Join-Path `$tmp ("left_" + (Split-Path -Leaf `$left))
+`$rightCopy = Join-Path `$tmp ("right_" + (Split-Path -Leaf `$right))
+Copy-Item `$left `$leftCopy -Force
+Copy-Item `$right `$rightCopy -Force
+& "$resolvedDiffToolEscaped" --diff `$leftCopy `$rightCopy
+"@
+        try {
+            $scriptContent | Set-Content -LiteralPath $helperScriptPath -Encoding UTF8
+        } catch {}
+
+        $helperScriptPathDisplay = $helperScriptPath -replace '\\', '/'
+        $pwshCmd = Get-PwshCommand
+        $diffToolCommand = "git -C `"$RepoRoot`" difftool -y --extcmd=`"$pwshCmd -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"`" $BaseSha..$BranchSha"
+    }
+
+    $editorToUse = if (![string]::IsNullOrEmpty($editor)) { $editor } else { $diffTool }
+    if (![string]::IsNullOrEmpty($editorToUse)) {
+        $resolvedEditor = Get-ConfiguredEditorCommand -EditorOrToolName $editorToUse
+        $editorOpenCommand = "& `"$resolvedEditor`" `"$wtPathDisplay`""
+    }
+
+    Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
+    if ($TaskBranchExists) {
+        if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+            Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
+            Write-Host "    $diffToolCommand" -ForegroundColor Cyan
+        }
+        Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
+        Write-Host "    git -C `"$RepoRoot`" diff $BaseSha..$BranchSha" -ForegroundColor Cyan
+        Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
+        if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+            Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
+        } else {
+            Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
+        }
+    } else {
+        Write-Host "  - $NoCodeReviewHint" -ForegroundColor Cyan
+    }
+
+    # Write machine-readable signal file
+    $menu = "[HUMAN GATE] Task $TaskId complete. Present this menu to the human:`n`n" +
+            "  1) Accept     - $AcceptDesc`n" +
+            "  2) Reject     - something is wrong, send back for rework`n" +
+            "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
+            "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
+            "Review options:`n"
+    if ($TaskBranchExists) {
+        if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
+            $menu += "  - Launch visual diff tool (per-file):`n" +
+                     "    $diffToolCommand`n"
+        }
+        $menu += "  - Command-line text diff:`n" +
+                 "    git -C `"$RepoRoot`" diff $BaseSha..$BranchSha`n" +
+                 "  - Open the worktree folder in your editor:`n"
+        if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
+            $menu += "    $editorOpenCommand`n`n"
+        } else {
+            $menu += "    $wtPathDisplay`n`n"
+        }
+    } else {
+        $menu += "  - $NoCodeReviewHint`n`n"
+    }
+    $menu += "Gate fired. Run factory.ps1 -Init -TaskId $TaskId -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
+    $menu | Set-Content -Path $PendingFilePath -Encoding UTF8
+}
+
 function Invoke-HumanGate {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
     if ($null -eq $Context) {
         throw "FactoryContext is null."
     }
-    $requiredKeys = @("Handoff", "IsBootstrap", "SessionDir", "GateOutcome", "GateReason", "GateRedirectTarget", "CrucibleRoot", "Quiet")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key)) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    # LogFile and CircuitBreakerHistoryFile are required here like everywhere else. They
+    # used to be picked up by a conditional below instead, and when it did not fire this
+    # frame never bound $LOG_FILE - so Invoke-HumanGateAction, called twice from here,
+    # resolved its destination out of factory.ps1's script scope or dropped its events.
+    # The required-key check directly above that conditional was the file's own idiom for
+    # refusing exactly the context the conditional was written to tolerate.
+    Assert-FactoryContextKeys -Context $Context `
+        -RequiredKeys @("Handoff", "IsBootstrap", "SessionDir", "GateOutcome", "GateReason", "GateRedirectTarget", "CrucibleRoot", "Quiet") `
+        -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")
 
     $handoff = $Context.Handoff
     $isBootstrap = [bool]$Context.IsBootstrap
@@ -3584,12 +3921,8 @@ function Invoke-HumanGate {
     $crucibleRoot = $Context.CrucibleRoot
     $Quiet = [bool]$Context.Quiet
     $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
-    if ($Context.ContainsKey("LogFile") -and -not [string]::IsNullOrEmpty($Context.LogFile)) {
-        $LOG_FILE = $Context.LogFile
-    }
-    if ($Context.ContainsKey("CircuitBreakerHistoryFile") -and -not [string]::IsNullOrEmpty($Context.CircuitBreakerHistoryFile)) {
-        $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
-    }
+    $LOG_FILE = $Context.LogFile
+    $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
 
     $taskBranchExists = $false
     $isGit = $false
@@ -3685,7 +4018,7 @@ function Invoke-HumanGate {
         if (-not (Test-Path $pendingDir)) {
             New-Item -ItemType Directory -Force -Path $pendingDir | Out-Null
         }
-        $validOutcomes = @("accepted", "rejected", "redirected", "abandoned")
+        $validOutcomes = Get-HumanGateOutcomes
         $lowSignalGateReasons = @(
             "n/a", "na", "none", "ok", "looks good", "looks good.",
             "approved", "accept", "accepted", "done", "ship it", "auto"
@@ -3731,7 +4064,7 @@ function Invoke-HumanGate {
             $decision = [ordered]@{
                 task_id = $handoff.task_id
                 backlog_item = $handoff.task_id
-                gate_fired_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                gate_fired_at = Get-UtcTimestamp
                 outcome = $GateOutcome
                 reason = $trimmedGateReason
                 rework_requested = ($GateOutcome -eq "rejected")
@@ -3741,7 +4074,7 @@ function Invoke-HumanGate {
                 branch_sha = $branchSha
             }
             
-            $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+            $timestamp = Get-UtcFileTimestamp
             $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
             $decision | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
             Write-Host ("`n[HUMAN GATE] Decision recorded via CLI flag: " + $GateOutcome) -ForegroundColor Green
@@ -3750,7 +4083,8 @@ function Invoke-HumanGate {
             # Execute push or reset based on automated CLI decision. An accepted merge
             # that conflicts routes to rework and removes this premature decision itself
             # (see Invoke-HumanGateMerge) so a non-completed accept cannot block a retry.
-            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $trimmedGateReason
+            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $trimmedGateReason `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
 
             if ($GateOutcome -eq "abandoned") {
                 Write-Host "[ABANDONED] Pipeline stopped per human request." -ForegroundColor Gray
@@ -3804,7 +4138,7 @@ function Invoke-HumanGate {
                 if (Test-Path $legacyTemplate) { $otherPending += Get-Item $legacyTemplate }
                     
                 foreach ($stale in $otherPending) {
-                    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+                    $timestamp = Get-UtcFileTimestamp
                     $staleArchive = Join-Path $GATE_DIR ($stale.BaseName + "-stale-" + $timestamp + ".json")
                     Write-Quiet ("[GATE] Warning: Found legacy template file. Archiving to: $($staleArchive)") -ForegroundColor Yellow
                     Move-Item -Path $stale.FullName -Destination $staleArchive -Force
@@ -3818,16 +4152,7 @@ function Invoke-HumanGate {
                             Write-Host ("File: " + $gateTemplatePath) -ForegroundColor White
                             
                             $primaryBranch = Get-PrimaryBranchName
-                            $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $repoRoot
-                            $autoPush = $false
-                            if ($autoPushVal -eq "true") {
-                                $autoPush = $true
-                            }
-                            $acceptDesc = if ($autoPush) {
-                                "work looks good; merges to $primaryBranch and pushes to origin; pause after this item"
-                            } else {
-                                "work looks good; merges to $primaryBranch (local only); pause after this item"
-                            }
+                            $acceptDesc = Get-GateAcceptDescription -PrimaryBranch $primaryBranch -ProjectRoot $repoRoot
 
                             $baseSha = ""
                             $branchSha = ""
@@ -3841,93 +4166,9 @@ function Invoke-HumanGate {
                                 $branchSha = $gateRange.BranchSha
                             }
 
-                            $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
-                            $wtPath = Join-Path $workspacesDir ("implementation-" + $handoff.task_id)
-                            $wtPathDisplay = $wtPath -replace '\\', '/'
-
-                            $diffTool = Get-ConfiguredReview -Key "diff_tool" -ProjectRoot $repoRoot
-                            $editor = Get-ConfiguredReview -Key "editor" -ProjectRoot $repoRoot
-
-                            $diffToolCommand = ""
-                            $editorOpenCommand = ""
-
-                            if (![string]::IsNullOrEmpty($diffTool)) {
-                                $resolvedDiffTool = Get-ConfiguredEditorCommand -EditorOrToolName $diffTool
-                                $taskSessionDir = Join-Path $sessionDir $handoff.task_id
-                                if (-not (Test-Path $taskSessionDir)) {
-                                    New-Item -ItemType Directory -Force -Path $taskSessionDir | Out-Null
-                                }
-                                $helperScriptPath = Join-Path $taskSessionDir "review-diff.ps1"
-                                $resolvedDiffToolEscaped = $resolvedDiffTool -replace '"', '`"'
-                                $scriptContent = @"
-`$left = `$args[0]
-`$right = `$args[1]
-`$tmp = Join-Path `$env:TEMP "crucible-review/$($handoff.task_id)"
-if (-not (Test-Path `$tmp)) { New-Item -ItemType Directory -Path `$tmp -Force | Out-Null }
-`$leftCopy = Join-Path `$tmp ("left_" + (Split-Path -Leaf `$left))
-`$rightCopy = Join-Path `$tmp ("right_" + (Split-Path -Leaf `$right))
-Copy-Item `$left `$leftCopy -Force
-Copy-Item `$right `$rightCopy -Force
-& "$resolvedDiffToolEscaped" --diff `$leftCopy `$rightCopy
-"@
-                                try {
-                                    $scriptContent | Set-Content -LiteralPath $helperScriptPath -Encoding UTF8
-                                } catch {}
-
-                                $helperScriptPathDisplay = $helperScriptPath -replace '\\', '/'
-                                $pwshCmd = Get-PwshCommand
-                                $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"$pwshCmd -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"`" $baseSha..$branchSha"
-                            }
-
-                            $editorToUse = if (![string]::IsNullOrEmpty($editor)) { $editor } else { $diffTool }
-                            if (![string]::IsNullOrEmpty($editorToUse)) {
-                                $resolvedEditor = Get-ConfiguredEditorCommand -EditorOrToolName $editorToUse
-                                $editorOpenCommand = "& `"$resolvedEditor`" `"$wtPathDisplay`""
-                            }
-
-                            Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
-                            if ($taskBranchExists) {
-                                if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                                    Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
-                                    Write-Host "    $diffToolCommand" -ForegroundColor Cyan
-                                }
-                                Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
-                                Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
-                                Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
-                                if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                                    Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
-                                } else {
-                                    Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
-                                }
-                            } else {
-                                Write-Host "  - $noCodeClosureReviewHint" -ForegroundColor Cyan
-                            }
-
-                            # Write machine-readable signal file
-                            $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
-                                    "  1) Accept     - $acceptDesc`n" +
-                                    "  2) Reject     - something is wrong, send back for rework`n" +
-                                    "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
-                                    "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
-                                    "Review options:`n"
-                            if ($taskBranchExists) {
-                                if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                                    $menu += "  - Launch visual diff tool (per-file):`n" +
-                                             "    $diffToolCommand`n"
-                                }
-                                $menu += "  - Command-line text diff:`n" +
-                                         "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
-                                         "  - Open the worktree folder in your editor:`n"
-                                if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                                    $menu += "    $editorOpenCommand`n`n"
-                                } else {
-                                    $menu += "    $wtPathDisplay`n`n"
-                                }
-                            } else {
-                                $menu += "  - $noCodeClosureReviewHint`n`n"
-                            }
-                            $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
-                            $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
+                            Write-GatePendingSurface -Context $Context -RepoRoot $repoRoot -SessionDir $sessionDir `
+                                -TaskId $handoff.task_id -PendingFilePath $GATE_PENDING_FILE -TaskBranchExists $taskBranchExists `
+                                -BaseSha $baseSha -BranchSha $branchSha -NoCodeReviewHint $noCodeClosureReviewHint -AcceptDesc $acceptDesc
                             
                             # Construct gate-specific command for next_step.txt
                             $pwshCmd = Get-PwshCommand
@@ -3937,12 +4178,13 @@ Copy-Item `$right `$rightCopy -Force
                             exit 0
                         } else {
                             # Execute push or reset based on manual decision
-                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason
+                            Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason `
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
 
                             # Archive the decision, stamping the firing cycle so a
                             # same-cycle re-run is recognized as already-passed while a
                             # later cycle is not (see gateAlreadyPassed scoping above).
-                            $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+                            $timestamp = Get-UtcFileTimestamp
                             $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
                             $gateData | Add-Member -NotePropertyName "session_cycle_id" -NotePropertyValue $currentGateCycle -Force
                             $gateData | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
@@ -3957,22 +4199,16 @@ Copy-Item `$right `$rightCopy -Force
                             }
                         }
                     } catch {
-                        Write-Host "Error parsing gate decision template." -ForegroundColor Red
+                        # This catch spans the gate action too, not just the parse, so a
+                        # fixed message would report an unrecognized outcome as bad JSON
+                        # and send the operator to debug a file that is well-formed.
+                        Write-Host ("Error handling gate decision template: " + $_.Exception.Message) -ForegroundColor Red
                         exit 1
                     }
                 } else {
                     # Create template and exit
                     $primaryBranch = Get-PrimaryBranchName
-                    $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $repoRoot
-                    $autoPush = $false
-                    if ($autoPushVal -eq "true") {
-                        $autoPush = $true
-                    }
-                    $acceptDesc = if ($autoPush) {
-                        "work looks good; merges to $primaryBranch and pushes to origin; pause after this item"
-                    } else {
-                        "work looks good; merges to $primaryBranch (local only); pause after this item"
-                    }
+                    $acceptDesc = Get-GateAcceptDescription -PrimaryBranch $primaryBranch -ProjectRoot $repoRoot
                     $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
                     $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
                     $baseSha = $gateRange.BaseSha
@@ -3981,7 +4217,7 @@ Copy-Item `$right `$rightCopy -Force
                     $template = [ordered]@{
                         task_id = $handoff.task_id
                         backlog_item = $handoff.task_id
-                        gate_fired_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        gate_fired_at = Get-UtcTimestamp
                         outcome = "accepted | rejected | redirected | abandoned"
                         reason = "Brief human description of why"
                         rework_requested = $false
@@ -3991,93 +4227,9 @@ Copy-Item `$right `$rightCopy -Force
                     }
                     $template | ConvertTo-Json | Set-Content -Path $gateTemplatePath -Encoding UTF8
                     
-                    $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
-                    $wtPath = Join-Path $workspacesDir ("implementation-" + $handoff.task_id)
-                    $wtPathDisplay = $wtPath -replace '\\', '/'
-
-                    $diffTool = Get-ConfiguredReview -Key "diff_tool" -ProjectRoot $repoRoot
-                    $editor = Get-ConfiguredReview -Key "editor" -ProjectRoot $repoRoot
-
-                    $diffToolCommand = ""
-                    $editorOpenCommand = ""
-
-                    if (![string]::IsNullOrEmpty($diffTool)) {
-                        $resolvedDiffTool = Get-ConfiguredEditorCommand -EditorOrToolName $diffTool
-                        $taskSessionDir = Join-Path $sessionDir $handoff.task_id
-                        if (-not (Test-Path $taskSessionDir)) {
-                            New-Item -ItemType Directory -Force -Path $taskSessionDir | Out-Null
-                        }
-                        $helperScriptPath = Join-Path $taskSessionDir "review-diff.ps1"
-                        $resolvedDiffToolEscaped = $resolvedDiffTool -replace '"', '`"'
-                        $scriptContent = @"
-`$left = `$args[0]
-`$right = `$args[1]
-`$tmp = Join-Path `$env:TEMP "crucible-review/$($handoff.task_id)"
-if (-not (Test-Path `$tmp)) { New-Item -ItemType Directory -Path `$tmp -Force | Out-Null }
-`$leftCopy = Join-Path `$tmp ("left_" + (Split-Path -Leaf `$left))
-`$rightCopy = Join-Path `$tmp ("right_" + (Split-Path -Leaf `$right))
-Copy-Item `$left `$leftCopy -Force
-Copy-Item `$right `$rightCopy -Force
-& "$resolvedDiffToolEscaped" --diff `$leftCopy `$rightCopy
-"@
-                        try {
-                            $scriptContent | Set-Content -LiteralPath $helperScriptPath -Encoding UTF8
-                        } catch {}
-
-                        $helperScriptPathDisplay = $helperScriptPath -replace '\\', '/'
-                        $pwshCmd = Get-PwshCommand
-                        $diffToolCommand = "git -C `"$repoRoot`" difftool -y --extcmd=`"$pwshCmd -NoProfile -ExecutionPolicy Bypass -File \`"$helperScriptPathDisplay\`"`" $baseSha..$branchSha"
-                    }
-
-                    $editorToUse = if (![string]::IsNullOrEmpty($editor)) { $editor } else { $diffTool }
-                    if (![string]::IsNullOrEmpty($editorToUse)) {
-                        $resolvedEditor = Get-ConfiguredEditorCommand -EditorOrToolName $editorToUse
-                        $editorOpenCommand = "& `"$resolvedEditor`" `"$wtPathDisplay`""
-                    }
-
-                    Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
-                    if ($taskBranchExists) {
-                        if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                            Write-Host "  - Launch visual diff tool (per-file):" -ForegroundColor Yellow
-                            Write-Host "    $diffToolCommand" -ForegroundColor Cyan
-                        }
-                        Write-Host "  - Command-line text diff:" -ForegroundColor Yellow
-                        Write-Host "    git -C `"$repoRoot`" diff $baseSha..$branchSha" -ForegroundColor Cyan
-                        Write-Host "  - Open the worktree folder in your editor:" -ForegroundColor Yellow
-                        if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                            Write-Host "    $editorOpenCommand" -ForegroundColor Cyan
-                        } else {
-                            Write-Host "    $wtPathDisplay" -ForegroundColor Cyan
-                        }
-                    } else {
-                        Write-Host "  - $noCodeClosureReviewHint" -ForegroundColor Cyan
-                    }
-
-                    # Write machine-readable signal file
-                    $menu = "[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:`n`n" +
-                            "  1) Accept     - $acceptDesc`n" +
-                            "  2) Reject     - something is wrong, send back for rework`n" +
-                            "  3) Redirect   - accept this item and work on a specific item next (ask which one)`n" +
-                            "  4) Abandon    - do not accept; stop the pipeline entirely`n`n" +
-                            "Review options:`n"
-                    if ($taskBranchExists) {
-                        if (-not [string]::IsNullOrEmpty($diffToolCommand)) {
-                            $menu += "  - Launch visual diff tool (per-file):`n" +
-                                     "    $diffToolCommand`n"
-                        }
-                        $menu += "  - Command-line text diff:`n" +
-                                 "    git -C `"$repoRoot`" diff $baseSha..$branchSha`n" +
-                                 "  - Open the worktree folder in your editor:`n"
-                        if (-not [string]::IsNullOrEmpty($editorOpenCommand)) {
-                            $menu += "    $editorOpenCommand`n`n"
-                        } else {
-                            $menu += "    $wtPathDisplay`n`n"
-                        }
-                    } else {
-                        $menu += "  - $noCodeClosureReviewHint`n`n"
-                    }
-                    $menu += "Gate fired. Run factory.ps1 -Init -TaskId $($handoff.task_id) -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
-                    $menu | Set-Content -Path $GATE_PENDING_FILE -Encoding UTF8
+                    Write-GatePendingSurface -Context $Context -RepoRoot $repoRoot -SessionDir $sessionDir `
+                        -TaskId $handoff.task_id -PendingFilePath $GATE_PENDING_FILE -TaskBranchExists $taskBranchExists `
+                        -BaseSha $baseSha -BranchSha $branchSha -NoCodeReviewHint $noCodeClosureReviewHint -AcceptDesc $acceptDesc
 
                     Write-Host "`n[HUMAN GATE] Task $($handoff.task_id) complete. Present this menu to the human:" -ForegroundColor Yellow
                     Write-Host ""
@@ -4110,15 +4262,9 @@ Copy-Item `$right `$rightCopy -Force
 function Invoke-RepositoryIntegrityGates {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    $requiredKeys = @("Handoff", "IsBootstrap", "Quiet", "FrameworkPowerShell", "SessionDir", "LogFile", "CircuitBreakerHistoryFile")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key)) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    Assert-FactoryContextKeys -Context $Context `
+        -RequiredKeys @("Handoff", "IsBootstrap", "Quiet", "FrameworkPowerShell", "SessionDir") `
+        -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")
 
     $handoff = $Context.Handoff
     $isBootstrap = [bool]$Context.IsBootstrap
@@ -4243,15 +4389,9 @@ function Invoke-RepositoryIntegrityGates {
 function Resolve-FactoryTransition {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    if ($null -eq $Context) {
-        throw "FactoryContext is null."
-    }
-    $requiredKeys = @("Handoff", "IsBootstrap", "SessionDir", "FrameworkPowerShell", "NextFactoryCommand", "Quiet", "LogFile", "CircuitBreakerHistoryFile")
-    foreach ($key in $requiredKeys) {
-        if (-not $Context.ContainsKey($key)) {
-            throw "Required key '$key' is missing from FactoryContext."
-        }
-    }
+    Assert-FactoryContextKeys -Context $Context `
+        -RequiredKeys @("Handoff", "IsBootstrap", "SessionDir", "FrameworkPowerShell", "NextFactoryCommand", "Quiet") `
+        -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")
 
     $handoff = $Context.Handoff
     $isBootstrap = [bool]$Context.IsBootstrap

@@ -67,12 +67,9 @@ invoke_subagent(
 
 ## After Each Sub-Agent Returns
 
-Before advancing the pipeline:
+Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (run factory and check for gates). A gate signal at `.crucible/session/{TASK_ID}/gate_pending.txt` goes straight to the Gate Protocol before anything else, and any failed check goes to the Failure Protocol rather than advancing the pipeline.
 
-1. Read `.crucible/session/{TASK_ID}/{ROLE}/task.md` — confirm `### CHECKPOINT` markers present and no required `- [ ]` items unchecked
-2. Confirm a new handoff file exists in `.crucible/session/handoffs/{TASK_ID}-*.json`
-3. Run `factory.ps1 -Init -TaskId {TASK_ID} -Quiet` — check for gate signals or circuit breakers
-4. If any check fails → Failure Protocol (see `.crucible/sops/orchestrator.md`)
+Step 5 includes the **budget ladder** that warns, then escalates and waits, then presents the ceiling as a Circuit Breaker Gate. Read its thresholds from the SOP; they are not repeated here, so they cannot go stale here. This section used to restate Step 5 as a four-item list and had already dropped the budget check entirely. Point at the SOP; do not re-inline it.
 
 ---
 

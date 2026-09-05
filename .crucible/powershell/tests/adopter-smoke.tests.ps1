@@ -8,6 +8,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
 $LINT_SCRIPT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
+$RESOLVE_PATH = Join-Path $REPO_ROOT "powershell/resolve-config-path.ps1"
 
 $results = @()
 
@@ -145,9 +146,11 @@ try {
     }
 
     $results += Run-Test -Name "Runs factory_lint in adopter context" -Body {
+        $backlogDir = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot
+        Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         Push-Location $projectRoot
         try {
-            $outputLines = @(go run $LINT_SCRIPT $REPO_ROOT 2>&1)
+            $outputLines = @(go run $LINT_SCRIPT -framework-root $REPO_ROOT -backlog-dir $backlogDir 2>&1)
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
             Assert-Result -Name "factory_lint exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got " + $exitCode + ". Output: " + $output)

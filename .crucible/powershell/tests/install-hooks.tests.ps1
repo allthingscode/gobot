@@ -88,6 +88,54 @@ try {
         }
     }
 
+    $results += Run-Test -Name "Reports hooks in .git/hooks that core.hooksPath now shadows" -Body {
+        # Setting core.hooksPath shadows .git/hooks rather than emptying it, so a hook
+        # installed the old way stays on disk, stops running, and reads as coverage.
+        # The framework repo carried exactly this: a pre-commit referencing
+        # check-policy-drift.ps1, a gate deleted months earlier.
+        $repo = Join-Path $tempRoot "shadowed"
+        git init -q $repo | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "powershell") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "scripts/hooks") -Force | Out-Null
+        Copy-Item $SCRIPT_SRC (Join-Path $repo "powershell/install-hooks.ps1") -Force
+
+        $gitHooks = Join-Path $repo ".git/hooks"
+        New-Item -ItemType Directory -Path $gitHooks -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $gitHooks "pre-commit") -Value "#!/bin/sh`nexit 0`n" -NoNewline
+        Set-Content -LiteralPath (Join-Path $gitHooks "pre-push") -Value "#!/bin/sh`nexit 0`n" -NoNewline
+        # Ships with every git init and is inert by name; must not be reported.
+        Set-Content -LiteralPath (Join-Path $gitHooks "commit-msg.sample") -Value "#!/bin/sh`nexit 0`n" -NoNewline
+
+        $r = Invoke-StagedScript -ScriptPath (Join-Path $repo "powershell/install-hooks.ps1")
+        Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
+        Assert-Result -Name "counts the shadowed hooks" -Condition ($r.Output -match "2 hook file\(s\)") -FailureMessage ("expected a count of 2 shadowed hooks, got: " + $r.Output)
+        Assert-Result -Name "names pre-commit" -Condition ($r.Output -match "(?m)^\s+- pre-commit\s*$") -FailureMessage ("expected pre-commit to be named, got: " + $r.Output)
+        Assert-Result -Name "names pre-push" -Condition ($r.Output -match "(?m)^\s+- pre-push\s*$") -FailureMessage ("expected pre-push to be named, got: " + $r.Output)
+        Assert-Result -Name "does not report the .sample file" -Condition ($r.Output -notmatch "commit-msg\.sample") -FailureMessage ("a .sample file was reported as shadowed: " + $r.Output)
+        Assert-Result -Name "leaves the shadowed hooks in place" `
+            -Condition ((Test-Path -LiteralPath (Join-Path $gitHooks "pre-commit")) -and (Test-Path -LiteralPath (Join-Path $gitHooks "pre-push"))) `
+            -FailureMessage "install-hooks deleted a hook it only had standing to report"
+    }
+
+    $results += Run-Test -Name "Says nothing when .git/hooks holds only samples" -Body {
+        # Guards the warning against firing on the normal case, which is what would
+        # train a reader to ignore it.
+        $repo = Join-Path $tempRoot "nothingshadowed"
+        git init -q $repo | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "powershell") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "scripts/hooks") -Force | Out-Null
+        Copy-Item $SCRIPT_SRC (Join-Path $repo "powershell/install-hooks.ps1") -Force
+
+        $gitHooks = Join-Path $repo ".git/hooks"
+        Get-ChildItem -LiteralPath $gitHooks -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notlike "*.sample" } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+
+        $r = Invoke-StagedScript -ScriptPath (Join-Path $repo "powershell/install-hooks.ps1")
+        Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
+        Assert-Result -Name "no shadowed-hook warning" -Condition ($r.Output -notmatch "shadowed by core.hooksPath") -FailureMessage ("expected no warning on a clean repo, got: " + $r.Output)
+    }
+
     $results += Run-Test -Name "Throws when no .git is present" -Body {
         $repo = Join-Path $tempRoot "nogit"
         New-Item -ItemType Directory -Path (Join-Path $repo "powershell") -Force | Out-Null

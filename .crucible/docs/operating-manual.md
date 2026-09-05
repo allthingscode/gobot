@@ -168,13 +168,13 @@ The Groomer reads `human_decisions.approved` as the authoritative scope for back
 
 ### Expected Human Interactions Per Budget Tier
 
-This table documents the total expected human interaction count for a full pipeline cycle, from Research Gate through Human Gate. Use this to set expectations before starting a task.
+This table documents the total expected human interaction count for a full pipeline cycle, from Research Gate through Human Gate. Use this to set expectations before starting a task. These are the counts a typical clean cycle produces, not the tier's cap — the handoff ceilings are in [policy.md §2.1](policy.md#21-budget-overage-protocol), generated from the constant the factory enforces.
 
-| Tier | Budget (handoffs) | Session Confirmations | Human Gate | Formal Gates | Total |
-|---|---|---|---|---|---|
-| **Low** | 6 | 3–4 | 1 | 1 (post-Operator) | ~5–6 |
-| **Medium** | 10 | 5–7 | 1 | 1 (post-Operator) | ~7–9 |
-| **High** | 16 | 8–12 | 1–2 | 1–2 (mid + post-Operator) | ~11–16 |
+| Tier | Session Confirmations | Human Gate | Formal Gates | Total |
+|---|---|---|---|---|
+| **Low** | 3–4 | 1 | 1 (post-Operator) | ~5–6 |
+| **Medium** | 5–7 | 1 | 1 (post-Operator) | ~7–9 |
+| **High** | 8–12 | 1–2 | 1–2 (mid + post-Operator) | ~11–16 |
 
 #### Interaction Types
 - **Session Chain Confirmation** — "paste the next factory.ps1 command" — no decision required, just continuation of the pipeline.
@@ -544,7 +544,7 @@ To optimize for both output quality and cost-efficiency, the factory uses a tier
 The Verification phase must verify in this order — a failure at any step blocks approval:
 
 1. **Isolated checks pass** — `powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full` exits 0.
-2. **Vet/Lint/Test/Doc parity preserved** — helper runs `go vet`, `golangci-lint`, `gotestsum`, and `go run scripts/factory_lint.go` in the task worktree with isolated caches/tmp.
+2. **Vet/Lint/Test/Doc parity preserved** — helper runs `go vet`, `golangci-lint`, `gotestsum`, and `go run scripts/factory_lint.go -framework-root . -backlog-dir <resolved>` (the backlog directory comes from `powershell/resolve-config-path.ps1 -Key backlog`, not from the linter re-reading `config.yaml`) in the task worktree with isolated caches/tmp.
 3. **Acceptance criteria met** — every checkbox in the spec's `Acceptance Criteria` section is checked off.
 4. **Scope is bounded** — changes are limited to files named in the spec and strictly match the declared `file_affinity` boundary. No unrequested modifications.
 5. **No regressions** — diff is reviewed for behavior changes outside the stated scope.
@@ -678,7 +678,9 @@ Run `factory.ps1 -Health` to scan for orphaned artifacts, including:
 Run `{{crucible_root}}/powershell/analyze-evals.ps1` to report on factory performance across all completed tasks:
 - Gate decision outcomes (accepted / rejected / redirected / abandoned)
 - Tasks that needed multiple review cycles (Architect bounced back by Reviewer)
-- Average budget utilization and tasks with high DEGRADED event counts
+- Average budget utilization, DEGRADED counts by kind, and tasks with high DEGRADED event counts
+- Enforcement coverage: gates that reported `outcome: "unverifiable"` and the tasks where they declined to run
+- Average phase-open wall time per phase, with the event count and the newest contributing timestamp. This is wall time from phase open to handoff and includes idle; the factory does not measure specialist active work time
 - Operator-captured eval records (`ac_verified`, `review_cycles`, `budget_pct_used`)
 
 Add `-Json` flag for machine-readable output. Run this quarterly or after every 10 completed tasks (see {task_id}).

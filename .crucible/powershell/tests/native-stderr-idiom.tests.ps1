@@ -40,7 +40,7 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Child PowerShell process running isolated checks test suite to capture full runner output."
     },
     @{
-        RelativePath = "powershell/lib/factory-gates.ps1"
+        RelativePath = "powershell/lib/git.ps1"
         Pattern      = '(?i)\$pipeline\s*=\s*&\s*\$ScriptBlock\s*2>&1'
         Reason       = "Invoke-GitChecked wrapper executing scriptblocks and capturing pipeline output for error diagnosis."
     },
@@ -160,6 +160,65 @@ $results += Run-Test -Name "Every allowlist entry has a non-empty rationale and 
     }
     $failureMsg = if ($missingRationale.Count -gt 0) { $missingRationale -join "`n" } else { "none" }
     Assert-Result -Name "valid allowlist entries" -Condition ($missingRationale.Count -eq 0) -FailureMessage $failureMsg
+}
+
+$results += Run-Test -Name "Every allowlist entry still matches a line in the file it names" -Body {
+    # A stale entry - correct path, pattern that no longer matches anything - satisfies
+    # every other assertion in this file forever. The scan above reports only 2>&1 lines
+    # NOT covered by an entry, so an entry covering nothing is invisible to it, and the
+    # check above confirms the file exists without ever asking whether the pattern hits.
+    # Moving a sanctioned 2>&1 site from one file to another is exactly what strands one,
+    # which is why this is pinned before powershell/lib/factory-gates.ps1 is split.
+    Assert-Result -Name "allowlist is not empty" -Condition ($PRODUCTION_2TO1_ALLOWLIST.Count -gt 0) -FailureMessage "the allowlist is empty, so every assertion made about its entries passes vacuously"
+
+    $stale = @()
+    foreach ($entry in $PRODUCTION_2TO1_ALLOWLIST) {
+        $fullPath = Join-Path $REPO_ROOT $entry.RelativePath
+        if (-not (Test-Path -LiteralPath $fullPath)) {
+            $stale += "$($entry.RelativePath): file does not exist, so its pattern covers nothing"
+            continue
+        }
+        $hits = @(Get-Content -LiteralPath $fullPath | Where-Object {
+            $_ -match '2>&1' -and $_ -notmatch '^\s*#' -and $_ -match $entry.Pattern
+        })
+        if ($hits.Count -eq 0) {
+            $stale += "$($entry.RelativePath): pattern $($entry.Pattern) matches no 2>&1 line in that file"
+        }
+    }
+    $staleMsg = if ($stale.Count -gt 0) { "Stale allowlist entries (delete them, or point them at the file the code moved to):`n" + ($stale -join "`n") } else { "none" }
+    Assert-Result -Name "no stale allowlist entries" -Condition ($stale.Count -eq 0) -FailureMessage $staleMsg
+}
+
+$results += Run-Test -Name "Every lib that calls Invoke-GitChecked resolves it when loaded alone" -Body {
+    # Invoke-GitChecked is the sanctioned wrapper, so it is reachable from more than one
+    # file, and dot-sourcing flattens scope: under the normal load through factory-lib.ps1
+    # a caller that never declares the dependency still gets it from whichever sibling
+    # happened to load first. That is how the pre-split arrangement was safe - by accident
+    # of load order rather than by declaration - and deleting a dot-source proved to change
+    # nothing. Loading each caller on its own makes its own dot-source the only thing that
+    # can satisfy the call.
+    #
+    # The caller list is derived, not written down. A hand-maintained list would go stale
+    # the first time a new lib file started using the wrapper, and would then pass while
+    # covering nothing new.
+    $libDir = Join-Path $REPO_ROOT "powershell/lib"
+    $callers = @(Get-ChildItem -Path $libDir -Filter "*.ps1" -File | Where-Object {
+        $_.Name -ne "git.ps1" -and
+        @(Get-Content -LiteralPath $_.FullName | Where-Object { $_ -match 'Invoke-GitChecked' -and $_ -notmatch '^\s*#' }).Count -gt 0
+    })
+    Assert-Result -Name "callers of the wrapper were found" -Condition ($callers.Count -gt 0) -FailureMessage "no powershell/lib file calls Invoke-GitChecked, so the loads below would prove nothing"
+
+    $undeclared = @()
+    foreach ($caller in $callers) {
+        $libPath = $caller.FullName
+        $probe = ". `"$libPath`"; if (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue) { exit 0 } else { exit 3 }"
+        $run = Invoke-ExternalCommand -Command { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command $probe }
+        if ($run.ExitCode -ne 0) {
+            $undeclared += ("powershell/lib/" + $caller.Name + ": exit " + $run.ExitCode + " - " + $run.Output)
+        }
+    }
+    $undeclaredMsg = if ($undeclared.Count -gt 0) { "These call Invoke-GitChecked but do not load powershell/lib/git.ps1 themselves:`n" + ($undeclared -join "`n") } else { "none" }
+    Assert-Result -Name "wrapper callers declare their own dependency" -Condition ($undeclared.Count -eq 0) -FailureMessage $undeclaredMsg
 }
 
 $results += Run-Test -Name "MUT: Scanner detects synthetic raw git 2>&1 violation" -Body {

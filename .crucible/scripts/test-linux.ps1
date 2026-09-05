@@ -107,25 +107,32 @@ try {
     exit 1
 }
 
-$saved = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-$untrackedFiles = @(git -C $repoRoot ls-files -o --exclude-standard -- powershell scripts/hooks 2>$null)
-$gitCode = $LASTEXITCODE
-$ErrorActionPreference = $saved
+# Surfaced before the run, enforced after it. rsync copies untracked files into
+# WSL and the suite reads them, but no digest can cover them, so the run would
+# otherwise go green on code that never ships. Say so now rather than after the
+# developer has waited out the whole leg.
+try {
+    $untrackedAtStart = @(Get-LinuxLegUntrackedPaths -RepoRoot $repoRoot)
+} catch {
+    Write-Error "Could not enumerate untracked files before test run: $_"
+    exit 1
+}
 
-if ($gitCode -eq 0 -and $untrackedFiles.Count -gt 0) {
-    $nonEmptyUntracked = @($untrackedFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($nonEmptyUntracked.Count -gt 0) {
-        Write-Host ("[WARN] " + $nonEmptyUntracked.Count + " untracked file(s) under powershell/ or scripts/hooks/ were included in the Linux run but are not covered by the verification digest (they cannot be pushed):") -ForegroundColor Yellow
-        foreach ($uf in $nonEmptyUntracked) {
-            $normUf = $uf.Trim().Replace('\', '/')
-            Write-Host "    - $normUf" -ForegroundColor Yellow
-        }
+if ($untrackedAtStart.Count -gt 0) {
+    Write-Host ("[WARN] " + $untrackedAtStart.Count + " untracked file(s) will be synced into WSL and read by the suite, but no tracked blob records their content. No stamp will be written:") -ForegroundColor Yellow
+    foreach ($uf in $untrackedAtStart) {
+        Write-Host "    - $uf" -ForegroundColor Yellow
     }
+    Write-Host "    git add them (or add them to .gitignore) before re-running." -ForegroundColor Yellow
 }
 
 Write-Host "Syncing working tree -> $dest (WSL)..."
 $syncScript = "set -e`nmkdir -p '$dest'`nrsync -a --delete --exclude=.git/index.lock '$wslSrc/' '$dest/'"
+# rsync copies .git/config verbatim, so the destination inherits Windows'
+# core.ignorecase=true and stops behaving like the case-sensitive filesystem
+# this leg exists to mirror. Do NOT "correct" core.filemode the same way: the
+# /mnt DrvFs mount reports 0777, so filemode=true marks every file modified.
+$syncScript += "`ngit -C '$dest' config core.ignorecase false"
 Invoke-WslBash $syncScript
 if ($LASTEXITCODE -ne 0) { Write-Error 'Sync (rsync) failed.'; exit 1 }
 
@@ -144,21 +151,38 @@ $gitCode = $LASTEXITCODE
 $ErrorActionPreference = $saved
 $headAtEnd = if ($gitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($headAtEndRaw)) { ([string]$headAtEndRaw).Trim() } else { '' }
 
-$digestAtEnd = $null
+# An unreadable fact is not a clean one. Both are seeded with a value that cannot
+# pass, so a throw below leaves the refusal in place instead of an empty answer
+# that reads as "unchanged and untracked-free".
+#
+# Do NOT collapse these into `$x = if (...) { $a } else { $b }`. An if-expression
+# unrolls its output, so an empty collection arrives as $null and the verdict call
+# fails to bind. That is exactly what happened the first time this ran.
+$digestAtEnd = ''
 try {
-    $digestAtEnd = Get-LinuxLegWorkingTreeDigest -RepoRoot $repoRoot
+    $digestAtEnd = (Get-LinuxLegWorkingTreeDigest -RepoRoot $repoRoot).Digest
 } catch {
     Write-Host "[FAIL] Could not recompute working tree digest after test run." -ForegroundColor Red
 }
 
-if ($headAtEnd -ne $headAtStart) {
-    Write-Host "[FAIL] HEAD moved during the Linux test run (started at $headAtStart, now at $headAtEnd); refusing to stamp." -ForegroundColor Red
-    $finalExit = if ($exitCode -ne 0) { $exitCode } else { 1 }
-    exit $finalExit
+$untrackedAtEnd = @('<could not enumerate>')
+try {
+    $untrackedAtEnd = @(Get-LinuxLegUntrackedPaths -RepoRoot $repoRoot)
+} catch {
+    Write-Host "[FAIL] Could not re-enumerate untracked files after test run." -ForegroundColor Red
 }
 
-if ($null -eq $digestAtEnd -or $digestAtEnd.Digest -ne $digestAtStart.Digest) {
-    Write-Host "[FAIL] Working tree content changed during the Linux test run; refusing to stamp." -ForegroundColor Red
+$verdict = Test-LinuxLegStampable `
+    -ExitCode $exitCode `
+    -HeadAtStart $headAtStart `
+    -HeadAtEnd $headAtEnd `
+    -DigestAtStart $digestAtStart.Digest `
+    -DigestAtEnd $digestAtEnd `
+    -UntrackedPaths $untrackedAtEnd
+
+if (-not $verdict.Stampable) {
+    Write-Host "[FAIL] $($verdict.Reason) Refusing to stamp." -ForegroundColor Red
+    Write-Host "       $($verdict.Remediation)" -ForegroundColor Yellow
     $finalExit = if ($exitCode -ne 0) { $exitCode } else { 1 }
     exit $finalExit
 }

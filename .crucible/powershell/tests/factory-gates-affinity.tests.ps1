@@ -173,7 +173,15 @@ exit 0
 
         # Verify that warning degraded event is written in log file
         $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
-        Assert-Result -Name "D19 warning logged" -Condition ($logContent -match "Handoff file_affinity contains paths.*not mentioned in spec") -FailureMessage ("expected degraded warning in log, got: " + $logContent)
+        $logEntries = @(Get-Content -LiteralPath $ctx.LogFile -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
+        # Selected by kind, not by position. The degraded channel carries more than one
+        # kind of event - the integrity gate reports its own unrun committed leg here
+        # when the fixture handoff has no base_commit - and taking [0] silently asserted
+        # against whichever happened to be logged first.
+        $degradedEntry = @($logEntries | Where-Object { $_.event -eq "degraded" -and $_.PSObject.Properties["kind"] -and $_.kind -eq "file_affinity_scope" })[0]
+        Assert-Result -Name "D19 degraded event logged" -Condition ($null -ne $degradedEntry) -FailureMessage ("expected degraded warning in log, got: " + $logContent)
+        Assert-Result -Name "D19 degraded outcome warned" -Condition ($degradedEntry.outcome -eq "warned") -FailureMessage ("expected warned outcome, got: " + $degradedEntry.outcome)
+        Assert-Result -Name "D19 degraded kind file affinity scope" -Condition ($degradedEntry.kind -eq "file_affinity_scope") -FailureMessage ("expected file_affinity_scope kind, got: " + $degradedEntry.kind)
     }
 
     $results += Run-Test -Name "D19: prose and command bullets in affected files do not trigger affinity warning" -Body {
@@ -328,9 +336,14 @@ exit 0
             $REPO_ROOT = $origRepoRoot
         }
 
-        # Check log file for degraded warning event
+        # Check log file for degraded unverifiable event
         $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
-        Assert-Result -Name "D23 warning logged" -Condition ($logContent -match "Spec file does not declare an affected files/packages section") -FailureMessage "expected spec missing affected warning in log"
+        $logEntries = @(Get-Content -LiteralPath $ctx.LogFile -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
+        # Selected by kind rather than position, for the reason given at the D19 case.
+        $degradedEntry = @($logEntries | Where-Object { $_.event -eq "degraded" -and $_.PSObject.Properties["kind"] -and $_.kind -eq "file_affinity_unverifiable" })[0]
+        Assert-Result -Name "D23 degraded event logged" -Condition ($null -ne $degradedEntry) -FailureMessage ("expected degraded event in log, got: " + $logContent)
+        Assert-Result -Name "D23 degraded outcome unverifiable" -Condition ($degradedEntry.outcome -eq "unverifiable") -FailureMessage ("expected unverifiable outcome, got: " + $degradedEntry.outcome)
+        Assert-Result -Name "D23 degraded kind file affinity unverifiable" -Condition ($degradedEntry.kind -eq "file_affinity_unverifiable") -FailureMessage ("expected file_affinity_unverifiable kind, got: " + $degradedEntry.kind)
     }
 
     $results += Run-Test -Name "D40: spec with multiple affected sections and trailing prose containing affected" -Body {
@@ -611,10 +624,18 @@ exit 0
         }
 
         $logContent = ""
+        $unexpectedDegraded = @()
         if (Test-Path -LiteralPath $ctx.LogFile) {
             $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
+            # "No affinity warning", not "no degraded event of any kind". The integrity
+            # gate reports its own unrun committed leg on this channel when the fixture
+            # handoff has no base_commit, which says nothing about affinity validation.
+            $unexpectedDegraded = @(Get-Content -LiteralPath $ctx.LogFile -Encoding UTF8 |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                ForEach-Object { $_ | ConvertFrom-Json } |
+                Where-Object { $_.event -eq "degraded" -and -not ($_.PSObject.Properties["kind"] -and $_.kind -eq "framework_integrity_no_baseline") })
         }
-        Assert-Result -Name "D23 fallback: clean validation" -Condition ($logContent -notmatch "degraded" -and $logContent -notmatch "cannot be validated") -FailureMessage "expected clean validation from frontmatter, got log: $logContent"
+        Assert-Result -Name "D23 fallback: clean validation" -Condition ($unexpectedDegraded.Count -eq 0 -and $logContent -notmatch "cannot be validated") -FailureMessage "expected clean validation from frontmatter, got log: $logContent"
     }
 
     $results += Run-Test -Name "D23: Spec with Scope only + frontmatter, handoff overbroad vs frontmatter" -Body {

@@ -99,6 +99,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -255,6 +257,8 @@ created_at: "2026-06-04"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'needs more polish'
     GateRedirectTarget = `$null
@@ -378,6 +382,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -412,6 +418,8 @@ Write-Host "SUCCESS_MARKER"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = `$null
     GateReason = `$null
     GateRedirectTarget = `$null
@@ -549,6 +557,8 @@ created_at: "2026-06-04"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'needs work'
     GateRedirectTarget = `$null
@@ -703,6 +713,8 @@ created_at: "2026-06-04"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'abandoned'
     GateReason = 'canceled'
     GateRedirectTarget = `$null
@@ -855,6 +867,8 @@ created_at: "2026-06-04"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'rejected'
     GateReason = 'needs rework'
     GateRedirectTarget = `$null
@@ -905,6 +919,8 @@ try {
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'perfect now'
     GateRedirectTarget = `$null
@@ -1050,6 +1066,8 @@ created_at: "2026-06-04"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'redirected'
     GateReason = 'ship F-555 and pivot to the hotfix next'
     GateRedirectTarget = 'F-556'
@@ -1201,6 +1219,8 @@ created_at: "2026-06-04"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'abandoned'
     GateReason = 'scope pulled; drop it'
     GateRedirectTarget = `$null

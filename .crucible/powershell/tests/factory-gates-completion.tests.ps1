@@ -502,6 +502,127 @@ Complete-FactorySourceSession -Context `$ctx
         }
     }
 
+    $results += Run-Test -Name "D40: an unreadable gate decision does not skip merge verification" -Body {
+        $caseRoot = Join-Path $tempRoot "d40-unreadable-gate-decision"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-040G"
+
+        $mainBranch = ""
+        $sideHash = ""
+        Push-Location $caseRoot
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            Set-Content -LiteralPath "README.md" -Value "# d40" -Encoding UTF8
+            git add README.md
+            git commit -m "init" --quiet
+            $mainBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+            git checkout -b side-only --quiet
+            Set-Content -LiteralPath "side.txt" -Value "side" -Encoding UTF8
+            git add side.txt
+            git commit -m "side" --quiet
+            $sideHash = (git rev-parse HEAD).Trim()
+            git checkout $mainBranch --quiet
+        } finally {
+            Pop-Location
+        }
+
+        # The newest gate decision exists but will not parse. The flag it feeds guards the
+        # whole merge verification, so reading the failure as "the gate did not pass" skipped
+        # the check and reported an unmerged commit as verified.
+        $gateDir = Join-Path $ctx.SessionDir "global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $gateDir "F-040G-20260604T120000Z.json") -Value '{"task_id":"F-040G","outcome":"accepted"' -Encoding UTF8
+        New-Item -ItemType Directory -Path (Split-Path -Parent $ctx.LogFile) -Force | Out-Null
+
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            `$Quiet = `$true
+            `$backlogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $FACTORY_LIB)'
+            Set-Location '$($caseRoot.Replace("'", "''"))'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$($caseRoot.Replace("'", "''"))'
+                BacklogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
+                SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'
+                WorkspacesDir = '$($ctx.WorkspacesDir.Replace("'", "''"))'
+                LogFile = '$($ctx.LogFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-040G'
+                    source_phase = 'deployment'
+                    target_phase = 'done'
+                    commit_hash = '$sideHash'
+                    file_affinity = @()
+                    cumulative_handoff_count = 2
+                }
+            }
+            Test-CompletionArtifactGate -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        $logContent = if (Test-Path -LiteralPath $ctx.LogFile) { Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8 } else { "" }
+
+        Assert-Result -Name "unreadable decision still runs merge verification" -Condition ($exitCode -ne 0) -FailureMessage ("an unmerged commit passed the completion gate. Exit " + $exitCode + ". Output: " + $outputText)
+        Assert-Result -Name "unreadable decision names the unmerged commit" -Condition ($outputText -match "is not merged") -FailureMessage ("expected the not-merged reason. Output: " + $outputText)
+        Assert-Result -Name "unreadable decision is reported as unverifiable" -Condition ($logContent -match '"kind":"unreadable_gate_decision"' -and $logContent -match '"outcome":"unverifiable"') -FailureMessage ("expected an unreadable_gate_decision degraded event. Log: " + $logContent)
+    }
+
+    $results += Run-Test -Name "D40: an unreadable gate decision does not skip backlog finalization" -Body {
+        $caseRoot = Join-Path $tempRoot "d40-unreadable-finalization-decision"
+        $taskId = "F-040F"
+        $sessionDir = Join-Path $caseRoot ".crucible/session"
+        $backlogDir = Join-Path $caseRoot ".crucible/backlog"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        $logFile = Join-Path $sessionDir ($taskId + "/pipeline.log.jsonl")
+        New-Item -ItemType Directory -Path $backlogDir, $gateDir, (Split-Path -Parent $logFile) -Force | Out-Null
+        $backlogText = @"
+# Backlog
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-040F](features/active/F-040F_test.md) | P2 | Ready for Deploy | Test | Operator |
+"@
+        [System.IO.File]::WriteAllText((Join-Path $backlogDir "BACKLOG.md"), $backlogText, (New-Object System.Text.UTF8Encoding $false))
+        Set-Content -LiteralPath (Join-Path $gateDir "F-040F-20260902T120000Z.json") -Value '{"task_id":"F-040F","outcome":"accepted"' -Encoding UTF8
+
+        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            `$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
+            `$Quiet = `$true
+            Set-Location '$($caseRoot.Replace("'", "''"))'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$($caseRoot.Replace("'", "''"))'
+                SessionDir = '$($sessionDir.Replace("'", "''"))'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$(Join-Path $sessionDir "global/circuit_breakers.jsonl")'
+                Quiet = `$true
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = '$taskId'
+                    source_phase = 'deployment'
+                    target_phase = 'done'
+                    cumulative_handoff_count = 2
+                    budget_tier = 'low'
+                }
+            }
+            Complete-FactorySourceSession -Context `$ctx
+"@)
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        $logContent = if (Test-Path -LiteralPath $logFile) { Get-Content -LiteralPath $logFile -Raw -Encoding UTF8 } else { "" }
+
+        Assert-Result -Name "unreadable decision still enforces backlog finalization" -Condition ($exitCode -eq 2) -FailureMessage ("an unfinalized backlog passed the source-session finalization gate. Exit " + $exitCode + ". Output: " + $outputText)
+        Assert-Result -Name "unreadable decision names the finalization failure" -Condition ($outputText -match "did not finalize the backlog") -FailureMessage ("expected the finalization reason. Output: " + $outputText)
+        Assert-Result -Name "unreadable finalization decision is reported as unverifiable" -Condition ($logContent -match '"kind":"unreadable_gate_decision"' -and $logContent -match '"outcome":"unverifiable"') -FailureMessage ("expected an unreadable_gate_decision degraded event. Log: " + $logContent)
+    }
+
     $results += Run-Test -Name "Workspace cleanliness gate: start-phase probe and deploy-phase block with classification" -Body {
         $caseRoot = Join-Path $tempRoot "cleanliness-integration-test"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null

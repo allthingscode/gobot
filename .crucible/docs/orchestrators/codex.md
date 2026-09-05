@@ -31,7 +31,7 @@ never mistaken for a review verdict. Run `launch-codex-specialist.ps1 -Preflight
 > on Windows shells out to `codex-windows-sandbox-setup.exe` (often absent) and fails every command —
 > yielding a false `CHANGES_REQUESTED` with no work done. `codex exec -s danger-full-access` via the
 > Crucible launcher is the reliable full-access path. See the parent-side dispatch protocol in
-> `docs/orchestrators/CLAUDE.md` ("Dispatching a Codex Specialist").
+> `docs/orchestrators/claude.md` ("Dispatching a Codex Specialist").
 
 ## Adapter Boundary
 

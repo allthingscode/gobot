@@ -75,18 +75,23 @@ Is the spec clearly written with unambiguous acceptance criteria?
 
 ---
 
-## Breaker 2 — Strike-2 DEGRADED Signal
+## Breaker 2 - DEGRADED Signals
 
-**Trigger**: `review_strike_count` reaches 2 (one strike before stalemate).
+**Trigger**: The factory logs a `degraded` event because the pipeline continued with reduced assurance.
 
-**What it means**: This is a warning, not a full block. The factory emits a DEGRADED event and logs it. The Architect receives a directive to reduce scope on the next attempt.
+**How to identify it**: Inspect the event's `kind` and `outcome` in the pipeline log. `kind` names which check spoke. `outcome: "unverifiable"` means that check could not run; do not treat the absence of a finding as a pass.
 
-**Action required**: No immediate human decision needed. The Architect should:
-- Remove the most contentious part of the implementation
-- Defer it to a follow-up task
-- Submit a smaller, cleaner change for review
+| Kind | Outcome | Operator response |
+|---|---|---|
+| `review_strike_2` | `warned` | No immediate human decision is needed. Watch the next Architect session. It should remove the most contentious part, defer it to a follow-up task, or submit a smaller change for review. If it re-implements the same contentious code, intervene before the third strike fires. |
+| `file_affinity_unverifiable` | `unverifiable` | The task was not scope-checked because the spec had no affected-files section. The human is the only remaining scope check: compare the change set against the intended task before allowing deployment. |
+| `file_affinity_scope` | `warned` | The scope gate ran and found handoff paths the spec did not mention. Confirm whether the spec should expand or the out-of-scope changes should be removed. |
+| `task_checklist` | `warned` | Review `task.md` checklist formatting and optional items before the next handoff. |
+| `session_cycle_id_mismatch` | `warned` | Confirm the active specialist read the current `task.md` before continuing. |
+| `review_report_format` | `warned` | Ask the Reviewer to use the structured review report format on the next pass. |
+| `unknown` | `warned` | Legacy archived event without `kind`; use the event notes and surrounding log context. It is not an unverifiable gate. |
 
-If you see DEGRADED in the factory output, watch the next Architect session closely. If it ignores the directive and re-implements the same contentious code, intervene before the third strike fires.
+Duplicate handoffs are not DEGRADED. They are reported by `analyze-evals.ps1` under handoff quality.
 
 ---
 
@@ -119,7 +124,9 @@ Is the task spec clear?
 
 ## Breaker 4 — Token Budget Exceeded
 
+<!-- crucible:generated budget-tier-ceilings-inline -->
 **Trigger**: `cumulative_handoff_count` exceeds the tier ceiling (Low=10, Medium=16, High=28, Extended=40).
+<!-- crucible:end budget-tier-ceilings-inline -->
 
 **What it means**: The task consumed more pipeline cycles than estimated. This is not necessarily a failure — complex tasks legitimately need more cycles — but it requires explicit human approval to continue.
 
@@ -132,9 +139,10 @@ Is the remaining work clearly defined and bounded?
     Is the remaining work worth the additional cost?
     ├── No → Abandon or reduce scope.
     └── Yes → Approve a tier escalation.
-        Current tier is Low (6)?  → Escalate to Medium (10).
-        Current tier is Medium (10)? → Escalate to High (24).
-        Current tier is High (24)?  → Split the task or abandon.
+        Current tier is Low?      → Escalate to Medium.
+        Current tier is Medium?   → Escalate to High.
+        Current tier is High?     → Escalate to Extended.
+        Current tier is Extended? → Split the task or abandon.
 ```
 
 **Resolution steps**:
@@ -292,12 +300,63 @@ Were the out-of-scope changes necessary for the task?
 
 ---
 
+## Breaker 12 - Unreadable Retry History
+
+**Trigger**: A gate scanned the pipeline log to decide whether the current failure is a repeat, and one or more log lines would not parse as JSON. The gate could not rule out a prior failure, so it stopped instead of treating this as a first offence.
+
+**What it means**: This breaker makes no claim that the task did anything wrong. It reports that the evidence needed to make the repeat-or-first decision is unreadable. The two scans that raise it are the artifact-integrity check and the independent-verification check; the blocked record names which one and how many lines were skipped. A matching `degraded` event with `kind: unreadable_retry_history` is written whenever a scan skips a line, whether or not it blocks.
+
+**Decision tree**:
+
+```
+Is the malformed line explicable - a crash mid-write, a disk-full, a manual edit?
+├── Yes → Repair or archive the log, then recover. The task itself is unaffected.
+└── No → Treat the log as tampered. A planted malformed line is the documented way
+         to suppress this gate. Inspect who wrote it before recovering.
+```
+
+**Resolution steps**:
+1. Open the pipeline log and find the lines that do not parse. Each is a single JSON object per line; a truncated or concatenated line is the usual shape.
+2. Decide whether the corruption is accidental or deliberate. Writers serialize through `Invoke-FileLock`, so ordinary operation should not tear a line.
+3. Repair the malformed lines, or move them to an archive file so the scan reads a clean log. Do not delete history you have not read.
+4. Run `factory.ps1 -Init -TaskId {task_id} -Recover`.
+5. If the scan now finds a genuine prior retry, the underlying breaker fires and you handle that one instead. That is the intended outcome, not a second failure.
+
+---
+
+## Breaker 13 - Unverifiable Handoff Count
+
+**Trigger**: The server-side handoff count is derived by counting `session_end` events for the task in the pipeline log, because an agent-reported `cumulative_handoff_count` cannot be trusted to guard its own budget. Some log lines would not parse. The counted handoffs are under the tier ceiling, but by fewer than the number of unreadable lines - so the count cannot establish that the ceiling was not crossed.
+
+**What it means**: Not that the budget was exceeded, and not that the task misbehaved. Each unreadable line may or may not be a `session_end` this count never saw. The gate stops rather than passing a ceiling check its own evidence does not support. A `degraded` event with `kind: unreadable_handoff_history` and `outcome: unverifiable` is written on every run where any line is skipped, including runs far below the ceiling where nothing blocks.
+
+**Decision tree**:
+
+```
+Do the counted handoffs alone already exceed the ceiling?
+└── No, or this breaker would be Breaker 4 instead.
+
+Is the corruption explicable - a crash mid-write, disk full, a hand edit?
+├── Yes → Repair or archive the log so the count can be recomputed, then recover.
+└── No → Suppressing a session_end is the direct way to buy handoffs past the
+         ceiling. Establish who wrote the line before granting the task more room.
+```
+
+**Resolution steps**:
+1. Read the pipeline log and locate the lines that do not parse. One JSON object per line; truncated or concatenated lines are the usual shape.
+2. If the lines are recoverable, repair them so their `session_end` events are counted. The honest resolution is to recompute the count, not to raise the ceiling.
+3. If they are not recoverable, move them to an archive file and decide the count deliberately. Record that decision - the next run will not know you made it.
+4. Run `factory.ps1 -Init -TaskId {task_id} -Recover`.
+5. If the repaired count now exceeds the ceiling, Breaker 4 fires. That is the correct outcome, not a new problem.
+
+---
+
 ## Quick reference
 
 | Breaker | Trigger | Your decision |
 |---------|---------|---------------|
 | Review Stalemate | 3 Architect failures | Split task, reduce scope, or rewrite spec |
-| Strike-2 DEGRADED | 2nd failure | Watch next Architect session; no action yet |
+| DEGRADED Signal | Pipeline continued with reduced assurance | Inspect `kind`; for `file_affinity_unverifiable`, manually scope-check the task; for `review_strike_2`, watch next Architect session |
 | Handoff Retry | Self-loop >2× | Clarify spec or re-dispatch with correction |
 | Token Budget | Handoff ceiling hit | Escalate tier, reduce scope, or abandon |
 | Reviewer Verification Failure | Factory re-ran tests, they failed | Fix Reviewer execution or re-route to Architect |
@@ -307,3 +366,5 @@ Were the out-of-scope changes necessary for the task?
 | Scope Violation | Modified out-of-scope files | Expand spec or revert out-of-scope changes |
 | Operator Threshold | Low-priority feedback | Log as backlog item; don't auto-trigger Researcher |
 | Scan Limit | No Ready items found | Check health; give explicit next task ID |
+| Unreadable Retry History | Pipeline log lines would not parse, so repeat-or-first could not be decided | Repair or archive the malformed lines, then recover; if the corruption is unexplained, treat it as tampering |
+| Unverifiable Handoff Count | Unreadable log lines could hide enough `session_end` events to cross the tier ceiling | Repair the log and recompute the count; do not raise the ceiling to clear it |

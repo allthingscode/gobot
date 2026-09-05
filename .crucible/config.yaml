@@ -96,5 +96,5 @@ review:
   editor: zed
   auto_push: true
   require_green_ci: true
-crucible_version: "0.3.4"
-crucible_install_commit: "d4b5f764b1fe2d2dbd23dcf5bababc77f4fed5b4"
+crucible_version: "0.4.0"
+crucible_install_commit: "e3a9e83eca883405d63e1d2740cd96a1b18d68b1"

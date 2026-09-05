@@ -347,6 +347,74 @@ try {
         Assert-Result -Name "bad manifest message" -Condition ($outputBad -match "manifest_files must be an array") -FailureMessage ("expected array validation error message. Output: " + $outputBad)
     }
 
+    # The review block was validated three keys deep - diff_tool, editor, auto_push -
+    # and everything the CI publish gate reads went unchecked. A malformed value there
+    # validated clean and then read as its default at runtime, which for
+    # require_green_ci means the gate is off in a file that says it is on.
+    $goodReview = @"
+
+review:
+  diff_tool: zed
+  editor: zed
+  auto_push: false
+  require_green_ci: true
+  ci_post_push_watch: false
+  ci_timeout_minutes: 20
+  ci_queued_grace_minutes: 15
+  ci_staging_branch_prefix: staging/
+  ci_required_checks: build
+"@
+
+    function New-ReviewConfig {
+        param([string]$Name, [string]$Review)
+        $base = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $path = Join-Path $projectRoot (".crucible/config-" + $Name + ".yaml")
+        [System.IO.File]::WriteAllText($path, ($base + $Review), (New-Object System.Text.UTF8Encoding($false)))
+        return $path
+    }
+
+    $results += Run-Test -Name "A well-formed review block passes" -Body {
+        $path = New-ReviewConfig -Name "review-good" -Review $goodReview
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
+        Assert-Result -Name "good review exit" -Condition ($cmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+    }
+
+    $results += Run-Test -Name "A non-boolean review CI flag fails validation" -Body {
+        $path = New-ReviewConfig -Name "review-bad-bool" -Review ($goodReview -replace "require_green_ci: true", "require_green_ci: yes")
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
+        Assert-Result -Name "bad bool exit" -Condition ($cmd.ExitCode -eq 2) -FailureMessage ("expected exit 2 for require_green_ci: yes, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+        Assert-Result -Name "bad bool message" -Condition ($cmd.Output -match "review\.require_green_ci must be true or false") -FailureMessage ("expected the boolean message. Output: " + $cmd.Output)
+    }
+
+    $results += Run-Test -Name "A non-numeric review CI timeout fails validation" -Body {
+        $path = New-ReviewConfig -Name "review-bad-timeout" -Review ($goodReview -replace "ci_timeout_minutes: 20", "ci_timeout_minutes: soon")
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
+        Assert-Result -Name "bad timeout exit" -Condition ($cmd.ExitCode -eq 2) -FailureMessage ("expected exit 2 for ci_timeout_minutes: soon, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+        Assert-Result -Name "bad timeout message" -Condition ($cmd.Output -match "review\.ci_timeout_minutes must be a positive whole number") -FailureMessage ("expected the numeric message. Output: " + $cmd.Output)
+    }
+
+    $results += Run-Test -Name "A review key present but valueless is reported, not treated as absent" -Body {
+        $path = New-ReviewConfig -Name "review-valueless" -Review ($goodReview -replace "require_green_ci: true", "require_green_ci:")
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
+        Assert-Result -Name "valueless exit" -Condition ($cmd.ExitCode -eq 2) -FailureMessage ("expected exit 2 for a valueless require_green_ci, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+        Assert-Result -Name "valueless message" -Condition ($cmd.Output -match "present but carries no value") -FailureMessage ("expected the unreadable-key message. Output: " + $cmd.Output)
+    }
+
+    $results += Run-Test -Name "Indent width does not change the verdict" -Body {
+        # The runtime reads this file indent-agnostically. A validator that only
+        # understands two spaces disagrees with it about the same config, and reports
+        # fields as missing that the runtime reads without trouble.
+        $base = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $widened = (($base + $goodReview) -split "`r?`n" | ForEach-Object {
+            if ($_ -match '^( +)(.*)$') { (" " * ($Matches[1].Length * 2)) + $Matches[2] } else { $_ }
+        }) -join "`n"
+        $path = Join-Path $projectRoot ".crucible/config-wide-indent.yaml"
+        [System.IO.File]::WriteAllText($path, $widened, (New-Object System.Text.UTF8Encoding($false)))
+
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
+        Assert-Result -Name "wide indent exit" -Condition ($cmd.ExitCode -eq 0) -FailureMessage ("expected a 4-space config to validate the same as a 2-space one, got exit " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+    }
+
     $results += Run-Test -Name "Schema config.schema.json pattern regression test" -Body {
         $schemaPath = Join-Path $REPO_ROOT "schemas/config.schema.json"
         Assert-Result -Name "schema exists" -Condition (Test-Path -LiteralPath $schemaPath) -FailureMessage "config.schema.json not found"

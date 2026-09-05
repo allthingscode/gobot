@@ -255,6 +255,8 @@ created_at: "2026-05-25"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'work looks beautiful'
     GateRedirectTarget = `$null
@@ -584,6 +586,8 @@ paths:
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'work looks beautiful'
     GateRedirectTarget = `$null
@@ -712,6 +716,8 @@ created_at: "2026-05-25"
 `$ctx = @{
     IsBootstrap = `$false
     SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
     GateOutcome = 'accepted'
     GateReason = 'work looks beautiful'
     GateRedirectTarget = `$null

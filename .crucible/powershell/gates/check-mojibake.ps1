@@ -4,34 +4,40 @@ param(
 )
 
 if ($Paths.Count -eq 0) {
-    $parentOfPowershell = (Resolve-Path -Path "$PSScriptRoot/..").Path
-    $isFramework = (Test-Path -LiteralPath (Join-Path $parentOfPowershell "proposals")) -and (Test-Path -LiteralPath (Join-Path $parentOfPowershell "powershell/run-all-tests.ps1"))
+    # ../.. because this script lives in <root>/powershell/gates. A single ".." landed on
+    # powershell/ itself, where none of the content paths below exist, so every default
+    # path was skipped as missing and a bare invocation scanned zero files and exited 0.
+    $contentRoot = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+    $isFramework = (Test-Path -LiteralPath (Join-Path $contentRoot "proposals")) -and (Test-Path -LiteralPath (Join-Path $contentRoot "powershell/run-all-tests.ps1"))
 
     if ($isFramework) {
+        # Keep in sync with the explicit list in scripts/hooks/pre-commit.
+        # check-mojibake.tests.ps1 pins both against the tracked root *.md files.
         $Paths = @(
-            (Join-Path $parentOfPowershell "prompts"),
-            (Join-Path $parentOfPowershell "personas"),
-            (Join-Path $parentOfPowershell "sops"),
-            (Join-Path $parentOfPowershell "docs"),
-            (Join-Path $parentOfPowershell "powershell"),
-            (Join-Path $parentOfPowershell "templates"),
-            (Join-Path $parentOfPowershell "README.md"),
-            (Join-Path $parentOfPowershell "ROADMAP.md"),
-            (Join-Path $parentOfPowershell "CHANGELOG.md")
+            (Join-Path $contentRoot "prompts"),
+            (Join-Path $contentRoot "personas"),
+            (Join-Path $contentRoot "sops"),
+            (Join-Path $contentRoot "docs"),
+            (Join-Path $contentRoot "powershell"),
+            (Join-Path $contentRoot "templates"),
+            (Join-Path $contentRoot "README.md"),
+            (Join-Path $contentRoot "ROADMAP.md"),
+            (Join-Path $contentRoot "CHANGELOG.md"),
+            (Join-Path $contentRoot "CONTRIBUTING.md"),
+            (Join-Path $contentRoot "TODO.md")
         )
     } else {
         $Paths = @(
-            (Join-Path $parentOfPowershell "prompts"),
-            (Join-Path $parentOfPowershell "personas"),
-            (Join-Path $parentOfPowershell "sops"),
-            (Join-Path $parentOfPowershell "docs"),
-            (Join-Path $parentOfPowershell "powershell"),
-            (Join-Path $parentOfPowershell "templates"),
-            (Join-Path $parentOfPowershell "README.md")
+            (Join-Path $contentRoot "prompts"),
+            (Join-Path $contentRoot "personas"),
+            (Join-Path $contentRoot "sops"),
+            (Join-Path $contentRoot "docs"),
+            (Join-Path $contentRoot "powershell"),
+            (Join-Path $contentRoot "templates"),
+            (Join-Path $contentRoot "README.md")
         )
     }
 }
-
 $ErrorActionPreference = "Stop"
 
 $markers = @(

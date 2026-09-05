@@ -14,8 +14,8 @@ function Write-BlockedTaskRecord {
     $blockedDir = Join-Path $BacklogDir "blocked"
     if (-not (Test-Path $blockedDir)) { New-Item -ItemType Directory -Force -Path $blockedDir | Out-Null }
 
-    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    $fileTimestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+    $timestamp = Get-UtcTimestamp
+    $fileTimestamp = Get-UtcFileTimestamp
     $record = [ordered]@{
         task_id                = $TaskId
         backlog_item           = $TaskId
@@ -60,6 +60,15 @@ function Write-BlockedTaskRecord {
         } catch {}
     }
 
+    # The record above is the artifact the operator and tooling read; this is a follow-on
+    # side effect. It runs in-process and reads config, so under $ErrorActionPreference =
+    # "Stop" a failure here used to propagate out of the breaker path and replace a
+    # deliberate refusal with an unrelated error - losing the wedge and the exit code with
+    # it. A session-state update that cannot run is worth a warning, never the refusal.
     $updateJson = @{ status = "blocked"; circuit_breaker = $CircuitBreaker } | ConvertTo-Json -Compress
-    & "$FrameworkPowerShell/update-session-state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null
+    try {
+        & "$FrameworkPowerShell/update-session-state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null
+    } catch {
+        Write-Quiet ("[BLOCKED] Warning: session state was not updated for " + $TaskId + ": " + $_.Exception.Message) -ForegroundColor Yellow
+    }
 }

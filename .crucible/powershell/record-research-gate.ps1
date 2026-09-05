@@ -35,6 +35,8 @@ param(
 )
 
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "lib/time.ps1")
+
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
@@ -96,7 +98,7 @@ if (Test-Path -LiteralPath $researchDir) {
     if ($artifact) { $findingsRel = "$CrucibleRoot/research/$($artifact.Name)" }
 }
 
-$timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+$timestamp = Get-UtcFileTimestamp
 
 # --- Structural decision record (auditability + a machine-detectable gate marker) ---
 $gateDir = Join-Path $resolvedCrucibleRoot (Join-Path "session" (Join-Path "global" "research_gate"))

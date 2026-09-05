@@ -140,9 +140,22 @@ try {
     }
 
     $results += Run-Test -Name "Consumers do not duplicate literal transition tables" -Body {
-        $factoryGatesText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/factory-gates.ps1") -Raw
+        # Globbed rather than named. factory-gates.ps1 is being split into
+        # factory-gates-<concern>.ps1 files, and an assertion that names one path keeps
+        # passing while covering less of the code it was written to cover - the table
+        # could reappear in any sibling and nothing would look. The count is pinned first
+        # because a glob that matches nothing satisfies every assertion about its contents.
+        $gatesSources = @(Get-ChildItem -Path (Join-Path $REPO_ROOT "powershell/lib") -Filter "factory-gates*.ps1" -File)
+        Assert-Result -Name "gates sources were found" -Condition ($gatesSources.Count -ge 1) -FailureMessage "no powershell/lib/factory-gates*.ps1 matched, so the scan below would report clean without reading anything"
+
+        $duplicating = @()
+        foreach ($gatesSource in $gatesSources) {
+            if ((Get-Content -LiteralPath $gatesSource.FullName -Raw).Contains('$validTransitions = @{')) {
+                $duplicating += $gatesSource.Name
+            }
+        }
         $validateHandoffText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/validate-handoff.ps1") -Raw
-        Assert-Result -Name "factory-gates no literal validTransitions" -Condition (-not $factoryGatesText.Contains('$validTransitions = @{')) -FailureMessage "factory-gates.ps1 still duplicates the transition table"
+        Assert-Result -Name "factory-gates no literal validTransitions" -Condition ($duplicating.Count -eq 0) -FailureMessage ("these gates sources still duplicate the transition table: " + ($duplicating -join ", "))
         Assert-Result -Name "validate-handoff no literal validTransitions" -Condition (-not $validateHandoffText.Contains('$validTransitions = @{')) -FailureMessage "validate-handoff.ps1 still duplicates the transition table"
     }
 

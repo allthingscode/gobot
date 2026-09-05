@@ -90,7 +90,7 @@ if ($gitExitCode -ne 0) {
     
     $report = [ordered]@{
         task_id = $TaskId
-        timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        timestamp = Get-UtcTimestamp
         conflicting_files = $conflictingFiles
         summary = "Automatic merge simulation failed. Manual rebase required."
     }

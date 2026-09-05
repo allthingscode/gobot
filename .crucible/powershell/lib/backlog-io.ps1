@@ -1,6 +1,13 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Get-BacklogItemPathForTaskProjectRoot below needs Get-ConfiguredPath. factory-lib.ps1
+# loads config-helpers.ps1 first, so this normally does nothing; it exists so a caller
+# that dot-sources this file on its own gets a working function rather than a missing one.
+if (-not (Get-Command Get-ConfiguredPath -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
+
 if (-not (Test-Path variable:script:HeldBacklogLocks)) {
     $script:HeldBacklogLocks = @{}
 }
@@ -117,4 +124,52 @@ function Invoke-WithBacklogLock {
             } catch {}
         }
     }
+}
+
+# Resolves a backlog item spec file from a task id, preferring active over loose over
+# archived. It lived in factory-gates.ps1 until TODO item 14 step A, where it was not a
+# gate and had no relationship to the ones around it: archive-task.tests.ps1 had to
+# dot-source that 4600-line file purely to reach this function, which is the argument for
+# it living here instead.
+function Get-BacklogItemPathForTaskProjectRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Task,
+        [string]$ProjectRoot = ""
+    )
+
+    $typeDir = if ($Task -match "^F-") {
+        "features"
+    } elseif ($Task -match "^B-") {
+        "bugs"
+    } elseif ($Task -match "^C-") {
+        "chores"
+    } else {
+        ""
+    }
+
+    $typeDirs = if ([string]::IsNullOrWhiteSpace($typeDir)) {
+        @("features", "bugs", "chores")
+    } else {
+        @($typeDir)
+    }
+
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+    foreach ($dir in $typeDirs) {
+        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $activeMatch) {
+            return $activeMatch.FullName
+        }
+
+        $rootMatch = Get-ChildItem -Path (Join-Path $backlogDir $dir) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $rootMatch) {
+            return $rootMatch.FullName
+        }
+
+        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($Task + "_*.md") -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $archivedMatch) {
+            return $archivedMatch.FullName
+        }
+    }
+
+    return ""
 }

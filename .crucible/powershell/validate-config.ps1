@@ -17,16 +17,13 @@ function Write-Result {
     }
 }
 
-function Test-Pattern {
-    param(
-        [Parameter(Mandatory=$true)][string]$Name,
-        [Parameter(Mandatory=$true)][string]$Pattern,
-        [Parameter(Mandatory=$true)][string]$Content
-    )
-    if ($Content -notmatch $Pattern) {
-        $script:errors += "Missing or invalid config field: $Name"
-    }
-}
+# The validator reads the config through the same primitive the runtime uses. It used
+# to carry its own pinned regexes - `^\s{2}<key>:` and a bespoke `paths:` block matcher
+# - so the two could disagree about what one file said. Both directions were wrong: a
+# key the validator could not see was silently not validated (the whole review.ci_*
+# family was in that category), and an indent the runtime reads without trouble made
+# the validator report present fields as missing.
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
     Write-Result ("CONFIG VALIDATION FAILED: file not found: " + $ConfigPath) -ForegroundColor Red
@@ -35,13 +32,58 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
+$entries = @(Get-ConfigEntries -Content $content)
 
-# Top-level scalar fields (have a value on the same line).
-Test-Pattern -Name "crucible_root" -Pattern '(?m)^crucible_root:\s+["'']?[^"''\r\n]+["'']?\s*$' -Content $content
+# A key that is present but unreadable is reported as such. Treating it as absent is
+# what let a malformed value pass validation and then read as its default at runtime.
+function Read-Value {
+    param([Parameter(Mandatory=$true)][string[]]$Path)
+    try {
+        $value = Get-ConfigBlockValue -Content $script:content -Path $Path -Source $script:ConfigPath
+        return [pscustomobject]@{ Ok = $true; Value = $value }
+    } catch {
+        $script:errors += $_.Exception.Message
+        return [pscustomobject]@{ Ok = $false; Value = $null }
+    }
+}
 
-if ($content -match '(?m)^crucible_root:\s+["'']?([^"''\r\n]+)["'']?\s*$') {
-    $crucibleRootPath = $Matches[1].Trim()
-    
+function Find-Node {
+    param([Parameter(Mandatory=$true)][string[]]$Path)
+    try {
+        return Find-ConfigNode -Entries $script:entries -Path $Path -Source $script:ConfigPath
+    } catch {
+        $script:errors += $_.Exception.Message
+        return $null
+    }
+}
+
+function Test-RequiredValue {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$Path,
+        [Parameter(Mandatory=$true)][string]$Name
+    )
+    $result = Read-Value -Path $Path
+    if ($result.Ok -and $null -eq $result.Value) {
+        $script:errors += "Missing or invalid config field: $Name"
+    }
+    return $result.Value
+}
+
+function Test-RequiredSection {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$Path,
+        [Parameter(Mandatory=$true)][string]$Name
+    )
+    $node = Find-Node -Path $Path
+    if ($null -eq $node) {
+        $script:errors += "Missing or invalid config field: $Name"
+    }
+    return $node
+}
+
+$crucibleRootPath = Test-RequiredValue -Path @("crucible_root") -Name "crucible_root"
+
+if (-not [string]::IsNullOrWhiteSpace($crucibleRootPath)) {
     $isRooted = [System.IO.Path]::IsPathRooted($crucibleRootPath) -or $crucibleRootPath -match '^([A-Za-z]:|[\\/])'
     $resolvedCrucibleRoot = $crucibleRootPath
     if (-not $isRooted) {
@@ -78,48 +120,27 @@ if ($content -match '(?m)^crucible_root:\s+["'']?([^"''\r\n]+)["'']?\s*$') {
 }
 
 foreach ($section in @("project", "roles", "verification", "project_mandates")) {
-    Test-Pattern -Name ($section + " section") -Pattern ("(?m)^" + [regex]::Escape($section) + ":\s*$") -Content $content
+    $null = Test-RequiredSection -Path @($section) -Name ($section + " section")
 }
 
 foreach ($field in @("name", "description", "default_branch")) {
-    Test-Pattern -Name ("project." + $field) -Pattern ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s+.+$") -Content $content
+    $null = Test-RequiredValue -Path @("project", $field) -Name ("project." + $field)
 }
 
-if ($content -match '(?m)^paths:\s*$') {
-    # Check that session and framework assets are rooted under .crucible/
+$pathsNode = Find-Node -Path @("paths")
+if ($null -ne $pathsNode) {
+    # Session and framework assets must stay under the bundle directory.
     foreach ($field in @("session", "workspaces", "prompts", "personas", "sops")) {
-        Test-Pattern -Name ("paths." + $field) -Pattern ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s+\.crucible/.+$") -Content $content
-    }
-    # backlog is allowed to reside anywhere relative to the project root, but it must be non-empty
-    Test-Pattern -Name "paths.backlog" -Pattern "(?m)^\s{2}backlog:\s+.+$" -Content $content
-}
-
-if ($content -match '(?m)^manifest_files:[ \t]*(.*)$') {
-    $rest = $Matches[1].Trim()
-    if ($rest -ne "") {
-        if ($rest -notmatch '^\[.+?\][ \t]*$') {
-            $errors += "manifest_files must be an array of files (either block or inline format)."
-        }
-    } else {
-        if ($content -notmatch '(?m)^manifest_files:[ \t]*\r?\n\s{2}-\s+.+$') {
-            $errors += "manifest_files must be an array of files (either block or inline format)."
+        $value = Test-RequiredValue -Path @("paths", $field) -Name ("paths." + $field)
+        if ((-not [string]::IsNullOrWhiteSpace($value)) -and ($value -notmatch '^\.crucible/.+')) {
+            $errors += "Missing or invalid config field: paths." + $field
         }
     }
-}
 
-if ($content -match '(?m)^review:\s*$') {
-    foreach ($field in @("diff_tool", "editor", "auto_push")) {
-        if ($content -match ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s*")) {
-            Test-Pattern -Name ("review." + $field) -Pattern ("(?m)^\s{2}" + [regex]::Escape($field) + ":\s+.+$") -Content $content
-        }
-    }
-}
-
-# Parse and validate paths block details
-if ($content -match '(?ms)^paths:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
-    $pathsBlock = $Matches[1]
-    if ($pathsBlock -match '(?m)^\s{2}backlog:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
-        $backlogVal = $Matches[1].Trim()
+    # backlog may live anywhere relative to the project root, but it must be non-empty
+    # and must not escape.
+    $backlogVal = Test-RequiredValue -Path @("paths", "backlog") -Name "paths.backlog"
+    if (-not [string]::IsNullOrWhiteSpace($backlogVal)) {
         if ([System.IO.Path]::IsPathRooted($backlogVal) -or $backlogVal -match '^([A-Za-z]:|[\\/])') {
             $errors += "paths.backlog must be a relative path inside the project."
         }
@@ -129,8 +150,50 @@ if ($content -match '(?ms)^paths:\s*\r?\n(.*?)(?=\r?\n\S|\z)') {
     }
 }
 
+$manifestNode = Find-Node -Path @("manifest_files")
+if ($null -ne $manifestNode) {
+    try {
+        $null = Get-ConfigBlockList -Content $content -Path @("manifest_files") -Source $ConfigPath
+    } catch {
+        $errors += "manifest_files must be an array of files (either block or inline format)."
+    }
+}
+
+# Every review key below is optional, so absence is legitimate and silent. A key the
+# adopter did write, however, is checked - including the CI family, which decides
+# whether a push is gated on green CI. The old validator looked only at diff_tool,
+# editor and auto_push, so `require_green_ci: yes` validated clean and then read as
+# false at runtime, turning the publish gate off in a file that says it is on.
+$reviewNode = Find-Node -Path @("review")
+if ($null -ne $reviewNode) {
+    foreach ($field in @("diff_tool", "editor", "ci_staging_branch_prefix", "ci_required_checks")) {
+        $result = Read-Value -Path @("review", $field)
+        if ($result.Ok -and $null -ne $result.Value -and [string]::IsNullOrWhiteSpace($result.Value)) {
+            $errors += "Missing or invalid config field: review." + $field
+        }
+    }
+
+    foreach ($field in @("auto_push", "require_green_ci", "ci_post_push_watch")) {
+        $result = Read-Value -Path @("review", $field)
+        if ($result.Ok -and $null -ne $result.Value -and $result.Value -notmatch '^(true|false)$') {
+            $errors += "review." + $field + " must be true or false (got '" + $result.Value + "')."
+        }
+    }
+
+    foreach ($field in @("ci_timeout_minutes", "ci_queued_grace_minutes")) {
+        $result = Read-Value -Path @("review", $field)
+        if ($result.Ok -and $null -ne $result.Value) {
+            if ($result.Value -notmatch '^[0-9]+$') {
+                $errors += "review." + $field + " must be a positive whole number of minutes (got '" + $result.Value + "')."
+            } elseif ([double]$result.Value -le 0) {
+                $errors += "review." + $field + " must be a positive whole number of minutes (got '" + $result.Value + "')."
+            }
+        }
+    }
+}
+
 foreach ($role in @("researcher", "groomer", "architect", "reviewer", "operator")) {
-    Test-Pattern -Name ("roles." + $role) -Pattern ("(?m)^\s{2}" + [regex]::Escape($role) + ":\s*$") -Content $content
+    $null = Test-RequiredSection -Path @("roles", $role) -Name ("roles." + $role)
 }
 
 foreach ($tier in @("fast", "high-capability")) {
@@ -139,9 +202,23 @@ foreach ($tier in @("fast", "high-capability")) {
     }
 }
 
-Test-Pattern -Name "verification.quick" -Pattern "(?m)^\s{2}quick:\s*$" -Content $content
-Test-Pattern -Name "verification.full" -Pattern "(?m)^\s{2}full:\s*$" -Content $content
-Test-Pattern -Name "verification command" -Pattern "(?m)^\s{6}command:\s+.+$" -Content $content
+$null = Test-RequiredSection -Path @("verification", "quick") -Name "verification.quick"
+$null = Test-RequiredSection -Path @("verification", "full") -Name "verification.full"
+
+# The verification entries are a list of maps, so command: is not reachable as a
+# mapping key path; it is looked for anywhere inside the verification block instead.
+$verificationNode = Find-Node -Path @("verification")
+$hasVerificationCommand = $false
+if ($null -ne $verificationNode) {
+    for ($i = $verificationNode.SpanStart; $i -lt $verificationNode.SpanEnd; $i++) {
+        if ($entries[$i].Key -eq "command" -and -not [string]::IsNullOrWhiteSpace($entries[$i].Value)) {
+            $hasVerificationCommand = $true
+        }
+    }
+}
+if (-not $hasVerificationCommand) {
+    $errors += "Missing or invalid config field: verification command"
+}
 
 if ($content -match "replace-with-project-") {
     $errors += "Verification commands still contain scaffold placeholder values."
@@ -153,16 +230,16 @@ if ($content -match "Replace with project-specific engineering rules") {
 
 # Version metadata: warn (do not error) if missing or unstamped.
 $hasVersion = $false
-if ($content -match '(?m)^crucible_version:\s+["'']?([^"''\r\n]+)["'']?\s*$') {
-    $versionValue = $Matches[1].Trim()
-    if (($versionValue -match '^[0-9]+\.[0-9]+\.[0-9]+') -and ($versionValue -ne "REPLACE_WITH_VERSION")) {
+$versionResult = Read-Value -Path @("crucible_version")
+if ($versionResult.Ok -and $null -ne $versionResult.Value) {
+    if (($versionResult.Value -match '^[0-9]+\.[0-9]+\.[0-9]+') -and ($versionResult.Value -ne "REPLACE_WITH_VERSION")) {
         $hasVersion = $true
     }
 }
 $hasCommit = $false
-if ($content -match '(?m)^crucible_install_commit:\s+["'']?([^"''\r\n]+)["'']?\s*$') {
-    $commitValue = $Matches[1].Trim()
-    if ($commitValue -match '^[0-9a-f]{40}$') {
+$commitResult = Read-Value -Path @("crucible_install_commit")
+if ($commitResult.Ok -and $null -ne $commitResult.Value) {
+    if ($commitResult.Value -match '^[0-9a-f]{40}$') {
         $hasCommit = $true
     }
 }

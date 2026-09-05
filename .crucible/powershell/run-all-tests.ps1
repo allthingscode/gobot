@@ -1,11 +1,30 @@
+# IdleTimeoutSeconds measures silence, not total runtime: a test that is still printing
+# is not hung however long it takes. 300s is about 5x the worst gap between consecutive
+# output lines measured across the suite's longest files (60.6s, in
+# adopter-update-materialization.tests.ps1). NoTimeout is the debugging escape hatch.
+# Both are parameters rather than environment variables because every child this runner
+# spawns inherits the environment and would inherit the setting with it.
+#
+# One threshold governs both modes. A wall-clock cap cannot: it has to be set against the
+# slowest legitimate file under the worst contention the pool can produce, so it is always
+# either too tight for a slow test or too loose to catch a hang promptly. Silence does not
+# scale with contention, so an idle cap needs no per-file exemptions.
 param(
     [switch]$Serial,
-    [int]$ThrottleLimit = 0
+    [int]$ThrottleLimit = 0,
+    [switch]$Force,
+    [int]$IdleTimeoutSeconds = 300,
+    [switch]$NoTimeout
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:CRUCIBLE_SKIP_PROVENANCE = 'true'
+
+# Before any fixture is built, point git at an isolated global config so the suite
+# never inherits the developer's core.autocrlf. Defined in tests/_harness.ps1, which
+# every test file also dot-sources, so a solo test run is isolated identically.
+. (Join-Path $PSScriptRoot "tests/_harness.ps1")
 
 $testsDir = Join-Path $PSScriptRoot "tests"
 $testFiles = Get-ChildItem -Path $testsDir -Filter '*test*.ps1' | Sort-Object Name
@@ -34,22 +53,56 @@ if ($ThrottleLimit -lt 1) {
 }
 
 $exitCode = 0
+$runLock = $null
+
+# Two concurrent runs of this script against the same checkout destroy each other's
+# work: both build fixtures under one run root and the first to finish deletes it.
+#
+# The lock is taken after the no-test-files check so that path cannot exit holding
+# it. The run root itself is created by _harness.ps1 above, before the lock exists;
+# that is harmless because the root is named for this process and no other run will
+# touch it.
+#
+# -Force is a command-line switch rather than an environment variable because every
+# child this runner spawns inherits the environment and would inherit the bypass
+# with it, disabling the guard everywhere at once.
+if (-not $Force) {
+    . (Join-Path $PSScriptRoot "lib/run-lock.ps1")
+    $runLock = Enter-RunLock -ScopeRoot $PSScriptRoot
+    if (-not $runLock.Acquired) {
+        Write-Host "Another test run already holds the lock for this checkout." -ForegroundColor Red
+        if ($null -ne $runLock.Holder) {
+            Write-Host "  Held by PID $($runLock.Holder.ProcessId), started $($runLock.Holder.Started)" -ForegroundColor Red
+        }
+        Write-Host "  Lock file: $($runLock.LockPath)" -ForegroundColor Red
+        Write-Host "  Wait for it to finish, or re-run with -Force if you are certain it is gone." -ForegroundColor Yellow
+        exit 1
+    }
+}
 
 try {
-    # Clean up old runner-owned shared adopter fixtures to prevent TEMP directory bloat
+    . (Join-Path $PSScriptRoot "tests/_fixtures.ps1")
+
+    # Collect run roots abandoned by runs that were killed, and by test files invoked
+    # on their own. Both leave a root no finally will ever reach.
+    #
+    # This replaces an age-plus-ownership sweep over crucible-shared-adopter-*. The age
+    # half is gone: a dead owner is proof of abandonment on its own, and the threshold
+    # only ever delayed the collection it could not justify. Skipping the live root
+    # this process is using falls out of the same check, since this process is alive.
     $tempPath = [System.IO.Path]::GetTempPath()
-    Get-ChildItem -Path $tempPath -Filter "crucible-shared-adopter-*" -ErrorAction SilentlyContinue |
-        Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-30) } |
+    Get-ChildItem -Path $tempPath -Filter "crucible-test-run-*" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-TestRunRootOrphaned -Name $_.Name } |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
-    $createdSharedFixture = $false
-    # Pre-stage the shared adopter fixture once before running worker tests
+    # Pre-stage the shared adopter fixture once before running worker tests. Nothing
+    # records whether this call built it: the fixture lives inside the run root now, so
+    # ownership of the ROOT decides who cleans up, and a nested runner that inherits
+    # both variables must not delete either.
     Write-Host "Pre-staging shared adopter fixture..." -ForegroundColor Cyan
-    . (Join-Path $PSScriptRoot "tests/_fixtures.ps1")
     try {
         if (-not $env:CRUCIBLE_SHARED_FIXTURE -or -not (Test-Path -LiteralPath $env:CRUCIBLE_SHARED_FIXTURE)) {
             $env:CRUCIBLE_SHARED_FIXTURE = Get-SharedAdopterFixture
-            $createdSharedFixture = $true
         }
         Write-Host "Shared adopter fixture pre-staged at: $env:CRUCIBLE_SHARED_FIXTURE" -ForegroundColor Green
     } catch {
@@ -73,15 +126,36 @@ try {
         return ($Output -cmatch 'EXCEPTION OCCURRED:' -or $Output -cmatch 'SOME TESTS FAILED' -or $Output -cmatch '\bFAILED:')
     }
 
-    function Start-TestProcess {
-        param($file)
+    # Consumes every line one stream has already produced, without blocking, restarting
+    # the idle clock for each. Returns the still-pending read, or $null once the stream
+    # has reached end of stream and must not be read again.
+    function Read-PendingLines {
+        param($Pending, $Reader, $Lines, $Idle)
 
-        # These two run 190s-265s standalone and swing near 2x under parallel load,
-        # so the default 360s cap makes them flake as timeouts rather than failures.
-        $timeout = 360
-        if ($file.Name -in @('factory-gates.tests.ps1', 'factory-gates-human.tests.ps1')) {
-            $timeout = 600
+        while ($null -ne $Pending -and $Pending.IsCompleted) {
+            $line = $null
+            try {
+                $line = $Pending.Result
+            } catch {
+                # Killing a child closes its redirected pipes. Treat a read fault during
+                # that shutdown exactly like end of stream.
+                $line = $null
+            }
+
+            if ($null -eq $line) {
+                $Pending = $null
+            } else {
+                [void]$Lines.Add($line)
+                $Idle.Restart()
+                $Pending = $Reader.ReadLineAsync()
+            }
         }
+
+        return $Pending
+    }
+
+    function Start-TestProcess {
+        param($file, [switch]$StreamStandardOutput)
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $shell
@@ -95,18 +169,28 @@ try {
         $p.StartInfo = $psi
         [void]$p.Start()
 
-        $outTask = $p.StandardOutput.ReadToEndAsync()
-        $errTask = $p.StandardError.ReadToEndAsync()
+        # A caller that streams reads both redirected streams itself, line by line, so
+        # no reads are started here. Parallel mode reads line by line too, but buffers
+        # what it reads rather than echoing it. Reading to end of stream instead would be
+        # simpler and is what this used to do, but it completes exactly once, at end of
+        # stream, so it can tell a finished child from an unfinished one and never a
+        # hung one from a slow one. A pending per-line read makes each line's arrival
+        # time observable, which is what an idle clock needs, while still printing
+        # nothing until the child exits.
+        $outRead = if ($StreamStandardOutput) { $null } else { $p.StandardOutput.ReadLineAsync() }
+        $errRead = if ($StreamStandardOutput) { $null } else { $p.StandardError.ReadLineAsync() }
 
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
         return [PSCustomObject]@{
             File = $file
             Proc = $p
-            OutTask = $outTask
-            ErrTask = $errTask
+            OutRead = $outRead
+            ErrRead = $errRead
+            OutLines = (New-Object System.Collections.Generic.List[string])
+            ErrLines = (New-Object System.Collections.Generic.List[string])
             Stopwatch = $sw
-            Timeout = $timeout
+            Idle = [System.Diagnostics.Stopwatch]::StartNew()
         }
     }
 
@@ -118,26 +202,88 @@ try {
         foreach ($file in $testFiles) {
             Write-Host "Running $($file.Name)..." -ForegroundColor Cyan
 
-            $item = Start-TestProcess -file $file
+            $item = Start-TestProcess -file $file -StreamStandardOutput
             $proc = $item.Proc
+
+            # Echo each line as the child produces it, so a test that is still running is
+            # visible while it runs rather than only once it finishes. Both streams are
+            # read concurrently: draining only stdout would let a child that fills the
+            # stderr pipe block forever, and would also make a test that reports progress
+            # on stderr look silent to the idle check below.
+            $outLines = New-Object System.Collections.Generic.List[string]
+            $outRead = $proc.StandardOutput.ReadLineAsync()
+            $errRead = $proc.StandardError.ReadLineAsync()
+            $idle = [System.Diagnostics.Stopwatch]::StartNew()
+            $pollMs = 250
+            $isTimeout = $false
+
+            while ($null -ne $outRead -or $null -ne $errRead) {
+                $pending = New-Object System.Collections.Generic.List[System.Threading.Tasks.Task]
+                if ($null -ne $outRead) { [void]$pending.Add($outRead) }
+                if ($null -ne $errRead) { [void]$pending.Add($errRead) }
+
+                $completedIndex = [System.Threading.Tasks.Task]::WaitAny(
+                    [System.Threading.Tasks.Task[]]$pending.ToArray(),
+                    $pollMs
+                )
+
+                if ($completedIndex -eq -1) {
+                    if (-not $NoTimeout -and $idle.Elapsed.TotalSeconds -ge $IdleTimeoutSeconds) {
+                        $isTimeout = $true
+                        try {
+                            $proc.Kill()
+                            $proc.WaitForExit()
+                        } catch {}
+                        # Stop reading rather than waiting for the pending reads to end.
+                        # Killing the child does not close the pipes if it had spawned a
+                        # process of its own that inherited the handles, so those reads
+                        # can stay pending indefinitely and this loop would spin forever
+                        # on the very hang the timeout exists to break.
+                        break
+                    }
+                    continue
+                }
+
+                $completed = $pending[$completedIndex]
+                try {
+                    $line = $completed.Result
+                } catch {
+                    # Killing a timed-out child closes its redirected pipes. Treat a
+                    # read fault during that shutdown exactly like end of stream.
+                    $line = $null
+                }
+
+                if ($completed -eq $outRead) {
+                    if ($null -eq $line) {
+                        $outRead = $null
+                    } else {
+                        Write-Host $line
+                        [void]$outLines.Add($line)
+                        $idle.Restart()
+                        $outRead = $proc.StandardOutput.ReadLineAsync()
+                    }
+                } else {
+                    if ($null -eq $line) {
+                        $errRead = $null
+                    } else {
+                        Write-Host $line -ForegroundColor Red
+                        $idle.Restart()
+                        $errRead = $proc.StandardError.ReadLineAsync()
+                    }
+                }
+            }
             $proc.WaitForExit()
+            $idle.Stop()
 
-            $outText = $item.OutTask.Result
-            $errText = $item.ErrTask.Result
-
-            if ($null -eq $outText) { $outText = "" }
-            if ($null -eq $errText) { $errText = "" }
-
-            if (-not [string]::IsNullOrWhiteSpace($outText)) {
-                Write-Host $outText
-            }
-            if (-not [string]::IsNullOrWhiteSpace($errText)) {
-                Write-Host $errText -ForegroundColor Red
-            }
+            $outText = ($outLines -join "`n")
 
             $testFailed = $false
-            if ($proc.ExitCode -ne 0 -or (Test-OutputHasFailure -Output $outText)) {
+            if ($isTimeout -or $proc.ExitCode -ne 0 -or (Test-OutputHasFailure -Output $outText)) {
                 $testFailed = $true
+            }
+
+            if ($isTimeout) {
+                Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
             }
             $proc.Dispose()
 
@@ -165,6 +311,11 @@ try {
         # Static scheduling weights (in seconds) based on Windows CI execution times.
         # Unknown/new tests will default to 0 weight and sort alphabetically.
         $weights = @{
+            # Longest file in the suite. Most of it is nested runners started and waited
+            # on for real, including two that must be given a bounded window to prove they
+            # do not hang. An unweighted file sorts last, which for the longest one means
+            # the pool finishes it alone after everything else has drained.
+            'run-all-tests-runner.tests.ps1'         = 345
             'factory-gates-reject-abandon.tests.ps1' = 35
             'adopter-pipeline-e2e.tests.ps1'         = 28
             'factory-gates-human.tests.ps1'          = 26
@@ -202,7 +353,6 @@ try {
             'install-hooks.tests.ps1'                = 5
         }
 
-        $sequentialFiles = @()
         $parallelFiles = @($testFiles)
 
         # Sort parallel files by scheduling weight descending, then alphabetically ascending
@@ -219,81 +369,7 @@ try {
         $nextIndex = 0
 
         try {
-            # 1. Run sequential/subprocess-heavy tests first to prevent CPU/IO contention
-            if ($sequentialFiles.Count -gt 0) {
-                Write-Host "Running sequential tests first to prevent CPU/IO contention..." -ForegroundColor Cyan
-                foreach ($file in $sequentialFiles) {
-                    Write-Host "Running $($file.Name) serially..." -ForegroundColor Cyan
-
-                    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                    $p = New-Object System.Diagnostics.Process
-                    $psi = New-Object System.Diagnostics.ProcessStartInfo
-                    $psi.FileName = $shell
-                    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($file.FullName)`""
-                    $psi.UseShellExecute = $false
-                    $psi.RedirectStandardOutput = $true
-                    $psi.RedirectStandardError = $true
-                    $psi.CreateNoWindow = $true
-                    $p.StartInfo = $psi
-                    [void]$p.Start()
-
-                    $outTask = $p.StandardOutput.ReadToEndAsync()
-                    $errTask = $p.StandardError.ReadToEndAsync()
-
-                    # Wait for exit or timeout (900 seconds is plenty when serial)
-                    $exited = $false
-                    $isTimeout = $false
-                    while (-not $exited) {
-                        $p.Refresh()
-                        if ($p.HasExited) {
-                            $p.WaitForExit()
-                            $exited = $true
-                        } elseif ($sw.Elapsed.TotalSeconds -ge 900) {
-                            try {
-                                $p.Kill()
-                                $p.WaitForExit()
-                            } catch {}
-                            $exited = $true
-                            $isTimeout = $true
-                        }
-                        if (-not $exited) {
-                            Start-Sleep -Milliseconds 100
-                        }
-                    }
-
-                    $sw.Stop()
-                    $duration = [Math]::Round($sw.Elapsed.TotalSeconds, 2)
-                    $outText = $outTask.Result
-                    $errText = $errTask.Result
-                    if ($null -eq $outText) { $outText = "" }
-                    if ($null -eq $errText) { $errText = "" }
-
-                    $exitCodeValue = if ($isTimeout) { -1 } else { $p.ExitCode }
-
-                    if ($exitCodeValue -eq 0) {
-                        Write-Host "PASS  $($file.Name) ($($duration)s)" -ForegroundColor Green
-                    } else {
-                        if ($isTimeout) {
-                            Write-Host "FAIL  $($file.Name) (TIMEOUT after 900s)" -ForegroundColor Red
-                        } else {
-                            Write-Host "FAIL  $($file.Name) ($($duration)s, ExitCode: $exitCodeValue)" -ForegroundColor Red
-                        }
-                    }
-
-                    $completed += [PSCustomObject]@{
-                        File = $file
-                        ExitCode = $exitCodeValue
-                        Output = $outText
-                        Error = $errText
-                        Duration = $duration
-                        IsTimeout = $isTimeout
-                        Timeout = 900
-                    }
-                    $p.Dispose()
-                }
-            }
-
-            # 2. Run parallel tests
+            # 1. Run parallel tests
             while ($nextIndex -lt $parallelFiles.Count -or $running.Count -gt 0) {
                 # Fill the running pool up to ThrottleLimit
                 while ($running.Count -lt $ThrottleLimit -and $nextIndex -lt $parallelFiles.Count) {
@@ -314,28 +390,41 @@ try {
                     $exited = $false
                     $isTimeout = $false
 
+                    $item.OutRead = Read-PendingLines -Pending $item.OutRead -Reader $proc.StandardOutput -Lines $item.OutLines -Idle $item.Idle
+                    $item.ErrRead = Read-PendingLines -Pending $item.ErrRead -Reader $proc.StandardError -Lines $item.ErrLines -Idle $item.Idle
+
                     $proc.Refresh()
-                    if ($proc.HasExited) {
+                    $streamsClosed = ($null -eq $item.OutRead -and $null -eq $item.ErrRead)
+
+                    if ($proc.HasExited -and $streamsClosed) {
                         $proc.WaitForExit()
                         $exited = $true
-                    } elseif ($sw.Elapsed.TotalSeconds -ge $item.Timeout) {
-                        try {
-                            $proc.Kill()
-                            $proc.WaitForExit()
-                        } catch {}
+                    } elseif (-not $NoTimeout -and $item.Idle.Elapsed.TotalSeconds -ge $IdleTimeoutSeconds) {
+                        # Silence for the whole window. A child still running is hung, and
+                        # is killed. A child that has already exited is not: its pipes are
+                        # held open by a process that inherited them, so report the exit
+                        # code it really had rather than calling a finished test a timeout.
+                        # Either way the pending reads are abandoned rather than waited
+                        # out, since waiting on them is the hang this exists to break.
+                        if (-not $proc.HasExited) {
+                            try {
+                                $proc.Kill()
+                                $proc.WaitForExit()
+                            } catch {}
+                            $isTimeout = $true
+                        }
+                        $item.OutRead = $null
+                        $item.ErrRead = $null
                         $exited = $true
-                        $isTimeout = $true
                     }
 
                     if ($exited) {
                         $sw.Stop()
+                        $item.Idle.Stop()
                         $duration = [Math]::Round($sw.Elapsed.TotalSeconds, 2)
 
-                        $outText = $item.OutTask.Result
-                        $errText = $item.ErrTask.Result
-
-                        if ($null -eq $outText) { $outText = "" }
-                        if ($null -eq $errText) { $errText = "" }
+                        $outText = ($item.OutLines -join "`n")
+                        $errText = ($item.ErrLines -join "`n")
 
                         $exitCodeValue = 0
                         if ($isTimeout) {
@@ -350,7 +439,7 @@ try {
                             Write-Host "PASS  $($file.Name) ($($duration)s)" -ForegroundColor Green
                         } else {
                             if ($isTimeout) {
-                                Write-Host "FAIL  $($file.Name) (TIMEOUT after $($item.Timeout)s)" -ForegroundColor Red
+                                Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
                             } elseif ($hasOutputFailure) {
                                 Write-Host "FAIL  $($file.Name) ($($duration)s, Output Failure Signature)" -ForegroundColor Red
                             } else {
@@ -365,7 +454,7 @@ try {
                             Error = $errText
                             Duration = $duration
                             IsTimeout = $isTimeout
-                            Timeout = $item.Timeout
+                            Timeout = $IdleTimeoutSeconds
                         }
 
                         $proc.Dispose()
@@ -377,7 +466,26 @@ try {
                 $running = $stillRunning
 
                 if ($running.Count -gt 0 -or $nextIndex -lt $parallelFiles.Count) {
-                    Start-Sleep -Milliseconds 100
+                    # Wake as soon as any child produces a line rather than always
+                    # sleeping out the poll interval. Draining only on a fixed tick would
+                    # cap a child's throughput at one buffer per tick, and a child that
+                    # fills its pipe faster than that blocks on the write - which an idle
+                    # clock cannot distinguish from a hang, because a blocked writer is
+                    # exactly as silent as one.
+                    $pendingReads = New-Object System.Collections.Generic.List[System.Threading.Tasks.Task]
+                    foreach ($item in $running) {
+                        if ($null -ne $item.OutRead) { [void]$pendingReads.Add($item.OutRead) }
+                        if ($null -ne $item.ErrRead) { [void]$pendingReads.Add($item.ErrRead) }
+                    }
+
+                    if ($pendingReads.Count -gt 0) {
+                        [void][System.Threading.Tasks.Task]::WaitAny(
+                            [System.Threading.Tasks.Task[]]$pendingReads.ToArray(),
+                            100
+                        )
+                    } else {
+                        Start-Sleep -Milliseconds 100
+                    }
                 }
             }
         }
@@ -399,7 +507,7 @@ try {
             }
         }
 
-        # 3. Print detailed failures
+        # 2. Print detailed failures
         $failedItems = @($completed | Where-Object { $_.ExitCode -ne 0 -or (Test-OutputHasFailure -Output $_.Output) })
         if ($failedItems.Count -gt 0) {
             Write-Host ""
@@ -408,7 +516,7 @@ try {
                 Write-Host "--------------------------------------------------" -ForegroundColor Red
                 Write-Host "Failure in: $($item.File.Name)" -ForegroundColor Red
                 if ($item.IsTimeout) {
-                    Write-Host "Status: TIMEOUT after $($item.Timeout) seconds" -ForegroundColor Red
+                    Write-Host "Status: TIMEOUT after $($item.Timeout) seconds of silence" -ForegroundColor Red
                 } elseif ($item.ExitCode -ne 0) {
                     Write-Host "Status: Failed with Exit Code $($item.ExitCode) in $($item.Duration)s" -ForegroundColor Red
                 } else {
@@ -429,7 +537,7 @@ try {
             Write-Host "=========================" -ForegroundColor Red
         }
 
-        # 4. Final summary
+        # 3. Final summary
         $failedTests = @()
         $passCount = 0
         foreach ($item in $completed) {
@@ -453,9 +561,19 @@ try {
         }
     }
 } finally {
-    if ($createdSharedFixture -and $env:CRUCIBLE_SHARED_FIXTURE -and (Test-Path -LiteralPath $env:CRUCIBLE_SHARED_FIXTURE)) {
-        Write-Host "Cleaning up shared adopter fixture..." -ForegroundColor Cyan
-        Remove-Item -LiteralPath $env:CRUCIBLE_SHARED_FIXTURE -Recurse -Force -ErrorAction SilentlyContinue
+    try {
+        # Deleting the root takes the shared fixture and the isolated git config with
+        # it. Only the process that created the root may do this: a nested runner
+        # inherits CRUCIBLE_TEST_ROOT from the outer suite and would otherwise delete
+        # the outer run's fixtures while it is still using them.
+        if ($CRUCIBLE_TEST_ROOT_CREATED -and $env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
+            Write-Host "Cleaning up test run root..." -ForegroundColor Cyan
+            Remove-Item -LiteralPath $env:CRUCIBLE_TEST_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } finally {
+        if ($null -ne $runLock) {
+            Exit-RunLock -Lock $runLock
+        }
     }
 }
 exit $exitCode

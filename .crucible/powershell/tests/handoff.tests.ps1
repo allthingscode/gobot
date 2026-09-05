@@ -81,7 +81,7 @@ try {
         $parsed = Get-HandoffTimestampFromFileName -Name "F-001-20260526T143012Z.json"
         $invalid = Get-HandoffTimestampFromFileName -Name "not-a-handoff.json"
 
-        Assert-Result -Name "parsed datetime" -Condition ($parsed.ToString("yyyy-MM-ddTHH:mm:ssZ") -eq "2026-05-26T14:30:12Z") -FailureMessage "timestamp parse changed"
+        Assert-Result -Name "parsed datetime" -Condition ($parsed.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture) -eq "2026-05-26T14:30:12Z") -FailureMessage "timestamp parse changed"
         Assert-Result -Name "invalid datetime" -Condition ($invalid -eq [datetime]::MinValue) -FailureMessage "invalid names should return MinValue"
     }
 
@@ -108,6 +108,12 @@ try {
         Assert-Result -Name "winner name" -Condition ($old.superseded_by -eq "F-003-20260526T150000Z.json") -FailureMessage "wrong winner selected"
         Assert-Result -Name "reason" -Condition ($old.superseded_reason -eq "deterministic_duplicate_transition") -FailureMessage "superseded reason changed"
         Assert-Result -Name "winner untouched" -Condition (-not $new.PSObject.Properties["superseded"]) -FailureMessage "winner should not be superseded"
+        $degradedEntries = @()
+        if (Test-Path -LiteralPath $LOG_FILE) {
+            $logLines = @(Get-Content -LiteralPath $LOG_FILE -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $degradedEntries = @($logLines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.event -eq "degraded" })
+        }
+        Assert-Result -Name "duplicate supersede degraded event absent" -Condition ($degradedEntries.Count -eq 0) -FailureMessage "duplicate handoff supersede should not write degraded events"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
