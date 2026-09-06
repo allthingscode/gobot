@@ -662,7 +662,7 @@ func TestShouldRetryMorningBriefingAfterError(t *testing.T) {
 		{name: "nil error", err: nil, want: false},
 		{name: "auth expired marker", err: fmt.Errorf("gmail service: AUTH_EXPIRED: run gobot reauth"), want: false},
 		{name: "invalid grant", err: fmt.Errorf("calendar auth: google token refresh: invalid_grant"), want: false},
-		{name: "reauth google hint", err: fmt.Errorf("google API 401: token may be expired, run gobot reauth-google"), want: false},
+		{name: "reauth hint", err: fmt.Errorf("google API 401: token may be expired, run gobot reauth"), want: false},
 		{name: "transient network error", err: fmt.Errorf("timeout while calling provider"), want: true},
 		{name: "validation error", err: fmt.Errorf("response contains TOOL_ERROR marker"), want: true},
 	}

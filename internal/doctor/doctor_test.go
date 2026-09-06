@@ -268,6 +268,9 @@ func TestCheckTelegram_TokenMissing(t *testing.T) {
 	if r.OK {
 		t.Error("expected OK=false for empty token")
 	}
+	if strings.Contains(r.Remediation, "gobot reauth") {
+		t.Errorf("expected remediation not to mention gobot reauth (Google OAuth recovery), got %q", r.Remediation)
+	}
 }
 
 func TestCheckTelegram_NoProbe(t *testing.T) {

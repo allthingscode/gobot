@@ -47,7 +47,7 @@ func checkTelegram(token string, probe func(string) (string, error)) Result {
 			Name:        "telegram",
 			OK:          false,
 			Detail:      "token not configured or reauth required",
-			Remediation: "Provide a Telegram token in config.json or environment variable, or run 'gobot reauth'.",
+			Remediation: "Provide a Telegram token in config.json, an environment variable, or via 'gobot secrets set'.",
 		}
 	}
 	if probe == nil {
