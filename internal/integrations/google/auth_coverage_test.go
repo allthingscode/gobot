@@ -97,7 +97,7 @@ func TestAPIGet_401Error(t *testing.T) {
 	defer srv.Close()
 
 	err := apiGet(context.Background(), "tok", srv.URL, srv.Client(), &struct{}{})
-	if err == nil || !strings.Contains(err.Error(), "gobot reauth-google") {
+	if err == nil || !strings.Contains(err.Error(), "gobot reauth") {
 		t.Errorf("expected reauth hint in error, got %v", err)
 	}
 }

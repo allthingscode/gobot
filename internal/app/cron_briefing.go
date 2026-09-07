@@ -23,8 +23,7 @@ func shouldRetryMorningBriefingAfterError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "auth_expired") ||
 		strings.Contains(msg, "invalid_grant") ||
-		strings.Contains(msg, "run gobot reauth") ||
-		strings.Contains(msg, "run gobot reauth-google") {
+		strings.Contains(msg, "run gobot reauth") {
 		return false
 	}
 	return true

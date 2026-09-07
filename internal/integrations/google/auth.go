@@ -411,7 +411,7 @@ func apiGet(ctx context.Context, accessToken, apiURL string, client *http.Client
 		_ = json.Unmarshal(body, &errResp)
 		if strings.Contains(errResp.Error.Message, "Invalid Credentials") ||
 			strings.Contains(errResp.Error.Message, "401") {
-			return fmt.Errorf("google API 401: token may be expired, run gobot reauth-google")
+			return fmt.Errorf("google API 401: token may be expired, run gobot reauth")
 		}
 		return fmt.Errorf("google API %d: %s", resp.StatusCode, string(body))
 	}
