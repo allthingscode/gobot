@@ -16,6 +16,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - `config.json` is now written atomically to avoid partial writes on crash.
 
+### Fixed
+
+- **govulncheck finding GO-2026-6348 (`google.golang.org/grpc` v1.82.1).** An
+  unauthenticated peer can fragment a gRPC payload into tiny HTTP/2 DATA frames
+  and exhaust heap even inside flow-control windows (CVE-2026-84304). Bumped the
+  indirect module to v1.83.2, which also includes GO-2026-6443 (server panic on
+  missing `:authority`/`Host`, CVE-2026-84445). `go get` pulled the companion
+  otel 1.43.0 -> 1.44.0 and x/net 0.56.0 -> 0.58.0 that v1.83.2 requires.
+
 ---
 
 ## [0.2.1] - 2026-04-19
