@@ -3,12 +3,12 @@ param(
     [string]$TaskId,
 
     [Parameter(Mandatory = $true)]
-    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
+    # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
     [ValidateSet("research", "grooming", "implementation", "verification", "deployment")]
     [string]$Source,
 
     [Parameter(Mandatory = $true)]
-    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
+    # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
     [ValidateSet("research", "grooming", "implementation", "verification", "deployment", "done")]
     [string]$Target,
 
@@ -18,7 +18,7 @@ param(
     [int]$HandoffRetryCount = -1,
     [int]$ReviewStrikeCount = -1,
     [int]$RebaseCount = -1,
-    # Keep synchronized with $script:BUDGET_TIERS in factory-lib.ps1.
+    # Keep synchronized with $script:BUDGET_TIERS in crucible-lib.ps1.
     [ValidateSet("low", "medium", "high", "extended")]
     [string]$BudgetTier = "",
     # Set by the Groomer on a grooming->implementation handoff when the Architect must
@@ -48,42 +48,20 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib/project-root.ps1")
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    # A dot-sourcing caller that already resolved the project says so through REPO_ROOT.
     $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
     if ($null -ne $repoRootVar) {
         $ProjectRoot = $repoRootVar.Value
-    } else {
-        # Prefer the project derived from THIS script's location over the caller's cwd, so the
-        # orchestrator can bootstrap a handoff into an adopter while sitting in another checkout
-        # (the footgun that made new-handoff throw "cwd is not a valid Crucible project"). The
-        # bundle ships at <adopter>/.crucible/powershell/, so $PSScriptRoot names the adopter
-        # unambiguously. The canonical framework copy at <crucible>/powershell/ derives the
-        # framework root, which is NOT itself an adopter, so we fall back to cwd there.
-        $derivedParent = Split-Path -Path $PSScriptRoot -Parent
-        if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
-            $derivedParent = Split-Path -Path $derivedParent -Parent
-        }
-        $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
-        if ((Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/backlog")) -or
-            (Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/config.yaml"))) {
-            $ProjectRoot = $derivedRoot
-        } else {
-            $cwd = (Get-Location).Path
-            $cwdBacklog = Join-Path $cwd ".crucible/backlog"
-            $cwdConfig = Join-Path $cwd ".crucible/config.yaml"
-            if (-not (Test-Path -LiteralPath $cwdBacklog) -and -not (Test-Path -LiteralPath $cwdConfig)) {
-                throw "ProjectRoot is omitted, REPO_ROOT is not set, the directory derived from this script ('$derivedRoot') is not a valid Crucible project, and neither is the current working directory ('$cwd') (missing .crucible/backlog or .crucible/config.yaml)."
-            }
-            $ProjectRoot = $cwd
-        }
     }
 }
-$REPO_ROOT = $ProjectRoot
+$REPO_ROOT = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 Push-Location $REPO_ROOT
 try {
-    $factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
-    . $factoryLibPath
+    $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
+    . $crucibleLibPath
 
     # D41: Validate that the resolved bundle actually owns the task
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $REPO_ROOT
@@ -279,6 +257,24 @@ if ($isGitRepo) {
             $primaryHead = (git rev-parse $primaryBranch 2>$null)
             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($primaryHead)) {
                 $resolvedBaseCommit = $primaryHead.Trim()
+            }
+        }
+    }
+
+    # On deployment -> done the commit being deployed is the tip of the task branch, and git
+    # is the only thing that knows it: no phase before deployment records a commit_hash, so
+    # an omitted -CommitHash inherited either nothing (and the handoff was refused for a
+    # missing field) or, after a rebase cycle, the stale hash an earlier deployment attempt
+    # had recorded. Deriving beats inheriting here for the same reason it does for
+    # base_commit just above. No task branch means nothing was built, which is the No-Code
+    # Closure the merge-verification gate looks for, so leave it null and let the gate judge.
+    if ($Source -eq "deployment" -and $Target -eq "done" -and [string]::IsNullOrWhiteSpace($CommitHash)) {
+        $deployBranch = "task/$TaskId"
+        git show-ref --verify --quiet "refs/heads/$deployBranch" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $deployTip = (git rev-parse "refs/heads/$deployBranch" 2>$null)
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($deployTip)) {
+                $resolvedCommitHash = $deployTip.Trim()
             }
         }
     }

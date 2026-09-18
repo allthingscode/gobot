@@ -74,7 +74,7 @@ $results += Run-Test -Name "Every rule in the shipped JSON has a positive test a
 }
 
 $results += Run-Test -Name "Benign research prose does not trigger false positives" -Body {
-    $benignText = "We will design a system architecture diagram that defines how instructions flow through the factory-gates pipeline."
+    $benignText = "We will design a system architecture diagram that defines how instructions flow through the crucible-gates pipeline."
     $matches = Get-InjectionMatches -Text $benignText
     Assert-Result -Name "No matches for benign text" -Condition ($matches.Count -eq 0) -FailureMessage "expected 0 matches, found $($matches.Count): $($matches | Out-String)"
 

@@ -31,8 +31,7 @@ function Invoke-StagedScript {
     return [PSCustomObject]@{ ExitCode = $code; Output = ($output -join "`n") }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-install-hooks-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "install-hooks-test"
 
 try {
     $results += Run-Test -Name "Framework mode sets core.hooksPath to scripts/hooks" -Body {

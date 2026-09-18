@@ -419,17 +419,15 @@ if ($AppendInstructions) {
     Install-CrucibleInstructions -ProjectRoot $resolvedProjectRoot -Quiet:$Quiet | Out-Null
 }
 
-# Set git hooks path for the adopter
+# Activate adopter hooks through the copy we just installed, not this checkout's
+# installer. install-hooks.ps1 derives framework vs adopter from its own location,
+# so invoking the source script would set hooksPath on the framework repo.
 if (Test-Path -LiteralPath (Join-Path $resolvedProjectRoot ".git")) {
-    Push-Location $resolvedProjectRoot
-    try {
-        git config core.hooksPath ".crucible/scripts/hooks"
-        Write-Info "Set git core.hooksPath to '.crucible/scripts/hooks'" -ForegroundColor Green
-    } catch {
-        Write-Warning "Failed to set git core.hooksPath: $_"
-    } finally {
-        Pop-Location
+    $hookInstaller = Join-Path $targetCrucible "powershell/install-hooks.ps1"
+    if (-not (Test-Path -LiteralPath $hookInstaller -PathType Leaf)) {
+        throw "Installed bundle is missing powershell/install-hooks.ps1; cannot activate git hooks."
     }
+    & $hookInstaller
 }
 
 Write-Info ""
@@ -443,7 +441,7 @@ Write-Info "  - .crucible/.gitattributes"
 Write-Info "  - .crucible/README.md"
 Write-Info "  - .crucible/config.yaml"
 Write-Info "  - .crucible/agent-instructions/ (copy-ready root instruction snippets)"
-Write-Info "  - .crucible/docs/, personas/, sops/, prompts/, schemas/, powershell/"
+Write-Info "  - .crucible/docs/, personas/, sops/, prompts/, schemas/, standards/, powershell/"
 Write-Info ""
 $backlogDirForRel = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
 $relativeBacklogPath = $backlogDirForRel
@@ -477,7 +475,7 @@ if ($AppendInstructions) {
 }
 Write-Info "  4. From the project root, run .crucible/powershell/validate-config.ps1 -ConfigPath .crucible/config.yaml."
 if ($WithSampleTask) {
-    Write-Info "  5. F-001 sample task installed. Run '.\.crucible\powershell\factory.ps1 -Init -TaskId F-001' to smoke-test the pipeline. Add your own backlog items afterward." -ForegroundColor DarkGray
+    Write-Info "  5. F-001 sample task installed. Run '.\.crucible\powershell\crucible.ps1 -Init -TaskId F-001' to smoke-test the pipeline. Add your own backlog items afterward." -ForegroundColor DarkGray
 } else {
     Write-Info "  5. Add initial backlog items under $relativeBacklogPath."
 }

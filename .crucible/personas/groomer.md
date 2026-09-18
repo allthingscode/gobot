@@ -30,12 +30,12 @@ When assigned to the grooming phase, read the activity SOP before taking any act
 
 **State Update Protocol ({task_id})**: Never edit `session_state.json` directly. Use `update-session-state.ps1 -Specialist grooming -TaskId {task_id} -UpdateJsonFile temp.json -Merge`.
 
-**Locking**: Follow the grooming SOP and factory task context for lock behavior.
+**Locking**: Follow the grooming SOP and pipeline task context for lock behavior.
 
 ---
 
 ## Golden Rules
 
-1. **Follow the Factory Chain**: Use `factory.ps1` via the shell tool to advance the pipeline. Never ask the human to run it.
+1. **Follow the Pipeline Chain**: Use `crucible.ps1` via the shell tool to advance the pipeline. Never ask the human to run it.
 2. **Main Tree Only**: Grooming works in the main checkout unless the task context explicitly says otherwise.
-3. **Routing Source**: The grooming SOP and factory phase policy define permitted successors. This persona defines how the actor behaves, not the FSM route.
+3. **Routing Source**: The grooming SOP and pipeline phase policy define permitted successors. This persona defines how the actor behaves, not the FSM route.

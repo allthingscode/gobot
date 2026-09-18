@@ -90,9 +90,13 @@ try {
     # half is gone: a dead owner is proof of abandonment on its own, and the threshold
     # only ever delayed the collection it could not justify. Skipping the live root
     # this process is using falls out of the same check, since this process is alive.
+    #
+    # The whole DirectoryInfo is passed, not the name: a root whose pid has since been
+    # reused by a later process is abandoned too, and only the creation time can tell that
+    # apart from a second checkout's live run. Two such roots sat here for three days.
     $tempPath = [System.IO.Path]::GetTempPath()
     Get-ChildItem -Path $tempPath -Filter "crucible-test-run-*" -Directory -ErrorAction SilentlyContinue |
-        Where-Object { Test-TestRunRootOrphaned -Name $_.Name } |
+        Where-Object { Test-TestRunRootOrphaned -Directory $_ } |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
     # Pre-stage the shared adopter fixture once before running worker tests. Nothing
@@ -124,6 +128,24 @@ try {
         }
 
         return ($Output -cmatch 'EXCEPTION OCCURRED:' -or $Output -cmatch 'SOME TESTS FAILED' -or $Output -cmatch '\bFAILED:')
+    }
+
+    # Collects the third outcome Run-Test can report. A test whose precondition cannot exist on
+    # this platform is not a pass, and the per-file tail cannot say so without editing the tail of
+    # every test file, so the run summary is where the count lives. Without this the skip would be
+    # invisible here and the Linux leg would be quietly weaker than the Windows one rather than
+    # measurably narrower. Item 102.
+    function Get-OutputSkipNotes {
+        param([AllowEmptyString()][string]$Output)
+
+        $notes = @()
+        if ([string]::IsNullOrWhiteSpace($Output)) {
+            return ,$notes
+        }
+        foreach ($line in ($Output -split "`r?`n")) {
+            if ($line -cmatch '^SKIPPED: (.+)$') { $notes += $Matches[1] }
+        }
+        return ,$notes
     }
 
     # Consumes every line one stream has already produced, without blocking, restarting
@@ -198,6 +220,7 @@ try {
         Write-Host "Running tests in serial mode..." -ForegroundColor Cyan
         $failedTests = @()
         $passCount = 0
+        $skipNotes = @()
 
         foreach ($file in $testFiles) {
             Write-Host "Running $($file.Name)..." -ForegroundColor Cyan
@@ -277,6 +300,10 @@ try {
 
             $outText = ($outLines -join "`n")
 
+            foreach ($note in (Get-OutputSkipNotes -Output $outText)) {
+                $skipNotes += ($file.Name + ": " + $note)
+            }
+
             $testFailed = $false
             if ($isTimeout -or $proc.ExitCode -ne 0 -or (Test-OutputHasFailure -Output $outText)) {
                 $testFailed = $true
@@ -297,6 +324,15 @@ try {
         Write-Host ""
         Write-Host "--- Test Summary ---" -ForegroundColor Cyan
         Write-Host "Passed: $passCount" -ForegroundColor Green
+        if ($skipNotes.Count -gt 0) {
+            # Named individually, not just totalled. A count alone tells a reader that the leg is
+            # narrower than the other one without telling them where, which is how a skip becomes
+            # permanent.
+            Write-Host "Skipped: $($skipNotes.Count)" -ForegroundColor Yellow
+            foreach ($note in ($skipNotes | Sort-Object)) {
+                Write-Host ("  - " + $note) -ForegroundColor Yellow
+            }
+        }
         if ($failedTests.Count -gt 0) {
             $sortedFailed = @($failedTests | Sort-Object)
             Write-Host "Failed: $($sortedFailed.Count) ($($sortedFailed -join ', '))" -ForegroundColor Red
@@ -316,38 +352,39 @@ try {
             # do not hang. An unweighted file sorts last, which for the longest one means
             # the pool finishes it alone after everything else has drained.
             'run-all-tests-runner.tests.ps1'         = 345
-            'factory-gates-reject-abandon.tests.ps1' = 35
+            'crucible-gates-reject-abandon.tests.ps1' = 35
             'adopter-pipeline-e2e.tests.ps1'         = 28
-            'factory-gates-human.tests.ps1'          = 26
+            'crucible-gates-human.tests.ps1'          = 26
+            'crucible-gates-routing.tests.ps1'        = 25
             'update-bundle-rename-prune.tests.ps1'   = 24
-            'factory.tests.ps1'                      = 21
+            'archive-task.tests.ps1'                 = 22
+            'crucible.tests.ps1'                      = 21
             'operator-merge-verification.tests.ps1'  = 20
+            'no-code-closure.tests.ps1'              = 18
             'validate-config.tests.ps1'              = 18
             'concurrent-worktrees.tests.ps1'         = 18
             'adopter-bootstrap.tests.ps1'            = 18
             'check-merge-conflicts.tests.ps1'        = 18
             'validate-backlog.tests.ps1'             = 17
-            'factory-gates-breakers.tests.ps1'       = 16
+            'crucible-gates-breakers.tests.ps1'       = 16
             'update-bundle-core.tests.ps1'           = 15
-            'factory-gates-routing.tests.ps1'        = 15
             'status-drift.tests.ps1'                 = 15
             'update-bundle-custom-regions.tests.ps1' = 14
-            'archive-task.tests.ps1'                 = 11
             'init-project-config-version.tests.ps1'  = 11
             'init-project-instructions.tests.ps1'    = 10
             'new-handoff.tests.ps1'                  = 10
             'update-session-state-stale-lock.tests.ps1' = 9
-            'factory-gates-affinity.tests.ps1'       = 9
+            'crucible-gates-affinity.tests.ps1'       = 9
             'run-isolated-checks.tests.ps1'          = 9
             'fabricated-test-result-circuit-breaker.tests.ps1' = 8
             'check-file-affinity.tests.ps1'          = 8
             'update-bundle-scope-snapshot.tests.ps1' = 8
             'adopter-smoke.tests.ps1'                = 8
             'provenance-manifest.tests.ps1'          = 8
-            'factory-health.tests.ps1'               = 8
+            'crucible-health.tests.ps1'               = 8
             'scope-violation-circuit-breaker.tests.ps1' = 7
-            'factory-doctor.tests.ps1'               = 7
-            'factory-gates-completion.tests.ps1'     = 6
+            'crucible-doctor.tests.ps1'               = 7
+            'crucible-gates-completion.tests.ps1'     = 6
             'grooming-task-reason.tests.ps1'         = 5
             'init-project-core.tests.ps1'            = 5
             'install-hooks.tests.ps1'                = 5
@@ -540,7 +577,11 @@ try {
         # 3. Final summary
         $failedTests = @()
         $passCount = 0
+        $skipNotes = @()
         foreach ($item in $completed) {
+            foreach ($note in (Get-OutputSkipNotes -Output $item.Output)) {
+                $skipNotes += ($item.File.Name + ": " + $note)
+            }
             if ($item.ExitCode -eq 0 -and -not (Test-OutputHasFailure -Output $item.Output)) {
                 $passCount++
             } else {
@@ -551,6 +592,15 @@ try {
         Write-Host ""
         Write-Host "--- Test Summary ---" -ForegroundColor Cyan
         Write-Host "Passed: $passCount" -ForegroundColor Green
+        if ($skipNotes.Count -gt 0) {
+            # Named individually, not just totalled. A count alone tells a reader that the leg is
+            # narrower than the other one without telling them where, which is how a skip becomes
+            # permanent.
+            Write-Host "Skipped: $($skipNotes.Count)" -ForegroundColor Yellow
+            foreach ($note in ($skipNotes | Sort-Object)) {
+                Write-Host ("  - " + $note) -ForegroundColor Yellow
+            }
+        }
         if ($failedTests.Count -gt 0) {
             $sortedFailed = @($failedTests | Sort-Object)
             Write-Host "Failed: $($sortedFailed.Count) ($($sortedFailed -join ', '))" -ForegroundColor Red

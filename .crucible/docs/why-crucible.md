@@ -62,7 +62,7 @@ The legal phase transitions form a small state machine - see
   decision. The orchestrator never crosses a gate on the human's behalf.
 - **Zero-infra, single-session.** No database, no Docker, no Python, no background
   daemon. It runs entirely inside your interactive agent chat (Claude Code, Gemini CLI,
-  Codex). State is plain files on disk; a local script (`factory.ps1`) acts as the
+  Codex). State is plain files on disk; a local script (`crucible.ps1`) acts as the
   deterministic coprocessor that drives the state machine.
 
 ## Enforcement proofs

@@ -57,8 +57,7 @@ function Remove-WorktreeIfPresent {
     git -C $ProjectRoot worktree prune 2>$null
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-run-isolated-checks-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "run-isolated-checks-test"
 $projectRoot = Join-Path $tempRoot "project"
 $taskId = "T-001"
 $worktreePath = Join-Path $projectRoot ".crucible/.agent-workspaces/implementation-$taskId"

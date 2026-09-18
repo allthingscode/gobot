@@ -1,9 +1,25 @@
+# PositionalBinding = $false, with an explicit Position only on $Paths. Without it
+# $MessageFile is implicitly positional too, and a lone positional argument binds to it
+# instead of to $Paths - so `check-mojibake.ps1 README.md` would quietly take the
+# single-file message route while two or more arguments took the other. Caught by the
+# declined-extension case in check-mojibake.tests.ps1, which is the only case whose result
+# differs between the two routes.
+[CmdletBinding(PositionalBinding = $false)]
 param(
-    [Parameter(Mandatory = $false, ValueFromRemainingArguments = $true)]
-    [string[]]$Paths = @()
+    [Parameter(Mandatory = $false, Position = 0, ValueFromRemainingArguments = $true)]
+    [string[]]$Paths = @(),
+
+    # One file to scan whatever its extension. The extension filter below exists so a
+    # directory walk does not read .go or .json, but it also silently skipped an explicit
+    # leaf path it did not recognise. A commit message file is the case that matters: it is
+    # neither .md nor .ps1, it lives outside every content root, and a BOM in it becomes the
+    # first character of a subject line that no later commit can correct once pushed. A
+    # single string rather than an array because powershell.exe -File binds only the first
+    # token of a named array parameter. Item 89.
+    [string]$MessageFile = ""
 )
 
-if ($Paths.Count -eq 0) {
+if ($Paths.Count -eq 0 -and -not $MessageFile) {
     # ../.. because this script lives in <root>/powershell/gates. A single ".." landed on
     # powershell/ itself, where none of the content paths below exist, so every default
     # path was skipped as missing and a bare invocation scanned zero files and exited 0.
@@ -51,16 +67,30 @@ $markers = @(
 )
 
 $targetFiles = @()
+$declined = @()
 foreach ($path in $Paths) {
     if (-not (Test-Path -LiteralPath $path)) { continue }
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         if ($path -match '\.(md|ps1)$') {
             $targetFiles += Get-Item -LiteralPath $path
+        } else {
+            # Not skipped silently. A caller that names a file and is answered [PASS] has been
+            # told the file is clean when it was never opened. Item 89.
+            $declined += $path
         }
     } else {
         $targetFiles += Get-ChildItem -Path $path -Recurse -File |
             Where-Object { $_.Extension -in @(".md", ".ps1") }
     }
+}
+
+if ($MessageFile) {
+    # A message file the hook cannot find is a gate that could not run, not a clean message.
+    if (-not (Test-Path -LiteralPath $MessageFile -PathType Leaf)) {
+        Write-Host ("[FAIL] -MessageFile names no readable file: " + $MessageFile) -ForegroundColor Red
+        exit 1
+    }
+    $targetFiles += Get-Item -LiteralPath $MessageFile
 }
 
 $hits = @()
@@ -97,13 +127,26 @@ foreach ($file in $targetFiles) {
     }
 }
 
-if ($hits.Count -gt 0) {
-    Write-Host "[FAIL] Encoding issues detected (mojibake markers / UTF-8 BOM):" -ForegroundColor Red
-    $hits | Sort-Object Path, Line, Marker | ForEach-Object {
-        Write-Host ("{0}:{1} [{2}] {3}" -f $_.Path, $_.Line, $_.Marker, $_.Snippet)
+if ($hits.Count -gt 0 -or $declined.Count -gt 0) {
+    if ($hits.Count -gt 0) {
+        Write-Host "[FAIL] Encoding issues detected (mojibake markers / UTF-8 BOM):" -ForegroundColor Red
+        $hits | Sort-Object Path, Line, Marker | ForEach-Object {
+            Write-Host ("{0}:{1} [{2}] {3}" -f $_.Path, $_.Line, $_.Marker, $_.Snippet)
+        }
+        if ($hits | Where-Object { $_.Marker -eq "UTF-8 BOM" }) {
+            Write-Host "Rewrite the file as UTF-8 without a BOM. In PowerShell:" -ForegroundColor Yellow
+            Write-Host '  [System.IO.File]::WriteAllText($p, [System.IO.File]::ReadAllText($p).TrimStart([char]0xFEFF), (New-Object System.Text.UTF8Encoding($false)))' -ForegroundColor Yellow
+        }
+    }
+    if ($declined.Count -gt 0) {
+        Write-Host "[FAIL] Named files this gate does not scan, so nothing was checked for them:" -ForegroundColor Red
+        $declined | Sort-Object | ForEach-Object { Write-Host $_ }
+        Write-Host "Only .md and .ps1 are walked. Pass one file of any type with -MessageFile." -ForegroundColor Yellow
     }
     exit 1
 }
 
-Write-Host "[PASS] No mojibake markers or BOMs detected in scoped files." -ForegroundColor Green
+# The count is reported because a pass over zero files and a pass over the whole tree are
+# otherwise the same line, which is how a mis-resolved content root once read as green.
+Write-Host ("[PASS] No mojibake markers or BOMs detected in " + $targetFiles.Count + " scoped file(s).") -ForegroundColor Green
 exit 0

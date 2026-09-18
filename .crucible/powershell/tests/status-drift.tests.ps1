@@ -1,4 +1,4 @@
-# Tests for crucible status --drift (the -Drift switch on factory-status.ps1).
+# Tests for crucible status --drift (the -Drift switch on crucible-status.ps1).
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
@@ -6,7 +6,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_fixtures.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/install-manifest.ps1")
-$STATUS_SCRIPT = Join-Path $REPO_ROOT "powershell/factory-status.ps1"
+$STATUS_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible-status.ps1"
 $results = @()
 
 function Write-Utf8File {
@@ -76,8 +76,7 @@ function Invoke-Drift {
     }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-drift-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "drift-test"
 
 $script:SharedFrameworkPath = $null
 $script:SharedFrameworkCommit = $null

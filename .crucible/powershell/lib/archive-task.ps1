@@ -6,13 +6,15 @@ if (-not (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue)) {
 }
 
 function Get-BacklogTerminalStatus {
-    param([Parameter(Mandatory=$true)][string]$Type)
+    # docs/policy.md defines Production as merged to the main branch and Resolved as closed
+    # without a deploy. Neither is a property of the item's directory: a bug that ships a fix
+    # merges exactly as a feature does. This mapped features to Production and bugs and
+    # chores to Resolved, so B-011 was recorded Resolved after merging real code - the
+    # status said the opposite of what happened.
+    param([Parameter(Mandatory=$true)][bool]$ShippedCode)
 
-    $normalized = $Type.Trim().ToLowerInvariant()
-    if ($normalized -eq "features" -or $normalized -eq "feature") { return "Production" }
-    if ($normalized -eq "bugs" -or $normalized -eq "bug") { return "Resolved" }
-    if ($normalized -eq "chores" -or $normalized -eq "chore") { return "Resolved" }
-    throw "Unsupported backlog item type: $Type"
+    if ($ShippedCode) { return "Production" }
+    return "Resolved"
 }
 
 function Set-BacklogSpecFrontmatterStatus {
@@ -276,7 +278,12 @@ function Invoke-BacklogTaskArchive {
     param(
         [Parameter(Mandatory=$true)][string]$BacklogPath,
         [Parameter(Mandatory=$true)][string]$SpecPath,
-        [ValidateSet("Production","Resolved","Abandoned")][string]$Status
+        [ValidateSet("Production","Resolved","Abandoned")][string]$Status,
+        # Whether this task merged code. Every caller that does not pass -Status binds this
+        # explicitly, because neither default is safe: assuming no would record a shipped fix
+        # as closed without a deploy, and assuming yes would claim a deploy that never
+        # happened. Left unbound the archive refuses rather than picks one.
+        [switch]$ShippedCode
     )
 
     $resolvedBacklog = (Resolve-Path -LiteralPath $BacklogPath).Path
@@ -325,7 +332,10 @@ function Invoke-BacklogTaskArchive {
         }
     }
     if ([string]::IsNullOrEmpty($terminalStatus)) {
-        $terminalStatus = Get-BacklogTerminalStatus -Type $type
+        if (-not $PSBoundParameters.ContainsKey("ShippedCode")) {
+            throw ("Cannot derive a terminal status for " + $relativeSpec + ". Pass -Status explicitly, or pass -ShippedCode (true or false) to state whether this task merged code. The item type is not evidence of whether it deployed.")
+        }
+        $terminalStatus = Get-BacklogTerminalStatus -ShippedCode ([bool]$ShippedCode)
     }
 
     # Read item_id and priority from active spec frontmatter before moving

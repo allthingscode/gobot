@@ -7,8 +7,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
-. $factoryLibPath
+$crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
+. $crucibleLibPath
+. (Join-Path (Join-Path $PSScriptRoot "lib") "no-code-closure.ps1")
 
 # Default schema location: framework's own schemas/ directory (one level up from powershell/).
 if ([string]::IsNullOrWhiteSpace($SchemaPath)) {
@@ -255,7 +256,7 @@ $validTransitions = Get-PipelineValidTransitions -DeploymentRework $isRework
 
 $source = ([string]$handoff.source_phase).Trim().ToLowerInvariant()
 $target = ([string]$handoff.target_phase).Trim().ToLowerInvariant()
-$validPhases = @($script:FACTORY_PHASES)
+$validPhases = @($script:CRUCIBLE_PHASES)
 
 if ($validPhases -notcontains $source -or
     ($validPhases -notcontains $target -and $target -ne "done") -or
@@ -338,7 +339,15 @@ elseif ($source -eq "deployment") {
         Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment handoff requires artifacts." -Details @{ field = "artifacts"; handoff_file = $HandoffFile }
     }
     if ($target -eq "done" -and -not (Test-RequiredField -Handoff $handoff -FieldName "commit_hash")) {
-        Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment completed handoff requires commit_hash." -Details @{ field = "commit_hash"; handoff_file = $HandoffFile }
+        # A No-Code Closure has no merge to name, and the merge-verification gate is built
+        # to accept exactly that shape. This refused it unconditionally, so the only way to
+        # produce the closure the gate waits for was to hand-author the JSON, which
+        # prompts/deployment_prompt.md forbids in the same breath. The exemption is decided
+        # by the same function the gate calls, on the same evidence, so the two cannot drift.
+        $noCodeClosureTaskId = if ($handoff.PSObject.Properties["task_id"]) { ([string]$handoff.task_id).Trim() } else { "" }
+        if (-not (Test-NoCodeClosure -TaskId $noCodeClosureTaskId -ProjectRoot $resolvedProjectRoot)) {
+            Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment completed handoff requires commit_hash unless the task is a No-Code Closure: a research or grooming spec with no task/<task_id> branch." -Details @{ field = "commit_hash"; handoff_file = $HandoffFile }
+        }
     }
     if ($null -ne $handoff.PSObject.Properties["reviewer_checks_passed"]) {
         Write-ValidationResult -Ok $false -ReasonCode "invalid_field" -Message "Deployment handoff must not contain reviewer_checks_passed." -Details @{ field = "reviewer_checks_passed"; handoff_file = $HandoffFile }

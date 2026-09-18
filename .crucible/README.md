@@ -1,6 +1,6 @@
 # Crucible Install
 
-This directory is this application's installed Crucible dev factory. It must be self-contained.
+This directory is this application's installed Crucible bundle. It must be self-contained.
 
 Nothing in this application should reference external paths outside the repository. Crucible files, settings, docs, prompts, personas, SOPs, schemas, and scripts must be self-contained within this directory.
 
@@ -29,12 +29,14 @@ Commit durable Crucible behavior and configuration:
 
 - `config.yaml`
 - `.gitignore`
+- `.gitattributes`
 - `README.md`
 - `docs/`
 - `personas/`
 - `sops/`
 - `prompts/`
 - `schemas/`
+- `standards/`
 - `powershell/`
 - `agent-instructions/`, if present
 

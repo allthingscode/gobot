@@ -1,6 +1,6 @@
 # Test for Token Budget Exceeded circuit breaker.
 # Supplies a handoff with budget_tier="low" (ceiling=10) and cumulative_handoff_count=11,
-# which exceeds the ceiling.  Expects factory to write a "budget_exceeded" blocked record
+# which exceeds the ceiling.  Expects Crucible to write a "budget_exceeded" blocked record
 # and exit with code 2.
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +8,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 
 $results = @()
 
@@ -21,8 +21,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-budget-overrun-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "budget-overrun-test"
 
 try {
     $projectRoot = Join-Path $tempRoot "app"
@@ -94,18 +93,18 @@ created_at: "2026-05-25"
         }
         $handoff | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath -Encoding UTF8
 
-        $env:FACTORY_CYCLE_ID = "test-cycle"
+        $env:CRUCIBLE_CYCLE_ID = "test-cycle"
 
-        # 4. Run factory
+        # 4. Run Crucible
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId $taskId -ProjectRoot $projectRoot
         }
         $output   = $res.Output -join "`n"
         $exitCode = $res.ExitCode
 
         # 5. Assertions
-        Assert-Result -Name "Factory exits 2 (blocked)" -Condition ($exitCode -eq 2) `
+        Assert-Result -Name "Crucible exits 2 (blocked)" -Condition ($exitCode -eq 2) `
             -FailureMessage ("expected exit 2, got $exitCode. Output:`n$output")
 
         $blockedDir  = Join-Path $projectRoot ".crucible/backlog/blocked"
@@ -166,9 +165,9 @@ created_at: "2026-05-25"
             file_affinity            = @("src/")
         }
         $handoff | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath -Encoding UTF8
-        $env:FACTORY_CYCLE_ID = "test-cycle"
+        $env:CRUCIBLE_CYCLE_ID = "test-cycle"
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId $TaskId -ProjectRoot $projectRoot
         }
         return $res
@@ -190,13 +189,13 @@ created_at: "2026-05-25"
     $results += Run-Test -Name "Rebase headroom is bounded: cum 16 with rebase_count 1 still trips (effective ceiling 15)" -Body {
         $res = Invoke-BudgetScenario -TaskId "C-BUDGET-RB2" -RebaseCount 1 -CumulativeCount 16
         $output = $res.Output -join "`n"
-        Assert-Result -Name "Factory exits 2 (blocked)" -Condition ($res.ExitCode -eq 2) `
+        Assert-Result -Name "Crucible exits 2 (blocked)" -Condition ($res.ExitCode -eq 2) `
             -FailureMessage ("expected exit 2 for cum 16 over effective ceiling 15, got $($res.ExitCode). Output:`n$output")
         Assert-Result -Name "Budget breaker fired" -Condition ($output -match "Token Budget Exceeded") `
             -FailureMessage ("expected budget breaker. Output:`n$output")
     }
 } finally {
-    Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue
+    Remove-Item env:CRUCIBLE_CYCLE_ID -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

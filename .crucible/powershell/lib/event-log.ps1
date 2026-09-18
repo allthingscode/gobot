@@ -9,7 +9,7 @@ function Write-EventLog {
         [string]$Notes = $null,
         [int]$DurationSeconds = 0,
         [int]$HandoffCount = 0,
-        [string]$CycleId = $env:FACTORY_CYCLE_ID,
+        [string]$CycleId = $env:CRUCIBLE_CYCLE_ID,
         [hashtable]$Metrics = $null,
         # Mandatory, not defaulted to the ambient $LOG_FILE / $CB_HISTORY_FILE. A param
         # default naming an unassigned variable is resolved at call time against the
@@ -119,4 +119,39 @@ function Get-LastEntry {
         } catch { continue }
     }
     return $null
+}
+
+# Wall time from phase open to handoff is not worked time. The pipeline logs a start and
+# an end and nothing in between, so an overnight pause is indistinguishable from work:
+# grooming on the dogfood adopter's B-011 recorded 90552 seconds because the session began
+# on 2026-09-05 and was resumed on 2026-09-06. Past this limit the span stops being a
+# plausible single working session, so it is recorded under a name no consumer averages
+# instead of feeding the duration average as though a specialist had worked 25 hours.
+#
+# Two hours matches the staleness bound the concurrent-Groomer check already uses for the
+# same judgement - how long a phase can go untouched before it is no longer evidence of a
+# live session. Measured over the adopter's 473 archived session_end events, 30 exceed it,
+# the largest 44 hours. Treating intervening task events as activity marks and summing
+# only the short gaps was tried against that same data and reclassified nothing at this
+# limit, so the span alone decides and the marks scan is not worth its complexity.
+$script:PhaseWallAttributionLimitSeconds = 7200
+
+function Get-PhaseDurationMetrics {
+    param(
+        [Parameter(Mandatory=$true)][int]$ElapsedSeconds,
+        [string]$Anomaly = $null,
+        [int]$AttributionLimitSeconds = $script:PhaseWallAttributionLimitSeconds
+    )
+
+    $metrics = [ordered]@{}
+    if ($ElapsedSeconds -gt $AttributionLimitSeconds) {
+        # Deliberately a different key, not a null phase_wall_seconds. A consumer that
+        # reads the field it knows gets nothing to average, and the observation is still
+        # on the record for anyone who asks for elapsed time by that name.
+        $metrics.phase_elapsed_seconds = $ElapsedSeconds
+    } else {
+        $metrics.phase_wall_seconds = $ElapsedSeconds
+    }
+    if ($Anomaly) { $metrics.duration_anomaly = $Anomaly }
+    return $metrics
 }

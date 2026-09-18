@@ -14,8 +14,7 @@ $results = @()
 
 
 # Create a temporary environment
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-affinity-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "affinity-test"
 
 try {
     $projectRoot = Join-Path $tempRoot "app"

@@ -41,7 +41,7 @@ The source repo is used only for installs and updates. It is not referenced at r
 Before pulling updates, you can inspect your local `.crucible/` customizations compared to your baseline (recorded at install or the last successful update) using the drift-detection tool:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory-status.ps1" -Drift
+powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -Drift
 ```
 
 This is a read-only command that classifies all files into:
@@ -56,7 +56,7 @@ It exits with code `0` when no customized files exist, and `1` if customizations
 Crucible uses a provenance manifest (`.crucible/install-provenance.json`) to track files. If this manifest is missing (e.g. from an older install version), the drift tool automatically backfills it in memory using the `crucible_install_commit` from your `config.yaml`. To do this, it requires access to the upstream Crucible source repository containing that commit:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory-status.ps1" -Drift -FrameworkSource "C:\path\to\crucible-source"
+powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -Drift -FrameworkSource "C:\path\to\crucible-source"
 ```
 
 ---
@@ -97,7 +97,9 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory-statu
      -Mode auto-safe
    ```
 
-   `safe-overwrite` files are copied from upstream because they still match your recorded baseline. `add` files are new upstream files and are copied too. `needs-merge` and `review-removal` files are reported for human review and are not auto-changed.
+   `safe-overwrite` files are copied from upstream because they still match your recorded baseline. `add` files are new upstream files and are copied too. `retired` files are deleted: Crucible renamed them, the replacement is landing in this same update, and your copy still matched the baseline. `needs-merge` and `review-removal` files are reported for human review and are not auto-changed.
+
+   A file you have edited is never retired, whatever the rename says. It is reported as `needs-merge` so you can move your changes to the new path yourself.
 
 5. **Manually merge anything flagged.** For each `needs-merge` item, compare your local file against upstream HEAD, then edit the adopter file by hand.
 
@@ -108,6 +110,25 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory-statu
    ```
 
 7. **Commit.** Treat the update like any other change: review, test, commit.
+
+---
+
+## The update log
+
+Every run writes its classification report to `.crucible/session/update-bundle/{timestamp}.log`
+and prints the path. The timestamp is UTC `yyyyMMdd-HHmmss`, so the directory sorts oldest to
+newest by name.
+
+**Retention: the newest 20 logs, counting the one the run just wrote.** A normal update
+produces two - the preview and the apply - so twenty is about the last ten updates. Anything
+older is deleted at the end of each run, and the run says how many it removed. The directory
+is inside `session/`, which the bundle `.gitignore` excludes, so none of this is committed.
+
+Logs written before 2026-09-09 landed in the root of `.crucible/session/` as
+`update-bundle-{timestamp}.log`, where nothing pruned them and they buried the per-task
+directories an operator lists to orient. The next run moves them into
+`session/update-bundle/` and reports how many it moved; retention then applies to them like
+any other log. There is nothing to do by hand.
 
 ---
 
@@ -234,13 +255,39 @@ To migrate an existing adopter repository:
    This replaces `.crucible/.gitignore` with the anchored version and prunes the retired `.crucible/templates/project/.crucible/.gitignore` snapshot file while installing `.crucible/templates/project/.crucible/gitignore`. Confirm `.crucible/.gitignore` still exists on disk before proceeding.
 
 2. **Force-add any untracked scaffold snapshot files:**
-   Because git ignored nested backlog files under `.crucible/templates/project/.crucible/` in older commits, force-stage all snapshot files so your repository tracks the complete 15-file scaffold:
+   Because git ignored nested backlog files under `.crucible/templates/project/.crucible/` in older commits, force-stage all snapshot files so your repository tracks the complete scaffold:
    ```powershell
    git add -f .crucible/templates/project/.crucible
    ```
 
 3. **Verify and commit:**
-   Run `.crucible/powershell/run-all-tests.ps1` and verify `git ls-files .crucible/templates/project/.crucible` returns 15 tracked files. Then commit the updated bundle.
+   Run `.crucible/powershell/run-all-tests.ps1` and verify `git ls-files .crucible/templates/project/.crucible` returns as many tracked files as `git ls-files templates/project/.crucible` returns in the source checkout. Then commit the updated bundle.
+
+---
+
+## Migrating Existing Adopters (2026-09-09 Project Scorecard Moves Out Of `research/`)
+
+The adopter-project audit scorecard used to live at
+`.crucible/research/scorecard-{project}.md`. The bundle's own `.gitignore` excludes
+`research/`, so that file was never committed: never reviewed, and gone from a fresh clone
+with nothing left to say what the audit used to require. Audit reports are output and still
+belong in `research/`. The scorecard is the standard they are written against, so it belongs
+in git.
+
+Updating installs `.crucible/standards/scorecard-TEMPLATE.md`, and
+`.crucible/sops/research-audit-project.md` now reads
+`.crucible/standards/scorecard-{project}.md`. After updating, move your copy:
+
+```powershell
+Move-Item ".crucible\research\scorecard-<project>.md" ".crucible\standards\"
+git add .crucible/standards
+```
+
+Use `git mv` instead if your repository already tracks the old copy.
+
+**Leaving it where it is also works.** The audit SOP reads the old path when it finds a
+scorecard only there, and records in its report that the file needs to move. Nothing breaks;
+the scorecard simply stays untracked, which is the condition this change exists to end.
 
 ---
 

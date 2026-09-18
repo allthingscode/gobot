@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+. (Join-Path $REPO_ROOT "powershell/lib/repo-scan.ps1")
 
 $results = @()
 
@@ -15,12 +16,12 @@ $results = @()
 # Each entry requires an exact RelativePath, a regex Pattern matching the line, and an explicit Decision reason.
 $PRODUCTION_2TO1_ALLOWLIST = @(
     @{
-        RelativePath = "powershell/factory-doctor.ps1"
+        RelativePath = "powershell/crucible-doctor.ps1"
         Pattern      = '(?i)\$output\s*=\s*&\s*\$Command\s*@Arguments\s*2>&1'
         Reason       = "Generic command runner in diagnostic doctor tool that executes arbitrary user/diagnostic commands and captures combined output."
     },
     @{
-        RelativePath = "powershell/factory-lib.ps1"
+        RelativePath = "powershell/crucible-lib.ps1"
         Pattern      = '(?i)\$output\s*=\s*&\s*\$Command\s*@Arguments\s*2>&1'
         Reason       = "Generic command execution helper Invoke-Executable that captures output across varied external tools."
     },
@@ -30,12 +31,12 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Codex CLI specialist execution capturing combined stdout and stderr to stream and parse agent verdicts."
     },
     @{
-        RelativePath = "powershell/lib/factory-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates.ps1"
         Pattern      = '(?i)\$preflightRaw\s*=\s*&\s*\$preflightScript.*2>&1'
         Reason       = "PowerShell script invocation for handoff schema preflight validation capturing diagnostic stderr."
     },
     @{
-        RelativePath = "powershell/lib/factory-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates.ps1"
         Pattern      = '(?i)\$testOutput\s*=\s*&\s*\(Get-PwshCommand\).*isolatedChecksScript.*2>&1'
         Reason       = "Child PowerShell process running isolated checks test suite to capture full runner output."
     },
@@ -45,17 +46,17 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Invoke-GitChecked wrapper executing scriptblocks and capturing pipeline output for error diagnosis."
     },
     @{
-        RelativePath = "powershell/lib/factory-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates.ps1"
         Pattern      = '(?i)\$ciOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running CI watcher during automated promotion."
     },
     @{
-        RelativePath = "powershell/lib/factory-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates.ps1"
         Pattern      = '(?i)\$postPushOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running post-push CI watcher during automated promotion."
     },
     @{
-        RelativePath = "powershell/lib/factory-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates.ps1"
         Pattern      = '(?i)\$result\s*=\s*&\s*"\$FRAMEWORK_POWERSHELL/validate-backlog\.ps1".*2>&1'
         Reason       = "PowerShell script invocation for backlog validation before handoff."
     },
@@ -76,27 +77,44 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
     }
 )
 
+# The shape Get-RepoScannableFile returns, for the two mutation fixtures below. They plant a
+# single file in a temp directory that is not a git repository, so they cannot go through the
+# real enumeration - and should not: what they prove is that the violation patterns match,
+# which is a separate question from what the enumeration hands them.
+function New-ScanEntry {
+    param(
+        [Parameter(Mandatory = $true)][string]$FullName,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+    return [pscustomobject]@{ FullName = $FullName; RelativePath = $RelativePath }
+}
+
 function Get-ProductionPs1Files {
     param([string]$RepoRoot)
-    $files = @(Get-ChildItem -Path $RepoRoot -Filter "*.ps1" -Recurse -File)
-    return @($files | Where-Object {
-        $rel = ($_.FullName.Substring($RepoRoot.Length)).TrimStart('\', '/') -replace '\\', '/'
-        -not (
-            $rel.StartsWith("powershell/tests/") -or
-            $rel.StartsWith("examples/") -or
-            $rel.StartsWith(".private/") -or
-            $rel.StartsWith(".gemini/") -or
-            $rel.StartsWith(".agent-workspaces/") -or
-            $rel.StartsWith(".crucible/")
-        )
-    })
+    # This walked the filesystem from $RepoRoot with -Recurse until item 87, and excluded
+    # .private/, .agent-workspaces/ and .crucible/ by hand - three entries each restating a
+    # line of .gitignore. None of them was .claude/worktrees/, where agent tooling puts a
+    # real git worktree, so a full suite run concurrent with a subagent linted that agent's
+    # checkout of this very suite as production code and failed at 96/97, naming eighteen
+    # paths under a directory that no longer existed by the time the failure was read.
+    #
+    # Get-RepoScannableFile asks git instead, so every one of those three exclusions comes
+    # from .gitignore rather than from this list, and the worktree does too.
+    #
+    # The two prefixes left are scope, not noise: both are tracked, and both are deliberately
+    # outside this rule. powershell/tests/ is test code, and examples/ is the generated
+    # adopter mirror whose .ps1 files are copies of the ones already scanned here - a
+    # violation there is the same violation reported twice. .gemini/ is no longer listed
+    # because git does not ignore it and it holds no .ps1 at all; if one ever appears there
+    # it should be read, not skipped by a line nobody remembers writing.
+    return @(Get-RepoScannableFile -RepoRoot $RepoRoot -Extension ".ps1" -ExcludePrefix @("powershell/tests", "examples"))
 }
 
 function Find-NativeGit2To1Violations {
-    param([array]$Files, [string]$RepoRoot)
+    param([array]$Files)
     $violations = @()
     foreach ($f in $Files) {
-        $rel = ($f.FullName.Substring($RepoRoot.Length)).TrimStart('\', '/') -replace '\\', '/'
+        $rel = $f.RelativePath
         $lines = @(Get-Content -LiteralPath $f.FullName)
         for ($i = 0; $i -lt $lines.Count; $i++) {
             $line = [string]$lines[$i]
@@ -110,10 +128,10 @@ function Find-NativeGit2To1Violations {
 }
 
 function Find-Unallowlisted2To1Violations {
-    param([array]$Files, [string]$RepoRoot, [array]$Allowlist)
+    param([array]$Files, [array]$Allowlist)
     $violations = @()
     foreach ($f in $Files) {
-        $rel = ($f.FullName.Substring($RepoRoot.Length)).TrimStart('\', '/') -replace '\\', '/'
+        $rel = $f.RelativePath
         $lines = @(Get-Content -LiteralPath $f.FullName)
         for ($i = 0; $i -lt $lines.Count; $i++) {
             $line = [string]$lines[$i]
@@ -137,13 +155,24 @@ function Find-Unallowlisted2To1Violations {
 
 $results += Run-Test -Name "No raw 2>&1 on native git commands in production ps1 files" -Body {
     $prodFiles = @(Get-ProductionPs1Files -RepoRoot $REPO_ROOT)
-    $violations = @(Find-NativeGit2To1Violations -Files $prodFiles -RepoRoot $REPO_ROOT)
+    # Neither scan in this file asked how many files it had read until item 87. Both report
+    # only the violations they find, so an enumeration that returned nothing - a bad root, a
+    # filter that matched no extension, git failing - made both of them pass having read no
+    # code at all. Get-RepoScannableFile throws rather than return an empty list for exactly
+    # that reason, and this is the assertion that would say so here if it ever stopped.
+    Assert-Result -Name "the production scan is non-empty" -Condition ($prodFiles.Count -ge 50) -FailureMessage (
+        "the scan found " + $prodFiles.Count + " production .ps1 files; below 50 it is no longer reading this " +
+        "repository and the violation assertions below would pass vacuously")
+    $violations = @(Find-NativeGit2To1Violations -Files $prodFiles)
     Assert-Result -Name "no raw git 2>&1" -Condition ($violations.Count -eq 0) -FailureMessage ("Found raw git 2>&1 violations in production files:`n" + ($violations -join "`n"))
 }
 
 $results += Run-Test -Name "All production 2>&1 usages are in documented allowlist with explicit rationale" -Body {
     $prodFiles = @(Get-ProductionPs1Files -RepoRoot $REPO_ROOT)
-    $violations = @(Find-Unallowlisted2To1Violations -Files $prodFiles -RepoRoot $REPO_ROOT -Allowlist $PRODUCTION_2TO1_ALLOWLIST)
+    Assert-Result -Name "the production scan is non-empty" -Condition ($prodFiles.Count -ge 50) -FailureMessage (
+        "the scan found " + $prodFiles.Count + " production .ps1 files; below 50 it is no longer reading this " +
+        "repository and the violation assertion below would pass vacuously")
+    $violations = @(Find-Unallowlisted2To1Violations -Files $prodFiles -Allowlist $PRODUCTION_2TO1_ALLOWLIST)
     Assert-Result -Name "all 2>&1 allowlisted" -Condition ($violations.Count -eq 0) -FailureMessage ("Found unallowlisted 2>&1 in production files:`n" + ($violations -join "`n"))
 }
 
@@ -168,7 +197,7 @@ $results += Run-Test -Name "Every allowlist entry still matches a line in the fi
     # NOT covered by an entry, so an entry covering nothing is invisible to it, and the
     # check above confirms the file exists without ever asking whether the pattern hits.
     # Moving a sanctioned 2>&1 site from one file to another is exactly what strands one,
-    # which is why this is pinned before powershell/lib/factory-gates.ps1 is split.
+    # which is why this is pinned before powershell/lib/crucible-gates.ps1 is split.
     Assert-Result -Name "allowlist is not empty" -Condition ($PRODUCTION_2TO1_ALLOWLIST.Count -gt 0) -FailureMessage "the allowlist is empty, so every assertion made about its entries passes vacuously"
 
     $stale = @()
@@ -191,7 +220,7 @@ $results += Run-Test -Name "Every allowlist entry still matches a line in the fi
 
 $results += Run-Test -Name "Every lib that calls Invoke-GitChecked resolves it when loaded alone" -Body {
     # Invoke-GitChecked is the sanctioned wrapper, so it is reachable from more than one
-    # file, and dot-sourcing flattens scope: under the normal load through factory-lib.ps1
+    # file, and dot-sourcing flattens scope: under the normal load through crucible-lib.ps1
     # a caller that never declares the dependency still gets it from whichever sibling
     # happened to load first. That is how the pre-split arrangement was safe - by accident
     # of load order rather than by declaration - and deleting a dot-source proved to change
@@ -222,13 +251,11 @@ $results += Run-Test -Name "Every lib that calls Invoke-GitChecked resolves it w
 }
 
 $results += Run-Test -Name "MUT: Scanner detects synthetic raw git 2>&1 violation" -Body {
-    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-mut-git-2to1-" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $tempDir = New-TestFixtureRoot -NameHint "mut-git-2to1"
     try {
         $fakePs1 = Join-Path $tempDir "leak.ps1"
         Set-Content -LiteralPath $fakePs1 -Value 'git status 2>&1'
-        $fileInfo = Get-Item -LiteralPath $fakePs1
-        $violations = @(Find-NativeGit2To1Violations -Files @($fileInfo) -RepoRoot $tempDir)
+        $violations = @(Find-NativeGit2To1Violations -Files @(New-ScanEntry -FullName $fakePs1 -RelativePath "leak.ps1"))
         Assert-Result -Name "MUT catches synthetic git 2>&1" -Condition ($violations.Count -gt 0) -FailureMessage "Scanner failed to detect synthetic git 2>&1"
     } finally {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -236,13 +263,11 @@ $results += Run-Test -Name "MUT: Scanner detects synthetic raw git 2>&1 violatio
 }
 
 $results += Run-Test -Name "MUT: Scanner detects synthetic unallowlisted 2>&1 violation" -Body {
-    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-mut-unallowlisted-2to1-" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $tempDir = New-TestFixtureRoot -NameHint "mut-unallow-2to1"
     try {
         $fakePs1 = Join-Path $tempDir "unallowlisted.ps1"
         Set-Content -LiteralPath $fakePs1 -Value '$out = & my-native-tool 2>&1'
-        $fileInfo = Get-Item -LiteralPath $fakePs1
-        $violations = @(Find-Unallowlisted2To1Violations -Files @($fileInfo) -RepoRoot $tempDir -Allowlist $PRODUCTION_2TO1_ALLOWLIST)
+        $violations = @(Find-Unallowlisted2To1Violations -Files @(New-ScanEntry -FullName $fakePs1 -RelativePath "unallowlisted.ps1") -Allowlist $PRODUCTION_2TO1_ALLOWLIST)
         Assert-Result -Name "MUT catches unallowlisted 2>&1" -Condition ($violations.Count -gt 0) -FailureMessage "Scanner failed to detect unallowlisted 2>&1"
     } finally {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue

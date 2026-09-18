@@ -1,6 +1,6 @@
 # End-to-end integration tests for the Crucible adopter path bootstrap.
 # Verifies that a new project can adopt Crucible, write a backlog item, validate it,
-# create a new handoff, and boot the factory for the first time.
+# create a new handoff, and boot Crucible for the first time.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -11,9 +11,9 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_BACKLOG = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
 $VALIDATE_CONFIG = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
-$FACTORY_LINT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
+$CRUCIBLE_LINT = Join-Path $REPO_ROOT "scripts/crucible_lint.go"
 $RESOLVE_PATH = Join-Path $REPO_ROOT "powershell/resolve-config-path.ps1"
 
 $results = @()
@@ -27,8 +27,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-adopter-bootstrap-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "adopter-bootstrap"
 
 try {
     $projectRoot = Join-Path $tempRoot "bootstrap-app"
@@ -111,13 +110,13 @@ Add a health endpoint.
         Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         Push-Location $projectRoot
         try {
-            $factoryLintCmd = Invoke-ExternalCommand {
-                go run $FACTORY_LINT -framework-root $REPO_ROOT -backlog-dir $backlogDir
+            $crucibleLintCmd = Invoke-ExternalCommand {
+                go run $CRUCIBLE_LINT -framework-root $REPO_ROOT -backlog-dir $backlogDir
             }
         } finally {
             Pop-Location
         }
-        Assert-Result -Name "factory_lint exit" -Condition ($factoryLintCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $factoryLintCmd.ExitCode + ". Output: " + ($factoryLintCmd.Output -join "`n"))
+        Assert-Result -Name "crucible_lint exit" -Condition ($crucibleLintCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $crucibleLintCmd.ExitCode + ". Output: " + ($crucibleLintCmd.Output -join "`n"))
 
         # Check that BACKLOG.md priority summary counts were updated
         $updatedBacklog = Get-Content -LiteralPath $backlogFile -Raw -Encoding UTF8
@@ -134,11 +133,11 @@ Add a health endpoint.
         }
         Assert-Result -Name "validate-config exit" -Condition ($validateConfigCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $validateConfigCmd.ExitCode + ". Output: " + ($validateConfigCmd.Output -join "`n"))
 
-        # 7. Create a new handoff (groomer -> architect) using factory -NewHandoff (testing C!)
+        # 7. Create a new handoff (groomer -> architect) using crucible -NewHandoff (testing C!)
         Push-Location $projectRoot
         try {
             $newHandoffCmd = Invoke-ExternalCommand {
-                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                     -NewHandoff `
                     -ProjectRoot $projectRoot `
                     -TaskId "F-001" `
@@ -162,17 +161,17 @@ Add a health endpoint.
         Assert-Result -Name "handoff artifacts is array" -Condition ($handoffJson.artifacts.GetType().BaseType.Name -eq "Array" -or $handoffJson.artifacts -is [System.Array]) -FailureMessage ("expected artifacts to be Array, got " + $handoffJson.artifacts.GetType().Name)
         Assert-Result -Name "handoff file_affinity is array" -Condition ($handoffJson.file_affinity.GetType().BaseType.Name -eq "Array" -or $handoffJson.file_affinity -is [System.Array]) -FailureMessage ("expected file_affinity to be Array, got " + $handoffJson.file_affinity.GetType().Name)
 
-        # 8. Run factory -Init on the task (testing D & E & H!)
+        # 8. Run crucible -Init on the task (testing D & E & H!)
         Push-Location $projectRoot
         try {
-            $factoryInitCmd = Invoke-ExternalCommand {
-                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            $crucibleInitCmd = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                     -Init -ProjectRoot $projectRoot -TaskId "F-001"
             }
         } finally {
             Pop-Location
         }
-        Assert-Result -Name "factory -Init exit" -Condition ($factoryInitCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $factoryInitCmd.ExitCode + ". Output: " + ($factoryInitCmd.Output -join "`n"))
+        Assert-Result -Name "crucible -Init exit" -Condition ($crucibleInitCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $crucibleInitCmd.ExitCode + ". Output: " + ($crucibleInitCmd.Output -join "`n"))
 
         # Verify prompt and task folders scaffolded
         $architectPrompt = Join-Path $projectRoot ".crucible/session/F-001/implementation/prompt.md"

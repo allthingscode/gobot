@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-. (Join-Path $REPO_ROOT "powershell/factory-lib.ps1")
+. (Join-Path $REPO_ROOT "powershell/crucible-lib.ps1")
 
 $results = @()
 
@@ -54,8 +54,7 @@ $results += Run-Test "done has no tier; blank/dirty tier defaults safely" {
 
 # --- Stage 2: tier + target -> concrete model (framework default map) ---
 
-$noCfgRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("modelsel-nocfg-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $noCfgRoot -Force | Out-Null
+$noCfgRoot = New-TestFixtureRoot -NameHint "modelsel-nocfg"
 
 $results += Run-Test "Default map: claude tiers -> opus/sonnet/haiku" {
     Assert-Result "claude strong" ((Get-ConfiguredModel -Target 'claude' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'opus') "expected opus"
@@ -88,7 +87,7 @@ $results += Run-Test "Empty tier (done phase) resolves to empty model; unknown t
 
 # --- Stage 2: config.yaml override wins over the default map ---
 
-$cfgRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("modelsel-cfg-" + [guid]::NewGuid().ToString("N"))
+$cfgRoot = New-TestFixtureRoot -NameHint "modelsel-cfg"
 New-Item -ItemType Directory -Path (Join-Path $cfgRoot ".crucible") -Force | Out-Null
 $cfgBody = @"
 project:

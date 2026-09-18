@@ -5,7 +5,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 $ANALYZE_SCRIPT = Join-Path $REPO_ROOT "powershell/analyze-evals.ps1"
 
 $results = @()
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-analyze-evals-test-" + [guid]::NewGuid().ToString("N"))
+$tempRoot = New-TestFixtureRoot -NameHint "analyze-evals-test"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 function Write-Utf8NoBomFile {
@@ -125,8 +125,6 @@ function Invoke-AnalyzeMarkdown {
     }
 }
 
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-
 try {
     $results += Run-Test -Name "Json report includes synthetic task" -Body {
         $projectRoot = New-AnalyzeProject -Name "json-basic"
@@ -163,7 +161,7 @@ try {
         $md = Invoke-AnalyzeMarkdown -ProjectRoot $projectRoot
         $markdown = $md.Output -join "`n"
         Assert-Result -Name "markdown phase wall provenance exit code" -Condition ($md.ExitCode -eq 0) -FailureMessage "expected 0, got $($md.ExitCode). Output:`n$markdown"
-        Assert-Result -Name "markdown phase wall header uses phase events newest" -Condition ($markdown -match "\| Phase \| Avg Minutes \| Events \| Newest Event \|") -FailureMessage "expected phase wall table header with provenance. Output:`n$markdown"
+        Assert-Result -Name "markdown phase wall header uses phase events newest" -Condition ($markdown -match "\| Phase \| Avg Minutes \| Events \| Unattributed \| Newest Event \|") -FailureMessage "expected phase wall table header with provenance. Output:`n$markdown"
     }
 
     $results += Run-Test -Name "Legacy factory phase and canonical crucible phase aggregate as one phase" -Body {
@@ -222,6 +220,48 @@ try {
         $row = @(@($json.avg_phase_wall_minutes) | Where-Object { $_.phase -eq "deployment" }) | Select-Object -First 1
         Assert-Result -Name "json phase wall zero sample counted" -Condition ($null -ne $row -and $row.events -eq 2) -FailureMessage "expected the zero-valued sample to be retained, got events=$($row.events). Output:`n$output"
         Assert-Result -Name "json phase wall zero sample averaged" -Condition ($null -ne $row -and $row.avg_minutes -eq 5) -FailureMessage "expected avg of 0 and 600 seconds to be 5 minutes, got $($row.avg_minutes). Output:`n$output"
+    }
+    $results += Run-Test -Name "Unattributable spans are excluded from the average and counted" -Body {
+        # A resumed session measures the calendar, not the work, so the producer withholds
+        # phase_wall_seconds for it. Excluding it silently would leave the average taken
+        # over a filtered population with nothing in the report to say so, which is the
+        # same class of defect as averaging the outlier. Found by TODO item 63.
+        $projectRoot = New-AnalyzeProject -Name "json-phase-wall-unattributed"
+        Write-GateDecision -ProjectRoot $projectRoot -TaskId "T-LONG"
+        Write-PipelineLog -ProjectRoot $projectRoot -TaskId "T-LONG" -Lines @(
+            '{"event":"session_end","timestamp":"2026-09-06T23:16:40Z","task_id":"T-LONG","phase":"grooming","metrics":{"phase_elapsed_seconds":90552}}',
+            '{"event":"session_end","timestamp":"2026-09-06T23:32:44Z","task_id":"T-LONG","phase":"grooming","metrics":{"phase_wall_seconds":600}}',
+            '{"event":"session_end","timestamp":"2026-09-06T23:55:08Z","task_id":"T-LONG","phase":"deployment","metrics":{"phase_elapsed_seconds":161282}}',
+            '{"event":"session_end","timestamp":"2026-09-05T10:00:00Z","task_id":"T-LONG","phase":"verification","metrics":{"phase_wall_seconds":90552}}',
+            '{"event":"session_end","timestamp":"2026-09-05T11:00:00Z","task_id":"T-LONG","phase":"verification","metrics":{"phase_wall_seconds":1200}}'
+        )
+
+        $res = Invoke-AnalyzeJson -ProjectRoot $projectRoot
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "json unattributed exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+        $json = $output | ConvertFrom-Json
+        $grooming = @(@($json.avg_phase_wall_minutes) | Where-Object { $_.phase -eq "grooming" }) | Select-Object -First 1
+        Assert-Result -Name "json unattributed span not averaged" -Condition ($null -ne $grooming -and $grooming.events -eq 1 -and $grooming.avg_minutes -eq 10) -FailureMessage "expected only the 600-second sample to be averaged, got events=$($grooming.events) avg=$($grooming.avg_minutes). Output:`n$output"
+        Assert-Result -Name "json unattributed span counted" -Condition ($null -ne $grooming -and $grooming.unattributed -eq 1) -FailureMessage "expected the excluded span to be counted. Output:`n$output"
+
+        # A phase with nothing but unattributable spans has to survive into the report.
+        # Keying the summary off the timed table alone would drop it entirely, which reads
+        # as a phase that never ran.
+        $deployment = @(@($json.avg_phase_wall_minutes) | Where-Object { $_.phase -eq "deployment" }) | Select-Object -First 1
+        Assert-Result -Name "json phase with no usable sample survives" -Condition ($null -ne $deployment -and $deployment.events -eq 0 -and $deployment.unattributed -eq 1) -FailureMessage "expected a deployment row with no timed events and one exclusion. Output:`n$output"
+
+        # Archived logs are never rewritten, so the spans already on disk as
+        # phase_wall_seconds keep arriving forever. Fixing only the producer would leave
+        # the adopter's 30 existing outliers inflating this average for good.
+        $verification = @(@($json.avg_phase_wall_minutes) | Where-Object { $_.phase -eq "verification" }) | Select-Object -First 1
+        Assert-Result -Name "json legacy over-limit wall time excluded" -Condition ($null -ne $verification -and $verification.events -eq 1 -and $verification.avg_minutes -eq 20) -FailureMessage "expected the 90552-second phase_wall_seconds sample to be excluded from the average, got events=$($verification.events) avg=$($verification.avg_minutes). Output:`n$output"
+        Assert-Result -Name "json legacy over-limit wall time counted" -Condition ($null -ne $verification -and $verification.unattributed -eq 1) -FailureMessage "expected the excluded legacy span to be counted. Output:`n$output"
+
+        $md = Invoke-AnalyzeMarkdown -ProjectRoot $projectRoot
+        $markdown = $md.Output -join "`n"
+        Assert-Result -Name "markdown unattributed exit code" -Condition ($md.ExitCode -eq 0) -FailureMessage "expected 0, got $($md.ExitCode). Output:`n$markdown"
+        Assert-Result -Name "markdown unattributed column populated" -Condition ($markdown -match "\| grooming \| 10 \| 1 \| 1 \|") -FailureMessage "expected the grooming row to show one averaged event and one exclusion. Output:`n$markdown"
+        Assert-Result -Name "markdown empty phase reads n/a" -Condition ($markdown -match "\| deployment \| n/a \| 0 \| 1 \|") -FailureMessage "expected a phase with no usable sample to render n/a rather than a zero average. Output:`n$markdown"
     }
     $results += Run-Test -Name "Duration anomalies omit constructed zero duration" -Body {
         $projectRoot = New-AnalyzeProject -Name "json-duration-anomaly-shape"
@@ -362,16 +402,16 @@ try {
         $res = Invoke-AnalyzeMarkdown -ProjectRoot $projectRoot
         $output = $res.Output -join "`n"
         Assert-Result -Name "markdown basic exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
-        Assert-Result -Name "markdown basic report output" -Condition ($output -match "# Dev Factory - Eval Report" -and $output -match "T-001") -FailureMessage "markdown report missing expected content. Output:`n$output"
+        Assert-Result -Name "markdown basic report output" -Condition ($output -match "# Crucible - Eval Report" -and $output -match "T-001") -FailureMessage "markdown report missing expected content. Output:`n$output"
         Assert-Result -Name "markdown basic no average session duration heading" -Condition ($output -notmatch "Average Session Duration") -FailureMessage "did not expect dead average session duration heading. Output:`n$output"
         Assert-Result -Name "markdown basic no phase wall data branch" -Condition ($output -match "\(no phase wall-time data available\)") -FailureMessage "expected no phase wall-time data branch. Output:`n$output"
     }
     $results += Run-Test -Name "Handoffs differing only in phase-field case count as one duplicate" -Body {
         # The assertion whose absence let this file's inline dedupe key drift from
-        # Get-HandoffDedupeKey. The factory normalizes case and whitespace before
+        # Get-HandoffDedupeKey. Crucible normalizes case and whitespace before
         # comparing, so it supersedes these two as duplicates; the report's own copy of
         # the key did neither, so it saw two distinct transitions and reported zero
-        # duplicates on records the factory had already deduplicated.
+        # duplicates on records Crucible had already deduplicated.
         $projectRoot = New-AnalyzeProject -Name "dedupe-case"
         Write-GateDecision -ProjectRoot $projectRoot -TaskId "T-010"
         Write-TestHandoffRecord -ProjectRoot $projectRoot -FileName "T-010-20260501T120000Z.json" `

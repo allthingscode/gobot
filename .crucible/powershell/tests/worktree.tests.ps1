@@ -3,9 +3,9 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $Quiet = $true
-. $FACTORY_LIB
+. $CRUCIBLE_LIB
 
 $results = @()
 
@@ -15,8 +15,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-worktree-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "worktree-test"
 
 try {
     $results += Run-Test -Name "Normalize-RepoRelativePath normalizes separators and prefixes" -Body {

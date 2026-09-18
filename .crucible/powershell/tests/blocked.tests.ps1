@@ -3,10 +3,10 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $HELPER = Join-Path $REPO_ROOT "powershell/lib/blocked.ps1"
 $Quiet = $true
-. $FACTORY_LIB
+. $CRUCIBLE_LIB
 . $HELPER
 
 $results = @()
@@ -17,7 +17,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-blocked-test-" + [guid]::NewGuid().ToString("N"))
+$tempRoot = New-TestFixtureRoot -NameHint "blocked-test"
 $backlogDir = Join-Path $tempRoot "backlog"
 $frameworkDir = Join-Path $tempRoot "powershell"
 New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null

@@ -1,6 +1,6 @@
 param (
     [Parameter(Mandatory=$true)]
-    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
+    # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
     # "coder" remains accepted here for legacy state cleanup calls.
     [ValidateSet("research", "grooming", "implementation", "verification", "deployment", "coder", "done")]
     [string]$Specialist,
@@ -176,16 +176,21 @@ try {
     $json | Set-Content -Path $StateFile -Encoding UTF8
     Write-Host "Successfully updated $Specialist state in $StateFile" -ForegroundColor Green
 
-    # --- 2.5 Optional: Validate state with a project-provided command if configured ---
-    $ProjectValidatorCommand = $env:CRUCIBLE_STATE_VALIDATOR
-    if ($ProjectValidatorCommand) {
-        try {
-            & $ProjectValidatorCommand factory state validate $StateFile | Out-Null
-            Write-Host "State validation passed." -ForegroundColor Cyan
-        } catch {
-            Write-Warning "State validation failed: $($_.Exception.Message)"
-        }
-    }
+    # A CRUCIBLE_STATE_VALIDATOR hook used to run here, invoking an adopter-supplied command as
+    # `<cmd> factory state validate <state file>`. Deleted by item 91 on the human's decision.
+    # It printed "State validation passed." whenever the command could be launched: a native
+    # process that exits non-zero does not throw even under $ErrorActionPreference = "Stop", and
+    # nothing read $LASTEXITCODE, so the catch fired only for a command that could not start.
+    # It could not tell "verified" from "never checked", which CONTRIBUTING.md forbids.
+    #
+    # Not repaired, because the repair would not have made it matter. No caller read its
+    # outcome, so a corrected check would have been honest and still consequence-free. It had
+    # also been present unchanged since the initial commit with no rationale, no implementation
+    # anywhere including the live adopter, and no mention in any doc, schema, template or test -
+    # an adopter could not discover the hook existed, let alone the subcommand to implement. If
+    # adopter-side validation of this file is wanted, it belongs in a gate with a documented
+    # config key, not an undiscoverable environment variable. That also retires the last
+    # `factory` token in production PowerShell rather than documenting it as a contract.
 
 } catch {
     Write-Error "Failed to update session state: $($_.Exception.Message)"

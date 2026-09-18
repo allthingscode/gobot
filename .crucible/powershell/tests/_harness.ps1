@@ -1,6 +1,10 @@
 # Shared test harness helper functions.
 # Name does not contain "test" to prevent runner execution.
 
+# Safe to load here: _ownership.ps1 has no load-time side effects, which is what lets
+# _worktree-fixture.ps1 load it too without loading this file. See its header.
+. (Join-Path $PSScriptRoot "_ownership.ps1")
+
 function Get-ProcessDeathDescription {
     param(
         [Parameter(Mandatory=$true)]
@@ -91,6 +95,35 @@ function Assert-Result {
     }
 }
 
+# A third outcome, for a test whose precondition cannot exist on the platform it is running on.
+# Until item 102 there were two, so such a test either failed the whole leg or was rewritten to
+# pass without having run. Both happened: run-lock.tests.ps1 borrows a protected Windows process
+# to get one whose start time cannot be read, asserts it found one rather than skipping - which is
+# item 89's lesson, applied on purpose - and therefore failed every Linux run.
+#
+# Signalled by a sentinel prefix on a thrown string, matching Assert-Result's "FAILED: " idiom,
+# because the runner already classifies a child by grepping its output for exactly those prefixes.
+# "SKIPPED: " is deliberately not a substring of any signature Test-OutputHasFailure looks for.
+#
+# What this does NOT do: change the per-file tail. A file's own
+# "$failed = @($results | Where-Object { -not $_ }).Count" counts a skip as a non-failure, which is
+# right, and its "ALL TESTS PASSED (n tests)" line still includes it, which is loose. Fixing that
+# means editing the tail of every test file; the run summary is the surface that reports the count,
+# and it is the one CI and scripts/test-linux.ps1 read.
+$CRUCIBLE_SKIP_SENTINEL = "CRUCIBLE-TEST-SKIPPED: "
+
+function Skip-Test {
+    param(
+        # No default. A skip with no stated reason is the vacuous pass this exists to prevent,
+        # one rename later.
+        [Parameter(Position=0, Mandatory=$true)][string]$Reason
+    )
+    if ([string]::IsNullOrWhiteSpace($Reason)) {
+        throw "Skip-Test: -Reason must say why this platform cannot run the test."
+    }
+    throw ($CRUCIBLE_SKIP_SENTINEL + $Reason)
+}
+
 function Run-Test {
     param(
         [Parameter(Position=0, Mandatory=$true)][string]$Name,
@@ -103,12 +136,44 @@ function Run-Test {
         Write-Host "PASSED" -ForegroundColor Green
         return $true
     } catch {
+        $message = [string]$_.Exception.Message
+        if ($message.StartsWith($CRUCIBLE_SKIP_SENTINEL)) {
+            Write-Host ("SKIPPED: " + $Name + " - " + $message.Substring($CRUCIBLE_SKIP_SENTINEL.Length)) -ForegroundColor Yellow
+            return $true
+        }
         Write-Host "EXCEPTION OCCURRED: $_" -ForegroundColor Red
         if ($null -ne $_.ScriptStackTrace) {
             Write-Host $_.ScriptStackTrace -ForegroundColor Red
         }
         return $false
     }
+}
+
+# Start-Process -WindowStyle does not exist on PowerShell's Linux edition; it throws "The parameter
+# '-WindowStyle' is not supported for the cmdlet 'Start-Process' on this edition of PowerShell".
+# Hidden is there only to stop a console window flashing on Windows, so the parameter is needed on
+# one platform and rejected on the other. Two test files spawn a host process whose only job is to
+# exist - run-lock.tests.ps1's pid-reuse fixture and framework-worktree-hygiene.tests.ps1's dead and
+# live owners - and both failed the entire Linux leg on this one parameter. Item 102.
+#
+# Here rather than in each caller so the platform branch has one definition, and not dot-sourcing
+# lib/platform.ps1 to reach Test-PlatformIsWindows: that file carries the mock state
+# platform.tests.ps1 drives, and loading it from the harness would put a second loader in front of
+# the file that tests it. Both callers already load it, so this asks rather than assumes.
+function Start-HiddenHostProcess {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    if ($null -eq (Get-Command Test-PlatformIsWindows -ErrorAction SilentlyContinue)) {
+        throw "Start-HiddenHostProcess: dot-source lib/platform.ps1 before calling this."
+    }
+
+    $startArgs = @{
+        FilePath     = (Get-PwshCommand)
+        ArgumentList = $Arguments
+        PassThru     = $true
+    }
+    if (Test-PlatformIsWindows) { $startArgs["WindowStyle"] = "Hidden" }
+    return (Start-Process @startArgs)
 }
 
 function Invoke-ExternalCommand {
@@ -132,6 +197,15 @@ function Invoke-ExternalCommand {
 # fixture names, and a pid-liveness reclaim in the run lock - each maintaining its own
 # idea of which stray TEMP entry belonged to whom.
 #
+# That sentence was written for item 24 and was false for two years: 88 of 98 test files built their
+# fixture root straight off the machine TEMP path, at 107 sites, so the delete collected the fixtures
+# of nine files and a developer's TEMP accumulated 131 directories nothing could attribute. Item 88
+# made it true. It is kept honest by fixture-root-conformance.tests.ps1, which fails when a test file
+# reaches TEMP without a recorded exemption - there are five exemptions and each names its own line.
+# The one that matters to a reader here is item 85's fixture worktrees, which stay directly in TEMP
+# because a checkout of this repository needs the depth; residue there is detected rather than
+# deleted, and _worktree-fixture.ps1 states the measurement.
+#
 # The owning process id is in the name because ownership cannot be inferred any other
 # way, and it is still needed: the runner deletes its own root in a finally, but a run
 # that is KILLED never reaches that finally, and a test file invoked on its own has no
@@ -140,28 +214,90 @@ function Invoke-ExternalCommand {
 # CRUCIBLE_TEST_ROOT is exported so the 80-odd child processes the runner spawns share
 # the parent's root rather than each making one. A child therefore never creates a
 # root and never deletes one.
+#
+# The name is 32 characters, and it used to be 56 because the unique part was a whole guid. Those
+# 24 characters were the reason nothing deep could be built under here at all: a worktree of this
+# repository under a run root projected exactly 260 characters against
+# examples/gobot/.crucible/templates/project/.crucible/backlog/_example_F-001_example_feature.md,
+# one over the Windows limit, on a machine whose TEMP path is 46 characters - so the fixture that
+# item 85 landed sits directly in TEMP instead. Item 88 moved the other 88 files, which were doing
+# the same thing for no such reason, and it had to start here: none of them could move until there
+# was budget to move them into.
+#
+# Eight hex digits rather than 32: the pid is already in the name and a root is created once per
+# process, so the digits only have to separate this run from residue left by a dead process that
+# happened to hold the same pid. A collision there is benign rather than unlikely-and-fatal - the
+# owner is dead, New-Item -Force adopts the directory, and the run's own finally deletes both.
 function Get-TestRunRoot {
     if ($env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
         return $env:CRUCIBLE_TEST_ROOT
     }
 
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-test-run-" + $PID + "-" + [guid]::NewGuid().ToString("N"))
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-test-run-" + $PID + "-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
     New-Item -ItemType Directory -Path $root -Force | Out-Null
     $env:CRUCIBLE_TEST_ROOT = $root
     return $root
 }
 
-# Age is not ownership. The run lock serialises one checkout, so a second checkout can
-# legitimately have a run in flight, and a threshold short enough to collect a crashed
-# run would also collect that one alive. A dead owner is proof; nothing else is.
+# One place builds a fixture root, for the reason item 88 was filed about: 88 test files built
+# their own directly off the machine TEMP path, so the runner's single delete collected almost
+# nothing and Test-TestRunRootOrphaned could not attribute what was left. Measured while that
+# migration landed, a developer's TEMP held 131 such directories going back three months.
+#
+# The unique suffix is eight hex digits rather than a whole guid, and that is what pays for the
+# move. A run root costs 33 characters over bare TEMP; dropping 24 characters of guid off the
+# fixture's own leaf gives most of them straight back, so converting a fixture is close to
+# length-neutral instead of a 33-character step towards 'Filename too long'.
+#
+# No path budget is enforced here, and that is a decision rather than an omission. A version of
+# this function refused any root that could not hold this repository's deepest tracked path, 94
+# characters. Measured against what fixtures actually write, that was the wrong number: the
+# deepest path the suite produced was 211 of the 259 available, and its payload below the fixture
+# root was 133 - deeper than anything in the tree, because a fixture nests an agent workspace
+# inside an installed bundle. Raising the constant to 133 does not fix it either. The deepest
+# payload and the longest root belong to DIFFERENT fixtures, so a single global constant is the
+# product of two independent maxima: it refuses roots that would have worked while still not
+# proving that the one deep fixture fits. A budget assertion needs the payload, so it belongs
+# where the payload is known - Assert-FrameworkTestWorktreePathBudget in _worktree-fixture.ps1 is
+# that shape, and it is the one caller that can name its own committish.
+function New-TestFixtureRoot {
+    param([Parameter(Mandatory = $true)][string]$NameHint)
+
+    $safe = ($NameHint -replace '[^A-Za-z0-9]+', '-').Trim('-')
+    if ([string]::IsNullOrWhiteSpace($safe)) {
+        throw "New-TestFixtureRoot: -NameHint must contain at least one alphanumeric character."
+    }
+
+    $path = Join-Path (Get-TestRunRoot) ($safe + "-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+    New-Item -ItemType Directory -Path $path -Force | Out-Null
+    return $path
+}
+
+# Ownership is decided by Test-OwnerProcessLive in _ownership.ps1: a dead owner is proof of
+# abandonment, and so is a live owner that started after the root was created, because
+# Windows reuses pids. Age is still not ownership and no threshold is used here.
 #
 # Names that do not carry a pid are reported orphaned. The caller has already
 # established the directory is a run root, and an unparseable name cannot be
 # attributed to a live process by any other means.
+#
+# -Directory rather than -Name because the name and the creation time have to come from the
+# same directory. Two parameters would let a caller pair one root's name with another's
+# timestamp, and the only production caller - the reaper in run-all-tests.ps1 - already holds
+# the object.
 function Test-TestRunRootOrphaned {
-    param([Parameter(Mandatory=$true)][string]$Name)
+    param([Parameter(Mandatory=$true)][System.IO.DirectoryInfo]$Directory)
 
-    $segments = $Name.Split("-")
+    # A directory that is not there is not residue anyone can collect, and its
+    # CreationTimeUtc would be the 1601 epoch - a time every live process started after, so
+    # it would read as orphaned for a reason that has nothing to do with ownership.
+    # [System.IO.DirectoryInfo] coerces from a string, so a caller that passes a bare name
+    # reaches exactly that.
+    if (-not $Directory.Exists) {
+        return $false
+    }
+
+    $segments = $Directory.Name.Split("-")
     if ($segments.Count -lt 5) {
         return $true
     }
@@ -171,7 +307,7 @@ function Test-TestRunRootOrphaned {
         return $true
     }
 
-    return ($null -eq (Get-Process -Id $ownerPid -ErrorAction SilentlyContinue))
+    return (-not (Test-OwnerProcessLive -OwnerPid $ownerPid -CreatedUtc $Directory.CreationTimeUtc))
 }
 
 # Fixture repos git-init into TEMP, which inherits the DEVELOPER'S global git
@@ -189,8 +325,14 @@ function Test-TestRunRootOrphaned {
 # The config used to be written to a fixed TEMP path shared by every run. The content
 # is a constant, so concurrent runs wrote identical bytes and the sharing was almost
 # safe - but WriteAllText is not atomic, so a run of a second checkout could read the
-# file while another was rewriting it and get a truncated config. Inside the run root
-# there is exactly one writer.
+# file while another was rewriting it and get a truncated config. Moving it inside the
+# run root was believed to leave exactly one writer. It did not. The run root is per RUN,
+# not per process, and the parallel runner exports it to every child, so the same path
+# went from two occasional writers to as many as eight simultaneous ones. That claim was
+# recorded here as an invariant rather than as the assumption it was, which is why the
+# change that falsified it went unnoticed for so long: a reader checks a stated invariant
+# against the code below it, not against the callers above it. The writer count is no
+# longer what makes this safe - the publish is. See the rename in the body.
 function Initialize-GitTestIsolation {
     $configPath = Join-Path (Get-TestRunRoot) "gitconfig"
 
@@ -213,7 +355,38 @@ function Initialize-GitTestIsolation {
         "`tdefaultBranch = master"
     )
 
-    [System.IO.File]::WriteAllText($configPath, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    # Create-if-absent, published by rename. Every process that dot-sources this file
+    # calls this function, and under the parallel runner up to eight of them resolve the
+    # same path inside one shared run root, so the write cannot be a plain WriteAllText
+    # to $configPath: that opens the destination for truncation. A sibling READING it
+    # through GIT_CONFIG_GLOBAL at that moment gets a truncated config; a sibling WRITING
+    # it at that moment gets "the process cannot access the file because it is being used
+    # by another process" and takes an unrelated test down with it. Staging under a unique
+    # name and renaming into place means the destination is only ever created whole, and
+    # only ever created once. The Test-Path is an optimisation, not the guard - two
+    # processes can both pass it - and the loser of the rename is right to discard its
+    # copy, because the bytes are a constant and the winner wrote the same ones.
+    # -PathType Leaf on both checks, because "something occupies that name" is not the
+    # question being asked either time. A directory there satisfies a bare Test-Path,
+    # which would skip the publish and then point GIT_CONFIG_GLOBAL at a path git cannot
+    # read as a config - silently, and looking exactly like isolation.
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        $stagePath = $configPath + ".stage-" + $PID + "-" + [guid]::NewGuid().ToString("N")
+        [System.IO.File]::WriteAllText($stagePath, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        try {
+            [System.IO.File]::Move($stagePath, $configPath)
+        } catch {
+            # Losing the rename is the expected outcome of a tie, not an error. Any other
+            # failure leaves the destination absent, and pointing GIT_CONFIG_GLOBAL at a
+            # file that does not exist would hand the suite straight back to the global
+            # config of whoever is running it - the one thing this function exists to
+            # prevent. So the swallow is conditional on the file being there, whoever put
+            # it there.
+            Remove-Item -LiteralPath $stagePath -Force -ErrorAction SilentlyContinue
+            if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw }
+        }
+    }
+
     $env:GIT_CONFIG_GLOBAL = $configPath
     return $configPath
 }

@@ -39,8 +39,7 @@ function New-DeploymentReworkHandoff {
 }
 
 $results += Run-Test "deployment->implementation with rebase_count>=1 validates (no gate decision)" {
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("vh_a_" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    $root = New-TestFixtureRoot -NameHint "vh-a"
     try {
         $hf = Join-Path $root "handoff.json"
         New-DeploymentReworkHandoff -Path $hf -RebaseCount 1
@@ -57,8 +56,7 @@ $results += Run-Test "deployment->implementation with rebase_count>=1 validates 
 }
 
 $results += Run-Test "deployment->implementation with rebase_count=0 and no gate decision is rejected" {
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("vh_b_" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    $root = New-TestFixtureRoot -NameHint "vh-b"
     try {
         $hf = Join-Path $root "handoff.json"
         New-DeploymentReworkHandoff -Path $hf -RebaseCount 0

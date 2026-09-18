@@ -8,7 +8,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 
 $results = @()
 
@@ -21,8 +21,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-groomer-reason-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "groomer-reason"
 
 try {
     $projectRoot = Join-Path $tempRoot "groomer-reason-app"
@@ -124,14 +123,14 @@ Separate ready item that must not rewrite another task's handoff reason.
 
         Push-Location $projectRoot
         try {
-            $factoryCmd = Invoke-ExternalCommand {
-                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            $crucibleCmd = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                     -Init -ProjectRoot $projectRoot -TaskId "C-100" -Quiet
             }
         } finally {
             Pop-Location
         }
-        Assert-Result -Name "factory -Init exit" -Condition ($factoryCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $factoryCmd.ExitCode + ". Output: " + ($factoryCmd.Output -join "`n"))
+        Assert-Result -Name "crucible -Init exit" -Condition ($crucibleCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $crucibleCmd.ExitCode + ". Output: " + ($crucibleCmd.Output -join "`n"))
 
         $taskFile = Join-Path $projectRoot ".crucible/session/C-100/grooming/task.md"
         Assert-Result -Name "grooming task.md exists" -Condition (Test-Path -LiteralPath $taskFile) -FailureMessage "expected grooming/task.md to exist"

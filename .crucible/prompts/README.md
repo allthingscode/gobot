@@ -1,7 +1,9 @@
-<!-- prompt_version: readme-v1 -->
+<!-- prompt_version: readme-v3 -->
 # Prompt Library
 
 Ultra-short prompts for common tasks. Use these instead of verbose commands.
+
+The phrases in this file are human shorthand. They are not a second routing table. When you need an agent to load a specific procedure, paste the trigger from `sops/registry.md` or the **Trigger form:** line in the SOP itself. If a short phrase here and a trigger form disagree, the SOP wins.
 
 ## For Humans vs For Agents
 
@@ -11,7 +13,7 @@ Ultra-short prompts for common tasks. Use these instead of verbose commands.
 1. Recognize it as a **minimalist trigger** for your specialist workflow.
 2. Immediately read `.crucible/session/handoffs/` and your specialist's `task.md`.
 3. Understand that **all technical details, reasons, and objectives** are in the data files, not the prompt.
-4. Follow the workflow defined in your specialist's **machine template** (e.g., `implementation_prompt.md`). Note that documentation files (e.g., `docs/implementation-phase-reference.md`) are for human reference and non-factory manual invocations only; do not rely on them for operating instructions in the automated pipeline.
+4. Follow the workflow defined in your specialist's **machine template** (e.g., `implementation_prompt.md`). Note that documentation files (e.g., `docs/implementation-phase-reference.md`) are for human reference and manual invocations only; do not rely on them for operating instructions in the automated pipeline.
 
 The prompt's only job is to trigger the correct persona and target ID. All context is "pulled" by the agent from the file system, not "pushed" through the prompt.
 
@@ -37,7 +39,7 @@ agent "[PROMPT]"
 ### Research & Planning
 - `Researcher: Investigate [TOPIC]` - Gap analysis, library evaluation
 - `Researcher: Audit [project name]` - Structured quality audit of the adopter project
-- `Researcher: Audit Dev Factory` - Structured quality audit of the Dev Factory (internal + live framework comparison)
+- `Researcher: Audit Crucible` - Structured quality audit of Crucible (internal + live framework comparison)
 - `Groomer: Review and update the backlog` - Full grooming session
 - `Groomer: Next item` - Find next highest priority item
 - `Groomer: Prioritize backlog` - Re-prioritize all items
@@ -45,7 +47,7 @@ agent "[PROMPT]"
 ### Implementation
 - `Architect: Design F-XXX` - Create implementation plan for feature/bug
 - `Architect: Implement F-XXX` - Design + code a feature
-- `Controller: Research + Groom [TOPIC]` - Batch research and grooming
+- `Orchestrator: Research + Groom [TOPIC]` - Batch research and grooming
 
 ### Review & Validation
 - `Reviewer: Review F-XXX` - Full code review of implementation

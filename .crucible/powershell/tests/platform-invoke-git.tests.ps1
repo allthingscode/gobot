@@ -31,8 +31,7 @@ try {
     }
 
     $results += Run-Test -Name "ErrorActionPreference is restored even when callee throws" -Body {
-        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-test-git-" + [guid]::NewGuid().ToString("N"))
-        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        $tempDir = New-TestFixtureRoot -NameHint "invoke-git-throws"
         try {
             $prevEAP = $ErrorActionPreference
             Assert-Result -Name "EAP is Stop before call" -Condition ($prevEAP -eq "Stop") -FailureMessage "Expected EAP Stop"
@@ -49,8 +48,7 @@ try {
     }
 
     $results += Run-Test -Name "Stderr-only exit-0 command yields exit 0 with empty Lines" -Body {
-        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-test-git-" + [guid]::NewGuid().ToString("N"))
-        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        $tempDir = New-TestFixtureRoot -NameHint "invoke-git-stderr0"
         try {
             $initRes = Invoke-Git -Directory $tempDir init --quiet
             Assert-Result -Name "init success" -Condition ($initRes.ExitCode -eq 0) -FailureMessage "git init failed"

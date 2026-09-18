@@ -1,16 +1,16 @@
-# Dev Factory Policy (Canonical)
+# Crucible Policy (Canonical)
 
-> **Source of Truth**: This file is the authoritative definition of Dev Factory operational policies. Documentation and prompt templates must be synchronized with this file.
+> **Source of Truth**: This file is the authoritative definition of Crucible operational policies. Documentation and prompt templates must be synchronized with this file.
 
 ## 1. FSM Phase Sequence (The DAG)
 
-The factory operates as a strict Directed Acyclic Graph (DAG). Self-loops and out-of-order transitions are prohibited.
+Crucible operates as a strict Directed Acyclic Graph (DAG). Self-loops and out-of-order transitions are prohibited.
 
-- **grooming** → `implementation` | `research` | `done` (terminal; requires a recorded human decision)
-- **research** → `grooming`
-- **implementation** → `verification`
-- **verification** → `deployment` (Approved) | `implementation` (Changes Requested)
-- **deployment** → `done` | `implementation` (if rejected/rework requested) | `grooming` (if production issue threshold met)
+- **grooming** -> `implementation` | `research` | `verification` (Stub-Only Close-Out) | `done` (terminal; requires a recorded human decision)
+- **research** -> `grooming`
+- **implementation** -> `verification`
+- **verification** -> `deployment` (Approved) | `implementation` (Changes Requested)
+- **deployment** -> `done` | `implementation` (if rejected/rework requested) | `grooming` (if production issue threshold met)
 
 ## 2. Circuit Breakers
 
@@ -23,16 +23,18 @@ Circuit breakers prevent "infinite loops" and budget escalation by blocking task
 | **Token Budget** | `cumulative_handoff_count` exceeds the task's tier ceiling (see 2.1) | BLOCK task; route to Human |
 | **Merge Conflict** | > 3 rebase attempts | BLOCK task; route to Human |
 | **Fabricated Artifacts** | Missing paths in `artifacts` field | BLOCK task; route to Human |
-| **Verification Failure** | The project's `verification.full` checks fail when the factory re-runs them in the worktree after the Reviewer reports APPROVED. The first failure is a retry, not a block; a repeat failure fires the breaker | BLOCK task; route to implementation |
+| **Verification Failure** | The project's `verification.full` checks fail when Crucible re-runs them in the worktree after the Reviewer reports APPROVED. The first failure is a retry, not a block; a repeat failure fires the breaker | BLOCK task; route to implementation |
 | **Git Hook Bypass** | Reports or references `--no-verify` or equivalent hook bypass | BLOCK task; route to Human |
 
-The **Handoff Retry Limit** is a defense-in-depth backstop, not a live-accruing breaker: no same-phase (`X -> X`) transition exists in the FSM's allowed-transition map, so a schema-valid handoff can never satisfy its `source_phase == target_phase` predicate. It fires only if a same-phase handoff bypasses validation and reaches the breaker with `handoff_retry_count > 2`. Persistent re-review failure — a task repeatedly bounced back for rework — is caught live by the **Review Strike Rule** instead.
+The **Handoff Retry Limit** is a defense-in-depth backstop, not a live-accruing breaker: no same-phase (`X -> X`) transition exists in the FSM's allowed-transition map, so a schema-valid handoff can never satisfy its `source_phase == target_phase` predicate. It fires only if a same-phase handoff bypasses validation and reaches the breaker with `handoff_retry_count > 2`. Persistent re-review failure - a task repeatedly bounced back for rework - is caught live by the **Review Strike Rule** instead.
 
 ### 2.1 Budget Overage Protocol
 
 A task's `budget_tier` sets the ceiling on its `cumulative_handoff_count`. The table
-below is generated from `$script:BUDGET_CEILINGS` in `powershell/factory-lib.ps1`;
-change the ceilings there and run `powershell/gates/check-generated-docs.ps1 -Write`.
+below is generated from `$script:BUDGET_CEILINGS` in `powershell/crucible-lib.ps1`;
+change the ceilings there and regenerate.
+The regenerator is `powershell/gates/check-generated-docs.ps1 -Write`, which runs in the framework repo only and is not part of a bundle.
+An adopter who changes these ceilings edits the table below by hand.
 
 <!-- crucible:generated budget-tier-ceilings -->
 | Tier | Handoff ceiling |
@@ -56,7 +58,7 @@ Known degraded kinds:
 
 | Kind | Outcome | Meaning |
 |---|---|---|
-| `review_strike_2` | `warned` | When `review_strike_count` reaches 2, `factory.ps1` emits a visible DEGRADED warning and logs a `degraded` event. The Architect MUST treat this as a directive to reduce scope - split the task, defer the contentious part, or simplify - rather than attempting a full re-implementation. If the blocker requires human input, escalate before consuming the last strike. |
+| `review_strike_2` | `warned` | When `review_strike_count` reaches 2, `crucible.ps1` emits a visible DEGRADED warning and logs a `degraded` event. The Architect MUST treat this as a directive to reduce scope - split the task, defer the contentious part, or simplify - rather than attempting a full re-implementation. If the blocker requires human input, escalate before consuming the last strike. |
 | `file_affinity_unverifiable` | `unverifiable` | The scope-violation gate could not run because the spec declared no affected-files section. Human review is the remaining scope check. |
 | `file_affinity_scope` | `warned` | The scope gate ran and the handoff `file_affinity` listed paths the spec did not mention. |
 | `task_checklist` | `warned` | `task.md` checklist content had malformed or unchecked optional items. |
@@ -70,12 +72,18 @@ Known degraded kinds:
 
 Duplicate handoffs are reported under handoff quality. They are not a degradation and MUST NOT emit `degraded`.
 
+Kinds carried by other event types. These are not degradations, and reporting MUST NOT count them as reduced assurance:
+
+| Kind | Event | Meaning |
+|---|---|---|
+| `deprecated_entrypoint_factory_ps1` | `deprecated_entrypoint` | A call arrived through `powershell/factory.ps1`, the forwarding shim the entrypoint rename left at the old path. The call was forwarded to `crucible.ps1` unchanged and nothing about it ran with reduced assurance. The event exists so the shim's deletion criterion is a query rather than a guess - see the framework repo's `docs/proposals/crucible-rename-and-factory-migration.md`, D2, which is not part of a bundle. |
+
 ### 2.3 Model Selection
 
-The model a specialist runs on is **computed by the factory, not fixed per role**, in two stages:
+The model a specialist runs on is **computed by Crucible, not fixed per role**, in two stages:
 
-1. **Activity → capability tier.** `Get-SpecialistModel` derives an abstract tier — `strong`, `default`, or `light` — from the handoff's `target_phase`, `budget_tier`, and `design_required`. This stage is provider-agnostic; it knows nothing about specific model names.
-2. **Tier → concrete model for the active target.** `Get-ConfiguredModel` resolves that tier to a real model for the active `-Target` (`claude` | `codex` | `antigravity`; `agent` uses the `claude` row), reading the editable `models:` block in `config.yaml`. The factory prints the result as a `[RECOMMENDED MODEL]` line next to the dispatch command; the orchestrator dispatches with it and keeps no per-role table of its own.
+1. **Activity -> capability tier.** `Get-SpecialistModel` derives an abstract tier - `strong`, `default`, or `light` - from the handoff's `target_phase`, `budget_tier`, and `design_required`. This stage is provider-agnostic; it knows nothing about specific model names.
+2. **Tier -> concrete model for the active target.** `Get-ConfiguredModel` resolves that tier to a real model for the active `-Target` (`claude` | `codex` | `antigravity`; `agent` uses the `claude` row), reading the editable `models:` block in `config.yaml`. Crucible prints the result as a `[RECOMMENDED MODEL]` line next to the dispatch command; the orchestrator dispatches with it and keeps no per-role table of its own.
 
 The tier policy defaults to the `default` workhorse and escalates to `strong` only where the activity warrants deeper reasoning:
 
@@ -86,7 +94,7 @@ The tier policy defaults to the `default` workhorse and escalates to `strong` on
 | implementation / Architect | `default` | `design_required` is true, **or** `budget_tier` is `high`/`extended` |
 | verification / Reviewer | `default` | `budget_tier` is `high` or `extended` |
 | deployment / Operator | `light` | `budget_tier` is `high`/`extended` (escalates only to `default`) |
-| (orchestrator) | `default` | never — orchestration is procedural verification |
+| (orchestrator) | `default` | never - orchestration is procedural verification |
 
 The concrete model each tier maps to lives in `config.yaml` under `models:` (see `docs/config-reference.md`) so it is easy to update as providers ship new models. Framework defaults:
 
@@ -96,7 +104,7 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 | `codex` | gpt-5.5 | gpt-5.5 | gpt-5.4 |
 | `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.5 Flash (High) | Gemini 3.5 Flash (Medium) |
 
-`design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming→implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by the factory.
+`design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming->implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by Crucible.
 
 ## 3. Human Gates
 
@@ -112,43 +120,43 @@ Transitions across the "Trust Boundary" require a formal human decision.
 
 A Reviewer MUST verify these 7 steps in order. A failure at any step blocks approval.
 
-1. **Tests pass** — run the project's `verification.full` test command from `.crucible/config.yaml` (e.g. `go test`, `npm test`, `pytest`)
-2. **Vet / static analysis passes** — run the project's vet/lint commands from `.crucible/config.yaml` (e.g. `go vet`, `npm run lint`, `cargo clippy`)
-3. **Lint passes** — run the project's linter command from `.crucible/config.yaml` (e.g. `golangci-lint`, `ruff`, `eslint`)
-4. **Doc-lint passes** — run the project's doc-lint command if defined in `.crucible/config.yaml`
-5. **Config-format/validate check passes** — run the project's config-format/validate command if defined in `.crucible/config.yaml` (e.g. `config_check` command)
+1. **Tests pass** - run the project's `verification.full` test command from `.crucible/config.yaml` (e.g. `go test`, `npm test`, `pytest`)
+2. **Vet / static analysis passes** - run the project's vet/lint commands from `.crucible/config.yaml` (e.g. `go vet`, `npm run lint`, `cargo clippy`)
+3. **Lint passes** - run the project's linter command from `.crucible/config.yaml` (e.g. `golangci-lint`, `ruff`, `eslint`)
+4. **Doc-lint passes** - run the project's doc-lint command if defined in `.crucible/config.yaml`
+5. **Config-format/validate check passes** - run the project's config-format/validate command if defined in `.crucible/config.yaml` (e.g. `config_check` command)
 6. **Acceptance Criteria met** (mapped 1:1 to spec)
 7. **Scope bounded** (strictly within `file_affinity`)
 
-> The specific commands in steps 1–5 come from the project's `.crucible/config.yaml`, not from Crucible itself. Crucible is language-agnostic; the examples in this repo use Go (`go test`, `go vet`, `golangci-lint`) because the reference application is written in Go.
+> The specific commands in steps 1-5 come from the project's `.crucible/config.yaml`, not from Crucible itself. Crucible is language-agnostic; the examples in this repo use Go (`go test`, `go vet`, `golangci-lint`) because the reference application is written in Go.
 
 ## 5. Pipeline State Machine
 
-The factory tracks each task through a fixed set of states. Only `factory.ps1` transitions states — specialists never update state directly.
+Crucible tracks each task through a fixed set of states. Only `crucible.ps1` transitions states - specialists never update state directly.
 
 ```
-                    ┌─────────────────────────────────────────┐
-                    │                                         │
-         [New item] │                             [Rework]    │
-              ↓     │                                ↑        │
-           READY ───┤                         READY_FOR_REVIEW│
-              │     │                                │        │
-         [Groomer]  │                          [Architect]    │
-              ↓     │                                │        │
-        IN_PROGRESS │                    ┌───────────┘        │
-              │     │                    │  [Reviewer: APPROVED]
-         [Research] │                    ↓                    │
-              ↓     │           READY_FOR_DEPLOY              │
-        RESEARCH_GATE (Human)            │                    │
-              │                     [Operator]                │
-              ↓                          │                    │
-           READY ◄───────────────────────┤                    │
-                                         │ [Human Gate]       │
-                                         ↓                    │
-                                    PRODUCTION                │
-                                    (or RESOLVED)             │
-                                                              │
-        Any state ─────── [Circuit Breaker] ──────► BLOCKED ─┘
+                    +-----------------------------------------+
+                    |                                         |
+         [New item] |                             [Rework]    |
+              v     |                                ^        |
+           READY ---+                         READY_FOR_REVIEW|
+              |     |                                |        |
+         [Groomer]  |                          [Architect]    |
+              v     |                                |        |
+        IN_PROGRESS |                    +-----------+        |
+              |     |                    |  [Reviewer: APPROVED]
+         [Research] |                    v                    |
+              v     |           READY_FOR_DEPLOY              |
+        RESEARCH_GATE (Human)            |                    |
+              |                     [Operator]                |
+              v                          |                    |
+           READY <-----------------------+                    |
+                                         | [Human Gate]       |
+                                         v                    |
+                                    PRODUCTION                |
+                                    (or RESOLVED)             |
+                                                              |
+        Any state ------- [Circuit Breaker] ------> BLOCKED -+
                                                   (human resolves)
 ```
 
@@ -157,28 +165,28 @@ The factory tracks each task through a fixed set of states. Only `factory.ps1` t
 | State | Meaning | Who sets it |
 |-------|---------|-------------|
 | `Ready` | Eligible for next pipeline step | Groomer, Operator (on cycle), or human |
-| `In Progress` | Actively being worked | factory.ps1 on session start |
-| `Research Gate` | Awaiting human approval of Researcher findings | factory.ps1 |
-| `Ready for Review` | Architect complete; awaiting Reviewer | factory.ps1 |
-| `Ready for Deploy` | Reviewer approved; awaiting Operator | factory.ps1 |
+| `In Progress` | Actively being worked | crucible.ps1 on session start |
+| `Research Gate` | Awaiting human approval of Researcher findings | crucible.ps1 |
+| `Ready for Review` | Architect complete; awaiting Reviewer | crucible.ps1 |
+| `Ready for Deploy` | Reviewer approved; awaiting Operator | crucible.ps1 |
 | `Production` | Merged to main branch | Operator |
-| `Resolved` | Chore/bug closed without a deploy | Operator |
-| `Blocked` | Circuit breaker fired; awaiting human decision | factory.ps1 |
+| `Resolved` | Closed without a deploy, whatever the item type | Operator |
+| `Blocked` | Circuit breaker fired; awaiting human decision | crucible.ps1 |
 
-**Valid transitions** (all others are hard-blocked by factory.ps1):
+**Valid transitions** (all others are hard-blocked by crucible.ps1):
 
 ```
-Ready            → In Progress        (factory on Groomer/Architect session start)
-In Progress      → Research Gate      (Researcher session complete)
-In Progress      → Ready for Review   (Architect session complete)
-In Progress      → Done               (Groomer closure session complete; requires a recorded human decision)
-Research Gate    → In Progress        (human approves Research Gate)
-Ready for Review → Ready for Deploy   (Reviewer APPROVED)
-Ready for Deploy → Production         (Operator merge complete)
-Ready for Deploy → In Progress        (Reviewer sent back to Architect — strike counted)
-Ready for Deploy → In Progress        (Operator Human Gate REJECTED — rework requested)
-Any              → Blocked            (circuit breaker)
-Blocked          → Ready              (human resolution + factory -Recover)
+Ready            -> In Progress        (Crucible on Groomer/Architect session start)
+In Progress      -> Research Gate      (Researcher session complete)
+In Progress      -> Ready for Review   (Architect session complete)
+In Progress      -> Done               (Groomer closure session complete; requires a recorded human decision)
+Research Gate    -> In Progress        (human approves Research Gate)
+Ready for Review -> Ready for Deploy   (Reviewer APPROVED)
+Ready for Deploy -> Production         (Operator merge complete)
+Ready for Deploy -> In Progress        (Reviewer sent back to Architect - strike counted)
+Ready for Deploy -> In Progress        (Operator Human Gate REJECTED - rework requested)
+Any              -> Blocked            (circuit breaker)
+Blocked          -> Ready              (human resolution + Crucible -Recover)
 ```
 
 ## 6. Security & Isolation
@@ -189,28 +197,33 @@ Blocked          → Ready              (human resolution + factory -Recover)
 - **File Affinity**: Groomers define the scope boundary. Specialists must not edit files outside this boundary.
 - **No Push/Commit Shortcuts**: Only the Operator may merge to `master` and push to origin.
 
-### 6.1 File Affinity — Design Model & Validation Strength
+### 6.1 File Affinity - Design Model & Validation Strength
 
 `file_affinity` is a **forward-looking, deny-by-default allowlist** of the path prefixes a task is permitted to touch. It exists to **confine the blast radius** of an autonomous change (principle of least privilege / capability confinement; same posture as a firewall allowlist or GitHub `CODEOWNERS`).
 
-The blast-radius control is **not the list itself** — it is the **scope gate** that diffs the specialist's actual changes against the list. Enforcement strength is deliberately tiered, and this is settled design (do not re-litigate without a new, named failure mode):
+The blast-radius control is **not the list itself** - it is the **scope gate** that diffs the specialist's actual changes against the list. Enforcement strength is deliberately tiered, and this is settled design (do not re-litigate without a new, named failure mode):
 
 | Check | What it protects | Strength | Why |
 |---|---|---|---|
-| Actual diff ⊆ `file_affinity` | The real boundary | **Hard, fail-closed** (block) | This is the security property. If scope can't be determined, block. |
+| Actual diff is a subset of `file_affinity` | The real boundary | **Hard, fail-closed** (block) | This is the security property. If scope can't be determined, block. |
 | `file_affinity` not *over-broad* vs the spec's Affected Files | Least privilege (minimize blast radius) | **Warn** | Over-breadth is the real blast-radius risk; surface it for narrowing. |
-| Declared `file_affinity` paths *exist on disk* | Authoring hygiene (catch typos) | **Warn only — never hard-fail** | See below. |
+| Declared `file_affinity` paths *exist on disk* | Authoring hygiene (catch typos) | **Warn only - never hard-fail** | See below. |
 
-**Why path-existence is warn-only, by construction:** `file_affinity` is a *scope boundary*, not a *manifest of existing files*. Any task that **creates** a file or package legitimately lists a target that does not exist at grooming time. Hard-failing on non-existence would conflate "boundary" with "manifest" and break every file-creating task — a category error. (`CODEOWNERS` follows the same rule: a pattern matching no files is a warning, never a failure.) A non-existent allowlist entry is also **not a safety issue** — an entry that matches nothing grants nothing; only *over-broad* entries widen blast radius.
+**Why path-existence is warn-only, by construction:** `file_affinity` is a *scope boundary*, not a *manifest of existing files*. Any task that **creates** a file or package legitimately lists a target that does not exist at grooming time. Hard-failing on non-existence would conflate "boundary" with "manifest" and break every file-creating task - a category error. (`CODEOWNERS` follows the same rule: a pattern matching no files is a warning, never a failure.) A non-existent allowlist entry is also **not a safety issue** - an entry that matches nothing grants nothing; only *over-broad* entries widen blast radius.
 
-**Implication for authors and reviewers:** keep `file_affinity` as **narrow as possible** (least privilege) and **consistent with reality** — a path that doesn't resolve usually means the *real* file is outside the declared scope, which will make the fail-closed gate correctly *block a legitimate edit*. Treat the existence `[WARN]` from `validate-backlog.ps1` as a signal to fix the scope, not noise. (History: finding D46 — `validate-backlog.ps1` warns on non-resolvable `file_affinity` entries, `-ProjectRoot`-aware; intentionally warn, not fail, per the reasoning above.)
+**Implication for authors and reviewers:** keep `file_affinity` as **narrow as possible** (least privilege) and **consistent with reality** - a path that doesn't resolve usually means the *real* file is outside the declared scope, which will make the fail-closed gate correctly *block a legitimate edit*. Treat the existence `[WARN]` from `validate-backlog.ps1` as a signal to fix the scope, not noise. (History: finding D46 - `validate-backlog.ps1` warns on non-resolvable `file_affinity` entries, `-ProjectRoot`-aware; intentionally warn, not fail, per the reasoning above.)
 
 ## 7. Handoff Validation & Quality Gates
 
-In addition to circuit breakers, `factory.ps1` enforces runtime validation gates before accepting handoffs:
+In addition to circuit breakers, `crucible.ps1` enforces runtime validation gates before accepting handoffs:
 
-- **Unchecked task.md Quality Gate**: `factory.ps1` blocks any handoff where the source specialist's `task.md` still contains unchecked `- [ ]` items.
-- **Budget Tier Cross-Validation**: `factory.ps1` reads the backlog spec frontmatter at task initialization and overrides the handoff's `budget_tier` if it mismatches. Specialists cannot escalate their own budget tier.
-- **Log-Derived Handoff Count**: `factory.ps1` counts `session_end` events in the task-scoped pipeline log and overrides the agent-reported `cumulative_handoff_count` if it is lower (preventing budget under-reporting).
-- **Scan Limit**: `factory.ps1` auto-kickoff scans at most 5 items in a single run.
-- **Assertion-Deletion Gate**: Pre-push checks (`check-assertion-deletion.ps1`) diff test files (`*.tests.ps1`) for dropped `Assert-Result` calls. Pushes containing deleted or renamed assertions are rejected unless every removing commit carries a non-empty `Assertions-Removed: <reason>` trailer.
+- **Unchecked task.md Quality Gate**: `crucible.ps1` blocks any handoff where the source specialist's `task.md` still has an item under `## Task List` marked `[ ]` (unchecked) or `[/]` (in progress), or carrying a marker it does not recognize. Items outside that section warn without blocking, and `[-]` marks an item as deliberately skipped. The failure names the offending lines, not only how many there are.
+- **Budget Tier Cross-Validation**: `crucible.ps1` reads the backlog spec frontmatter at task initialization and overrides the handoff's `budget_tier` if it mismatches. Specialists cannot escalate their own budget tier.
+- **Log-Derived Handoff Count**: `crucible.ps1` counts `session_end` events in the task-scoped pipeline log and overrides the agent-reported `cumulative_handoff_count` if it is lower (preventing budget under-reporting).
+- **Scan Limit**: `crucible.ps1` auto-kickoff scans at most 5 items in a single run.
+- **Backlog Integrity**: On a `grooming` or `deployment` handoff, `crucible.ps1` runs `validate-backlog.ps1` against the project's backlog. A non-zero exit blocks the handoff (exit 2) with "YOU must fix BACKLOG.md before proceeding."
+- **Dev Log Integrity**: On a `deployment` handoff whose target is not `implementation`, and which is not the task's bootstrap handoff, a file must exist at `.crucible/dev-logs/UNPUBLISHED_LOGS.md` and pass `validate-dev-log.ps1`. A missing file or a failed PII/secret scan blocks the handoff (exit 2).
+- **Workspace Cleanliness**: Same trigger as Dev Log Integrity. Any untracked or uncommitted path outside `.crucible/`, `.agent-workspaces/`, `.gemini/`, `.antigravitycli/`, `.vscode/`, and `vendor/` blocks the handoff (exit 2).
+- **Assertion-Deletion Gate** (framework repo only; the gate is not part of a bundle and an adopter's hooks do not run it): `check-assertion-deletion.ps1` diffs test files (`*.tests.ps1`) for dropped `Assert-Result` calls, and runs at two points. At `commit-msg` it reads the index and refuses the commit unless the message being written carries a non-empty `Assertions-Removed: <reason>` trailer; merge commits skip this leg, because a merge's first-parent diff restates the merged branch. At `pre-push` it walks every commit in the push range and charges a commit for a name dropped against every parent of that commit, so a merge is charged for a removal that appears on neither parent and not for work already on a parent. The commit-msg leg is where the trailer is a one-line edit for ordinary commits; the pre-push leg is the backstop for removals that reached the range without one.
+
+The Baseline Cleanliness Probe at task start is advisory and does not block. There is no Task Dependency Gate.

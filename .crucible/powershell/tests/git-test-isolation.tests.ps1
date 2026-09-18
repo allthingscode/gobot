@@ -10,8 +10,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 # file exists and would pass even if git ignored it.
 
 $results = @()
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-gitiso-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "gitiso"
 
 function New-FixtureRepo {
     param([Parameter(Mandatory=$true)][string]$Name)
@@ -29,6 +28,89 @@ function Write-LfFile {
         [Parameter(Mandatory=$true)][string]$Content
     )
     [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# The cases at the bottom of this file load _harness.ps1 in child PROCESSES. The hazard
+# they cover is between processes - run-all-tests.ps1 exports CRUCIBLE_TEST_ROOT, so up
+# to eight children resolve one gitconfig path - and re-invoking the function in this
+# process would exercise a single writer and prove nothing about any of it.
+$PS_HOST = (Get-Process -Id $PID).Path
+$HARNESS_PATH = Join-Path $PSScriptRoot "_harness.ps1"
+
+# The bytes Initialize-GitTestIsolation publishes, held here as a literal. Reading them
+# back from $env:GIT_CONFIG_GLOBAL instead would compare the function against itself, so
+# a truncated or doubled file would match whatever produced it and every byte-exactness
+# assertion below would pass vacuously.
+$EXPECTED_CONFIG = (@(
+    "[core]",
+    "`tautocrlf = false",
+    "`tsafecrlf = false",
+    "[user]",
+    "`tname = Crucible Test",
+    "`temail = test@crucible.invalid",
+    "[merge]",
+    "`tautoedit = no",
+    "[init]",
+    "`tdefaultBranch = master"
+) -join "`n") + "`n"
+
+# Not Get-TestRunRoot: these cases need a root that starts empty and that no other test
+# file is sharing. The real one already holds this run's gitconfig, and eight children
+# writing into it would be the very collision under test. These sit under this file's own
+# fixture root, which is inside the run root without being it - item 88 moved the fixture
+# root there, and that changed where these live without changing what they are.
+function New-IsolatedRunRoot {
+    param([Parameter(Mandatory=$true)][string]$Name)
+    $path = Join-Path $tempRoot ("root-" + $Name)
+    New-Item -ItemType Directory -Path $path -Force | Out-Null
+    return $path
+}
+
+function New-HarnessLoaderScript {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    Write-LfFile -Path $Path -Content (
+        ". `"$HARNESS_PATH`"`n" +
+        "Write-Host (`"CONFIG=`" + `$env:GIT_CONFIG_GLOBAL)`n" +
+        "Write-Host (`"ROOT=`" + `$env:CRUCIBLE_TEST_ROOT)`n" +
+        "exit 0`n")
+}
+
+# CRUCIBLE_TEST_ROOT is overridden on the child's environment block rather than by
+# assigning to $env: here. This process is itself running inside a run root, and
+# reassigning the variable would move its own fixtures out from under it for the rest
+# of the file.
+function Start-HarnessLoad {
+    param(
+        [Parameter(Mandatory=$true)][string]$ScriptPath,
+        [string]$TestRoot
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $PS_HOST
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    if ([string]::IsNullOrEmpty($TestRoot)) {
+        [void]$psi.EnvironmentVariables.Remove("CRUCIBLE_TEST_ROOT")
+    } else {
+        $psi.EnvironmentVariables["CRUCIBLE_TEST_ROOT"] = $TestRoot
+    }
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo = $psi
+    [void]$p.Start()
+    return $p
+}
+
+# Both pipes are drained before the wait. A child that fills a redirected pipe blocks on
+# the write, and a parent that waited first would deadlock against it. The loader script
+# emits two lines, so reading the streams in sequence is safe here.
+function Complete-HarnessLoad {
+    param([Parameter(Mandatory=$true)]$Process)
+    $out = $Process.StandardOutput.ReadToEnd()
+    $err = $Process.StandardError.ReadToEnd()
+    $Process.WaitForExit()
+    return [pscustomobject]@{ ExitCode = $Process.ExitCode; Output = ($out + $err) }
 }
 
 try {
@@ -129,6 +211,190 @@ try {
         try { Assert-Result -Name "inner" -Condition $true } catch { $omitted = $true }
         Assert-Result -Name "omitting the argument is still an error" -Condition $omitted `
             -FailureMessage "FailureMessage stopped being mandatory"
+    }
+
+    # The reported failure, made deterministic. crucible.tests.ps1 died after 1.82s on
+    # "the process cannot access the file ... because it is being used by another
+    # process", which is what an unconditional WriteAllText gets when a sibling has the
+    # destination open. Holding it open on purpose turns that race into a certainty.
+    $results += Run-Test -Name "A harness load survives a gitconfig another process holds open" -Body {
+        $root = New-IsolatedRunRoot -Name "locked"
+        $configPath = Join-Path $root "gitconfig"
+        Write-LfFile -Path $configPath -Content $EXPECTED_CONFIG
+
+        $handle = [System.IO.File]::Open($configPath, [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        try {
+            # The statement the function used to run, executed here against the same
+            # handle. Without it this case would show that the new code passes without
+            # ever establishing that the old code would not, which is the only reason
+            # the case is worth its runtime.
+            $unconditionalWriteThrew = $false
+            try {
+                [System.IO.File]::WriteAllText($configPath, $EXPECTED_CONFIG, (New-Object System.Text.UTF8Encoding($false)))
+            } catch {
+                $unconditionalWriteThrew = $true
+            }
+            Assert-Result -Name "the unconditional write still fails against a held file" `
+                -Condition $unconditionalWriteThrew `
+                -FailureMessage "WriteAllText succeeded against a FileShare.None handle, so this case proves nothing"
+
+            $script = Join-Path $root "load.ps1"
+            New-HarnessLoaderScript -Path $script
+            $r = Complete-HarnessLoad -Process (Start-HarnessLoad -ScriptPath $script -TestRoot $root)
+            Assert-Result -Name "the harness loads anyway" -Condition ($r.ExitCode -eq 0) `
+                -FailureMessage ("a harness load failed against a held gitconfig: " + $r.Output)
+            Assert-Result -Name "and reports no sharing violation" `
+                -Condition ($r.Output -notmatch 'being used by another process') `
+                -FailureMessage ("the sharing violation is back: " + $r.Output)
+        } finally {
+            $handle.Dispose()
+        }
+    }
+
+    # One writer per shared config is the fix, so a load that finds one must leave it
+    # alone. The sentinel is a git comment, which git ignores and an overwrite does not.
+    $results += Run-Test -Name "A later harness load does not rewrite a config already in the root" -Body {
+        $root = New-IsolatedRunRoot -Name "no-rewrite"
+        $configPath = Join-Path $root "gitconfig"
+        $sentinel = "# placed by the test; git ignores it and an overwrite does not`n"
+        Write-LfFile -Path $configPath -Content ($sentinel + $EXPECTED_CONFIG)
+
+        $script = Join-Path $root "load.ps1"
+        New-HarnessLoaderScript -Path $script
+        $r = Complete-HarnessLoad -Process (Start-HarnessLoad -ScriptPath $script -TestRoot $root)
+        Assert-Result -Name "the load succeeds" -Condition ($r.ExitCode -eq 0) `
+            -FailureMessage ("harness load failed: " + $r.Output)
+        # Asserted as the exact path, not merely as non-empty: the child inherits this
+        # process's GIT_CONFIG_GLOBAL through its environment block, so a function that
+        # stopped setting the variable would leave a plausible value behind.
+        Assert-Result -Name "it points at the config that was already there" `
+            -Condition ($r.Output -match ([regex]::Escape("CONFIG=" + $configPath))) `
+            -FailureMessage ("expected GIT_CONFIG_GLOBAL=" + $configPath + ", got: " + $r.Output)
+        Assert-Result -Name "the existing bytes are untouched" `
+            -Condition ([System.IO.File]::ReadAllText($configPath) -ceq ($sentinel + $EXPECTED_CONFIG)) `
+            -FailureMessage "the harness overwrote a gitconfig that was already in the run root"
+    }
+
+    # Eight because that is the runner's ThrottleLimit ceiling, and the root starts empty
+    # so every one of them reaches the write rather than short-circuiting on it. This is
+    # the collision as it actually happened: eight WriteAllText calls truncating one
+    # destination, rarely enough that the failure read as a flake in whichever test drew
+    # the short straw.
+    $results += Run-Test -Name "Eight concurrent harness loads share one run root without colliding" -Body {
+        $root = New-IsolatedRunRoot -Name "concurrent"
+        $script = Join-Path $root "load.ps1"
+        New-HarnessLoaderScript -Path $script
+
+        $procs = @()
+        for ($i = 0; $i -lt 8; $i++) {
+            $procs += Start-HarnessLoad -ScriptPath $script -TestRoot $root
+        }
+        $loads = @($procs | ForEach-Object { Complete-HarnessLoad -Process $_ })
+
+        $failed = @($loads | Where-Object { $_.ExitCode -ne 0 })
+        Assert-Result -Name "all eight loads succeed" -Condition ($failed.Count -eq 0) `
+            -FailureMessage ([string]$failed.Count + " of 8 concurrent loads failed: " + (($failed | ForEach-Object { $_.Output }) -join " | "))
+
+        $configPath = Join-Path $root "gitconfig"
+        Assert-Result -Name "the published config is byte-exact" `
+            -Condition ([System.IO.File]::ReadAllText($configPath) -ceq $EXPECTED_CONFIG) `
+            -FailureMessage "the shared config is not the canonical content: a concurrent write truncated or doubled it"
+
+        $strays = @(Get-ChildItem -LiteralPath $root -Filter "gitconfig.stage-*" -ErrorAction SilentlyContinue)
+        Assert-Result -Name "no staging files survive the publish" -Condition ($strays.Count -eq 0) `
+            -FailureMessage ([string]$strays.Count + " staging file(s) were left in the run root")
+    }
+
+    # The pid and the guid in the staging name are what keep eight simultaneous loads off
+    # one temporary file, and the concurrent case above cannot prove it: those eight can
+    # serialise by luck and pass with a fixed name, which is exactly what a mutation to a
+    # fixed name did. So this holds open the name the staging path collapses to when the
+    # suffix is dropped, alongside a stray left behind by a killed run, and requires the
+    # load to be undisturbed by either.
+    $results += Run-Test -Name "A staging file another process holds open does not disturb a load" -Body {
+        $root = New-IsolatedRunRoot -Name "held-stage"
+        $collapsed = Join-Path $root "gitconfig.stage"
+        Write-LfFile -Path $collapsed -Content "held open by this test"
+        Write-LfFile -Path (Join-Path $root "gitconfig.stage-999999-dead") -Content "left behind by a killed run"
+
+        $handle = [System.IO.File]::Open($collapsed, [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        try {
+            $script = Join-Path $root "load.ps1"
+            New-HarnessLoaderScript -Path $script
+            $r = Complete-HarnessLoad -Process (Start-HarnessLoad -ScriptPath $script -TestRoot $root)
+            Assert-Result -Name "the load succeeds" -Condition ($r.ExitCode -eq 0) `
+                -FailureMessage ("a staging file held by another process stopped a harness load: " + $r.Output)
+            Assert-Result -Name "and publishes a config of its own" `
+                -Condition ([System.IO.File]::ReadAllText((Join-Path $root "gitconfig")) -ceq $EXPECTED_CONFIG) `
+                -FailureMessage "the load did not publish the canonical config"
+        } finally {
+            $handle.Dispose()
+        }
+    }
+
+    # Every test file in this directory is runnable on its own, so the function cannot
+    # depend on a runner having materialised the config ahead of it. With no
+    # CRUCIBLE_TEST_ROOT in the environment the child builds its own root, which is the
+    # one case where it really is the only writer.
+    $results += Run-Test -Name "A harness load with no runner present builds its own root and config" -Body {
+        $work = New-IsolatedRunRoot -Name "standalone"
+        $script = Join-Path $work "load.ps1"
+        New-HarnessLoaderScript -Path $script
+        $r = Complete-HarnessLoad -Process (Start-HarnessLoad -ScriptPath $script)
+
+        Assert-Result -Name "the standalone load succeeds" -Condition ($r.ExitCode -eq 0) `
+            -FailureMessage ("a harness load without a runner failed: " + $r.Output)
+
+        $ownRoot = $null
+        if ($r.Output -match 'ROOT=(.+)') { $ownRoot = $Matches[1].Trim() }
+        try {
+            Assert-Result -Name "it made a root of its own" `
+                -Condition ((-not [string]::IsNullOrWhiteSpace($ownRoot)) -and $ownRoot -ne $work) `
+                -FailureMessage ("expected a freshly created run root, got: " + $r.Output)
+
+            $ownConfig = $null
+            if ($r.Output -match 'CONFIG=(.+)') { $ownConfig = $Matches[1].Trim() }
+            Assert-Result -Name "the config lives inside that root" `
+                -Condition ((-not [string]::IsNullOrWhiteSpace($ownConfig)) -and $ownConfig -eq (Join-Path $ownRoot "gitconfig")) `
+                -FailureMessage ("expected the config under the new root, got: " + $r.Output)
+            Assert-Result -Name "and holds the canonical bytes" `
+                -Condition ((Test-Path -LiteralPath $ownConfig -PathType Leaf) -and ([System.IO.File]::ReadAllText($ownConfig) -ceq $EXPECTED_CONFIG)) `
+                -FailureMessage "a standalone load did not produce the canonical config"
+        } finally {
+            # A standalone test file has no finally of its own, so nothing else will
+            # collect this. Left behind it would be reported orphaned only once the pid
+            # was reused or dead, which is a slow way to litter TEMP.
+            if ((-not [string]::IsNullOrWhiteSpace($ownRoot)) -and (Test-Path -LiteralPath $ownRoot)) {
+                Remove-Item -LiteralPath $ownRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    # The publish can only fail for a reason other than losing the race if something is
+    # already occupying the name, and a directory is the reachable way to arrange that.
+    # The branch matters out of proportion to how likely it is: swallowing the failure
+    # would set GIT_CONFIG_GLOBAL to a path git cannot read as a config, which hands the
+    # whole suite back to the global config of whoever is running it - silently, and
+    # looking exactly like isolation.
+    $results += Run-Test -Name "A publish that lands nothing fails loudly instead of pointing at nothing" -Body {
+        $root = New-IsolatedRunRoot -Name "blocked"
+        $configPath = Join-Path $root "gitconfig"
+        New-Item -ItemType Directory -Path $configPath -Force | Out-Null
+
+        $script = Join-Path $root "load.ps1"
+        New-HarnessLoaderScript -Path $script
+        $r = Complete-HarnessLoad -Process (Start-HarnessLoad -ScriptPath $script -TestRoot $root)
+
+        Assert-Result -Name "the load fails" -Condition ($r.ExitCode -ne 0) `
+            -FailureMessage ("a load whose publish landed nothing reported success: " + $r.Output)
+        Assert-Result -Name "it does not announce a config it never wrote" `
+            -Condition ($r.Output -notmatch 'CONFIG=') `
+            -FailureMessage ("GIT_CONFIG_GLOBAL was set despite the publish failing: " + $r.Output)
+        $strays = @(Get-ChildItem -LiteralPath $root -Filter "gitconfig.stage-*" -ErrorAction SilentlyContinue)
+        Assert-Result -Name "the staging file is cleaned up on the way out" -Condition ($strays.Count -eq 0) `
+            -FailureMessage ([string]$strays.Count + " staging file(s) survived a failed publish")
     }
 } finally {    if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

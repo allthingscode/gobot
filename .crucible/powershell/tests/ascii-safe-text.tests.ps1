@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-. (Join-Path $REPO_ROOT "powershell/factory-lib.ps1")
+. (Join-Path $REPO_ROOT "powershell/crucible-lib.ps1")
 
-# ConvertTo-AsciiSafeText (factory-lib.ps1) guards reason strings against mojibake: agents
+# ConvertTo-AsciiSafeText (crucible-lib.ps1) guards reason strings against mojibake: agents
 # emit smart punctuation that corrupts on a UTF-8 JSON round-trip. Inputs are built from
 # codepoints so this test file itself stays ASCII-safe.
 

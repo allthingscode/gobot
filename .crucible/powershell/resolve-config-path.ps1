@@ -1,7 +1,7 @@
 # Resolves one .crucible/config.yaml path key and prints it on stdout.
 #
 # This exists so non-PowerShell callers - the sh pre-commit hook and CI, which
-# must hand `factory_lint` a backlog directory - can use the one config parser in
+# must hand `crucible_lint` a backlog directory - can use the one config parser in
 # lib/config-helpers.ps1 instead of reimplementing the grammar. A second parser is
 # exactly what let a custom paths.backlog silently disable three lints.
 #

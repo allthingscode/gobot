@@ -10,7 +10,7 @@ For a step-by-step setup guide see [get-started.md](get-started.md). For a worke
 
 ```yaml
 # Installed Crucible root for this project. Must point inside this project.
-# The orchestrator invokes <crucible_root>/powershell/factory.ps1.
+# The orchestrator invokes <crucible_root>/powershell/crucible.ps1.
 crucible_root: ".crucible"
 
 project:
@@ -72,13 +72,13 @@ review:                                   # optional
 
 ### `crucible_root` (required)
 
-Path to the installed Crucible bundle for this project. In a normal install this is `.crucible`, but custom relative paths (e.g. `.dev-factory`, `tools/crucible`) are supported.
+Path to the installed Crucible bundle for this project. In a normal install this is `.crucible`, but custom relative paths (e.g. `.crucible-bundle`, `tools/crucible`) are supported.
 
 This value must point to a relative path inside the project. Applications that use Crucible must use their own installed framework folder, rather than referencing absolute or external directories, and the path must not escape the project root (no `..` segments).
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `crucible_root` | string | yes | Path to this project's installed Crucible bundle. Must be relative, safe, and contain a complete bundle structure. The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory to run the pipeline. |
+| `crucible_root` | string | yes | Path to this project's installed Crucible bundle. Must be relative, safe, and contain a complete bundle structure. The orchestrator invokes `<crucible_root>/powershell/crucible.ps1` from the project directory to run the pipeline. |
 
 **Examples**:
 
@@ -87,7 +87,7 @@ This value must point to a relative path inside the project. Applications that u
 crucible_root: ".crucible"
 
 # Custom bundle directory
-crucible_root: ".dev-factory"
+crucible_root: ".crucible-bundle"
 
 # Nested custom bundle directory
 crucible_root: "tools/crucible"
@@ -101,7 +101,7 @@ Identity and metadata for the target project.
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `name` | string | yes | Short display name. Appears in factory output and agent prompts. |
+| `name` | string | yes | Short display name. Appears in Crucible output and agent prompts. |
 | `description` | string | yes | One sentence describing what the project does. |
 | `default_branch` | string | yes | Branch the Operator merges to. Typically `main` or `master`. |
 
@@ -143,13 +143,13 @@ Assigns a model tier to each specialist. All five roles are required.
 | `fast` | Cost-effective models (e.g. Haiku, Gemini Flash) |
 | `high-capability` | High-reasoning models (e.g. Opus, Gemini Pro) |
 
-> **Note:** `roles.*.model_tier` is legacy and superseded by the `models:` block below, which the factory's `[RECOMMENDED MODEL]` computation actually reads. `validate-config.ps1` still warns if a tier value is unused, so the block is retained for now.
+> **Note:** `roles.*.model_tier` is legacy and superseded by the `models:` block below, which Crucible's `[RECOMMENDED MODEL]` computation actually reads. `validate-config.ps1` still warns if a tier value is unused, so the block is retained for now.
 
 ---
 
 ### `models` (optional)
 
-Concrete models per CLI target and capability tier. The factory computes an abstract tier (`strong` / `default` / `light`) from the phase, `budget_tier`, and `design_required` (see `docs/policy.md` section 2.3), then resolves it **here** for the active `-Target`. This block is the single source of truth the `[RECOMMENDED MODEL]` line reads, and is the place to edit as providers release new models.
+Concrete models per CLI target and capability tier. Crucible computes an abstract tier (`strong` / `default` / `light`) from the phase, `budget_tier`, and `design_required` (see `docs/policy.md` section 2.3), then resolves it **here** for the active `-Target`. This block is the single source of truth the `[RECOMMENDED MODEL]` line reads, and is the place to edit as providers release new models.
 
 ```yaml
 models:
@@ -179,7 +179,7 @@ models:
 
 ### `verification` (required)
 
-Shell commands the Reviewer runs to verify Architect work. These must match your project's language and toolchain exactly. The factory does not supply defaults - every project configures its own commands.
+Shell commands the Reviewer runs to verify Architect work. These must match your project's language and toolchain exactly. Crucible does not supply defaults - every project configures its own commands.
 
 #### `verification.quick`
 
@@ -222,7 +222,7 @@ Each step:
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `name` | string | yes | Label shown in factory output and Reviewer reports. |
+| `name` | string | yes | Label shown in Crucible output and Reviewer reports. |
 | `command` | string | yes | Shell command to run. Must not contain scaffold placeholder values (`replace-with-...`). |
 
 **Language examples:**
@@ -345,15 +345,19 @@ The project-local `.crucible/.gitignore` (created by `init-project.ps1`) handles
 |------|--------|-----|
 | `.crucible/config.yaml` | Yes | Configuration |
 | `.crucible/.gitignore` | Yes | The policy file itself |
+| `.crucible/.gitattributes` | Yes | Line-ending policy for the bundle |
+| `.crucible/README.md` | Yes | What the bundle is and how to work with it |
 | `.crucible/docs/` | Yes | Installed manuals, policies, and runbooks |
 | `.crucible/personas/` | Yes | Installed specialist behavior |
 | `.crucible/sops/` | Yes | Installed specialist workflows |
 | `.crucible/prompts/` | Yes | Installed prompt templates |
 | `.crucible/schemas/` | Yes | Installed validation schemas |
 | `.crucible/powershell/` | Yes | Installed runtime scripts |
+| `.crucible/standards/` | Yes | Audit scorecards the project authors |
+| `.crucible/agent-instructions/` | Yes | Copy-ready root instruction snippets |
 | `.crucible/backlog/` | No | Backlog items are data (tickets), not structure |
 | `.crucible/session/` | No | Runtime state; regenerated each session |
-| `.crucible/.agent-workspaces/` | No | Git worktrees; created and deleted by factory |
+| `.crucible/.agent-workspaces/` | No | Git worktrees; created and deleted by Crucible |
 | `.crucible/locks/` | No | Ephemeral file locks |
 | `.crucible/research/` | No | Generated artifacts |
 | `.crucible/dev-logs/` | No | Generated artifacts |

@@ -5,6 +5,7 @@
 $ErrorActionPreference = "Stop"
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 Set-StrictMode -Version Latest
 
@@ -13,8 +14,7 @@ if (-not (Test-Path -LiteralPath $scriptUnderTest)) {
     throw "Missing script under test: $scriptUnderTest"
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-stale-lock-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "stale-lock-test"
 
 $LockFile = Join-Path $tempRoot ".crucible/session/global/session_state.lock"
 $StateFile = Join-Path $tempRoot ".crucible/session/global/session_state.json"
@@ -38,7 +38,9 @@ function Restore-State {
     }
 }
 
-$payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("c223-locktest-" + [guid]::NewGuid().ToString("N") + ".json")
+# Its own root rather than $tempRoot: $tempRoot is the ProjectRoot handed to the script under test,
+# and a stray json inside it would be a file the subject can see.
+$payloadFile = Join-Path (New-TestFixtureRoot -NameHint "stale-lock-payload") "update.json"
 '{"status":"locktest"}' | Out-File -LiteralPath $payloadFile -Encoding UTF8
 
 function Invoke-ScriptUnderTest {

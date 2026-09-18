@@ -22,8 +22,7 @@ function New-GateProject {
     return @{ Root = $Root; TaskId = $TaskId; GateFiling = (Join-Path $researchSession "gate-filing.md") }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-research-gate-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "research-gate-test"
 
 try {
     $results += Run-Test -Name "records approval and generates a gate-filing prompt listing approved items" -Body {

@@ -1,5 +1,5 @@
 # Adopter smoke tests for Crucible.
-# Verifies that a new project can adopt Crucible, ignore data/runtime, validate configuration, and pass factory linting.
+# Verifies that a new project can adopt Crucible, ignore data/runtime, validate configuration, and pass crucible linting.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
@@ -7,7 +7,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
-$LINT_SCRIPT = Join-Path $REPO_ROOT "scripts/factory_lint.go"
+$LINT_SCRIPT = Join-Path $REPO_ROOT "scripts/crucible_lint.go"
 $RESOLVE_PATH = Join-Path $REPO_ROOT "powershell/resolve-config-path.ps1"
 
 $results = @()
@@ -18,8 +18,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-adopter-smoke-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "adopter-smoke"
 
 try {
     $projectRoot = Join-Path $tempRoot "adopter-app"
@@ -119,6 +118,7 @@ try {
                 ".crucible/.gitignore",
                 ".crucible/.gitattributes",
                 ".crucible/README.md",
+                ".crucible/standards/scorecard-example.md",
                 ".crucible/agent-instructions/AGENTS.md",
                 ".crucible/agent-instructions/CLAUDE.md",
                 ".crucible/agent-instructions/GEMINI.md"
@@ -145,7 +145,7 @@ try {
         Assert-Result -Name "validate-config exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
     }
 
-    $results += Run-Test -Name "Runs factory_lint in adopter context" -Body {
+    $results += Run-Test -Name "Runs crucible_lint in adopter context" -Body {
         $backlogDir = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot
         Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         Push-Location $projectRoot
@@ -153,7 +153,7 @@ try {
             $outputLines = @(go run $LINT_SCRIPT -framework-root $REPO_ROOT -backlog-dir $backlogDir 2>&1)
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
-            Assert-Result -Name "factory_lint exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got " + $exitCode + ". Output: " + $output)
+            Assert-Result -Name "crucible_lint exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got " + $exitCode + ". Output: " + $output)
         } finally {
             Pop-Location
         }

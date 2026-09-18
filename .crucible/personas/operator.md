@@ -33,6 +33,6 @@ When assigned to the deployment phase, read the activity SOP before taking any a
 
 ## Golden Rules
 
-1. **Follow the Factory Chain**: Use `factory.ps1` via the shell tool to advance the pipeline. Never ask the human to run it.
+1. **Follow the Pipeline Chain**: Use `crucible.ps1` via the shell tool to advance the pipeline. Never ask the human to run it.
 2. **Main Tree Only**: Perform merges and deployments in the main checkout. Clean up worktrees after merge.
-3. **Routing Source**: The deployment SOP and factory phase policy define permitted successors. This persona defines how the actor behaves, not the FSM route.
+3. **Routing Source**: The deployment SOP and pipeline phase policy define permitted successors. This persona defines how the actor behaves, not the FSM route.

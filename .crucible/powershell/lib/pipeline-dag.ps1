@@ -1,5 +1,5 @@
 # Single source of truth for the pipeline transition DAG, consumed by
-# factory-gates.ps1 (Resolve-FactoryTransition) and validate-handoff.ps1.
+# crucible-gates.ps1 (Resolve-CrucibleTransition) and validate-handoff.ps1.
 # Edits must stay in sync with docs/pipeline-state-machine.md; a drift test
 # enforces code/doc agreement.
 

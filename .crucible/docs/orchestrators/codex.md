@@ -1,12 +1,12 @@
 # Codex Strategic Orchestrator Protocol
 
-This document defines **Codex CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Codex CLI environment.
+This document defines **Codex CLI-specific** mechanics for Crucible pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Codex CLI environment.
 
 > **Cross-platform.** The `powershell.exe` invocations below are the Windows form. On Linux/macOS, use `pwsh` (PowerShell 7+) in their place.
 
 ## The "Orchestrate" Directive
 
-When the human says `"Orchestrate {TASK_ID}"`, `"Orchestrate the next task in the backlog"`, or asks Codex to run the factory loop, the current Codex session adopts the **Strategic Orchestrator** persona.
+When the human says `"Orchestrate {TASK_ID}"`, `"Orchestrate the next task in the backlog"`, or asks Codex to run the pipeline loop, the current Codex session adopts the **Strategic Orchestrator** persona.
 
 The parent session is the controller. It does not become Groomer, Architect, Reviewer, Operator, or Researcher.
 
@@ -15,7 +15,7 @@ The parent session is the controller. It does not become Groomer, Architect, Rev
 This document covers Codex as the **parent** orchestrator. Codex can also run as a **single-phase
 specialist** under a different parent (for example, a Claude Code orchestrator dispatching Codex for the
 verification/review phase). That topology does **not** use `spawn_agent` or this document's parent
-mechanics — the parent invokes the Crucible launcher:
+mechanics - the parent invokes the Crucible launcher:
 
 ```
 powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
@@ -28,7 +28,7 @@ never mistaken for a review verdict. Run `launch-codex-specialist.ps1 -Preflight
 
 > **Why not the plugin `task` runtime / `codex-rescue` subagent for full-access specialist work?** That
 > path hardcodes a `read-only`/`workspace-write` sandbox and routes through the app-server broker, which
-> on Windows shells out to `codex-windows-sandbox-setup.exe` (often absent) and fails every command —
+> on Windows shells out to `codex-windows-sandbox-setup.exe` (often absent) and fails every command -
 > yielding a false `CHANGES_REQUESTED` with no work done. `codex exec -s danger-full-access` via the
 > Crucible launcher is the reliable full-access path. See the parent-side dispatch protocol in
 > `docs/orchestrators/claude.md` ("Dispatching a Codex Specialist").
@@ -49,8 +49,8 @@ Boundary rules:
 1. **Zero-Implementation Policy**: Covered in `.crucible/docs/orchestrator.md`. Codex adds: never run `gemini`, `claude`, or another `agent` CLI process from inside Codex to create a specialist session - use Codex subagents exclusively.
 2. **Delegation via Subagents**: Every specialist role is executed with `spawn_agent`.
 3. **Context Isolation**: Spawn specialist subagents with `fork_context: false`. Pass only the generated specialist prompt or a short bootstrap prompt that tells the subagent which files to read.
-4. **Parent-Owned Routing**: Subagents MUST NOT spawn successor agents. The parent session waits for completion, runs or verifies `factory.ps1`, checks gates, asks the human for confirmation, and then spawns the next subagent.
-5. **Human Gates Stay Blocking**: Research Gate, Operator Human Gate, circuit breakers, missing handoffs, and factory validation failures always stop the loop.
+4. **Parent-Owned Routing**: Subagents MUST NOT spawn successor agents. The parent session waits for completion, runs or verifies `crucible.ps1`, checks gates, asks the human for confirmation, and then spawns the next subagent.
+5. **Human Gates Stay Blocking**: Research Gate, Operator Human Gate, circuit breakers, missing handoffs, and Crucible validation failures always stop the loop.
 6. **Checkpoint Enforcement**: The parent session MUST verify required `### CHECKPOINT` markers in the specialist `task.md` before accepting a subagent's completion.
 7. **Plan State Is Mandatory**: Parent session must keep `update_plan` current with a 4-6 step loop (`Research -> Spec -> Exec -> Validate -> Handoff`) and only one `in_progress` step.
 8. **Parallelize Only Independent Work**: Use `multi_tool_use.parallel` for independent reads/searches and allow concurrent subagents only for non-overlapping, non-gated workstreams explicitly approved by the human.
@@ -85,11 +85,11 @@ The parent session must do the following for every specialist subagent:
 4. Confirm the required `## Task List` has no unchecked required items before accepting the handoff.
 5. If checkpoints are missing, do not advance the pipeline. Re-dispatch the same specialist with a repair prompt, or ask the human for direction if the work cannot be verified.
 
-Checkpoint verification is not a replacement for `factory.ps1` gates. It is an additional parent-side check to prevent subagents from rushing directly to handoff.
+Checkpoint verification is not a replacement for `crucible.ps1` gates. It is an additional parent-side check to prevent subagents from rushing directly to handoff.
 
 ## Bootstrap: Next Backlog Item
 
-`factory.ps1 -Init -TaskId` requires a task ID, so `"Groomer: Next Item"` starts in bootstrap mode.
+`crucible.ps1 -Init -TaskId` requires a task ID, so `"Groomer: Next Item"` starts in bootstrap mode.
 
 1. Parent spawns a Groomer subagent with a short bootstrap prompt:
 
@@ -98,15 +98,15 @@ Checkpoint verification is not a replacement for `factory.ps1` gates. It is an a
 
     Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md,
     and .crucible/sops/grooming.md. Select the next eligible backlog item, write or
-    update its spec, write the grooming -> implementation handoff, run factory.ps1
+    update its spec, write the grooming -> implementation handoff, run crucible.ps1
     -Init -TaskId <selected_task_id> -Quiet, then stop and report the task ID and
-    factory output. Follow your SOP checkpoint mandate: append `### CHECKPOINT`
+    Crucible output. Follow your SOP checkpoint mandate: append `### CHECKPOINT`
     entries to task.md after each major pass, and do not write the handoff until
     required checklist items are complete.
    ```
 
 2. Parent waits for the Groomer subagent to finish.
-3. Parent reads the generated handoff and factory output paths.
+3. Parent reads the generated handoff and Crucible output paths.
 4. Parent asks the human for confirmation before launching the Architect subagent.
 
 ## Continuation: Known Task ID
@@ -114,7 +114,7 @@ Checkpoint verification is not a replacement for `factory.ps1` gates. It is an a
 For an existing task, the parent runs:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {TASK_ID} -Quiet
+powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {TASK_ID} -Quiet
 ```
 
 Then it reads:
@@ -131,7 +131,7 @@ If no gate or circuit breaker is active, the parent spawns the next specialist s
 Follow your SOP checkpoint mandate. Append `### CHECKPOINT [brief summary]`
 to task.md after every major phase. Do not write the final handoff until the
 required checkpoints and task checklist are complete. Stop after running
-factory.ps1 and report the result to the parent.
+crucible.ps1 and report the result to the parent.
 ```
 
 ## Parent Session Responsibilities
@@ -142,7 +142,7 @@ The parent Codex session is responsible for:
 - Maintaining `update_plan` state with one active step and explicit completion transitions.
 - Spawning exactly one specialist subagent at a time unless the human explicitly authorizes parallel work.
 - Waiting for specialist completion when on the critical path; if parallel specialists are running, continue non-overlapping parent checks/work.
-- Reading the latest handoff for the task and validating that `factory.ps1` produced the next session artifacts.
+- Reading the latest handoff for the task and validating that `crucible.ps1` produced the next session artifacts.
 - Inspecting the completed specialist `task.md` for required checkpoints and unchecked required task-list items.
 - Presenting the Step 3 status report (from `.crucible/sops/orchestrator.md`) before each specialist launch, including budget tracking, and waiting for explicit human confirmation.
 - Pulling CI diagnostics directly with `gh run view <id> --log` when CI status affects gates; do not ask humans to paste logs.
@@ -157,10 +157,10 @@ Required prompt constraints:
 
 - Tell the subagent to read `AGENTS.md`.
 - Tell the subagent to read the generated `prompt.md` for its role when one exists.
-- Tell the subagent to run `factory.ps1 -Init -TaskId {TASK_ID} -Quiet` at session end after writing handoff JSON.
+- Tell the subagent to run `crucible.ps1 -Init -TaskId {TASK_ID} -Quiet` at session end after writing handoff JSON.
 - Tell the subagent to append `### CHECKPOINT` markers to `task.md` after major phases.
 - Tell the subagent not to write handoff JSON until required checklist items are complete.
-- Tell the subagent to stop after factory output is produced and report the result to the parent.
+- Tell the subagent to stop after Crucible output is produced and report the result to the parent.
 - Tell the subagent it is not alone in the codebase and must not revert unrelated edits.
 
 ## Parallelization Policy (Codex)
@@ -168,7 +168,7 @@ Required prompt constraints:
 Use parallelism to reduce cycle time without weakening control:
 
 - Use `multi_tool_use.parallel` for independent file reads, content searches, and metadata inspections.
-- Do not parallelize dependent operations (for example, reading generated artifacts before `factory.ps1` completes).
+- Do not parallelize dependent operations (for example, reading generated artifacts before `crucible.ps1` completes).
 - Parallel specialist sessions are allowed only when all conditions are true:
   - Human explicitly approves parallel work.
   - Workstreams have disjoint ownership and no shared write paths.
@@ -179,9 +179,9 @@ Use parallelism to reduce cycle time without weakening control:
 
 Treat session lifecycle as a hard requirement:
 
-- On session start, run `factory.ps1 -Init -TaskId {TASK_ID}` and verify artifacts exist before specialist launch.
-- On specialist completion, validate handoff + checkpoints, then re-run or verify `factory.ps1` output before routing.
-- On session end, ensure handoff is written, clear lock/process residue per SOP, run `factory.ps1 -Init -TaskId {TASK_ID}`, and report the exact output to the human.
+- On session start, run `crucible.ps1 -Init -TaskId {TASK_ID}` and verify artifacts exist before specialist launch.
+- On specialist completion, validate handoff + checkpoints, then re-run or verify `crucible.ps1` output before routing.
+- On session end, ensure handoff is written, clear lock/process residue per SOP, run `crucible.ps1 -Init -TaskId {TASK_ID}`, and report the exact output to the human.
 
 ## Gate and Failure Protocols
 

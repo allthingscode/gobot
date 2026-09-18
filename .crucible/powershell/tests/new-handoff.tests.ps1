@@ -8,15 +8,14 @@ $schemaPath = Join-Path $realRepoRoot "schemas/handoff.schema.json"
 
 # Isolate execution in a temp directory to prevent repo-root test pollution
 $origLocation = Get-Location
-$tempRoot = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), [System.IO.Path]::GetRandomFileName())
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+. (Join-Path $PSScriptRoot '_harness.ps1')
+$tempRoot = New-TestFixtureRoot -NameHint "new-handoff"
 
 # Copy the powershell directory so relative file path artifacts exist for testing
 Copy-Item -Path (Join-Path $realRepoRoot "powershell") -Destination (Join-Path $tempRoot "powershell") -Recurse -Force | Out-Null
 
 # Set REPO_ROOT to temp root so new-handoff.ps1 resolves its target path to the temp directory
 $REPO_ROOT = $tempRoot
-. (Join-Path $PSScriptRoot '_harness.ps1')
 
 Set-Location -LiteralPath $tempRoot
 
@@ -113,7 +112,7 @@ try {
             Target = "implementation"
             Reason = "groomer handoff test"
             PromptVersion = "implementation_prompt-v21"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             FileAffinity = @("powershell/", "schemas/handoff.schema.json")
             SchemaPath = $schemaPath
         }
@@ -140,7 +139,7 @@ try {
             Reason = "review complete"
             PromptVersion = "reviewer_prompt-v1"
             SessionCycleId = "cycle-test"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             ReviewerChecksPassed = @("tests_pass", "vet_pass", "acceptance_criteria_met", "scope_bounded", "no_regressions", "no_hard_mandates_violated")
             SchemaPath = $schemaPath
         }
@@ -163,7 +162,7 @@ try {
             Target = "grooming"
             Reason = "research complete with human decisions"
             PromptVersion = "researcher_prompt-v1"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             HumanApproved = @("alice", "bob")
             HumanDeferred = @("carol")
             HumanRejected = @("dave")
@@ -244,7 +243,7 @@ budget_tier: "low"
             Reason = "extended budget test"
             PromptVersion = "groomer_prompt-v16"
             BudgetTier = "extended"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             FileAffinity = @("powershell/")
             SchemaPath = $schemaPath
         }
@@ -267,7 +266,7 @@ budget_tier: "low"
             Target = "verification"
             Reason = "Stub-Only Close-Out: stub rows filed, parent task closed - no implementation work"
             PromptVersion = "groomer-sop-v1"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             StubSpecsCreated = @("backlog/features/active/F-001_Stub.md")
             SchemaPath = $schemaPath
         }
@@ -300,7 +299,7 @@ budget_tier: "low"
             Target = "verification"
             Reason = "should fail - stub_specs_created is required"
             PromptVersion = "groomer-sop-v1"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -eq 0) {
@@ -320,7 +319,7 @@ budget_tier: "low"
             Target = "verification"
             Reason = "should fail - reviewer_checks_passed not allowed from groomer"
             PromptVersion = "groomer-sop-v1"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             StubSpecsCreated = @("backlog/features/active/F-001_Stub.md")
             ReviewerChecksPassed = @("tests_pass", "vet_pass", "acceptance_criteria_met", "scope_bounded", "no_regressions", "no_hard_mandates_violated")
             SchemaPath = $schemaPath
@@ -388,7 +387,7 @@ budget_tier: "low"
             cumulative_handoff_count = 2
             prompt_version = "groomer_prompt-v16"
             session_cycle_id = "cycle-invalid"
-            artifacts = @("powershell/factory.ps1")
+            artifacts = @("powershell/crucible.ps1")
             file_affinity = @("powershell/")
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
         $script:createdFiles += $handoffPath
@@ -420,7 +419,7 @@ budget_tier: "low"
             budget_tier = "low"
             cumulative_handoff_count = 1
             prompt_version = "1.0.0"
-            artifacts = @("powershell/factory.ps1")
+            artifacts = @("powershell/crucible.ps1")
             file_affinity = @("powershell/")
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
         $script:createdFiles += $handoffPath
@@ -451,7 +450,7 @@ budget_tier: "low"
             budget_tier = "low"
             cumulative_handoff_count = 1
             prompt_version = "1.0.0"
-            artifacts = @("powershell/factory.ps1")
+            artifacts = @("powershell/crucible.ps1")
             file_affinity = @("powershell/")
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
         $script:createdFiles += $handoffPath
@@ -489,8 +488,7 @@ budget_tier: "low"
         $taskId = New-TestTaskId "CWD-FAIL"
         
         # Temporarily switch to a completely fresh directory without backlog/config
-        $emptyTempDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), [System.IO.Path]::GetRandomFileName())
-        New-Item -ItemType Directory -Path $emptyTempDir -Force | Out-Null
+        $emptyTempDir = New-TestFixtureRoot -NameHint "new-handoff-cwd-fail"
         $origLoc = Get-Location
         Set-Location -LiteralPath $emptyTempDir
         
@@ -638,7 +636,7 @@ budget_tier: "low"
             cumulative_handoff_count = 1
             prompt_version = "groomer_prompt-v16"
             session_cycle_id = "cycle-1"
-            artifacts = @("powershell/factory.ps1")
+            artifacts = @("powershell/crucible.ps1")
             file_affinity = @()
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
         $script:createdFiles += $handoffPath
@@ -649,7 +647,7 @@ budget_tier: "low"
             Target = "verification"
             Reason = "empty prior fallback test"
             PromptVersion = "impl_prompt-v1"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -ne 0) {
@@ -697,7 +695,7 @@ budget_tier: "low"
             cumulative_handoff_count = 1
             prompt_version = "groomer_prompt-v16"
             session_cycle_id = "cycle-1"
-            artifacts = @("powershell/factory.ps1")
+            artifacts = @("powershell/crucible.ps1")
             file_affinity = @("internal/cron/", "internal/config/")
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
         $script:createdFiles += $handoffPath
@@ -708,7 +706,7 @@ budget_tier: "low"
             Target = "verification"
             Reason = "union fallback test"
             PromptVersion = "impl_prompt-v1"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -ne 0) {
@@ -803,6 +801,144 @@ budget_tier: "low"
         }
     }
 
+    # The deployment prompt said -CommitHash could be omitted and the hash would be
+    # inherited. Nothing upstream carries one - no phase before deployment merges anything -
+    # so the handoff was refused for a missing field. The tip of the task branch is the
+    # commit being deployed and git already knows it. Found by TODO item 61.
+    Invoke-Test -Name "deployment->done derives commit_hash from the task branch tip when omitted" -Script {
+        $taskId = "F-DEPLOY-TIP"
+        $gitRepoDir = [System.IO.Path]::Combine($tempRoot, "git-deploy-tip-test")
+        New-Item -ItemType Directory -Path $gitRepoDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $tempRoot "powershell") -Destination (Join-Path $gitRepoDir "powershell") -Recurse -Force | Out-Null
+
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $gitRepoDir
+        Set-Location -LiteralPath $gitRepoDir
+        try {
+            & git init -b master --quiet
+            & git config user.name "Test"
+            & git config user.email "test@example.com"
+            & git config commit.gpgSign false
+
+            $configDir = Join-Path $gitRepoDir ".crucible"
+            New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+            @(
+                "project: HandoffDeployTipTest",
+                "paths:",
+                "  backlog: .crucible/backlog",
+                "  session: .crucible/session",
+                "  workspaces: .crucible/.agent-workspaces"
+            ) | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+            $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
+            New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
+            "- $taskId" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+            Set-Content -LiteralPath "dummy.txt" -Value "hello"
+            & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
+            & git commit -m "initial commit" --quiet
+            $masterHead = (& git rev-parse HEAD).Trim()
+
+            & git checkout -b "task/$taskId" --quiet
+            Set-Content -LiteralPath "feature.txt" -Value "work"
+            & git add feature.txt
+            & git commit -m "task work" --quiet
+            $taskTip = (& git rev-parse HEAD).Trim()
+            & git checkout master --quiet
+
+            $sessionHandoffDir = Join-Path $gitRepoDir ".crucible/session/handoffs"
+
+            $result = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "deployment"
+                Target = "done"
+                Reason = "Deployment complete. Pipeline resolved."
+                SessionCycleId = "cycle-test"
+                SchemaPath = $schemaPath
+                ProjectRoot = $gitRepoDir
+            } -NoRegister
+
+            if ($result.ExitCode -ne 0) {
+                throw "Omitting -CommitHash on deployment->done must succeed as the prompt documents it. Output: $($result.Output)"
+            }
+
+            $written = Get-ChildItem -Path $sessionHandoffDir -Filter ($taskId + "-*.json") |
+                Sort-Object Name -Descending | Select-Object -First 1
+            if ($null -eq $written) {
+                throw "No handoff file created for $taskId at $sessionHandoffDir"
+            }
+            $obj = Get-Content -LiteralPath $written.FullName -Raw | ConvertFrom-Json
+            if ($obj.commit_hash -ne $taskTip) {
+                throw "Expected the task branch tip ($taskTip), got: $($obj.commit_hash)"
+            }
+            # Recording the primary branch head would still satisfy the schema while naming
+            # a commit that is not the work being deployed.
+            if ($obj.commit_hash -eq $masterHead) {
+                throw "Recorded the primary branch head instead of the tip of task/$taskId"
+            }
+
+            # An explicit hash is the specialist overriding the derivation, so it has to win
+            # even though a prior handoff now carries the derived one.
+            $explicit = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "deployment"
+                Target = "done"
+                Reason = "Deployment complete. Pipeline resolved."
+                SessionCycleId = "cycle-test"
+                CommitHash = $masterHead
+                SchemaPath = $schemaPath
+                ProjectRoot = $gitRepoDir
+            } -NoRegister
+            if ($explicit.ExitCode -ne 0) {
+                throw "Passing -CommitHash explicitly failed: $($explicit.Output)"
+            }
+            $writtenExplicit = Get-ChildItem -Path $sessionHandoffDir -Filter ($taskId + "-*.json") |
+                Sort-Object Name -Descending | Select-Object -First 1
+            $objExplicit = Get-Content -LiteralPath $writtenExplicit.FullName -Raw | ConvertFrom-Json
+            if ($objExplicit.commit_hash -ne $masterHead) {
+                throw "Expected the explicitly passed hash ($masterHead), got: $($objExplicit.commit_hash)"
+            }
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+            Set-Location -LiteralPath $tempRoot
+            if (Test-Path -LiteralPath $gitRepoDir) {
+                Remove-Item -Recurse -Force -LiteralPath $gitRepoDir -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    # "omit it to inherit the commit hash automatically" was not a true description of
+    # anything: no phase before deployment records a commit_hash, so there was never a value
+    # to inherit and the handoff was refused for a missing field. The tool derives one now,
+    # but a doc that says "inherit" is still naming a mechanism that does not exist.
+    Invoke-Test -Name "deployment docs do not promise an inherited commit hash" -Script {
+        $docs = @(
+            (Join-Path $realRepoRoot "prompts/deployment_prompt.md"),
+            (Join-Path $realRepoRoot "sops/deployment.md")
+        )
+        $offenders = @()
+        foreach ($doc in $docs) {
+            if (-not (Test-Path -LiteralPath $doc)) {
+                throw "Deployment doc not found: $doc"
+            }
+            $mentions = 0
+            $lines = @(Get-Content -LiteralPath $doc -Encoding UTF8)
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -notmatch '(?i)commit[ _]?hash') { continue }
+                $mentions++
+                if ($lines[$i] -match '(?i)inherit') {
+                    $offenders += ((Split-Path -Leaf $doc) + ":" + ($i + 1))
+                }
+            }
+            if ($mentions -lt 1) {
+                throw "No commit hash line found in $doc, so this guard would report clean without reading anything"
+            }
+        }
+        if ($offenders.Count -gt 0) {
+            throw ("these tell the specialist the commit hash is inherited, and nothing upstream carries one: " + ($offenders -join ", "))
+        }
+    }
+
     Invoke-Test -Name "inherits genuine commit_hash and base_commit from prior handoff" -Script {
         $taskId = New-TestTaskId "INHERIT-COMMIT"
         $priorHandoff = [ordered]@{
@@ -863,7 +999,7 @@ budget_tier: "low"
             Target = "implementation"
             Reason = "BOM check test"
             PromptVersion = "groomer_prompt-v16"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             FileAffinity = @("powershell/")
             SchemaPath = $schemaPath
         }
@@ -905,7 +1041,7 @@ budget_tier: "low"
             cumulative_handoff_count = 3
             prompt_version = "verification_prompt-v26"
             session_cycle_id = "cycle-strike"
-            artifacts = @("powershell/factory.ps1")
+            artifacts = @("powershell/crucible.ps1")
             file_affinity = @("powershell/")
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $handoffPath -Encoding UTF8
         $script:createdFiles += $handoffPath
@@ -920,7 +1056,7 @@ budget_tier: "low"
             Target = "implementation"
             Reason = "Changes requested"
             PromptVersion = "verification_prompt-v26"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }
@@ -942,7 +1078,7 @@ budget_tier: "low"
             Reason = "Changes requested"
             ReviewStrikeCount = 0
             PromptVersion = "verification_prompt-v26"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }
@@ -963,7 +1099,7 @@ budget_tier: "low"
             Target = "verification"
             Reason = "Implementation complete"
             PromptVersion = "implementation_prompt-v29"
-            Artifacts = @("powershell/factory.ps1")
+            Artifacts = @("powershell/crucible.ps1")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }

@@ -12,8 +12,7 @@ $HARNESS_SCRIPT = Join-Path $PSScriptRoot "_harness.ps1"
 
 $results = @()
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-test-runner-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "test-runner"
 
 try {
     function Stage-RunnerScratch {
@@ -24,7 +23,11 @@ try {
         New-Item -ItemType Directory -Path $testsDir -Force | Out-Null
 
         Copy-Item -LiteralPath $RUNNER_SCRIPT -Destination (Join-Path $powershellDir "run-all-tests.ps1") -Force
-        Copy-Item -LiteralPath $HARNESS_SCRIPT -Destination (Join-Path $testsDir "_harness.ps1") -Force
+        # Every helper, not just _harness.ps1: it dot-sources _ownership.ps1 since item 90, and a
+        # fixture that copies "the real script" by name goes stale the moment the caller gains a
+        # second one. No _*.ps1 matches the runner's *test*.ps1 discovery glob, so copying all of
+        # them cannot smuggle a test file into the scratch suite.
+        Copy-Item -Path (Join-Path (Split-Path -Parent $HARNESS_SCRIPT) "_*.ps1") -Destination $testsDir -Force
 
         # The runner dot-sources its concurrency lock from lib/, so a scratch copy is
         # not runnable without it. The lock is scoped to the runner's own directory,
@@ -98,6 +101,57 @@ exit 0
 
         Assert-Result -Name "synthetic pass exit code" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
         Assert-Result -Name "synthetic pass summary" -Condition ($output -match "Passed: 1") -FailureMessage ("expected 'Passed: 1' in output: " + $output)
+        # The other half of item 102's skip reporting: a run with nothing skipped must not print a
+        # Skipped line at all. Without this, a summary that always printed "Skipped: 0" - or one
+        # whose count came from somewhere other than the child output - would satisfy the skip test
+        # below without measuring anything.
+        Assert-Result -Name "no skip line when nothing skipped" -Condition ($output -notmatch "Skipped:") -FailureMessage ("a run with no skipped test still reported a skip count: " + $output)
+    }
+
+    # Item 102. A test whose precondition cannot exist on the running platform is neither a pass
+    # nor a failure, and before this there was no third answer: run-lock.tests.ps1 asserted its
+    # Windows-only precondition on purpose, so it failed every Linux run. Both modes are exercised
+    # because the runner carries two separate summary blocks.
+    foreach ($mode in @("parallel", "serial")) {
+        $results += Run-Test -Name ("A skipped test does not fail the run and is named in the summary (" + $mode + " mode)") -Body {
+            $scratchDir = Join-Path $tempRoot ("synthetic-skip-" + $mode)
+            $psDir = Stage-RunnerScratch -Dir $scratchDir
+            $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
+            $testsDir = Join-Path $psDir "tests"
+
+            $syntheticTest = Join-Path $testsDir "synthetic-skip.tests.ps1"
+            $syntheticContent = @'
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_harness.ps1")
+$results = @()
+$results += Run-Test -Name "Synthetic skip" -Body {
+    Skip-Test "this platform cannot supply the precondition"
+}
+if ($results -contains $false) { exit 1 }
+exit 0
+'@
+            Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
+
+            if ($mode -eq "serial") {
+                $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1)
+            } else {
+                $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+            }
+            $exitCode = $LASTEXITCODE
+            $output = $outputLines -join "`n"
+
+            Assert-Result -Name "a skip does not fail the run" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
+            Assert-Result -Name "the skip is counted" -Condition ($output -match "Skipped: 1") -FailureMessage ("expected 'Skipped: 1' in output: " + $output)
+            Assert-Result -Name "the summary names the file and the test" -Condition ($output -match "synthetic-skip\.tests\.ps1: Synthetic skip") -FailureMessage ("the skip was counted without saying which test it was: " + $output)
+            Assert-Result -Name "the summary carries the stated reason" -Condition ($output -match "this platform cannot supply the precondition") -FailureMessage ("the reason given to Skip-Test did not reach the summary: " + $output)
+            # The distinction that makes this worth having. A skip that printed PASSED for the test
+            # would be the vacuous pass the mechanism exists to replace, and the run would look
+            # identical to one where the assertion really ran.
+            # -cnotmatch, and anchored at both ends. The harness prints exactly "PASSED" on its own
+            # line; the summary prints "Passed: 1", and -notmatch is case-insensitive, so the
+            # obvious spelling of this assertion fails against the run's own summary line.
+            Assert-Result -Name "the skipped test is not reported as passed" -Condition ($output -cnotmatch "(?m)^PASSED\s*$") -FailureMessage ("a skipped test printed PASSED as well as SKIPPED: " + $output)
+        }
     }
 
     $results += Run-Test -Name "Exits non-zero when child test prints failure signature and exits 0 (parallel mode)" -Body {
@@ -746,22 +800,46 @@ exit 0
 
         $holderPidFile = Join-Path $scratchDir "holder-pid.txt"
 
+        # Three numbers with a required ordering, so they are derived rather than written
+        # out separately: startup budget << runner bound < pipe hold.
+        #
+        # $idleTimeout is the budget for the child to get from launch to exit. That whole
+        # interval is silent - the child never writes a byte - and the pool's idle clock
+        # starts at Start(), so any excursion past the threshold while the child is still
+        # alive is killed and reported as a timeout. That is the runner behaving correctly;
+        # a silent running child IS what the timeout is for. This value was 2s, which is a
+        # 1.8x margin over the worst launch measured here (781 samples taken during a full
+        # parallel suite run: median 0.40s, p99 0.81s, max 1.13s) and was exceeded for real
+        # on 2026-09-10. Startup stalls are heavy-tailed, so the margin is now ~18x.
+        #
+        # Unlike the talking-child cases above, nothing here couples the threshold to the
+        # child's runtime: the child exits immediately either way, so the threshold only
+        # sets how long the pool waits before inspecting a child it finds already gone.
+        # Raising it costs one wait, not one wait per assertion.
+        $idleTimeout = 20
+        $runnerBoundMs = 90000
+        # The grandchild must outlive the whole run. If it exits first the pipes close on
+        # their own, the pool takes the ordinary streams-closed path, and every assertion
+        # below passes without the leaked-handle case ever happening - the vacuous green
+        # this file exists to prevent. Derived from the bound so no edit can invert them.
+        $holdSeconds = [int]($runnerBoundMs / 1000) + 30
+
         # The other half of the leaked-pipe case: this child passes and exits at once, but
         # a grandchild holds its pipes open, so the pool sees a process that has exited
         # and streams that never close. Silence after exit is a leaked handle, not a hang,
         # and reporting the exit code the child really had is the difference between this
         # and a false timeout on a test that passed.
         $syntheticContent = @'
-$holder = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 90' -NoNewWindow -PassThru
+$holder = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds __HOLD__' -NoNewWindow -PassThru
 Set-Content -LiteralPath "__PID_FILE__" -Value $holder.Id -Encoding ASCII
 exit 0
 '@
-        $syntheticContent = $syntheticContent.Replace("__PID_FILE__", $holderPidFile)
+        $syntheticContent = $syntheticContent.Replace("__PID_FILE__", $holderPidFile).Replace("__HOLD__", [string]$holdSeconds)
         Set-Content -LiteralPath (Join-Path $testsDir "exited-holder.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = (Get-PwshCommand)
-        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runnerCopy`" -IdleTimeoutSeconds 2"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runnerCopy`" -IdleTimeoutSeconds $idleTimeout"
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
@@ -773,7 +851,7 @@ exit 0
         $outTask = $p.StandardOutput.ReadToEndAsync()
         [void]$p.StandardError.ReadToEndAsync()
 
-        $exited = $p.WaitForExit(60000)
+        $exited = $p.WaitForExit($runnerBoundMs)
         if (-not $exited) {
             try { $p.Kill() } catch {}
             $p.WaitForExit()
@@ -793,10 +871,28 @@ exit 0
             }
         }
 
-        Assert-Result -Name "exited-holder runner exits" -Condition ($exited) -FailureMessage ("runner did not exit within 60s waiting on pipes held open by a grandchild of a child that had already finished. Output: " + $output)
+        Assert-Result -Name "exited-holder runner exits" -Condition ($exited) -FailureMessage ("runner did not exit within $([int]($runnerBoundMs / 1000))s waiting on pipes held open by a grandchild of a child that had already finished. Output: " + $output)
         Assert-Result -Name "exited-holder is not reported as a timeout" -Condition ($output -notmatch "TIMEOUT") -FailureMessage ("a child that had already exited was reported as a timeout: " + $output)
         Assert-Result -Name "exited-holder passes" -Condition ($output -match "PASS  exited-holder.tests.ps1") -FailureMessage ("expected a PASS line in output: " + $output)
         Assert-Result -Name "exited-holder run exit code" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
+
+        # The three assertions above are all satisfied by a run where the pipes were never
+        # held at all: the child exits, the streams close, the pool takes the ordinary path
+        # and reports a pass. So none of them prove the leaked-handle branch ran, and a
+        # threshold raised past the pipe hold would turn this test green while testing
+        # nothing - the failure mode the second acceptance criterion of item 76 names.
+        #
+        # The runner reports each child's duration on its own PASS line, and for this child
+        # the duration and the idle clock start together and the idle clock never resets, so
+        # reaching the idle branch means a duration of at least the threshold, while the
+        # ordinary streams-closed path means about a second. Asserting the floor therefore
+        # pins which branch ran. It is one-sided on purpose: contention can only push the
+        # measured duration up, never toward a false failure.
+        $reportedDuration = $null
+        if ($output -match 'PASS  exited-holder\.tests\.ps1 \(([0-9.]+)s\)') {
+            $reportedDuration = [double]$Matches[1]
+        }
+        Assert-Result -Name "exited-holder waited out the idle window with its pipes still held" -Condition ($null -ne $reportedDuration -and $reportedDuration -ge $idleTimeout) -FailureMessage ("expected a reported duration of at least the ${idleTimeout}s idle threshold, proving the pool reached the idle branch on a child whose pipes were still open; got '" + $reportedDuration + "'. A shorter duration means the grandchild released the pipes first and the leaked-handle path was never exercised. Output: " + $output)
     }
 
 } finally {

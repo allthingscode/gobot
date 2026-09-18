@@ -5,9 +5,9 @@ Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $Quiet = $true
-. $FACTORY_LIB
+. $CRUCIBLE_LIB
 
 $results = @()
 
@@ -49,7 +49,7 @@ function New-TestContext {
     New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/archived") -Force | Out-Null
 
-    # Copy framework scripts to temp framework dir so they can be executed by factory-gates.ps1
+    # Copy framework scripts to temp framework dir so they can be executed by crucible-gates.ps1
     $actualPowershellDir = Join-Path $REPO_ROOT "powershell"
     Copy-Item -Path (Join-Path $actualPowershellDir "*.ps1") -Destination $frameworkDir -Force
     New-Item -ItemType Directory -Path (Join-Path $frameworkDir "lib") -Force | Out-Null
@@ -94,15 +94,14 @@ paths:
         CumulativeHandoffCount = 1
         IsBootstrap = $false
         Transition = $null
-        NextFactoryCommand = $null
+        NextCrucibleCommand = $null
     }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-grooming-closure-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "grooming-closure-test"
 
 try {
-    $results += Run-Test -Name "Resolve-FactoryTransition refuses grooming -> done if no human decision recorded" -Body {
+    $results += Run-Test -Name "Resolve-CrucibleTransition refuses grooming -> done if no human decision recorded" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "refusal") -TaskId "F-001"
         $handoffFile = Join-Path $ctx.HandoffDir "F-001-handoff.json"
         
@@ -120,14 +119,14 @@ try {
         $ctx.LatestHandoff = Get-Item $handoffFile
         $ctx.RelativeHandoffPath = "session/handoffs/F-001-handoff.json"
 
-        # Call Resolve-FactoryTransition
-        $res = Resolve-FactoryTransition -Context $ctx
+        # Call Resolve-CrucibleTransition
+        $res = Resolve-CrucibleTransition -Context $ctx
         Assert-Result -Name "refusal should exit" -Condition $res.ShouldExit -FailureMessage "expected transition to exit"
         Assert-Result -Name "refusal exit code" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit code 2"
         Assert-Result -Name "refusal reason" -Condition ($res.Reason -match "no recorded human decision") -FailureMessage "expected reason matching no recorded human decision"
     }
 
-    $results += Run-Test -Name "Resolve-FactoryTransition accepts grooming -> done if Research Gate approved it" -Body {
+    $results += Run-Test -Name "Resolve-CrucibleTransition accepts grooming -> done if Research Gate approved it" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "approved-rg") -TaskId "F-001"
         
         # Create a spec in active features
@@ -189,8 +188,8 @@ priority: "P1"
         $ctx.LatestHandoff = Get-Item $handoffFile
         $ctx.RelativeHandoffPath = "session/handoffs/F-001-handoff.json"
 
-        # Call Resolve-FactoryTransition
-        $res = Resolve-FactoryTransition -Context $ctx
+        # Call Resolve-CrucibleTransition
+        $res = Resolve-CrucibleTransition -Context $ctx
         Assert-Result -Name "approved transition should exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $res.ExitCode)
 
         # Check backlog archival was executed automatically

@@ -9,8 +9,7 @@ $HELPER = Join-Path $REPO_ROOT "powershell/lib/install-manifest.ps1"
 
 $results = @()
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-manifest-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "manifest-test"
 
 $expectedScaffoldCount = @(git -C $REPO_ROOT ls-files templates/project/.crucible).Count
 
@@ -104,17 +103,41 @@ try {
     }
 
     $results += Run-Test -Name "Framework-development-only tests are excluded from shipping" -Body {
+        # More than one probe, and the second one is the reason. This test named only
+        # examples-mirror-sync.tests.ps1, which proves the MECHANISM works but says nothing
+        # about any other file's membership: dropping framework-gitignore.tests.ps1 from
+        # $devOnlyPaths left this entire suite green, and the only thing that noticed was
+        # examples-mirror-sync.tests.ps1 reporting it as mirror drift - a true failure for a
+        # misleading reason. A file that ships when it must not should fail the test named
+        # after shipping. Add a probe here when a dev-only path would break an adopter.
+        $devOnlyProbes = @(
+            "powershell/tests/examples-mirror-sync.tests.ps1",
+            # Asserts against the framework repo's own .gitignore; in a bundle $REPO_ROOT is
+            # the bundle root, so shipping it fails for every adopter. Item 84.
+            "powershell/tests/framework-gitignore.tests.ps1"
+        )
+
         $ownedFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $REPO_ROOT)
-        $devOnlyTest = "powershell/tests/examples-mirror-sync.tests.ps1"
-        Assert-Result -Name "excluded from Get-FrameworkOwnedFiles" -Condition ($ownedFiles -notcontains $devOnlyTest) -FailureMessage "expected examples-mirror-sync.tests.ps1 to be excluded from framework-owned files"
+        # Get-FrameworkOwnedFiles applies Test-FrameworkDevOnlyFile twice, once per branch: the
+        # working-tree walk and the -AtCommit ls-tree. Only the walk was asserted, so deleting the
+        # filter from the commit branch alone passed the whole suite - a provenance manifest would
+        # have started claiming the framework ships its own dev-only tests. Assert both branches.
+        $ownedAtCommit = @(Get-FrameworkOwnedFiles -FrameworkRoot $REPO_ROOT -AtCommit "HEAD")
+
+        foreach ($devOnlyTest in $devOnlyProbes) {
+            Assert-Result -Name "excluded from Get-FrameworkOwnedFiles: $devOnlyTest" -Condition ($ownedFiles -notcontains $devOnlyTest) -FailureMessage ("expected " + $devOnlyTest + " to be excluded from framework-owned files")
+            Assert-Result -Name "excluded from Get-FrameworkOwnedFiles -AtCommit: $devOnlyTest" -Condition ($ownedAtCommit -notcontains $devOnlyTest) -FailureMessage ("expected " + $devOnlyTest + " to be excluded from framework-owned files at a commit")
+        }
 
         $installRoot = Join-Path $tempRoot "manifest-install-check"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
         $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Exclusion Check" -Quiet 2>&1)
         Assert-Result -Name "install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("install failed: " + ($output -join "`n"))
 
-        $installedDevTestPath = Join-Path $installRoot ".crucible/powershell/tests/examples-mirror-sync.tests.ps1"
-        Assert-Result -Name "excluded from fresh install" -Condition (-not (Test-Path -LiteralPath $installedDevTestPath)) -FailureMessage "expected examples-mirror-sync.tests.ps1 to not be copied during initialization"
+        foreach ($devOnlyTest in $devOnlyProbes) {
+            $installedDevTestPath = Join-Path $installRoot (".crucible/" + $devOnlyTest)
+            Assert-Result -Name "excluded from fresh install: $devOnlyTest" -Condition (-not (Test-Path -LiteralPath $installedDevTestPath)) -FailureMessage ("expected " + $devOnlyTest + " to not be copied during initialization")
+        }
     }
 
     $results += Run-Test -Name "Manifest path mapping covers scaffold and copied dirs" -Body {
@@ -133,7 +156,7 @@ try {
         foreach ($excluded in @("config.yaml", "backlog/F-001.md", "session/run.log", "research/notes.md", ".gemini/cache", ".private/secret", ".agent-workspaces/wt/file.txt")) {
             Assert-Result -Name "excluded $excluded" -Condition (Test-AdopterOwnedPath -RelativePath $excluded -Manifest $manifest) -FailureMessage "expected adopter-owned match"
         }
-        foreach ($included in @("README.md", "docs/updating.md", "powershell/factory.ps1", "prompts/README.md")) {
+        foreach ($included in @("README.md", "docs/updating.md", "powershell/crucible.ps1", "prompts/README.md", "standards/scorecard-TEMPLATE.md")) {
             Assert-Result -Name "included $included" -Condition (-not (Test-AdopterOwnedPath -RelativePath $included -Manifest $manifest)) -FailureMessage "unexpected adopter-owned match"
         }
     }
@@ -202,6 +225,81 @@ try {
         Assert-Result -Name "missing scaffold directory is incomplete" -Condition ($noScaffoldCheck.IsComplete -eq $false) -FailureMessage "missing scaffold directory was reported as complete"
         Assert-Result -Name "missing scaffold directory source is none" -Condition ($noScaffoldCheck.Source -eq "none") -FailureMessage ("expected source none, got " + $noScaffoldCheck.Source)
         Assert-Result -Name "missing scaffold directory is non-authoritative" -Condition ($noScaffoldCheck.IsAuthoritative -eq $false) -FailureMessage "expected missing scaffold directory to be non-authoritative"
+    }
+
+    # The shipped manifest happens to produce no colliding adopter paths, so the de-duplication in
+    # Get-AdopterBundlePath was dead code: removing the guard, and making its comparer
+    # case-sensitive, both left all 221 paths and every test green. The collision is one manifest
+    # edit away - the scaffold's README.md already flattens to the bundle root, so adding a
+    # framework-root README.md to root_files aims two sources at one destination. Duplicates there
+    # would make the mirror copy a file twice and the provenance manifest hash whichever source
+    # enumerated last.
+    $results += Run-Test -Name "Two sources mapping to one adopter path yield one bundle entry" -Body {
+        $fixture = Join-Path $tempRoot "bundle-path-collision"
+        foreach ($rel in @("templates/project/.crucible", "docs")) {
+            New-Item -ItemType Directory -Path (Join-Path $fixture $rel) -Force | Out-Null
+        }
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText((Join-Path $fixture "install-manifest.json"), @'
+{
+  "scaffold_source": "templates/project/.crucible",
+  "root_files": ["README.md"],
+  "copied_dirs": ["docs"],
+  "renamed_paths": [],
+  "adopter_owned_excludes": ["config.yaml"]
+}
+'@, $utf8)
+        [System.IO.File]::WriteAllText((Join-Path $fixture "README.md"), "framework root readme`n", $utf8)
+        [System.IO.File]::WriteAllText((Join-Path $fixture "templates/project/.crucible/README.md"), "scaffold readme`n", $utf8)
+        [System.IO.File]::WriteAllText((Join-Path $fixture "docs/guide.md"), "guide`n", $utf8)
+
+        $manifest = Get-InstallManifest -FrameworkRoot $fixture
+        $entries = @(Get-AdopterBundlePath -FrameworkRoot $fixture -Manifest $manifest)
+        $readme = @($entries | Where-Object { $_.AdopterPath -eq "README.md" })
+        Assert-Result -Name "collision is actually set up" -Condition ($readme.Count -ge 1) -FailureMessage (
+            "the fixture produced no README.md entry, so it does not exercise the collision: " + (($entries | ForEach-Object { $_.AdopterPath }) -join ","))
+        Assert-Result -Name "README.md appears once" -Condition ($readme.Count -eq 1) -FailureMessage (
+            "two sources mapped to README.md and both were returned: " + (($readme | ForEach-Object { $_.SourcePath }) -join ", "))
+
+        $paths = @($entries | ForEach-Object { $_.AdopterPath })
+        $dupes = @($paths | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+        Assert-Result -Name "no duplicate adopter paths at all" -Condition ($dupes.Count -eq 0) -FailureMessage (
+            "duplicate adopter paths returned: " + ($dupes -join ","))
+    }
+
+    $results += Run-Test -Name "Rename map reads the shipped manifest and every destination exists" -Body {
+        $manifest = Get-InstallManifest -FrameworkRoot $REPO_ROOT
+        $map = Get-SupersededRenameMap -Manifest $manifest
+        Assert-Result -Name "map is non-empty" -Condition ($map.Count -gt 0) -FailureMessage "the shipped manifest declares no renames, so nothing below proves anything"
+        foreach ($from in $map.Keys) {
+            # A destination that does not exist would make the entry unenforceable: the
+            # update corroborates the map against HEAD and would silently fall back to
+            # review-removal, which is the behaviour the map exists to replace.
+            Assert-Result -Name ("destination exists for " + $from) `
+                -Condition (Test-Path -LiteralPath (Join-Path $REPO_ROOT $map[$from]) -PathType Leaf) `
+                -FailureMessage ("renamed_paths maps " + $from + " to " + $map[$from] + ", which does not exist")
+            Assert-Result -Name ("source is gone for " + $from) `
+                -Condition (-not (Test-Path -LiteralPath (Join-Path $REPO_ROOT $from) -PathType Leaf)) `
+                -FailureMessage ($from + " is still present, so it was not renamed away")
+        }
+    }
+
+    $results += Run-Test -Name "Rename map treats an absent renamed_paths key as no renames" -Body {
+        $manifest = [pscustomobject]@{ scaffold_source = "x"; root_files = @(); copied_dirs = @("docs"); adopter_owned_excludes = @() }
+        $map = Get-SupersededRenameMap -Manifest $manifest
+        Assert-Result -Name "empty map" -Condition ($map.Count -eq 0) -FailureMessage "a manifest without renamed_paths should yield no renames"
+    }
+
+    $results += Run-Test -Name "Rename map rejects malformed entries" -Body {
+        $blank = [pscustomobject]@{ renamed_paths = @([pscustomobject]@{ from = "a/b.ps1"; to = "" }) }
+        $threwOnBlank = $false
+        try { $null = Get-SupersededRenameMap -Manifest $blank } catch { $threwOnBlank = $true }
+        Assert-Result -Name "blank destination throws" -Condition $threwOnBlank -FailureMessage "an entry with an empty 'to' was accepted"
+
+        $self = [pscustomobject]@{ renamed_paths = @([pscustomobject]@{ from = "a/b.ps1"; to = "a/b.ps1" }) }
+        $threwOnSelf = $false
+        try { $null = Get-SupersededRenameMap -Manifest $self } catch { $threwOnSelf = $true }
+        Assert-Result -Name "self rename throws" -Condition $threwOnSelf -FailureMessage "an entry renaming a path to itself was accepted"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

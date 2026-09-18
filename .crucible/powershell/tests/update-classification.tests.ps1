@@ -41,6 +41,7 @@ function New-LatticeCase {
         InProvenance = $false
         SourceIsScaffoldSnapshot = $false
         AdopterIsScaffoldSnapshot = $false
+        IsSupersededRename = $false
     }
     foreach ($key in $With.Keys) {
         if (-not $params.ContainsKey($key)) {
@@ -76,6 +77,24 @@ $cases = @(
 
     (New-LatticeCase -Name "source gone but adopter edited outside custom regions is needs-merge" `
         -With @{ HeadHash = $null; AdopterHash = $LOCAL; AdopterBaseHash = $OTHER; BaselineBaseHash = $BASE } -Category "needs-merge"),
+
+    (New-LatticeCase -Name "source renamed away and adopter untouched is retired" `
+        -With @{ HeadHash = $null; AdopterHash = $LOCAL; AdopterBaseHash = $BASE; BaselineBaseHash = $BASE; IsSupersededRename = $true } -Category "retired"),
+
+    (New-LatticeCase -Name "source renamed away with no baseline base hash is retired" `
+        -With @{ HeadHash = $null; AdopterHash = $LOCAL; BaselineBaseHash = $null; IsSupersededRename = $true } -Category "retired"),
+
+    # The safety property of the rename map: knowing where a file went is not permission
+    # to delete an edited copy of it. If this case ever returns "retired" the mechanism is
+    # silently discarding adopter work.
+    (New-LatticeCase -Name "source renamed away but adopter edited outside custom regions is still needs-merge" `
+        -With @{ HeadHash = $null; AdopterHash = $LOCAL; AdopterBaseHash = $OTHER; BaselineBaseHash = $BASE; IsSupersededRename = $true } -Category "needs-merge"),
+
+    (New-LatticeCase -Name "source renamed away but another source still claims the path is skipped" `
+        -With @{ HeadHash = $null; AdopterHash = $LOCAL; IsExpectedPath = $true; IsSupersededRename = $true } -Category "skip"),
+
+    (New-LatticeCase -Name "a rename flag on a file that still exists at HEAD does not retire it" `
+        -With @{ HeadHash = $HEAD; AdopterHash = $LOCAL; AdopterBaseHash = $BASE; BaselineBaseHash = $BASE; BaselineHash = $PREV; IsSupersededRename = $true } -Category "safe-overwrite"),
 
     # --- File missing on the adopter ---
     (New-LatticeCase -Name "framework file missing on the adopter is add" `
@@ -153,7 +172,7 @@ foreach ($case in $cases) {
 # reachable, or a bucket is dead code and a branch is untested.
 $results += Run-Test -Name "every classification category is covered by a case" -Body {
     $covered = @($cases | ForEach-Object { $_.Category } | Sort-Object -Unique)
-    foreach ($category in @("skip", "add", "no-op", "safe-overwrite", "needs-merge", "review-removal")) {
+    foreach ($category in @("skip", "add", "no-op", "safe-overwrite", "needs-merge", "review-removal", "retired")) {
         Assert-Result -Name ("category '" + $category + "' has at least one case") `
             -Condition ($covered -contains $category) `
             -FailureMessage ("no test case produces '" + $category + "'")

@@ -36,33 +36,11 @@ param(
 
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/time.ps1")
+. (Join-Path $PSScriptRoot "lib/project-root.ps1")
 
 $ErrorActionPreference = "Stop"
 
-if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    # Derive the project root from THIS script's location, never the caller's cwd, so the
-    # orchestrator can record a gate while sitting in another checkout. The bundle ships at
-    # <adopter>/.crucible/powershell/, so $PSScriptRoot names the adopter unambiguously; the
-    # canonical framework copy at <crucible>/powershell/ is not itself an adopter, so we fall
-    # back to cwd there.
-    $derivedParent = Split-Path -Path $PSScriptRoot -Parent
-    if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
-        $derivedParent = Split-Path -Path $derivedParent -Parent
-    }
-    $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
-    if ((Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/backlog")) -or
-        (Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/config.yaml"))) {
-        $ProjectRoot = $derivedRoot
-    } else {
-        $cwd = (Get-Location).Path
-        if (-not (Test-Path -LiteralPath (Join-Path $cwd ".crucible/backlog")) -and
-            -not (Test-Path -LiteralPath (Join-Path $cwd ".crucible/config.yaml"))) {
-            throw "ProjectRoot is omitted, the directory derived from this script ('$derivedRoot') is not a valid Crucible project, and neither is the current working directory ('$cwd')."
-        }
-        $ProjectRoot = $cwd
-    }
-}
-$REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
+$REPO_ROOT = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 
 function Split-ItemList {
     param([string[]]$Items)
@@ -204,11 +182,11 @@ This records the human decision in the handoff `human_decisions` block.
 
 ## Step 4 - Validate and advance
 
-    $CrucibleRoot/powershell/validate-backlog.ps1
-    $CrucibleRoot/powershell/factory.ps1 -Init -TaskId $TaskId -Quiet
+    $CrucibleRoot/powershell/validate-backlog.ps1 -ProjectRoot "$REPO_ROOT"
+    $CrucibleRoot/powershell/crucible.ps1 -Init -TaskId $TaskId -Quiet -ProjectRoot "$REPO_ROOT"
 
 Fix any validate-backlog count mismatch before finishing. Append a `### CHECKPOINT` line to
-your research task.md noting the stubs filed and the handoff written. Report the factory
+your research task.md noting the stubs filed and the handoff written. Report the Crucible
 output. Do NOT spawn successor agents.
 "@
 

@@ -51,14 +51,46 @@ created_at: "2026-05-25"
 "@ | Set-Content -LiteralPath $full -Encoding UTF8
 }
 
+function New-SingleItemBacklog {
+    param([string]$Root, [string]$ItemId, [string]$Priority, [string]$RelPath, [string]$Title)
+    $summaryRows = @("P0", "P1", "P2", "P3") | ForEach-Object {
+        if ($_ -eq $Priority) { "| **$_** | 1 | $ItemId |" } else { "| **$_** | 0 | - |" }
+    }
+    $backlog = Join-Path $Root "BACKLOG.md"
+    $content = @(
+        "# Backlog",
+        "",
+        "## Priority Summary",
+        "",
+        "| Priority | Active Count | Item IDs |",
+        "|---|---|---|"
+    ) + $summaryRows + @(
+        "",
+        "**Status Overview**: 1 active items.",
+        "",
+        "## Active Items",
+        "",
+        "| ID | Priority | Status | Title | Target |",
+        "|---|---|---|---|---|",
+        "| [$ItemId]($RelPath) | $Priority | Ready for Deploy | $Title | Operator |"
+    )
+    Set-Content -LiteralPath $backlog -Value $content -Encoding UTF8
+    return $backlog
+}
+
 function Invoke-ArchiveTask {
-    param([string]$BacklogPath, [string]$SpecPath, [string]$Status)
+    # ShippedCode is an [object] rather than a [switch] so a test can express all three
+    # states the script distinguishes: shipped, did not ship, and nobody said.
+    param([string]$BacklogPath, [string]$SpecPath, [string]$Status, [object]$ShippedCode = $null)
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
         $cmdArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-BacklogPath", $BacklogPath, "-SpecPath", $SpecPath)
         if (-not [string]::IsNullOrEmpty($Status)) {
             $cmdArgs += @("-Status", $Status)
+        }
+        if ($null -ne $ShippedCode) {
+            $cmdArgs += @("-ShippedCode", ([bool]$ShippedCode).ToString().ToLowerInvariant())
         }
         $outputLines = @(& (Get-PwshCommand) @cmdArgs 2>&1)
         return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
@@ -67,8 +99,7 @@ function Invoke-ArchiveTask {
     }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-archive-task-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "archive-task-test"
 
 try {
     $results += Run-Test -Name "Status-column resolver handles non-first rows and table boundaries" -Body {
@@ -120,7 +151,7 @@ try {
 | [C-101]($activeRel) | P2 | Ready for Deploy | Close The Loop | Operator |
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
-        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel)
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel) -ShippedCode $false
         $archivedPath = Join-Path $root $archivedRel
         $specContent = Get-Content -LiteralPath $archivedPath -Raw
         $backlogContent = Get-Content -LiteralPath $backlog -Raw
@@ -154,7 +185,7 @@ try {
 | [C-150]($activeRel) | P2 | No Status Column | Operator |
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
-        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel)
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel) -ShippedCode $false
         Assert-Result -Name "rollback exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "rollback active restored" -Condition (Test-Path -LiteralPath (Join-Path $root $activeRel)) -FailureMessage "active spec was not restored"
         Assert-Result -Name "rollback archived absent" -Condition (-not (Test-Path -LiteralPath (Join-Path $root $archivedRel))) -FailureMessage "archived spec remained after failure"
@@ -189,7 +220,7 @@ try {
 | [F-201]($activeRel) | P1 | Ready for Deploy | Ship Feature | Operator |
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
-        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root "features/active/F-201_*.md")
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root "features/active/F-201_*.md") -ShippedCode $true
         $archivedPath = Join-Path $root $archivedRel
         $specContent = Get-Content -LiteralPath $archivedPath -Raw
         $backlogContent = Get-Content -LiteralPath $backlog -Raw
@@ -248,6 +279,69 @@ try {
         Assert-Result -Name "feature backlog row resolved honored" -Condition ($backlogContent -match '\[F-203\]\(features/archived/F-203_Honor_Status\.md\)\s*\|\s*P1\s*\|\s*Resolved') -FailureMessage ("expected archived Resolved BACKLOG row. Content: " + $backlogContent)
     }
 
+    # docs/policy.md defines Production as merged to the main branch and Resolved as closed
+    # without a deploy. The status used to be read off the item's directory, so B-011 merged
+    # a real fix and was recorded Resolved. These four fix the evidence in both directions:
+    # type does not decide it, and neither does an unstated default. Found by TODO item 62.
+    $results += Run-Test -Name "A bug that shipped code archives as Production" -Body {
+        $root = Join-Path $tempRoot "bug-shipped"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "bugs/active/B-011_Fix_The_Thing.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "B-011" -Type "Bug" -Priority "P1" -Title "Fix The Thing"
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "B-011" -Priority "P1" -RelPath $activeRel -Title "Fix The Thing"
+
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel) -ShippedCode $true
+        Assert-Result -Name "bug shipped exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        $specContent = Get-Content -LiteralPath (Join-Path $root "bugs/archived/B-011_Fix_The_Thing.md") -Raw
+        $backlogContent = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result -Name "bug shipped frontmatter production" -Condition ($specContent -match 'status:\s*"Production"') -FailureMessage ("a bug that merged code deployed; Resolved would say it did not. Content: " + $specContent)
+        Assert-Result -Name "bug shipped backlog row production" -Condition ($backlogContent -match '\[B-011\]\(bugs/archived/B-011_Fix_The_Thing\.md\)\s*\|\s*P1\s*\|\s*Production') -FailureMessage ("expected archived Production BACKLOG row. Content: " + $backlogContent)
+    }
+
+    $results += Run-Test -Name "A bug closed with no code archives as Resolved" -Body {
+        $root = Join-Path $tempRoot "bug-no-code"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "bugs/active/B-012_Not_Reproducible.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "B-012" -Type "Bug" -Priority "P2" -Title "Not Reproducible"
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "B-012" -Priority "P2" -RelPath $activeRel -Title "Not Reproducible"
+
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel) -ShippedCode $false
+        Assert-Result -Name "bug no-code exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        $specContent = Get-Content -LiteralPath (Join-Path $root "bugs/archived/B-012_Not_Reproducible.md") -Raw
+        Assert-Result -Name "bug no-code frontmatter resolved" -Condition ($specContent -match 'status:\s*"Resolved"') -FailureMessage ("a bug closed without a deploy is Resolved. Content: " + $specContent)
+    }
+
+    # The other direction. Mapping bugs by evidence while still mapping features by directory
+    # would pass the two tests above and keep half the defect.
+    $results += Run-Test -Name "A feature closed with no code archives as Resolved" -Body {
+        $root = Join-Path $tempRoot "feature-no-code"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "features/active/F-204_Withdrawn.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "F-204" -Type "Feature" -Priority "P3" -Title "Withdrawn"
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-204" -Priority "P3" -RelPath $activeRel -Title "Withdrawn"
+
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel) -ShippedCode $false
+        Assert-Result -Name "feature no-code exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+        $specContent = Get-Content -LiteralPath (Join-Path $root "features/archived/F-204_Withdrawn.md") -Raw
+        Assert-Result -Name "feature no-code frontmatter resolved" -Condition ($specContent -match 'status:\s*"Resolved"') -FailureMessage ("a feature that never merged did not reach production. Content: " + $specContent)
+    }
+
+    # Refusing is the point. A default here would be the same defect wearing the other
+    # answer: silence would either demote every shipped fix or claim a deploy for everything.
+    $results += Run-Test -Name "Archiving refuses when nothing states whether the task shipped code" -Body {
+        $root = Join-Path $tempRoot "no-evidence"
+        New-MinimalBacklogTree -Root $root
+        $activeRel = "bugs/active/B-013_Unstated.md"
+        New-SpecFile -Root $root -RelPath $activeRel -ItemId "B-013" -Type "Bug" -Priority "P2" -Title "Unstated"
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "B-013" -Priority "P2" -RelPath $activeRel -Title "Unstated"
+
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel)
+        Assert-Result -Name "unstated refuses" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected a non-zero exit when no caller stated whether code shipped. Output: " + $r.Output)
+        Assert-Result -Name "unstated names both remedies" -Condition (($r.Output -match '-Status') -and ($r.Output -match '-ShippedCode')) -FailureMessage ("the refusal has to say what to pass, or the operator is left guessing the same way the code was. Output: " + $r.Output)
+        Assert-Result -Name "unstated leaves the spec active" -Condition ((Test-Path -LiteralPath (Join-Path $root $activeRel)) -and -not (Test-Path -LiteralPath (Join-Path $root "bugs/archived/B-013_Unstated.md"))) -FailureMessage "a refused archive must not move the spec"
+        Assert-Result -Name "unstated leaves the backlog row alone" -Condition ((Get-Content -LiteralPath $backlog -Raw) -match 'Ready for Deploy') -FailureMessage "a refused archive must not rewrite the BACKLOG row"
+    }
+
     $results += Run-Test -Name "Reconciles Priority Summary on multi-item bucket archive" -Body {
         $root = Join-Path $tempRoot "multi-item-reconcile"
         New-MinimalBacklogTree -Root $root
@@ -279,7 +373,7 @@ try {
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
         # Archive one item: C-305
-        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel1)
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel1) -ShippedCode $false
         Assert-Result -Name "archive multi-item exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
         
         # Verify BACKLOG content: Count updated to 1, C-305 removed, C-305a remains, status overview updated to 1
@@ -321,7 +415,7 @@ try {
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
         # Archive the sole item: C-305
-        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel)
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel) -ShippedCode $false
         Assert-Result -Name "archive sole-item exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
         
         # Verify BACKLOG content: Count updated to 0, Item IDs set to -, status overview updated to 0
@@ -336,11 +430,11 @@ try {
     }
 
     $results += Run-Test -Name "Spec path resolvers search archived directory and prioritize active" -Body {
-        # factory-lib.ps1 loads the whole lib chain, so the second dot-source that used to
-        # sit here - reaching directly into powershell/lib/factory-gates.ps1 for one path
+        # crucible-lib.ps1 loads the whole lib chain, so the second dot-source that used to
+        # sit here - reaching directly into powershell/lib/crucible-gates.ps1 for one path
         # helper - was already redundant. Get-BacklogItemPathForTaskProjectRoot now lives in
         # lib/backlog-io.ps1 and arrives the same way everything else in this test does.
-        . (Join-Path $REPO_ROOT "powershell/factory-lib.ps1")
+        . (Join-Path $REPO_ROOT "powershell/crucible-lib.ps1")
 
         $root = Join-Path $tempRoot "resolver-test"
         New-MinimalBacklogTree -Root $root

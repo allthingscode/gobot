@@ -38,8 +38,7 @@ function New-FrameworkFixture {
     return Invoke-GitCommit -Repo $Root -Message "baseline"
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-provenance-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "provenance-test"
 
 try {
     $results += Run-Test -Name "Manifest maps bundle paths to LF-normalized hashes with version and source_commit" -Body {
@@ -68,6 +67,38 @@ try {
         # config.yaml (scaffold-derived adopter-owned) and template backlog must be absent
         Assert-Result -Name "config.yaml excluded" -Condition ($names -notcontains "config.yaml") -FailureMessage ("config.yaml leaked: " + ($names -join ","))
         Assert-Result -Name "backlog excluded" -Condition (-not ($names | Where-Object { $_ -like "backlog/*" })) -FailureMessage ("backlog leaked: " + ($names -join ","))
+    }
+
+    # Every other test here builds a fixture, commits it, and reads the provenance while the
+    # working tree still matches the commit, so nothing pinned the enumeration to $Commit.
+    #
+    # The content layer is pinned regardless: New-ProvenanceManifest hashes Get-GitFileContent at
+    # $Commit and skips anything absent there, so a working-tree edit or an untracked addition
+    # cannot reach the manifest. What is NOT pinned is the path set - drop -AtCommit from the
+    # enumeration and a file the commit shipped but the working tree no longer has disappears from
+    # the manifest, so an adopter updating from that commit is never told the file changed.
+    # Deleting from the working tree is the only divergence that shows this.
+    #
+    # Generate exactly once per (root, commit): New-ProvenanceManifest caches on that key in the
+    # temp dir, so a second call for the same pair returns the first result and tests the cache
+    # rather than the code.
+    $results += Run-Test -Name "Provenance enumerates the named commit, not the working tree" -Body {
+        $framework = Join-Path $tempRoot "pinned-framework"
+        $commit = New-FrameworkFixture -Root $framework
+
+        Remove-Item -LiteralPath (Join-Path $framework "docs/guide.md") -Force
+        Remove-Item -LiteralPath (Join-Path $framework "powershell/tool.ps1") -Force
+
+        $pinned = New-ProvenanceManifest -FrameworkRoot $framework -Commit $commit
+        $names = @($pinned.files.PSObject.Properties.Name)
+
+        Assert-Result -Name "deleted tracked file still recorded" -Condition ($names -contains "docs/guide.md") -FailureMessage (
+            "docs/guide.md was committed at " + $commit + " but the manifest dropped it after a working-tree delete: " + ($names -join ","))
+        Assert-Result -Name "deleted copied-dir file still recorded" -Condition ($names -contains "powershell/tool.ps1") -FailureMessage (
+            "powershell/tool.ps1 was committed at " + $commit + " but the manifest dropped it after a working-tree delete: " + ($names -join ","))
+        $expected = Get-GitFileNormalizedHash -Repo $framework -Commit $commit -Path "docs/guide.md"
+        Assert-Result -Name "hash still that of the commit" -Condition ($pinned.files."docs/guide.md".hash -eq $expected) -FailureMessage (
+            "hash for docs/guide.md did not match the committed content at " + $commit)
     }
 
     $results += Run-Test -Name "EOL differences hash identically (CRLF vs LF)" -Body {

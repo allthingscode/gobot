@@ -33,7 +33,7 @@ function New-ConformanceFixture {
     # Under docs/ so it IS in the commit-by-default set, but excluded by the bundle's
     # own .gitignore. Without this the bundle-internal assertions pass vacuously.
     Set-Content -LiteralPath (Join-Path $bundle "docs/local-notes.md") -Value "local" -Encoding UTF8
-    Set-Content -LiteralPath (Join-Path $bundle "powershell/lib/factory.ps1") -Value "# runtime" -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $bundle "powershell/lib/crucible.ps1") -Value "# runtime" -Encoding UTF8
     # Runtime state the bundle's own .gitignore is supposed to exclude.
     Set-Content -LiteralPath (Join-Path $bundle "session/notes.md") -Value "scratch" -Encoding UTF8
 
@@ -50,8 +50,7 @@ function New-ConformanceFixture {
     return $bundle
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-gitignore-conformance-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "gitignore-conformance"
 
 try {
     $results += Run-Test -Name "Unanchored root pattern is reported against bundle files" -Body {
@@ -212,7 +211,7 @@ try {
         $null = New-ConformanceFixture -Path $project -RootIgnore @("AGENTS.md")
 
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File (Join-Path $REPO_ROOT "powershell/factory-doctor.ps1") -ProjectRoot $project
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File (Join-Path $REPO_ROOT "powershell/crucible-doctor.ps1") -ProjectRoot $project
         }
         $output = $res.Output -join "`n"
 

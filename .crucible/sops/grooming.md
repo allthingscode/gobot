@@ -6,9 +6,9 @@
 **Role:** De-risk backlog items and prepare complete technical specifications for the implementation phase.
 
 **Trigger forms:**
-- `Grooming: {task_id}` — groom a specific item
-- `Grooming: Next item` — find and groom the highest priority ready item
-- `Grooming: Review and update the backlog` — full grooming session
+- `Grooming: {task_id}` - groom a specific item
+- `Grooming: Next item` - find and groom the highest priority ready item
+- `Grooming: Review and update the backlog` - full grooming session
 
 ---
 
@@ -27,13 +27,13 @@
 ## Execution Workflow
 
 ### Pass 1: Archive & Index Verification
-Scan `{{backlog_dir}}/BACKLOG.md` master index for items marked `Production` or `Resolved`. Verify their corresponding `.md` files have been moved from `active/` to `archived/`. If any remain in `active/`, perform the move and update the frontmatter status. Ensure the index tables exactly match the actual active/archived backlog files. Run `{{crucible_root}}/powershell/validate-backlog.ps1 -FixSummary` to sync Priority Summary counts and item IDs.
+Scan `{{backlog_dir}}/BACKLOG.md` master index for items marked `Production` or `Resolved`. Verify their corresponding `.md` files have been moved from `active/` to `archived/`. If any remain in `active/`, perform the move and update the frontmatter status. Ensure the index tables exactly match the actual active/archived backlog files. Run `{{crucible_root}}/powershell/validate-backlog.ps1 -FixSummary -ProjectRoot "{project_root}"` to sync Priority Summary counts and item IDs.
 
 ### Pass 2: Inventory & Deduplication
 Scan `{{backlog_dir}}/` for new or untracked items. Deduplicate entries (merge semantic duplicates into the oldest item and archive the duplicate). Refine item titles and descriptions for clarity. Detect rot (items referencing paths or files that no longer exist) and update or archive them. Update state after this pass.
 
 ### Pass 3: Priority Triage
-Identify the highest priority (`P0` → `P1` → `P2` → `P3`) items. Apply the hardening-first matrix (stability/hardening fixes must rank above features). Confirm status transitions are accurate. Flag any items blocked on external dependencies. Update state after this pass.
+Identify the highest priority (`P0` -> `P1` -> `P2` -> `P3`) items. Apply the hardening-first matrix (stability/hardening fixes must rank above features). Confirm status transitions are accurate. Flag any items blocked on external dependencies. Update state after this pass.
 
 #### Ship-vs-Local Severity Check
 Before assigning P0/P1 severity to vulnerability, dependency, generated-artifact, vendor, lockfile, or build-output claims, verify whether the affected artifact actually ships or participates in CI/release packaging.
@@ -77,13 +77,13 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 
 When a P0/P1 item is marked "Ready" with complete specification:
 
-### Step 1 — Assign Budget Tier ({task_id})
+### Step 1 - Assign Budget Tier ({task_id})
 Tier ceilings are defined in `{{crucible_root}}/docs/policy.md` Section 2 (canonical source). Guidance:
 - **Low**: Docs, small refactors, single-file chores
 - **Medium**: Standard features, multi-file refactors
 - **High**: New packages, complex architectural changes
 
-### Step 2 — Run new-handoff.ps1
+### Step 2 - Run new-handoff.ps1
 
 Do NOT hand-author or hand-edit the handoff JSON. You must use the `new-handoff.ps1` tool.
 
@@ -94,18 +94,18 @@ powershell.exe -ExecutionPolicy Bypass \
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats fields like `file_affinity`.)
 
-**`-DesignRequired` (implementation handoffs only):** Set this flag when the Architect must still produce the design — i.e. the spec states the goal and constraints but not the concrete approach. **Omit it** when your spec already contains a complete `## Design` the Architect only has to execute. This single bit drives the Architect's model (design → strong model; execution → default model) per `docs/policy.md` §2.3; do not over-set it, as design-tier work is the expensive path.
+**`-DesignRequired` (implementation handoffs only):** Set this flag when the Architect must still produce the design - i.e. the spec states the goal and constraints but not the concrete approach. **Omit it** when your spec already contains a complete `## Design` the Architect only has to execute. This single bit drives the Architect's model (design -> strong model; execution -> default model) per `docs/policy.md` section 2.3; do not over-set it, as design-tier work is the expensive path.
 
-### Step 3 — Run validation
-Run `{{crucible_root}}/powershell/validate-backlog.ps1`. A failing validation blocks the handoff — fix `BACKLOG.md` before proceeding.
+### Step 3 - Run validation
+Run `{{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"`. A failing validation blocks the handoff - fix `BACKLOG.md` before proceeding.
 
-### Step 4 — Advance pipeline
+### Step 4 - Advance pipeline
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 
-Present factory output to the human. Wait for confirmation before ending your session.
+Present Crucible output to the human. Wait for confirmation before ending your session.
 
 ---
 
@@ -113,7 +113,7 @@ Present factory output to the human. Wait for confirmation before ending your se
 
 If there are no active items to implement:
 1. Do NOT write a handoff file
-2. Do NOT run `factory.ps1`
+2. Do NOT run `crucible.ps1`
 3. Inform the human the backlog is empty and the pipeline is paused
 4. Stop
 
@@ -134,21 +134,21 @@ Write the handoff with `target_phase: "verification"` and **omit** `file_affinit
   "cumulative_handoff_count": N,
   "budget_tier": "low",
   "prompt_version": "groomer-sop-v1",
-  "reason": "Stub-Only Close-Out: stub rows filed, parent task closed — no implementation work",
+  "reason": "Stub-Only Close-Out: stub rows filed, parent task closed - no implementation work",
   "artifacts": ["{{backlog_dir}}/BACKLOG.md", "{{backlog_dir}}/{type}/active/{task_id}_*.md"],
   "suspicious_content": null
 }
 ```
 
-## Closure Routing (Grooming → Done)
+## Closure Routing (Grooming -> Done)
 
 If a grooming session or task results in a closure with no code deliverable (e.g., closing an already-shipped or obsolete feature without deploying new code):
 - Run `new-handoff.ps1` with `-Target done` and `-Source grooming`.
 - The transition requires a recorded human decision (either a Research-Gate approval as in Pass 17, or a Human Gate).
-- If no prior Research Gate approval exists, the factory will trigger a Human Gate, requiring the human to approve it via `-GateOutcome accepted` before it can transition to `done`.
-- On transition, the factory will automatically archive and finalize the task status as `Resolved` in both the BACKLOG.md row and the spec frontmatter status. No code push is performed.
+- If no prior Research Gate approval exists, Crucible will trigger a Human Gate, requiring the human to approve it via `-GateOutcome accepted` before it can transition to `done`.
+- On transition, Crucible will automatically archive and finalize the task status as `Resolved` in both the BACKLOG.md row and the spec frontmatter status. No code push is performed.
 
-## Routing to Research (Grooming → Research)
+## Routing to Research (Grooming -> Research)
 
 When routing a task to the `research` phase, the Groomer defines the open questions, scope, and objectives of the investigation.
 - **Mandate**: The Groomer MUST NOT perform the investigation itself or write a pre-baked conclusion / closure recommendation into the spec.
@@ -159,7 +159,7 @@ When routing a task to the `research` phase, the Groomer defines the open questi
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `implementation`, `research`, `done` (closure path), or `verification` (Stub-Only Close-Out only) — not to myself
+- [ ] Routing to: `implementation`, `research`, `done` (closure path), or `verification` (Stub-Only Close-Out only) - not to myself
 - [ ] If routing to `implementation`: `file_affinity` is populated with package-level paths
 - [ ] If routing to `verification` (Stub-Only Close-Out): no `file_affinity` required; confirm no implementation spec was created
 - [ ] Spec file exists in `backlog/{type}/active/` with acceptance criteria (or stubs for Stub-Only Close-Out)
@@ -176,16 +176,16 @@ Use this runbook for manual, weekly backlog grooming sessions.
 
 ### Trigger
 Paste into the agent:
-`Follow the procedure in .crucible/sops/grooming.md — Runbook Mode`
+`Follow the procedure in .crucible/sops/grooming.md - Runbook Mode`
 
 To perform a quick priority check only (skipping inventory sweep):
-`Follow the procedure in .crucible/sops/grooming.md — Runbook Mode — run Pass 3 and Pass 4 only, skip Pass 1 and 2`
+`Follow the procedure in .crucible/sops/grooming.md - Runbook Mode - run Pass 3 and Pass 4 only, skip Pass 1 and 2`
 
 ### Procedure
 1. **Load Persona**: Read `.crucible/personas/groomer.md` and adopt the Groomer persona.
-2. **Resume state**: Read `.crucible/session/global/session_state.json` → `phases.grooming` to check for active state.
+2. **Resume state**: Read `.crucible/session/global/session_state.json` -> `phases.grooming` to check for active state.
 3. **Execute Passes**: Run all 4 passes (or Pass 3 & 4 only if requested) across the entire backlog directory as described in the **Execution Workflow** above.
-4. **Update runbook registry**: Edit `.crucible/sops/registry.md` — update the `grooming` row's `last_run` and `outcome` fields.
+4. **Update runbook registry**: Edit `.crucible/sops/registry.md` - update the `grooming` row's `last_run` and `outcome` fields.
 5. **Append to runbook log**: Write an entry to `.crucible/session/global/runbook_log.md`:
    ```markdown
    ### grooming -- <ISO timestamp>

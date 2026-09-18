@@ -16,7 +16,7 @@
 | Task context | `.crucible/session/{task_id}/implementation/task.md` |
 | Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` |
 | Backlog spec | `{{backlog_dir}}/{type}/active/{task_id}_*.md` |
-| Worktree | `.crucible/.agent-workspaces/implementation-{task_id}/` (created by factory.ps1) |
+| Worktree | `.crucible/.agent-workspaces/implementation-{task_id}/` (created by crucible.ps1) |
 | Review fix spec (if from Verification) | `.crucible/session/{task_id}/verification/review_report.md` and `task.md` |
 
 ---
@@ -66,7 +66,7 @@ Read the backlog item spec, then:
 cd .crucible/.agent-workspaces/implementation-{task_id}
 git status  # must show: On branch task/{task_id}
 ```
-If the worktree does not exist or the branch is wrong, STOP and run `factory.ps1 -Init -TaskId {task_id}` before proceeding.
+If the worktree does not exist or the branch is wrong, STOP and run `crucible.ps1 -Init -TaskId {task_id}` before proceeding.
 
 Perform ALL edits inside the isolated worktree at `.crucible/.agent-workspaces/implementation-{task_id}/`.
 
@@ -110,7 +110,7 @@ Before marking ready for Verification:
 4. Review your own diff - would you approve this in a PR?
 5. Write completion summary to `.crucible/session/{task_id}/implementation/output.md`
 
-**Note on trivial changes**: Even for <20-line changes, you MUST route to Verification. `implementation -> deployment` is not a valid pipeline transition - factory.ps1 will hard-block it. For truly trivial changes the Verification session will simply be fast.
+**Note on trivial changes**: Even for <20-line changes, you MUST route to Verification. `implementation -> deployment` is not a valid pipeline transition - crucible.ps1 will hard-block it. For truly trivial changes the Verification session will simply be fast.
 
 ### Phase 4: Handoff to Verification
 
@@ -130,10 +130,10 @@ powershell.exe -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
-5. Run factory and present output to human:
+5. Run Crucible and present output to human:
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 
 ---
@@ -141,10 +141,10 @@ powershell.exe -ExecutionPolicy Bypass \
 ## Quality Bar
 
 Before writing handoff.json, confirm:
-- [ ] Routing to: `verification` (always - `implementation -> deployment` is not a valid transition and will be hard-blocked by factory.ps1)
+- [ ] Routing to: `verification` (always - `implementation -> deployment` is not a valid transition and will be hard-blocked by crucible.ps1)
 - [ ] All edits are inside the worktree - nothing committed to `master`
 - [ ] NOT pushed to origin
 - [ ] `BACKLOG.md` not edited (that's the Reviewer/Operator's job)
 - [ ] `session_cycle_id` included in handoff
 - [ ] `task_id` in handoff matches the task I was given
-- [ ] Any skipped conditional checklist item in `task.md` is marked `[-]` (skipped/N/A) or listed under `## Optional Steps` so it does not block quality gate validation.
+- [ ] Every required `## Task List` item in `task.md` is `[x]`. An item that was genuinely skipped is marked `[-]` or moved under `## Optional Steps`; a `[ ]` or `[/]` left in that section fails the quality gate and exits the run with code 2.

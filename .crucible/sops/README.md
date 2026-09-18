@@ -1,7 +1,7 @@
 # SOPs
 
 Standard operating procedures for Crucible. There are two kinds: **pipeline phase
-SOPs** that `factory.ps1` routes to automatically as a task moves through the FSM, and
+SOPs** that `crucible.ps1` routes to automatically as a task moves through the FSM, and
 **human-initiated runbooks** you trigger by hand.
 
 For the runbook triggers (the exact prompt to paste), see [registry.md](registry.md).
@@ -9,9 +9,9 @@ For how a phase's SOP relates to its persona and prompt, see "Anatomy of a phase
 
 ---
 
-## Pipeline phase SOPs (auto-routed by `factory.ps1`)
+## Pipeline phase SOPs (auto-routed by `crucible.ps1`)
 
-One per FSM phase. The orchestrator never picks these by hand - the factory assembles
+One per FSM phase. The orchestrator never picks these by hand - Crucible assembles
 the matching prompt when a handoff lands in that phase.
 
 | SOP | Phase | Persona | Prompt template |
@@ -42,7 +42,7 @@ The Orchestrator is the meta-role that drives the pipeline (not a phase speciali
 
 ## Human-initiated runbooks
 
-Triggered by hand, not by the factory. Paste the trigger from [registry.md](registry.md).
+Triggered by hand, not by Crucible. Paste the trigger from [registry.md](registry.md).
 
 | Runbook | What it is |
 |---|---|
@@ -59,7 +59,7 @@ the one that matches your intent:
 
 - **Persona** (`../personas/<role>.md`) - WHO the agent is: mandate, voice, boundaries.
 - **SOP** (`sops/<phase>.md`) - HOW the phase runs: the procedure and its gates.
-- **Prompt** (`../prompts/<phase>_prompt.md`) - the runtime template `factory.ps1`
+- **Prompt** (`../prompts/<phase>_prompt.md`) - the runtime template `crucible.ps1`
   assembles and hands to the specialist. Edit here to change what the agent actually receives.
 - **Reference** (`../docs/<phase>-reference.md`, where present) - human-readable
   explanation; not loaded at runtime.

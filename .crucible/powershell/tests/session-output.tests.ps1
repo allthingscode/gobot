@@ -4,9 +4,9 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
-$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $Quiet = $true
-. $FACTORY_LIB
+. $CRUCIBLE_LIB
 
 if (-not (Get-Command Check-Dependencies -ErrorAction SilentlyContinue)) {
     function Check-Dependencies {
@@ -79,17 +79,16 @@ function New-TestContext {
         CumulativeHandoffCount = 1
         IsBootstrap = $false
         Transition = "grooming -> verification"
-        NextFactoryCommand = "$((Get-PwshCommand)) -ExecutionPolicy Bypass -File `".crucible/powershell/factory.ps1`" -Init -TaskId $TaskId -Quiet"
+        NextCrucibleCommand = "$((Get-PwshCommand)) -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId $TaskId -Quiet"
     }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-session-output-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "session-output-test"
 
 try {
     $results += Run-Test -Name "Write-NextStep writes expected content with explicit SessionDir" -Body {
         $sessionDir = Join-Path $tempRoot "next-step/session"
-        $command = "$((Get-PwshCommand)) -File factory.ps1 -Init -TaskId F-901"
+        $command = "$((Get-PwshCommand)) -File crucible.ps1 -Init -TaskId F-901"
 
         Write-NextStep -SessionDir $sessionDir -Command $command -TaskId "F-901" -Specialist "verification"
 
@@ -100,7 +99,7 @@ try {
         Assert-Result -Name "next_step content" -Condition ($content -eq $expected) -FailureMessage "next_step.txt content changed"
     }
 
-    $results += Run-Test -Name "New-FactoryPromptText applies replacement map" -Body {
+    $results += Run-Test -Name "New-CruciblePromptText applies replacement map" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "replace") -TaskId "F-902" -TargetPhase "verification"
         @"
 <!-- prompt_version: 9.9.9 -->
@@ -121,7 +120,7 @@ Ceiling {budget_ceiling}
 {context_bundle_path}
 "@ | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "verification_prompt.md") -Encoding UTF8
 
-        $text = New-FactoryPromptText -Context $ctx
+        $text = New-CruciblePromptText -Context $ctx
 
         Assert-Result -Name "task replaced" -Condition ($text -match "Task F-902") -FailureMessage "task id was not replaced"
         Assert-Result -Name "reason replaced" -Condition ($text -match "Reason unit test") -FailureMessage "handoff reason was not replaced"
@@ -130,7 +129,7 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "ceiling replaced" -Condition ($text -match "Ceiling 6") -FailureMessage "budget_ceiling was not replaced"
     }
 
-    $results += Run-Test -Name "New-FactoryPromptText substitutes PowerShell host for non-Windows prompts" -Body {
+    $results += Run-Test -Name "New-CruciblePromptText substitutes PowerShell host for non-Windows prompts" -Body {
         $oldPlatformMock = $script:MockPlatformIsWindows
         $oldPwshMock = $script:MockPwshCommandExists
         try {
@@ -138,10 +137,10 @@ Ceiling {budget_ceiling}
             $script:MockPwshCommandExists = $true
             $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "pwsh-host") -TaskId "F-906" -TargetPhase "verification"
             @"
-Run powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/factory.ps1 -Init -TaskId {task_id}
+Run powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/crucible.ps1 -Init -TaskId {task_id}
 "@ | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "verification_prompt.md") -Encoding UTF8
 
-            $text = New-FactoryPromptText -Context $ctx
+            $text = New-CruciblePromptText -Context $ctx
 
             Assert-Result -Name "pwsh rendered" -Condition ($text -match "\bpwsh\b") -FailureMessage "non-Windows prompt did not render pwsh: $text"
             Assert-Result -Name "windows host removed" -Condition (-not $text.Contains("powershell.exe")) -FailureMessage "non-Windows prompt still contains powershell.exe: $text"
@@ -151,13 +150,13 @@ Run powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/fa
         }
     }
 
-    $results += Run-Test -Name "New-FactoryPromptText exits on unresolved placeholders" -Body {
+    $results += Run-Test -Name "New-CruciblePromptText exits on unresolved placeholders" -Body {
         $caseRoot = Join-Path $tempRoot "unresolved"
         $script = @"
 `$ErrorActionPreference = 'Stop'
 `$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
 `$Quiet = `$true
-. (Join-Path `$REPO_ROOT 'powershell/factory-lib.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/crucible-lib.ps1')
 `$root = '$($caseRoot.Replace("'", "''"))'
 `$session = Join-Path `$root 'session'
 `$handoffs = Join-Path `$session 'handoffs'
@@ -174,9 +173,9 @@ New-Item -ItemType Directory -Path `$handoffs,`$prompts -Force | Out-Null
     Init = `$true; Recover = `$false; Quiet = `$true; AutoAdvance = `$false; BudgetCeilings = @{ low = 6 }; Ceiling = 6
     Handoff = [PSCustomObject]@{ task_id = 'F-903'; source_phase = 'grooming'; target_phase = 'verification'; cumulative_handoff_count = 1; handoff_retry_count = 0; review_strike_count = 0; rebase_count = 0; budget_tier = 'low'; reason = 'unit test'; artifacts = @(); file_affinity = @() }
     LatestHandoff = (Get-Item `$handoffPath); RelativeHandoffPath = '.crucible/session/handoffs/F-903-20260527T120000Z.json'
-    CumulativeHandoffCount = 1; IsBootstrap = `$false; Transition = 'grooming -> verification'; NextFactoryCommand = 'next'
+    CumulativeHandoffCount = 1; IsBootstrap = `$false; Transition = 'grooming -> verification'; NextCrucibleCommand = 'next'
 }
-New-FactoryPromptText -Context `$ctx
+New-CruciblePromptText -Context `$ctx
 "@
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
         $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1
@@ -184,7 +183,7 @@ New-FactoryPromptText -Context `$ctx
         Assert-Result -Name "message" -Condition (($output | Out-String) -match "unresolved placeholders") -FailureMessage "unresolved placeholder message changed"
     }
 
-    $results += Run-Test -Name "Write-FactoryCiStatusBanner uses no-gh fallback" -Body {
+    $results += Run-Test -Name "Write-CrucibleCiStatusBanner uses no-gh fallback" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "ci") -TaskId "F-904" -TargetPhase "verification"
         $ctx.PromptFilePath = Join-Path $ctx.SessionDir "F-904/verification/prompt.md"
         New-Item -ItemType Directory -Path (Split-Path -Parent $ctx.PromptFilePath) -Force | Out-Null
@@ -193,7 +192,7 @@ New-FactoryPromptText -Context `$ctx
         try {
             $env:PATH = ""
             $script:Quiet = $false
-            $output = & { Write-FactoryCiStatusBanner -Context $ctx } 6>&1 | Out-String
+            $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
             Assert-Result -Name "fallback output" -Condition ($output -match "\[CI\] WARN: gh not found - cannot check CI status") -FailureMessage "no-gh fallback message missing"
         } finally {
             $env:PATH = $oldPath
@@ -201,7 +200,29 @@ New-FactoryPromptText -Context `$ctx
         }
     }
 
-    $results += Run-Test -Name "Initialize-FactoryTargetSession writes task and context files" -Body {
+    # Item 100: the success line on a normal run, and nothing matched it - so item 51b's
+    # [FACTORY] -> [CRUCIBLE] rename of it was made on inspection alone. Its absence is the
+    # signal, which is what makes it a contract rather than a message: a run that prints no
+    # banner and exits 0 is indistinguishable from one that finished. See CONTRIBUTING.md,
+    # "Which output strings are contracts". The literal is deliberately kept out of this
+    # test's name - _harness.ps1 echoes every name on a green run, which would inject the
+    # string into the very output a search for it reads.
+    $results += Run-Test -Name "Write-CruciblePromptOutput emits its validated-handoff success line" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "prompt-output") -TaskId "F-906" -TargetPhase "verification"
+        $ctx.PromptText = "# prompt body"
+        $ctx.PromptVersion = "verification_prompt-v29"
+        $oldQuiet = $Quiet
+        try {
+            $script:Quiet = $false
+            $output = & { Write-CruciblePromptOutput -Context $ctx } 6>&1 | Out-String
+            Assert-Result -Name "the handoff success line is present" -Condition ($output -match "\[CRUCIBLE\] Handoff validated\. Next step prepared\.") -FailureMessage ("the line an operator reads to know the run finished is missing. Output:`n" + $output)
+            Assert-Result -Name "the success line is followed by its handoff summary" -Condition ($output -match "TASK ID   : F-906") -FailureMessage ("the banner printed but the summary under it did not, so the function did not run to completion and the banner alone would be misleading. Output:`n" + $output)
+        } finally {
+            $script:Quiet = $oldQuiet
+        }
+    }
+
+    $results += Run-Test -Name "Initialize-CrucibleTargetSession writes task and context files" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "target") -TaskId "F-905" -TargetPhase "verification"
         $ctx.TypeDir = "features"
         $activeDir = Join-Path $ctx.BacklogDir "features/active"
@@ -212,9 +233,9 @@ budget_tier: "low"
 ---
 Spec body
 "@ | Set-Content -LiteralPath (Join-Path $activeDir "F-905_spec.md") -Encoding UTF8
-        $env:FACTORY_CYCLE_ID = "testcycle"
+        $env:CRUCIBLE_CYCLE_ID = "testcycle"
 
-        Initialize-FactoryTargetSession -Context $ctx
+        Initialize-CrucibleTargetSession -Context $ctx
 
         $taskFile = Join-Path $ctx.SessionDir "F-905/verification/task.md"
         $contextFile = Join-Path $ctx.SessionDir "F-905/verification/context.md"
@@ -330,7 +351,7 @@ Feature spec
         try {
             $script:Quiet = $false
             # Test R-029 confirmation
-            $outputR29 = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            $outputR29 = & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 | Out-String
             Assert-Result -Name "R-029 confirmed" -Condition ($outputR29 -match "\[INIT\] Confirmed task: R-029") -FailureMessage "R-029 was not confirmed; output: $outputR29"
 
             # Test C-305a confirmation (suffixed ID) with backlog having only C-305a
@@ -341,7 +362,7 @@ Feature spec
 "@ | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
             $ctx.TaskId = "C-305a"
             $ctx.Handoff.task_id = "C-305a"
-            $outputC305a = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            $outputC305a = & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 | Out-String
             Assert-Result -Name "C-305a confirmed" -Condition ($outputC305a -match "\[INIT\] Confirmed task: C-305a") -FailureMessage "C-305a was not confirmed; output: $outputC305a"
 
             # Test B-101 confirmation with backlog having only B-101
@@ -352,7 +373,7 @@ Feature spec
 "@ | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
             $ctx.TaskId = "B-101"
             $ctx.Handoff.task_id = "B-101"
-            $outputB101 = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            $outputB101 = & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 | Out-String
             Assert-Result -Name "B-101 confirmed" -Condition ($outputB101 -match "\[INIT\] Confirmed task: B-101") -FailureMessage "B-101 was not confirmed; output: $outputB101"
 
             # Test F-210 confirmation with backlog having only F-210
@@ -363,7 +384,7 @@ Feature spec
 "@ | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
             $ctx.TaskId = "F-210"
             $ctx.Handoff.task_id = "F-210"
-            $outputF210 = & { Initialize-FactoryTargetSession -Context $ctx } 6>&1 | Out-String
+            $outputF210 = & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 | Out-String
             Assert-Result -Name "F-210 confirmed" -Condition ($outputF210 -match "\[INIT\] Confirmed task: F-210") -FailureMessage "F-210 was not confirmed; output: $outputF210"
         } finally {
             $script:Quiet = $oldQuiet

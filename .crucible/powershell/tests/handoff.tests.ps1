@@ -3,9 +3,9 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $Quiet = $true
-. $FACTORY_LIB
+. $CRUCIBLE_LIB
 
 $results = @()
 
@@ -31,7 +31,7 @@ function Write-TestHandoff {
     $Values | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-handoff-test-" + [guid]::NewGuid().ToString("N"))
+$tempRoot = New-TestFixtureRoot -NameHint "handoff-test"
 $handoffDir = Join-Path $tempRoot "handoffs"
 $LOG_FILE = Join-Path $tempRoot "logs/pipeline.log.jsonl"
 $CB_HISTORY_FILE = Join-Path $tempRoot "logs/circuit_breakers.jsonl"

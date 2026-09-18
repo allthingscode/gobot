@@ -72,8 +72,7 @@ function Invoke-MergeCheck {
     }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-merge-conflicts-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "merge-conflicts-test"
 $mainSupported = Test-GitInitMainSupported
 
 try {

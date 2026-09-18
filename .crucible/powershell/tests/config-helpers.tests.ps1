@@ -17,8 +17,7 @@ $results = @()
 
 function ToStr($arr) { if ($null -eq $arr) { return "<null>" } return ($arr -join '.') }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-config-helpers-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "config-helpers-test"
 
 try {
     $results += Run-Test -Name "Parse-SemVer extracts major.minor.patch" -Body {

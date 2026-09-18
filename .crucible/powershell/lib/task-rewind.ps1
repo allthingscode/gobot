@@ -127,6 +127,6 @@ function Invoke-TaskRewind {
             Write-Host "  - Worktree: Preserved at $worktreePath" -ForegroundColor Yellow
         }
         Write-Host "`n[REWIND] Next suggested command to start grooming:" -ForegroundColor Green
-        Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .crucible/powershell/factory.ps1 -Init -TaskId $TaskId" -ForegroundColor Yellow
+        Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -TaskId $TaskId" -ForegroundColor Yellow
     }
 }

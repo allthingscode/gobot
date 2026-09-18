@@ -32,10 +32,17 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
-    # Resolve platform-appropriate PowerShell command. Prefer powershell.exe so
-    # Windows runs Windows PowerShell 5.1 (the field-tested host, matching CI);
-    # Linux/macOS have no powershell.exe and fall through to pwsh 7+.
-    PWSH="$(command -v powershell.exe || command -v pwsh)"
+    # Resolve platform-appropriate PowerShell command. Windows prefers powershell.exe so it
+    # runs Windows PowerShell 5.1, the field-tested host matching CI. The OS is tested
+    # rather than inferred from the lookup succeeding: the previous comment here claimed
+    # "Linux/macOS have no powershell.exe", which is false under WSL - PATH interop puts
+    # /mnt/c/.../powershell.exe on PATH, so the lookup hands a Linux repository to a
+    # Windows host that sees the work tree as \\wsl.localhost\... and cannot read its
+    # index. Regression: check-assertion-deletion.tests.ps1 drives a real hook on Linux.
+    case "$(uname -s)" in
+        Linux|Darwin) PWSH="$(command -v pwsh)" ;;
+        *)            PWSH="$(command -v powershell.exe || command -v pwsh)" ;;
+    esac
 
     # 1. Project Scaffolding unit tests
     echo "Running project scaffolding tests..."
@@ -55,9 +62,9 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     echo "Running file affinity tests..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/check-file-affinity.tests.ps1
 
-    # 5. Core Factory Routing test suite
-    echo "Running core factory routing tests..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/factory.tests.ps1
+    # 5. Core Crucible routing test suite
+    echo "Running core Crucible routing tests..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/tests/crucible.tests.ps1
 
     # 6. E2E Adopter Onboarding Bootstrap tests
     echo "Running adopter onboarding E2E bootstrap tests..."

@@ -4,7 +4,7 @@
 # Check 3 (Broken Links): Catch when BACKLOG.md has a table entry pointing to a missing file
 # Check 4 (Archived Status): Repair stale archived frontmatter when BACKLOG.md is already terminal;
 #                            otherwise catch archived files with incorrect or missing frontmatter status
-# Check 5 (Stub Convention): Catch Stub-Only Close-Out drift — BACKLOG.md Status='Stub' rows whose spec
+# Check 5 (Stub Convention): Catch Stub-Only Close-Out drift - BACKLOG.md Status='Stub' rows whose spec
 #                            frontmatter doesn't say status='Stub' (mislabeled stub), and active specs
 #                            with status='Stub' that aren't listed as Stub in BACKLOG.md (orphan stub).
 # Returns exit code 0 if consistent, non-zero if inconsistencies found
@@ -116,8 +116,25 @@ if (-not (Test-Path -LiteralPath $archiveHelpersPath)) {
     throw "Required helper script not found at $archiveHelpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
 }
 . $archiveHelpersPath
+$projectRootHelpersPath = Join-Path $PSScriptRoot "lib/project-root.ps1"
+if (-not (Test-Path -LiteralPath $projectRootHelpersPath)) {
+    throw "Required helper script not found at $projectRootHelpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+}
+. $projectRootHelpersPath
 
 if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
+    # No -BacklogPath means the backlog has to be derived, and deriving it from the working
+    # directory is how this came to validate a repository nobody had named, then report
+    # "Backlog file not found" against it. -BacklogPath answers the same question
+    # explicitly, so it still works on its own.
+    try {
+        $ProjectRoot = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
+    } catch {
+        # Reported the way every other failure here is reported, so a caller reading the
+        # output sees one convention rather than a bare unhandled exception on stderr.
+        Write-Host "BACKLOG VALIDATION ERROR: $_"
+        exit 2
+    }
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
     $BacklogPath = Join-Path $backlogDir "BACKLOG.md"
 } else {
@@ -422,6 +439,30 @@ try {
                 $frontmatterStr = [string]$frontmatter
                 $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                 $relPath = $relPath -replace '\\', '/'
+
+                # Check A reports an active spec with no BACKLOG.md entry but stops at
+                # active, so an archived spec with no row passed silently. That row is a
+                # load-bearing index: measured 2026-09-05 on the dogfood adopter, R-029
+                # was archived "Resolved" with no row, and both the dependency check and
+                # the concurrent-Groomer exclusion read it as a task that does not exist.
+                # A warning rather than an error, matching the `type:` precedent, so an
+                # existing adopter backlog is not broken on upgrade.
+                # Matched on the row's link, not on the bare ID. Check A searches every
+                # line for the ID, so a task named only in prose counts as present - and
+                # gobot's BACKLOG.md does mention R-029 in a sentence while listing no row
+                # for it. Prose is not what a reader resolving a task by table row finds.
+                $linkNeedle = "](" + $relPath + ")"
+                $hasBacklogRow = $false
+                foreach ($cLine in $content) {
+                    if ($cLine.Contains($linkNeedle)) {
+                        $hasBacklogRow = $true
+                        break
+                    }
+                }
+                if (-not $hasBacklogRow) {
+                    Write-Host "[WARN] Archived spec has no BACKLOG.md row: $relPath. Readers that resolve a task by its table row will treat it as nonexistent." -ForegroundColor Yellow
+                }
+
                 if ($frontmatter -and $frontmatterStr -match 'status:\s*"?([^"\r\n]+)"?') {
                     $status = $matches[1].Trim()
                     if ($status -eq "Production" -or $status -eq "Resolved" -or $status -eq "Abandoned") {
@@ -454,7 +495,7 @@ try {
     # This check catches two specific drifts that the broken-links scan alone misses:
     #   (a) BACKLOG.md row says Status=Stub but the spec frontmatter says something else (mislabeled stub)
     #   (b) Spec frontmatter says status=Stub but BACKLOG.md row doesn't say Status=Stub (orphan stub spec)
-    # The third drift — BACKLOG.md row says Status=Stub but the spec file doesn't exist — is already caught
+    # The third drift - BACKLOG.md row says Status=Stub but the spec file doesn't exist - is already caught
     # by Check B (Broken Links), so we just skip those rows here to avoid duplicate errors.
     Write-Quiet "Validating Stub-Only Close-Out stub-row convention..."
 

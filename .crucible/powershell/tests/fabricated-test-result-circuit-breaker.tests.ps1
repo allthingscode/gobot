@@ -4,7 +4,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $pwshCmd = Get-PwshCommand
 
@@ -19,8 +19,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-fabricated-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "fabricated-test"
 
 try {
     $projectRoot = Join-Path $tempRoot "app"
@@ -70,7 +69,7 @@ verification:
         [System.IO.File]::WriteAllText($configPath, $configContent)
 
         # 4. Set up task spec file
-        $specPath = Join-Path $projectRoot ".crucible/backlog/chores/active/C-FABRICATED_FactoryTest.md"
+        $specPath = Join-Path $projectRoot ".crucible/backlog/chores/active/C-FABRICATED_CrucibleTest.md"
         New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
         $specContent = @"
 ---
@@ -88,7 +87,7 @@ created_at: "2026-05-08"
 
         # Ensure BACKLOG.md is updated
         $backlogPath = Join-Path $projectRoot ".crucible/backlog/BACKLOG.md"
-        $backlogLine = "| [C-FABRICATED](chores/active/C-FABRICATED_FactoryTest.md) | Test Title |"
+        $backlogLine = "| [C-FABRICATED](chores/active/C-FABRICATED_CrucibleTest.md) | Test Title |"
         [System.IO.File]::AppendAllText($backlogPath, "`n" + $backlogLine)
 
         # 5. Create Architect worktree on branch task/C-FABRICATED
@@ -139,8 +138,8 @@ APPROVED
         $handoffJson = $handoffData | ConvertTo-Json -Depth 10
         [System.IO.File]::WriteAllText($handoffPath, $handoffJson)
 
-        # Set env FACTORY_CYCLE_ID to match session_cycle_id / cycle_id
-        $env:FACTORY_CYCLE_ID = "test-cycle"
+        # Set env CRUCIBLE_CYCLE_ID to match session_cycle_id / cycle_id
+        $env:CRUCIBLE_CYCLE_ID = "test-cycle"
 
         # Pre-seed log file with quality_gate_retry to simulate a prior retry, triggering the circuit breaker on this run
         $logDir = Join-Path $projectRoot ".crucible/session/C-FABRICATED"
@@ -165,16 +164,16 @@ APPROVED
         } | ConvertTo-Json -Compress
         [System.IO.File]::AppendAllText($logFile, $startEvent + "`n")
 
-        # 8. Run factory safely using Invoke-ExternalCommand helper
+        # 8. Run Crucible safely using Invoke-ExternalCommand helper
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId "C-FABRICATED" -ProjectRoot $projectRoot
         }
         $output = $res.Output -join "`n"
         $exitCode = $res.ExitCode
 
         # 9. Assertions
-        Assert-Result -Name "Factory exits with block code 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit code 2, got " + $exitCode + ". Output: " + $output)
+        Assert-Result -Name "Crucible exits with block code 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit code 2, got " + $exitCode + ". Output: " + $output)
         Assert-Result -Name "Wedge sentinel emitted" -Condition ($output -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage ("missing wedge sentinel. Output: " + $output)
         Assert-Result -Name "Wedge breaker code emitted" -Condition ($output -match [regex]::Escape("(reviewer_verification_failed)")) -FailureMessage ("missing reviewer_verification_failed wedge code. Output: " + $output)
         Assert-Result -Name "Wedge keeps failing check name" -Condition ($output -match [regex]::Escape("Failing Test Full")) -FailureMessage ("missing failing check detail. Output: " + $output)
@@ -193,7 +192,7 @@ APPROVED
     }
 } finally {
     # Clean up env variable
-    Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue
+    Remove-Item env:CRUCIBLE_CYCLE_ID -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

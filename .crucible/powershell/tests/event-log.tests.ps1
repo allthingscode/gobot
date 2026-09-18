@@ -3,22 +3,61 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $HELPER = Join-Path $REPO_ROOT "powershell/lib/event-log.ps1"
 $Quiet = $true
-. $FACTORY_LIB
+. $CRUCIBLE_LIB
 . $HELPER
+. (Join-Path $REPO_ROOT "powershell/lib/repo-scan.ps1")
 
 $results = @()
 
+# The pipeline has no activity signal inside a phase, so the gap between session_start and
+# session_end is calendar time. Grooming on the dogfood adopter recorded 90552 seconds of
+# it and the eval report averaged the number as duration. These cases pin the boundary
+# where a span stops being reportable as wall time, because the defect was not a wrong
+# number - it was a plausible number nothing refused to publish. Found by TODO item 63.
+$results += Run-Test -Name "Get-PhaseDurationMetrics reports a span within the attribution limit as wall time" -Body {
+    $metrics = Get-PhaseDurationMetrics -ElapsedSeconds 600
+    Assert-Result -Name "wall time reported" -Condition ($metrics.Contains("phase_wall_seconds") -and $metrics.phase_wall_seconds -eq 600) -FailureMessage ("expected phase_wall_seconds 600, got: " + ($metrics | ConvertTo-Json -Compress))
+    Assert-Result -Name "no elapsed key" -Condition (-not $metrics.Contains("phase_elapsed_seconds")) -FailureMessage ("did not expect phase_elapsed_seconds: " + ($metrics | ConvertTo-Json -Compress))
+}
+
+$results += Run-Test -Name "Get-PhaseDurationMetrics treats the attribution limit itself as reportable" -Body {
+    # The boundary is inclusive on the reportable side. Asserted so that narrowing the
+    # limit by one second cannot pass as a refactor.
+    $metrics = Get-PhaseDurationMetrics -ElapsedSeconds 7200
+    Assert-Result -Name "limit is wall time" -Condition ($metrics.Contains("phase_wall_seconds") -and $metrics.phase_wall_seconds -eq 7200) -FailureMessage ("expected the limit itself to report as wall time: " + ($metrics | ConvertTo-Json -Compress))
+
+    $overLimit = Get-PhaseDurationMetrics -ElapsedSeconds 7201
+    Assert-Result -Name "one second over is not wall time" -Condition (-not $overLimit.Contains("phase_wall_seconds")) -FailureMessage ("expected no phase_wall_seconds one second past the limit: " + ($overLimit | ConvertTo-Json -Compress))
+}
+
+$results += Run-Test -Name "Get-PhaseDurationMetrics withholds wall time for a resumed session" -Body {
+    # 90552 seconds is the observed value, not an invented one: B-011 grooming, started
+    # 2026-09-05 and resumed 2026-09-06.
+    $metrics = Get-PhaseDurationMetrics -ElapsedSeconds 90552
+    Assert-Result -Name "no wall time" -Condition (-not $metrics.Contains("phase_wall_seconds")) -FailureMessage ("a 25-hour span must not be reported as wall time: " + ($metrics | ConvertTo-Json -Compress))
+    Assert-Result -Name "elapsed time recorded" -Condition ($metrics.Contains("phase_elapsed_seconds") -and $metrics.phase_elapsed_seconds -eq 90552) -FailureMessage ("expected the span to survive as phase_elapsed_seconds: " + ($metrics | ConvertTo-Json -Compress))
+}
+
+$results += Run-Test -Name "Get-PhaseDurationMetrics keeps the duration anomaly on both branches" -Body {
+    # A missing start event already constructs a zero duration, and a span past the limit
+    # must not swallow an anomaly the caller detected on the way in.
+    $short = Get-PhaseDurationMetrics -ElapsedSeconds 0 -Anomaly "missing_start_event"
+    Assert-Result -Name "anomaly kept with wall time" -Condition ($short.Contains("duration_anomaly") -and $short.duration_anomaly -eq "missing_start_event") -FailureMessage ("expected the anomaly alongside wall time: " + ($short | ConvertTo-Json -Compress))
+
+    $long = Get-PhaseDurationMetrics -ElapsedSeconds 90552 -Anomaly "negative_duration"
+    Assert-Result -Name "anomaly kept with elapsed time" -Condition ($long.Contains("duration_anomaly") -and $long.duration_anomaly -eq "negative_duration") -FailureMessage ("expected the anomaly alongside elapsed time: " + ($long | ConvertTo-Json -Compress))
+}
 
 
 
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-event-log-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+$tempRoot = New-TestFixtureRoot -NameHint "event-log-test"
 
 try {
     $results += Run-Test -Name "Invoke-FileLock does not admit a waiter while a slow holder is still in its critical section" -Body {
@@ -29,7 +68,7 @@ try {
 
         $worker = @'
 param(
-    [string]$FactoryLib,
+    [string]$CrucibleLib,
     [string]$LockPath,
     [string]$EventsPath,
     [string]$Name,
@@ -38,7 +77,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Quiet = $true
-. $FactoryLib
+. $CrucibleLib
 
 Invoke-FileLock -LockPath $LockPath -TimeoutMs 200 -ScriptBlock {
     [System.IO.File]::AppendAllText($EventsPath, $Name + "-enter`n", [System.Text.UTF8Encoding]::new($false))
@@ -53,7 +92,7 @@ Invoke-FileLock -LockPath $LockPath -TimeoutMs 200 -ScriptBlock {
             param([string]$Name, [int]$HoldMs)
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName = $shell
-            $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$workerPath`" -FactoryLib `"$FACTORY_LIB`" -LockPath `"$lockPath`" -EventsPath `"$eventsPath`" -Name $Name -HoldMs $HoldMs"
+            $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$workerPath`" -CrucibleLib `"$CRUCIBLE_LIB`" -LockPath `"$lockPath`" -EventsPath `"$eventsPath`" -Name $Name -HoldMs $HoldMs"
             $psi.UseShellExecute = $false
             $psi.RedirectStandardOutput = $true
             $psi.RedirectStandardError = $true
@@ -285,8 +324,14 @@ Invoke-FileLock -LockPath $LockPath -TimeoutMs 200 -ScriptBlock {
         # Readers accept both values permanently, which is exactly what would let a
         # re-introduced emit site sit unnoticed: reports keep looking right while the
         # written data drifts back to the old name.
-        $productionFiles = @(Get-ChildItem -Path (Join-Path $REPO_ROOT "powershell") -Recurse -Filter *.ps1 |
-            Where-Object { $_.FullName -notmatch "[\\/]tests[\\/]" })
+        # Enumerated through git rather than by walking powershell/, so the scan cannot read a
+        # second copy of these files out of an agent worktree. This walk was not the one that
+        # failed for item 87 - rooted at powershell/, it could not reach .claude/worktrees/ at
+        # the repository root - but the exclusion belongs in one place, and a walk rooted at a
+        # subdirectory is only safe for as long as nothing nests a checkout under it. Note
+        # framework-gitignore.tests.ps1 deliberately pins that a worktree below the root is
+        # NOT ignored, so that is a live gap rather than a theoretical one.
+        $productionFiles = @(Get-RepoScannableFile -RepoRoot $REPO_ROOT -Extension ".ps1" -IncludePrefix "powershell" -ExcludePrefix "powershell/tests")
         Assert-Result -Name "production scan is non-empty" -Condition ($productionFiles.Count -ge 20) -FailureMessage ("expected to scan the production scripts, found " + $productionFiles.Count)
 
         $offenders = @($productionFiles | Where-Object {
@@ -295,20 +340,24 @@ Invoke-FileLock -LockPath $LockPath -TimeoutMs 200 -ScriptBlock {
         Assert-Result -Name "no legacy emit site" -Condition ($offenders.Count -eq 0) -FailureMessage ("these files still stamp the legacy phase value: " + ($offenders -join ", "))
     }
 
-    $results += Run-Test -Name "every emitted degraded kind is in the policy taxonomy" -Body {
+    $results += Run-Test -Name "every emitted event kind is in the policy taxonomy" -Body {
         # docs/policy.md 2.2 calls its table the known degraded kinds. Nothing compared
         # it to the code, so a kind could be emitted for months and never appear there -
         # and a reader consulting the taxonomy for an undocumented kind gets silence,
         # which reads as "no such signal exists" rather than "this doc is behind".
-        $sourceText = (Get-ChildItem -Path (Join-Path $REPO_ROOT "powershell") -Recurse -Filter *.ps1 |
-            Where-Object { $_.FullName -notmatch "[\\/]tests[\\/]" } |
+        #
+        # The scan is over every -Kind literal, not only the degraded emit sites, so the
+        # documented set is read from both of 2.2's tables. Restricting it to the degraded
+        # table would force a non-degraded kind to be filed as a degradation to satisfy
+        # this check, which is a worse answer than the check failing.
+        $sourceText = (Get-RepoScannableFile -RepoRoot $REPO_ROOT -Extension ".ps1" -IncludePrefix "powershell" -ExcludePrefix "powershell/tests" |
             ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
         $emittedKinds = @([regex]::Matches($sourceText, '-Kind\s+"([a-z0-9_]+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
         Assert-Result -Name "source scan finds emitted kinds" -Condition ($emittedKinds.Count -ge 5) -FailureMessage ("expected the source scan to find emitted -Kind literals, found " + $emittedKinds.Count)
 
         $policyText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "docs/policy.md") -Raw -Encoding UTF8
-        $documentedKinds = @([regex]::Matches($policyText, '(?m)^\|\s*`([a-z0-9_]+)`\s*\|\s*`(?:warned|unverifiable)`\s*\|') | ForEach-Object { $_.Groups[1].Value })
-        Assert-Result -Name "policy taxonomy table parses" -Condition ($documentedKinds.Count -ge 5) -FailureMessage ("expected to parse the degraded-kind rows out of docs/policy.md, found " + $documentedKinds.Count)
+        $documentedKinds = @([regex]::Matches($policyText, '(?m)^\|\s*`([a-z0-9_]+)`\s*\|\s*`[a-z0-9_]+`\s*\|') | ForEach-Object { $_.Groups[1].Value })
+        Assert-Result -Name "policy taxonomy table parses" -Condition ($documentedKinds.Count -ge 5) -FailureMessage ("expected to parse the kind rows out of docs/policy.md, found " + $documentedKinds.Count)
 
         foreach ($kind in $emittedKinds) {
             Assert-Result -Name ("policy documents " + $kind) -Condition ($documentedKinds -contains $kind) -FailureMessage ("code emits degraded kind '" + $kind + "' but docs/policy.md 2.2 does not list it")

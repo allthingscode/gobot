@@ -1,17 +1,16 @@
-# Regression tests for powershell/factory.ps1 -Rewind mode.
+# Regression tests for powershell/crucible.ps1 -Rewind mode.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 
 $results = @()
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-rewind-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "rewind-test"
 
-function Invoke-FactoryRewind {
+function Invoke-CrucibleRewind {
     param(
         [string]$TaskId,
         [string]$ToPhase,
@@ -19,7 +18,7 @@ function Invoke-FactoryRewind {
         [string]$ProjectRoot,
         [switch]$Quiet
     )
-    $cmdArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $FACTORY_SCRIPT)
+    $cmdArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $CRUCIBLE_SCRIPT)
     $cmdArgs += "-Rewind"
     if (-not [string]::IsNullOrEmpty($TaskId)) {
         $cmdArgs += @("-TaskId", $TaskId)
@@ -50,14 +49,14 @@ function Invoke-FactoryRewind {
 try {
     # Test 1: Refuses missing TaskId
     $results += Run-Test -Name "Rewind refuses missing TaskId" -Body {
-        $r = Invoke-FactoryRewind -ToPhase "grooming" -ProjectRoot $tempRoot
+        $r = Invoke-CrucibleRewind -ToPhase "grooming" -ProjectRoot $tempRoot
         Assert-Result -Name "refuses missing TaskId" -Condition ($r.ExitCode -ne 0) -FailureMessage "expected non-zero exit code when TaskId is missing"
         Assert-Result -Name "shows task id error" -Condition ($r.Output -match "TaskId is required") -FailureMessage "expected task id error message"
     }
 
     # Test 2: Refuses missing ToPhase
     $results += Run-Test -Name "Rewind refuses missing ToPhase" -Body {
-        $r = Invoke-FactoryRewind -TaskId "B-001" -ProjectRoot $tempRoot
+        $r = Invoke-CrucibleRewind -TaskId "B-001" -ProjectRoot $tempRoot
         Assert-Result -Name "refuses missing ToPhase" -Condition ($r.ExitCode -ne 0) -FailureMessage "expected non-zero exit code when ToPhase is missing"
         Assert-Result -Name "shows to phase error" -Condition ($r.Output -match "ToPhase") -FailureMessage "expected to phase error message"
     }
@@ -65,7 +64,7 @@ try {
     # Test 3: Refuses invalid ToPhase
     $results += Run-Test -Name "Rewind refuses invalid ToPhase" -Body {
         # Using a phase other than grooming should fail
-        $r = Invoke-FactoryRewind -TaskId "B-001" -ToPhase "implementation" -ProjectRoot $tempRoot
+        $r = Invoke-CrucibleRewind -TaskId "B-001" -ToPhase "implementation" -ProjectRoot $tempRoot
         Assert-Result -Name "refuses invalid ToPhase" -Condition ($r.ExitCode -ne 0) -FailureMessage "expected non-zero exit code when ToPhase is not grooming"
     }
 
@@ -93,7 +92,7 @@ try {
         Set-Content -Path $logFile -Value '{"event":"session_start","task_id":"B-001","phase":"grooming"}'
 
         # Execute rewind (without ResetBudget)
-        $r = Invoke-FactoryRewind -TaskId "B-001" -ToPhase "grooming" -ProjectRoot $tempRoot
+        $r = Invoke-CrucibleRewind -TaskId "B-001" -ToPhase "grooming" -ProjectRoot $tempRoot
         Assert-Result -Name "rewind success" -Condition ($r.ExitCode -eq 0) -FailureMessage "expected exit code 0. Output: $($r.Output)"
 
         # Verify handoffs moved out of active path
@@ -144,7 +143,7 @@ try {
         Set-Content -Path $logFile -Value '{"event":"session_start","task_id":"B-003","phase":"grooming"}'
 
         # Execute rewind (with ResetBudget)
-        $r = Invoke-FactoryRewind -TaskId "B-003" -ToPhase "grooming" -ResetBudget -ProjectRoot $tempRoot
+        $r = Invoke-CrucibleRewind -TaskId "B-003" -ToPhase "grooming" -ResetBudget -ProjectRoot $tempRoot
         Assert-Result -Name "rewind success" -Condition ($r.ExitCode -eq 0) -FailureMessage "expected exit code 0"
 
         # Verify pipeline log moved out of active path
@@ -165,7 +164,7 @@ try {
     # Test 6: Idempotency (no-op on second run)
     $results += Run-Test -Name "Rewind is idempotent (no-op on second run)" -Body {
         # Execute rewind again on B-003 (which was already rewound)
-        $r = Invoke-FactoryRewind -TaskId "B-003" -ToPhase "grooming" -ResetBudget -ProjectRoot $tempRoot
+        $r = Invoke-CrucibleRewind -TaskId "B-003" -ToPhase "grooming" -ResetBudget -ProjectRoot $tempRoot
         Assert-Result -Name "rewind success second time" -Condition ($r.ExitCode -eq 0) -FailureMessage "expected exit code 0"
         Assert-Result -Name "no-op message" -Condition ($r.Output -match "No downstream state found") -FailureMessage "expected no downstream state message"
     }

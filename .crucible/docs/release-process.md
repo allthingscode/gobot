@@ -1,6 +1,6 @@
 # Release Process
 
-This is the convention Crucible maintainers follow when cutting a release. Adopters do not need to read this — see [updating.md](updating.md) for the adopter-side workflow.
+This is the convention Crucible maintainers follow when cutting a release. Adopters do not need to read this - see [updating.md](updating.md) for the adopter-side workflow.
 
 ---
 
@@ -8,9 +8,9 @@ This is the convention Crucible maintainers follow when cutting a release. Adopt
 
 Crucible follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html):
 
-- **MAJOR** — breaking change to the adopter contract (schema-incompatible config changes, removed flags, renamed canonical paths, deleted public scripts).
-- **MINOR** — backward-compatible additions (new flags, new docs, new optional config fields, additive schema changes).
-- **PATCH** — backward-compatible bug fixes only.
+- **MAJOR** - breaking change to the adopter contract (schema-incompatible config changes, removed flags, renamed canonical paths, deleted public scripts).
+- **MINOR** - backward-compatible additions (new flags, new docs, new optional config fields, additive schema changes).
+- **PATCH** - backward-compatible bug fixes only.
 
 Pre-1.0 (`0.x.y`): MINOR may include breaking changes. After `1.0.0`, MAJOR is required for any break.
 
@@ -21,7 +21,7 @@ Pre-1.0 (`0.x.y`): MINOR may include breaking changes. After `1.0.0`, MAJOR is r
 `VERSION` at the repository root is the single source of truth for the current Crucible version. It is read by:
 
 - `powershell/init-project.ps1` when stamping `crucible_version` into a newly-scaffolded adopter config
-- `powershell/factory.ps1` indirectly, via the stamped value in the adopter's `.crucible/config.yaml`
+- `powershell/crucible.ps1` indirectly, via the stamped value in the adopter's `.crucible/config.yaml`
 
 Bump `VERSION` BEFORE tagging. The tag references the commit that contains the new `VERSION`.
 
@@ -94,9 +94,10 @@ On `STOP`, re-cut the release rather than tagging over it.
 
 7. **Verify** that a fresh `init-project.ps1` run on the new commit stamps the new version into the adopter's config:
    ```powershell
-   # Windows uses $env:TEMP; on Linux/macOS run under pwsh and use [System.IO.Path]::GetTempPath()
-   ./powershell/init-project.ps1 -ProjectRoot $env:TEMP/release-smoke
-   Select-String -Path "$env:TEMP/release-smoke/.crucible/config.yaml" -Pattern "crucible_version"
+   # GetTempPath() resolves on Windows, Linux and macOS, so these run as written on all three.
+   $smoke = Join-Path ([System.IO.Path]::GetTempPath()) "release-smoke"
+   ./powershell/init-project.ps1 -ProjectRoot $smoke
+   Select-String -Path (Join-Path $smoke ".crucible/config.yaml") -Pattern "crucible_version"
    # Should show: crucible_version: "X.Y.Z"
    ```
 
@@ -138,4 +139,4 @@ For pre-1.0 work this is rare, but the format is:
 - Tag: `v0.2.0-alpha.1`
 - `CHANGELOG.md` section: `## [0.2.0-alpha.1] - YYYY-MM-DD`
 
-Pre-release tags do not become the basis for hotfix branches — they're cumulative drafts of the eventual `0.2.0`.
+Pre-release tags do not become the basis for hotfix branches - they're cumulative drafts of the eventual `0.2.0`.

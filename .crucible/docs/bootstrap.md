@@ -19,11 +19,14 @@ A complete installed `.crucible/` contains:
 
 - `config.yaml` - project-specific commands, paths, roles, and mandates.
 - `.gitignore` - commit policy for durable behavior vs. runtime data.
+- `.gitattributes` - line-ending policy, so the runtime scripts survive a clone on any platform.
+- `README.md` - what the bundle is and how to work with it.
 - `docs/` - operating manual, policies, runbooks, and quick references.
 - `personas/` - specialist role definitions for this project; edit in place to customize.
 - `sops/` - specialist workflows for this project; edit in place to customize.
 - `prompts/` - prompt templates and prompt README.
 - `schemas/` - handoff and config validation schemas.
+- `standards/` - the standards audits are run against; copy `scorecard-TEMPLATE.md` to make your project's.
 - `powershell/` - current executable runtime.
 - `agent-instructions/` - copy-ready snippets for root `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`.
 - `backlog/` - project task index and task specs.

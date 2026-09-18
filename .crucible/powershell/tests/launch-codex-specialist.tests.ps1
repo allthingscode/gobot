@@ -147,8 +147,7 @@ function New-TestGitProject {
     Invoke-TestGit -Directory $Root -GitArgs @("commit", "-m", "initial") | Out-Null
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-launch-codex-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "launch-codex-test"
 $binDir = Join-Path $tempRoot "fake-bin"
 Write-FakeCodex -BinDir $binDir
 
@@ -557,7 +556,7 @@ try {
     }
 
     $results += Run-Test -Name "Ad-hoc session cannot collide with a task session dir" -Body {
-        # session/adhoc/ is not decorative. factory-health treats a top-level
+        # session/adhoc/ is not decorative. crucible-health treats a top-level
         # session/<F|B|C>-<n>/ dir as a task session and archives it when the backlog says that
         # task is done, so a prompt file named F-001.md must NOT land at session/F-001/.
         $projectRoot = Join-Path $tempRoot "proj-promptfile-collide"
@@ -575,7 +574,7 @@ try {
 
     $results += Run-Test -Name "-PromptFile with only one of -TaskId/-Phase exits 2" -Body {
         # All-or-nothing: -TaskId alone would name session/<id>/ with no phase segment, a shape
-        # nothing else in the factory writes or reads.
+        # nothing else in Crucible writes or reads.
         $projectRoot = Join-Path $tempRoot "proj-promptfile-halfid"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $promptFilePath = Join-Path $tempRoot "half-id-brief.md"

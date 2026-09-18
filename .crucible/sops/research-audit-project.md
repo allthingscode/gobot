@@ -7,7 +7,7 @@
 
 **Project override:** Projects with language-, runtime-, or domain-specific audit needs may replace this SOP at `.crucible/sops/research-audit-project.md`.
 
-**Scorecard:** `.crucible/research/scorecard-{project}.md` - read this before proceeding. It defines the audit categories, standards, signals, and report template. This SOP describes the process; the scorecard describes the content.
+**Scorecard:** `.crucible/standards/scorecard-{project}.md` - read this before proceeding. It defines the audit categories, standards, signals, and report template. This SOP describes the process; the scorecard describes the content.
 
 ---
 
@@ -16,7 +16,7 @@
 | Input | Source | When needed |
 |---|---|---|
 | Project config | `.crucible/config.yaml` | Before starting |
-| Scorecard | `.crucible/research/scorecard-{project}.md` | Before starting |
+| Scorecard | `.crucible/standards/scorecard-{project}.md` | Before starting |
 | Project source | Paths and file affinity declared by `.crucible/config.yaml`, the backlog item, or `task.md` | All code/product categories |
 | Verification output | Commands from `.crucible/config.yaml` `verification.quick` and `verification.full` | Quality and release-readiness categories |
 | Existing research | `.crucible/research/` | Before external research |
@@ -50,9 +50,17 @@ If required project context is missing, ask the human for the missing informatio
 
 ### Step 2 - Load the Scorecard
 
-Read `.crucible/research/scorecard-{project}.md` completely.
+Read `.crucible/standards/scorecard-{project}.md` completely.
 
-If no project scorecard exists, create a minimal audit plan in the report using these generic lenses:
+The scorecard is the project's own standard rather than audit output, so it is committed
+and reviewable. Older bundles kept it at `.crucible/research/scorecard-{project}.md`. If
+you find it only there, use it and record in the report that it needs to move: `research/`
+is gitignored, so that copy is untracked, has never been through review, and does not
+survive a fresh clone - with nothing left to say what it used to require.
+
+If no project scorecard exists at either path, recommend in the report that the human copy
+`.crucible/standards/scorecard-TEMPLATE.md` to `.crucible/standards/scorecard-{project}.md`
+and fill it in. Then audit this run against a minimal plan built from these generic lenses:
 
 1. Correctness and reliability
 2. Security and secret handling

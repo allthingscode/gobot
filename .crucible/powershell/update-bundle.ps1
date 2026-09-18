@@ -9,9 +9,32 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Retention for the per-run report written to session/update-bundle/. A normal update writes
+# two logs - the dry run and the apply - so twenty is roughly the last ten updates, which is
+# further back than anyone has ever needed to look and still a bounded directory.
+$UpdateLogRetentionCount = 20
+
 function ConvertTo-RelativeSlashPath {
     param([Parameter(Mandatory=$true)][string]$Path)
     return $Path.Replace("\", "/").TrimStart("/")
+}
+
+# A path is superseded only when the framework says where it went AND the destination is
+# actually shipping in this update. Trusting the map alone would retire a file on the word
+# of a manifest entry whose replacement failed to materialise, turning a bad rename record
+# into silent data loss; requiring the destination in $Expected makes the map a claim the
+# update itself has to corroborate.
+function Test-SupersededRename {
+    param(
+        [Parameter(Mandatory=$true)][string]$RelativePath,
+        [Parameter(Mandatory=$true)][hashtable]$RenameMap,
+        [Parameter(Mandatory=$true)]$Expected
+    )
+    $normalized = ConvertTo-RelativeSlashPath -Path $RelativePath
+    if (-not $RenameMap.ContainsKey($normalized)) {
+        return $false
+    }
+    return $Expected.Contains((ConvertTo-RelativeSlashPath -Path $RenameMap[$normalized]))
 }
 
 function Read-ConfigScalar {
@@ -50,6 +73,7 @@ function New-ClassificationResult {
         "safe-overwrite" = New-Object System.Collections.Generic.List[object]
         "needs-merge" = New-Object System.Collections.Generic.List[object]
         "add" = New-Object System.Collections.Generic.List[object]
+        "retired" = New-Object System.Collections.Generic.List[object]
         "review-removal" = New-Object System.Collections.Generic.List[object]
     }
 }
@@ -69,7 +93,7 @@ function Add-ClassifiedItem {
 
 function Write-Report {
     param([Parameter(Mandatory=$true)]$Results)
-    foreach ($category in @("no-op", "safe-overwrite", "needs-merge", "add", "review-removal")) {
+    foreach ($category in @("no-op", "safe-overwrite", "needs-merge", "add", "retired", "review-removal")) {
         Write-Host ("{0,-16} {1}" -f ($category + ":"), $Results[$category].Count)
         foreach ($item in $Results[$category].ToArray()) {
             Write-Host ("  " + $item.AdopterPath)
@@ -202,6 +226,7 @@ function Invoke-UpdateBundle {
     . (Join-Path $scriptRoot "lib/install-manifest.ps1")
     . (Join-Path $scriptRoot "lib/update-classification.ps1")
     $manifest = Get-InstallManifest -FrameworkRoot $frameworkRoot
+    $renameMap = Get-SupersededRenameMap -Manifest $manifest
 
     $baselineCommit = Read-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit"
     if (-not ($baselineCommit -match '^[0-9a-f]{40}$')) {
@@ -279,7 +304,8 @@ function Invoke-UpdateBundle {
                 -IsExpectedPath ($expected.Contains((ConvertTo-RelativeSlashPath -Path $adopterPath))) `
                 -InProvenance $inProvenance `
                 -SourceIsScaffoldSnapshot (Test-ScaffoldSnapshotPath -RelativePath $sourcePath -Manifest $manifest) `
-                -AdopterIsScaffoldSnapshot (Test-ScaffoldSnapshotPath -RelativePath $adopterPath -Manifest $manifest)
+                -AdopterIsScaffoldSnapshot (Test-ScaffoldSnapshotPath -RelativePath $adopterPath -Manifest $manifest) `
+                -IsSupersededRename (Test-SupersededRename -RelativePath $adopterPath -RenameMap $renameMap -Expected $expected)
 
             if ($verdict.Category -eq "skip") {
                 continue
@@ -314,41 +340,89 @@ function Invoke-UpdateBundle {
             if (-not (Test-ScaffoldSnapshotPath -RelativePath $rel -Manifest $manifest)) {
                 if (Test-CrucibleGitIgnored -BundleRoot $adopterCrucibleRoot -RelativePath $rel) { continue }
             }
-            Add-ClassifiedItem -Results $results -Category "review-removal" -SourcePath "" -AdopterPath $rel
+            $orphanCategory = if (Test-SupersededRename -RelativePath $rel -RenameMap $renameMap -Expected $expected) {
+                "retired"
+            } else {
+                "review-removal"
+            }
+            Add-ClassifiedItem -Results $results -Category $orphanCategory -SourcePath "" -AdopterPath $rel
             [void]$classifiedAdopterPaths.Add($rel)
         }
     }
 
     $sessionDir = Join-Path $adopterCrucibleRoot "session"
-    if (-not (Test-Path -LiteralPath $sessionDir)) {
-        New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+    $logDir = Join-Path $sessionDir "update-bundle"
+    if (-not (Test-Path -LiteralPath $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     }
+
+    # These logs used to land in the root of session/, alongside the per-task directories an
+    # operator lists to orient, and nothing pruned them - one adopter had accumulated 172.
+    # Move rather than delete, so the retention sweep below stays the only thing that ever
+    # removes a log and the newest survivors are chosen by one rule instead of two.
+    $migratedLogs = 0
+    foreach ($legacy in @(Get-ChildItem -LiteralPath $sessionDir -Filter "update-bundle-*.log" -File -Force -ErrorAction SilentlyContinue)) {
+        $destination = Join-Path $logDir ($legacy.Name -replace '^update-bundle-', '')
+        if (Test-Path -LiteralPath $destination) {
+            Remove-Item -LiteralPath $legacy.FullName -Force
+        } else {
+            Move-Item -LiteralPath $legacy.FullName -Destination $destination -Force
+        }
+        $migratedLogs++
+    }
+
     $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss", [System.Globalization.CultureInfo]::InvariantCulture)
-    $logPath = Join-Path $sessionDir ("update-bundle-" + $timestamp + ".log")
+    $logPath = Join-Path $logDir ($timestamp + ".log")
     $reportLines = @()
-    foreach ($category in @("no-op", "safe-overwrite", "needs-merge", "add", "review-removal")) {
+    foreach ($category in @("no-op", "safe-overwrite", "needs-merge", "add", "retired", "review-removal")) {
         $reportLines += ("{0}: {1}" -f $category, $results[$category].Count)
         $reportLines += @($results[$category].ToArray() | ForEach-Object { "  " + $_.AdopterPath })
     }
     [System.IO.File]::WriteAllText($logPath, (($reportLines -join "`r`n") + "`r`n"), [System.Text.UTF8Encoding]::new($false))
 
+    # Names are UTC yyyyMMdd-HHmmss, so sorting by name is sorting by age, and the log just
+    # written is always newest. Counting it in the retention keeps the directory at exactly
+    # $UpdateLogRetentionCount rather than one more than whatever the rule claims.
+    $removedLogs = 0
+    $keptLogs = @(Get-ChildItem -LiteralPath $logDir -Filter "*.log" -File -Force | Sort-Object -Property Name -Descending)
+    foreach ($stale in @($keptLogs | Select-Object -Skip $UpdateLogRetentionCount)) {
+        Remove-Item -LiteralPath $stale.FullName -Force
+        $removedLogs++
+    }
+
     Write-Report -Results $results
     Write-Host ("Log: " + $logPath)
+    if ($migratedLogs -gt 0) {
+        Write-Host ("Moved {0} update log(s) out of session/ into session/update-bundle/." -f $migratedLogs)
+    }
+    if ($removedLogs -gt 0) {
+        Write-Host ("Removed {0} update log(s) beyond the newest {1}." -f $removedLogs, $UpdateLogRetentionCount)
+    }
 
     $effectiveDryRun = ($DryRun -or $Mode -eq "report-only")
     $applyItems = @($results["safe-overwrite"].ToArray() + $results["add"].ToArray())
+    # Retirements ride the apply decision rather than the -Prune decision. -Prune is opt-in
+    # and asks a separate question, so routing renames through it would make every rename a
+    # bundle an adopter cannot bring current in one non-interactive command.
+    $retireItems = @($results["retired"].ToArray())
     $shouldApply = $false
-    if (-not $effectiveDryRun -and $applyItems.Count -gt 0) {
+    if (-not $effectiveDryRun -and ($applyItems.Count + $retireItems.Count) -gt 0) {
         if ($Mode -eq "auto-safe") {
             $shouldApply = $true
         } elseif ($Mode -eq "interactive") {
-            $answer = Read-Host ("Apply " + $applyItems.Count + " safe/add update(s)? [y/N]")
+            $prompt = if ($retireItems.Count -gt 0) {
+                "Apply " + $applyItems.Count + " safe/add update(s) and retire " + $retireItems.Count + " superseded file(s)? [y/N]"
+            } else {
+                "Apply " + $applyItems.Count + " safe/add update(s)? [y/N]"
+            }
+            $answer = Read-Host $prompt
             $shouldApply = ($answer -match '^(?i)y(es)?$')
         }
     }
 
     $appliedCount = 0
     $skippedCount = 0
+    $retiredCount = 0
     if ($shouldApply) {
         foreach ($item in $applyItems) {
             # Guard against an apply item whose framework source no longer exists on
@@ -366,6 +440,25 @@ function Invoke-UpdateBundle {
             $appliedCount++
         }
         Write-Host ("Applied " + $appliedCount + " update(s).")
+        $emptiedByRetire = @()
+        foreach ($item in $retireItems) {
+            $relPath = ConvertTo-RelativeSlashPath -Path $item.AdopterPath
+            # A path that something at HEAD still claims is not dead, whatever the map says.
+            if ($expected.Contains($relPath)) { continue }
+            $pathToDelete = Join-Path $adopterCrucibleRoot $item.AdopterPath
+            if (Test-Path -LiteralPath $pathToDelete -PathType Leaf) {
+                Remove-Item -LiteralPath $pathToDelete -Force
+                $retiredCount++
+                $emptiedByRetire += (Split-Path -Path $pathToDelete -Parent)
+            }
+        }
+        if ($retiredCount -gt 0) {
+            $removedByRetire = Remove-EmptiedBundleDirectory -Candidates $emptiedByRetire -BundleRoot $adopterCrucibleRoot
+            Write-Host ("Retired " + $retiredCount + " superseded file(s) whose replacement shipped in this update.")
+            if ($removedByRetire -gt 0) {
+                Write-Host ("Removed " + $removedByRetire + " directory/directories left empty by the retirement.")
+            }
+        }
         if ($skippedCount -gt 0) {
             Write-Host ("Skipped " + $skippedCount + " item(s) with a missing framework source (likely renamed upstream; their current names are applied separately).") -ForegroundColor Yellow
         }
@@ -409,7 +502,7 @@ function Invoke-UpdateBundle {
         }
     }
 
-    if ($appliedCount -gt 0 -or $prunedCount -gt 0) {
+    if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0) {
         $isGitRepo = $false
         $checkDir = $adopterRootResolved
         while (-not [string]::IsNullOrEmpty($checkDir)) {
@@ -424,11 +517,11 @@ function Invoke-UpdateBundle {
         if ($isGitRepo) {
             $old7 = if ($baselineCommit -and $baselineCommit.Length -ge 7) { $baselineCommit.Substring(0, 7) } else { "old" }
             $new7 = if ($frameworkHead -and $frameworkHead.Length -ge 7) { $frameworkHead.Substring(0, 7) } else { "new" }
-            Write-Host "NEXT STEP (required): commit this bundle update in the adopter repo before running factory.ps1."
+            Write-Host "NEXT STEP (required): commit this bundle update in the adopter repo before running crucible.ps1."
             Write-Host "  git add .crucible"
             Write-Host ("  git commit -m `"chore(crucible): update adopter bundle " + $old7 + " -> " + $new7 + "`"")
             Write-Host "The framework-integrity circuit breaker treats uncommitted .crucible/ changes as a"
-            Write-Host "specialist modifying framework-owned files and will hard-stop factory.ps1 -Init with exit 2."
+            Write-Host "specialist modifying framework-owned files and will hard-stop crucible.ps1 -Init with exit 2."
         }
     }
 
@@ -438,7 +531,8 @@ function Invoke-UpdateBundle {
         if ($shouldPrune) {
             $remainingRemovals -= $prunedCount
         }
-        if ($results["needs-merge"].Count -eq 0 -and $remainingRemovals -eq 0) {
+        $remainingRetired = $retireItems.Count - $retiredCount
+        if ($results["needs-merge"].Count -eq 0 -and $remainingRemovals -eq 0 -and $remainingRetired -eq 0) {
             $shouldRestamp = $true
         }
     } elseif ($Restamp -and -not $effectiveDryRun) {
@@ -447,7 +541,7 @@ function Invoke-UpdateBundle {
         # add, needs-merge, or review-removal item means content is NOT current, so
         # stamping HEAD would lie about what is installed - refuse and tell the caller
         # to run a normal update first.
-        $pendingWork = $results["safe-overwrite"].Count + $results["add"].Count + $results["needs-merge"].Count + $results["review-removal"].Count
+        $pendingWork = $results["safe-overwrite"].Count + $results["add"].Count + $results["needs-merge"].Count + $results["retired"].Count + $results["review-removal"].Count
         if ($pendingWork -eq 0) {
             $shouldRestamp = $true
             Write-Host "Re-stamping bundle provenance to framework HEAD (content already current)." -ForegroundColor Cyan

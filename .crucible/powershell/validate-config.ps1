@@ -93,7 +93,7 @@ if (-not [string]::IsNullOrWhiteSpace($crucibleRootPath)) {
     }
 
     if ($isRooted) {
-        $errors += "crucible_root must be a relative path inside the project (e.g. .crucible, .dev-factory, tools/crucible)."
+        $errors += "crucible_root must be a relative path inside the project (e.g. .crucible, .crucible-bundle, tools/crucible)."
     }
     if ($crucibleRootPath -match "^\.\." -or $crucibleRootPath -match "[\\/]\.\.") {
         $errors += "crucible_root must not escape the project root (path contains '..')."

@@ -50,8 +50,7 @@ function New-EolFixture {
     return $bundle
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-line-ending-conformance-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "line-ending-conformance"
 
 try {
     $results += Run-Test -Name "A repo that stores LF everywhere reports no violations" -Body {
@@ -226,7 +225,7 @@ try {
         $null = Invoke-Git @("add", "-A") -Directory $project
 
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File (Join-Path $REPO_ROOT "powershell/factory-doctor.ps1") -ProjectRoot $project
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File (Join-Path $REPO_ROOT "powershell/crucible-doctor.ps1") -ProjectRoot $project
         }
         $output = $res.Output -join "`n"
 

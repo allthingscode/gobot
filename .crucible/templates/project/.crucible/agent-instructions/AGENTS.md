@@ -15,5 +15,5 @@ The `.crucible/` directory is the installed Crucible bundle for this project. It
 Run the installed runtime from the project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId <task-id>
+powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id>
 ```

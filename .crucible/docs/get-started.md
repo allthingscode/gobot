@@ -32,7 +32,7 @@ cd crucible
 This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md.
 
 ### Run the sample task
-Commit the scaffold first so the factory does not flag the new instruction files as untracked:
+Commit the scaffold first so Crucible does not flag the new instruction files as untracked:
 
 ```powershell
 git add .crucible AGENTS.md CLAUDE.md GEMINI.md
@@ -41,9 +41,9 @@ git commit -m "Add Crucible scaffold"
 
 ```powershell
 cd <your-project-path>
-./.crucible/powershell/factory.ps1 -Init -TaskId F-001
+./.crucible/powershell/crucible.ps1 -Init -TaskId F-001
 ```
-Follow the prompts. The factory will scaffold a Groomer session and tell you the next agent command.
+Follow the prompts. Crucible will scaffold a Groomer session and tell you the next agent command.
 
 Expected output excerpt:
 
@@ -57,7 +57,7 @@ agent "Groomer: F-001 - read and follow all instructions in <abs path>/.crucible
 [RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
 ```
 
-The factory also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
+Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
 
 ---
 
@@ -87,6 +87,7 @@ my-api/
 |-- .crucible/
 |   |-- config.yaml          # edit this next
 |   |-- .gitignore           # commit this; it separates durable intent from runtime state
+|   |-- .gitattributes       # commit this too; it pins line endings for the runtime scripts
 |   |-- backlog/
 |   |   |-- BACKLOG.md       # master task index
 |   |   |-- features/        # feature specs go here
@@ -97,13 +98,14 @@ my-api/
 |   |-- sops/                # per-phase workflows; edit in place to customize
 |   |-- prompts/             # prompt templates
 |   |-- schemas/             # handoff and config validation schemas
+|   |-- standards/           # audit scorecards you author; commit these
 |   |-- powershell/          # the runtime
 |   |-- agent-instructions/  # copy-ready snippets for AGENTS.md / CLAUDE.md / GEMINI.md
 |   `-- README.md
 `-- <your source code>
 ```
 
-Commit the scaffold before running the factory:
+Commit the scaffold before running Crucible:
 
 ```powershell
 git add .crucible
@@ -198,12 +200,12 @@ or renaming the columns breaks it:
 
 ---
 
-## Step 4 - Run the factory for the task
+## Step 4 - Run Crucible for the task
 
 From your project root:
 
 ```powershell
-./.crucible/powershell/factory.ps1 -Init -TaskId F-002
+./.crucible/powershell/crucible.ps1 -Init -TaskId F-002
 ```
 *(Linux/macOS: prefix the script path with `pwsh`.)*
 
@@ -219,13 +221,13 @@ agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible
 [RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
 ```
 
-The factory also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
+Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
 
 ---
 
 ## Step 5 - Run the Groomer
 
-Open an AI agent session (Claude Code, Gemini CLI, Codex, etc.) in your project directory. Paste the command the factory produced:
+Open an AI agent session (Claude Code, Gemini CLI, Codex, etc.) in your project directory. Paste the command Crucible produced:
 
 ```
 agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/grooming/prompt.md"
@@ -235,8 +237,8 @@ The Groomer will:
 1. Read your backlog item and config
 2. Write a detailed technical spec with implementation strategy and file scope
 3. Write `.crucible/session/handoffs/F-002-{timestamp}.json`
-4. Run `factory.ps1 -Init -TaskId F-002`
-5. Present the factory output to you
+4. Run `crucible.ps1 -Init -TaskId F-002`
+5. Present the Crucible output to you
 
 You'll see something like:
 
@@ -270,7 +272,7 @@ The Architect will:
 2. Implement the code inside an isolated git worktree at `.crucible/.agent-workspaces/implementation-F-002/`
 3. Run your verification commands (`npm test`, etc.) inside the worktree
 4. Commit the changes inside the worktree
-5. Write the handoff and run the factory
+5. Write the handoff and run Crucible
 
 You confirm, then run the Reviewer.
 
@@ -278,20 +280,25 @@ You confirm, then run the Reviewer.
 
 ## Step 7 - Reviewer and Operator
 
-Each runs the same pattern: paste the factory-generated command, agent does its work, presents the next command, you confirm.
+Each runs the same pattern: paste the Crucible-generated command, agent does its work, presents the next command, you confirm.
 
 The **Reviewer** checks the Architect's work against your spec and runs `npm test`, `npm run lint`, `npx tsc --noEmit`. If anything fails, it routes back to the Architect with a strike. After 3 strikes the task blocks and requires human intervention (see [circuit-breaker-runbook.md](circuit-breaker-runbook.md)).
 
 The **Operator** merges the worktree branch to `main`, cleans up the worktree, updates the backlog to `Production`, and presents the **Human Gate**:
 
 ```
-1) Accept     - work looks good; pause after this item
+1) Accept     - work looks good; merges to main (local only); pause after this item
 2) Reject     - something is wrong, rework
 3) Redirect   - accept this item and go work on a specific item next
 4) Abandon    - do not accept; stop the pipeline
 ```
 
-Reply with a number. The cycle is complete.
+Reply with a number. Option 1's wording follows `review.auto_push`, which is off by default: the
+merge stays on your machine and the gate prints the `git push` command for you to run when you
+choose to publish. With `auto_push: true` that line reads `merges to main and pushes to origin`
+instead. Present whichever line the gate emitted - it is the one that says what accept will do.
+
+The cycle is complete.
 
 ---
 
@@ -301,12 +308,16 @@ Reply with a number. The cycle is complete.
 |------|-------------|---------|
 | `.crucible/config.yaml` | Your project's config | Yes |
 | `.crucible/.gitignore` | Separates durable vs. runtime state | Yes |
+| `.crucible/.gitattributes` | Pins line endings for the runtime scripts | Yes |
+| `.crucible/README.md` | What the bundle is and how to work with it | Yes |
 | `.crucible/docs/` | Installed manuals and policies | Yes |
 | `.crucible/personas/` | Installed specialist identities | Yes |
 | `.crucible/sops/` | Installed specialist workflows | Yes |
 | `.crucible/prompts/` | Installed prompt templates | Yes |
 | `.crucible/schemas/` | Installed validation schemas | Yes |
 | `.crucible/powershell/` | Installed runtime scripts | Yes |
+| `.crucible/standards/` | Audit scorecards you author | Yes |
+| `.crucible/agent-instructions/` | Copy-ready snippets for root AGENTS.md, CLAUDE.md, GEMINI.md | Yes |
 | `.crucible/backlog/` | Specs and BACKLOG.md | Project choice |
 | `.crucible/session/` | Agent scratchpads, handoffs, logs | No (runtime state) |
 | `.crucible/.agent-workspaces/` | Git worktrees | No (runtime state) |
@@ -319,14 +330,14 @@ Reply with a number. The cycle is complete.
 **`validate-config.ps1` fails with "placeholder commands found"**
 Replace every `replace-with-...` value in `config.yaml` with your actual commands.
 
-**Factory says "no handoff found, bootstrapping"**
-That's normal on a first run. The factory creates the Groomer session automatically.
+**Crucible says "no handoff found, bootstrapping"**
+That's normal on a first run. Crucible creates the Groomer session automatically.
 
 **Agent can't find `prompt.md`**
 Make sure the agent's working directory is your project root where the installed `.crucible/` lives.
 
 **Worktree already exists error**
-Run `./powershell/factory.ps1 -Health` to find orphaned worktrees from previous runs, then `./powershell/factory.ps1 -Cleanup` to preview cleanup or `./powershell/factory.ps1 -Cleanup -Force` to execute it.
+Run `./powershell/crucible.ps1 -Health` to find orphaned worktrees from previous runs, then `./powershell/crucible.ps1 -Cleanup` to preview cleanup or `./powershell/crucible.ps1 -Cleanup -Force` to execute it.
 
 ---
 

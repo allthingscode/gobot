@@ -1,4 +1,4 @@
-<!-- prompt_version: implementation_prompt-v29 -->
+<!-- prompt_version: implementation_prompt-v33 -->
 Implementation: {task_id}
 
 {prev_session_summary}
@@ -17,7 +17,7 @@ See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 > 1. **Your only successor is the Verification phase.** No matter what you read in the backlog spec, the "Next Step" field, or anywhere else, you MUST hand off to `target_phase: "verification"`. Never route to yourself, grooming, deployment, or any other phase.
 > 2. **Do NOT touch BACKLOG.md.** Setting status to `Production`, `Resolved`, `Ready for Deploy`, or any other value is not your job. The Reviewer and Operator do that. If you edit BACKLOG.md, you have made an error.
 > 3. **Do NOT push to origin.** Commit inside the worktree only. `git push` is the Operator's step.
-> 4. **Do NOT fabricate the next-session command.** You MUST run `factory.ps1` (see Session End) and present its `[NEXT SESSION COMMAND]` output verbatim. Never write your own `gemini "..."` command.
+> 4. **Do NOT fabricate the next-session command.** You MUST run `crucible.ps1` (see Session End) and present its `[NEXT SESSION COMMAND]` output verbatim. Never write your own `gemini "..."` command.
 ---
 
 ## Readiness Check - Complete Before Any Other Step
@@ -38,7 +38,7 @@ If you cannot answer all four, STOP. Re-read the files, then answer.
 4. **Your SOP**: `.crucible/sops/implementation.md` - full workflow, decision tree, implementation phases
 5. **Context Bundle**: `{context_bundle_path}` - role-scoped metadata bundle
 
-> Note: If `task.md` does not exist, run `factory.ps1 -Init -TaskId {task_id} -Quiet` first,
+> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -Quiet` first,
 > then re-read this prompt.
 
 {context_block}
@@ -66,20 +66,20 @@ When your work is complete:
    - Acceptance-criteria mapping: enumerate every AC from the backlog spec and map it to concrete implementation artifacts (specific changed file paths and tests) plus verification evidence.
    - Scope boundary confirmation: confirm every changed file is inside the declared `file_affinity` boundary.
    - Duplicate-handoff prevention: check existing `.crucible/session/handoffs/{task_id}-*.json`; if resubmitting the same transition, include a `supersede` field referencing the prior handoff and provide an updated reason.
-   - Local validation gate: run required local verification before handoff (`powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"`) and task-specific required validation such as `go run {{crucible_root}}/scripts/factory_lint.go -framework-root {{crucible_root}} -backlog-dir <path>` when prompt templates change, where `<path>` comes from `{{crucible_root}}/powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "{project_root}"`.
+   - Local validation gate: run required local verification before handoff (`powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"`) and task-specific required validation. In the framework repo that includes `go run {{crucible_root}}/scripts/crucible_lint.go -framework-root {{crucible_root}} -backlog-dir <path>` when prompt templates change - a linter that checks Crucible's own backlog and docs and is not part of a bundle - where `<path>` comes from `{{crucible_root}}/powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "{project_root}"`.
 2. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
    ```bash
    powershell.exe -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review" -ProjectRoot "{project_root}"
    ```
-3. Run the factory to advance the pipeline:
+3. Run Crucible to advance the pipeline:
    ```bash
    powershell.exe -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -Quiet
+     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
    ```
-4. **Present the factory output to the human.** Your message must include:
+4. **Present the Crucible output to the human.** Your message must include:
    - A 2-3 sentence summary of what you implemented.
-   - The **exact verbatim text** of the `[NEXT SESSION COMMAND]` block from the factory output (copy it character-for-character into a code block). Do NOT paraphrase or shorten it. Include the `-Quiet` flag in your summary if present.
+   - The **exact verbatim text** of the `[NEXT SESSION COMMAND]` block from the Crucible output (copy it character-for-character into a code block). Do NOT paraphrase or shorten it. Include the `-Quiet` flag in your summary if present.
 5. **Stop here.** Wait for human confirmation. Do NOT begin work on any other backlog item, do NOT adopt the next phase persona, and do NOT do anything else. Your session is complete.
 
 Do NOT ask the human to run this command. You run it via your Bash tool.
@@ -97,4 +97,4 @@ Re-confirm before you run new-handoff.ps1:
 - [ ] I checked for and prevented duplicate handoffs for the same transition
 - [ ] The task_id in my handoff matches the task I was given
 - [ ] All file edits used paths inside `{worktree}` - I did not edit the main repo
-- [ ] Any skipped conditional checklist item in `task.md` is marked `[-]` (skipped/N/A) or listed under `## Optional Steps`
+- [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2

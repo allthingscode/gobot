@@ -15,8 +15,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-validate-dev-log-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "validate-dev-log-test"
 
 try {
     $results += Run-Test -Name "Clean dev log passes scan" -Body {

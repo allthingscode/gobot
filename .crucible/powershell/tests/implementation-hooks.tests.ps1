@@ -4,16 +4,17 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-# Temporary repository root
-$TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-arch-hooks-" + [guid]::NewGuid().ToString("N"))
+. (Join-Path $PSScriptRoot '_harness.ps1')
 
-New-Item -ItemType Directory -Path $TempRoot -Force | Out-Null
+# Temporary repository root
+$TempRoot = New-TestFixtureRoot -NameHint "arch-hooks"
+
 Push-Location $TempRoot
 try {
     git init --quiet
     git config core.autocrlf false
     git config core.safecrlf false
-    # Enable per‑worktree config extension
+    # Enable per-worktree config extension
     git config extensions.worktreeConfig true
     # Add an initial commit so a worktree can be created
     Set-Content -Path "README.md" -Value "# Temp Repo" -Encoding UTF8

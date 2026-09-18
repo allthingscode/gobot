@@ -11,6 +11,7 @@ Agents must use the project's own `.crucible/` folder as configured in `.crucibl
 
 Add this block near the top of the target project's `AGENTS.md`. If the project does not have an `AGENTS.md`, create one and keep any existing product-specific engineering rules below this block.
 
+<!-- crucible:generated instruction-block-agents -->
 ````markdown
 <!-- crucible-instructions-start -->
 ## Crucible
@@ -38,6 +39,7 @@ Commit durable Crucible files:
 - `.crucible/sops/`
 - `.crucible/prompts/`
 - `.crucible/schemas/`
+- `.crucible/standards/`
 - `.crucible/powershell/`
 - `.crucible/agent-instructions/`
 
@@ -53,10 +55,11 @@ Do not commit runtime data:
 Run the installed runtime from the project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId <task-id>
+powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id>
 ```
 <!-- crucible-instructions-end -->
 ````
+<!-- crucible:end instruction-block-agents -->
 
 > `init-project.ps1 -AppendInstructions` writes this block with the correct host for the target OS (`powershell.exe` on Windows, `pwsh` on Linux/macOS). If you paste it by hand on Linux/macOS, change `powershell.exe` to `pwsh`.
 
@@ -66,6 +69,7 @@ Some tools read their own root instruction files. Keep these small and make them
 
 ### `CLAUDE.md`
 
+<!-- crucible:generated instruction-block-claude -->
 ```markdown
 <!-- crucible-instructions-start -->
 # Claude Instructions
@@ -79,9 +83,11 @@ For Crucible work, read `.crucible/config.yaml`, resolve `crucible_root`, then f
 - `{{crucible_root}}/docs/orchestrators/claude.md`
 <!-- crucible-instructions-end -->
 ```
+<!-- crucible:end instruction-block-claude -->
 
 ### `GEMINI.md`
 
+<!-- crucible:generated instruction-block-gemini -->
 ```markdown
 <!-- crucible-instructions-start -->
 # Gemini Instructions
@@ -95,6 +101,7 @@ For Crucible work, read `.crucible/config.yaml`, resolve `crucible_root`, then f
 - `{{crucible_root}}/docs/orchestrators/antigravity.md`
 <!-- crucible-instructions-end -->
 ```
+<!-- crucible:end instruction-block-gemini -->
 
 ### Codex
 

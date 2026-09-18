@@ -92,7 +92,7 @@ try {
     }
 
     $results += Run-Test -Name "Test-DeploymentReworkReentry recognizes rejected rework decision" -Body {
-        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-pipeline-dag-" + [System.Guid]::NewGuid().ToString("N"))
+        $tempRoot = New-TestFixtureRoot -NameHint "pipeline-dag-rejected"
         try {
             $gateDir = Join-Path $tempRoot "global/gate_decisions"
             New-Item -ItemType Directory -Force -Path $gateDir | Out-Null
@@ -109,7 +109,7 @@ try {
     }
 
     $results += Run-Test -Name "Test-DeploymentReworkReentry returns false for clean handoff" -Body {
-        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-pipeline-dag-" + [System.Guid]::NewGuid().ToString("N"))
+        $tempRoot = New-TestFixtureRoot -NameHint "pipeline-dag-clean"
         try {
             New-Item -ItemType Directory -Force -Path (Join-Path $tempRoot "global/gate_decisions") | Out-Null
             $handoff = [PSCustomObject]@{ task_id = "F-123" }
@@ -123,7 +123,7 @@ try {
     }
 
     $results += Run-Test -Name "Test-DeploymentReworkReentry ignores pending decisions" -Body {
-        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-pipeline-dag-" + [System.Guid]::NewGuid().ToString("N"))
+        $tempRoot = New-TestFixtureRoot -NameHint "pipeline-dag-pending"
         try {
             $gateDir = Join-Path $tempRoot "global/gate_decisions"
             New-Item -ItemType Directory -Force -Path $gateDir | Out-Null
@@ -140,13 +140,13 @@ try {
     }
 
     $results += Run-Test -Name "Consumers do not duplicate literal transition tables" -Body {
-        # Globbed rather than named. factory-gates.ps1 is being split into
-        # factory-gates-<concern>.ps1 files, and an assertion that names one path keeps
+        # Globbed rather than named. crucible-gates.ps1 is being split into
+        # crucible-gates-<concern>.ps1 files, and an assertion that names one path keeps
         # passing while covering less of the code it was written to cover - the table
         # could reappear in any sibling and nothing would look. The count is pinned first
         # because a glob that matches nothing satisfies every assertion about its contents.
-        $gatesSources = @(Get-ChildItem -Path (Join-Path $REPO_ROOT "powershell/lib") -Filter "factory-gates*.ps1" -File)
-        Assert-Result -Name "gates sources were found" -Condition ($gatesSources.Count -ge 1) -FailureMessage "no powershell/lib/factory-gates*.ps1 matched, so the scan below would report clean without reading anything"
+        $gatesSources = @(Get-ChildItem -Path (Join-Path $REPO_ROOT "powershell/lib") -Filter "crucible-gates*.ps1" -File)
+        Assert-Result -Name "gates sources were found" -Condition ($gatesSources.Count -ge 1) -FailureMessage "no powershell/lib/crucible-gates*.ps1 matched, so the scan below would report clean without reading anything"
 
         $duplicating = @()
         foreach ($gatesSource in $gatesSources) {
@@ -155,7 +155,7 @@ try {
             }
         }
         $validateHandoffText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/validate-handoff.ps1") -Raw
-        Assert-Result -Name "factory-gates no literal validTransitions" -Condition ($duplicating.Count -eq 0) -FailureMessage ("these gates sources still duplicate the transition table: " + ($duplicating -join ", "))
+        Assert-Result -Name "crucible-gates no literal validTransitions" -Condition ($duplicating.Count -eq 0) -FailureMessage ("these gates sources still duplicate the transition table: " + ($duplicating -join ", "))
         Assert-Result -Name "validate-handoff no literal validTransitions" -Condition (-not $validateHandoffText.Contains('$validTransitions = @{')) -FailureMessage "validate-handoff.ps1 still duplicates the transition table"
     }
 
@@ -173,6 +173,68 @@ try {
         $reworkTransitions = Get-PipelineValidTransitions -DeploymentRework $true
         Assert-TransitionMapEqual -Name "doc rework topology" -Actual $reworkTransitions -Expected $reworkDocTransitions
     }
+    # The prompt is what the specialist actually reads. When its declared successors and
+    # the DAG disagree, the specialist either routes somewhere the gate refuses or, as in
+    # item 58's pass, stops and asks - and the round trip is the cheap outcome. Nothing
+    # compared the two, so a stale line survived the rename that introduced the edge it
+    # was missing. Filed as TODO item 58.
+    $results += Run-Test -Name "Phase prompts declare the successors the DAG allows" -Body {
+        # Rework topology, because a prompt describes every route its phase can take,
+        # not just the routes available on a clean pass.
+        $transitions = Get-PipelineValidTransitions -DeploymentRework $true
+
+        $promptFiles = @(Get-ChildItem -Path (Join-Path $REPO_ROOT "prompts") -Filter "*_prompt.md" -File)
+        Assert-Result -Name "phase prompts were found" -Condition ($promptFiles.Count -ge 1) -FailureMessage "no prompts/*_prompt.md matched, so the scan below would report clean without reading anything"
+
+        # Every phase in the table must have a prompt. Deriving the phase from the file
+        # name and then checking coverage both ways means a renamed prompt fails loudly
+        # instead of quietly dropping out of the comparison.
+        $seenPhases = @()
+        foreach ($promptFile in $promptFiles) {
+            $phase = $promptFile.Name -replace '_prompt\.md$', ''
+            if (-not $transitions.ContainsKey($phase)) { continue }
+            $seenPhases += $phase
+
+            $successorLine = @(Get-Content -LiteralPath $promptFile.FullName | Where-Object { $_ -match '^- \*\*Successors?\*\*:' })
+            Assert-Result -Name ($phase + " prompt declares its successors") -Condition ($successorLine.Count -eq 1) -FailureMessage ("expected exactly one '- **Successor(s)**:' line in " + $promptFile.Name + " but found " + $successorLine.Count)
+            if ($successorLine.Count -ne 1) { return }
+
+            $declared = @([regex]::Matches($successorLine[0], '`([a-z]+)`') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+            $allowed = @($transitions[$phase] | Sort-Object -Unique)
+            Assert-StringArrayEqual -Name ($phase + " prompt successors match the DAG") -Actual $declared -Expected $allowed
+        }
+
+        $missingPrompts = @($transitions.Keys | Where-Object { $seenPhases -notcontains $_ } | Sort-Object)
+        Assert-Result -Name "every DAG phase has a prompt" -Condition ($missingPrompts.Count -eq 0) -FailureMessage ("these phases have no prompts/<phase>_prompt.md: " + ($missingPrompts -join ", "))
+    }
+
+    # policy.md calls itself the authoritative definition and the prompts point readers at
+    # it, so it is the one document a drifting line does the most damage in.
+    $results += Run-Test -Name "Policy DAG section agrees with code" -Body {
+        $transitions = Get-PipelineValidTransitions -DeploymentRework $true
+
+        $inSection = $false
+        $documented = @{}
+        foreach ($line in (Get-Content -LiteralPath (Join-Path $REPO_ROOT "docs/policy.md"))) {
+            if ($line -match '^## 1\. FSM Phase Sequence') { $inSection = $true; continue }
+            if ($inSection -and $line -match '^## ') { break }
+            if (-not $inSection) { continue }
+            if ($line -notmatch '^- \*\*([a-z]+)\*\*') { continue }
+            $source = $matches[1]
+            $rest = $line.Substring($matches[0].Length)
+            $documented[$source] = @([regex]::Matches($rest, '`([a-z]+)`') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        }
+
+        Assert-Result -Name "policy DAG section was parsed" -Condition ($documented.Count -eq $transitions.Count) -FailureMessage ("expected " + $transitions.Count + " phase bullets under '## 1. FSM Phase Sequence' but parsed " + $documented.Count + ": " + (($documented.Keys | Sort-Object) -join ", "))
+        if ($documented.Count -ne $transitions.Count) { return }
+
+        foreach ($phase in @($transitions.Keys | Sort-Object)) {
+            Assert-Result -Name ("policy documents " + $phase) -Condition ($documented.ContainsKey($phase)) -FailureMessage ("policy.md has no DAG bullet for " + $phase)
+            if (-not $documented.ContainsKey($phase)) { continue }
+            Assert-StringArrayEqual -Name ("policy " + $phase + " successors match the DAG") -Actual $documented[$phase] -Expected @($transitions[$phase] | Sort-Object -Unique)
+        }
+    }
+
 } finally {
 }
 

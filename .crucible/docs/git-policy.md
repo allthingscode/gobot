@@ -1,6 +1,6 @@
 # Git Policy For Project `.crucible/`
 
-A project using Crucible should commit the installed Crucible factory files and ignore **data and runtime state**.
+A project using Crucible should commit the installed Crucible bundle and ignore **data and runtime state**.
 
 Do not ignore the entire `.crucible/` directory. The default scaffold includes a nested `.crucible/.gitignore` so new users do not have to choose artifact-by-artifact.
 
@@ -8,10 +8,10 @@ Do not ignore the entire `.crucible/` directory. The default scaffold includes a
 
 Treat `.crucible/` like a typical application's directory structure:
 
-- **Code/configuration** is committed: the installed factory, how the system is set up, and how it should behave.
+- **Code/configuration** is committed: the installed bundle, how the system is set up, and how it should behave.
 - **Data** is not committed: tickets, research notes, session logs, work in progress.
 
-Backlog items are data — they're tickets in a ticketing system that happens to be markdown files. Committing them clutters git history with constant churn that has nothing to do with code. If you want a public roadmap, mirror selected items to a separate doc you control.
+Backlog items are data - they're tickets in a ticketing system that happens to be markdown files. Committing them clutters git history with constant churn that has nothing to do with code. If you want a public roadmap, mirror selected items to a separate doc you control.
 
 ## Commit By Default
 
@@ -27,24 +27,25 @@ These define how the project uses Crucible:
 - `.crucible/sops/`
 - `.crucible/prompts/`
 - `.crucible/schemas/`
+- `.crucible/standards/` - the standards you audit against, such as the project scorecard
 - `.crucible/powershell/`
 
 ## Ignore By Default
 
 These are data, runtime state, or generated artifacts:
 
-- `.crucible/backlog/` — backlog items are data, not structure
-- `.crucible/session/` — runtime scratchpads, handoffs, event logs
-- `.crucible/.agent-workspaces/` — git worktrees
+- `.crucible/backlog/` - backlog items are data, not structure
+- `.crucible/session/` - runtime scratchpads, handoffs, event logs
+- `.crucible/.agent-workspaces/` - git worktrees
 - `.crucible/locks/`, `.crucible/tmp/`, `.crucible/cache/`
 - `.crucible/archive/`, `.crucible/archived/`, `.crucible/history/`
-- `.crucible/research/` — research artifacts are data
-- `.crucible/dev-logs/` — dev log entries are data
+- `.crucible/research/` - research artifacts are data
+- `.crucible/dev-logs/` - dev log entries are data
 - generated logs, JSONL files, handoffs, and eval output
 
 ## Overriding the default
 
-If you do want to commit your backlog (for example, an open-source project that wants a public roadmap), comment out the `backlog/` line in your project's `.crucible/.gitignore`. The principle is a recommendation, not a hard rule — but commit the choice deliberately.
+If you do want to commit your backlog (for example, an open-source project that wants a public roadmap), comment out the `backlog/` line in your project's `.crucible/.gitignore`. The principle is a recommendation, not a hard rule - but commit the choice deliberately.
 
 ## Your Own `.gitignore` Can Silently Override All Of This
 
@@ -71,7 +72,7 @@ Anchor the pattern to the repo root with a leading slash:
 /CLAUDE.md
 ```
 
-`factory-doctor.ps1` checks this for you. It expands the commit-by-default list into
+`crucible-doctor.ps1` checks this for you. It expands the commit-by-default list into
 the real files in your bundle and reports any that an ignore rule outside the bundle
 would exclude, naming the exact rule:
 
@@ -84,6 +85,40 @@ The finding is advisory, not a readiness failure: as below, the list is a
 recommendation and you may override it deliberately. Rules inside
 `.crucible/.gitignore` are Crucible's own policy and are never reported.
 
+## Agent Worktrees Outside The Bundle
+
+Crucible's own worktrees live at `.crucible/.agent-workspaces/`, which the installed
+`.gitignore` already excludes. Nothing more is needed for them.
+
+Your agent tooling may create worktrees somewhere else. Claude Code subagents, for
+example, use `.claude/worktrees/` at your repository root. The installed
+`.gitignore` cannot reach that path: its patterns are anchored relative to
+`.crucible/`, and a rule there has no bearing on a sibling of it.
+
+This is worse than a file being committed by accident. A worktree **is** a git
+repository, so `git add -A` from your repo root stages it as a gitlink and tells you
+only in passing:
+
+```
+warning: adding embedded git repository: .claude/worktrees/agent-a1b2c3
+```
+
+The commit then carries a submodule reference to a directory that is deleted the moment
+the agent finishes, and every clone inherits it.
+
+Add the path to your root `.gitignore`, anchored:
+
+```
+/.claude/worktrees/
+```
+
+Ignore the worktree directory, not all of `.claude/`. Agent configuration that belongs
+to the project, such as subagent definitions and shared settings, is exactly the kind of
+thing worth committing, and a blanket rule forbids it.
+
+Crucible will not write this rule for you, for the same reason it will not write your
+root `.gitattributes`: the file governs paths Crucible does not own.
+
 ## Line Endings In Your Own Tree
 
 The `.gitattributes` Crucible installs governs only the `.crucible/` subtree, because
@@ -92,7 +127,7 @@ happened to be on the machine that first staged each file, and a blob stored wit
 checks out with CRLF everywhere regardless of local config. For a `Makefile` or a shell
 script that is not cosmetic: it fails on a Linux runner.
 
-`factory-doctor.ps1` reports this too, reading the index rather than your working tree
+`crucible-doctor.ps1` reports this too, reading the index rather than your working tree
 so the verdict is a property of the repository and not of your machine:
 
 ```
@@ -119,4 +154,4 @@ got clean.
 
 ## Rule Of Thumb
 
-Commit the installed factory, configuration, and behavior. Ignore data and runtime state.
+Commit the installed bundle, configuration, and behavior. Ignore data and runtime state.

@@ -4,14 +4,13 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
-$FACTORY_LIB = Join-Path $REPO_ROOT "powershell/factory-lib.ps1"
+$CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
 $Quiet = $true
-. $FACTORY_LIB
+. $CRUCIBLE_LIB
 
 $results = @()
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-culture-timestamps-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "culture-timestamps-test"
 $isoPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
 # Matches the timestamp as it is written to disk. Asserting against the raw JSON rather
 # than a parsed object keeps these tests engine-independent: PowerShell 7's
@@ -176,7 +175,7 @@ review:
 "@ | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
 
         $childScript = Join-Path $tempRoot "run-gate-culture.ps1"
-        $libPath = $FACTORY_LIB.Replace("'", "''")
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $projectEscaped = $projectRoot.Replace("'", "''")
         $sessionEscaped = $sessionDir.Replace("'", "''")
         $logFile = (Join-Path $sessionDir "C-CULTURE-GATE/pipeline.log.jsonl").Replace("'", "''")

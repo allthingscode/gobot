@@ -1,560 +1,69 @@
-# Factory Orchestrator Script
-# Validates handoff.json, routes pipeline in code, assembles next prompt from template.
-# Usage: .\.crucible\\factory.ps1 [-Target agent|claude|codex|antigravity] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>]
+# Deprecated entrypoint. The orchestrator is powershell/crucible.ps1; this file
+# only forwards to it.
 #
-# Dual-use note: -Init serves two purposes depending on call site:
-#   Session START: validates incoming handoff, scaffolds worktree + task.md, logs session_start event.
-#   Session END:   called after writing handoff.json to route the pipeline to the next specialist.
-# Both uses pass -TaskId. The script detects which is appropriate from the handoff state.
+# It exists because adopters merge the invocation line from
+# templates/project/.crucible/agent-instructions/AGENTS.md into their own root
+# instruction files, which Crucible does not own and update-bundle.ps1 never
+# touches. A bare rename would break the most common invocation path silently.
+# Keeping a framework-owned file here also makes the rename classify as
+# safe-overwrite rather than review-removal, so an update replaces the old
+# implementation with this forwarder instead of stranding it behind -Prune.
 #
-# -AutoAdvance: non-gate transitions emit [AUTO-ADVANCE] marker; orchestrators execute the next
-#   specialist immediately. Gate transitions (operator, researcher) always pause for human input.
+# Deliberately declares no param() block: every argument must reach crucible.ps1
+# exactly as written, and a param() block here would bind and reshape them.
+#
+# Deletion criterion is measured, not timed - see docs/proposals/crucible-rename-and-factory-migration.md, D2.
 
-param (
-    [Parameter(Mandatory=$false)]
-    [ValidateSet("agent", "claude", "codex", "antigravity")]
-    [string]$Target = "agent",
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Init,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Health,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Doctor,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Cleanup,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Force,
-
-    [Parameter(Mandatory=$false)]
-    [string]$TaskId = "",
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Status,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$NewHandoff,
-
-    [Parameter(Mandatory=$false)]
-    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
-    [ValidateSet("research", "grooming", "implementation", "verification", "deployment")]
-    [string]$HandoffSource = "",
-
-    [Parameter(Mandatory=$false)]
-    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
-    [ValidateSet("research", "grooming", "implementation", "verification", "deployment", "done")]
-    [string]$HandoffTarget = "",
-
-    [Parameter(Mandatory=$false)]
-    [string]$HandoffReason = "",
-
-    [Parameter(Mandatory=$false)]
-    [string[]]$HandoffArtifacts = @(),
-
-    [Parameter(Mandatory=$false)]
-    [string[]]$HandoffFileAffinity = @(),
-
-    [Parameter(Mandatory=$false)]
-    [string[]]$HandoffReviewerChecksPassed = @(),
-
-    [Parameter(Mandatory=$false)]
-    [string[]]$HandoffStubSpecsCreated = @(),
-
-    [Parameter(Mandatory=$false)]
-    [string[]]$HumanApproved = @(),
-    [Parameter(Mandatory=$false)]
-    [string[]]$HumanDeferred = @(),
-    [Parameter(Mandatory=$false)]
-    [string[]]$HumanRejected = @(),
-    [Parameter(Mandatory=$false)]
-    [ValidateSet("accepted", "rejected", "redirected", "abandoned", "1", "2", "3", "4")]
-    [string]$GateOutcome = "",
-
-    [Parameter(Mandatory=$false)]
-    [string]$GateRedirectTarget = "",
-
-    [Parameter(Mandatory=$false)]
-    [string]$GateReason = "",
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Recover,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Quiet,
-
-    # When set, non-gate transitions output [AUTO-ADVANCE] instead of [NEXT SESSION COMMAND].
-    # Orchestrators check this marker to chain the next specialist without waiting for human confirmation.
-    # Gate transitions (operator -> *, researcher -> *) always pause regardless of this flag.
-    [Parameter(Mandatory=$false)]
-    [switch]$AutoAdvance,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$Rewind,
-
-    [Parameter(Mandatory=$false)]
-    [ValidateSet("grooming")]
-    [string]$ToPhase = "",
-
-    [Parameter(Mandatory=$false)]
-    [switch]$ResetBudget,
-
-    # Absolute path to the project root (the directory containing .crucible/).
-    # Defaults to the root derived from this script's location (never the caller's cwd).
-    # Specify explicitly only to target a project other than the one this script ships in.
-    [Parameter(Mandatory=$false)]
-    [string]$ProjectRoot = ""
-)
-
-$ErrorActionPreference = "Stop"
-foreach ($lib in "config-helpers.ps1", "instruction-blocks.ps1", "language-presets.ps1") {
-    $libPath = Join-Path $PSScriptRoot "lib/$lib"
-    if (-not (Test-Path -LiteralPath $libPath)) {
-        throw "Required helper script not found at $libPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
-    }
-}
-. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
-$factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
-. $factoryLibPath
-
-function Get-CrucibleRoot {
-    param([string]$ProjectRoot = "")
-    $root = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $REPO_ROOT } else { $ProjectRoot }
-    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
-    $configPath = Join-Path $root ".crucible/config.yaml"
-    if (Test-Path -LiteralPath $configPath) {
-        try {
-            $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-            if ($content -match '(?m)^crucible_root:\s*["'']([^"''\r\n]+)["'']\s*$') {
-                return $Matches[1].Trim()
-            }
-        } catch {}
-    }
-    return ".crucible"
-}
-# Framework powershell/ directory - used to resolve sibling scripts regardless of CWD.
-$FRAMEWORK_POWERSHELL = $PSScriptRoot
-# Anchor paths to the project root (where .crucible/ lives).
-# -ProjectRoot overrides for explicit invocation from elsewhere; otherwise PREFER the root
-# derived from THIS script's location over the caller's cwd. factory.ps1 ships to adopters
-# at <root>/.crucible/powershell/ and lives in the framework repo at <root>/powershell/, so
-# $PSScriptRoot names the target repo unambiguously no matter where the orchestrator invoked
-# us from. Defaulting to cwd silently targeted the wrong repo when the gate ran from a
-# different checkout. The canonical framework copy derives the framework root, which is NOT
-# itself an adopter, so we fall back to cwd there (dev/test invocation against a fixture).
-if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $derivedParent = Split-Path -Path $PSScriptRoot -Parent
-    if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
-        $derivedParent = Split-Path -Path $derivedParent -Parent
-    }
-    $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
-    if ((Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/backlog")) -or
-        (Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/config.yaml"))) {
-        $REPO_ROOT = $derivedRoot
-    } else {
-        $REPO_ROOT = (Get-Location).Path
-    }
-} else {
-    if (-not (Test-Path -LiteralPath $ProjectRoot)) {
-        Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
-        exit 1
-    }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
-}
-$crucibleRoot = Get-CrucibleRoot -ProjectRoot $ProjectRoot
-Push-Location $REPO_ROOT
-
-# Display a one-line Crucible version banner from the project's installed config,
-# if version metadata is present. Silent on $Quiet or when config is missing/unstamped.
-if (-not $Quiet) {
-    $bannerCfg = Join-Path $REPO_ROOT ".crucible/config.yaml"
-    if (Test-Path -LiteralPath $bannerCfg) {
-        try {
-            $bannerContent = Get-Content -LiteralPath $bannerCfg -Raw -Encoding UTF8
-            $bannerVersion = $null
-            $bannerCommit = $null
-            if ($bannerContent -match '(?m)^crucible_version:\s+["'']([^"''\r\n]+)["'']\s*$') {
-                $bannerVersion = $Matches[1].Trim()
-            }
-            if ($bannerContent -match '(?m)^crucible_install_commit:\s+["'']([^"''\r\n]+)["'']\s*$') {
-                $bannerCommit = $Matches[1].Trim()
-            }
-            if ($bannerVersion -and $bannerVersion -match '^[0-9]+\.[0-9]+\.[0-9]+') {
-                if ($bannerCommit -and $bannerCommit -match '^[0-9a-f]{40}$') {
-                    Write-Host ("Crucible v" + $bannerVersion + " (commit " + $bannerCommit.Substring(0, 7) + ")") -ForegroundColor DarkGray
-                    $frameworkSource = ""
-                    if (-not [string]::IsNullOrWhiteSpace($env:CRUCIBLE_DEV_ROOT) -and (Test-Path -LiteralPath (Join-Path $env:CRUCIBLE_DEV_ROOT ".git"))) {
-                        $frameworkSource = $env:CRUCIBLE_DEV_ROOT
-                    } elseif (-not [string]::IsNullOrWhiteSpace($env:CRUCIBLE_FRAMEWORK_DIR) -and (Test-Path -LiteralPath (Join-Path $env:CRUCIBLE_FRAMEWORK_DIR ".git"))) {
-                        $frameworkSource = $env:CRUCIBLE_FRAMEWORK_DIR
-                    } else {
-                        $siblingCandidate = Join-Path (Split-Path -Parent $REPO_ROOT) "crucible"
-                        if (Test-Path -LiteralPath (Join-Path $siblingCandidate ".git")) {
-                            $frameworkSource = $siblingCandidate
-                        }
-                    }
-                    if ($frameworkSource) {
-                        $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet main
-                        $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitMainResult) { ($gitMainResult | Out-String).Trim() } else { "" }
-                        if (-not ($frameworkHead -match '^[0-9a-f]{40}$')) {
-                            $gitHeadResult = git -C $frameworkSource rev-parse HEAD 2>$null
-                            $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitHeadResult) { ($gitHeadResult | Out-String).Trim() } else { "" }
-                        }
-                        if ($frameworkHead -match '^[0-9a-f]{40}$' -and $bannerCommit -ne $frameworkHead) {
-                            $null = git -C $frameworkSource merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
-                            if ($LASTEXITCODE -eq 0) {
-                                Write-Host ("WARNING: Installed Crucible bundle lags framework HEAD. Installed: " + $bannerCommit.Substring(0, 7) + " | Upstream HEAD: " + $frameworkHead.Substring(0, 7)) -ForegroundColor Yellow
-                                Write-Host ("  Run 'update-bundle.ps1 -FrameworkSource " + $frameworkSource + "' to bring it current.") -ForegroundColor Yellow
-                            }
-                        }
-                    }
-                } else {
-                    Write-Host ("Crucible v" + $bannerVersion) -ForegroundColor DarkGray
-                }
-            } else {
-                Write-Host "Crucible (unversioned install)" -ForegroundColor DarkGray
-            }
-        } catch {
-            # Banner is informational; never block on a malformed config.
-        }
-    }
-}
-
-# Optional utility mode: readiness diagnostics.
-if ($Doctor) {
-    $doctorScript = "$FRAMEWORK_POWERSHELL/factory-doctor.ps1"
-    if (-not (Test-Path -LiteralPath $doctorScript)) {
-        Write-Host ("Error: Doctor script not found at " + $doctorScript) -ForegroundColor Red
-        exit 1
-    }
-    & $doctorScript
-    exit $LASTEXITCODE
-}
-
-# Optional utility mode: deterministic handoff generation via dedicated script.
-if ($NewHandoff) {
-    if ([string]::IsNullOrWhiteSpace($TaskId)) {
-        Write-Host "Error: -TaskId is required when using -NewHandoff." -ForegroundColor Red
-        exit 1
-    }
-    if ([string]::IsNullOrWhiteSpace($HandoffSource) -or
-        [string]::IsNullOrWhiteSpace($HandoffTarget) -or
-        [string]::IsNullOrWhiteSpace($HandoffReason)) {
-        Write-Host "Error: -HandoffSource, -HandoffTarget, and -HandoffReason are required with -NewHandoff." -ForegroundColor Red
-        exit 1
-    }
-
-    $generatorScript = "$FRAMEWORK_POWERSHELL/new-handoff.ps1"
-    if (-not (Test-Path -LiteralPath $generatorScript)) {
-        Write-Host ("Error: Handoff generator script not found at " + $generatorScript) -ForegroundColor Red
-        exit 1
-    }
-
-    $genParams = @{
-        TaskId = $TaskId
-        Source = $HandoffSource
-        Target = $HandoffTarget
-        Reason = $HandoffReason
-    }
-    if ($HandoffArtifacts.Count -gt 0) {
-        $genParams.Artifacts = $HandoffArtifacts
-    }
-    if ($HandoffFileAffinity.Count -gt 0) {
-        $genParams.FileAffinity = $HandoffFileAffinity
-    }
-    if ($HandoffReviewerChecksPassed.Count -gt 0) {
-        $genParams.ReviewerChecksPassed = $HandoffReviewerChecksPassed
-    }
-    if ($HandoffStubSpecsCreated.Count -gt 0) {
-        $genParams.StubSpecsCreated = $HandoffStubSpecsCreated
-    }
-
-    if ($HumanApproved.Count -gt 0) { $genParams.HumanApproved = [string[]]$HumanApproved }
-    if ($HumanDeferred.Count -gt 0) { $genParams.HumanDeferred = [string[]]$HumanDeferred }
-    if ($HumanRejected.Count -gt 0) { $genParams.HumanRejected = [string[]]$HumanRejected }
-
-    & $generatorScript @genParams
-    exit $LASTEXITCODE
-}
-
-$sessionDir = Get-ConfiguredPath -Key "session"
-$backlogDir = Get-ConfiguredPath -Key "backlog"
-$workspacesDir = Get-ConfiguredPath -Key "workspaces"
-$HANDOFF_DIR = Join-Path $sessionDir "handoffs"
-$PROMPT_LIB = Get-ConfiguredPath -Key "prompts"
-$budgetCeilings = Get-BudgetCeilings
-$ceiling = 0
-$promptText = ""
-
-# When $TaskId is provided, log to per-task file; otherwise global.
-if (-not [string]::IsNullOrEmpty($TaskId)) {
-    $LOG_FILE = Join-Path $sessionDir ($TaskId + "/pipeline.log.jsonl")
-    # Ensure the directory exists
-    $logDir = Split-Path $LOG_FILE
-    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
-} else {
-    $LOG_FILE = Join-Path $sessionDir "global/pipeline.log.jsonl"
-    # Ensure the directory exists
-    $logDir = Split-Path $LOG_FILE
-    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
-}
-$GLOBAL_DIR = Join-Path $sessionDir "global"
-if (-not (Test-Path $GLOBAL_DIR)) { New-Item -ItemType Directory -Force -Path $GLOBAL_DIR | Out-Null }
-$CB_HISTORY_FILE = Join-Path $GLOBAL_DIR "circuit_breakers.jsonl"
-
-# Sticky per-task specialist target: the human picks -Target once (e.g. codex) and the
-# whole pipeline should keep recommending it. Without this, every phase's -Init defaults
-# -Target back to "agent", so the printed [NEXT SESSION COMMAND]/[RECOMMENDED MODEL]
-# mislabels a Codex-run pipeline. Persist an explicit -Target and reload it when omitted.
-$Target = Resolve-StickyTarget -TaskId $TaskId -SessionDir $sessionDir -Target $Target `
-    -Explicit ($PSBoundParameters.ContainsKey('Target'))
-
-$factoryContext = @{
-    RepoRoot = $REPO_ROOT
-    CrucibleRoot = $crucibleRoot
-    FrameworkPowerShell = $FRAMEWORK_POWERSHELL
-    SessionDir = $sessionDir
-    BacklogDir = $backlogDir
-    WorkspacesDir = $workspacesDir
-    HandoffDir = $HANDOFF_DIR
-    PromptLib = $PROMPT_LIB
-    LogFile = $LOG_FILE
-    CircuitBreakerHistoryFile = $CB_HISTORY_FILE
-    TaskId = $TaskId
-    Target = $Target
-    Init = [bool]$Init
-    Recover = [bool]$Recover
-    Quiet = [bool]$Quiet
-    AutoAdvance = [bool]$AutoAdvance
-    GateOutcome = $GateOutcome
-    GateRedirectTarget = $GateRedirectTarget
-    GateReason = $GateReason
-    BudgetCeilings = $null
-    Ceiling = $null
-    Handoff = $null
-    LatestHandoff = $null
-    RelativeHandoffPath = $null
-    CumulativeHandoffCount = 0
-    IsBootstrap = $false
-    Transition = $null
-    NextFactoryCommand = $null
-}
-
-function Get-PrimaryBranchName {
-    git show-ref --verify --quiet refs/heads/main
-    if ($LASTEXITCODE -eq 0) { return "main" }
-    return "master"
-}
-
-if ($Health -or $Cleanup) {
-    $healthScript = "$FRAMEWORK_POWERSHELL/factory-health.ps1"
-    if (-not (Test-Path -LiteralPath $healthScript)) {
-        Write-Host ("Error: Health script not found at " + $healthScript) -ForegroundColor Red
-        exit 1
-    }
-    & $healthScript -Health:$Health -Cleanup:$Cleanup -Force:$Force -Quiet:$Quiet -TaskId $TaskId
-    exit $LASTEXITCODE
-}
-
-if ($Status) {
-    $statusScript = "$FRAMEWORK_POWERSHELL/factory-status.ps1"
-    if (-not (Test-Path -LiteralPath $statusScript)) {
-        Write-Host ("Error: Status script not found at " + $statusScript) -ForegroundColor Red
-        exit 1
-    }
-    & $statusScript
-    exit $LASTEXITCODE
-}
-
-if ($Rewind) {
-    if ([string]::IsNullOrWhiteSpace($TaskId)) {
-        Write-Host "Error: -TaskId is required when using -Rewind." -ForegroundColor Red
-        exit 1
-    }
-    if ([string]::IsNullOrWhiteSpace($ToPhase)) {
-        Write-Host "Error: -ToPhase is required when using -Rewind." -ForegroundColor Red
-        exit 1
-    }
-    if ($ToPhase -ne "grooming") {
-        Write-Host "Error: Only '-ToPhase grooming' is supported in this version." -ForegroundColor Red
-        exit 1
-    }
-
-    Invoke-TaskRewind -TaskId $TaskId -ToPhase $ToPhase -ResetBudget:$ResetBudget -SessionDir $sessionDir -HandoffDir $HANDOFF_DIR -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE -Quiet:$Quiet -WorkspacesDir $workspacesDir
-    exit 0
-}
-
-# --- 0a. Require -TaskId for all pipeline operations ---
-if ([string]::IsNullOrEmpty($TaskId)) {
-    Write-Host "`n[ERROR] -TaskId is required." -ForegroundColor Red
-    Write-Host "Usage: .\.crucible\\factory.ps1 -Init -TaskId {task_id}" -ForegroundColor Yellow
-    Write-Host "       .\.crucible\\factory.ps1 -Health  (no -TaskId needed for health checks)" -ForegroundColor DarkGray
-    Write-Host "       .\.crucible\\factory.ps1 -Doctor  (no -TaskId needed for readiness checks)" -ForegroundColor DarkGray
+$crucibleScript = Join-Path $PSScriptRoot "crucible.ps1"
+if (-not (Test-Path -LiteralPath $crucibleScript)) {
+    [Console]::Error.WriteLine("[DEPRECATED] factory.ps1 forwards to crucible.ps1, which is missing at $crucibleScript. Your Crucible bundle is incomplete; see docs/updating.md.")
     exit 1
 }
 
-function Check-Dependencies {
-    param([string]$BacklogItemPath, [string]$TargetSpecialist, [string]$TaskId)
+[Console]::Error.WriteLine("[DEPRECATED] factory.ps1 is deprecated and will be removed. Invoke powershell/crucible.ps1 instead; forwarding this call unchanged.")
 
-    if (-not (Test-Path $BacklogItemPath)) { return }
+# Telemetry is what makes D2's deletion criterion measurable rather than a guess,
+# but it must never be able to fail the call it is only observing.
+try {
+    & {
+        . (Join-Path $PSScriptRoot "crucible-lib.ps1")
+        $Quiet = $true
 
-    $frontmatter = Get-Content -LiteralPath $BacklogItemPath -Head 20 -Encoding UTF8
-    $dependsOn = @()
-    $parsing = $false
-    foreach ($line in $frontmatter) {
-        if ($line -match 'depends_on:\s*\[([^\]]*)\]') {
-            $rawDeps = $matches[1].Split(',') | ForEach-Object { $_.Trim().Replace('"', '').Replace("'", "") }
-            $dependsOn = @($rawDeps | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            break
+        $taskId = "unknown"
+        for ($i = 0; $i -lt $args.Count - 1; $i++) {
+            if ("$($args[$i])" -eq "-TaskId") { $taskId = "$($args[$i + 1])"; break }
         }
-        if ($line -match 'depends_on:') {
-            $parsing = $true
-            continue
+        $projectRoot = ""
+        for ($i = 0; $i -lt $args.Count - 1; $i++) {
+            if ("$($args[$i])" -eq "-ProjectRoot") { $projectRoot = "$($args[$i + 1])"; break }
         }
-        if ($parsing) {
-            if ($line -match '^\s*-\s*([A-Z][A-Z0-9\-]+)') {
-                $dependsOn += $matches[1]
-            } elseif ($line -match '^[a-z_]+:') {
-                $parsing = $false
+        if ([string]::IsNullOrWhiteSpace($projectRoot)) {
+            $derivedParent = Split-Path -Path $PSScriptRoot -Parent
+            if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
+                $derivedParent = Split-Path -Path $derivedParent -Parent
             }
-        }
-    }
-
-    if ($dependsOn.Count -eq 0) { return }
-
-    Write-Quiet "`n[DEPENDENCY] Checking dependencies for $TaskId..." -ForegroundColor Cyan
-    $dependencySources = @(
-        @{ Path = Join-Path $backlogDir "BACKLOG.md"; Name = "BACKLOG.md" },
-        @{ Path = Join-Path $backlogDir "ARCHIVED.md"; Name = "ARCHIVED.md" }
-    )
-    if (-not ($dependencySources | Where-Object { Test-Path $_.Path })) { return }
-
-    $unsatisfied = @()
-    foreach ($dep in $dependsOn) {
-        $found = $false
-        $depStatus = $null
-        $depSource = $null
-        foreach ($source in $dependencySources) {
-            if (-not (Test-Path $source.Path)) { continue }
-
-            $lines = Get-Content -Path $source.Path -Encoding UTF8
-            $statusColumnIndex = -1
-            $escapedDep = [regex]::Escape($dep)
-
-            foreach ($line in $lines) {
-                if ($line -match '^\|\s*ID\s*\|') {
-                    $headerCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
-                    $statusColumnIndex = [Array]::IndexOf($headerCols, "Status")
-                    continue
-                }
-                if ($line -match '^\|\s*[-: ]+\|') { continue }
-
-                if ($line -match "^\|\s*(:?\[$escapedDep\]\([^)]+\)|$escapedDep)\s*\|") {
-                    $rowCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
-                    if ($statusColumnIndex -ge 0 -and $statusColumnIndex -lt $rowCols.Count) {
-                        $depStatus = $rowCols[$statusColumnIndex]
-                    } elseif ($rowCols.Count -gt 0) {
-                        $depStatus = $rowCols[$rowCols.Count - 1]
-                    } else {
-                        $depStatus = ""
-                    }
-                    $depSource = $source.Name
-                    $found = $true
-                    break
-                }
-            }
-
-            if ($found) {
-                break
-            }
+            $projectRoot = (Resolve-Path -LiteralPath $derivedParent).Path
         }
 
-        if (-not $found) {
-            $unsatisfied += "$dep (Not found in BACKLOG.md or ARCHIVED.md)"
-            continue
-        }
-
-        $statusNormalized = ($depStatus | ForEach-Object { $_.Trim() }).ToLowerInvariant()
-        if ($statusNormalized -ne "production" -and $statusNormalized -ne "resolved") {
-            $statusLabel = if ([string]::IsNullOrWhiteSpace($depStatus)) { "(empty)" } else { $depStatus }
-            $unsatisfied += "$dep (Status: $statusLabel in $depSource)"
-        }
-    }
-
-    if ($unsatisfied.Count -gt 0) {
-        if ($TargetSpecialist -eq "deployment" -or $TargetSpecialist -eq "operator") {
-            Write-Host "[DEPENDENCY] BLOCKING: Unsatisfied dependencies detected:" -ForegroundColor Red
-            $unsatisfied | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
-            Write-Host "`n[STOP] Prerequisite tasks must be in 'Production' or 'Resolved' before deployment." -ForegroundColor Red
-            exit 2
+        $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $projectRoot
+        $logFile = if ($taskId -eq "unknown") {
+            Join-Path $sessionDir "global/pipeline.log.jsonl"
         } else {
-            Write-Quiet "[DEPENDENCY] WARNING: Unsatisfied dependencies detected:" -ForegroundColor Yellow
-            $unsatisfied | ForEach-Object { Write-Quiet "  - $_" -ForegroundColor Yellow }
-            Write-Quiet "  (Proceeding - only the Operator phase is blocked by dependencies)`n" -ForegroundColor Gray
+            Join-Path $sessionDir ($taskId + "/pipeline.log.jsonl")
         }
-    } else {
-        Write-Quiet "[DEPENDENCY] All prerequisites satisfied." -ForegroundColor Green
-    }
+        Write-EventLog -Event "deprecated_entrypoint" -TaskId $taskId -Phase "crucible" `
+            -Kind "deprecated_entrypoint_factory_ps1" `
+            -Notes "Invoked via the deprecated powershell/factory.ps1 entrypoint; forwarded to crucible.ps1." `
+            -LogFile $logFile `
+            -CircuitBreakerHistoryFile (Join-Path $sessionDir "global/circuit_breakers.jsonl")
+    } @args
+} catch {
+    [Console]::Error.WriteLine("[DEPRECATED] Could not record the deprecated_entrypoint event: " + $_.Exception.Message)
 }
 
-Resolve-FactoryInputHandoff -Context $factoryContext
-$latestHandoff = $factoryContext.LatestHandoff
-$isBootstrap = $factoryContext.IsBootstrap
-
-Read-FactoryHandoffContext -Context $factoryContext
-$handoff = $factoryContext.Handoff
-$relativeHandoffPath = $factoryContext.RelativeHandoffPath
-$budgetCeilings = $factoryContext.BudgetCeilings
-$ceiling = $factoryContext.Ceiling
-$cumulativeHandoffCount = $factoryContext.CumulativeHandoffCount
-$isBootstrap = $factoryContext.IsBootstrap
-$handoffFile = $latestHandoff.FullName
-$handoffRaw = Get-Content $handoffFile -Raw -Encoding UTF8
-
-Invoke-HandoffPreflightValidation -Context $factoryContext
-$latestHandoff = $factoryContext.LatestHandoff
-$handoff = $factoryContext.Handoff
-$relativeHandoffPath = $factoryContext.RelativeHandoffPath
-$nextFactoryCmd = $factoryContext.NextFactoryCommand
-$handoffFile = $latestHandoff.FullName
-$handoffRaw = Get-Content $handoffFile -Raw -Encoding UTF8
-
-Complete-FactorySourceSession -Context $factoryContext
-# --- 2. Runtime Validation (complements schema preflight) ---
-Invoke-FactoryRuntimeValidation -Context $factoryContext
-
-Invoke-FactoryScopeGates -Context $factoryContext
-
-Test-CompletionArtifactGate -Context $factoryContext
-
-Normalize-FactoryInputState -Context $factoryContext
-$handoff = $factoryContext.Handoff
-
-Invoke-CircuitBreakerGates -Context $factoryContext
-
-Invoke-HumanGate -Context $factoryContext
-
-Invoke-RepositoryIntegrityGates -Context $factoryContext
-
-$transitionDecision = Resolve-FactoryTransition -Context $factoryContext
-if ($transitionDecision.ShouldExit) {
-    if (-not [string]::IsNullOrEmpty($transitionDecision.Reason)) {
-        Write-Quiet $transitionDecision.Reason -ForegroundColor Cyan
-    }
-    exit $transitionDecision.ExitCode
-}
-$factoryContext.Transition = $transitionDecision.Transition
-$factoryContext.NextFactoryCommand = $transitionDecision.NextFactoryCommand
-$factoryContext.IsBootstrap = $transitionDecision.IsBootstrap
-
-$nextFactoryCmd = $factoryContext.NextFactoryCommand
-$isBootstrap = $factoryContext.IsBootstrap
-New-FactoryPromptText -Context $factoryContext
-Write-FactoryPromptOutput -Context $factoryContext
-Initialize-FactoryTargetSession -Context $factoryContext
-Write-FactoryCiStatusBanner -Context $factoryContext
-Start-FactoryTargetSessionLog -Context $factoryContext
-exit 0
+# Invoked in-process rather than as a child process so arguments cross as objects.
+# Re-launching pwsh would re-quote them, and PowerShell 5.1's native-argument
+# quoting mangles embedded quotes - which -GateReason routinely carries.
+$global:LASTEXITCODE = 0
+& $crucibleScript @args
+exit $LASTEXITCODE

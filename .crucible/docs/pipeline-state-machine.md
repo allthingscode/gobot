@@ -38,6 +38,6 @@ reviewer verification on `verification -> deployment`, commit hash and BACKLOG
 integrity checks on `deployment -> done`, and `human_decisions` requirements on
 `research -> grooming`.
 
-Those guards currently live as scattered checks inside `Resolve-FactoryTransition`
-in [factory-gates.ps1](../powershell/lib/factory-gates.ps1). They are not yet
+Those guards currently live as scattered checks inside `Resolve-CrucibleTransition`
+in [crucible-gates.ps1](../powershell/lib/crucible-gates.ps1). They are not yet
 centralized in the DAG library.

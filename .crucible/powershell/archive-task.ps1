@@ -2,6 +2,14 @@ param(
     [Parameter(Mandatory=$true)][string]$BacklogPath,
     [Parameter(Mandatory=$true)][string]$SpecPath,
     [ValidateSet("Production","Resolved","Abandoned")][string]$Status,
+    # Required unless -Status is given or the spec already carries a terminal status: state
+    # whether the task merged code. The archive refuses rather than infer it from the item's
+    # directory, which is not evidence of whether anything deployed.
+    #
+    # Spelled as an explicit "true"/"false" rather than a switch because -Switch:$false does
+    # not survive PowerShell's -File argument parsing, and a [bool] would read the string
+    # "false" as true.
+    [ValidateSet("true","false")][string]$ShippedCode = "",
     [switch]$Quiet
 )
 
@@ -19,6 +27,9 @@ $params = @{
 }
 if ($PSBoundParameters.ContainsKey('Status')) {
     $params['Status'] = $Status
+}
+if (-not [string]::IsNullOrEmpty($ShippedCode)) {
+    $params['ShippedCode'] = ($ShippedCode -eq "true")
 }
 
 $result = Invoke-BacklogTaskArchive @params

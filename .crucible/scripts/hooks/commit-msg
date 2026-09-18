@@ -1,0 +1,74 @@
+#!/bin/sh
+# Crucible framework commit-msg hook
+# Runs the assertion-deletion gate against the staged tree, with the message being
+# written available to carry an Assertions-Removed: trailer.
+# A non-zero exit from any check aborts the commit.
+#
+# Why commit-msg and not pre-commit: the gate lets a deliberate removal or rename be
+# justified by a trailer, and pre-commit cannot see the message, so a pre-commit leg
+# could only ever refuse. That leaves an author with no way to justify a legitimate
+# rename except --no-verify, which CONTRIBUTING.md forbids. commit-msg is the one hook
+# that has both the staged tree and a message that is still editable. Item 77.
+
+set -e
+
+MSG_FILE="$1"
+
+# Resolve hooks directory from the location of this hook script
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve the framework root relative to the hook's directory (always 2 levels up)
+FRAMEWORK_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+# Resolve the repository root where the commit is occurring
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
+
+if [ "$REPO_ROOT" != "$FRAMEWORK_ROOT" ]; then
+    # ADOPTER REPO CONTEXT. The assertion gate guards this project's own test suite and
+    # pre-push already bypasses it for adopters; running it here would judge an adopter's
+    # tests by Crucible's convention.
+    exit 0
+fi
+
+cd "$REPO_ROOT"
+
+# Resolve platform-appropriate PowerShell command. Windows prefers powershell.exe so it
+# runs Windows PowerShell 5.1, the field-tested host matching CI. The OS is tested rather
+# than inferred from the lookup succeeding: under WSL, Windows PATH interop puts
+# /mnt/c/.../powershell.exe on PATH, so a bare `command -v powershell.exe` hands a Linux
+# repository to a Windows host. That host sees the work tree as \\wsl.localhost\... , which
+# git will not treat as a repository, so `git diff --cached` degrades to --no-index and
+# exits 129 - a gate reporting that it could not run, on a correct tree.
+case "$(uname -s)" in
+    Linux|Darwin) PWSH="$(command -v pwsh)" ;;
+    *)            PWSH="$(command -v powershell.exe || command -v pwsh)" ;;
+esac
+
+echo "--- Crucible commit-msg verification started"
+
+# 1. Message file encoding, ahead of the merge short-circuit below.
+# A UTF-8 BOM in the message file becomes the first character of the subject line, and once
+# pushed nothing can correct it - unlike a BOM in a tracked file, which a later commit fixes.
+# This ran nowhere before: the encoding gate walks .md and .ps1 under the content roots, and a
+# message file is an untracked temporary whose path only this hook knows. Placed before the
+# MERGE_HEAD check because it needs no staged tree and a tool-written merge message can carry
+# a BOM just as easily. Item 89.
+echo "Running commit message encoding check..."
+"$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 -MessageFile "$MSG_FILE"
+
+# A merge commit's diff against its first parent shows every removal the merged branch
+# made, so requiring one trailer on the merge would ask the merger to restate reasons
+# that already sit on the commits that made them. Those commits are still walked
+# individually by the pre-push range check. A merge is charged there only for a name
+# dropped against every parent - an evil merge - not for work already on a parent.
+if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
+    echo "Merge commit: assertion deletion check deferred to the commits being merged."
+    echo "--- Commit-msg: all verification tests passed!"
+    exit 0
+fi
+
+# 2. Assertion deletion gate, against the index
+echo "Running assertion deletion check..."
+"$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-assertion-deletion.ps1 -Staged -MessageFile "$MSG_FILE"
+
+echo "--- Commit-msg: all verification tests passed!"

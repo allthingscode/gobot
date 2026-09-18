@@ -3,7 +3,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 
 $results = @()
 
@@ -125,15 +125,15 @@ function Write-GroomerHandoff {
     return $handoffPath
 }
 
-function Invoke-FactoryForArchitect {
+function Invoke-CrucibleForArchitect {
     param([string]$ProjectRoot, [string]$TaskId)
-    $env:FACTORY_CYCLE_ID = "test-cycle"
+    $env:CRUCIBLE_CYCLE_ID = "test-cycle"
     return Invoke-ExternalCommand {
-        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT -Init -TaskId $TaskId -ProjectRoot $ProjectRoot -Quiet
+        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT -Init -TaskId $TaskId -ProjectRoot $ProjectRoot -Quiet
     }
 }
 
-function Assert-FactorySuccess {
+function Assert-CrucibleSuccess {
     param([object]$Result, [string]$Name)
     $output = $Result.Output -join "`n"
     Assert-Result -Name $Name -Condition ($Result.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($Result.ExitCode). Output:`n$output"
@@ -147,8 +147,7 @@ function Remove-WorktreeIfPresent {
     git -C $ProjectRoot worktree prune 2>$null
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-worktree-isolation-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "worktree-isolation-test"
 $projectRoot = Join-Path $tempRoot "app"
 $mainSupported = Test-GitInitMainSupported
 $baseBranch = if ($mainSupported) { "main" } else { "master" }
@@ -166,12 +165,12 @@ try {
 
     $results += Run-Test -Name "Two tasks create isolated worktrees" -Body {
         Write-GroomerHandoff -ProjectRoot $projectRoot -TaskId $taskA | Out-Null
-        $resA = Invoke-FactoryForArchitect -ProjectRoot $projectRoot -TaskId $taskA
-        Assert-FactorySuccess -Result $resA -Name "task A factory init"
+        $resA = Invoke-CrucibleForArchitect -ProjectRoot $projectRoot -TaskId $taskA
+        Assert-CrucibleSuccess -Result $resA -Name "task A crucible init"
 
         Write-GroomerHandoff -ProjectRoot $projectRoot -TaskId $taskB | Out-Null
-        $resB = Invoke-FactoryForArchitect -ProjectRoot $projectRoot -TaskId $taskB
-        Assert-FactorySuccess -Result $resB -Name "task B factory init"
+        $resB = Invoke-CrucibleForArchitect -ProjectRoot $projectRoot -TaskId $taskB
+        Assert-CrucibleSuccess -Result $resB -Name "task B crucible init"
 
         Assert-Result -Name "worktree A exists" -Condition (Test-Path $wtA) -FailureMessage "$wtA missing"
         Assert-Result -Name "worktree B exists" -Condition (Test-Path $wtB) -FailureMessage "$wtB missing"
@@ -198,14 +197,14 @@ try {
 
     $results += Run-Test -Name "Same-ID re-init reuses existing worktree cleanly" -Body {
         Write-GroomerHandoff -ProjectRoot $projectRoot -TaskId $taskA | Out-Null
-        $resFirst = Invoke-FactoryForArchitect -ProjectRoot $projectRoot -TaskId $taskA
-        Assert-FactorySuccess -Result $resFirst -Name "task A recreate factory init"
+        $resFirst = Invoke-CrucibleForArchitect -ProjectRoot $projectRoot -TaskId $taskA
+        Assert-CrucibleSuccess -Result $resFirst -Name "task A recreate crucible init"
         Assert-Result -Name "worktree A recreated" -Condition (Test-Path $wtA) -FailureMessage "worktree A was not recreated"
 
         Start-Sleep -Milliseconds 10
         Write-GroomerHandoff -ProjectRoot $projectRoot -TaskId $taskA | Out-Null
-        $resSecond = Invoke-FactoryForArchitect -ProjectRoot $projectRoot -TaskId $taskA
-        Assert-FactorySuccess -Result $resSecond -Name "task A same-ID factory init"
+        $resSecond = Invoke-CrucibleForArchitect -ProjectRoot $projectRoot -TaskId $taskA
+        Assert-CrucibleSuccess -Result $resSecond -Name "task A same-ID crucible init"
         Assert-Result -Name "same-ID worktree remains" -Condition (Test-Path $wtA) -FailureMessage "same-ID re-init did not leave a worktree"
         Assert-Result -Name "same-ID branch intact" -Condition ((git -C $wtA branch --show-current) -eq "task/$taskA") -FailureMessage "same-ID re-init changed branch"
     }
@@ -219,7 +218,7 @@ try {
         }
     }
 } finally {
-    Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue
+    Remove-Item env:CRUCIBLE_CYCLE_ID -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $wtA
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $wtB

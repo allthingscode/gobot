@@ -14,8 +14,7 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-config-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "config-test"
 
 try {
     $projectRoot = Join-Path $tempRoot "app"
@@ -108,28 +107,28 @@ try {
     }
 
     $results += Run-Test -Name "Non-.crucible bundle name is accepted when bundle structure exists" -Body {
-        # Copy the installed .crucible bundle to a differently-named directory (.dev-factory)
-        $devFactoryRoot = Join-Path $projectRoot ".dev-factory"
-        Copy-Item -LiteralPath (Join-Path $projectRoot ".crucible") -Destination $devFactoryRoot -Recurse -Force
+        # Copy the installed .crucible bundle to a differently-named directory (.crucible-bundle)
+        $altBundleRoot = Join-Path $projectRoot ".crucible-bundle"
+        Copy-Item -LiteralPath (Join-Path $projectRoot ".crucible") -Destination $altBundleRoot -Recurse -Force
 
         $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-        $configDevFactory = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: ".dev-factory"'
-        $testPath = Join-Path $projectRoot ".crucible/config-dev-factory.yaml"
-        $configDevFactory | Out-File -LiteralPath $testPath -Encoding UTF8
+        $configAltBundle = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: ".crucible-bundle"'
+        $testPath = Join-Path $projectRoot ".crucible/config-alt-bundle.yaml"
+        $configAltBundle | Out-File -LiteralPath $testPath -Encoding UTF8
 
         $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
         $output = $outputLines -join "`n"
-        Assert-Result -Name "dev-factory exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
-        Assert-Result -Name "dev-factory message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
+        Assert-Result -Name "alt-bundle exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
+        Assert-Result -Name "alt-bundle message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
     }
 
     $results += Run-Test -Name "Non-.crucible bundle name without bundle structure fails" -Body {
-        $emptyRoot = Join-Path $projectRoot ".my-factory"
+        $emptyRoot = Join-Path $projectRoot ".my-bundle"
         New-Item -ItemType Directory -Path $emptyRoot -Force | Out-Null
 
         $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-        $configEmptyRoot = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: ".my-factory"'
-        $testPath = Join-Path $projectRoot ".crucible/config-empty-factory.yaml"
+        $configEmptyRoot = $config -replace '(?m)^crucible_root:.+$', 'crucible_root: ".my-bundle"'
+        $testPath = Join-Path $projectRoot ".crucible/config-empty-bundle.yaml"
         $configEmptyRoot | Out-File -LiteralPath $testPath -Encoding UTF8
 
         $previousPreference = $ErrorActionPreference
@@ -141,8 +140,8 @@ try {
             $ErrorActionPreference = $previousPreference
         }
         $output = $outputLines -join "`n"
-        Assert-Result -Name "empty-factory exit" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
-        Assert-Result -Name "empty-factory message" -Condition ($output -match "is not a complete installed Crucible bundle") -FailureMessage ("missing bundle-structure message. Output: " + $output)
+        Assert-Result -Name "empty-bundle exit" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
+        Assert-Result -Name "empty-bundle message" -Condition ($output -match "is not a complete installed Crucible bundle") -FailureMessage ("missing bundle-structure message. Output: " + $output)
     }
 
     $results += Run-Test -Name "Missing config fails" -Body {

@@ -3,7 +3,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 
 $results = @()
 
@@ -194,15 +194,15 @@ function Write-OperatorHandoff {
     return $handoffPath
 }
 
-function Invoke-FactoryForTask {
+function Invoke-CrucibleForTask {
     param([string]$ProjectRoot, [string]$TaskId, [switch]$AcceptGate)
-    $env:FACTORY_CYCLE_ID = "test-cycle"
-    $factoryArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $FACTORY_SCRIPT, "-Init", "-TaskId", $TaskId, "-ProjectRoot", $ProjectRoot, "-Quiet")
+    $env:CRUCIBLE_CYCLE_ID = "test-cycle"
+    $crucibleArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $CRUCIBLE_SCRIPT, "-Init", "-TaskId", $TaskId, "-ProjectRoot", $ProjectRoot, "-Quiet")
     if ($AcceptGate) {
-        $factoryArgs += @("-GateOutcome", "accepted", "-GateReason", "Commit verification test accepted")
+        $crucibleArgs += @("-GateOutcome", "accepted", "-GateReason", "Commit verification test accepted")
     }
     return Invoke-ExternalCommand {
-        & (Get-PwshCommand) @factoryArgs
+        & (Get-PwshCommand) @crucibleArgs
     }
 }
 
@@ -222,8 +222,7 @@ function Assert-VerificationBlocked {
     Assert-Result -Name "blocked record" -Condition ($blocked.Count -gt 0) -FailureMessage "no blocked record found in $blockedDir"
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-operator-merge-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "operator-merge-test"
 $mainSupported = Test-GitInitMainSupported
 
 try {
@@ -232,7 +231,7 @@ try {
         $taskId = "C-OP-MISSING"
         Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -CommitHash $null | Out-Null
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "commit_hash"
     }
 
@@ -241,7 +240,7 @@ try {
         $taskId = "C-OP-NONEXISTENT"
         Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -CommitHash "ffffffffffffffffffffffffffffffffffffffff" | Out-Null
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "does not exist"
     }
 
@@ -263,7 +262,7 @@ try {
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
         Finalize-TestTaskInRepo -ProjectRoot $projectRoot -TaskId $taskId
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "is not merged"
     }
 
@@ -284,7 +283,7 @@ try {
             Pop-Location
         }
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -CommitHash $mergedHash -BaseCommit $baseHash | Out-Null
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "no verification failure" -Condition ($output -notmatch "artifact_verification_failed") -FailureMessage "unexpected verification failure. Output:`n$output"
@@ -306,16 +305,16 @@ try {
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
         Finalize-TestTaskInRepo -ProjectRoot $projectRoot -TaskId $taskId
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "is a baseline commit"
     }
 
     $results += Run-Test -Name "Ignored-only file_affinity no longer bypasses merge verification" -Body {
-        $projectRoot = Join-Path $tempRoot "factory-skip"
+        $projectRoot = Join-Path $tempRoot "crucible-skip"
         $taskId = "C-OP-FACTORY-SKIP"
         Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -CommitHash $null -FileAffinity @(".crucible/session/notes.md") | Out-Null
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "commit_hash"
     }
 
@@ -343,7 +342,7 @@ try {
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
         Finalize-TestTaskInRepo -ProjectRoot $projectRoot -TaskId $taskId
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "is not merged into main"
     }
 
@@ -369,7 +368,7 @@ try {
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
         Finalize-TestTaskInRepo -ProjectRoot $projectRoot -TaskId $taskId
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "is not merged into main"
     }
 
@@ -448,7 +447,7 @@ try {
         }
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "No-Code Closure detected" -Condition ($output -match "No-Code Closure") -FailureMessage "expected No-Code Closure detection message. Output:`n$output"
@@ -525,7 +524,7 @@ try {
         }
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "Merge verification failed"
     }
 
@@ -570,7 +569,7 @@ try {
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
         Finalize-TestTaskInRepo -ProjectRoot $projectRoot -TaskId $taskId
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "commit_hash"
     }
 
@@ -641,7 +640,7 @@ try {
         }
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "No-Code Closure detected" -Condition ($output -match "No-Code Closure") -FailureMessage "expected No-Code Closure detection message. Output:`n$output"
@@ -714,7 +713,7 @@ try {
         }
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "No-Code Closure detected" -Condition ($output -match "No-Code Closure") -FailureMessage "expected No-Code Closure detection message. Output:`n$output"
@@ -787,7 +786,7 @@ try {
         }
         $decision | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "${taskId}-20260604T120000Z.json") -Encoding UTF8
 
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         $output = $res.Output -join "`n"
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "Merge verification failed"
         Assert-Result -Name "No-Code Closure NOT detected" -Condition ($output -notmatch "No-Code Closure detected") -FailureMessage "unexpected No-Code Closure detection message. Output:`n$output"
@@ -800,7 +799,7 @@ try {
         $taskId = "C-OP-GROOM-DEPBLK"
         Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -Target "grooming" -CommitHash $null | Out-Null
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "no verification failure" -Condition ($output -notmatch "artifact_verification_failed") -FailureMessage "unexpected verification failure. Output:`n$output"
@@ -823,7 +822,7 @@ try {
             Pop-Location
         }
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -Target "grooming" -CommitHash $mergedHash -BaseCommit $baseHash | Out-Null
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
         $output = $res.Output -join "`n"
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "no verification failure" -Condition ($output -notmatch "artifact_verification_failed") -FailureMessage "unexpected verification failure. Output:`n$output"
@@ -835,11 +834,11 @@ try {
         Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
         $sideHash = New-SideBranchCommit -ProjectRoot $projectRoot -BaseBranch "master"
         Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -Target "grooming" -CommitHash $sideHash | Out-Null
-        $res = Invoke-FactoryForTask -ProjectRoot $projectRoot -TaskId $taskId
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId
         Assert-VerificationBlocked -ProjectRoot $projectRoot -TaskId $taskId -Result $res -ExpectedText "Incident handoff"
     }
 } finally {
-    Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue
+    Remove-Item env:CRUCIBLE_CYCLE_ID -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

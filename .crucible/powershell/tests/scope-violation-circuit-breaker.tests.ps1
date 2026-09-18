@@ -1,6 +1,6 @@
 # Test for Scope Boundary Violation circuit breaker.
 #
-# This test modifies a file outside the spec file_affinity and asserts factory blocks
+# This test modifies a file outside the spec file_affinity and asserts Crucible blocks
 # the handoff before it can proceed to Reviewer.
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +8,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 $INIT_SCRIPT    = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 
 $results = @()
@@ -22,14 +22,13 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-scope-violation-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "scope-violation-test"
 
 try {
     $projectRoot = Join-Path $tempRoot "app"
     New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
 
-    $results += Run-Test -Name "Scope violation rejected by factory" -Body {
+    $results += Run-Test -Name "Scope violation rejected by Crucible" -Body {
         # 1. Git repo
         Push-Location $projectRoot
         try {
@@ -118,17 +117,17 @@ try {
         }
         $handoff | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath -Encoding UTF8
 
-        $env:FACTORY_CYCLE_ID = "test-cycle"
+        $env:CRUCIBLE_CYCLE_ID = "test-cycle"
 
-        # 6. Run factory; expect exit 2 (block) because src/b.txt is out-of-scope
+        # 6. Run Crucible; expect exit 2 (block) because src/b.txt is out-of-scope
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId $taskId -ProjectRoot $projectRoot
         }
         $output   = $res.Output -join "`n"
         $exitCode = $res.ExitCode
 
-        Assert-Result -Name "Factory blocks out-of-scope handoff" `
+        Assert-Result -Name "Crucible blocks out-of-scope handoff" `
             -Condition ($exitCode -eq 2) `
             -FailureMessage ("expected exit 2 (scope violation block), got $exitCode. " +
                 "Output:`n$output")
@@ -247,17 +246,17 @@ try {
         }
         $handoff2 | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath2 -Encoding UTF8
 
-        $env:FACTORY_CYCLE_ID = "test-cycle2"
+        $env:CRUCIBLE_CYCLE_ID = "test-cycle2"
 
-        # 6. Run factory; expect exit 0 because empty affinity skips scope checks with an advisory
+        # 6. Run Crucible; expect exit 0 because empty affinity skips scope checks with an advisory
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId $taskId2 -ProjectRoot $projectRoot2
         }
         $output   = $res.Output -join "`n"
         $exitCode = $res.ExitCode
 
-        Assert-Result -Name "Factory succeeds on empty file_affinity" `
+        Assert-Result -Name "Crucible succeeds on empty file_affinity" `
             -Condition ($exitCode -eq 0) `
             -FailureMessage ("expected exit 0 (skipped scope check), got $exitCode. Output:`n$output")
 
@@ -266,7 +265,7 @@ try {
             -FailureMessage "Expected advisory in output, got: $output"
     }
 } finally {
-    Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue
+    Remove-Item env:CRUCIBLE_CYCLE_ID -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

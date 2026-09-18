@@ -19,7 +19,7 @@
 /research/
 /dev-logs/
 
-# Backlog is data, not structure — see docs/git-policy.md.
+# Backlog is data, not structure - see docs/git-policy.md.
 # Uncomment the next line if you want to commit your backlog (e.g. public roadmap).
 /backlog/
 

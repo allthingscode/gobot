@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# analyze-evals.ps1 - Mine gate decisions and pipeline logs for factory performance metrics
+# analyze-evals.ps1 - Mine gate decisions and pipeline logs for Crucible performance metrics
 # Usage: powershell/analyze-evals.ps1 [-Json]
 
 param([switch]$Json)
@@ -38,6 +38,7 @@ $total     = $decisions.Count
 $pipelineMetrics = @{}
 $phaseWallStats  = @{} # phase -> [phase-open wall times]
 $phaseWallNewest = @{} # phase -> newest contributing event timestamp
+$phaseWallUnattributed = @{} # phase -> count of spans too long to report as wall time
 $anomalies       = @() # {tid, specialist, type}
 $degradedByKind  = @{}
 $unverifiableGateEventsTotal = 0
@@ -72,7 +73,15 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 				$logPhase = Get-EntryPhase $e
 				if ($logPhase -eq "implementation" -or $logPhase -eq "architect") { $archSessions++ }
 				
-				if ($e.metrics -and $null -ne $e.metrics.phase_wall_seconds) {
+				# The same limit the producer applies, applied again on the way in.
+				# Archived logs are never rewritten, so the 30 spans already written as
+				# phase_wall_seconds - up to 44 hours - would otherwise inflate this
+				# average for good; they do not age out, they accumulate.
+				if ($e.metrics -and $null -ne $e.metrics.phase_wall_seconds -and
+					$e.metrics.phase_wall_seconds -gt $PhaseWallAttributionLimitSeconds) {
+					Add-Count -Table $phaseWallUnattributed -Key $logPhase
+				}
+				elseif ($e.metrics -and $null -ne $e.metrics.phase_wall_seconds) {
 					if (-not $phaseWallStats.ContainsKey($logPhase)) { $phaseWallStats[$logPhase] = @() }
 					$phaseWallStats[$logPhase] += $e.metrics.phase_wall_seconds
 					$eventIso = Get-IsoTimestamp $e.timestamp
@@ -81,6 +90,14 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 						[string]::CompareOrdinal($eventIso, $phaseWallNewest[$logPhase]) -gt 0)) {
 						$phaseWallNewest[$logPhase] = $eventIso
 					}
+				}
+
+				# A span the producer refused to call wall time is still a session that
+				# happened. Counting it keeps the average from being taken over a
+				# silently filtered population: without this the long phases would
+				# simply vanish and the remaining mean would read as the whole story.
+				if ($e.metrics -and $null -ne $e.metrics.phase_elapsed_seconds) {
+					Add-Count -Table $phaseWallUnattributed -Key $logPhase
 				}
 
 				# Capture anomalies ({task_id})
@@ -130,10 +147,16 @@ Get-ChildItem "$LogDir/pipeline-*.log.jsonl" -ErrorAction SilentlyContinue | For
 	}
 }
 
+# Keyed off both tables, not just the timed one: a phase whose every span was too long to
+# report would otherwise be missing from the report altogether rather than showing as a
+# phase with no usable duration data.
 $phaseWallSummary = @(
-	$phaseWallStats.GetEnumerator() | ForEach-Object {
-		$avg = if ($_.Value.Count) { [math]::Round(($_.Value | Measure-Object -Average).Average / 60, 1) } else { 0 }
-		[PSCustomObject]@{ phase = $_.Key; avg_minutes = $avg; events = $_.Value.Count; newest_event = $phaseWallNewest[$_.Key] }
+	@(@($phaseWallStats.Keys) + @($phaseWallUnattributed.Keys) | Sort-Object -Unique) | ForEach-Object {
+		$phaseKey = $_
+		$samples = if ($phaseWallStats.ContainsKey($phaseKey)) { @($phaseWallStats[$phaseKey]) } else { @() }
+		$avg = if ($samples.Count) { [math]::Round(($samples | Measure-Object -Average).Average / 60, 1) } else { $null }
+		$unattributed = if ($phaseWallUnattributed.ContainsKey($phaseKey)) { $phaseWallUnattributed[$phaseKey] } else { 0 }
+		[PSCustomObject]@{ phase = $phaseKey; avg_minutes = $avg; events = $samples.Count; unattributed = $unattributed; newest_event = $phaseWallNewest[$phaseKey] }
 	} | Sort-Object avg_minutes -Descending
 )
 
@@ -228,11 +251,11 @@ $versionSummary = $versionStats.GetEnumerator() | ForEach-Object {
 
 # Duplicate/Superseded Handoff Metrics
 #
-# Keyed by Get-HandoffDedupeKey, the same function the factory uses to decide which
+# Keyed by Get-HandoffDedupeKey, the same function Crucible uses to decide which
 # handoffs are duplicates of each other. This file used to build the key inline, and
 # the two drifted: the copy here neither trimmed nor lowercased, so a handoff whose
 # phase field differed only in case or whitespace counted as a distinct transition and
-# the report understated the duplicates the factory had already superseded. The records
+# the report understated the duplicates Crucible had already superseded. The records
 # are grouped on the projected objects rather than the raw JSON so the legacy
 # specialist-to-phase mapping above still applies.
 #
@@ -365,7 +388,7 @@ if ($Json) {
 $pct = if ($total -gt 0) { { param($n) [math]::Round($n / $total * 100, 1) } } else { { param($n) 0 } }
 
 $report = @()
-$report += "# Dev Factory - Eval Report"
+$report += "# Crucible - Eval Report"
 $report += "Generated: $((Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm", [System.Globalization.CultureInfo]::InvariantCulture)) UTC"
 $report += ""
 
@@ -427,13 +450,16 @@ if ($unverifiableGateTasks.Count -gt 0) {
 $report += ""
 $report += "### Average Phase-Open Wall Time (minutes)"
 $report += ""
-$report += "Wall time from phase open to handoff, including idle time. This is not specialist active work time; the factory does not measure that."
+$report += "Wall time from phase open to handoff, including idle time. This is not specialist active work time; Crucible does not measure that."
+$report += ""
+$report += "``Unattributed`` counts sessions whose span was too long to be one working session - a session resumed the next day measures the calendar, not the work - so they are excluded from the average rather than reported as duration."
 $report += ""
 if ($phaseWallSummary.Count -gt 0) {
-	$report += "| Phase | Avg Minutes | Events | Newest Event |"
-	$report += "|-------|-------------|--------|--------------|"
+	$report += "| Phase | Avg Minutes | Events | Unattributed | Newest Event |"
+	$report += "|-------|-------------|--------|--------------|--------------|"
 	foreach ($s in $phaseWallSummary) {
-		$report += "| $($s.phase) | $($s.avg_minutes) | $($s.events) | $($s.newest_event) |"
+		$avgCell = if ($s.events -gt 0) { $s.avg_minutes } else { "n/a" }
+		$report += "| $($s.phase) | $avgCell | $($s.events) | $($s.unattributed) | $($s.newest_event) |"
 	}
 } else {
 	$report += "(no phase wall-time data available)"
@@ -533,7 +559,7 @@ if ($multiCycle.Count -gt ($total * 0.3))                                    { $
 if ($signalPct -lt 80)                                                       { $recs += "Gate signal coverage is $signalPct% - provide qualitative reasons at the Human Gate (see operator SOP Step 9)" }
 if ($duplicateHandoffsTotal -gt 0)                                           { $recs += "Duplicate handoffs detected ($duplicateHandoffsTotal). Investigate repeated submit patterns and enforce supersede handling." }
 if ($supersedeRate -gt 5)                                                    { $recs += "Supersede rate is $supersedeRate% - review specialist handoff discipline and retry ergonomics." }
-if ($unsupersededDuplicateIncidents -gt 0)                                   { $recs += "There are $unsupersededDuplicateIncidents unsuperseded duplicate transition incidents. Factory supersede enforcement should reduce this to zero." }
+if ($unsupersededDuplicateIncidents -gt 0)                                   { $recs += "There are $unsupersededDuplicateIncidents unsuperseded duplicate transition incidents. Crucible's supersede enforcement should reduce this to zero." }
 $highCycleVersions = @($versionSummary | Where-Object { $_.avg_review_cycles -gt 1.5 })
 if ($highCycleVersions.Count -gt 0) {
 	$vers = ($highCycleVersions | ForEach-Object { $_.version }) -join ", "

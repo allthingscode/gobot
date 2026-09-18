@@ -2,14 +2,14 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "crucible/config.schema.json",
   "title": "Crucible Project Configuration",
-  "description": "Schema for .crucible/config.yaml — the project-local configuration file that tells Crucible how to run against a specific project.",
+  "description": "Schema for .crucible/config.yaml - the project-local configuration file that tells Crucible how to run against a specific project.",
   "type": "object",
   "required": ["crucible_root", "project", "roles", "verification", "project_mandates"],
   "additionalProperties": false,
   "properties": {
     "crucible_root": {
       "type": "string",
-      "description": "Path to this project's installed Crucible bundle. Must point inside the application repo, normally .crucible, but may be a custom relative path (e.g. .dev-factory, tools/crucible). The orchestrator invokes `<crucible_root>/powershell/factory.ps1` from the project directory.",
+      "description": "Path to this project's installed Crucible bundle. Must point inside the application repo, normally .crucible, but may be a custom relative path (e.g. .crucible-bundle, tools/crucible). The orchestrator invokes `<crucible_root>/powershell/crucible.ps1` from the project directory.",
       "minLength": 1,
       "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(^|[\\\\/])\\.\\.($|[\\\\/])).+"
     },
@@ -121,7 +121,7 @@
       "properties": {
         "quick": {
           "type": "array",
-          "description": "Fast check — run after every Architect commit. Typically just the test suite.",
+          "description": "Fast check - run after every Architect commit. Typically just the test suite.",
           "minItems": 1,
           "items": {
             "$ref": "#/definitions/verification_step"
@@ -129,7 +129,7 @@
         },
         "full": {
           "type": "array",
-          "description": "Complete check — run by the Reviewer before approval. Mirrors CI exactly: vet, lint, tests, doc-lint.",
+          "description": "Complete check - run by the Reviewer before approval. Mirrors CI exactly: vet, lint, tests, doc-lint.",
           "minItems": 1,
           "items": {
             "$ref": "#/definitions/verification_step"
@@ -152,7 +152,7 @@
     },
     "file_affinity_examples": {
       "type": "array",
-      "description": "Optional. Illustrative examples of package paths or globs used in file_affinity declarations. Not enforced — just documentation for the Groomer.",
+      "description": "Optional. Illustrative examples of package paths or globs used in file_affinity declarations. Not enforced - just documentation for the Groomer.",
       "items": {
         "type": "string",
         "minLength": 1
@@ -230,7 +230,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Display name shown in factory output and Reviewer reports.",
+          "description": "Display name shown in Crucible output and Reviewer reports.",
           "minLength": 1
         },
         "command": {

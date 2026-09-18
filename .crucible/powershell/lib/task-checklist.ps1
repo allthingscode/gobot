@@ -19,9 +19,13 @@ function Get-TaskChecklistGateResult {
     $lines = Get-Content -LiteralPath $TaskMdPath -Encoding UTF8
     $inRequiredSection = $false
 
-    function Is-PostSessionFactoryChecklistItem {
+    function Is-PostSessionCrucibleChecklistItem {
         param([string]$ChecklistLine)
-        return $ChecklistLine -match '^\s*-\s+\[( |/|x|X|-)\]\s*Run\s+factory\.ps1\s+-Init\s+-TaskId\b'
+        # Both names, permanently. task.md files are adopter data written before the
+        # entrypoint rename and never rewritten by an update, so narrowing this to
+        # crucible.ps1 would turn every in-flight task's post-session line into a
+        # blocking unchecked item at the moment the adopter upgrades.
+        return $ChecklistLine -match '^\s*-\s+\[( |/|x|X|-)\]\s*Run\s+(crucible|factory)\.ps1\s+-Init\s+-TaskId\b'
     }
 
     for ($idx = 0; $idx -lt $lines.Count; $idx++) {
@@ -39,7 +43,7 @@ function Get-TaskChecklistGateResult {
         }
 
         if ($line -match '^\s*-\s+\[( |/)\]') {
-            if (Is-PostSessionFactoryChecklistItem -ChecklistLine $line) {
+            if (Is-PostSessionCrucibleChecklistItem -ChecklistLine $line) {
                 continue
             }
             $entry = [pscustomobject]@{ line = $lineNo; text = $line.Trim() }
@@ -53,7 +57,7 @@ function Get-TaskChecklistGateResult {
 
         # Preserve strict blocking for malformed checklist markers in the required section.
         if ($inRequiredSection -and $line -match '^\s*-\s+\[' -and $line -notmatch '^\s*-\s+\[( |/|x|X|-)\]') {
-            if (Is-PostSessionFactoryChecklistItem -ChecklistLine $line) {
+            if (Is-PostSessionCrucibleChecklistItem -ChecklistLine $line) {
                 continue
             }
             $result.RequiredMalformed += [pscustomobject]@{ line = $lineNo; text = $line.Trim() }

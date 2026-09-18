@@ -78,8 +78,7 @@ function Invoke-Validator {
     return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-validate-backlog-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "validate-backlog-test"
 
 try {
     # --- Test 1: clean tree with one valid link passes ---
@@ -916,6 +915,133 @@ created_at: "2026-05-25"
         $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
         Assert-Result -Name "archived invalid type exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "archived no type error" -Condition (-not ($r.Output -match "Invalid type")) -FailureMessage ("expected no type error for archived spec. Output: " + $r.Output)
+    }
+
+    # --- REGRESSION: an archived spec with no table row must be reported ---
+    # Measured on the dogfood adopter 2026-09-05: R-029 was archived "Resolved" with no
+    # BACKLOG.md row. That row is a load-bearing index, and its absence made two readers
+    # treat a finished task as nonexistent. This validator passed the same backlog.
+    # The fixture reproduces the exact shape, including the prose sentence naming R-029:
+    # matching the bare ID anywhere in the file would accept that sentence as a row.
+    $results += Run-Test -Name "REGRESSION: archived spec with no BACKLOG.md row is reported" -Body {
+        $root = Join-Path $tempRoot "rowless-archive"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Hello.md" -ItemId "C-001" -Priority "P2" -Title "Hello"
+        New-SpecFile -Root $root -RelPath "features/archived/R-028_Audit.md" -ItemId "R-028" -Priority "P2" -Title "Audit" -Status "Resolved" -Type "Research"
+        New-SpecFile -Root $root -RelPath "features/archived/R-029_Audit.md" -ItemId "R-029" -Priority "P2" -Title "Audit" -Status "Resolved" -Type "Research"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-001 |
+| **P3** | 0 | - |
+
+**Status Overview**: 1 active items.
+
+R-029 discovery was archived as Resolved after filing C-001.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Hello.md) | P2 | Ready | Hello | Architect |
+| [R-028](features/archived/R-028_Audit.md) | P2 | Resolved | Audit | Researcher |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog
+        Assert-Result -Name "rowless archived spec is reported" -Condition ($r.Output -match "no BACKLOG.md row: features/archived/R-029_Audit.md") -FailureMessage ("expected a warning naming R-029, whose only mention is prose. Output: " + $r.Output)
+        Assert-Result -Name "archived spec with a row is not reported" -Condition (-not ($r.Output -match "no BACKLOG.md row: features/archived/R-028_Audit.md")) -FailureMessage ("R-028 has a row and must not be reported. Output: " + $r.Output)
+        Assert-Result -Name "report does not fail the run" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 so an existing adopter backlog still passes on upgrade, got " + $r.ExitCode + ". Output: " + $r.Output)
+    }
+
+    # TODO item 60. Run bare from a directory that is not a Crucible project, this used to
+    # resolve the backlog against the working directory and report on whatever it found -
+    # in the case that surfaced it, "Backlog file not found" naming a path in a repository
+    # the Groomer had never been pointed at. The caller has to be told what to pass.
+    $results += Run-Test -Name "Bare invocation from an unrelated directory names -ProjectRoot" -Body {
+        $unrelated = Join-Path $tempRoot "unrelated-cwd"
+        New-Item -ItemType Directory -Path $unrelated -Force | Out-Null
+
+        Push-Location $unrelated
+        try {
+            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT 2>&1)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        $output = ($outputLines -join "`n")
+
+        Assert-Result -Name "refuses to run" -Condition ($exitCode -ne 0) -FailureMessage ("expected a non-zero exit, got " + $exitCode + ". Output: " + $output)
+        Assert-Result -Name "names -ProjectRoot" -Condition ($output -match '\-ProjectRoot') -FailureMessage ("the failure has to name the parameter the caller must pass. Output: " + $output)
+        Assert-Result -Name "does not report on the unrelated directory" -Condition ($output -notmatch "Backlog file not found") -FailureMessage ("it reported a missing backlog for a project nobody named, which is the defect. Output: " + $output)
+    }
+
+    # -BacklogPath answers the same question explicitly, so it must keep working on its own.
+    # Every existing caller in the framework - init-project.ps1 and this file's own fixtures -
+    # relies on that, and making the root mandatory everywhere would have broken them.
+    $results += Run-Test -Name "An explicit -BacklogPath still needs no project root" -Body {
+        $root = Join-Path $tempRoot "backlogpath-only"
+        New-MinimalBacklogTree -Root $root
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $unrelated = Join-Path $tempRoot "backlogpath-only-cwd"
+        New-Item -ItemType Directory -Path $unrelated -Force | Out-Null
+        Push-Location $unrelated
+        try {
+            $r = Invoke-Validator -BacklogPath $backlog
+        } finally {
+            Pop-Location
+        }
+        Assert-Result -Name "validates the named backlog" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
+    }
+
+    # The prompt taught the failing form: it spelled out -ProjectRoot on every other script
+    # it invoked and omitted it here alone. Asserting over every prompt and SOP at once is
+    # what turns one corrected line into a rule, the way item 58's four drifted copies
+    # showed a single fix does not hold.
+    $results += Run-Test -Name "Every prompt and SOP invocation names the project" -Body {
+        $docFiles = @()
+        $docFiles += @(Get-ChildItem -Path (Join-Path $REPO_ROOT "prompts") -Filter "*.md" -File)
+        $docFiles += @(Get-ChildItem -Path (Join-Path $REPO_ROOT "sops") -Filter "*.md" -File)
+        Assert-Result -Name "prompts and SOPs were found" -Condition ($docFiles.Count -ge 2) -FailureMessage "no prompt or SOP files matched, so the scan below would report clean without reading anything"
+
+        $invocations = 0
+        $offenders = @()
+        foreach ($docFile in $docFiles) {
+            $lines = @(Get-Content -LiteralPath $docFile.FullName -Encoding UTF8)
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -notmatch 'validate-backlog\.ps1') { continue }
+                $invocations++
+                if ($lines[$i] -notmatch '\-ProjectRoot' -and $lines[$i] -notmatch '\-BacklogPath') {
+                    $offenders += ($docFile.Name + ":" + ($i + 1))
+                }
+            }
+        }
+        Assert-Result -Name "invocations were found" -Condition ($invocations -ge 1) -FailureMessage "no validate-backlog.ps1 invocation was found in any prompt or SOP, so this guard proves nothing"
+        Assert-Result -Name "none omits the project" -Condition ($offenders.Count -eq 0) -FailureMessage ("these tell a specialist to run validate-backlog.ps1 without saying which project: " + (($offenders | Sort-Object) -join ", "))
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

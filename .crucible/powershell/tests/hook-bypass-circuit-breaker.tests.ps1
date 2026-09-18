@@ -1,13 +1,13 @@
 # Test for Git Hook Bypass Prevention circuit breaker.
 # Git intentionally honors --no-verify by skipping local hooks, so Crucible enforces
-# this at the factory boundary when a handoff reports or references a bypass attempt.
+# this at the Crucible boundary when a handoff reports or references a bypass attempt.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 
 $results = @()
 
@@ -20,14 +20,13 @@ $results = @()
 
 
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-hook-bypass-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "hook-bypass-test"
 
 try {
     $projectRoot = Join-Path $tempRoot "app"
     New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
 
-    $results += Run-Test -Name "Factory blocks handoff that reports --no-verify" -Body {
+    $results += Run-Test -Name "Crucible blocks handoff that reports --no-verify" -Body {
         Push-Location $projectRoot
         try {
             git init --quiet
@@ -88,16 +87,16 @@ created_at: "2026-05-25"
         }
         $handoff | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $handoffPath -Encoding UTF8
 
-        $env:FACTORY_CYCLE_ID = "test-cycle"
+        $env:CRUCIBLE_CYCLE_ID = "test-cycle"
 
         $res = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId $taskId -ProjectRoot $projectRoot
         }
         $output = $res.Output -join "`n"
         $exitCode = $res.ExitCode
 
-        Assert-Result -Name "Factory exits 2 (blocked)" -Condition ($exitCode -eq 2) `
+        Assert-Result -Name "Crucible exits 2 (blocked)" -Condition ($exitCode -eq 2) `
             -FailureMessage ("expected exit 2, got $exitCode. Output:`n$output")
         Assert-Result -Name "Wedge sentinel emitted" -Condition ($output -match "\[STOP\] HUMAN INTERVENTION REQUIRED") `
             -FailureMessage ("missing wedge sentinel. Output:`n$output")
@@ -122,7 +121,7 @@ created_at: "2026-05-25"
             -FailureMessage "blocked record does not name 'git_hook_bypass'. Content:`n$blockedJson"
     }
 } finally {
-    Remove-Item env:FACTORY_CYCLE_ID -ErrorAction SilentlyContinue
+    Remove-Item env:CRUCIBLE_CYCLE_ID -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

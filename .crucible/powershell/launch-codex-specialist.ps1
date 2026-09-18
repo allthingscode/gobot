@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     This is the Crucible-blessed way to run Codex as a specialist under another orchestrator
-    (for example, a Claude Code parent driving the factory loop). It wraps `codex exec` with
+    (for example, a Claude Code parent driving the Crucible loop). It wraps `codex exec` with
     the dogfood-validated full-access posture and treats infrastructure failures as DISTINCT
     from review verdicts, so a dead Codex runtime can never masquerade as a CHANGES_REQUESTED.
 
@@ -16,7 +16,7 @@
 
 .NOTES
     The authoritative specialist output remains the handoff JSON the Codex session writes plus
-    its `factory.ps1 -Init` run. This launcher's last-message + transcript capture is the
+    its `crucible.ps1 -Init` run. This launcher's last-message + transcript capture is the
     orchestrator's sanity check that real work happened before any verdict is trusted.
 #>
 param(
@@ -24,7 +24,7 @@ param(
     [string]$TaskId = "",
 
     [Parameter(Mandatory = $false)]
-    # Keep synchronized with $script:FACTORY_PHASES in factory-lib.ps1.
+    # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
     [ValidateSet("research", "grooming", "implementation", "verification", "deployment")]
     [string]$Phase = "",
 
@@ -138,8 +138,8 @@ function New-BootstrapPrompt {
         "complete. You are not alone in the codebase; do not revert unrelated edits.",
         "",
         "After writing handoff JSON, run:",
-        "  pwsh -File `"$CrucibleRootValue/powershell/factory.ps1`" -Init -TaskId $TaskIdValue -Quiet",
-        "(use powershell.exe on Windows). Report the factory output. Do not spawn successor agents."
+        "  pwsh -File `"$CrucibleRootValue/powershell/crucible.ps1`" -Init -TaskId $TaskIdValue -Quiet",
+        "(use powershell.exe on Windows). Report the Crucible output. Do not spawn successor agents."
     )
     if ($RequireJsonVerdict) {
         $lines += ""
@@ -269,7 +269,7 @@ if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Model)) {
-    Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED MODEL] value from factory.ps1 -Init -Target codex)." -ForegroundColor Red
+    Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED MODEL] value from crucible.ps1 -Init -Target codex)." -ForegroundColor Red
     exit 2
 }
 
@@ -334,7 +334,7 @@ if (-not [string]::IsNullOrWhiteSpace($PromptFile)) {
 # -TaskId and -Phase remain required on the bootstrap path, where they do select content. They
 # are optional on the -PromptFile path, but all-or-nothing: supplying one without the other
 # would name a session directory (session/<id>/ or session//<phase>/) in a shape nothing else
-# in the factory writes or reads.
+# in Crucible writes or reads.
 $usingAdhocSession = $false
 if (-not [string]::IsNullOrWhiteSpace($PromptFile) -and [string]::IsNullOrWhiteSpace($TaskId) -and [string]::IsNullOrWhiteSpace($Phase)) {
     if ([string]::IsNullOrWhiteSpace($adhocLabel)) {
@@ -399,7 +399,7 @@ if ([string]::IsNullOrWhiteSpace($Role)) {
 }
 
 # Ad-hoc sessions nest under session/adhoc/ rather than sitting at session/<name>/ so they
-# cannot collide with a task's own directory. factory-health treats a top-level
+# cannot collide with a task's own directory. crucible-health treats a top-level
 # session/<F|B|C>-<n>/ dir as a task session and archives it once the backlog says that task is
 # finished, and it deletes scratchpads and prompts at session/<phase-name>/. A prompt file named
 # `F-001.md` or `implementation.md` would otherwise land in either line of fire; session/adhoc/

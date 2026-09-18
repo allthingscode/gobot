@@ -1,6 +1,6 @@
 # Antigravity Strategic Orchestrator Protocol
 
-This document defines **Antigravity CLI-specific** mechanics for Dev Factory pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first — the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Antigravity CLI environment. The legacy Gemini CLI runtime is retained at the end for reference.
+This document defines **Antigravity CLI-specific** mechanics for Crucible pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Antigravity CLI environment. The legacy Gemini CLI runtime is retained at the end for reference.
 
 > **Cross-platform.** The `powershell.exe` invocations below are the Windows form. On Linux/macOS, use `pwsh` (PowerShell 7+) in their place.
 
@@ -21,13 +21,13 @@ invoke_subagent(
       "TypeName": "self",
       "Role": "{Role}",
       "Prompt": (
-        f"{Role}: {TASK_ID} — read and follow all instructions in "
+        f"{Role}: {TASK_ID} - read and follow all instructions in "
         f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
         "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
         "to task.md after each major phase. Do not write the final handoff until all "
         "required task checklist items are complete.\n\n"
-        "After writing handoff JSON, run factory.ps1 -Init -TaskId {TASK_ID} -Quiet "
-        "and report the factory output verbatim. Stop after reporting. "
+        "After writing handoff JSON, run crucible.ps1 -Init -TaskId {TASK_ID} -Quiet "
+        "and report the Crucible output verbatim. Stop after reporting. "
         "Do not spawn successor agents."
       )
     }
@@ -52,11 +52,11 @@ invoke_subagent(
         "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
         "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
         "update its spec, write the grooming -> implementation handoff, then run:\n\n"
-        "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
+        "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/crucible.ps1\" "
         "-Init -TaskId <selected_task_id> -Quiet\n\n"
         "Follow your SOP checkpoint mandate. Do not write the handoff until required "
-        "checklist items are complete. Stop after factory output. Report the selected "
-        "task ID and factory output verbatim."
+        "checklist items are complete. Stop after Crucible output. Report the selected "
+        "task ID and Crucible output verbatim."
       )
     }
   ]
@@ -67,7 +67,7 @@ invoke_subagent(
 
 ## After Each Sub-Agent Returns
 
-Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (run factory and check for gates). A gate signal at `.crucible/session/{TASK_ID}/gate_pending.txt` goes straight to the Gate Protocol before anything else, and any failed check goes to the Failure Protocol rather than advancing the pipeline.
+Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (run Crucible and check for gates). A gate signal at `.crucible/session/{TASK_ID}/gate_pending.txt` goes straight to the Gate Protocol before anything else, and any failed check goes to the Failure Protocol rather than advancing the pipeline.
 
 Step 5 includes the **budget ladder** that warns, then escalates and waits, then presents the ceiling as a Circuit Breaker Gate. Read its thresholds from the SOP; they are not repeated here, so they cannot go stale here. This section used to restate Step 5 as a four-item list and had already dropped the budget check entirely. Point at the SOP; do not re-inline it.
 
@@ -75,7 +75,7 @@ Step 5 includes the **budget ladder** that warns, then escalates and waits, then
 
 ## Human Confirmation
 
-Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3 — including the budget tracking line. The human is the Pilot in Command; every dispatch is their decision, not a formality.
+Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3 - including the budget tracking line. The human is the Pilot in Command; every dispatch is their decision, not a formality.
 
 Wait for an explicit "go" or redirect. Do not dispatch without confirmation.
 
@@ -102,13 +102,13 @@ The Gemini CLI was the original runtime for this orchestrator doc before Antigra
 invoke_agent(
   agent_name="generalist",
   prompt=(
-    f"{Role}: {TASK_ID} — read and follow all instructions in "
+    f"{Role}: {TASK_ID} - read and follow all instructions in "
     f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
     "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
     "to task.md after each major phase. Do not write the final handoff until all "
     "required task checklist items are complete.\n\n"
-    "After writing handoff JSON, run factory.ps1 -Init -TaskId {TASK_ID} -Quiet "
-    "and report the factory output verbatim. Stop after reporting. "
+    "After writing handoff JSON, run crucible.ps1 -Init -TaskId {TASK_ID} -Quiet "
+    "and report the Crucible output verbatim. Stop after reporting. "
     "Do not spawn successor agents."
   )
 )
@@ -124,11 +124,11 @@ invoke_agent(
     "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
     "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
     "update its spec, write the grooming -> implementation handoff, then run:\n\n"
-    "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/factory.ps1\" "
+    "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/crucible.ps1\" "
     "-Init -TaskId <selected_task_id> -Quiet\n\n"
     "Follow your SOP checkpoint mandate. Do not write the handoff until required "
-    "checklist items are complete. Stop after factory output. Report the selected "
-    "task ID and factory output verbatim."
+    "checklist items are complete. Stop after Crucible output. Report the selected "
+    "task ID and Crucible output verbatim."
   )
 )
 ```

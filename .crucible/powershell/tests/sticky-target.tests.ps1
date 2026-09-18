@@ -1,4 +1,4 @@
-# Verifies Resolve-StickyTarget (factory-lib.ps1): a per-task specialist target chosen once
+# Verifies Resolve-StickyTarget (crucible-lib.ps1): a per-task specialist target chosen once
 # via an explicit -Target persists across later phase -Init calls that omit -Target, so the
 # emitted [NEXT SESSION COMMAND]/[RECOMMENDED MODEL] stays on the chosen specialist.
 
@@ -7,11 +7,10 @@ Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
-. (Join-Path $REPO_ROOT "powershell/factory-lib.ps1")
+. (Join-Path $REPO_ROOT "powershell/crucible-lib.ps1")
 
 $results = @()
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-sticky-target-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "sticky-target"
 
 function New-CaseDir {
     $d = Join-Path $tempRoot ([guid]::NewGuid().ToString("N"))

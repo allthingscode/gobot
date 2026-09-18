@@ -1,10 +1,10 @@
 # Circuit Breaker Runbook
 
-When a circuit breaker fires, `factory.ps1` writes a blocked record to `.crucible/backlog/blocked/{task_id}-{timestamp}.json`, updates session state to `blocked`, and halts the pipeline. This runbook has a section for every breaker type.
+When a circuit breaker fires, `crucible.ps1` writes a blocked record to `.crucible/backlog/blocked/{task_id}-{timestamp}.json`, updates session state to `blocked`, and halts the pipeline. This runbook has a section for every breaker type.
 
 > **Canonical policy** (thresholds, DAG rules): [policy.md](policy.md)  
 > **Blocked record location**: `.crucible/backlog/blocked/{task_id}-{timestamp}.json`  
-> **Re-entry command**: `factory.ps1 -Init -TaskId {task_id} -Recover`
+> **Re-entry command**: `crucible.ps1 -Init -TaskId {task_id} -Recover`
 
 ---
 
@@ -37,7 +37,7 @@ Once you have made a decision:
 2. Update the backlog item status back to `Ready` in `BACKLOG.md` and the spec frontmatter.
 3. Resume the pipeline:
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/factory.ps1" -Init -TaskId {task_id} -Recover
+   powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible.ps1" -Init -TaskId {task_id} -Recover
    ```
    *(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 
@@ -45,7 +45,7 @@ The human is never required to edit session JSON directly. The agent handles all
 
 ---
 
-## Breaker 1 — Review Stalemate (3-Strike Rule)
+## Breaker 1 - Review Stalemate (3-Strike Rule)
 
 **Trigger**: The Architect has failed the Reviewer's checklist 3 times on the same task.
 
@@ -55,14 +55,14 @@ The human is never required to edit session JSON directly. The agent handles all
 
 ```
 Is the spec clearly written with unambiguous acceptance criteria?
-├── No → Rewrite the spec. Send back to Groomer.
-└── Yes
++-- No > Rewrite the spec. Send back to Groomer.
++-- Yes
     Is the task too large to implement cleanly in one cycle?
-    ├── Yes → Split the task. Create F-001a and F-001b. Abandon F-001.
-    └── No
+    +-- Yes > Split the task. Create F-001a and F-001b. Abandon F-001.
+    +-- No
         Is the Reviewer applying criteria not in the spec?
-        ├── Yes → Override: tell the Reviewer which criteria are out of scope.
-        └── No → Reduce scope. Remove the contentious acceptance criteria. Defer to a follow-up task.
+        +-- Yes > Override: tell the Reviewer which criteria are out of scope.
+        +-- No > Reduce scope. Remove the contentious acceptance criteria. Defer to a follow-up task.
 ```
 
 **Resolution steps**:
@@ -77,7 +77,7 @@ Is the spec clearly written with unambiguous acceptance criteria?
 
 ## Breaker 2 - DEGRADED Signals
 
-**Trigger**: The factory logs a `degraded` event because the pipeline continued with reduced assurance.
+**Trigger**: Crucible logs a `degraded` event because the pipeline continued with reduced assurance.
 
 **How to identify it**: Inspect the event's `kind` and `outcome` in the pipeline log. `kind` names which check spoke. `outcome: "unverifiable"` means that check could not run; do not treat the absence of a finding as a pass.
 
@@ -95,7 +95,7 @@ Duplicate handoffs are not DEGRADED. They are reported by `analyze-evals.ps1` un
 
 ---
 
-## Breaker 3 — Handoff Retry Limit
+## Breaker 3 - Handoff Retry Limit
 
 **Trigger**: A specialist has handed off to themselves more than twice (same role as both source and target in consecutive handoffs).
 
@@ -105,14 +105,14 @@ Duplicate handoffs are not DEGRADED. They are reported by `analyze-evals.ps1` un
 
 ```
 Is the task spec clear?
-├── No → Rewrite. Send to Groomer.
-└── Yes
++-- No > Rewrite. Send to Groomer.
++-- Yes
     Did the specialist misunderstand their role?
-    ├── Yes → Re-dispatch with an explicit correction prompt.
-    └── No → The task may be blocked on an external dependency.
+    +-- Yes > Re-dispatch with an explicit correction prompt.
+    +-- No > The task may be blocked on an external dependency.
         Is there a dependency that needs to resolve first?
-        ├── Yes → Block this task, work the dependency.
-        └── No → Reduce scope or abandon.
+        +-- Yes > Block this task, work the dependency.
+        +-- No > Reduce scope or abandon.
 ```
 
 **Resolution steps**:
@@ -122,89 +122,89 @@ Is the task spec clear?
 
 ---
 
-## Breaker 4 — Token Budget Exceeded
+## Breaker 4 - Token Budget Exceeded
 
 <!-- crucible:generated budget-tier-ceilings-inline -->
 **Trigger**: `cumulative_handoff_count` exceeds the tier ceiling (Low=10, Medium=16, High=28, Extended=40).
 <!-- crucible:end budget-tier-ceilings-inline -->
 
-**What it means**: The task consumed more pipeline cycles than estimated. This is not necessarily a failure — complex tasks legitimately need more cycles — but it requires explicit human approval to continue.
+**What it means**: The task consumed more pipeline cycles than estimated. This is not necessarily a failure - complex tasks legitimately need more cycles - but it requires explicit human approval to continue.
 
 **Decision tree**:
 
 ```
 Is the remaining work clearly defined and bounded?
-├── No → Reduce scope. Close with what's done. Defer the rest.
-└── Yes
++-- No > Reduce scope. Close with what's done. Defer the rest.
++-- Yes
     Is the remaining work worth the additional cost?
-    ├── No → Abandon or reduce scope.
-    └── Yes → Approve a tier escalation.
-        Current tier is Low?      → Escalate to Medium.
-        Current tier is Medium?   → Escalate to High.
-        Current tier is High?     → Escalate to Extended.
-        Current tier is Extended? → Split the task or abandon.
+    +-- No > Abandon or reduce scope.
+    +-- Yes > Approve a tier escalation.
+        Current tier is Low?      -> Escalate to Medium.
+        Current tier is Medium?   -> Escalate to High.
+        Current tier is High?     -> Escalate to Extended.
+        Current tier is Extended? -> Split the task or abandon.
 ```
 
 **Resolution steps**:
-1. Read the blocked record's `summary` — what has been done vs. what remains.
+1. Read the blocked record's `summary` - what has been done vs. what remains.
 2. Make one of three decisions:
    - **Escalate**: Edit the spec frontmatter: `budget_tier: medium` (or `high`). This requires your explicit approval.
    - **Reduce scope**: Edit acceptance criteria to remove unfinished items. Defer to a new task.
    - **Abandon**: Mark the task `Abandoned` in BACKLOG.md. Create a new, smaller task from what remains.
-3. The agent MUST NOT auto-escalate or silently adjust the tier. If it did, that is a policy violation — treat the handoff as invalid and re-dispatch the specialist.
+3. The agent MUST NOT auto-escalate or silently adjust the tier. If it did, that is a policy violation - treat the handoff as invalid and re-dispatch the specialist.
 
 ---
 
-## Breaker 5 — Reviewer Verification Failure
+## Breaker 5 - Reviewer Verification Failure
 
-**Trigger**: The Reviewer self-reported APPROVED, but `factory.ps1` independently re-ran the project's test suite and it failed.
+**Trigger**: The Reviewer self-reported APPROVED, but `crucible.ps1` independently re-ran the project's test suite and it failed.
 
-**What it means**: The Reviewer's checklist was not executed correctly — they marked tests as passing without actually running them, or ran the wrong test command.
+**What it means**: The Reviewer's checklist was not executed correctly - they marked tests as passing without actually running them, or ran the wrong test command.
 
 **Decision tree**:
 
 ```
 Did the Reviewer run the correct verification commands?
-├── No → Re-dispatch Reviewer with explicit instructions to run .crucible/config.yaml verification.full commands.
-└── Yes
++-- No > Re-dispatch Reviewer with explicit instructions to run .crucible/config.yaml verification.full commands.
++-- Yes
     Did the Architect's code actually pass tests before handoff?
-    ├── No → Route back to Architect. The failure is in the implementation.
-    └── Yes (tests pass in worktree, fail in factory run) → Environment issue.
-        → Run factory.ps1 -Health to check worktree state.
-        → Verify worktree is at the correct commit.
+    +-- No > Route back to Architect. The failure is in the implementation.
+    +-- Yes (tests pass in worktree, fail in Crucible run) > Environment issue.
+        -> Run crucible.ps1 -Health to check worktree state.
+        -> Verify worktree is at the correct commit.
 ```
 
 **Resolution steps**:
-1. Check `.crucible/session/{task_id}/reviewer/review_report.md` — does it list specific test results?
+1. Check `.crucible/session/{task_id}/reviewer/review_report.md` - does it list specific test results?
 2. If the Reviewer skipped tests: re-dispatch with "Re-run your verification checklist. Step 1 is running tests; show me the actual output."
 3. If the Architect's code has a real failure: route to Architect with the specific failing test name and output.
 4. Increment `review_strike_count` when re-dispatching the Architect.
 
 ---
 
-## Breaker 6 — Fabricated Artifacts
+## Breaker 6 - Fabricated Artifacts
 
 **Trigger**: A path listed in the handoff's `artifacts` array does not exist or is empty.
 
-**What it means**: The agent listed files it did not actually create or modify. This is a reliability signal — the agent is over-reporting its work.
+**What it means**: The agent listed files it did not actually create or modify. This is a reliability signal - the agent is over-reporting its work.
 
 **Decision tree**:
 
 ```
 Were the files supposed to be created?
-├── Yes → The Architect failed to produce required output. Re-dispatch Architect.
-└── No → The Architect listed the wrong files. Correct the handoff and re-run factory.
++-- Yes > The Architect failed to produce required output. Re-dispatch Architect.
++-- No > The Architect listed the wrong files. Correct the handoff and re-run Crucible.
 ```
 
 **Resolution steps**:
 1. List what actually exists in the worktree: `git -C .crucible/.agent-workspaces/implementation-{task_id} status`
 2. Compare against the spec's acceptance criteria.
 3. If work is genuinely missing: re-dispatch the Architect with "Your handoff lists {file} as an artifact but it does not exist. Create it."
-4. If the handoff just listed the wrong path: have the agent correct the handoff JSON and re-run `factory.ps1 -Init -TaskId {task_id}`.
+4. If the handoff just listed the wrong path: have the agent correct the handoff JSON and re-run `crucible.ps1 -Init -TaskId {task_id}`.
 
 ---
 
-## Breaker 7 — Recurring Merge Conflicts
+## Breaker 7 - Recurring Merge Conflicts
 
 **Trigger**: `rebase_count` reaches 3 on the same task.
 
@@ -214,12 +214,12 @@ Were the files supposed to be created?
 
 ```
 Is another task actively modifying the same files?
-├── Yes → Serialize. Finish the other task first, then resume this one.
-└── No
++-- Yes > Serialize. Finish the other task first, then resume this one.
++-- No
     Has master changed significantly since this task started?
-    ├── Yes → Consider abandoning and re-grooming on top of current master.
-    └── No → The conflict is a merge strategy issue.
-        → Have the Architect do a clean rebase and resolve conflicts manually.
+    +-- Yes > Consider abandoning and re-grooming on top of current master.
+    +-- No > The conflict is a merge strategy issue.
+        -> Have the Architect do a clean rebase and resolve conflicts manually.
 ```
 
 **Resolution steps**:
@@ -231,7 +231,7 @@ Is another task actively modifying the same files?
 
 ---
 
-## Breaker 8 — Git Hook Bypass Attempt
+## Breaker 8 - Git Hook Bypass Attempt
 
 **Trigger**: The handoff text reports `--no-verify`, an equivalent hook bypass, or `CRUCIBLE_BYPASS_LINUX_LEG`.
 
@@ -251,7 +251,7 @@ If the agent was cutting corners: re-dispatch with an explicit instruction: "You
 
 ---
 
-## Breaker 9 — Scope Boundary Violation
+## Breaker 9 - Scope Boundary Violation
 
 **Trigger**: The Architect modified files outside the `file_affinity` boundary declared in the spec.
 
@@ -261,11 +261,11 @@ If the agent was cutting corners: re-dispatch with an explicit instruction: "You
 
 ```
 Were the out-of-scope changes necessary for the task?
-├── Yes → The spec's file_affinity is wrong. Send back to Groomer to broaden scope.
-└── No → The Architect over-implemented. Revert the out-of-scope changes.
++-- Yes > The spec's file_affinity is wrong. Send back to Groomer to broaden scope.
++-- No > The Architect over-implemented. Revert the out-of-scope changes.
     Are the out-of-scope changes useful and safe?
-    ├── Yes → Create a separate task for them. Revert from this task.
-    └── No → Revert and re-dispatch Architect.
+    +-- Yes > Create a separate task for them. Revert from this task.
+    +-- No > Revert and re-dispatch Architect.
 ```
 
 **Resolution steps**:
@@ -275,11 +275,11 @@ Were the out-of-scope changes necessary for the task?
 
 ---
 
-## Breaker 10 — Operator Threshold
+## Breaker 10 - Operator Threshold
 
 **Trigger**: Researcher feedback was triggered for a P1/P2/P3 issue (not P0 or a batch of 5+).
 
-**What it means**: The factory prevents low-signal research triggers from clogging the pipeline. A P2 bug report from the Operator does not automatically kick off a Researcher session.
+**What it means**: Crucible prevents low-signal research triggers from clogging the pipeline. A P2 bug report from the Operator does not automatically kick off a Researcher session.
 
 **Action**: This is informational. The Operator logged the issue but did not route to Researcher. Review the Operator's report:
 - If it's genuinely P0 (crash/data loss): override and route to Researcher manually.
@@ -287,14 +287,14 @@ Were the out-of-scope changes necessary for the task?
 
 ---
 
-## Breaker 11 — Auto-Kickoff Scan Limit
+## Breaker 11 - Auto-Kickoff Scan Limit
 
-**Trigger**: Factory scanned 5 backlog items and found no item in `Ready` status eligible for the next pipeline step.
+**Trigger**: Crucible scanned 5 backlog items and found no item in `Ready` status eligible for the next pipeline step.
 
-**What it means**: The backlog has stalled — everything is blocked, in-flight, or in a status that can't advance automatically.
+**What it means**: The backlog has stalled - everything is blocked, in-flight, or in a status that can't advance automatically.
 
 **Action**:
-1. Run `factory.ps1 -Health` to see what's in-flight and what's blocked.
+1. Run `crucible.ps1 -Health` to see what's in-flight and what's blocked.
 2. Check `BACKLOG.md` for items that are `Blocked`, `In Progress`, or `Ready for Deploy` but haven't moved.
 3. Manually identify the next item to work and tell the agent: "Work F-007" (explicit task ID).
 
@@ -310,8 +310,8 @@ Were the out-of-scope changes necessary for the task?
 
 ```
 Is the malformed line explicable - a crash mid-write, a disk-full, a manual edit?
-├── Yes → Repair or archive the log, then recover. The task itself is unaffected.
-└── No → Treat the log as tampered. A planted malformed line is the documented way
++-- Yes > Repair or archive the log, then recover. The task itself is unaffected.
++-- No > Treat the log as tampered. A planted malformed line is the documented way
          to suppress this gate. Inspect who wrote it before recovering.
 ```
 
@@ -319,7 +319,7 @@ Is the malformed line explicable - a crash mid-write, a disk-full, a manual edit
 1. Open the pipeline log and find the lines that do not parse. Each is a single JSON object per line; a truncated or concatenated line is the usual shape.
 2. Decide whether the corruption is accidental or deliberate. Writers serialize through `Invoke-FileLock`, so ordinary operation should not tear a line.
 3. Repair the malformed lines, or move them to an archive file so the scan reads a clean log. Do not delete history you have not read.
-4. Run `factory.ps1 -Init -TaskId {task_id} -Recover`.
+4. Run `crucible.ps1 -Init -TaskId {task_id} -Recover`.
 5. If the scan now finds a genuine prior retry, the underlying breaker fires and you handle that one instead. That is the intended outcome, not a second failure.
 
 ---
@@ -334,11 +334,11 @@ Is the malformed line explicable - a crash mid-write, a disk-full, a manual edit
 
 ```
 Do the counted handoffs alone already exceed the ceiling?
-└── No, or this breaker would be Breaker 4 instead.
++-- No, or this breaker would be Breaker 4 instead.
 
 Is the corruption explicable - a crash mid-write, disk full, a hand edit?
-├── Yes → Repair or archive the log so the count can be recomputed, then recover.
-└── No → Suppressing a session_end is the direct way to buy handoffs past the
++-- Yes > Repair or archive the log so the count can be recomputed, then recover.
++-- No > Suppressing a session_end is the direct way to buy handoffs past the
          ceiling. Establish who wrote the line before granting the task more room.
 ```
 
@@ -346,7 +346,7 @@ Is the corruption explicable - a crash mid-write, disk full, a hand edit?
 1. Read the pipeline log and locate the lines that do not parse. One JSON object per line; truncated or concatenated lines are the usual shape.
 2. If the lines are recoverable, repair them so their `session_end` events are counted. The honest resolution is to recompute the count, not to raise the ceiling.
 3. If they are not recoverable, move them to an archive file and decide the count deliberately. Record that decision - the next run will not know you made it.
-4. Run `factory.ps1 -Init -TaskId {task_id} -Recover`.
+4. Run `crucible.ps1 -Init -TaskId {task_id} -Recover`.
 5. If the repaired count now exceeds the ceiling, Breaker 4 fires. That is the correct outcome, not a new problem.
 
 ---
@@ -357,9 +357,9 @@ Is the corruption explicable - a crash mid-write, disk full, a hand edit?
 |---------|---------|---------------|
 | Review Stalemate | 3 Architect failures | Split task, reduce scope, or rewrite spec |
 | DEGRADED Signal | Pipeline continued with reduced assurance | Inspect `kind`; for `file_affinity_unverifiable`, manually scope-check the task; for `review_strike_2`, watch next Architect session |
-| Handoff Retry | Self-loop >2× | Clarify spec or re-dispatch with correction |
+| Handoff Retry | Self-loop >2x | Clarify spec or re-dispatch with correction |
 | Token Budget | Handoff ceiling hit | Escalate tier, reduce scope, or abandon |
-| Reviewer Verification Failure | Factory re-ran tests, they failed | Fix Reviewer execution or re-route to Architect |
+| Reviewer Verification Failure | Crucible re-ran tests, they failed | Fix Reviewer execution or re-route to Architect |
 | Fabricated Artifacts | Listed file doesn't exist | Re-dispatch Architect to produce missing output |
 | Recurring Merge Conflicts | 3+ rebases | Serialize tasks or re-groom on current master |
 | Hook Bypass | `--no-verify` used | Fix the hook; never allow bypass |

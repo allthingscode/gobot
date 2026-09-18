@@ -39,8 +39,31 @@ function ConvertTo-ManifestRelativePath {
     return $Path.Replace("\", "/").TrimStart("/")
 }
 
-function Get-MirrorStructuralDirs {
-    return @("docs", "prompts", "sops", "personas", "schemas", "powershell")
+# The framework's record of its own renames, as adopter-relative from -> to pairs.
+#
+# Optional, and absent means "no renames": a synthetic manifest in a test, or one read
+# from a bundle installed before this key existed, must still load. An empty map only
+# costs the old behaviour, which is a review-removal the adopter has to prune by hand.
+function Get-SupersededRenameMap {
+    param([Parameter(Mandatory=$true)]$Manifest)
+
+    $map = @{}
+    if (-not $Manifest.PSObject.Properties["renamed_paths"]) {
+        return $map
+    }
+    foreach ($entry in @($Manifest.renamed_paths)) {
+        if ($null -eq $entry) { continue }
+        $from = ConvertTo-ManifestRelativePath -Path ([string]$entry.from)
+        $to = ConvertTo-ManifestRelativePath -Path ([string]$entry.to)
+        if ([string]::IsNullOrWhiteSpace($from) -or [string]::IsNullOrWhiteSpace($to)) {
+            throw "Install manifest renamed_paths entries require a non-empty 'from' and 'to'."
+        }
+        if ($from -eq $to) {
+            throw "Install manifest renamed_paths entry renames a path to itself: $from"
+        }
+        $map[$from] = $to
+    }
+    return $map
 }
 
 function Test-FrameworkDevOnlyFile {
@@ -52,14 +75,50 @@ function Test-FrameworkDevOnlyFile {
         "powershell/gates/check-assertion-deletion.ps1",
         "powershell/gates/check-linux-leg.ps1",
         "powershell/gates/check-culture-sensitive-time.ps1",
+        # Enforces Crucible's authoring convention - ASCII only - over Crucible's own
+        # tracked files. That is a house style, not a property of correct source: an
+        # adopter's code may need non-ASCII for reasons that are none of Crucible's
+        # business, and a shipped copy would impose it on them. check-mojibake.ps1 does
+        # ship, and should, because mis-decoded bytes are a defect in anybody's file.
+        "powershell/gates/check-ascii.ps1",
+        "powershell/tests/check-ascii.tests.ps1",
+        # Enforces that Crucible's own shipped files do not name the deprecated
+        # factory.ps1 shim's path as one to invoke, which would let the shim record
+        # deprecated_entrypoint events against itself and pollute item 52's deletion
+        # criterion. That is a statement about Crucible's own documents, not about an
+        # adopter's: an adopter's customized prompt naming the shim is a real signal
+        # item 52's query needs to read, not a defect a shipped gate should fail their
+        # commit over. Item 94.
+        "powershell/tests/deprecated-entrypoint-references.tests.ps1",
+        # Reads the index of the repo it runs in against a prompts/ pathspec. An
+        # adopter's prompts live under .crucible/prompts/, so shipping this would put a
+        # gate in every bundle that matches nothing, invoked by nothing, and reports a
+        # clean pass on a rule it never checked.
+        "powershell/gates/check-prompt-version.ps1",
         # Checks Crucible's own docs against Crucible's own constants. Its predecessor,
         # check-policy-drift.ps1, was absent from this list and so shipped by default -
         # runnable in an adopter bundle, invoked by nothing, checking the bundle against
         # itself. That accident is what TODO item 15 asked about; being listed here is
         # the answer stated rather than inferred.
         "powershell/gates/check-generated-docs.ps1",
+        # Rates Crucible and routes its recommendations to Crucible's own Human, Groomer
+        # and Architect; its last category is competitive research against six named
+        # frameworks. An adopter running it produces a document only the maintainer can
+        # act on. The adopter-facing version of this need already ships as
+        # sops/system-analysis.md, which covers the adopter project and Crucible both.
+        "sops/research-audit-framework.md",
         "powershell/tests/check-generated-docs.tests.ps1",
-        "powershell/tests/factory-lint-authoring.tests.ps1",
+        # Asserts against the ignore rules of the Crucible repo itself. In an adopter
+        # bundle $REPO_ROOT is the bundle root, whose .gitignore is the scaffold's and
+        # deliberately carries none of those rules, so a shipped copy would fail for the
+        # adopter. The adopter-facing half of item 84 is docs/git-policy.md, not a rule.
+        "powershell/tests/framework-gitignore.tests.ps1",
+        # Asserts against the worktree registrations of the Crucible repo itself, and its shared
+        # fixture registers worktrees of it. In an adopter bundle $REPO_ROOT is the bundle root,
+        # whose worktree list is not the framework's; both are dead weight there.
+        "powershell/tests/framework-worktree-hygiene.tests.ps1",
+        "powershell/tests/_worktree-fixture.ps1",
+        "powershell/tests/crucible-lint-authoring.tests.ps1",
         "powershell/tests/examples-mirror-sync.tests.ps1",
         "powershell/tests/pre-push-hook.tests.ps1",
         "powershell/tests/check-assertion-deletion.tests.ps1",
@@ -75,7 +134,32 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/adopter-install-materialization.tests.ps1",
         "powershell/tests/adopter-update-materialization.tests.ps1",
         "powershell/tests/check-linux-leg.tests.ps1",
-        "powershell/tests/check-culture-sensitive-time.tests.ps1"
+        "powershell/tests/check-culture-sensitive-time.tests.ps1",
+        "powershell/tests/check-prompt-version.tests.ps1",
+        # Its ledger names the Crucible repo's own test files, one per entry, and an entry nothing
+        # reaches is a failure by design. An adopter bundle ships a subset of powershell/tests, so
+        # every entry naming an excluded file would report itself stale and fail the adopter's run
+        # for a rule that is about this repository's migration rather than about their tests.
+        "powershell/tests/fixture-root-conformance.tests.ps1",
+        # Artifacts of building Crucible that sat under scripts/, which is a copied_dir, so
+        # they shipped by default until item 80's derived mirror made the bundle's contents
+        # visible. scripts/hooks/ is the opposite case and must keep shipping: core.hooksPath
+        # points at it and all four files have live adopter branches. The narrowing is per
+        # file for that reason.
+        #
+        # Runs Crucible's own Linux verification leg and writes .private/linux-leg-stamp.json,
+        # which only check-linux-leg.ps1 reads - and that gate is already dev-only. An adopter
+        # received the producer without the consumer, invoked by nothing either way.
+        "scripts/test-linux.ps1",
+        # Provisions a WSL distro with the tools test-linux.ps1 needs, Go among them "for
+        # crucible_lint". Both of its reasons to exist are now dev-only.
+        "scripts/wsl-bootstrap.sh",
+        # Lints Crucible's own backlog, docs and handoff schema. The pre-commit hook invokes
+        # it only under `[ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]`, which no adopter install can
+        # satisfy: the hook computes FRAMEWORK_ROOT two levels up from itself, so an adopter
+        # gets <root>/.crucible against a REPO_ROOT of <root>. It shipped, was unreachable,
+        # and docs/operating-manual.md told adopters to run it anyway.
+        "scripts/crucible_lint.go"
     )
     if ($devOnlyPaths -contains $normalized) {
         return $true
@@ -86,7 +170,12 @@ function Test-FrameworkDevOnlyFile {
     # ship on install nor mirror into examples/gobot.
     $devOnlyPrefixes = @(
         "docs/investigations/",
-        "docs/proposals/"
+        "docs/proposals/",
+        # The framework audit's scorecard and the reports it produces. Both describe
+        # Crucible, and both are read from this checkout rather than from a bundle -
+        # self-hosting is not a supported mode, so there is no .crucible/ here to put
+        # them in.
+        "docs/audits/"
     )
     foreach ($prefix in $devOnlyPrefixes) {
         if ($normalized.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -95,6 +184,20 @@ function Test-FrameworkDevOnlyFile {
     }
 
     return $false
+}
+
+# The framework paths an install reads from: the scaffold, the copied directories, and the
+# root files. Named once so the enumeration below and the mirror sync's "is canonical
+# staged?" question are asked over the same ground; the sync used to ask it over the six
+# directories of the old mirror list, which is a subset of what it went on to copy.
+function Get-InstallSourceRoot {
+    param([Parameter(Mandatory=$true)]$Manifest)
+
+    $roots = @()
+    $roots += ConvertTo-ManifestRelativePath -Path ([string]$Manifest.scaffold_source)
+    $roots += @($Manifest.root_files | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) })
+    $roots += @($Manifest.copied_dirs | ForEach-Object { (ConvertTo-ManifestRelativePath -Path ([string]$_)).TrimEnd("/") })
+    return @($roots | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
 }
 
 function Get-FrameworkOwnedFiles {
@@ -109,10 +212,7 @@ function Get-FrameworkOwnedFiles {
         $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
     }
     $manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
-    $roots = @()
-    $roots += ConvertTo-ManifestRelativePath -Path ([string]$manifest.scaffold_source)
-    $roots += @($manifest.root_files | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) })
-    $roots += @($manifest.copied_dirs | ForEach-Object { ConvertTo-ManifestRelativePath -Path ([string]$_) })
+    $roots = @(Get-InstallSourceRoot -Manifest $manifest)
 
     if (-not [string]::IsNullOrWhiteSpace($AtCommit)) {
         $files = @()
@@ -300,14 +400,31 @@ function Get-ProvenanceManifestPath {
     return Join-Path $BundleRoot "install-provenance.json"
 }
 
-function Get-ProvenanceBundlePaths {
+# Every path an install materializes into a bundle, as the adopter-relative path paired with
+# the framework file it is copied from.
+#
+# One definition with two readings: at a commit, for the provenance manifest, and from the
+# working tree, for the examples/gobot mirror. The mirror used to source its scope from a
+# hand-kept Get-MirrorStructuralDirs - six of the manifest's eight copied_dirs, and none of
+# the scaffold or root files - so the example was missing README.md, .gitattributes,
+# agent-instructions/, standards/, scripts/, templates/, VERSION and install-manifest.json
+# while its own parity guard, scoped to the same six directories, reported no drift. A subset
+# cannot disagree with itself. Item 80.
+function Get-AdopterBundlePath {
     param(
         [Parameter(Mandatory=$true)][string]$FrameworkRoot,
         [Parameter(Mandatory=$true)]$Manifest,
-        [Parameter(Mandatory=$true)][string]$Commit
+        # Empty reads the working tree. Naming a commit reads that commit, which is what a
+        # provenance manifest records.
+        [string]$Commit = ""
     )
 
-    $frameworkFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $FrameworkRoot -AtCommit $Commit)
+    $frameworkFiles = if ([string]::IsNullOrWhiteSpace($Commit)) {
+        @(Get-FrameworkOwnedFiles -FrameworkRoot $FrameworkRoot)
+    } else {
+        @(Get-FrameworkOwnedFiles -FrameworkRoot $FrameworkRoot -AtCommit $Commit)
+    }
+
     $seen = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
     $ordered = New-Object System.Collections.Generic.List[object]
     foreach ($source in $frameworkFiles) {
@@ -321,6 +438,16 @@ function Get-ProvenanceBundlePaths {
         }
     }
     return $ordered.ToArray()
+}
+
+function Get-ProvenanceBundlePaths {
+    param(
+        [Parameter(Mandatory=$true)][string]$FrameworkRoot,
+        [Parameter(Mandatory=$true)]$Manifest,
+        [Parameter(Mandatory=$true)][string]$Commit
+    )
+
+    return Get-AdopterBundlePath -FrameworkRoot $FrameworkRoot -Manifest $Manifest -Commit $Commit
 }
 
 function New-ProvenanceManifest {

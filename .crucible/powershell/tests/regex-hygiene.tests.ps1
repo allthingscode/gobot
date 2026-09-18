@@ -28,7 +28,7 @@ $results += Run-Test -Name "No literal '(m)' or `"(m)` regex flags in scripts" -
 
     $violatingFiles = @()
     foreach ($file in $files) {
-        if ($file.Name -eq "regex-hygiene.tests.ps1" -or $file.Name -eq "factory_lint.go") { continue }
+        if ($file.Name -eq "regex-hygiene.tests.ps1" -or $file.Name -eq "crucible_lint.go") { continue }
         $content = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
         # Check for literal '(m) or "(m)
         if ($content -match "'\(m\)" -or $content -match '"\(m\)') {

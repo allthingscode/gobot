@@ -7,13 +7,29 @@ $SENTINEL_END   = "<!-- crucible-instructions-end -->"
 function Get-CrucibleBlock {
     <#
     .SYNOPSIS
-        Returns a hashtable mapping filenames to their canonical Crucible block content.
-        Content matches docs/agent-instructions.md and is wrapped with sentinel markers.
+        Returns a hashtable mapping filenames to their canonical Crucible block content,
+        wrapped with sentinel markers.
+    .DESCRIPTION
+        Source of truth for the three copies of these blocks in docs/agent-instructions.md,
+        which gates/check-generated-docs.ps1 renders from here. This used to say only that
+        the doc "matches", with nothing comparing the two; by the time anything checked, the
+        doc still told adopters to run the pre-rename factory.ps1. Edit here and regenerate.
+
+        PwshCommand overrides the host named on the runtime line. The gate pins
+        powershell.exe so the generated region is byte-identical on every platform;
+        callers that actually write the block omit it and get the host for this OS.
     #>
-    if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
-        . (Join-Path $PSScriptRoot "platform.ps1")
+    param(
+        [Parameter(Mandatory=$false)][string]$PwshCommand
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PwshCommand)) {
+        if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
+            . (Join-Path $PSScriptRoot "platform.ps1")
+        }
+        $PwshCommand = Get-PwshCommand
     }
-    $pwshCmd = Get-PwshCommand
+    $pwshCmd = $PwshCommand
 
     $agentsBody = @'
 ## Crucible
@@ -41,6 +57,7 @@ Commit durable Crucible files:
 - `.crucible/sops/`
 - `.crucible/prompts/`
 - `.crucible/schemas/`
+- `.crucible/standards/`
 - `.crucible/powershell/`
 - `.crucible/agent-instructions/`
 
@@ -56,7 +73,7 @@ Do not commit runtime data:
 Run the installed runtime from the project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId <task-id>
+powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id>
 ```
 '@ -replace 'powershell.exe', $pwshCmd
 

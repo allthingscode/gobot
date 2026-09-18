@@ -8,11 +8,11 @@ param (
 
 $ErrorActionPreference = "Stop"
 
-$factoryLibPath = Join-Path $PSScriptRoot "factory-lib.ps1"
-if (-not (Test-Path -LiteralPath $factoryLibPath)) {
-    throw "Required helper script not found at $factoryLibPath; your Crucible bundle is incomplete."
+$crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
+if (-not (Test-Path -LiteralPath $crucibleLibPath)) {
+    throw "Required helper script not found at $crucibleLibPath; your Crucible bundle is incomplete."
 }
-. $factoryLibPath
+. $crucibleLibPath
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $REPO_ROOT = (Get-Location).Path

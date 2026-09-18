@@ -28,6 +28,11 @@
 #   safe-overwrite - nothing changed outside the custom regions and the file moved
 #   needs-merge    - adopter edits and framework edits both exist
 #   review-removal - the framework dropped the source and nothing else claims the path
+#   retired        - the framework renamed the source, and the replacement is shipping in
+#                    this same update, so the old path is dead weight rather than a
+#                    judgement call. Distinct from review-removal because review-removal
+#                    is cleared only by the interactive -Prune, which leaves the bundle
+#                    unable to restamp its provenance until a human answers a prompt.
 
 function New-ClassificationVerdict {
     param(
@@ -50,7 +55,8 @@ function Get-BundleFileClassification {
         [bool]$IsExpectedPath,
         [bool]$InProvenance,
         [bool]$SourceIsScaffoldSnapshot,
-        [bool]$AdopterIsScaffoldSnapshot
+        [bool]$AdopterIsScaffoldSnapshot,
+        [bool]$IsSupersededRename = $false
     )
 
     # 1. Not present at framework HEAD.
@@ -70,6 +76,14 @@ function Get-BundleFileClassification {
         # rather than silently deleting the adopter's work.
         if ($null -ne $BaselineBaseHash -and $AdopterBaseHash -ne $BaselineBaseHash) {
             return (New-ClassificationVerdict -Category "needs-merge")
+        }
+
+        # Strictly below the conflict check above, and that order is the safety property:
+        # knowing where a file went is not permission to delete an edited copy of it. A
+        # rename only downgrades the *unmodified* case, where the adopter has nothing to
+        # lose and the replacement is already landing.
+        if ($IsSupersededRename) {
+            return (New-ClassificationVerdict -Category "retired")
         }
         return (New-ClassificationVerdict -Category "review-removal")
     }

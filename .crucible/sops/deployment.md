@@ -22,21 +22,21 @@
 
 ## Standard Deployment Workflow
 
-### Step 1 — Verify Task Dependencies ({task_id})
-- Confirm `factory.ps1 -Init` did not emit a blocking dependency error
+### Step 1 - Verify Task Dependencies ({task_id})
+- Confirm `crucible.ps1 -Init` did not emit a blocking dependency error
 - If it blocked due to unsatisfied dependencies: STOP. Hand off to grooming or wait for prerequisites to reach `Production`
 
-### Step 2 — Verify Approval
+### Step 2 - Verify Approval
 Confirm the latest verification handoff for `{task_id}` has `status: "Ready for Deploy"`. Do not proceed if verification has not approved.
 
-### Step 3 — Merge Simulation ({task_id})
+### Step 3 - Merge Simulation ({task_id})
 Before touching `master`, run the merge simulation:
 ```powershell
 {{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id} -ProjectRoot "{project_root}"
 ```
 
 > [!NOTE]
-> No-Code Closures (research/grooming items with no code changes) have no task branch. `check-merge-conflicts.ps1` will automatically detect the missing branch, print a No-Code Closure message, and exit successfully with code 0. At `deployment -> done`, the factory gate also detects proven No-Code Closures (spec has `type: research` or `type: grooming` in frontmatter or task ID uses `R-*` prefix, AND no `refs/heads/task/{task_id}` branch exists, AND `commit_hash` is null/absent) and skips merge verification. You can proceed directly to the next step.
+> No-Code Closures (research/grooming items with no code changes) have no task branch. `check-merge-conflicts.ps1` will automatically detect the missing branch, print a No-Code Closure message, and exit successfully with code 0. At `deployment -> done`, the Crucible gate also detects proven No-Code Closures (spec has `type: research` or `type: grooming` in frontmatter or task ID uses `R-*` prefix, AND no `refs/heads/task/{task_id}` branch exists, AND `commit_hash` is null/absent) and skips merge verification. You can proceed directly to the next step. `validate-handoff.ps1` decides the same exemption from the same evidence (`lib/no-code-closure.ps1`), so `new-handoff.ps1` writes this handoff with a null `commit_hash` rather than refusing it.
 
 **If simulation fails:**
 - Set task status to `"Ready for Rebase"`
@@ -50,17 +50,17 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 - **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major step (e.g., "Step 4: Dev Log Generated").
 - **Example**: `### CHECKPOINT Step 4: Dev Log Generated`
 
-### Step 4 — Dev Log Generation ({task_id})
-Draft a narrative update using `.crucible/dev-logs/TEMPLATE.md` and append to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.
+### Step 4 - Dev Log Generation ({task_id})
+Draft a narrative update using `.crucible/templates/dev-log-entry.md` and append to `.crucible/dev-logs/UNPUBLISHED_LOGS.md`.
 
-For strictly internal Dev Factory tasks with no public-facing changes: append an entry with Date, Topic, and: `*Internal Dev Factory task. No public narrative required.*`
+For strictly internal Crucible tasks with no public-facing changes: append an entry with Date, Topic, and: `*Internal Crucible task. No public narrative required.*`
 
 Validate before continuing:
 ```powershell
 {{crucible_root}}/powershell/validate-dev-log.ps1 -FileToPublish .crucible/dev-logs/UNPUBLISHED_LOGS.md
 ```
 
-### Step 5 — Capture Eval Record
+### Step 5 - Capture Eval Record
 
 Write a structured eval record before archiving the pipeline log. This feeds `{{crucible_root}}/powershell/analyze-evals.ps1`.
 
@@ -93,31 +93,40 @@ New-Item -ItemType Directory -Force -Path ".crucible/session/eval" | Out-Null
 $eval | ConvertTo-Json | Out-File -FilePath ".crucible/session/eval/eval-{task_id}.json" -Encoding utf8
 ```
 
-### Step 6 — Finalize Task
-Run `archive-task.ps1` to explicitly finalize the task. This moves the backlog spec to the `archived/` directory and updates the status in `BACKLOG.md` to `Production` or `Resolved`:
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/archive-task.ps1" -BacklogPath "{{backlog_dir}}/BACKLOG.md" -SpecPath "<resolved_path_to_active_spec_file>"
-```
-(Note: Locate the resolved active spec path from the `Backlog Item:` line in your `task.md`. No manual Git cleanup or pipeline log archiving is required; the factory's Human Gate automatically merges the branch `task/{task_id}`, pushes to remote origin, deletes the worktree and branch, and archives the pipeline log once the human records an `accepted` or `redirected` decision.)
+### Step 6 - Do Not Finalize the Task
+Do NOT run `archive-task.ps1`, and do NOT set the `BACKLOG.md` status to `Production` or `Resolved`. Leave the task in an active status and let the Human Gate finalize it.
 
-### Step 7 — Run new-handoff.ps1 & Advance Pipeline
-Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done" and pass the task branch commit hash (or simply omit it to inherit the implementation branch commit hash from the previous phase):
+The gate enforces this from both sides, keyed on whether a human has decided:
+
+- **Before** an `accepted` or `redirected` decision exists, a task marked `Production` or `Resolved` is refused, because that status claims work shipped that nobody approved.
+- **After** the decision, the same task is required to be terminal, and the gate archives it itself.
+
+So finalizing early does not save a step. It trips the first check, and recovery means reverting the spec location, its frontmatter status, its `BACKLOG.md` row, and the Priority Summary count by hand.
+
+(Note: no manual Git cleanup or pipeline log archiving is required either; on an `accepted` or `redirected` decision the Human Gate merges `task/{task_id}`, deletes the worktree and branch, and archives the pipeline log. It pushes to origin only when `review.auto_push` is true.)
+
+### Step 7 - Run new-handoff.ps1 & Advance Pipeline
+Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done". Omit `-CommitHash` and the tool records the tip of `task/{task_id}` itself; pass it only to record a different commit:
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved."
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 
-Run factory:
+Run Crucible:
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 
-**Human Gate handling:** If `factory.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. The file contains the gate menu and visual review options (Launch visual diff tool, Command-line text diff, and Open the worktree folder in your editor) to help the human inspect changes. Present the gate menu and options, and ask for the human's choice:
+**Human Gate handling:** If `crucible.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. The file contains the gate menu and visual review options (Launch visual diff tool, Command-line text diff, and Open the worktree folder in your editor) to help the human inspect changes. Present the gate menu and options, and ask for the human's choice:
+
+Copy the Accept line out of `gate_pending.txt` rather than retyping it: its wording follows
+`review.auto_push`, so a line typed from this SOP can promise the human a push that will not
+happen (or hide one that will).
 
 ```
-1) Accept   - work looks good; pause after this item
+1) Accept   - {the Accept line from gate_pending.txt, verbatim; it states whether the merge also publishes to origin}
 2) Reject   - something is wrong, send back for rework
 3) Redirect - accept this item and work a specific item next
 4) Abandon  - do not accept; stop the pipeline
@@ -128,10 +137,10 @@ powershell.exe -ExecutionPolicy Bypass \
 
 The reason is required for **every** outcome, including `accepted` and `abandoned`. Placeholder text (`n/a`, `none`, `ok`, `looks good`) is invalid.
 
-Once you have the human's sentence, patch it into the pending gate decision file and then call factory:
+Once you have the human's sentence, patch it into the pending gate decision file and then call Crucible:
 
 ```powershell
-# Patch the qualitative reason into the pending gate decision before factory records it
+# Patch the qualitative reason into the pending gate decision before Crucible records it
 $pendingFile = Get-ChildItem ".crucible/session/global/gate_decisions/gate_decision_{task_id}_pending.json" -ErrorAction SilentlyContinue
 if ($pendingFile) {
     $pending = Get-Content $pendingFile.FullName -Raw | ConvertFrom-Json
@@ -142,19 +151,19 @@ if ($pendingFile) {
 
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "<human's one-sentence quality note>" -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "<human's one-sentence quality note>" -Quiet
 ```
 
-Present factory output to the human. Wait for confirmation before ending your session.
+Present Crucible output to the human. Wait for confirmation before ending your session.
 
 ---
 
-## Reject — Send Back for Rework Loop
+## Reject - Send Back for Rework Loop
 
 If a task is rejected during the Human Gate (e.g. choice 2: `rejected`), the following automatic and manual procedures apply to resume the task:
 
 1. **Automatic Unwind and Re-creation**:
-   - The factory automatically unwinds the local merge on the default branch, resetting it to the pre-merge tip.
+   - Crucible automatically unwinds the local merge on the default branch, resetting it to the pre-merge tip.
    - The task branch `task/{task_id}` is restored.
    - The implementation worktree at `.crucible/.agent-workspaces/implementation-{task_id}` is automatically re-created from the restored branch.
    - A sanctioned re-entry handoff targeting `implementation` is generated automatically under `.crucible/session/handoffs/` (with the strike/rework counter incremented and `generated_by=new-handoff.ps1`).
@@ -162,18 +171,18 @@ If a task is rejected during the Human Gate (e.g. choice 2: `rejected`), the fol
 2. **Orchestrator Resumption**:
    - The orchestrator or operator resumes the task by executing the standard initialization:
      ```bash
-     powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/factory.ps1" -Init -TaskId {task_id}
+     powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id}
      ```
    - This will boot the implementation phase, print the prompt, and output the command line for the next session under `[NEXT SESSION COMMAND]`.
 
 ---
 
-## Abandon — Stop the Pipeline
+## Abandon - Stop the Pipeline
 
 If a task is abandoned during the Human Gate (choice 4: `abandoned`), the following procedures apply:
 
 1. **Automatic Unwind**:
-   - The factory automatically unwinds the local merge on the default branch, resetting it to the pre-merge tip.
+   - Crucible automatically unwinds the local merge on the default branch, resetting it to the pre-merge tip.
    - Unlike the reject path, no task branch is restored and no new implementation worktree is created.
 
 2. **Backlog End State**:
@@ -190,20 +199,20 @@ When production issues are discovered that meet the circuit breaker threshold (P
 2. Run `new-handoff.ps1` to write the handoff JSON targeting grooming (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
 powershell.exe -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected — see deployment_report.md. grooming should dispatch Researcher."
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md. grooming should dispatch Researcher."
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
-3. Run factory and present output to human
+3. Run Crucible and present output to human
 
-> **Note**: `deployment → research` is NOT a valid pipeline transition. The deployment phase can only route to grooming. The grooming phase can then dispatch the Researcher if a research task is warranted.
+> **Note**: `deployment -> research` is NOT a valid pipeline transition. The deployment phase can only route to grooming. The grooming phase can then dispatch the Researcher if a research task is warranted.
 
 ---
 
 ## Quality Bar
 
-Pre-flight gate — confirm all are true before writing handoff:
+Pre-flight gate - confirm all are true before writing handoff:
 - [ ] `BACKLOG.md` entry for `{task_id}` shows active status (e.g. `Ready for Deploy` or `In Progress`)
-- [ ] Pipeline log is in `.crucible/session/{task_id}/` (will be archived by the factory on accept)
+- [ ] Pipeline log is in `.crucible/session/{task_id}/` (will be archived by Crucible on accept)
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
 - [ ] Routing to: `done` (or `grooming` if production issue threshold met)
 - [ ] `task_id` in handoff matches the task I was given

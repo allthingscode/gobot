@@ -1,4 +1,4 @@
-# End-to-end integration tests that drive the REAL factory.ps1 -Init entrypoint
+# End-to-end integration tests that drive the REAL crucible.ps1 -Init entrypoint
 # through the back half of the pipeline. Where adopter-bootstrap.tests.ps1 stops at
 # scaffolding the first implementation phase, this exercises the deployment -> done
 # human gate through the genuine router + gate chain - the integration surface where
@@ -14,7 +14,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-$FACTORY_SCRIPT = Join-Path $REPO_ROOT "powershell/factory.ps1"
+$CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
 
 $results = @()
@@ -29,7 +29,7 @@ $results = @()
 
 
 # Stand up a fully-initialized adopter project with a deployment -> done handoff
-# already queued, so a single factory.ps1 -Init reaches the human gate.
+# already queued, so a single crucible.ps1 -Init reaches the human gate.
 # Stand up a fully-initialized adopter project with one active feature spec
 # registered in BACKLOG.md. Returns the project root. Shared by all pipeline tests.
 function New-AdopterProject {
@@ -103,7 +103,7 @@ A pipeline task.
 }
 
 # Write a schema-valid handoff JSON straight into the bundle's handoffs dir, so a
-# subsequent factory.ps1 -Init processes it as the latest pending handoff. $Extra
+# subsequent crucible.ps1 -Init processes it as the latest pending handoff. $Extra
 # supplies the per-transition required fields (artifacts, reviewer_checks_passed,
 # commit_hash, file_affinity, etc.).
 function Write-PipelineHandoff {
@@ -152,7 +152,7 @@ function Complete-PhaseChecklist {
 }
 
 # Build the deployment-gate fixture: an adopter project with a deployment -> done
-# handoff already queued, so a single factory.ps1 -Init reaches the human gate.
+# handoff already queued, so a single crucible.ps1 -Init reaches the human gate.
 function New-DeploymentGateFixture {
     param([string]$Root, [string]$Cycle)
 
@@ -177,18 +177,17 @@ function New-DeploymentGateFixture {
     return $projectRoot
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-pipeline-e2e-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "pipeline-e2e"
 
-$savedCycleEnv = $env:FACTORY_CYCLE_ID
+$savedCycleEnv = $env:CRUCIBLE_CYCLE_ID
 try {
-    $results += Run-Test -Name "factory -Init drives a deployment->done handoff to the human gate" -Body {
+    $results += Run-Test -Name "crucible -Init drives a deployment->done handoff to the human gate" -Body {
         $cycle = "cycle-e2e-1"
-        $env:FACTORY_CYCLE_ID = $cycle
+        $env:CRUCIBLE_CYCLE_ID = $cycle
         $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t1") -Cycle $cycle
 
         $gateRun = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId "F-900" -ProjectRoot $projectRoot -Quiet
         }
         Assert-Result -Name "gate run exits 0 (awaiting human decision)" -Condition ($gateRun.ExitCode -eq 0) `
@@ -199,22 +198,22 @@ try {
             -FailureMessage ("expected gate_pending.txt at " + $pendingFile + ". Output: " + ($gateRun.Output -join "`n"))
     }
 
-    $results += Run-Test -Name "bundle factory derives project root from script location, not cwd" -Body {
-        # Regression: factory.ps1 used to default -ProjectRoot to the caller's cwd, so an
+    $results += Run-Test -Name "bundle entrypoint derives project root from script location, not cwd" -Body {
+        # Regression: crucible.ps1 used to default -ProjectRoot to the caller's cwd, so an
         # orchestrator running the gate from a different checkout silently targeted the wrong
-        # repo ("No active handoff"). The bundle's own factory must resolve its project from
+        # repo ("No active handoff"). The bundle's own entrypoint must resolve its project from
         # $PSScriptRoot (<root>/.crucible/powershell) regardless of where it is invoked.
         $cycle = "cycle-e2e-derive"
-        $env:FACTORY_CYCLE_ID = $cycle
+        $env:CRUCIBLE_CYCLE_ID = $cycle
         $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t-derive") -Cycle $cycle
-        $bundleFactory = Join-Path $projectRoot ".crucible/powershell/factory.ps1"
+        $bundleCrucible = Join-Path $projectRoot ".crucible/powershell/crucible.ps1"
 
         # cwd is deliberately an UNRELATED directory with no .crucible/. If root fell back to
-        # cwd, factory would find no F-900 handoff and exit 1 with no gate fired here.
+        # cwd, Crucible would find no F-900 handoff and exit 1 with no gate fired here.
         Push-Location $tempRoot
         try {
             $gateRun = Invoke-ExternalCommand {
-                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $bundleFactory `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $bundleCrucible `
                     -Init -TaskId "F-900" -Quiet
             }
         } finally {
@@ -230,7 +229,7 @@ try {
 
         $cwdCrucible = Join-Path $tempRoot ".crucible"
         Assert-Result -Name "no .crucible leaked into cwd" -Condition (-not (Test-Path -LiteralPath $cwdCrucible)) `
-            -FailureMessage ("factory wrote a .crucible under cwd " + $tempRoot + ", meaning it still resolved root from cwd")
+            -FailureMessage ("Crucible wrote a .crucible under cwd " + $tempRoot + ", meaning it still resolved root from cwd")
     }
 
     $results += Run-Test -Name "bundle new-handoff derives project root from script location, not cwd" -Body {
@@ -240,7 +239,7 @@ try {
         # adopter). The bundle's own new-handoff must resolve its project from $PSScriptRoot
         # (<root>/.crucible/powershell) regardless of where it is invoked.
         $cycle = "cycle-nh-derive"
-        $env:FACTORY_CYCLE_ID = $cycle
+        $env:CRUCIBLE_CYCLE_ID = $cycle
         $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t-nh-derive") -Cycle $cycle
         $bundleNewHandoff = Join-Path $projectRoot ".crucible/powershell/new-handoff.ps1"
         $head = (git -C $projectRoot rev-parse HEAD).Trim()
@@ -280,7 +279,7 @@ try {
 
     $results += Run-Test -Name "Recording accepted stamps the gate decision with the firing cycle" -Body {
         $cycle = "cycle-e2e-2"
-        $env:FACTORY_CYCLE_ID = $cycle
+        $env:CRUCIBLE_CYCLE_ID = $cycle
         $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t2") -Cycle $cycle
 
         $handoffDir = Join-Path $projectRoot ".crucible/session/handoffs"
@@ -289,7 +288,7 @@ try {
             Set-Content -LiteralPath $otherTaskHandoff -Encoding UTF8
 
         $acceptRun = Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                 -Init -TaskId "F-900" -ProjectRoot $projectRoot -Quiet `
                 -GateOutcome "accepted" -GateReason "verified locally and ready to ship"
         }
@@ -324,14 +323,14 @@ try {
 
     $results += Run-Test -Name "Drives the front half: grooming -> implementation -> verification -> deployment" -Body {
         $cycle = "cycle-e2e-front"
-        $env:FACTORY_CYCLE_ID = $cycle
+        $env:CRUCIBLE_CYCLE_ID = $cycle
         $task = "F-700"
         $projectRoot = New-AdopterProject -Root (Join-Path $tempRoot "t4") -TaskId $task -Title "Front Half" -Status "Ready" -StatusTarget "Groomer"
 
         $checks = @("tests_pass","vet_pass","acceptance_criteria_met","scope_bounded","no_regressions","no_hard_mandates_violated")
         $artifacts = @("src/feature.txt")
 
-        # Each step: an agent emits a handoff for the next transition, then factory.ps1
+        # Each step: an agent emits a handoff for the next transition, then crucible.ps1
         # -Init processes it through the real router + gates and scaffolds the target
         # phase. Required per-transition fields come straight from handoff.schema.json.
         $transitions = @(
@@ -355,7 +354,7 @@ try {
             Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source $t.Source -Target $t.Target -Cycle $cycle -Count $t.Count -Extra $t.Extra | Out-Null
 
             $run = Invoke-ExternalCommand {
-                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $FACTORY_SCRIPT `
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT `
                     -Init -TaskId $task -ProjectRoot $projectRoot -Quiet
             }
             $label = ($t.Source + " -> " + $t.Target)
@@ -369,7 +368,7 @@ try {
     }
 }
 finally {
-    $env:FACTORY_CYCLE_ID = $savedCycleEnv
+    $env:CRUCIBLE_CYCLE_ID = $savedCycleEnv
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
     }

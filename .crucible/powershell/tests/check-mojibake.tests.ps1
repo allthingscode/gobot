@@ -10,6 +10,7 @@
 $ErrorActionPreference = "Stop"
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+. (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $scriptPath = Join-Path $REPO_ROOT "powershell/gates/check-mojibake.ps1"
 $psExe = (Get-Process -Id $PID).Path  # the same PowerShell host running this test
@@ -24,14 +25,37 @@ function Check([string]$Name, [bool]$Condition, [string]$Detail) {
     }
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-mojibake-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempRoot = New-TestFixtureRoot -NameHint "mojibake-test"
+
+# Windows PowerShell 5.1 wraps each stderr line from a native command in an ErrorRecord, so
+# under this file's $ErrorActionPreference = "Stop" a gate that writes anything to stderr
+# terminates the test file instead of failing an assertion. Found by mutation: removing the
+# gate's missing-file guard let Get-Item throw, and the run died with a NativeCommandError
+# rather than reporting which assertion caught it. A kill by crash cannot be told apart from
+# a harness falling over, which is the whole point of reading the assertion name.
+function Invoke-GateProcess {
+    param([string[]]$GateArgs = @(), [string]$ScriptFile = "")
+    $target = if ([string]::IsNullOrWhiteSpace($ScriptFile)) { $scriptPath } else { $ScriptFile }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $target @GateArgs 2>&1
+        return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out | Out-String) }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
 
 function Invoke-Check {
     param([string[]]$Files)
     # Mirror the hook: -File mode, files passed positionally.
-    $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Files 2>&1
-    return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out | Out-String) }
+    return Invoke-GateProcess -GateArgs $Files
+}
+
+function Invoke-MessageCheck {
+    param([string]$Path)
+    # Mirror scripts/hooks/commit-msg, which passes one named single-token argument.
+    return Invoke-GateProcess -GateArgs @("-MessageFile", $Path)
 }
 
 try {
@@ -96,8 +120,7 @@ try {
 
     function Invoke-BareCheck {
         param([string]$ScriptFile)
-        $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $ScriptFile 2>&1
-        return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out | Out-String) }
+        return Invoke-GateProcess -ScriptFile $ScriptFile
     }
 
     [System.IO.File]::WriteAllText((Join-Path $fwRoot "docs/dirty.md"), $marker, [System.Text.UTF8Encoding]::new($false))
@@ -139,6 +162,81 @@ try {
             Check "pre-commit hook scans root $doc" ($hookLine -match ("\s" + [regex]::Escape($doc) + "(\s|$)")) "not in the hook's explicit list: $hookLine"
             Check "framework default list scans root $doc" ($fwBranch -match ('"' + [regex]::Escape($doc) + '"')) "not in the isFramework branch of check-mojibake.ps1"
         }
+    }
+
+    # 10-14. A commit message file is the one input where this defect is permanent: a BOM in a
+    # tracked file is fixable by a later commit, one in a subject line is not once pushed. The
+    # gate could not see it, and worse, handed one explicitly it scanned zero files and printed
+    # [PASS], because the leaf branch accepted only .md and .ps1. Item 89.
+    # The extensionless names are the point - that is what git hands the hook.
+    $msgBom = Join-Path $tempRoot "COMMIT_EDITMSG_bom"
+    $msgClean = Join-Path $tempRoot "COMMIT_EDITMSG_clean"
+    $msgMarker = Join-Path $tempRoot "COMMIT_EDITMSG_marker"
+    [System.IO.File]::WriteAllText($msgBom, "fix(scope): a subject behind a byte-order mark`n", [System.Text.UTF8Encoding]::new($true))
+    [System.IO.File]::WriteAllText($msgClean, "fix(scope): an ordinary subject`n`nA body line.`n", [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($msgMarker, ("fix(scope): " + [char]0x00C3 + [char]0x00A9 + " in the subject`n"), [System.Text.UTF8Encoding]::new($false))
+
+    $r10 = Invoke-MessageCheck -Path $msgBom
+    Check "message file with a BOM: detected (exit 1)" ($r10.ExitCode -eq 1) "exit=$($r10.ExitCode)`n$($r10.Output)"
+    Check "message file with a BOM: reports BOM" ($r10.Output -match "BOM") $r10.Output
+    Check "message file with a BOM: names the file" ($r10.Output -match "COMMIT_EDITMSG_bom") $r10.Output
+
+    # Without this, a gate that refused every message would satisfy the case above.
+    $r11 = Invoke-MessageCheck -Path $msgClean
+    Check "clean message file: exit 0" ($r11.ExitCode -eq 0) "exit=$($r11.ExitCode)`n$($r11.Output)"
+    Check "clean message file: was opened rather than skipped" ($r11.Output -match "in 1 scoped file") $r11.Output
+
+    $r12 = Invoke-MessageCheck -Path $msgMarker
+    Check "message file with a mojibake marker: detected (exit 1)" ($r12.ExitCode -eq 1) "exit=$($r12.ExitCode)`n$($r12.Output)"
+
+    # A gate that cannot find its input has verified nothing and must not report a clean message.
+    # The exit code alone cannot say this: an unhandled Get-Item throw under
+    # $ErrorActionPreference = "Stop" also exits 1, so deleting the guard left this case green
+    # once the helper above stopped dying on the child's stderr. Assert the refusal is the
+    # gate's own, by its words, and that no exception reached the surface.
+    $r13 = Invoke-MessageCheck -Path (Join-Path $tempRoot "no-such-message-file")
+    Check "missing message file: exit 1 rather than a clean report" ($r13.ExitCode -eq 1) "exit=$($r13.ExitCode)`n$($r13.Output)"
+    Check "missing message file: refused by name rather than by an unhandled throw" (($r13.Output -match "names no readable file") -and ($r13.Output -notmatch "ObjectNotFound")) $r13.Output
+
+    # A repository checked out under a path with a space is ordinary on Windows, and TEMP on
+    # this machine has none, so the spaced case would otherwise never be exercised.
+    $spacedDir = Join-Path $tempRoot "dir with spaces"
+    New-Item -ItemType Directory -Path $spacedDir -Force | Out-Null
+    $msgSpaced = Join-Path $spacedDir "COMMIT_EDITMSG"
+    [System.IO.File]::WriteAllText($msgSpaced, "fix(scope): spaced path`n", [System.Text.UTF8Encoding]::new($true))
+    $rSpace = Invoke-MessageCheck -Path $msgSpaced
+    Check "message file under a spaced path: detected (exit 1)" ($rSpace.ExitCode -eq 1) "exit=$($rSpace.ExitCode)`n$($rSpace.Output)"
+
+    # 14. The same silent skip by the positional route. Written BOM-free deliberately: the only
+    # thing that can fail this case is the declined-extension report, not an encoding hit.
+    $unscanned = Join-Path $tempRoot "notes.txt"
+    [System.IO.File]::WriteAllText($unscanned, "plain text, correctly encoded`n", [System.Text.UTF8Encoding]::new($false))
+    $r14 = Invoke-Check -Files @($unscanned)
+    Check "unscanned extension: exit 1 rather than a vacuous pass" ($r14.ExitCode -eq 1) "exit=$($r14.ExitCode)`n$($r14.Output)"
+    Check "unscanned extension: names the file it declined" ($r14.Output -match "notes.txt") $r14.Output
+    Check "unscanned extension: says it scanned nothing for it" ($r14.Output -match "does not scan") $r14.Output
+
+    # 15. The gate being right is not enough; it has to be wired, and wired before the merge
+    # short-circuit, or a merge message is exempt from a check that costs one file read. Pinned
+    # statically so that deleting the hook line fails here, the way case 9 pins pre-commit.
+    $msgHookPath = Join-Path $REPO_ROOT "scripts/hooks/commit-msg"
+    if (-not (Test-Path -LiteralPath $msgHookPath)) {
+        Write-Host "SKIPPED: commit-msg wiring guard (framework-only; no $msgHookPath)" -ForegroundColor Yellow
+    } else {
+        $msgHookLines = @([System.IO.File]::ReadAllText($msgHookPath) -split "`n")
+        $gateIdx = -1
+        $mergeIdx = -1
+        for ($i = 0; $i -lt $msgHookLines.Count; $i++) {
+            # Comments are skipped: a comment mentioning the gate is not the gate running.
+            if ($msgHookLines[$i] -match '^\s*#') { continue }
+            if ($gateIdx -lt 0 -and $msgHookLines[$i] -match 'check-mojibake\.ps1' -and $msgHookLines[$i] -match '-MessageFile') { $gateIdx = $i }
+            if ($mergeIdx -lt 0 -and $msgHookLines[$i] -match 'MERGE_HEAD') { $mergeIdx = $i }
+        }
+        $gateLine = if ($gateIdx -ge 0) { $msgHookLines[$gateIdx] } else { "(none)" }
+        Check "commit-msg invokes the encoding gate on the message file" ($gateIdx -ge 0) "no uncommented 'check-mojibake.ps1 ... -MessageFile' invocation in $msgHookPath"
+        Check "commit-msg passes the message path git gave it" (($gateIdx -ge 0) -and ($gateLine -match '"\$MSG_FILE"')) "the invocation does not pass the hook's own MSG_FILE: $gateLine"
+        Check "merge short-circuit located" ($mergeIdx -ge 0) "no MERGE_HEAD check in $msgHookPath"
+        Check "encoding check runs before the merge short-circuit" (($gateIdx -ge 0) -and ($mergeIdx -ge 0) -and ($gateIdx -lt $mergeIdx)) "gate at line $($gateIdx + 1), MERGE_HEAD at line $($mergeIdx + 1)"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
