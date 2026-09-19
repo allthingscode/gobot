@@ -508,7 +508,13 @@ function Invoke-UpdateBundle {
     # Classification fixtures do not ship the installer; a live bundle does, and
     # a live apply copies powershell/ before this runs. Missing file: skip, do
     # not throw, and do not set core.hooksPath here.
-    if ($shouldApply -or $shouldPrune) {
+    # Apply/prune was item 109. A clone of a current bundle classifies all-no-op
+    # (restamp-only is that plus -Restamp); hooksPath is local config, so those
+    # runs must heal too. Preview still does not. A bundle with pending work
+    # that was not applied is not current; it is not this heal.
+    $pendingWork = $results["safe-overwrite"].Count + $results["add"].Count + $results["needs-merge"].Count + $results["retired"].Count + $results["review-removal"].Count
+    $isAllNoOp = ($pendingWork -eq 0)
+    if (-not $effectiveDryRun -and ($shouldApply -or $shouldPrune -or $isAllNoOp)) {
         $hookInstaller = Join-Path $adopterCrucibleRoot "powershell/install-hooks.ps1"
         if ((Test-Path -LiteralPath (Join-Path $adopterRootResolved ".git")) -and
             (Test-Path -LiteralPath $hookInstaller -PathType Leaf)) {
@@ -555,7 +561,6 @@ function Invoke-UpdateBundle {
         # add, needs-merge, or review-removal item means content is NOT current, so
         # stamping HEAD would lie about what is installed - refuse and tell the caller
         # to run a normal update first.
-        $pendingWork = $results["safe-overwrite"].Count + $results["add"].Count + $results["needs-merge"].Count + $results["retired"].Count + $results["review-removal"].Count
         if ($pendingWork -eq 0) {
             $shouldRestamp = $true
             Write-Host "Re-stamping bundle provenance to framework HEAD (content already current)." -ForegroundColor Cyan

@@ -1,6 +1,6 @@
 {
     "manifest_version":  1,
-    "source_commit":  "6bf4a711dd34179fb30d1692d9508efbe83c9b07",
+    "source_commit":  "c1c43878d2a2599105a0d0a737318a4e03de864c",
     "files":  {
                   "docs/agent-discovery.md":  {
                                                   "hash":  "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -83,8 +83,8 @@
                                             "base_hash":  "1209d426a3b540504e78622ffcfc84fd4c5aadc7f501f18d732c3975754f03c5"
                                         },
                   "docs/updating.md":  {
-                                           "hash":  "0124ac5b52497dfcac747fda077fc557cceb36e821bb7be9b8399b8db7e6cfaa",
-                                           "base_hash":  "b8465a00271bfcfd0dba82cdfd9cc12118f910c6b2f7d4983bd55804e4f153c8"
+                                           "hash":  "d32cc4433c5bc807b15d91ed15894c9ecce5acd3c4ae6e52c3465aa95bb406d1",
+                                           "base_hash":  "66196fb75fbc9a409a7caeaab486be9d53dd6b496980cdf98ebf697e6f76e2fe"
                                        },
                   "docs/when-to-use.md":  {
                                               "hash":  "cdf51c67f0434227744aaf9c7cac4425e3cc7da46e86ed47ced9499921963145",
@@ -663,8 +663,8 @@
                                                               "base_hash":  "3ed9bfb4f5006f5d68ff2e5a1dc05171dc7bc8093caf2386cb60f9e7bc5ecb8e"
                                                           },
                   "powershell/update-bundle.ps1":  {
-                                                       "hash":  "1f717343f5d52a808df3cc7e3540a8418b6b9df253b95ece44c90a42aaf36ab0",
-                                                       "base_hash":  "1f717343f5d52a808df3cc7e3540a8418b6b9df253b95ece44c90a42aaf36ab0"
+                                                       "hash":  "03ddc7d9720a546e9651997b17d31bfd6b8e0c1d1e772b988614b01449f7a2bc",
+                                                       "base_hash":  "03ddc7d9720a546e9651997b17d31bfd6b8e0c1d1e772b988614b01449f7a2bc"
                                                    },
                   "powershell/update-session-state.ps1":  {
                                                               "hash":  "0576fbd057dd6fc762ef49414d45eed798796500dc6463181b6a8ff083a20a0f",
