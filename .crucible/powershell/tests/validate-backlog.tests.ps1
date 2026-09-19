@@ -977,8 +977,21 @@ R-029 discovery was archived as Resolved after filing C-001.
         }
         $output = ($outputLines -join "`n")
 
-        Assert-Result -Name "refuses to run" -Condition ($exitCode -ne 0) -FailureMessage ("expected a non-zero exit, got " + $exitCode + ". Output: " + $output)
-        Assert-Result -Name "names -ProjectRoot" -Condition ($output -match '\-ProjectRoot') -FailureMessage ("the failure has to name the parameter the caller must pass. Output: " + $output)
+        $scriptRoot = Split-Path -Path $SCRIPT -Parent
+        $derivedParent = Split-Path -Path $scriptRoot -Parent
+        if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
+            $derivedParent = Split-Path -Path $derivedParent -Parent
+        }
+        $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
+        $scriptLivesInProject = (Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/config.yaml")) -or
+            (Test-Path -LiteralPath (Join-Path $derivedRoot ".crucible/backlog"))
+
+        if ($scriptLivesInProject) {
+            Assert-Result -Name "finds the enclosing project" -Condition ($exitCode -eq 0) -FailureMessage ("the script lives under an adopter .crucible, so a cwd change must not hide that project. Expected exit 0, got " + $exitCode + ". Output: " + $output)
+        } else {
+            Assert-Result -Name "refuses to run" -Condition ($exitCode -ne 0) -FailureMessage ("expected a non-zero exit, got " + $exitCode + ". Output: " + $output)
+            Assert-Result -Name "names -ProjectRoot" -Condition ($output -match '\-ProjectRoot') -FailureMessage ("the failure has to name the parameter the caller must pass. Output: " + $output)
+        }
         Assert-Result -Name "does not report on the unrelated directory" -Condition ($output -notmatch "Backlog file not found") -FailureMessage ("it reported a missing backlog for a project nobody named, which is the defect. Output: " + $output)
     }
 

@@ -124,6 +124,15 @@ function Test-FrameworkDevOnlyFile {
         # The named files themselves ship; this wrapper does not, because it uses
         # the framework checkout as the install source.
         "powershell/tests/shipped-tests-crucible-lint.tests.ps1",
+        # Compares Crucible's shipping documents to Crucible's install set and to
+        # Test-FrameworkDevOnlyFile files an adopter tree does not contain. From a
+        # bundle the basename scan has nothing to derive and the documents name
+        # files the install omitted. Item 114. The four named tests that failed
+        # for layout reasons stay in the bundle.
+        "powershell/tests/documented-paths-ship.tests.ps1",
+        # Proves those four still exit 0 from a bundle, and that documented-paths-ship
+        # is omitted. Item 114. Uses the framework checkout as the install source.
+        "powershell/tests/shipped-tests-framework-layout.tests.ps1",
         "powershell/tests/examples-mirror-sync.tests.ps1",
         "powershell/tests/pre-push-hook.tests.ps1",
         "powershell/tests/check-assertion-deletion.tests.ps1",

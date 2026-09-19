@@ -456,7 +456,10 @@ function Get-RepositoryCandidate {
     $found += @(Get-ChildItem -Path (Join-Path $REPO_ROOT "powershell") -Filter "*.ps1" -File -Recurse |
         Where-Object { $_.FullName -notmatch '[\\/]tests[\\/]' })
     foreach ($rootDoc in @("README.md", "ROADMAP.md", "CONTRIBUTING.md")) {
-        $found += @(Get-Item -LiteralPath (Join-Path $REPO_ROOT $rootDoc))
+        $path = Join-Path $REPO_ROOT $rootDoc
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $found += @(Get-Item -LiteralPath $path)
+        }
     }
     return @($found)
 }
@@ -501,7 +504,15 @@ $results += Run-Test -Name "No undeclared page enumerates the commit-by-default 
     # An exclusion nothing reaches is either a file that stopped enumerating the list, in which
     # case delete it, or a pattern that cannot see the file it names, which is the defect item
     # 82 was filed for.
-    Assert-Result -Name "every exclusion was exercised" -Condition ($sweep.Stale.Count -eq 0) -FailureMessage ("these exclusions were never reached by the sweep, so each one excuses nothing and is not calibrated against anything: " + ($sweep.Stale -join "; "))
+    #
+    # ROADMAP.md and docs/proposals/ do not ship. A bundle that still has an empty
+    # docs/proposals directory (or that omits ROADMAP.md) cannot exercise those
+    # exclusions; requiring the hits would fail every adopter for files they were
+    # never shipped. The pin stays on the framework tree, which has both. Item 114.
+    $frameworkExclusionsApply = Test-Path -LiteralPath (Join-Path $REPO_ROOT "ROADMAP.md") -PathType Leaf
+    if ($frameworkExclusionsApply) {
+        Assert-Result -Name "every exclusion was exercised" -Condition ($sweep.Stale.Count -eq 0) -FailureMessage ("these exclusions were never reached by the sweep, so each one excuses nothing and is not calibrated against anything: " + ($sweep.Stale -join "; "))
+    }
 
     Assert-Result -Name "no undeclared page enumerates the list" -Condition ($sweep.Undeclared.Count -eq 0) -FailureMessage ("these enumerate the commit-by-default list but are neither a checked surface nor an exempted file: " + ($sweep.Undeclared -join "; "))
 

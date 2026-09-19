@@ -141,12 +141,15 @@ try {
     # 9. The hook passes its own explicit list, so the scope exists twice and can drift.
     # Pin both copies against the tracked root *.md files: a new root doc added to neither
     # list would otherwise be committed with no encoding gate covering it at all.
-    # This file is mirrored into the adopter bundle, where there is no framework hook and
-    # no root docs of its own - nothing to drift, so the guard is framework-only. Cases
-    # 1-8 above are layout-independent (synthetic fixtures) and do run in both contexts.
+    # This file ships. The adopter hook ships too, so "no $hookPath" is not a framework
+    # proxy. git -C .crucible ls-files -- "*.md" with no slash is empty: the work tree
+    # root is the adopter and .crucible/README.md has a slash. Nothing to drift, so the
+    # guard is framework-only. Cases 1-8 above are layout-independent and do run in both
+    # contexts. Item 114.
     $hookPath = Join-Path $REPO_ROOT "scripts/hooks/pre-commit"
-    if (-not (Test-Path -LiteralPath $hookPath)) {
-        Write-Host "SKIPPED: root-doc scope drift guard (framework-only; no $hookPath)" -ForegroundColor Yellow
+    $trackedRootDocs = @(& git -C $REPO_ROOT ls-files --full-name -- "*.md" | Where-Object { $_ -notmatch "/" })
+    if (-not (Test-Path -LiteralPath $hookPath) -or $trackedRootDocs.Count -eq 0) {
+        Write-Host "SKIPPED: root-doc scope drift guard (framework-only; no tracked root *.md under this tree)" -ForegroundColor Yellow
     } else {
         $hookLine = @([System.IO.File]::ReadAllText($hookPath) -split "`n" | Where-Object { $_ -match 'check-mojibake\.ps1 ' } | Select-Object -First 1)[0]
         Check "pre-commit mojibake invocation located" ([string]::IsNullOrWhiteSpace($hookLine) -eq $false) "no explicit check-mojibake.ps1 invocation found in $hookPath"
@@ -156,8 +159,6 @@ try {
         if ($scriptText -match '(?s)if \(\$isFramework\) \{(.*?)\} else \{') { $fwBranch = $Matches[1] }
         Check "framework default branch located" ($fwBranch -ne "") "could not parse the isFramework branch of check-mojibake.ps1"
 
-        $trackedRootDocs = @(& git -C $REPO_ROOT ls-files --full-name -- "*.md" | Where-Object { $_ -notmatch "/" })
-        Check "tracked root docs enumerated" ($trackedRootDocs.Count -gt 0) "git ls-files returned no root *.md files"
         foreach ($doc in $trackedRootDocs) {
             Check "pre-commit hook scans root $doc" ($hookLine -match ("\s" + [regex]::Escape($doc) + "(\s|$)")) "not in the hook's explicit list: $hookLine"
             Check "framework default list scans root $doc" ($fwBranch -match ('"' + [regex]::Escape($doc) + '"')) "not in the isFramework branch of check-mojibake.ps1"

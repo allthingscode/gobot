@@ -175,18 +175,30 @@ try {
         $exit = $result.ExitCode
         $joined = $result.Output
 
-        Assert-Result -Name "refused rather than guessed" -Condition ($exit -ne 0) -FailureMessage ("the entrypoint accepted a working directory that is not a project. Exit code " + $exit + ". Output: " + $joined)
-        Assert-Result -Name "the refusal names -ProjectRoot" -Condition ($joined -match '\-ProjectRoot') -FailureMessage ("the operator has to be told which parameter to pass. Output: " + $joined)
-        # An unhandled exception exits non-zero and carries the same message, so both
-        # assertions above pass against a script that merely crashed. These two are the
-        # difference between a refusal and a stack trace: the "Error: " prefix exists only
-        # on the reported path, and FullyQualifiedErrorId only on the thrown one. Checking
-        # for a stack trace by shape is what does not work - PowerShell renders an unhandled
-        # throw from a script as "At <path>:<line> char:<col>", not the "At line:N char:N"
-        # of the console, and a regex written for the console form matches neither and
-        # passes against both.
-        Assert-Result -Name "it is reported rather than thrown" -Condition ($joined -match '(?m)^Error: ') -FailureMessage ("the refusal did not come out through this entrypoint's own error reporting. Output: " + $joined)
-        Assert-Result -Name "with no exception machinery in the operator's face" -Condition ($joined -notmatch 'FullyQualifiedErrorId|CategoryInfo') -FailureMessage ("the refusal reached the operator as an unhandled exception. Output: " + $joined)
+        $scriptRoot = Split-Path -Path $entrypoint -Parent
+        $derivedParent = Split-Path -Path $scriptRoot -Parent
+        if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
+            $derivedParent = Split-Path -Path $derivedParent -Parent
+        }
+        $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
+        $scriptLivesInProject = Test-CrucibleProjectRoot -Path $derivedRoot
+
+        if ($scriptLivesInProject) {
+            Assert-Result -Name "finds the enclosing project" -Condition ($exit -eq 0) -FailureMessage ("the entrypoint lives under an adopter .crucible, so a cwd change must not hide that project. Exit code " + $exit + ". Output: " + $joined)
+        } else {
+            Assert-Result -Name "refused rather than guessed" -Condition ($exit -ne 0) -FailureMessage ("the entrypoint accepted a working directory that is not a project. Exit code " + $exit + ". Output: " + $joined)
+            Assert-Result -Name "the refusal names -ProjectRoot" -Condition ($joined -match '\-ProjectRoot') -FailureMessage ("the operator has to be told which parameter to pass. Output: " + $joined)
+            # An unhandled exception exits non-zero and carries the same message, so both
+            # assertions above pass against a script that merely crashed. These two are the
+            # difference between a refusal and a stack trace: the "Error: " prefix exists only
+            # on the reported path, and FullyQualifiedErrorId only on the thrown one. Checking
+            # for a stack trace by shape is what does not work - PowerShell renders an unhandled
+            # throw from a script as "At <path>:<line> char:<col>", not the "At line:N char:N"
+            # of the console, and a regex written for the console form matches neither and
+            # passes against both.
+            Assert-Result -Name "it is reported rather than thrown" -Condition ($joined -match '(?m)^Error: ') -FailureMessage ("the refusal did not come out through this entrypoint's own error reporting. Output: " + $joined)
+            Assert-Result -Name "with no exception machinery in the operator's face" -Condition ($joined -notmatch 'FullyQualifiedErrorId|CategoryInfo') -FailureMessage ("the refusal reached the operator as an unhandled exception. Output: " + $joined)
+        }
     }
 
     # The other half of the same change. Refusing an unrelated working directory is only

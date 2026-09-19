@@ -355,6 +355,7 @@ try {
             'crucible-gates-reject-abandon.tests.ps1' = 35
             'adopter-pipeline-e2e.tests.ps1'         = 28
             'shipped-tests-crucible-lint.tests.ps1'  = 28
+            'shipped-tests-framework-layout.tests.ps1' = 70
             'crucible-gates-human.tests.ps1'          = 26
             'crucible-gates-routing.tests.ps1'        = 25
             'update-bundle-rename-prune.tests.ps1'   = 24

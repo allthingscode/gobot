@@ -1,7 +1,9 @@
 #!/bin/sh
 # Crucible framework pre-push hook
 # Runs all verification, scaffolding, and integration tests before code is pushed to remote.
-# A non-zero exit from any test suite aborts the push.
+# A non-zero exit from any test suite aborts the push. In an adopter repo every step below is
+# skipped by design, and the hook says so instead of claiming that verification passed.
+# Item 115.
 
 set -e
 
@@ -164,9 +166,21 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # NOTE: This hook intentionally does not delete any working-tree files. Test
     # suites isolate into temp dirs and clean up after themselves; a verification
     # gate must never rm the repo (a stray ".crucible" here could be a real install).
+
+    echo "--- Pre-push: all verification and integration tests passed!"
 else
     # ADOPTER REPO CONTEXT
-    echo "Pre-push: Bypassed framework-specific self-tests for adopter project."
+    # Nothing runs here, and that is a decision rather than an omission. Every step above is
+    # either a Crucible self-test - which is exactly what this branch exists to keep off an
+    # adopter tree - or a gate item 107 decided is framework-only. The one check that did cross
+    # over to adopters in 107, message encoding, crossed because a commit message is unfixable
+    # once pushed and is still editable at commit-msg time. At pre-push the message is already
+    # written, so the same check here could only refuse the push and demand a history rewrite:
+    # the shape 107 rejected when it explained why the assertion gate cannot live in pre-commit.
+    # An adopter is already covered where its content is still fixable, by the pre-commit and
+    # commit-msg legs that do run for it. So this branch reports, and claims nothing. The
+    # closing success line used to sit outside this if/else, which told a push that ran zero
+    # checks that all verification and integration tests had passed. Item 115.
+    echo "Adopter: framework self-tests skipped (framework-only)."
+    echo "--- Pre-push: no checks apply to an adopter project; nothing was verified."
 fi
-
-echo "--- Pre-push: all verification and integration tests passed!"
