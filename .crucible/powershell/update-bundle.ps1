@@ -502,6 +502,20 @@ function Invoke-UpdateBundle {
         }
     }
 
+    # Activate adopter hooks through the copy now on disk, not this checkout's
+    # installer. install-hooks.ps1 derives framework vs adopter from its own
+    # location, so the source script would set hooksPath on the framework repo.
+    # Classification fixtures do not ship the installer; a live bundle does, and
+    # a live apply copies powershell/ before this runs. Missing file: skip, do
+    # not throw, and do not set core.hooksPath here.
+    if ($shouldApply -or $shouldPrune) {
+        $hookInstaller = Join-Path $adopterCrucibleRoot "powershell/install-hooks.ps1"
+        if ((Test-Path -LiteralPath (Join-Path $adopterRootResolved ".git")) -and
+            (Test-Path -LiteralPath $hookInstaller -PathType Leaf)) {
+            $null = & $hookInstaller
+        }
+    }
+
     if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0) {
         $isGitRepo = $false
         $checkDir = $adopterRootResolved

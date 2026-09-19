@@ -105,12 +105,13 @@ function Assert-Result {
 # because the runner already classifies a child by grepping its output for exactly those prefixes.
 # "SKIPPED: " is deliberately not a substring of any signature Test-OutputHasFailure looks for.
 #
-# What this does NOT do: change the per-file tail. A file's own
-# "$failed = @($results | Where-Object { -not $_ }).Count" counts a skip as a non-failure, which is
-# right, and its "ALL TESTS PASSED (n tests)" line still includes it, which is loose. Fixing that
-# means editing the tail of every test file; the run summary is the surface that reports the count,
-# and it is the one CI and scripts/test-linux.ps1 read.
+# Skip still returns $true from Run-Test, so "$results | Where-Object { -not $_ }" still
+# treats it as a non-failure. $results.Count therefore still includes it, which is why a
+# file's own "ALL TESTS PASSED (n tests)" line overstates coverage. Write-TestFileSummary
+# is the one place that count is corrected; a file that Skip-Tests must call it rather
+# than printing $results.Count. Item 104.
 $CRUCIBLE_SKIP_SENTINEL = "CRUCIBLE-TEST-SKIPPED: "
+$script:CrucibleSkipCount = 0
 
 function Skip-Test {
     param(
@@ -138,6 +139,7 @@ function Run-Test {
     } catch {
         $message = [string]$_.Exception.Message
         if ($message.StartsWith($CRUCIBLE_SKIP_SENTINEL)) {
+            $script:CrucibleSkipCount++
             Write-Host ("SKIPPED: " + $Name + " - " + $message.Substring($CRUCIBLE_SKIP_SENTINEL.Length)) -ForegroundColor Yellow
             return $true
         }
@@ -147,6 +149,33 @@ function Run-Test {
         }
         return $false
     }
+}
+
+# The per-file tail. Skip-Test returns $true, so $results.Count counts a skip as a test
+# that ran. Files that never skip can keep printing that count; files that Skip-Test
+# must come through here so a skip is not reported as a pass. Item 104.
+function Write-TestFileSummary {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        $Results
+    )
+
+    $list = @($Results)
+    $failed = @($list | Where-Object { $_ -eq $false }).Count
+    $skipped = [int]$script:CrucibleSkipCount
+    $passed = $list.Count - $failed - $skipped
+
+    if ($failed -gt 0) {
+        Write-Host ("`nSOME TESTS FAILED ($failed failed, $passed passed, $skipped skipped)") -ForegroundColor Red
+        exit 1
+    }
+    if ($skipped -gt 0) {
+        Write-Host ("`nALL TESTS PASSED ($passed tests, $skipped skipped)") -ForegroundColor Green
+    } else {
+        Write-Host ("`nALL TESTS PASSED ($passed tests)") -ForegroundColor Green
+    }
+    exit 0
 }
 
 # Start-Process -WindowStyle does not exist on PowerShell's Linux edition; it throws "The parameter

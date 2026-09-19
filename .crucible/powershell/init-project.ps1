@@ -427,7 +427,10 @@ if (Test-Path -LiteralPath (Join-Path $resolvedProjectRoot ".git")) {
     if (-not (Test-Path -LiteralPath $hookInstaller -PathType Leaf)) {
         throw "Installed bundle is missing powershell/install-hooks.ps1; cannot activate git hooks."
     }
-    & $hookInstaller
+    # -Quiet follows init-project's Quiet. The installer's Write-Host is this
+    # process's stdout when we are ourselves a child; an uncaptured caller would
+    # otherwise inherit "Success:" as a path.
+    & $hookInstaller -Quiet:$Quiet
 }
 
 Write-Info ""

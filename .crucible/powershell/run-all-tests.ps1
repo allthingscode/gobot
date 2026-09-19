@@ -131,10 +131,10 @@ try {
     }
 
     # Collects the third outcome Run-Test can report. A test whose precondition cannot exist on
-    # this platform is not a pass, and the per-file tail cannot say so without editing the tail of
-    # every test file, so the run summary is where the count lives. Without this the skip would be
-    # invisible here and the Linux leg would be quietly weaker than the Windows one rather than
-    # measurably narrower. Item 102.
+    # this platform is not a pass. Write-TestFileSummary is what a file's own tail uses when it
+    # Skip-Tests; this is the run summary, which CI and scripts/test-linux.ps1 read. Without it
+    # the skip would be invisible here and the Linux leg would be quietly weaker than the
+    # Windows one rather than measurably narrower. Item 102, item 104.
     function Get-OutputSkipNotes {
         param([AllowEmptyString()][string]$Output)
 
@@ -354,6 +354,7 @@ try {
             'run-all-tests-runner.tests.ps1'         = 345
             'crucible-gates-reject-abandon.tests.ps1' = 35
             'adopter-pipeline-e2e.tests.ps1'         = 28
+            'shipped-tests-crucible-lint.tests.ps1'  = 28
             'crucible-gates-human.tests.ps1'          = 26
             'crucible-gates-routing.tests.ps1'        = 25
             'update-bundle-rename-prune.tests.ps1'   = 24

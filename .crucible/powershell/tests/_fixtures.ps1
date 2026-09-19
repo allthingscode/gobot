@@ -14,13 +14,19 @@ if (-not (Get-Command "Get-TestRunRoot" -ErrorAction SilentlyContinue)) {
 $script:SharedAdopterFixturePath = $null
 
 function Get-SharedAdopterFixture {
+    param(
+        [string]$InitScript = ""
+    )
+
+    $usingOverride = -not [string]::IsNullOrWhiteSpace($InitScript)
+
     # 1. Check if the environment variable is set by the pre-stage runner
-    if ($env:CRUCIBLE_SHARED_FIXTURE -and (Test-Path -LiteralPath $env:CRUCIBLE_SHARED_FIXTURE)) {
+    if (-not $usingOverride -and $env:CRUCIBLE_SHARED_FIXTURE -and (Test-Path -LiteralPath $env:CRUCIBLE_SHARED_FIXTURE)) {
         return $env:CRUCIBLE_SHARED_FIXTURE
     }
 
     # 2. Check if already built in this process context
-    if ($null -ne $script:SharedAdopterFixturePath -and (Test-Path -LiteralPath $script:SharedAdopterFixturePath)) {
+    if (-not $usingOverride -and $null -ne $script:SharedAdopterFixturePath -and (Test-Path -LiteralPath $script:SharedAdopterFixturePath)) {
         return $script:SharedAdopterFixturePath
     }
 
@@ -48,17 +54,27 @@ function Get-SharedAdopterFixture {
         Pop-Location
     }
 
-    $initScript = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-    & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $initScript `
+    if (-not $usingOverride) {
+        $InitScript = Join-Path $REPO_ROOT "powershell/init-project.ps1"
+    }
+
+    # Capture the child's stdout. Write-Host in init-project/install-hooks becomes
+    # the child's success stream here; leaving it uncaptured made this function
+    # return "Success:" as a path. Assignment, not 2>&1.
+    $initOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $InitScript `
         -ProjectRoot $tempPath `
         -ProjectName "Shared App" `
         -Quiet
+    $initExit = $LASTEXITCODE
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to build shared adopter fixture at $tempPath"
+    if ($initExit -ne 0) {
+        $detail = @($initOutput) -join "`n"
+        throw "Failed to build shared adopter fixture at $tempPath : $detail"
     }
 
-    $script:SharedAdopterFixturePath = $tempPath
+    if (-not $usingOverride) {
+        $script:SharedAdopterFixturePath = $tempPath
+    }
     return $tempPath
 }
 

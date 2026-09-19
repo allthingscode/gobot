@@ -1,5 +1,19 @@
 # Installs git hooks for the Crucible framework repository or an adopter repository.
+param(
+    [switch]$Quiet
+)
+
 $ErrorActionPreference = "Stop"
+
+function Write-InstallInfo {
+    param(
+        [Parameter(Mandatory=$false)][string]$Message = "",
+        [string]$ForegroundColor = "White"
+    )
+    if (-not $Quiet) {
+        Write-Host $Message -ForegroundColor $ForegroundColor
+    }
+}
 
 # Determine if we are in the framework repo or an adopter
 $parentDir = (Resolve-Path -Path "$PSScriptRoot/..").Path
@@ -27,7 +41,7 @@ if (-not (Test-Path -LiteralPath $fullHooksDir)) {
 Push-Location $repoRoot
 try {
     git config core.hooksPath $hooksPath
-    Write-Host "Success: Set git core.hooksPath to '$hooksPath' in $repoRoot" -ForegroundColor Green
+    Write-InstallInfo "Success: Set git core.hooksPath to '$hooksPath' in $repoRoot" -ForegroundColor Green
 } finally {
     Pop-Location
 }
@@ -58,7 +72,7 @@ try {
 }
 
 if ($gitPathCode -ne 0 -or [string]::IsNullOrWhiteSpace($gitDirRel)) {
-    Write-Host "Warning: could not resolve the repository git directory; skipped the shadowed-hook check." -ForegroundColor Yellow
+    Write-InstallInfo "Warning: could not resolve the repository git directory; skipped the shadowed-hook check." -ForegroundColor Yellow
 } else {
     # Relative (".git") from the repo root, but absolute inside a linked worktree.
     $gitDir = ([string]$gitDirRel).Trim()
@@ -71,11 +85,11 @@ if ($gitPathCode -ne 0 -or [string]::IsNullOrWhiteSpace($gitDirRel)) {
         $shadowed = @(Get-ChildItem -LiteralPath $gitHooksDir -File -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -notlike "*.sample" })
         if ($shadowed.Count -gt 0) {
-            Write-Host ("Warning: " + $shadowed.Count + " hook file(s) in " + $gitHooksDir + " are now shadowed by core.hooksPath and will not run:") -ForegroundColor Yellow
+            Write-InstallInfo ("Warning: " + $shadowed.Count + " hook file(s) in " + $gitHooksDir + " are now shadowed by core.hooksPath and will not run:") -ForegroundColor Yellow
             foreach ($h in $shadowed) {
-                Write-Host ("    - " + $h.Name) -ForegroundColor Yellow
+                Write-InstallInfo ("    - " + $h.Name) -ForegroundColor Yellow
             }
-            Write-Host "    Delete them once you have confirmed they are not yours to keep." -ForegroundColor Yellow
+            Write-InstallInfo "    Delete them once you have confirmed they are not yours to keep." -ForegroundColor Yellow
         }
     }
 }
@@ -93,6 +107,6 @@ if (-not $onWindows) {
     Get-ChildItem -LiteralPath $fullHooksDir -File | ForEach-Object {
         & chmod "+x" $_.FullName
     }
-    Write-Host "Marked hook scripts executable for this platform." -ForegroundColor Green
+    Write-InstallInfo "Marked hook scripts executable for this platform." -ForegroundColor Green
 }
 

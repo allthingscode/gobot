@@ -528,10 +528,4 @@ try {
     }
 }
 
-if ($results -contains $false) {
-    Write-Host "`nSOME TESTS FAILED" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host ("`nALL TESTS PASSED (" + $results.Count + " tests)") -ForegroundColor Green
-exit 0
+Write-TestFileSummary -Results $results

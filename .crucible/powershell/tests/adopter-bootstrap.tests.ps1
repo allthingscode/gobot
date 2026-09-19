@@ -104,19 +104,25 @@ Add a health endpoint.
         }
         Assert-Result -Name "validate-backlog exit" -Condition ($validateCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $validateCmd.ExitCode + ". Output: " + ($validateCmd.Output -join "`n"))
 
-        # Run the same pre-commit lint used by adopters. It requires active backlog item
-        # filenames to appear in BACKLOG.md, so Active Items must use markdown links.
+        # Active Items must use markdown links so the framework linter can see
+        # each filename in BACKLOG.md. That linter is Test-FrameworkDevOnlyFile
+        # (item 83) and an adopter pre-commit does not invoke it. Run it when
+        # the file is present so a framework-repo run still lints this fixture.
         $backlogDir = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot
         Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
-        Push-Location $projectRoot
-        try {
-            $crucibleLintCmd = Invoke-ExternalCommand {
-                go run $CRUCIBLE_LINT -framework-root $REPO_ROOT -backlog-dir $backlogDir
+        if (Test-Path -LiteralPath $CRUCIBLE_LINT) {
+            Push-Location $projectRoot
+            try {
+                $crucibleLintCmd = Invoke-ExternalCommand {
+                    go run $CRUCIBLE_LINT -framework-root $REPO_ROOT -backlog-dir $backlogDir
+                }
+            } finally {
+                Pop-Location
             }
-        } finally {
-            Pop-Location
+            Assert-Result -Name "crucible_lint exit" -Condition ($crucibleLintCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $crucibleLintCmd.ExitCode + ". Output: " + ($crucibleLintCmd.Output -join "`n"))
+        } else {
+            Write-Host "Skipping crucible_lint: scripts/crucible_lint.go is not in this bundle."
         }
-        Assert-Result -Name "crucible_lint exit" -Condition ($crucibleLintCmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $crucibleLintCmd.ExitCode + ". Output: " + ($crucibleLintCmd.Output -join "`n"))
 
         # Check that BACKLOG.md priority summary counts were updated
         $updatedBacklog = Get-Content -LiteralPath $backlogFile -Raw -Encoding UTF8

@@ -99,6 +99,8 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-stat
 
    `safe-overwrite` files are copied from upstream because they still match your recorded baseline. `add` files are new upstream files and are copied too. `retired` files are deleted: Crucible renamed them, the replacement is landing in this same update, and your copy still matched the baseline. `needs-merge` and `review-removal` files are reported for human review and are not auto-changed.
 
+   A real apply also runs the installed `.crucible/powershell/install-hooks.ps1`. `core.hooksPath` is local uncommitted config, so a clone or an unset leaves copied hooks inert until something sets it. Preview (`report-only`) does not.
+
    A file you have edited is never retired, whatever the rename says. It is reported as `needs-merge` so you can move your changes to the new path yourself.
 
 5. **Manually merge anything flagged.** For each `needs-merge` item, compare your local file against upstream HEAD, then edit the adopter file by hand.

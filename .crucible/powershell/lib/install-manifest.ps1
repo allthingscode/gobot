@@ -119,6 +119,11 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/framework-worktree-hygiene.tests.ps1",
         "powershell/tests/_worktree-fixture.ps1",
         "powershell/tests/crucible-lint-authoring.tests.ps1",
+        # Proves the two shipped test files that still name scripts/crucible_lint.go
+        # do not invoke it from a bundle that has been through this list. Item 108.
+        # The named files themselves ship; this wrapper does not, because it uses
+        # the framework checkout as the install source.
+        "powershell/tests/shipped-tests-crucible-lint.tests.ps1",
         "powershell/tests/examples-mirror-sync.tests.ps1",
         "powershell/tests/pre-push-hook.tests.ps1",
         "powershell/tests/check-assertion-deletion.tests.ps1",
@@ -158,7 +163,8 @@ function Test-FrameworkDevOnlyFile {
         # it only under `[ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]`, which no adopter install can
         # satisfy: the hook computes FRAMEWORK_ROOT two levels up from itself, so an adopter
         # gets <root>/.crucible against a REPO_ROOT of <root>. It shipped, was unreachable,
-        # and docs/operating-manual.md told adopters to run it anyway.
+        # and docs/operating-manual.md told adopters to run it anyway. Shipped tests that
+        # still name this file skip the go-run when it is absent (item 108).
         "scripts/crucible_lint.go"
     )
     if ($devOnlyPaths -contains $normalized) {

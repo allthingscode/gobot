@@ -226,17 +226,21 @@ try {
         $msgHookLines = @([System.IO.File]::ReadAllText($msgHookPath) -split "`n")
         $gateIdx = -1
         $mergeIdx = -1
+        $adopterSkipIdx = -1
         for ($i = 0; $i -lt $msgHookLines.Count; $i++) {
             # Comments are skipped: a comment mentioning the gate is not the gate running.
             if ($msgHookLines[$i] -match '^\s*#') { continue }
             if ($gateIdx -lt 0 -and $msgHookLines[$i] -match 'check-mojibake\.ps1' -and $msgHookLines[$i] -match '-MessageFile') { $gateIdx = $i }
             if ($mergeIdx -lt 0 -and $msgHookLines[$i] -match 'MERGE_HEAD') { $mergeIdx = $i }
+            if ($adopterSkipIdx -lt 0 -and $msgHookLines[$i] -match 'assertion deletion check skipped') { $adopterSkipIdx = $i }
         }
         $gateLine = if ($gateIdx -ge 0) { $msgHookLines[$gateIdx] } else { "(none)" }
         Check "commit-msg invokes the encoding gate on the message file" ($gateIdx -ge 0) "no uncommented 'check-mojibake.ps1 ... -MessageFile' invocation in $msgHookPath"
         Check "commit-msg passes the message path git gave it" (($gateIdx -ge 0) -and ($gateLine -match '"\$MSG_FILE"')) "the invocation does not pass the hook's own MSG_FILE: $gateLine"
         Check "merge short-circuit located" ($mergeIdx -ge 0) "no MERGE_HEAD check in $msgHookPath"
         Check "encoding check runs before the merge short-circuit" (($gateIdx -ge 0) -and ($mergeIdx -ge 0) -and ($gateIdx -lt $mergeIdx)) "gate at line $($gateIdx + 1), MERGE_HEAD at line $($mergeIdx + 1)"
+        Check "adopter assertion skip located" ($adopterSkipIdx -ge 0) "no uncommented 'assertion deletion check skipped' in $msgHookPath"
+        Check "encoding check runs before the adopter assertion skip" (($gateIdx -ge 0) -and ($adopterSkipIdx -ge 0) -and ($gateIdx -lt $adopterSkipIdx)) "gate at line $($gateIdx + 1), adopter skip at line $($adopterSkipIdx + 1)"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

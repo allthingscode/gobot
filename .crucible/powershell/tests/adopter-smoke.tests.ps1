@@ -1,5 +1,6 @@
 # Adopter smoke tests for Crucible.
-# Verifies that a new project can adopt Crucible, ignore data/runtime, validate configuration, and pass crucible linting.
+# Verifies that a new project can adopt Crucible, ignore data/runtime, and validate configuration.
+# The framework-repo run also lints the adopter backlog when scripts/crucible_lint.go is present.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
@@ -146,6 +147,9 @@ try {
     }
 
     $results += Run-Test -Name "Runs crucible_lint in adopter context" -Body {
+        if (-not (Test-Path -LiteralPath $LINT_SCRIPT)) {
+            Skip-Test "scripts/crucible_lint.go is framework-dev-only and is not in this bundle"
+        }
         $backlogDir = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot
         Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         Push-Location $projectRoot
@@ -191,10 +195,4 @@ finally {
     }
 }
 
-if ($results -contains $false) {
-    Write-Host "`nSOME TESTS FAILED" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host ("`nALL TESTS PASSED (" + $results.Count + " tests)") -ForegroundColor Green
-exit 0
+Write-TestFileSummary -Results $results

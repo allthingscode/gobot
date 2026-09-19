@@ -19,11 +19,14 @@ $results = @()
 
 
 function Invoke-StagedScript {
-    param([string]$ScriptPath)
+    param(
+        [string]$ScriptPath,
+        [string[]]$ArgumentList = @()
+    )
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $ScriptPath 2>&1
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @ArgumentList 2>&1
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prev
@@ -45,6 +48,7 @@ try {
         Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
         $configured = (git -C $repo config --get core.hooksPath)
         Assert-Result -Name "hooksPath" -Condition ($configured -eq "scripts/hooks") -FailureMessage ("expected scripts/hooks, got '" + $configured + "'")
+        Assert-Result -Name "prints Success" -Condition ($r.Output -match "Success: Set git core.hooksPath") -FailureMessage ("expected the Success line on a non-Quiet run, got: " + $r.Output)
     }
 
     $results += Run-Test -Name "Adopter mode sets core.hooksPath to .crucible/scripts/hooks" -Body {
@@ -133,6 +137,26 @@ try {
         $r = Invoke-StagedScript -ScriptPath (Join-Path $repo "powershell/install-hooks.ps1")
         Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
         Assert-Result -Name "no shadowed-hook warning" -Condition ($r.Output -notmatch "shadowed by core.hooksPath") -FailureMessage ("expected no warning on a clean repo, got: " + $r.Output)
+    }
+
+    $results += Run-Test -Name "Quiet suppresses host messages and still sets hooksPath" -Body {
+        $repo = Join-Path $tempRoot "quiet"
+        git init -q $repo | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "powershell") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "scripts/hooks") -Force | Out-Null
+        Copy-Item $SCRIPT_SRC (Join-Path $repo "powershell/install-hooks.ps1") -Force
+
+        $gitHooks = Join-Path $repo ".git/hooks"
+        New-Item -ItemType Directory -Path $gitHooks -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $gitHooks "pre-commit") -Value "#!/bin/sh`nexit 0`n" -NoNewline
+
+        $r = Invoke-StagedScript -ScriptPath (Join-Path $repo "powershell/install-hooks.ps1") -ArgumentList @("-Quiet")
+        Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
+        $configured = (git -C $repo config --get core.hooksPath)
+        Assert-Result -Name "hooksPath" -Condition ($configured -eq "scripts/hooks") -FailureMessage ("expected scripts/hooks, got '" + $configured + "'")
+        Assert-Result -Name "no Success line" -Condition ($r.Output -notmatch "Success: Set git core.hooksPath") -FailureMessage ("Quiet still printed Success: " + $r.Output)
+        Assert-Result -Name "no shadowed-hook warning" -Condition ($r.Output -notmatch "shadowed by core.hooksPath") -FailureMessage ("Quiet still printed the shadowed-hook warning: " + $r.Output)
+        Assert-Result -Name "leaves the adopter hook in place" -Condition (Test-Path -LiteralPath (Join-Path $gitHooks "pre-commit")) -FailureMessage "Quiet install deleted a hook it only had standing to report"
     }
 
     $results += Run-Test -Name "Throws when no .git is present" -Body {
