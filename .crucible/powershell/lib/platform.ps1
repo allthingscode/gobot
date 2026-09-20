@@ -15,29 +15,25 @@ function Test-PlatformIsWindows {
 function Get-PwshCommand {
     <#
     .SYNOPSIS
-        Resolves the PowerShell host command or executable path for the current platform.
+        Resolves the PowerShell 7+ host command for the current platform.
     .DESCRIPTION
-        Returns 'powershell.exe' on Windows and 'pwsh' on non-Windows platforms.
-        Throws an error on non-Windows platforms if 'pwsh' is not found on PATH.
+        Returns 'pwsh' on every platform. Throws if 'pwsh' is not found on PATH.
+        Windows PowerShell 5.1 is not a supported host.
     .EXAMPLE
         & (Get-PwshCommand) -NoProfile -File ./script.ps1
     #>
-    if (Test-PlatformIsWindows) {
-        return "powershell.exe"
-    } else {
-        if ($null -ne $script:MockPwshCommandExists) {
-            if (-not $script:MockPwshCommandExists) {
-                throw "PowerShell Core executable 'pwsh' was not found on your PATH. Please install PowerShell 7+ on your Unix platform to run Crucible."
-            }
-            return "pwsh"
-        }
-
-        $cmd = Get-Command "pwsh" -ErrorAction SilentlyContinue
-        if ($null -eq $cmd) {
-            throw "PowerShell Core executable 'pwsh' was not found on your PATH. Please install PowerShell 7+ on your Unix platform to run Crucible."
+    if ($null -ne $script:MockPwshCommandExists) {
+        if (-not $script:MockPwshCommandExists) {
+            throw "PowerShell 7+ executable 'pwsh' was not found on your PATH. Please install PowerShell 7+ to run Crucible."
         }
         return "pwsh"
     }
+
+    $cmd = Get-Command "pwsh" -ErrorAction SilentlyContinue
+    if ($null -eq $cmd) {
+        throw "PowerShell 7+ executable 'pwsh' was not found on your PATH. Please install PowerShell 7+ to run Crucible."
+    }
+    return "pwsh"
 }
 
 function Invoke-Git {

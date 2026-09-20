@@ -145,9 +145,8 @@ project_mandates:
 Validate the config from your project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/validate-config.ps1" -ConfigPath ".crucible/config.yaml"
+pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/validate-config.ps1" -ConfigPath ".crucible/config.yaml"
 ```
-*(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 
 A passing run confirms no placeholder commands remain.
 

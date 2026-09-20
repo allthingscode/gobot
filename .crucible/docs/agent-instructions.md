@@ -55,13 +55,13 @@ Do not commit runtime data:
 Run the installed runtime from the project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id>
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id>
 ```
 <!-- crucible-instructions-end -->
 ````
 <!-- crucible:end instruction-block-agents -->
 
-> `init-project.ps1 -AppendInstructions` writes this block with the correct host for the target OS (`powershell.exe` on Windows, `pwsh` on Linux/macOS). If you paste it by hand on Linux/macOS, change `powershell.exe` to `pwsh`.
+> `init-project.ps1 -AppendInstructions` writes this block with `pwsh` (PowerShell 7+), the only supported host.
 
 ## Optional Tool-Specific Files
 

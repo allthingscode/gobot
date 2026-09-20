@@ -141,7 +141,7 @@ try {
     } else {
         Add-DoctorResult -Check "powershell.runtime" -Status "fail" -Severity "critical" `
             -Details ("Resolved PowerShell host '" + $pwshName + "' is not available on PATH.") `
-            -Remediation "Install Windows PowerShell 5.1 (Windows) or PowerShell 7+ (pwsh, Linux/macOS)."
+            -Remediation "Install PowerShell 7+ (pwsh)."
     }
 } catch {
     Add-DoctorResult -Check "powershell.runtime" -Status "fail" -Severity "critical" `

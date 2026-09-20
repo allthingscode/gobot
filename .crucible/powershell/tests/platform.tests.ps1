@@ -18,19 +18,27 @@ $results = @()
 
 try {
     $results += Run-Test -Name "Get-PwshCommand returns correct command based on platform mock" -Body {
-        # Test Windows mock
         $script:MockPlatformIsWindows = $true
-        $script:MockPwshCommandExists = $null
+        $script:MockPwshCommandExists = $true
         $cmdWin = Get-PwshCommand
-        Assert-Result -Name "windows mock returns & (Get-PwshCommand)" -Condition ($cmdWin -eq "powershell" + ".exe") -FailureMessage "expected & (Get-PwshCommand) on Windows"
+        Assert-Result -Name "windows mock returns pwsh" -Condition ($cmdWin -eq "pwsh") -FailureMessage "expected pwsh on Windows"
 
-        # Test Non-Windows mock with pwsh present
         $script:MockPlatformIsWindows = $false
         $script:MockPwshCommandExists = $true
         $cmdUnix = Get-PwshCommand
         Assert-Result -Name "unix mock returns pwsh" -Condition ($cmdUnix -eq "pwsh") -FailureMessage "expected pwsh on Unix"
 
-        # Test Non-Windows mock with pwsh absent
+        $script:MockPlatformIsWindows = $true
+        $script:MockPwshCommandExists = $false
+        $threwWin = $false
+        try {
+            $null = Get-PwshCommand
+        } catch {
+            $threwWin = $true
+            Assert-Result -Name "windows throw message" -Condition ($_.Exception.Message -match "not found on your PATH") -FailureMessage "unexpected exception message: $($_.Exception.Message)"
+        }
+        Assert-Result -Name "windows mock throws when pwsh absent" -Condition $threwWin -FailureMessage "expected Get-PwshCommand to throw when pwsh is absent on Windows"
+
         $script:MockPlatformIsWindows = $false
         $script:MockPwshCommandExists = $false
         $threw = $false

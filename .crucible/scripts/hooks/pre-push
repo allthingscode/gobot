@@ -34,17 +34,27 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
-    # Resolve platform-appropriate PowerShell command. Windows prefers powershell.exe so it
-    # runs Windows PowerShell 5.1, the field-tested host matching CI. The OS is tested
-    # rather than inferred from the lookup succeeding: the previous comment here claimed
-    # "Linux/macOS have no powershell.exe", which is false under WSL - PATH interop puts
-    # /mnt/c/.../powershell.exe on PATH, so the lookup hands a Linux repository to a
-    # Windows host that sees the work tree as \\wsl.localhost\... and cannot read its
-    # index. Regression: check-assertion-deletion.tests.ps1 drives a real hook on Linux.
+    # PowerShell 7+ (pwsh) is required. Do not look up powershell.exe: under WSL,
+    # Windows PATH interop puts /mnt/c/.../powershell.exe on PATH and would hand a
+    # Linux repository to Windows PowerShell 5.1. That host sees the work tree as
+    # \\wsl.localhost\... and cannot read its index. Regression:
+    # check-assertion-deletion.tests.ps1 drives a real hook on Linux.
+    # uname still decides: a Windows pwsh.exe on a Linux PATH is the same trap.
+    PWSH="$(command -v pwsh)"
     case "$(uname -s)" in
-        Linux|Darwin) PWSH="$(command -v pwsh)" ;;
-        *)            PWSH="$(command -v powershell.exe || command -v pwsh)" ;;
+        Linux|Darwin)
+            case "$PWSH" in
+                *.exe|/mnt/*)
+                    echo "ERROR: pwsh resolved to a Windows binary ($PWSH). Install PowerShell 7+ in this OS." >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
     esac
+    if [ -z "$PWSH" ]; then
+        echo "ERROR: pwsh (PowerShell 7+) was not found on PATH." >&2
+        exit 1
+    fi
 
     # 1. Project Scaffolding unit tests
     echo "Running project scaffolding tests..."

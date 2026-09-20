@@ -78,10 +78,9 @@ Agents **construct and write `handoff.json`** but do **not** generate the next c
 2. Agent writes `.crucible/session/handoffs/{task_id}-{timestamp}.json`.
 3. Agent runs `crucible.ps1 -Init -TaskId {task_id}` via the Bash tool (**`-TaskId` is required**):
    ```bash
-   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id}
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id}
    ```
-   *(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
-4. Agent presents the Crucible output to the human (summary of what was done, verbatim `[NEXT SESSION COMMAND]` block, recommended model) and **waits for human confirmation** before the next phase session begins. The human may continue in this session or take the command to a different session.
+   4. Agent presents the Crucible output to the human (summary of what was done, verbatim `[NEXT SESSION COMMAND]` block, recommended model) and **waits for human confirmation** before the next phase session begins. The human may continue in this session or take the command to a different session.
 
 ## Session State Management
 

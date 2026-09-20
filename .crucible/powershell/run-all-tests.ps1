@@ -115,8 +115,7 @@ try {
 
     $shell = (Get-Process -Id $PID).Path
     if (-not $shell) {
-        $isWindows = ($PSVersionTable.PSEdition -ne 'Core') -or ($env:OS -match 'Windows_NT')
-        $shell = if ($isWindows) { 'powershell.exe' } else { 'pwsh' }
+        $shell = 'pwsh'
     }
 
     # Scans child standard output for harness failure signatures (EXCEPTION OCCURRED:, SOME TESTS FAILED, FAILED:).

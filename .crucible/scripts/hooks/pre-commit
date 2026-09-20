@@ -15,16 +15,26 @@ FRAMEWORK_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
-# Resolve platform-appropriate PowerShell command. Windows prefers powershell.exe so it
-# runs Windows PowerShell 5.1, the field-tested host matching CI. The OS is tested rather
-# than inferred from the lookup succeeding: under WSL, Windows PATH interop puts
-# /mnt/c/.../powershell.exe on PATH, so a bare `command -v powershell.exe` hands a Linux
-# repository to a Windows host. That host sees the work tree as \\wsl.localhost\... , which
+# PowerShell 7+ (pwsh) is required. Do not look up powershell.exe: under WSL, Windows
+# PATH interop puts /mnt/c/.../powershell.exe on PATH and would hand a Linux repository
+# to Windows PowerShell 5.1. That host sees the work tree as \\wsl.localhost\... , which
 # git will not treat as a repository, so index-reading gates exit 129 on a correct tree.
+# uname still decides: a Windows pwsh.exe on a Linux PATH is the same trap.
+PWSH="$(command -v pwsh)"
 case "$(uname -s)" in
-    Linux|Darwin) PWSH="$(command -v pwsh)" ;;
-    *)            PWSH="$(command -v powershell.exe || command -v pwsh)" ;;
+    Linux|Darwin)
+        case "$PWSH" in
+            *.exe|/mnt/*)
+                echo "ERROR: pwsh resolved to a Windows binary ($PWSH). Install PowerShell 7+ in this OS." >&2
+                exit 1
+                ;;
+        esac
+        ;;
 esac
+if [ -z "$PWSH" ]; then
+    echo "ERROR: pwsh (PowerShell 7+) was not found on PATH." >&2
+    exit 1
+fi
 
 echo "--- Crucible pre-commit verification started"
 

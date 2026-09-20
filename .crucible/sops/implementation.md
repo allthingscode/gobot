@@ -1,7 +1,7 @@
 <!-- prompt_version: architect-sop-v1 -->
 # SOP: Implementation
 
-**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+**Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 **Role:** Design and implement backlog items in an isolated worktree. Always hand off to Verification - never to any other phase.
 
@@ -87,7 +87,7 @@ Specialists MUST log their progress mid-session to ensure state recovery in case
 
 Write table-driven tests as you go - not after. Run continuously:
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"
+pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"
 ```
 
 **STRICTLY FORBIDDEN**: `git push`. Your role ends with uncommitted changes staged in the worktree. Do not commit to `master`. Do not touch `BACKLOG.md`.
@@ -98,7 +98,7 @@ Before marking ready for Verification:
 
 1. Run full verification:
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
+   pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
    <project race/coverage test command>
    ```
 2. Coverage >80% for new code? If not, add tests.
@@ -126,13 +126,13 @@ Before marking ready for Verification:
    - Ordered deployment steps
 4. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the handoff JSON file directly):
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 5. Run Crucible and present output to human:
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 

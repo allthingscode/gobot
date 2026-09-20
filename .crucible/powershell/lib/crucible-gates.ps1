@@ -776,7 +776,7 @@ function Invoke-HandoffPreflightValidation {
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $missingReasonCode `
             -Why ("reason_code=" + $missingReasonCode + "; handoff_file=" + $handoffFileName + "; message=Validator script missing: powershell/validate-handoff.ps1") `
-            -RecoveryOverride ("Restore powershell/validate-handoff.ps1 from the Crucible bundle, then rerun: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id)
+            -RecoveryOverride ("Restore powershell/validate-handoff.ps1 from the Crucible bundle, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id)
         exit 2
     }
 
@@ -2322,18 +2322,18 @@ function Invoke-CircuitBreakerGates {
                         $distinctNotes = "researcher_config_unreadable: $scanFailedFile"
                         $summaryMsg = "Could not determine the configured research directory because $scanFailedFile could not be read: $scanFailedError. Research input cannot be scanned without it."
                         $wedgeWhy = $summaryMsg + " Reason: Configuration read failure."
-                        $recoveryOverride = "Restore read access to " + $scanFailedFile + ", verify the configured research directory, archive the blocked record, then run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                        $recoveryOverride = "Restore read access to " + $scanFailedFile + ", verify the configured research directory, archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
                     } else {
                         $distinctNotes = "researcher_artifact_unscannable: $scanFailedFile"
                         $summaryMsg = "Could not scan $scanFailedFile for prompt injection: $scanFailedError. Unscannable research input is treated as a block."
                         $wedgeWhy = $summaryMsg + " Reason: Scan failure."
-                        $recoveryOverride = "Review external sources before continuing. File: " + $scanFailedFile + "; Scan failure: " + $scanFailedError + ". Then archive the blocked record and run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                        $recoveryOverride = "Review external sources before continuing. File: " + $scanFailedFile + "; Scan failure: " + $scanFailedError + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
                     }
                 } else {
                     $distinctNotes = "researcher_silent_detector_hit: ${detectedFile}:$detectedRule"
                     $summaryMsg = "Silent injection match in ${detectedFile}: $detectedRule (researcher silent detector hit)"
                     $wedgeWhy = $summaryMsg + ". Reason: Silent corroboration."
-                    $recoveryOverride = "Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                    $recoveryOverride = "Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
                 }
 
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes $distinctNotes `
@@ -2354,7 +2354,7 @@ function Invoke-CircuitBreakerGates {
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Suspicious content flagged in handoff: " + $handoff.suspicious_content)
         Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
             -Why ("Suspicious Content detected. Suspicious content flagged in handoff: " + $handoff.suspicious_content) `
-            -RecoveryOverride ("Review external sources before continuing. Then archive the blocked record and run: powershell.exe -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover")
+            -RecoveryOverride ("Review external sources before continuing. Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover")
         exit 2
     }
 

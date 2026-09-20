@@ -71,9 +71,8 @@ Edit `<project-root>/.crucible/config.yaml`:
 From the adopter project root, validate the install:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/validate-config.ps1" -ConfigPath ".crucible/config.yaml"
+pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/validate-config.ps1" -ConfigPath ".crucible/config.yaml"
 ```
-*(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
 
 ## Agent Instruction Setup
 

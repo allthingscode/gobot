@@ -1,7 +1,7 @@
 <!-- prompt_version: groomer-sop-v1 -->
 # SOP: Grooming
 
-**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+**Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 **Role:** De-risk backlog items and prepare complete technical specifications for the implementation phase.
 
@@ -89,7 +89,7 @@ Do NOT hand-author or hand-edit the handoff JSON. You must use the `new-handoff.
 
 Run `new-handoff.ps1` to write the handoff JSON:
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source grooming -Target <implementation|research|verification> -Reason "Ready for next phase" [-FileAffinity "<paths>"] [-BudgetTier <low|medium|high|extended>] [-DesignRequired]
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats fields like `file_affinity`.)
@@ -101,7 +101,7 @@ Run `{{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_ro
 
 ### Step 4 - Advance pipeline
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 

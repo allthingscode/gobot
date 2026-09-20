@@ -27,10 +27,9 @@ git clone <crucible-upstream-url> C:\path\to\crucible-source
 git -C C:\path\to\crucible-source pull
 ```
 
-> **Cross-platform note.** Examples below use `powershell.exe` and a Windows
-> source path. On Linux/macOS, replace `powershell.exe` with `pwsh` and use a
-> Unix path (e.g. `~/src/crucible-source`). Forward-slash paths work on every
-> platform.
+> **Cross-platform note.** Examples below use `pwsh` (PowerShell 7+) and a
+> Windows source path. On Linux/macOS, use a Unix path (e.g.
+> `~/src/crucible-source`). Forward-slash paths work on every platform.
 
 The source repo is used only for installs and updates. It is not referenced at runtime.
 
@@ -41,7 +40,7 @@ The source repo is used only for installs and updates. It is not referenced at r
 Before pulling updates, you can inspect your local `.crucible/` customizations compared to your baseline (recorded at install or the last successful update) using the drift-detection tool:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -Drift
+pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -Drift
 ```
 
 This is a read-only command that classifies all files into:
@@ -56,7 +55,7 @@ It exits with code `0` when no customized files exist, and `1` if customizations
 Crucible uses a provenance manifest (`.crucible/install-provenance.json`) to track files. If this manifest is missing (e.g. from an older install version), the drift tool automatically backfills it in memory using the `crucible_install_commit` from your `config.yaml`. To do this, it requires access to the upstream Crucible source repository containing that commit:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -Drift -FrameworkSource "C:\path\to\crucible-source"
+pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -Drift -FrameworkSource "C:\path\to\crucible-source"
 ```
 
 ---
@@ -72,7 +71,7 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-stat
 2. **Stamp older installs once.** If `.crucible/config.yaml` does not contain `crucible_install_commit`, establish a baseline before updating:
 
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\init-project.ps1" `
+   pwsh -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\init-project.ps1" `
      -ProjectRoot . `
      -StampVersionOnly
    ```
@@ -82,7 +81,7 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-stat
 3. **Preview the update.** Run the updater in report mode from your project root:
 
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\update-bundle.ps1" `
+   pwsh -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\update-bundle.ps1" `
      -FrameworkSource "C:\path\to\crucible-source" `
      -AdopterRoot . `
      -Mode report-only
@@ -91,7 +90,7 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-stat
 4. **Apply safe updates.** When the report looks right, apply files that have no local adopter edits:
 
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\update-bundle.ps1" `
+   pwsh -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\update-bundle.ps1" `
      -FrameworkSource "C:\path\to\crucible-source" `
      -AdopterRoot . `
      -Mode auto-safe
@@ -108,7 +107,7 @@ powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-stat
 6. **Verify.** Run your bundle's test suite from your project root:
 
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/run-all-tests.ps1"
+   pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/run-all-tests.ps1"
    ```
 
 7. **Commit.** Treat the update like any other change: review, test, commit.
@@ -245,7 +244,7 @@ To migrate an existing adopter repository:
    Run the updater from your project root:
 
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\update-bundle.ps1" `
+   pwsh -ExecutionPolicy Bypass -File "C:\path\to\crucible-source\powershell\update-bundle.ps1" `
      -FrameworkSource "C:\path\to\crucible-source" `
      -AdopterRoot . `
      -Mode auto-safe `

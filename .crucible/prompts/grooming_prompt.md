@@ -1,4 +1,4 @@
-<!-- prompt_version: grooming_prompt-v24 -->
+<!-- prompt_version: grooming_prompt-v25 -->
 Grooming: {task_id}
 
 {prev_session_summary}
@@ -65,12 +65,12 @@ If there are no active items in the backlog to implement:
 If you have identified and specified the *next* task to be implemented:
 1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId <next_task_id> -Source grooming -Target <implementation|research|verification> -Reason "Ready for next phase" [-FileAffinity "<paths>"] [-BudgetTier <low|medium|high|extended>]
    ```
 2. Run Crucible to advance the pipeline for the NEW task:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <next_task_id> -Quiet
    ```
 3. Present the Crucible output to the human: what you accomplished and the assembled next-phase prompt.
@@ -80,12 +80,12 @@ If you have identified and specified the *next* task to be implemented:
 If the task is approved for closure without implementing code (e.g., already shipped or obsolete):
 1. Run `new-handoff.ps1` to write the handoff JSON:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId <task_id> -Source grooming -Target done -Reason "Task approved for closure - no code deliverable" -BudgetTier low
    ```
 2. Run Crucible to advance the pipeline:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task_id> -Quiet
    ```
 3. Present the Crucible output to the human and request human gate approval if required.

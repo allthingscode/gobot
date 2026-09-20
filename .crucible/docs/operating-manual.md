@@ -551,7 +551,7 @@ To optimize for both output quality and cost-efficiency, Crucible uses a tiered 
 #### Verification Checklist (MANDATORY)
 The Verification phase must verify in this order - a failure at any step blocks approval:
 
-1. **Isolated checks pass** - `powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full` exits 0.
+1. **Isolated checks pass** - `pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full` exits 0.
 2. **Vet/Lint/Test/Doc parity preserved** - helper runs `go vet`, `golangci-lint` and `gotestsum` in the task worktree with isolated caches/tmp. In the framework repo it also runs `go run scripts/crucible_lint.go -framework-root . -backlog-dir <resolved>` (the backlog directory comes from `powershell/resolve-config-path.ps1 -Key backlog`, not from the linter re-reading `config.yaml`); that linter checks Crucible's own backlog and docs, does not ship in a bundle, and is not a step in an adopter's verification.
 3. **Acceptance criteria met** - every checkbox in the spec's `Acceptance Criteria` section is checked off.
 4. **Scope is bounded** - changes are limited to files named in the spec and strictly match the declared `file_affinity` boundary. No unrequested modifications.
@@ -584,11 +584,9 @@ The Verification phase must verify in this order - a failure at any step blocks 
 
 ## Session Protocol
 
-> **Cross-platform invocation.** The `powershell.exe` commands throughout this
-> document are the Windows form. On Linux/macOS, replace `powershell.exe` with
-> `pwsh` (PowerShell 7+). The runtime resolves the correct host automatically
-> when it spawns subprocesses (`powershell/lib/platform.ps1`); only the manual
-> commands shown here need the substitution.
+> **Invocation.** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1
+> is not supported. The runtime resolves the host via `Get-PwshCommand`
+> (`powershell/lib/platform.ps1`) when it spawns subprocesses.
 
 ### Starting a Session (always in this order)
 
@@ -608,14 +606,14 @@ The Verification phase must verify in this order - a failure at any step blocks 
 4. **Advance Pipeline**: Execute `crucible.ps1 -Init -TaskId {task_id}` via the Bash tool using the PowerShell invocation below. Read the output, then **present it verbatim to the human** - copy the exact text of the `[ACTION REQUIRED]` block, including the full command. Do NOT paraphrase it. Wait for human confirmation before transitioning. Your session ends after presenting the output.
 
    ```bash
-   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
    ```
    The `-Quiet` flag suppresses verbose diagnostic output for cleaner session-end presentation. Omit it only when debugging Crucible behavior.
 
    **Orchestrator Auto-Advance**: When running as an orchestrator (not a solo specialist), add `-AutoAdvance` to eliminate human confirmation prompts for non-gate transitions. Crucible will emit `[AUTO-ADVANCE]` instead of `[NEXT SESSION COMMAND]` for mechanical hand-offs (Groomer->Architect, Architect->Reviewer, Reviewer->Operator). Gate transitions (Researcher->Groomer, Operator->*) always pause regardless of this flag.
 
    ```bash
-   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet -AutoAdvance
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet -AutoAdvance
    ```
 
 ### `-NewHandoff` Mode (Deterministic Handoff Generation)
@@ -623,7 +621,7 @@ The Verification phase must verify in this order - a failure at any step blocks 
 Agents **should** use `new-handoff.ps1` via `crucible.ps1 -NewHandoff` to generate handoff files rather than writing JSON manually. This guarantees schema compliance and auto-carries fields like `cumulative_handoff_count`, `review_strike_count`, and `cycle_id` from the previous handoff.
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -NewHandoff -TaskId {task_id} -HandoffSource {role} -HandoffTarget {next_role} -HandoffReason "Reason text"
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -NewHandoff -TaskId {task_id} -HandoffSource {role} -HandoffTarget {next_role} -HandoffReason "Reason text"
 ```
 
 Optional flags: `-HandoffArtifacts`, `-HandoffFileAffinity`, `-HandoffReviewerChecksPassed`. The script validates against the schema before writing, so any error surfaces immediately rather than at the next `crucible.ps1 -Init`.

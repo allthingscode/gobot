@@ -1,4 +1,4 @@
-<!-- prompt_version: research_prompt-v18 -->
+<!-- prompt_version: research_prompt-v19 -->
 Research: {task_id}
 
 {prev_session_summary}
@@ -38,12 +38,12 @@ When your work is complete:
 
 1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete - findings approved at Research Gate"
    ```
 2. Run Crucible to advance the pipeline:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
    ```
 3. Present the Crucible output to the human: what you accomplished and the assembled next-phase prompt.

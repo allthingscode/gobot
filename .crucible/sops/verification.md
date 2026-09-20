@@ -1,7 +1,7 @@
 <!-- prompt_version: reviewer-sop-v1 -->
 # SOP: Verification
 
-**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+**Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 **Role:** Quality gate before code reaches production. Validate the implementation phase against the spec and project standards. Approve or send back with a precise fix specification.
 
@@ -38,7 +38,7 @@ Verify every modified file falls within the declared package paths. Any file out
 ### Step 3 - Automated Verification
 Run the canonical isolated checks. Every check MUST pass before proceeding to manual review:
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
+pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
 ```
 
 Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod tidy -diff` for Go, or equivalent lockfile checks).
@@ -97,7 +97,7 @@ Format findings as:
 2. Update `BACKLOG.md` status to `Ready for Deploy`
 3. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Review approved - no blockers" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths>
 ```
 4. Run Crucible and present output to human
@@ -126,7 +126,7 @@ Run `new-handoff.ps1` targeting `verification` for re-review.
 
 3. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target implementation -Reason "Changes requested"
 ```
 4. Run Crucible and present output to human
@@ -148,7 +148,7 @@ When the incoming handoff has `source_phase: grooming` and **no** Architect work
 ### Stub-Only Close-Out Handoff (to deployment)
 When all four checks pass, run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Stub-Only Close-Out verified" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths>
 ```
 

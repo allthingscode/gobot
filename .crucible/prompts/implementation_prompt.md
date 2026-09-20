@@ -1,4 +1,4 @@
-<!-- prompt_version: implementation_prompt-v33 -->
+<!-- prompt_version: implementation_prompt-v34 -->
 Implementation: {task_id}
 
 {prev_session_summary}
@@ -48,7 +48,7 @@ If you cannot answer all four, STOP. Re-read the files, then answer.
 1. **Orientation**: Read your `task.md` and handoff - identify if this is a fresh implementation (from grooming phase) or a review-fix (from verification phase).
 2. **Decision**: Is the spec >50 lines or unclear? If so, complete Phase 1: Design (write plan to `task.md`) before Phase 2: Code.
 3. **Isolation**: Perform all code edits inside the isolated worktree at `{worktree}`.
-4. **Implementation**: Write idiomatic, well-structured code in the project's language, following the spec and project mandates. Run isolated validation from the assigned worktree as you work: `powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"` (or `-Mode full` before handoff).
+4. **Implementation**: Write idiomatic, well-structured code in the project's language, following the spec and project mandates. Run isolated validation from the assigned worktree as you work: `pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"` (or `-Mode full` before handoff).
 5. **Project mandates**: Follow the language, runtime, error-handling, and safety rules declared in `.crucible/config.yaml` and the target repository instructions. If you add or modify dependencies (e.g. adding imports in Go), you MUST run the language-specific package tidy/lock step (e.g. `go mod tidy`) in the worktree so the lockfile/manifest stays current and tidy.
 6. **Self-Review**: Verify all acceptance criteria are met and test coverage for new code is >80%.
 7. **Commit**: `git add . ; git commit -m "feat(scope): implement {task_id}"` inside the worktree. STRICTLY NO PUSH.
@@ -66,15 +66,15 @@ When your work is complete:
    - Acceptance-criteria mapping: enumerate every AC from the backlog spec and map it to concrete implementation artifacts (specific changed file paths and tests) plus verification evidence.
    - Scope boundary confirmation: confirm every changed file is inside the declared `file_affinity` boundary.
    - Duplicate-handoff prevention: check existing `.crucible/session/handoffs/{task_id}-*.json`; if resubmitting the same transition, include a `supersede` field referencing the prior handoff and provide an updated reason.
-   - Local validation gate: run required local verification before handoff (`powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"`) and task-specific required validation. In the framework repo that includes `go run {{crucible_root}}/scripts/crucible_lint.go -framework-root {{crucible_root}} -backlog-dir <path>` when prompt templates change - a linter that checks Crucible's own backlog and docs and is not part of a bundle - where `<path>` comes from `{{crucible_root}}/powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "{project_root}"`.
+   - Local validation gate: run required local verification before handoff (`pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"`) and task-specific required validation. In the framework repo that includes `go run {{crucible_root}}/scripts/crucible_lint.go -framework-root {{crucible_root}} -backlog-dir <path>` when prompt templates change - a linter that checks Crucible's own backlog and docs and is not part of a bundle - where `<path>` comes from `{{crucible_root}}/powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "{project_root}"`.
 2. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review" -ProjectRoot "{project_root}"
    ```
 3. Run Crucible to advance the pipeline:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
    ```
 4. **Present the Crucible output to the human.** Your message must include:

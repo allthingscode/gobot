@@ -1,4 +1,4 @@
-<!-- prompt_version: verification_prompt-v29 -->
+<!-- prompt_version: verification_prompt-v30 -->
 Verification: {task_id}
 
 {prev_session_summary}
@@ -48,7 +48,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 1. **Setup**: Operate inside the assigned worktree: `.crucible/.agent-workspaces/implementation-{task_id}`. Do not run `git checkout task/{task_id}` from the main checkout.
 2. **Scope Check**: Run `git diff master...task/{task_id} --name-only` and verify all modified files match the spec's `file_affinity`.
 3. **Automated Verification**: Run the canonical isolated checker before manual review:
-   - `powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"`
+   - `pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"`
    
    Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod tidy -diff` for Go, or equivalent lockfile checks).
    
@@ -73,7 +73,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 (Use this workflow if the incoming handoff has `source_phase: grooming` and no implementation worktree/code changes exist.)
 1. **Validation Check (Mandatory)**: Run the backlog validator and verify it exits 0:
    ```bash
-    powershell.exe -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"
+    pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"
    ```
    Paste the validator output into your session response. If the exit code is non-zero, you MUST reject the handoff (set `review_decision: CHANGES_REQUESTED` and write a handoff to `implementation` so the grooming phase can repair the backlog structure).
 2. **Stub-Row and Spec Consistency**: Verify every new stub row in `BACKLOG.md` has a corresponding spec file in `backlog/{type}/active/` and matches the stub-row convention (refer to `{{crucible_root}}/sops/verification.md` Stub-Only Close-Out Checklist).
@@ -89,17 +89,17 @@ When your work is complete:
 1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly).
    If approved (transition to deployment):
    ```bash
-    powershell.exe -ExecutionPolicy Bypass \
+    pwsh -ExecutionPolicy Bypass \
       -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Review approved - no blockers" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths> -ProjectRoot "{project_root}"
    ```
    If changes requested (transition back to implementation):
    ```bash
-    powershell.exe -ExecutionPolicy Bypass \
+    pwsh -ExecutionPolicy Bypass \
       -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target implementation -Reason "Changes requested" -ProjectRoot "{project_root}"
    ```
 2. Run Crucible to advance the pipeline:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
    ```
 3. **Present the Crucible output to the human.** Your message must include:

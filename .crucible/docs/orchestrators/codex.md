@@ -2,7 +2,7 @@
 
 This document defines **Codex CLI-specific** mechanics for Crucible pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Codex CLI environment.
 
-> **Cross-platform.** The `powershell.exe` invocations below are the Windows form. On Linux/macOS, use `pwsh` (PowerShell 7+) in their place.
+> **Invocation.** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 ## The "Orchestrate" Directive
 
@@ -18,7 +18,7 @@ verification/review phase). That topology does **not** use `spawn_agent` or this
 mechanics - the parent invokes the Crucible launcher:
 
 ```
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
   -TaskId {task_id} -Phase {phase} -Model {model}
 ```
 
@@ -114,7 +114,7 @@ Checkpoint verification is not a replacement for `crucible.ps1` gates. It is an 
 For an existing task, the parent runs:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {TASK_ID} -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {TASK_ID} -Quiet
 ```
 
 Then it reads:

@@ -16,8 +16,8 @@ function Get-CrucibleBlock {
         doc still told adopters to run the pre-rename factory.ps1. Edit here and regenerate.
 
         PwshCommand overrides the host named on the runtime line. The gate pins
-        powershell.exe so the generated region is byte-identical on every platform;
-        callers that actually write the block omit it and get the host for this OS.
+        pwsh so the generated region is byte-identical on every platform;
+        callers that actually write the block omit it and get Get-PwshCommand.
     #>
     param(
         [Parameter(Mandatory=$false)][string]$PwshCommand

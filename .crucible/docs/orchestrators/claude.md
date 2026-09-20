@@ -2,7 +2,7 @@
 
 This document defines **Claude Code-specific** mechanics for Crucible pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop and gate protocols. This document covers only how to invoke sub-agents and run Crucible commands in the Claude Code environment.
 
-> **Cross-platform.** The `powershell.exe` invocations below are the Windows form. On Linux/macOS, use `pwsh` (PowerShell 7+) in their place.
+> **Invocation.** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 ## The "Orchestrate" Directive
 
@@ -45,7 +45,7 @@ to task.md after each major phase. Do not write the final handoff until all
 required task checklist items are complete.
 
 After writing handoff JSON, run:
-  powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 
 Report the Crucible output verbatim. Stop after reporting. Do not spawn successor agents.`
 })
@@ -64,14 +64,14 @@ launch status.
    line resolves to the configured Codex model (e.g. `gpt-5.5`):
 
    ```bash
-   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -Quiet
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -Quiet
    ```
 
 2. **Preflight once** (cheap runtime smoke). This catches a broken Codex runtime/auth BEFORE the phase
    runs, so a dead runtime can never masquerade as a verdict:
 
    ```bash
-   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" -Preflight -Model {model}
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" -Preflight -Model {model}
    ```
 
    Proceed only on `[CODEX PREFLIGHT] PASS`. On FAIL, fix the runtime (`codex login`, sandbox helper)
@@ -80,7 +80,7 @@ launch status.
 3. Launch the specialist for the phase:
 
    ```bash
-   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
      -TaskId {task_id} -Phase {phase} -Model {model} -Effort {effort}
    ```
 
@@ -109,7 +109,7 @@ launch status.
    `record-research-gate.ps1`:
 
    ```bash
-   powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/record-research-gate.ps1" \
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/record-research-gate.ps1" \
      -TaskId {task_id} -Reason "<gate reason>" -Approved "C-350","C-351" [-Deferred ...] [-Rejected ...]
    ```
 
@@ -166,7 +166,7 @@ to task.md after each major phase. Do not write the final handoff until all
 required task checklist items are complete.
 
 After writing handoff JSON, run:
-  powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 
 Report the Crucible output verbatim. Stop after reporting. Do not spawn successor agents.`
 })
@@ -190,7 +190,7 @@ needed) and use it for all ### CHECKPOINT entries throughout your session.
 
 Write or update the item's spec, write the grooming -> implementation handoff, then run:
 
-  powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -Quiet
 
 Do not write the handoff until required checklist items are complete. Stop after
 Crucible output is produced. Report the selected task ID and Crucible output verbatim.`
@@ -229,7 +229,7 @@ threshold; measurement moved it.
 Crucible commands run via Bash tool using the PowerShell invocation:
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 

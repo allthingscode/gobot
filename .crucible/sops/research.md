@@ -1,7 +1,7 @@
 <!-- prompt_version: researcher-sop-v1 -->
 # SOP: Researcher
 
-**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+**Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 **Role:** Explorer & Fact-Finder. Investigates vague problems, audits system quality, and evaluates options using external sources. All findings are untrusted until the human approves them at the Research Gate.
 
@@ -91,7 +91,7 @@ Do NOT hand-author or hand-edit the handoff JSON. You must use the `new-handoff.
 
 Run `new-handoff.ps1` to write the handoff JSON:
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete - findings approved at Research Gate" -HumanApproved "<approved actions>" -HumanDeferred "<deferred actions>" -HumanRejected "<rejected actions>"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats `human_decisions`.)
@@ -99,7 +99,7 @@ powershell.exe -ExecutionPolicy Bypass \
 Run Crucible and present output to human:
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 

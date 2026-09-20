@@ -37,10 +37,9 @@ Once you have made a decision:
 2. Update the backlog item status back to `Ready` in `BACKLOG.md` and the spec frontmatter.
 3. Resume the pipeline:
    ```powershell
-   powershell.exe -ExecutionPolicy Bypass -File ".crucible/powershell/crucible.ps1" -Init -TaskId {task_id} -Recover
+   pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible.ps1" -Init -TaskId {task_id} -Recover
    ```
-   *(Linux/macOS: replace `powershell.exe` with `pwsh`.)*
-
+   
 The human is never required to edit session JSON directly. The agent handles all file operations after you give verbal direction.
 
 ---

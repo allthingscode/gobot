@@ -68,9 +68,9 @@ These are invoked **by the agent**, not by you. Listed here for reference only.
 *   **`crucible.ps1 -Doctor`** (or `crucible-doctor.ps1`): Readiness check. In an installed bundle it verifies your config parses, the bundle resolves, a PowerShell host is available, the Crucible scripts are intact, and the tools your `verification` commands call are on PATH - exits non-zero only on a critical failure. Go / `golangci-lint` / `gh` are advisory for adopters (they matter only for the optional GitHub deployment gate).
 *   **`git worktree list`**: See which tasks currently have isolated workspaces.
  
-**Agent bash invocation** (how agents run the script from a bash shell; use `powershell.exe` on Windows, `pwsh` on Linux/macOS):
+**Agent bash invocation** (how agents run the script from a bash shell; use `pwsh`):
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -Target agent -TaskId {task_id}
 # -Target: agent (default) | claude | codex | antigravity
 ```

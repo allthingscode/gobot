@@ -2,7 +2,7 @@
 
 This document defines **Antigravity CLI-specific** mechanics for Crucible pipeline orchestration. Read `.crucible/docs/orchestrator.md` and `.crucible/sops/orchestrator.md` first - the persona establishes who you are, the SOP defines the loop, gate protocols, and failure taxonomy. This document covers only how to invoke sub-agents in the Antigravity CLI environment. The legacy Gemini CLI runtime is retained at the end for reference.
 
-> **Cross-platform.** The `powershell.exe` invocations below are the Windows form. On Linux/macOS, use `pwsh` (PowerShell 7+) in their place.
+> **Invocation.** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 ## The "Orchestrate" Directive
 
@@ -52,7 +52,7 @@ invoke_subagent(
         "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
         "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
         "update its spec, write the grooming -> implementation handoff, then run:\n\n"
-        "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/crucible.ps1\" "
+        "  pwsh -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/crucible.ps1\" "
         "-Init -TaskId <selected_task_id> -Quiet\n\n"
         "Follow your SOP checkpoint mandate. Do not write the handoff until required "
         "checklist items are complete. Stop after Crucible output. Report the selected "
@@ -124,7 +124,7 @@ invoke_agent(
     "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
     "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
     "update its spec, write the grooming -> implementation handoff, then run:\n\n"
-    "  powershell.exe -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/crucible.ps1\" "
+    "  pwsh -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/crucible.ps1\" "
     "-Init -TaskId <selected_task_id> -Quiet\n\n"
     "Follow your SOP checkpoint mandate. Do not write the handoff until required "
     "checklist items are complete. Stop after Crucible output. Report the selected "

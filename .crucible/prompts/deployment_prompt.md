@@ -1,4 +1,4 @@
-<!-- prompt_version: deployment_prompt-v29 -->
+<!-- prompt_version: deployment_prompt-v30 -->
 Deployment: {task_id}
 
 {prev_session_summary}
@@ -78,17 +78,17 @@ When the pre-flight gate passes:
 1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly).
    For standard successful deployment (omit `-CommitHash` and the tool records the tip of `task/{task_id}`, which is the commit being deployed; pass it only to record a different commit):
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved."
    ```
    If production issues were detected requiring grooming/research:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md."
    ```
 2. Run Crucible to advance the pipeline:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
    ```
 3. **Human Gate Signal:** If `crucible.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. That means the gate fired.
@@ -97,7 +97,7 @@ When the pre-flight gate passes:
    - Do not accept placeholders such as `n/a`, `none`, `ok`, or `looks good`.
 5. **Advance with Outcome:** Once the human replies, run Crucible again with the outcome:
    ```bash
-   powershell.exe -ExecutionPolicy Bypass \
+   pwsh -ExecutionPolicy Bypass \
      -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> [-GateReason "Reason"] -Quiet
    ```
    (Outcomes: 1=accepted/pause, 2=rejected/rework, 3=redirected/accept-and-next, 4=abandoned/do-not-accept). Always pass `-GateReason` with the captured one-line reason. If the outcome is 2 (rejected/rework), Crucible will automatically unwind the merge, restore the task branch, recreate the implementation worktree, and generate a sanctioned rework handoff. Your session is then complete, and the orchestrator can resume implementation by running Crucible.

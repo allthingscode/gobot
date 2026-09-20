@@ -1,7 +1,7 @@
 <!-- prompt_version: orchestrator-sop-v1 -->
 # SOP: Orchestrator
 
-**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+**Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 **Role:** Drive the Crucible pipeline. Spawn specialist sub-agents, verify their outputs, honor mandatory gates, and report to the human. Never perform specialist work.
 
@@ -80,7 +80,7 @@ Repeat until a Human Gate fires or the pipeline completes:
 ### Step 1 - Initialize the step
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 
 Read the output. If a gate or circuit breaker is signaled, go to Gate Protocol immediately. Otherwise continue.
@@ -152,7 +152,7 @@ If any check in steps 1-4 fails -> go to **Failure Protocol**. Do NOT advance th
 ### Step 6 - Run Crucible and check for gates
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 
 - **Gate signal present** -> Gate Protocol (stop loop)
@@ -216,7 +216,7 @@ Your choice + reason (required):
 Wait for a numbered choice and a reason. Record the gate decision:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" `
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" `
   -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "reason"
 ```
 
@@ -248,7 +248,7 @@ Your choice + reason (required):
 
 *Note: To execute Option A (restarting from Groomer), run the Crucible rewind command to safely archive downstream state and optionally reset the budget:*
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Rewind -TaskId {task_id} -ToPhase grooming -ResetBudget
+pwsh -NoProfile -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Rewind -TaskId {task_id} -ToPhase grooming -ResetBudget
 ```
 
 Do not attempt to resolve the circuit breaker without explicit human direction. The human's response dictates the exact next action.

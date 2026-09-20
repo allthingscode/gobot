@@ -139,7 +139,7 @@ function New-BootstrapPrompt {
         "",
         "After writing handoff JSON, run:",
         "  pwsh -File `"$CrucibleRootValue/powershell/crucible.ps1`" -Init -TaskId $TaskIdValue -Quiet",
-        "(use powershell.exe on Windows). Report the Crucible output. Do not spawn successor agents."
+        "Report the Crucible output. Do not spawn successor agents."
     )
     if ($RequireJsonVerdict) {
         $lines += ""

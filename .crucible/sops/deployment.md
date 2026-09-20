@@ -1,7 +1,7 @@
 <!-- prompt_version: operator-sop-v3 -->
 # SOP: Deployment
 
-**Platform note:** Command examples use `powershell.exe` for Windows. On Linux/macOS, replace `powershell.exe` with `pwsh`.
+**Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
 **Role:** Merge approved code, verify production health, clean up artifacts, and hand off to the Groomer for the next cycle.
 
@@ -108,14 +108,14 @@ So finalizing early does not save a step. It trips the first check, and recovery
 ### Step 7 - Run new-handoff.ps1 & Advance Pipeline
 Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done". Omit `-CommitHash` and the tool records the tip of `task/{task_id}` itself; pass it only to record a different commit:
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved."
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 
 Run Crucible:
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
 ```
 
@@ -150,7 +150,7 @@ if ($pendingFile) {
 ```
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "<human's one-sentence quality note>" -Quiet
 ```
 
@@ -171,7 +171,7 @@ If a task is rejected during the Human Gate (e.g. choice 2: `rejected`), the fol
 2. **Orchestrator Resumption**:
    - The orchestrator or operator resumes the task by executing the standard initialization:
      ```bash
-     powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id}
+     pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id}
      ```
    - This will boot the implementation phase, print the prompt, and output the command line for the next session under `[NEXT SESSION COMMAND]`.
 
@@ -198,7 +198,7 @@ When production issues are discovered that meet the circuit breaker threshold (P
 1. Document findings in `.crucible/session/{task_id}/deployment/deployment_report.md`
 2. Run `new-handoff.ps1` to write the handoff JSON targeting grooming (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
-powershell.exe -ExecutionPolicy Bypass \
+pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md. grooming should dispatch Researcher."
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)

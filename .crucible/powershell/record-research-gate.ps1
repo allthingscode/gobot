@@ -174,7 +174,7 @@ $fileStep
 
 ## Step 3 - Write the research -> grooming handoff (do NOT hand-edit JSON)
 
-Run new-handoff.ps1 (use powershell.exe on Windows):
+Run new-handoff.ps1:
 
     $CrucibleRoot/powershell/new-handoff.ps1 $handoffArgs
 
