@@ -193,8 +193,11 @@ ones, diverging from CI without any warning.
 - If you see that warning, **delete the local `vendor/` directory**. Because
   `vendor/` is gitignored, this is a local-only action — there is nothing to
   commit. Then rely on the module cache + `go.mod` as normal.
-- Use `go mod verify` (and `govulncheck ./...`) to confirm cached modules match
-  their `go.sum` hashes.
+- Use `go mod verify` to confirm cached modules match their `go.sum` hashes.
+  Scan for reachable vulnerabilities with
+  `GOFLAGS="-mod=readonly" govulncheck ./internal/... ./cmd/...`
+  (the same scoped, readonly command CI and `scripts/check_security.ps1` use;
+  bare `./...` is intentionally avoided).
 
 ---
 
