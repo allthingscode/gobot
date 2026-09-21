@@ -43,6 +43,7 @@ _current_task.md
 /CLAUDE.md
 /GEMINI.md
 /AGENTS.md
+/GROK.md
 /opencode.json
 
 # Backlog lives in .crucible/backlog/ (gitignored as data) - root copy must never exist

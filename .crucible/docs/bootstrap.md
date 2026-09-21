@@ -28,7 +28,7 @@ A complete installed `.crucible/` contains:
 - `schemas/` - handoff and config validation schemas.
 - `standards/` - the standards audits are run against; copy `scorecard-TEMPLATE.md` to make your project's.
 - `powershell/` - current executable runtime.
-- `agent-instructions/` - copy-ready snippets for root `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`.
+- `agent-instructions/` - copy-ready snippets for root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `GROK.md`.
 - `backlog/` - project task index and task specs.
 
 Runtime directories such as `session/`, `.agent-workspaces/`, `locks/`, `tmp/`, and `cache/` are created as needed and ignored by git.
@@ -82,6 +82,7 @@ After bootstrapping `.crucible/`, update the target project's root instruction f
 2. If the project uses Claude Code, add or update `CLAUDE.md` with the Claude snippet.
 3. If the project uses Gemini or Antigravity, add or update `GEMINI.md` with the Gemini snippet.
 4. If the project has a Codex-specific instruction file, point it at `AGENTS.md` and `.crucible/docs/orchestrators/codex.md`.
+5. If the project uses Grok TUI, add or update `GROK.md` with the Grok snippet (`.crucible/agent-instructions/GROK.md`, or the block in [agent-instructions.md](agent-instructions.md)).
 
 The scaffold also places copy-ready snippets in `.crucible/agent-instructions/`. Those snippets are source material; paste or merge them into the root instruction files that your agent tool actually reads.
 

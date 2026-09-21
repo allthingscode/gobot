@@ -27,6 +27,7 @@ Before taking any action:
    - Claude Code: `{{crucible_root}}/docs/orchestrators/claude.md`
    - Antigravity CLI: `{{crucible_root}}/docs/orchestrators/antigravity.md`
    - Codex CLI: `{{crucible_root}}/docs/orchestrators/codex.md`
+   - Grok TUI: `{{crucible_root}}/docs/orchestrators/grok.md`
 
 You cannot enforce policies you have not read. Step 0 is mandatory - every subsequent step depends on the resolved `crucible_root`. Steps 1 and 2 are not optional either.
 

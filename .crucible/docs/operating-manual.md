@@ -365,6 +365,7 @@ finish. Then: `"Groomer: Groom {task_id}"`. The exact invocation syntax depends 
 - **Claude Code**: see `docs/orchestrators/claude.md`
 - **Antigravity CLI**: see `docs/orchestrators/antigravity.md`
 - **Codex CLI**: see `docs/orchestrators/codex.md`
+- **Grok TUI**: see `docs/orchestrators/grok.md`
 
 After each Groomer session, `crucible.ps1 -Init -TaskId <id>` is run automatically by the
 agent. That creates the handoff file that scopes the pipeline to that task.

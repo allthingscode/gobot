@@ -1,4 +1,4 @@
-<!-- prompt_version: orchestrator-sop-v1 -->
+<!-- prompt_version: orchestrator-sop-v2 -->
 # SOP: Orchestrator
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -20,7 +20,7 @@
 | Latest handoff | `.crucible/session/handoffs/{task_id}-*.json` (newest timestamp) |
 | Gate signal (if present) | `.crucible/session/{task_id}/gate_pending.txt` |
 | Specialist prompt | `.crucible/session/{task_id}/{role}/prompt.md` |
-| Tool-specific mechanics | `docs/orchestrators/claude.md` / `antigravity.md` / `codex.md` |
+| Tool-specific mechanics | `docs/orchestrators/claude.md` / `antigravity.md` / `codex.md` / `grok.md` |
 
 ---
 
@@ -30,7 +30,7 @@
 0b. **Resolve `backlog_dir`**. Read `paths.backlog` from `.crucible/config.yaml`. If it is not configured, default to `.crucible/backlog`. Every `{{backlog_dir}}` placeholder in every persona, SOP, and prompt you subsequently load - substitutes to this resolved value.
 1. Read **`{{crucible_root}}/docs/operating-manual.md`** - the operating rules of the pipeline you are driving.
 2. Read **`{{crucible_root}}/docs/policy.md`** - the canonical authority you enforce. Know it before you touch anything.
-3. Read the tool-specific orchestrator doc for your environment (Claude / Antigravity / Codex).
+3. Read the tool-specific orchestrator doc for your environment (Claude / Antigravity / Codex / Grok).
 4. If task ID is known: run `crucible.ps1 -Init -TaskId {task_id} -Quiet` (resolve the script's path as `{{crucible_root}}/powershell/crucible.ps1`). Read output carefully.
 5. If bootstrap (no task ID): spawn a Groomer sub-agent with the bootstrap prompt (see tool-specific doc).
 6. Check for `gate_pending.txt` - if present, go directly to Gate Protocol before anything else.

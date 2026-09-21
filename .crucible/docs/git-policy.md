@@ -58,11 +58,13 @@ The trap is pattern anchoring. A gitignore pattern with no slash in it matches a
 ```
 AGENTS.md
 CLAUDE.md
+GROK.md
 ```
 
 does not only ignore `AGENTS.md` at the root. It also ignores
 `.crucible/agent-instructions/AGENTS.md`, and on a case-insensitive filesystem
-`CLAUDE.md` additionally swallows `.crucible/docs/orchestrators/claude.md`. Nothing
+`CLAUDE.md` additionally swallows `.crucible/docs/orchestrators/claude.md` and
+`GROK.md` swallows `.crucible/docs/orchestrators/grok.md`. Nothing
 warns you; the files simply never get committed, and a fresh clone is missing them.
 
 Anchor the pattern to the repo root with a leading slash:
@@ -70,6 +72,7 @@ Anchor the pattern to the repo root with a leading slash:
 ```
 /AGENTS.md
 /CLAUDE.md
+/GROK.md
 ```
 
 `crucible-doctor.ps1` checks this for you. It expands the commit-by-default list into

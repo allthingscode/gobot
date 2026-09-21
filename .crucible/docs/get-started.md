@@ -29,7 +29,7 @@ cd crucible
 ```powershell
 ./powershell/init-project.ps1 -ProjectRoot <your-project-path> -Language <go|node|python|rust> -WithSampleTask -AppendInstructions
 ```
-This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md.
+This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md. Copy `.crucible/agent-instructions/GROK.md` to a root `GROK.md` if you orchestrate from Grok TUI.
 
 ### Run the sample task
 Commit the scaffold first so Crucible does not flag the new instruction files as untracked:
@@ -100,7 +100,7 @@ my-api/
 |   |-- schemas/             # handoff and config validation schemas
 |   |-- standards/           # audit scorecards you author; commit these
 |   |-- powershell/          # the runtime
-|   |-- agent-instructions/  # copy-ready snippets for AGENTS.md / CLAUDE.md / GEMINI.md
+|   |-- agent-instructions/  # copy-ready snippets for AGENTS.md / CLAUDE.md / GEMINI.md / GROK.md
 |   `-- README.md
 `-- <your source code>
 ```
@@ -316,7 +316,7 @@ The cycle is complete.
 | `.crucible/schemas/` | Installed validation schemas | Yes |
 | `.crucible/powershell/` | Installed runtime scripts | Yes |
 | `.crucible/standards/` | Audit scorecards you author | Yes |
-| `.crucible/agent-instructions/` | Copy-ready snippets for root AGENTS.md, CLAUDE.md, GEMINI.md | Yes |
+| `.crucible/agent-instructions/` | Copy-ready snippets for root AGENTS.md, CLAUDE.md, GEMINI.md, GROK.md | Yes |
 | `.crucible/backlog/` | Specs and BACKLOG.md | Project choice |
 | `.crucible/session/` | Agent scratchpads, handoffs, logs | No (runtime state) |
 | `.crucible/.agent-workspaces/` | Git worktrees | No (runtime state) |

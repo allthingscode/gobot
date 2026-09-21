@@ -449,23 +449,17 @@ try {
 
     # Deleting a live run's root is worse than leaking an abandoned one, so a start time that
     # cannot be read means "assume the owner" - the answer the pid-only rule gave for everything.
-    # Exercised against a real protected process rather than a stub, and paired with a control
-    # that proves the backdated timestamp really does produce the opposite answer when the start
-    # time can be read.
+    # Exercised against a real process whose StartTime this session cannot read, not a stub, and
+    # paired with a control that proves the backdated timestamp produces the opposite answer when
+    # the start time can be read. Item 102 treated "Windows" as the host that can supply that
+    # process. After item 26, CI Windows is pwsh 7 on a GitHub-hosted runner that can read every
+    # live process start time - the same shape as Linux. Skip when the fixture cannot be built.
+    # A host that still has a protected process (typical non-admin Windows) still runs the case.
     $results += Run-Test -Name "A run root whose owner's start time cannot be read is left alone" -Body {
         $protected = Get-UnreadableStartTimeProcess
         if ($null -eq $protected) {
-            # On Windows this borrows a protected system process, so nothing to borrow is a real
-            # failure and the assertion stays in force there - item 89's lesson, unchanged. On
-            # Linux every start time is readable, so the precondition cannot be constructed at all
-            # and the test has nothing to say rather than something to report. Keeping the Windows
-            # assertion is also what stops the skip being reached by rewriting instead of by
-            # platform: mock Test-PlatformIsWindows true and this fails rather than skips.
-            Assert-Result -Name "Windows can supply a process whose start time cannot be read" -Condition (-not (Test-PlatformIsWindows)) -FailureMessage (
-                "no live process on this machine has an unreadable start time, so the branch that treats one " +
-                "as the owner went unexercised rather than passing")
-            Skip-Test ("no process start time is unreadable on this platform, so an owner whose start time " +
-                "cannot be read cannot be constructed; the branch is covered on Windows")
+            Skip-Test ("no live process on this host has an unreadable start time, so an owner whose start time " +
+                "cannot be read cannot be constructed")
         }
 
         # 1990: before any process on a running Windows machine can have started, so a readable start

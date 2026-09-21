@@ -111,6 +111,26 @@ Codex normally reads `AGENTS.md`. If the project has a Codex-specific instructio
 {{crucible_root}}/docs/orchestrators/codex.md
 ```
 
+### `GROK.md`
+
+Grok TUI normally reads `AGENTS.md`. If the project has a Grok-specific instruction file, use the same forwarding pattern:
+
+```markdown
+<!-- crucible-instructions-start -->
+# Grok Instructions
+
+Read `AGENTS.md` first.
+
+For Crucible work, read `.crucible/config.yaml`, resolve `crucible_root`, then follow:
+
+- `{{crucible_root}}/docs/operating-manual.md`
+- `{{crucible_root}}/docs/policy.md`
+- `{{crucible_root}}/docs/orchestrators/grok.md`
+<!-- crucible-instructions-end -->
+```
+
+The scaffold also places this snippet at `.crucible/agent-instructions/GROK.md`. `-AppendInstructions` does not write a root `GROK.md` yet.
+
 ## What Not To Do
 
 - Do not tell agents to read `.private/`.
