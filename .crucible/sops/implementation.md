@@ -1,4 +1,4 @@
-<!-- prompt_version: architect-sop-v1 -->
+<!-- prompt_version: architect-sop-v3 -->
 # SOP: Implementation
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -66,7 +66,7 @@ Read the backlog item spec, then:
 cd .crucible/.agent-workspaces/implementation-{task_id}
 git status  # must show: On branch task/{task_id}
 ```
-If the worktree does not exist or the branch is wrong, STOP and run `crucible.ps1 -Init -TaskId {task_id}` before proceeding.
+If the worktree does not exist or the branch is wrong, STOP and run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}"` before proceeding.
 
 Perform ALL edits inside the isolated worktree at `.crucible/.agent-workspaces/implementation-{task_id}/`.
 
@@ -102,10 +102,10 @@ Before marking ready for Verification:
    <project race/coverage test command>
    ```
 2. Coverage >80% for new code? If not, add tests.
-3. Commit inside the worktree:
+3. Commit inside the worktree with a message in the style of this repo's recent commits (read `git log -5` first): a subject that names the change and a body that says why.
    ```bash
    git add .
-   git commit -m "feat(scope): implement {task_id}"
+   git commit -m "<subject naming the change>" -m "<body saying why>"
    ```
 4. Review your own diff - would you approve this in a PR?
 5. Write completion summary to `.crucible/session/{task_id}/implementation/output.md`
@@ -122,18 +122,18 @@ Before marking ready for Verification:
    - Any deviations from the original plan
 3. Write deployment plan to `.crucible/session/{task_id}/implementation/deployment_plan.md`:
    - Files committed
-   - Commit message (conventional format)
+   - Commit message (subject and body, as committed)
    - Ordered deployment steps
 4. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the handoff JSON file directly):
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review"
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review" -ProjectRoot "{project_root}"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 5. Run Crucible and present output to human:
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
 
 ---

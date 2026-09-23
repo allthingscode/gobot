@@ -593,7 +593,7 @@ function Assert-CrucibleFrameworkIntegrity {
     # the handoff instead of hidden in a commit the old check could not see.
     Write-Host "`n[STOP] Revert the framework-owned edits above before continuing." -ForegroundColor Red
     Write-Host "       If this was a deliberate bundle update, commit it and re-baseline the task:" -ForegroundColor Red
-    Write-Host "         new-handoff.ps1 -TaskId <id> -BaseCommit <commit-of-the-bundle-update>" -ForegroundColor Red
+    Write-Host "         new-handoff.ps1 -TaskId <id> -ProjectRoot `"$(Get-RecoveryProjectRoot -Context $Context)`" -BaseCommit <commit-of-the-bundle-update>" -ForegroundColor Red
     exit 2
 }
 
@@ -774,9 +774,9 @@ function Invoke-HandoffPreflightValidation {
         Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "crucible" `
             -Outcome $missingReasonCode -Notes ("reason_code=" + $missingReasonCode + "; handoff_file=" + $handoffFileName + "; message=Validator script missing") `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-        Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $missingReasonCode `
+        Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $missingReasonCode `
             -Why ("reason_code=" + $missingReasonCode + "; handoff_file=" + $handoffFileName + "; message=Validator script missing: powershell/validate-handoff.ps1") `
-            -RecoveryOverride ("Restore powershell/validate-handoff.ps1 from the Crucible bundle, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id)
+            -RecoveryOverride ("Restore powershell/validate-handoff.ps1 from the Crucible bundle, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`"")
         exit 2
     }
 
@@ -820,7 +820,7 @@ function Invoke-HandoffPreflightValidation {
             Write-EventLog -Event "preflight_failed" -TaskId $handoff.task_id -Specialist "crucible" `
                 -Outcome $reasonCode -Notes ("reason_code=" + $reasonCode + "; handoff_file=" + $handoffFileName + "; message=" + $errorMessage) `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-            Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $reasonCode `
+            Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $reasonCode `
                 -Why ("reason_code=" + $reasonCode + "; handoff_file=" + $handoffFileName + "; message=" + $errorMessage)
             exit 2
         }
@@ -1323,7 +1323,7 @@ function Complete-CrucibleSourceSession {
                 if ($checklistOffenders.Count -gt $checklistListLimit) {
                     Write-Host ("  ... and " + ($checklistOffenders.Count - $checklistListLimit) + " more.") -ForegroundColor Red
                 }
-                Write-Host "Tick the required ## Task List checkboxes in task.md, then re-run crucible.ps1 -Init -TaskId $($handoff.task_id)." -ForegroundColor Red
+                Write-Host "Tick the required ## Task List checkboxes in task.md, then re-run crucible.ps1 -Init -TaskId $($handoff.task_id) -ProjectRoot `"$(Get-RecoveryProjectRoot -Context $Context)`"." -ForegroundColor Red
                 exit 2
             }
         }
@@ -1413,7 +1413,7 @@ function Invoke-CrucibleRuntimeValidation {
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
             -LastSpecialist $handoff.source_phase -Summary "Handoff reported or referenced use of --no-verify or CRUCIBLE_BYPASS_LINUX_LEG, which bypass required git hooks."
-        Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "git_hook_bypass" `
+        Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "git_hook_bypass" `
             -Why "Git hook bypass attempt detected. '--no-verify' and CRUCIBLE_BYPASS_LINUX_LEG require human review. Fix the hook failure or complete Linux leg verification instead of bypassing it."
         exit 2
     }
@@ -1563,7 +1563,7 @@ function Invoke-CrucibleRuntimeValidation {
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary $unreadableRetryHistoryReason -Artifacts $missingArtifacts
-                Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
+                Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
                     -Why $unreadableRetryHistoryReason
                 exit 2
             } else {
@@ -1643,7 +1643,7 @@ function Invoke-CrucibleScopeGates {
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "scope_violation" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary ("Architect modified files outside declared file_affinity: " + $joined) -Artifacts $outOfScopeFiles
-                Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "scope_violation" `
+                Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "scope_violation" `
                     -Why ("Scope boundary violation detected. Out-of-scope files: " + $joined + ". Expand file_affinity or revert out-of-scope changes.")
                 exit 2
             }
@@ -2322,24 +2322,24 @@ function Invoke-CircuitBreakerGates {
                         $distinctNotes = "researcher_config_unreadable: $scanFailedFile"
                         $summaryMsg = "Could not determine the configured research directory because $scanFailedFile could not be read: $scanFailedError. Research input cannot be scanned without it."
                         $wedgeWhy = $summaryMsg + " Reason: Configuration read failure."
-                        $recoveryOverride = "Restore read access to " + $scanFailedFile + ", verify the configured research directory, archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                        $recoveryOverride = "Restore read access to " + $scanFailedFile + ", verify the configured research directory, archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover"
                     } else {
                         $distinctNotes = "researcher_artifact_unscannable: $scanFailedFile"
                         $summaryMsg = "Could not scan $scanFailedFile for prompt injection: $scanFailedError. Unscannable research input is treated as a block."
                         $wedgeWhy = $summaryMsg + " Reason: Scan failure."
-                        $recoveryOverride = "Review external sources before continuing. File: " + $scanFailedFile + "; Scan failure: " + $scanFailedError + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                        $recoveryOverride = "Review external sources before continuing. File: " + $scanFailedFile + "; Scan failure: " + $scanFailedError + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover"
                     }
                 } else {
                     $distinctNotes = "researcher_silent_detector_hit: ${detectedFile}:$detectedRule"
                     $summaryMsg = "Silent injection match in ${detectedFile}: $detectedRule (researcher silent detector hit)"
                     $wedgeWhy = $summaryMsg + ". Reason: Silent corroboration."
-                    $recoveryOverride = "Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover"
+                    $recoveryOverride = "Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover"
                 }
 
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes $distinctNotes `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $summaryMsg
-                Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
+                Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
                     -Why $wedgeWhy `
                     -RecoveryOverride $recoveryOverride
                 exit 2
@@ -2352,9 +2352,9 @@ function Invoke-CircuitBreakerGates {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes ("Suspicious Content Flagged: " + $handoff.suspicious_content) `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Suspicious content flagged in handoff: " + $handoff.suspicious_content)
-        Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
+        Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
             -Why ("Suspicious Content detected. Suspicious content flagged in handoff: " + $handoff.suspicious_content) `
-            -RecoveryOverride ("Review external sources before continuing. Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -Recover")
+            -RecoveryOverride ("Review external sources before continuing. Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover")
         exit 2
     }
 
@@ -2368,7 +2368,7 @@ function Invoke-CircuitBreakerGates {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Persistent Task Failure - Retry over 2" `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "handoff_retry_exceeded" -AttemptCount $handoff.handoff_retry_count -LastSpecialist $handoff.target_phase -Summary "Persistent Task Failure - Retry over 2"
-        Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "handoff_retry_exceeded" `
+        Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "handoff_retry_exceeded" `
             -Why ("Task " + $handoff.task_id + " has been handed off to " + $handoff.target_phase + " " + $handoff.handoff_retry_count + " times. Reason: " + $handoff.reason)
         exit 2
     }
@@ -2389,7 +2389,7 @@ function Invoke-CircuitBreakerGates {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Review Stalemate - 3 strikes" `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "review_stalemate" -AttemptCount $handoff.review_strike_count -LastSpecialist $handoff.target_phase -Summary "Review Stalemate - 3 strikes"
-        Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "review_stalemate" `
+        Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "review_stalemate" `
             -Why ("Task " + $handoff.task_id + " has failed review " + $handoff.review_strike_count + " times. Reason: " + $handoff.reason)
         exit 2
     }
@@ -2412,7 +2412,7 @@ function Invoke-CircuitBreakerGates {
     # Token Budget Enforcement
     if ($handoff.budget_tier) {
         if (-not [string]::IsNullOrWhiteSpace($invalidBudgetTier)) {
-            Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "invalid_budget_tier" `
+            Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "invalid_budget_tier" `
                 -Why ("Invalid budget_tier '" + $handoff.budget_tier + "'. Allowed values: " + ((Get-BudgetTierList) -join ", "))
             exit 1
         }
@@ -2432,7 +2432,7 @@ function Invoke-CircuitBreakerGates {
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "budget_exceeded" -Notes ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling) `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "budget_exceeded" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling)
-            Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "budget_exceeded" `
+            Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "budget_exceeded" `
                 -Why ("Task " + $handoff.task_id + " has reached " + $handoff.cumulative_handoff_count + " handoffs. Ceiling: " + $effectiveCeiling + " for tier " + $handoff.budget_tier + " (base " + $ceiling + " + " + $rebaseCycles + " rebase cycle(s)). Reason: " + $handoff.reason)
             exit 2
         } elseif ($handoffLogParseFailureCount -gt 0 -and
@@ -2444,7 +2444,7 @@ function Invoke-CircuitBreakerGates {
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "unreadable_handoff_history" -Notes $unreadableHandoffReason `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "unreadable_handoff_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $unreadableHandoffReason
-            Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_handoff_history" `
+            Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_handoff_history" `
                 -Why $unreadableHandoffReason
             exit 2
         }
@@ -2455,7 +2455,7 @@ function Invoke-CircuitBreakerGates {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Recurring Merge Conflicts - 3 strikes" `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $handoff.rebase_count -LastSpecialist $handoff.target_phase -Summary "Recurring Merge Conflicts - 3 strikes. Task requires manual intervention."
-        Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "recurring_merge_conflicts" `
+        Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "recurring_merge_conflicts" `
             -Why ("Task " + $handoff.task_id + " has been rebased " + $handoff.rebase_count + " times and still conflicts.")
         exit 2
     }
@@ -2466,7 +2466,7 @@ function Invoke-CircuitBreakerGates {
         $isolatedChecksScript = "$FRAMEWORK_POWERSHELL/run-isolated-checks.ps1"
         if (Test-Path $wtPath) {
             if (-not (Test-Path $isolatedChecksScript)) {
-                Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "missing_isolated_checks_script" `
+                Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "missing_isolated_checks_script" `
                     -Why ("Missing isolated checks script: " + $isolatedChecksScript)
                 exit 2
             }
@@ -2541,7 +2541,7 @@ function Invoke-CircuitBreakerGates {
                         $testOutputSummary = (($testOutput | ForEach-Object { [string]$_ }) -join " ")
                         $reviewerVerificationWhy = "Independent verification check failed on retry: " + $failedCheck + ". Check output: " + $testOutputSummary + ". Route back to Architect."
                     }
-                    Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "reviewer_verification_failed" `
+                    Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "reviewer_verification_failed" `
                         -Why $reviewerVerificationWhy
                     exit 2
                 } elseif ($retryHistoryParseFailureCount -gt 0) {
@@ -2549,7 +2549,7 @@ function Invoke-CircuitBreakerGates {
                     Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "unreadable_retry_history" -Notes $unreadableRetryHistoryReason `
                         -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                     Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary $unreadableRetryHistoryReason
-                    Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
+                    Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
                         -Why $unreadableRetryHistoryReason
                     exit 2
                 } else {
@@ -2665,7 +2665,7 @@ function Invoke-HumanGateMerge {
         if (Get-Command Write-BlockedTaskRecord -ErrorAction SilentlyContinue) {
             Write-BlockedTaskRecord -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
         }
-        Write-WedgeReport -TaskId $TaskId -SourcePhase "deployment" -TargetPhase "deployment" -BreakerCode "recurring_merge_conflicts" `
+        Write-WedgeReport -TaskId $TaskId -ProjectRoot $ProjectRoot -SourcePhase "deployment" -TargetPhase "deployment" -BreakerCode "recurring_merge_conflicts" `
             -Why "Recurring Merge Conflicts: task/$TaskId rebased $currentRebase time(s) and still conflicts with $PrimaryBranch. Reduce scope or resolve the conflict manually."
         & $removePrematureAccept
         return "breaker"
@@ -3370,12 +3370,12 @@ function Invoke-HumanGateAcceptRedirect {
             }
         } else {
             Write-Host "[HUMAN GATE] Refusing to push; merge remains LOCAL only." -ForegroundColor Yellow
-            if ($requireGreenCi) {
-                Write-Host "[HUMAN GATE] Verify adopter CI for the merge commit BEFORE pushing:" -ForegroundColor Yellow
-                Write-Host ("  pwsh -File .crucible/powershell/watch-adopter-ci.ps1 -Commit " + $mergedSha) -ForegroundColor Cyan
-            }
             Write-Host "Run the following command to publish:" -ForegroundColor Yellow
             Write-Host "  git push origin $PrimaryBranch" -ForegroundColor Cyan
+            if ($requireGreenCi) {
+                Write-Host "[HUMAN GATE] After that push, watch adopter CI for the merge commit:" -ForegroundColor Yellow
+                Write-Host ("  pwsh -File .crucible/powershell/watch-adopter-ci.ps1 -Commit " + $mergedSha) -ForegroundColor Cyan
+            }
         }
 
         $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
@@ -3927,7 +3927,7 @@ Copy-Item `$right `$rightCopy -Force
     } else {
         $menu += "  - $NoCodeReviewHint`n`n"
     }
-    $menu += "Gate fired. Run crucible.ps1 -Init -TaskId $TaskId -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
+    $menu += "Gate fired. Run crucible.ps1 -Init -TaskId $TaskId -ProjectRoot `"$RepoRoot`" -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
     $menu | Set-Content -Path $PendingFilePath -Encoding UTF8
 }
 
@@ -4207,7 +4207,7 @@ function Invoke-HumanGate {
                             
                             # Construct gate-specific command for next_step.txt
                             $pwshCmd = Get-PwshCommand
-                            $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
+                            $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$repoRoot`" -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
                             Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                             
                             exit 0
@@ -4281,7 +4281,7 @@ function Invoke-HumanGate {
                     
                     # Construct gate-specific command for next_step.txt
                     $pwshCmd = Get-PwshCommand
-                    $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
+                    $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$repoRoot`" -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
                     Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                     
                     exit 0
@@ -4421,7 +4421,7 @@ function Invoke-RepositoryIntegrityGates {
                 Write-Host "  - $f [$classification]" -ForegroundColor Yellow
             }
             Write-Host "`nSTASH or SURFACE untracked non-private files. Require human confirmation before deleting anything that is not obviously empty/scratch (marked as safe-to-remove). Never blanket-delete." -ForegroundColor Red
-            Write-Host "After resolving, re-run crucible.ps1 -Init -TaskId $($handoff.task_id)" -ForegroundColor Red
+            Write-Host "After resolving, re-run crucible.ps1 -Init -TaskId $($handoff.task_id) -ProjectRoot `"$repoRoot`"" -ForegroundColor Red
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "blocked" -Notes ("Stray untracked files: " + ($strayFiles -join ", ")) -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             exit 2
         }
@@ -4458,7 +4458,7 @@ function Resolve-CrucibleTransition {
         $validTransitions.GetEnumerator() | ForEach-Object {
             $validTransitionSummary += ($_.Key + " -> " + ($_.Value -join " | "))
         }
-        Write-WedgeReport -TaskId $handoff.task_id -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "invalid_transition" `
+        Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "invalid_transition" `
             -Why ("Invalid pipeline transition: " + $transitionMsg) `
             -RecoveryOverride ("Fix the handoff's target_phase field. Valid transitions: " + ($validTransitionSummary -join "; "))
         

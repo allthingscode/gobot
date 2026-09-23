@@ -58,7 +58,7 @@ to task.md after each major phase. Do not write the final handoff until all
 required task checklist items are complete.
 
 After writing handoff JSON, run:
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot {adopter project root} -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{adopter project root}" -Quiet
 
 Report the Crucible output verbatim. Stop after reporting. Do not spawn successor agents.`
 })
@@ -89,7 +89,7 @@ needed) and use it for all ### CHECKPOINT entries throughout your session.
 
 Write or update the item's spec, write the grooming -> implementation handoff, then run:
 
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -ProjectRoot {adopter project root} -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -ProjectRoot "{adopter project root}" -Quiet
 
 Do not write the handoff until required checklist items are complete. Stop after
 Crucible output is produced. Report the selected task ID and Crucible output verbatim.`
@@ -119,10 +119,26 @@ Resolve `{model}` / `{effort}` with `crucible.ps1 -Init -Target codex`. Trust `[
 ## Running Crucible Commands
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot {adopter project root} -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{adopter project root}" -Quiet
 ```
 
 On Windows, invoke `pwsh` directly. Do not wrap the call in `powershell.exe`, and do not look up `powershell.exe` on PATH.
+
+### When the terminal is cmd.exe
+
+cmd.exe strips only plain double quotes. Any other quoting reaches `pwsh` as part of the path. `pwsh` then exits 64 with "The argument '...' is not recognized as the name of a script file", even though the file exists. These forms fail that way:
+
+- Backslash-escaped quotes: `pwsh -File \"C:\gobot\.crucible\powershell\crucible.ps1\"`. Some tool layers add the backslashes themselves.
+- Single quotes: `pwsh -File 'C:\gobot\.crucible\powershell\crucible.ps1'`.
+- A quoted path that ends in a backslash: `"C:\gobot\"`. The backslash escapes the closing quote, so the rest of the line joins the path. This applies to `-ProjectRoot` as well.
+
+If exit 64 appears, drop the quotes. Set the working directory to the adopter root, pass `-File` a relative path, and pass the absolute adopter root to `-ProjectRoot` unquoted with no trailing backslash:
+
+```
+pwsh -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -TaskId {task_id} -ProjectRoot {adopter project root} -Quiet
+```
+
+Keep `-ProjectRoot` absolute. Some code paths join a relative root against the current directory, so `.` is only safe while nothing changes directory. If the adopter root contains a space, it cannot go unquoted. Put the command in a `.cmd` wrapper in the adopter root, quote the root inside the wrapper, and run the wrapper.
 
 The orchestrator runs `crucible.ps1 -Init` at two points per specialist cycle:
 

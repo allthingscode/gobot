@@ -195,6 +195,17 @@ try {
         Assert-Result -Name "skipped does not block" -Condition (@($blocking | Where-Object { $_ -like "*Deliberately skipped*" }).Count -eq 0) -FailureMessage 'the prompts promise that a [-] item is accepted as skipped, and it blocked'
         Assert-Result -Name "checked does not block" -Condition (@($blocking | Where-Object { $_ -like "*Done*" }).Count -eq 0) -FailureMessage "a completed item was reported as blocking"
     }
+
+    # The C-383 Architect obeyed a prescribed "implement {task_id}" subject and committed a
+    # message that said neither what changed nor why. All three places that tell the Architect
+    # how to commit have to send it to the repo's own history instead. Item 120.
+    $results += Run-Test -Name "Every Architect commit instruction defers to the repo's commit style" -Body {
+        foreach ($relative in @("prompts/implementation_prompt.md", "sops/implementation.md", "powershell/lib/session-output.ps1")) {
+            $text = [System.IO.File]::ReadAllText((Join-Path $REPO_ROOT $relative))
+            Assert-Result -Name ($relative + " prescribes no fixed task-ID subject") -Condition (-not $text.Contains("implement {task_id}")) -FailureMessage ($relative + " still hands the Architect a commit subject that names only the task ID")
+            Assert-Result -Name ($relative + " points at the repo's recent commits") -Condition ($text.Contains("style of this repo's recent commits")) -FailureMessage ($relative + " does not tell the Architect to match the repo's recent commit messages")
+        }
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

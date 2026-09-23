@@ -1,4 +1,4 @@
-<!-- prompt_version: orchestrator-sop-v2 -->
+<!-- prompt_version: orchestrator-sop-v3 -->
 # SOP: Orchestrator
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -31,7 +31,7 @@
 1. Read **`{{crucible_root}}/docs/operating-manual.md`** - the operating rules of the pipeline you are driving.
 2. Read **`{{crucible_root}}/docs/policy.md`** - the canonical authority you enforce. Know it before you touch anything.
 3. Read the tool-specific orchestrator doc for your environment (Claude / Antigravity / Codex / Grok).
-4. If task ID is known: run `crucible.ps1 -Init -TaskId {task_id} -Quiet` (resolve the script's path as `{{crucible_root}}/powershell/crucible.ps1`). Read output carefully.
+4. If task ID is known: run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` (resolve the script's path as `{{crucible_root}}/powershell/crucible.ps1`). Read output carefully.
 5. If bootstrap (no task ID): spawn a Groomer sub-agent with the bootstrap prompt (see tool-specific doc).
 6. Check for `gate_pending.txt` - if present, go directly to Gate Protocol before anything else.
 
@@ -80,7 +80,7 @@ Repeat until a Human Gate fires or the pipeline completes:
 ### Step 1 - Initialize the step
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
 
 Read the output. If a gate or circuit breaker is signaled, go to Gate Protocol immediately. Otherwise continue.
@@ -152,7 +152,7 @@ If any check in steps 1-4 fails -> go to **Failure Protocol**. Do NOT advance th
 ### Step 6 - Run Crucible and check for gates
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
 
 - **Gate signal present** -> Gate Protocol (stop loop)
@@ -217,7 +217,7 @@ Wait for a numbered choice and a reason. Record the gate decision:
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" `
-  -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "reason"
+  -Init -TaskId {task_id} -ProjectRoot "{project_root}" -GateOutcome <outcome> -GateReason "reason"
 ```
 
 **STOP. The orchestration session ends here.** Do not check for a next prompt. Do not dispatch any further specialists. Report the pipeline state and wait for a new human directive to start the next cycle. The human's choice is the gate - the orchestrator does not advance past it autonomously.
@@ -262,7 +262,7 @@ When a sub-agent does not produce required output, use this decision tree before
 ```
 Q1: Did the specialist complete their work but fail to run crucible.ps1?
   YES -> Orchestration Repair:
-          - Run crucible.ps1 -Init -TaskId {task_id} yourself if a valid handoff exists
+          - Run crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" yourself if a valid handoff exists
           - If no handoff: re-dispatch the specialist to write the handoff only
   NO  v
 

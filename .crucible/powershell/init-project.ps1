@@ -478,7 +478,7 @@ if ($AppendInstructions) {
 }
 Write-Info "  4. From the project root, run .crucible/powershell/validate-config.ps1 -ConfigPath .crucible/config.yaml."
 if ($WithSampleTask) {
-    Write-Info "  5. F-001 sample task installed. Run '.\.crucible\powershell\crucible.ps1 -Init -TaskId F-001' to smoke-test the pipeline. Add your own backlog items afterward." -ForegroundColor DarkGray
+    Write-Info "  5. F-001 sample task installed. Run '.\.crucible\powershell\crucible.ps1 -Init -TaskId F-001 -ProjectRoot `"$resolvedProjectRoot`"' to smoke-test the pipeline. Add your own backlog items afterward." -ForegroundColor DarkGray
 } else {
     Write-Info "  5. Add initial backlog items under $relativeBacklogPath."
 }

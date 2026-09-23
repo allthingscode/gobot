@@ -1,4 +1,4 @@
-<!-- prompt_version: verification_prompt-v30 -->
+<!-- prompt_version: verification_prompt-v31 -->
 Verification: {task_id}
 
 {prev_session_summary}
@@ -36,7 +36,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 4. **Your SOP**: `.crucible/sops/verification.md` - full review workflow, report format, decision logic
 5. **Context Bundle**: `{context_bundle_path}` - role-scoped metadata bundle
 
-> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -Quiet` first,
+> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first,
 > then re-read this prompt.
 
 {context_block}
@@ -100,7 +100,7 @@ When your work is complete:
 2. Run Crucible to advance the pipeline:
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
    ```
 3. **Present the Crucible output to the human.** Your message must include:
    - A 2-3 sentence summary of review outcome (approved / changes requested, key findings).

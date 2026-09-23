@@ -67,6 +67,40 @@ $results += Run-Test -Name "Get-WedgeReportLines collapses embedded newlines in 
     Assert-Result -Name "recovery override newline collapsed to a space" -Condition ($joined -match "RECOVERY:\s+step one step two") -FailureMessage "embedded newline in RecoveryOverride survived into the report. Lines:`n$joined"
 }
 
+# TODO item 126. A re-run command without -ProjectRoot inits whichever tree the shell is in,
+# which from the framework checkout is the wrong one (item 119). The table cannot know the
+# root, so it carries a placeholder the report fills in; these pin that it is filled in.
+$results += Run-Test -Name "Every recovery that re-runs Init carries the supplied -ProjectRoot" -Body {
+    $root = "C:/work/adopter"
+    $codes = @(Get-WedgeRecoveryCodes)
+    Assert-Result -Name "at least one recovery code exists" -Condition ($codes.Count -gt 0) -FailureMessage "Get-WedgeRecoveryCodes returned nothing, so the loop below would prove nothing"
+
+    $rerunCount = 0
+    $missing = @()
+    foreach ($code in $codes) {
+        $recovery = Get-WedgeRecovery -BreakerCode $code -TaskId "F-126" -ProjectRoot $root
+        if ($recovery -notmatch 'crucible\.ps1"? -Init') { continue }
+        $rerunCount++
+        if (-not $recovery.Contains('-ProjectRoot "' + $root + '"') -or $recovery.Contains("{project_root}")) {
+            $missing += ($code + ": " + $recovery)
+        }
+    }
+    Assert-Result -Name "recovery table has Init re-run commands to check" -Condition ($rerunCount -gt 0) -FailureMessage "no recovery re-runs crucible.ps1 -Init, so this test checks nothing"
+    Assert-Result -Name "each Init re-run passes the supplied root" -Condition ($missing.Count -eq 0) -FailureMessage ("re-run commands without the supplied -ProjectRoot:`n" + ($missing -join "`n"))
+}
+
+$results += Run-Test -Name "A recovery override gets the same -ProjectRoot substitution as a table entry" -Body {
+    $override = 'Fix it, then run: crucible.ps1 -Init -TaskId F-126 -ProjectRoot "{project_root}" -Recover'
+    $lines = Get-WedgeReportLines -TaskId "F-126" -SourcePhase "a" -TargetPhase "b" -BreakerCode "human_escalation" -Why "x" -RecoveryOverride $override -ProjectRoot "C:/work/adopter"
+    $joined = $lines -join "`n"
+    Assert-Result -Name "override root substituted" -Condition ($joined.Contains('-ProjectRoot "C:/work/adopter" -Recover')) -FailureMessage "override kept its placeholder or lost the root. Lines:`n$joined"
+}
+
+$results += Run-Test -Name "A blank ProjectRoot leaves the placeholder visible rather than an empty root" -Body {
+    $recovery = Get-WedgeRecovery -BreakerCode "scope_violation" -TaskId "F-126"
+    Assert-Result -Name "placeholder kept" -Condition ($recovery.Contains('-ProjectRoot "{project_root}"')) -FailureMessage ("expected the {project_root} placeholder, as {task_id} is kept for a blank TaskId. Got: " + $recovery)
+    Assert-Result -Name "no empty root" -Condition (-not $recovery.Contains('-ProjectRoot ""')) -FailureMessage ("an empty -ProjectRoot resolves the current directory, which is the defect. Got: " + $recovery)
+}
 $failed = @($results | Where-Object { -not $_ }).Count
 if ($failed -gt 0) {
     Write-Host ("`n$failed crucible-gates-wedge-report test(s) failed.") -ForegroundColor Red

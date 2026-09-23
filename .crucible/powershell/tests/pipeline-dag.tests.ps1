@@ -235,6 +235,28 @@ try {
         }
     }
 
+    # The deployment readiness check asked for the Operator's "ONE permitted successor"
+    # while the policy line above it listed three, so a literal reader could refuse a legal
+    # rework or grooming handoff. The Successors line was already checked; the question and
+    # the routing checkboxes were not. Item 123.
+    $results += Run-Test -Name "Deployment routing questions name every successor the DAG allows" -Body {
+        $allowed = @((Get-PipelineValidTransitions -DeploymentRework $true)["deployment"] | Sort-Object -Unique)
+        $promptLines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "prompts/deployment_prompt.md"))
+        $sopLines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/deployment.md"))
+        $routingLines = @(
+            @{ Name = "prompt readiness question"; Lines = @($promptLines | Where-Object { $_ -match '^3\. .*successor' }) },
+            @{ Name = "prompt final check"; Lines = @($promptLines | Where-Object { $_ -match '^- \[ \] I am routing to' }) },
+            @{ Name = "SOP final check"; Lines = @($sopLines | Where-Object { $_ -match '^- \[ \] Routing to' }) }
+        )
+        foreach ($routing in $routingLines) {
+            Assert-Result -Name ($routing.Name + " found") -Condition ($routing.Lines.Count -eq 1) -FailureMessage ("expected exactly one " + $routing.Name + " line but found " + $routing.Lines.Count)
+            if ($routing.Lines.Count -ne 1) { continue }
+            Assert-Result -Name ($routing.Name + " does not claim a single successor") -Condition ($routing.Lines[0] -cnotmatch '\bONE\b') -FailureMessage ($routing.Name + " still says the Operator has one permitted successor: " + $routing.Lines[0])
+            $named = @([regex]::Matches($routing.Lines[0], '`([a-z]+)`') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+            Assert-StringArrayEqual -Name ($routing.Name + " names the DAG successors") -Actual $named -Expected $allowed
+        }
+    }
+
 } finally {
 }
 

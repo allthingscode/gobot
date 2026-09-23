@@ -8,7 +8,8 @@ function Invoke-TaskRewind {
         [Parameter(Mandatory=$true)][string]$LogFile,
         [Parameter(Mandatory=$true)][string]$CircuitBreakerHistoryFile,
         [switch]$Quiet,
-        [Parameter(Mandatory=$true)][string]$WorkspacesDir
+        [Parameter(Mandatory=$true)][string]$WorkspacesDir,
+        [string]$ProjectRoot = ""
     )
 
     $timestamp = Get-UtcFileTimestamp
@@ -127,6 +128,7 @@ function Invoke-TaskRewind {
             Write-Host "  - Worktree: Preserved at $worktreePath" -ForegroundColor Yellow
         }
         Write-Host "`n[REWIND] Next suggested command to start grooming:" -ForegroundColor Green
-        Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -TaskId $TaskId" -ForegroundColor Yellow
+        $rootForCommand = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "{project_root}" } else { $ProjectRoot }
+        Write-Host "  pwsh -NoProfile -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -TaskId $TaskId -ProjectRoot `"$rootForCommand`"" -ForegroundColor Yellow
     }
 }

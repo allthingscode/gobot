@@ -4,7 +4,7 @@ When a circuit breaker fires, `crucible.ps1` writes a blocked record to `.crucib
 
 > **Canonical policy** (thresholds, DAG rules): [policy.md](policy.md)  
 > **Blocked record location**: `.crucible/backlog/blocked/{task_id}-{timestamp}.json`  
-> **Re-entry command**: `crucible.ps1 -Init -TaskId {task_id} -Recover`
+> **Re-entry command**: `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Recover`
 
 ---
 
@@ -37,7 +37,7 @@ Once you have made a decision:
 2. Update the backlog item status back to `Ready` in `BACKLOG.md` and the spec frontmatter.
 3. Resume the pipeline:
    ```powershell
-   pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible.ps1" -Init -TaskId {task_id} -Recover
+   pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Recover
    ```
    
 The human is never required to edit session JSON directly. The agent handles all file operations after you give verbal direction.
@@ -199,7 +199,7 @@ Were the files supposed to be created?
 1. List what actually exists in the worktree: `git -C .crucible/.agent-workspaces/implementation-{task_id} status`
 2. Compare against the spec's acceptance criteria.
 3. If work is genuinely missing: re-dispatch the Architect with "Your handoff lists {file} as an artifact but it does not exist. Create it."
-4. If the handoff just listed the wrong path: have the agent correct the handoff JSON and re-run `crucible.ps1 -Init -TaskId {task_id}`.
+4. If the handoff just listed the wrong path: have the agent correct the handoff JSON and re-run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}"`.
 
 ---
 
@@ -318,7 +318,7 @@ Is the malformed line explicable - a crash mid-write, a disk-full, a manual edit
 1. Open the pipeline log and find the lines that do not parse. Each is a single JSON object per line; a truncated or concatenated line is the usual shape.
 2. Decide whether the corruption is accidental or deliberate. Writers serialize through `Invoke-FileLock`, so ordinary operation should not tear a line.
 3. Repair the malformed lines, or move them to an archive file so the scan reads a clean log. Do not delete history you have not read.
-4. Run `crucible.ps1 -Init -TaskId {task_id} -Recover`.
+4. Run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Recover`.
 5. If the scan now finds a genuine prior retry, the underlying breaker fires and you handle that one instead. That is the intended outcome, not a second failure.
 
 ---
@@ -345,7 +345,7 @@ Is the corruption explicable - a crash mid-write, disk full, a hand edit?
 1. Read the pipeline log and locate the lines that do not parse. One JSON object per line; truncated or concatenated lines are the usual shape.
 2. If the lines are recoverable, repair them so their `session_end` events are counted. The honest resolution is to recompute the count, not to raise the ceiling.
 3. If they are not recoverable, move them to an archive file and decide the count deliberately. Record that decision - the next run will not know you made it.
-4. Run `crucible.ps1 -Init -TaskId {task_id} -Recover`.
+4. Run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Recover`.
 5. If the repaired count now exceeds the ceiling, Breaker 4 fires. That is the correct outcome, not a new problem.
 
 ---

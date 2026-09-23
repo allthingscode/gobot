@@ -1068,6 +1068,44 @@ budget_tier: "low"
         }
     }
 
+    # The deployment prompt's merge-simulation route. The generator runs validate-handoff,
+    # which allows deployment -> implementation only on rework re-entry, so the command the
+    # prompt prescribes has to pass and the same command without -RebaseCount has to fail.
+    # The second half is why the flag is there. Item 127.
+    Invoke-Test -Name "deployment->implementation merge-conflict handoff needs -RebaseCount above the incoming count" -Script {
+        $taskId = New-TestTaskId "REBASE-SIM"
+        New-PriorHandoff -TaskId $taskId -SourcePhase "verification" -TargetPhase "deployment" -Strike 0
+        $baseArgs = @{
+            TaskId = $taskId
+            Source = "deployment"
+            Target = "implementation"
+            Reason = "Merge conflict detected during simulation. See conflict_report.json."
+            PromptVersion = "deployment_prompt-v33"
+            Artifacts = @("powershell/crucible.ps1")
+            SchemaPath = $schemaPath
+        }
+
+        $refused = Invoke-Generator -InputArgs $baseArgs
+        if ($refused.ExitCode -eq 0) {
+            $null = Track-HandoffFile -TaskId $taskId
+            throw "Expected deployment->implementation without -RebaseCount to be refused at an incoming rebase_count of 0"
+        }
+        if ((ConvertTo-NormalizedOutput $refused.Output) -notmatch 'invalid_transition') {
+            throw "Expected the refusal to be invalid_transition, got: $($refused.Output)"
+        }
+
+        $withCount = $baseArgs.Clone()
+        $withCount["RebaseCount"] = 1
+        $accepted = Invoke-Generator -InputArgs $withCount
+        if ($accepted.ExitCode -ne 0) { throw "Generator refused the prescribed handoff: $($accepted.Output)" }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ([int]$obj.rebase_count -ne 1) {
+            throw "Expected rebase_count 1, got: $($obj.rebase_count)"
+        }
+    }
+
     Invoke-Test -Name "explicit -ReviewStrikeCount overrides auto-increment on verification->implementation" -Script {
         $taskId = New-TestTaskId "STRIKE-VI-OVERRIDE"
         New-PriorHandoff -TaskId $taskId -SourcePhase "implementation" -TargetPhase "verification" -Strike 1

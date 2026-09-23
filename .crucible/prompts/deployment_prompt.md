@@ -1,4 +1,4 @@
-<!-- prompt_version: deployment_prompt-v30 -->
+<!-- prompt_version: deployment_prompt-v33 -->
 Deployment: {task_id}
 
 {prev_session_summary}
@@ -24,7 +24,7 @@ Echo the following from the files you are required to read:
 
 1. From `task.md`: What is the Cycle ID?  -> ___
 2. From `{handoff_file}`: What is the handoff reason?  -> ___
-3. From this prompt's POLICY ENFORCEMENT and `.crucible/sops/deployment.md`: What is your ONE permitted successor phase?  -> ___
+3. From this prompt's POLICY ENFORCEMENT and `.crucible/sops/deployment.md`: Which legal successor phase will this session use: `done`, `grooming`, or `implementation` (rework only)?  -> ___
 
 If you cannot answer all three, STOP. Re-read the files, then answer.
 
@@ -35,7 +35,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 4. **Your SOP**: `.crucible/sops/deployment.md` - full deployment workflow, merge protocol, cleanup steps
 5. **Context Bundle**: `{context_bundle_path}` - role-scoped metadata bundle
 
-> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -Quiet` first,
+> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first,
 > then re-read this prompt.
 
 {context_block}
@@ -43,7 +43,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 ## Deployment Workflow
 
 1. **Verify Task Dependencies ({task_id})**:
-   - Run `crucible.ps1 -Init -TaskId {task_id} -Quiet` (already done if you are reading this, but ensure it didn't emit a blocking dependency error).
+   - Run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` (already done if you are reading this, but ensure it didn't emit a blocking dependency error).
    - If `crucible.ps1` blocks due to unsatisfied dependencies, STOP. Do not proceed with the merge.
    - Hand off to **grooming** or wait for the prerequisite tasks to reach `Production`.
 
@@ -57,9 +57,13 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
      (Note: No-Code Closures have no task branch; the simulation will automatically detect this and report a clean exit).
    - **If it fails**:
      - Status: Set task status to `"Ready for Rebase"`.
-     - Target: Hand off to **implementation** (`target_phase: "implementation"`).
-     - Reason: "Merge conflict detected during simulation. See conflict_report.json."
-     - Prompt: Instruct implementation to rebase `task/{task_id}` onto `master`.
+     - Hand off to **implementation** with exactly this command. `-RebaseCount {next_rebase_count}` is one above the incoming handoff's count. Validation refuses deployment -> implementation without it, and the `recurring_merge_conflicts` breaker counts it.
+       ```bash
+       pwsh -ExecutionPolicy Bypass \
+         -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target implementation -Reason "Merge conflict detected during simulation. See conflict_report.json." -RebaseCount {next_rebase_count} -ProjectRoot "{project_root}"
+       ```
+     - The Architect's prompt then carries the rebase workflow: rebase `task/{task_id}` onto `master`.
+     - Then run Crucible to advance, as in step 2 of "When the pre-flight gate passes" below, and stop. Skip step 4: nothing was deployed.
    - **If it passes**: Proceed to Step 4.
 
 4. **Dev Log Generation ({task_id})**:
@@ -79,17 +83,17 @@ When the pre-flight gate passes:
    For standard successful deployment (omit `-CommitHash` and the tool records the tip of `task/{task_id}`, which is the commit being deployed; pass it only to record a different commit):
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved."
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved." -ProjectRoot "{project_root}"
    ```
    If production issues were detected requiring grooming/research:
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md."
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md." -ProjectRoot "{project_root}"
    ```
 2. Run Crucible to advance the pipeline:
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
    ```
 3. **Human Gate Signal:** If `crucible.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. That means the gate fired.
 4. **Present the Menu + Capture Reason:** Show the menu from `gate_pending.txt` (or the console output), which includes the visual review options (Launch visual diff tool, Command-line text diff, and Open the worktree folder in your editor) to help the human inspect changes. Ask for the human's choice (1, 2, 3, or 4), and require one concrete one-line quality reason for the chosen outcome.
@@ -98,7 +102,7 @@ When the pre-flight gate passes:
 5. **Advance with Outcome:** Once the human replies, run Crucible again with the outcome:
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> [-GateReason "Reason"] -Quiet
+     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> [-GateReason "Reason"] -ProjectRoot "{project_root}" -Quiet
    ```
    (Outcomes: 1=accepted/pause, 2=rejected/rework, 3=redirected/accept-and-next, 4=abandoned/do-not-accept). Always pass `-GateReason` with the captured one-line reason. If the outcome is 2 (rejected/rework), Crucible will automatically unwind the merge, restore the task branch, recreate the implementation worktree, and generate a sanctioned rework handoff. Your session is then complete, and the orchestrator can resume implementation by running Crucible.
 
@@ -114,7 +118,7 @@ Timestamp format: `yyyyMMddTHHmmssZ` (UTC) - e.g., `{task_id}-20260418T143022Z.j
 ---
 ## Final Check - Before Running new-handoff.ps1
 Re-confirm before you run new-handoff.ps1:
-- [ ] I am routing to: done (or grooming if production issue threshold met)
+- [ ] I am routing to one legal successor: `done`, `grooming` (production issue threshold met), or `implementation` (rework only)
 - [ ] I have NOT edited BACKLOG.md outside my permitted scope
 - [ ] The task_id in my handoff matches the task I was given
 - [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2

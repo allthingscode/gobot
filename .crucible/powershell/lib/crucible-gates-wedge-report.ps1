@@ -10,26 +10,26 @@
 # whichever script began the dot-source chain, exactly as they did before the move.
 
 $script:WEDGE_RECOVERY_BY_CODE = @{
-    human_escalation = "Review the flagged external source or handoff content, make a human allow/block decision, archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    handoff_retry_exceeded = "Follow docs/circuit-breaker-runbook.md section 'Breaker 3 - Handoff Retry Limit', archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    review_stalemate = "Follow docs/circuit-breaker-runbook.md section 'Breaker 1 - Review Stalemate (3-Strike Rule)', archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    budget_exceeded = "Approve a budget_tier escalation, reduce scope, or abandon per docs/circuit-breaker-runbook.md section 'Breaker 4 - Token Budget Exceeded'; after the human decision, run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    recurring_merge_conflicts = "Follow docs/circuit-breaker-runbook.md section 'Breaker 7 - Recurring Merge Conflicts', archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    reviewer_verification_failed = "Follow docs/circuit-breaker-runbook.md section 'Breaker 5 - Reviewer Verification Failure'; route the exact failing check back to Reviewer or Architect, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    unreadable_handoff_history = "Follow docs/circuit-breaker-runbook.md section 'Breaker 13 - Unverifiable Handoff Count'; repair or archive the malformed pipeline-log lines so the server-side count can be recomputed, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    unreadable_retry_history = "Follow docs/circuit-breaker-runbook.md section 'Breaker 12 - Unreadable Retry History'; read the pipeline log, repair or archive the malformed lines named in the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    git_hook_bypass = "Follow docs/circuit-breaker-runbook.md section 'Breaker 8 - Git Hook Bypass Attempt'; fix the hook failure without bypassing hooks, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    fabricated_artifacts = "Follow docs/circuit-breaker-runbook.md section 'Breaker 6 - Fabricated Artifacts'; create the missing artifact or correct the handoff JSON, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    scope_violation = "Follow docs/circuit-breaker-runbook.md section 'Breaker 9 - Scope Boundary Violation'; expand file_affinity or revert out-of-scope edits, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    artifact_verification_failed = "Inspect completion artifacts and gate decision state, correct the artifact or decision record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -Recover"
-    missing_isolated_checks_script = "Restore powershell/run-isolated-checks.ps1 from the Crucible bundle, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    missing_required_field = "Correct the handoff JSON to include the required field, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    invalid_field = "Correct the invalid handoff field according to schemas/handoff.schema.json, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    invalid_json = "Fix the handoff JSON syntax or restore the schema file, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    invalid_transition = "Correct source_phase and target_phase to an allowed pipeline transition, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    invalid_budget_tier = "Set budget_tier to one of: low, medium, high, extended; then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    budget_tier_mismatch = "Make the handoff budget_tier match the spec frontmatter, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
-    missing_artifact = "Create the missing artifact or correct the handoff artifact path, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id}"
+    human_escalation = "Review the flagged external source or handoff content, make a human allow/block decision, archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    handoff_retry_exceeded = "Follow docs/circuit-breaker-runbook.md section 'Breaker 3 - Handoff Retry Limit', archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    review_stalemate = "Follow docs/circuit-breaker-runbook.md section 'Breaker 1 - Review Stalemate (3-Strike Rule)', archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    budget_exceeded = "Approve a budget_tier escalation, reduce scope, or abandon per docs/circuit-breaker-runbook.md section 'Breaker 4 - Token Budget Exceeded'; after the human decision, run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    recurring_merge_conflicts = "Follow docs/circuit-breaker-runbook.md section 'Breaker 7 - Recurring Merge Conflicts', archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    reviewer_verification_failed = "Follow docs/circuit-breaker-runbook.md section 'Breaker 5 - Reviewer Verification Failure'; route the exact failing check back to Reviewer or Architect, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    unreadable_handoff_history = "Follow docs/circuit-breaker-runbook.md section 'Breaker 13 - Unverifiable Handoff Count'; repair or archive the malformed pipeline-log lines so the server-side count can be recomputed, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    unreadable_retry_history = "Follow docs/circuit-breaker-runbook.md section 'Breaker 12 - Unreadable Retry History'; read the pipeline log, repair or archive the malformed lines named in the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    git_hook_bypass = "Follow docs/circuit-breaker-runbook.md section 'Breaker 8 - Git Hook Bypass Attempt'; fix the hook failure without bypassing hooks, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    fabricated_artifacts = "Follow docs/circuit-breaker-runbook.md section 'Breaker 6 - Fabricated Artifacts'; create the missing artifact or correct the handoff JSON, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    scope_violation = "Follow docs/circuit-breaker-runbook.md section 'Breaker 9 - Scope Boundary Violation'; expand file_affinity or revert out-of-scope edits, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    artifact_verification_failed = "Inspect completion artifacts and gate decision state, correct the artifact or decision record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"
+    missing_isolated_checks_script = "Restore powershell/run-isolated-checks.ps1 from the Crucible bundle, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    missing_required_field = "Correct the handoff JSON to include the required field, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    invalid_field = "Correct the invalid handoff field according to schemas/handoff.schema.json, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    invalid_json = "Fix the handoff JSON syntax or restore the schema file, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    invalid_transition = "Correct source_phase and target_phase to an allowed pipeline transition, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    invalid_budget_tier = "Set budget_tier to one of: low, medium, high, extended; then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    budget_tier_mismatch = "Make the handoff budget_tier match the spec frontmatter, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
+    missing_artifact = "Create the missing artifact or correct the handoff artifact path, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`""
 }
 
 $script:WEDGE_GUARD_NAME_BY_CODE = @{
@@ -67,12 +67,9 @@ function Get-WedgeRecovery {
     param(
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$BreakerCode,
         [AllowEmptyString()][string]$TaskId = "",
-        [AllowEmptyString()][string]$RecoveryOverride = ""
+        [AllowEmptyString()][string]$RecoveryOverride = "",
+        [AllowEmptyString()][string]$ProjectRoot = ""
     )
-
-    if (-not [string]::IsNullOrWhiteSpace($RecoveryOverride)) {
-        return $RecoveryOverride
-    }
 
     $code = ""
     if ($null -ne $BreakerCode) {
@@ -80,7 +77,9 @@ function Get-WedgeRecovery {
     }
 
     $recovery = ""
-    if (-not [string]::IsNullOrWhiteSpace($code) -and $script:WEDGE_RECOVERY_BY_CODE.ContainsKey($code)) {
+    if (-not [string]::IsNullOrWhiteSpace($RecoveryOverride)) {
+        $recovery = $RecoveryOverride
+    } elseif (-not [string]::IsNullOrWhiteSpace($code) -and $script:WEDGE_RECOVERY_BY_CODE.ContainsKey($code)) {
         $recovery = [string]$script:WEDGE_RECOVERY_BY_CODE[$code]
     } else {
         $recovery = "No automated recovery is defined. Read docs/circuit-breaker-runbook.md and choose a human resolution before rerunning crucible.ps1."
@@ -90,7 +89,14 @@ function Get-WedgeRecovery {
     if (-not [string]::IsNullOrWhiteSpace($TaskId)) {
         $replacementTaskId = $TaskId
     }
-    return $recovery.Replace("{task_id}", $replacementTaskId)
+    # Overrides take the root substitution too: they are built at the call site, which is
+    # the one place a re-run command could otherwise drop -ProjectRoot. Without it, a re-run
+    # from the framework checkout resolves the wrong tree. Items 119 and 126.
+    $replacementProjectRoot = "{project_root}"
+    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        $replacementProjectRoot = $ProjectRoot
+    }
+    return $recovery.Replace("{task_id}", $replacementTaskId).Replace("{project_root}", $replacementProjectRoot)
 }
 
 function Get-WedgeBreakerName {
@@ -116,11 +122,12 @@ function Get-WedgeReportLines {
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$TargetPhase,
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$BreakerCode,
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Why,
-        [AllowEmptyString()][string]$RecoveryOverride = ""
+        [AllowEmptyString()][string]$RecoveryOverride = "",
+        [AllowEmptyString()][string]$ProjectRoot = ""
     )
 
     $guardName = Get-WedgeBreakerName -BreakerCode $BreakerCode
-    $recovery = Get-WedgeRecovery -BreakerCode $BreakerCode -TaskId $TaskId -RecoveryOverride $RecoveryOverride
+    $recovery = Get-WedgeRecovery -BreakerCode $BreakerCode -TaskId $TaskId -RecoveryOverride $RecoveryOverride -ProjectRoot $ProjectRoot
     $whyLine = $Why
     if ([string]::IsNullOrWhiteSpace($whyLine)) {
         $whyLine = "No reason supplied."
@@ -146,10 +153,11 @@ function Write-WedgeReport {
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$TargetPhase,
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$BreakerCode,
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Why,
-        [AllowEmptyString()][string]$RecoveryOverride = ""
+        [AllowEmptyString()][string]$RecoveryOverride = "",
+        [AllowEmptyString()][string]$ProjectRoot = ""
     )
 
-    $lines = Get-WedgeReportLines -TaskId $TaskId -SourcePhase $SourcePhase -TargetPhase $TargetPhase -BreakerCode $BreakerCode -Why $Why -RecoveryOverride $RecoveryOverride
+    $lines = Get-WedgeReportLines -TaskId $TaskId -SourcePhase $SourcePhase -TargetPhase $TargetPhase -BreakerCode $BreakerCode -Why $Why -RecoveryOverride $RecoveryOverride -ProjectRoot $ProjectRoot
     foreach ($line in $lines) {
         if ($line -match "^\[STOP\]") {
             Write-Host $line -ForegroundColor Red

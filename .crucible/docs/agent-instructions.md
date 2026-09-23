@@ -55,7 +55,7 @@ Do not commit runtime data:
 Run the installed runtime from the project root:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id>
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id> -ProjectRoot "{project_root}"
 ```
 <!-- crucible-instructions-end -->
 ````

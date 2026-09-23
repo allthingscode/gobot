@@ -1950,6 +1950,7 @@ project_mandates:
   - rules
 review:
   auto_push: false
+  require_green_ci: true
 "@
         $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
 
@@ -1993,12 +1994,16 @@ try {
         Assert-Result -Name "auto_push=false: human gate accepted exits successfully" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
         Assert-Result -Name "auto_push=false: prints refusal note" -Condition ($output -match "Refusing to push; merge remains LOCAL only") -FailureMessage "expected refusal note in output"
         Assert-Result -Name "auto_push=false: prints push command" -Condition ($output -match "git push origin master") -FailureMessage "expected push command in output"
+        Assert-Result -Name "auto_push=false: does not say to watch CI before pushing" -Condition ($output -notmatch "BEFORE pushing") -FailureMessage "false path still tells the operator to watch CI before the commit is on a remote"
+        $pushAt = $output.IndexOf("git push origin master")
+        $watchAt = $output.IndexOf("After that push, watch adopter CI")
+        Assert-Result -Name "auto_push=false: watch instruction follows the push command" -Condition (($pushAt -ge 0) -and ($watchAt -gt $pushAt)) -FailureMessage "expected the CI watch after git push, pushAt=$pushAt watchAt=$watchAt"
 
         $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
         Assert-Result -Name "auto_push=false: local master remains ahead of origin" -Condition ($behindCommits.Count -gt 0) -FailureMessage "expected origin/master to be behind master"
 
         # Test Case 2: auto_push = true (should merge and push)
-        $configYamlTrue = $configYaml -replace "auto_push: false", "auto_push: true"
+        $configYamlTrue = $configYaml -replace "auto_push: false", "auto_push: true" -replace "require_green_ci: true", "require_green_ci: false"
         $configYamlTrue | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
 
         # Restore branch and merge state for re-test

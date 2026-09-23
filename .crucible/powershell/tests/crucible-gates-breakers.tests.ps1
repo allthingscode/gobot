@@ -84,6 +84,9 @@ function Assert-WedgeOutput {
     Assert-Result -Name ($BreakerCode + " wedge task") -Condition ($OutputText -match ("TASK:\s+" + [regex]::Escape($TaskId))) -FailureMessage ("missing task line. Output:`n" + $OutputText)
     Assert-Result -Name ($BreakerCode + " wedge code") -Condition ($OutputText -match [regex]::Escape("(" + $BreakerCode + ")")) -FailureMessage ("missing breaker code. Output:`n" + $OutputText)
     Assert-Result -Name ($BreakerCode + " wedge recovery") -Condition ($OutputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage ("missing non-empty recovery line. Output:`n" + $OutputText)
+    # Every context here sets RepoRoot, so a placeholder surviving into the report means the
+    # gate call site did not pass the root through. Item 126.
+    Assert-Result -Name ($BreakerCode + " wedge recovery carries the project root") -Condition (-not $OutputText.Contains("{project_root}")) -FailureMessage ("recovery printed the {project_root} placeholder; the Write-WedgeReport call site did not pass -ProjectRoot. Output:`n" + $OutputText)
 }
 
 function Assert-UnscannableResearchInputBlocks {

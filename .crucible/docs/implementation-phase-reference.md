@@ -1,4 +1,4 @@
-<!-- prompt_version: implementation-reference-v3 -->
+<!-- prompt_version: implementation-reference-v4 -->
 > **Human Reference Only.** In the pipeline, agents are driven by `implementation_prompt.md`
 > (loaded by `crucible.ps1`) and their `task.md`. This file documents the workflow for humans
 > and for manual invocations made outside the pipeline.
@@ -18,7 +18,7 @@ In the automated pipeline, the implementation phase is driven by `crucible.ps1` 
 4. **No Approval Gate**: Unlike the manual workflow, the implementation phase in the pipeline proceeds directly to implementation based on the groomed backlog item and handoff instructions.
 5. **Validation**: Run tests and workspace standards to confirm the success of the changes.
 6. **Handoff**: Write the handoff JSON to `.crucible/session/handoffs/` and update the backlog item status to `"Ready for Review"`.
-7. **Pipeline Advance**: Execute `crucible.ps1 -Init -TaskId {task_id} -Quiet` via the Bash tool (PowerShell invocation - see docs/operating-manual.md Session Protocol), present the Crucible output to the human: a brief summary of what was accomplished, the assembled next-specialist prompt, and which model is recommended. Wait for human confirmation before continuing - they may run the next step here or in a separate session.
+7. **Pipeline Advance**: Execute `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` via the Bash tool (PowerShell invocation - see docs/operating-manual.md Session Protocol), present the Crucible output to the human: a brief summary of what was accomplished, the assembled next-specialist prompt, and which model is recommended. Wait for human confirmation before continuing - they may run the next step here or in a separate session.
 
 ## 2. Manual Workflow (Outside the Pipeline)
 

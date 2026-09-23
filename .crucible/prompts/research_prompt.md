@@ -1,4 +1,4 @@
-<!-- prompt_version: research_prompt-v19 -->
+<!-- prompt_version: research_prompt-v21 -->
 Research: {task_id}
 
 {prev_session_summary}
@@ -18,7 +18,7 @@ See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 4. **Your SOP**: `.crucible/sops/research.md` - activity workflow, phase routing, and handoff protocol
 5. **Context Bundle**: `{context_bundle_path}` - role-scoped metadata bundle
 
-> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -Quiet` first,
+> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first,
 > then re-read this prompt.
 
 {context_block}
@@ -39,12 +39,12 @@ When your work is complete:
 1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete - findings approved at Research Gate"
+     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete - findings approved at Research Gate" -ProjectRoot "{project_root}"
    ```
 2. Run Crucible to advance the pipeline:
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
    ```
 3. Present the Crucible output to the human: what you accomplished and the assembled next-phase prompt.
 4. Wait for human confirmation before transitioning to the next phase.

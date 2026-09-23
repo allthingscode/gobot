@@ -16,13 +16,13 @@ Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are disp
 
 ### Default Specialist Target: Codex
 
-In this operating configuration, **Claude is the orchestrator and Codex runs all specialist work** (Groomer, Architect, Reviewer, Operator, Researcher). Default every dispatch to a Codex specialist via `launch-codex-specialist.ps1` (see *Dispatching a Codex Specialist*), resolving the model/effort with `crucible.ps1 -Init -Target codex`. Fall back to a Claude `Agent` sub-agent only when a Codex preflight fails or the human asks for Claude on a specific phase. The orchestrator itself stays Claude - it never becomes a specialist.
+In this operating configuration, **Claude is the orchestrator and Codex runs all specialist work** (Groomer, Architect, Reviewer, Operator, Researcher). Default every dispatch to a Codex specialist via `launch-codex-specialist.ps1` (see *Dispatching a Codex Specialist*), resolving the model/effort with `crucible.ps1 -Init -Target codex -ProjectRoot "{project_root}"`. Fall back to a Claude `Agent` sub-agent only when a Codex preflight fails or the human asks for Claude on a specific phase. The orchestrator itself stays Claude - it never becomes a specialist.
 
 ### Specialist Model Selection
 
 Do **not** hard-code a per-role model. Crucible computes the model from the activity
 (`target_phase`, `budget_tier`, `design_required`) and prints a `[RECOMMENDED MODEL] <x>`
-line next to the dispatch command after each `crucible.ps1 -Init`. Dispatch the sub-agent
+line next to the dispatch command after each `crucible.ps1 -Init -ProjectRoot "{project_root}"`. Dispatch the sub-agent
 with that model. The canonical policy and the default/escalation table live in
 [`docs/policy.md`](../policy.md) section 2.3.
 
@@ -45,7 +45,7 @@ to task.md after each major phase. Do not write the final handoff until all
 required task checklist items are complete.
 
 After writing handoff JSON, run:
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 
 Report the Crucible output verbatim. Stop after reporting. Do not spawn successor agents.`
 })
@@ -60,11 +60,11 @@ fails through a missing sandbox helper - producing a false `CHANGES_REQUESTED`).
 Crucible-blessed launcher, which wraps `codex exec -s danger-full-access` and reports an explicit
 launch status.
 
-1. Compute the Codex model. Run `crucible.ps1 -Init` with `-Target codex` so the `[RECOMMENDED MODEL]`
+1. Compute the Codex model. Run `crucible.ps1 -Init -ProjectRoot "{project_root}"` with `-Target codex` so the `[RECOMMENDED MODEL]`
    line resolves to the configured Codex model (e.g. `gpt-5.5`):
 
    ```bash
-   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -Quiet
+   pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -ProjectRoot "{project_root}" -Quiet
    ```
 
 2. **Preflight once** (cheap runtime smoke). This catches a broken Codex runtime/auth BEFORE the phase
@@ -146,7 +146,7 @@ launch status.
    `### CHECKPOINT` checks below pass. `STATUS=LAUNCH_FAILED` is an infrastructure failure - re-run the
    preflight, fix the runtime, and re-dispatch; never record it as `CHANGES_REQUESTED`.
 
-Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, `crucible.ps1 -Init`) is
+Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, `crucible.ps1 -Init -ProjectRoot "{project_root}"`) is
 identical to a Claude specialist - see *After Each Sub-Agent Returns*.
 
 ### Researcher Dispatch
@@ -166,7 +166,7 @@ to task.md after each major phase. Do not write the final handoff until all
 required task checklist items are complete.
 
 After writing handoff JSON, run:
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 
 Report the Crucible output verbatim. Stop after reporting. Do not spawn successor agents.`
 })
@@ -190,7 +190,7 @@ needed) and use it for all ### CHECKPOINT entries throughout your session.
 
 Write or update the item's spec, write the grooming -> implementation handoff, then run:
 
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -ProjectRoot "{project_root}" -Quiet
 
 Do not write the handoff until required checklist items are complete. Stop after
 Crucible output is produced. Report the selected task ID and Crucible output verbatim.`
@@ -230,10 +230,10 @@ Crucible commands run via Bash tool using the PowerShell invocation:
 
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
 
-The orchestrator runs `crucible.ps1 -Init` at two points per specialist cycle:
+The orchestrator runs `crucible.ps1 -Init -ProjectRoot "{project_root}"` at two points per specialist cycle:
 1. **Before dispatch** - to verify the previous handoff and assemble the next prompt
 2. **After sub-agent returns** - to advance the pipeline and detect gates
 
@@ -261,14 +261,14 @@ Do not dispatch until the human confirms with an explicit "go" or redirect. Do n
 
 All gate presentation formats and the failure decision tree are in `.crucible/sops/orchestrator.md`. Follow them exactly.
 
-**Critical for Human Gate**: after recording the human's gate decision via `crucible.ps1 -GateOutcome`, stop immediately. Do not spawn another sub-agent. Do not run `crucible.ps1 -Init` to look for the next prompt. Report the pipeline state and end the session. The human must re-trigger orchestration explicitly for the next cycle. The human's choice is the gate - the orchestrator never crosses it on their behalf.
+**Critical for Human Gate**: after recording the human's gate decision via `crucible.ps1 -GateOutcome`, stop immediately. Do not spawn another sub-agent. Do not run `crucible.ps1 -Init -ProjectRoot "{project_root}"` to look for the next prompt. Report the pipeline state and end the session. The human must re-trigger orchestration explicitly for the next cycle. The human's choice is the gate - the orchestrator never crosses it on their behalf.
 
 **CI Definition of Done**: a task that merges code to trunk is not done until adopter CI for the merge commit reports `[CI WATCH] STATUS=GREEN`. After any push of accepted task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>` and trust the STATUS value, not a prose label. Treat `STATUS=RED` as "task not done -- fix forward and re-run the gate." `[CI WATCH] SKIPPED (gh unavailable)`, `STATUS=NO_RUNS`, and `STATUS=PENDING_TIMEOUT` are advisory unless project policy says otherwise.
 
 If a sub-agent does not produce the required handoff or does not run crucible.ps1, follow the Failure Protocol in `.crucible/sops/orchestrator.md`. The orchestrator may only:
 
 - Read sub-agent output and inspect task state files
-- Run `crucible.ps1 -Init -TaskId {task_id} -Quiet` if a valid handoff already exists
+- Run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` if a valid handoff already exists
 - Re-dispatch the same specialist with a repair prompt
 - Escalate to the human
 

@@ -129,6 +129,25 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "ceiling replaced" -Condition ($text -match "Ceiling 6") -FailureMessage "budget_ceiling was not replaced"
     }
 
+    # Step 3 of the deployment prompt hands a failed merge simulation to implementation.
+    # Validation refuses deployment -> implementation at rebase_count 0, so the command the
+    # Operator copies has to carry the next count. Rendered from the real prompt, because
+    # the defect was in the prompt, not in a fixture. Item 127.
+    $results += Run-Test -Name "Deployment prompt's merge-conflict handoff carries the next rebase count" -Body {
+        foreach ($incoming in @(0, 2)) {
+            $ctx = New-TestContext -TempRoot (Join-Path $tempRoot ("rebase-next-" + $incoming)) -TaskId "F-907" -TargetPhase "deployment"
+            $ctx.Handoff.rebase_count = $incoming
+            Copy-Item -LiteralPath (Join-Path $REPO_ROOT "prompts/deployment_prompt.md") -Destination (Join-Path $ctx.PromptLib "deployment_prompt.md")
+
+            $text = New-CruciblePromptText -Context $ctx
+
+            $reworkLines = @(($text -split "`r?`n") | Where-Object { $_ -match 'new-handoff\.ps1' -and $_ -match '-Source deployment -Target implementation' })
+            Assert-Result -Name ("incoming " + $incoming + ": one merge-conflict handoff command") -Condition ($reworkLines.Count -eq 1) -FailureMessage ("expected one deployment -> implementation new-handoff command in the rendered prompt, found " + $reworkLines.Count)
+            if ($reworkLines.Count -ne 1) { continue }
+            Assert-Result -Name ("incoming " + $incoming + ": command passes the next rebase count") -Condition ($reworkLines[0] -match ('-RebaseCount ' + ($incoming + 1) + '\b')) -FailureMessage ("expected -RebaseCount " + ($incoming + 1) + " in: " + $reworkLines[0])
+        }
+    }
+
     $results += Run-Test -Name "New-CruciblePromptText substitutes PowerShell host for non-Windows prompts" -Body {
         $oldPlatformMock = $script:MockPlatformIsWindows
         $oldPwshMock = $script:MockPwshCommandExists

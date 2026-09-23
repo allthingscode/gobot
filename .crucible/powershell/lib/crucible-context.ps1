@@ -33,3 +33,16 @@ function Assert-CrucibleContextKeys {
         }
     }
 }
+
+# The root a printed re-run command should carry as -ProjectRoot. RepoRoot is optional in
+# most gate contexts, and a missing key throws under StrictMode, so this reads it guardedly.
+# The fallback is the placeholder rather than the current directory: a guessed path would
+# look authoritative, and a wrong root is the defect -ProjectRoot is there to prevent.
+function Get-RecoveryProjectRoot {
+    param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    if ($Context.ContainsKey("RepoRoot") -and -not [string]::IsNullOrWhiteSpace([string]$Context.RepoRoot)) {
+        return [string]$Context.RepoRoot
+    }
+    return "{project_root}"
+}

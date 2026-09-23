@@ -1,4 +1,4 @@
-<!-- prompt_version: implementation_prompt-v34 -->
+<!-- prompt_version: implementation_prompt-v36 -->
 Implementation: {task_id}
 
 {prev_session_summary}
@@ -38,7 +38,7 @@ If you cannot answer all four, STOP. Re-read the files, then answer.
 4. **Your SOP**: `.crucible/sops/implementation.md` - full workflow, decision tree, implementation phases
 5. **Context Bundle**: `{context_bundle_path}` - role-scoped metadata bundle
 
-> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -Quiet` first,
+> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first,
 > then re-read this prompt.
 
 {context_block}
@@ -51,7 +51,7 @@ If you cannot answer all four, STOP. Re-read the files, then answer.
 4. **Implementation**: Write idiomatic, well-structured code in the project's language, following the spec and project mandates. Run isolated validation from the assigned worktree as you work: `pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"` (or `-Mode full` before handoff).
 5. **Project mandates**: Follow the language, runtime, error-handling, and safety rules declared in `.crucible/config.yaml` and the target repository instructions. If you add or modify dependencies (e.g. adding imports in Go), you MUST run the language-specific package tidy/lock step (e.g. `go mod tidy`) in the worktree so the lockfile/manifest stays current and tidy.
 6. **Self-Review**: Verify all acceptance criteria are met and test coverage for new code is >80%.
-7. **Commit**: `git add . ; git commit -m "feat(scope): implement {task_id}"` inside the worktree. STRICTLY NO PUSH.
+7. **Commit**: `git add .` inside the worktree, then commit with a message in the style of this repo's recent commits (read `git log -5` first): a subject that names the change and a body that says why. STRICTLY NO PUSH.
 8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 Note: The backlog spec may contain a pre-filled "Next Step" line (e.g. `gemini "Architect: Plan F-XXX"`). That line is written by grooming for post-deployment sequencing and is **not your routing instruction**. Ignore it. Hard Rule 1 above applies.
@@ -75,7 +75,7 @@ When your work is complete:
 3. Run Crucible to advance the pipeline:
    ```bash
    pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
    ```
 4. **Present the Crucible output to the human.** Your message must include:
    - A 2-3 sentence summary of what you implemented.

@@ -1,4 +1,4 @@
-<!-- prompt_version: operator-sop-v3 -->
+<!-- prompt_version: operator-sop-v6 -->
 # SOP: Deployment
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -23,7 +23,7 @@
 ## Standard Deployment Workflow
 
 ### Step 1 - Verify Task Dependencies ({task_id})
-- Confirm `crucible.ps1 -Init` did not emit a blocking dependency error
+- Confirm `crucible.ps1 -Init -ProjectRoot "{project_root}"` did not emit a blocking dependency error
 - If it blocked due to unsatisfied dependencies: STOP. Hand off to grooming or wait for prerequisites to reach `Production`
 
 ### Step 2 - Verify Approval
@@ -40,7 +40,7 @@ Before touching `master`, run the merge simulation:
 
 **If simulation fails:**
 - Set task status to `"Ready for Rebase"`
-- Write handoff to **implementation** with reason: "Merge conflict detected during simulation. See conflict_report.json."
+- Write handoff to **implementation** with reason: "Merge conflict detected during simulation. See conflict_report.json.", passing `-RebaseCount` one above the incoming handoff's `rebase_count`. Validation refuses deployment -> implementation at `rebase_count` 0. The rendered prompt gives the exact command.
 - Instruct implementation to rebase `task/{task_id}` onto `master`
 
 - If simulation passes: Proceed to Step 4.
@@ -109,14 +109,14 @@ So finalizing early does not save a step. It trips the first check, and recovery
 Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done". Omit `-CommitHash` and the tool records the tip of `task/{task_id}` itself; pass it only to record a different commit:
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved."
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved." -ProjectRoot "{project_root}"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 
 Run Crucible:
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
 
 **Human Gate handling:** If `crucible.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. The file contains the gate menu and visual review options (Launch visual diff tool, Command-line text diff, and Open the worktree folder in your editor) to help the human inspect changes. Present the gate menu and options, and ask for the human's choice:
@@ -151,7 +151,7 @@ if ($pendingFile) {
 
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -GateOutcome <outcome> -GateReason "<human's one-sentence quality note>" -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -GateOutcome <outcome> -GateReason "<human's one-sentence quality note>" -Quiet
 ```
 
 Present Crucible output to the human. Wait for confirmation before ending your session.
@@ -171,7 +171,7 @@ If a task is rejected during the Human Gate (e.g. choice 2: `rejected`), the fol
 2. **Orchestrator Resumption**:
    - The orchestrator or operator resumes the task by executing the standard initialization:
      ```bash
-     pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id}
+     pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}"
      ```
    - This will boot the implementation phase, print the prompt, and output the command line for the next session under `[NEXT SESSION COMMAND]`.
 
@@ -199,7 +199,7 @@ When production issues are discovered that meet the circuit breaker threshold (P
 2. Run `new-handoff.ps1` to write the handoff JSON targeting grooming (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md. grooming should dispatch Researcher."
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md. grooming should dispatch Researcher." -ProjectRoot "{project_root}"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
 3. Run Crucible and present output to human
@@ -214,7 +214,7 @@ Pre-flight gate - confirm all are true before writing handoff:
 - [ ] `BACKLOG.md` entry for `{task_id}` shows active status (e.g. `Ready for Deploy` or `In Progress`)
 - [ ] Pipeline log is in `.crucible/session/{task_id}/` (will be archived by Crucible on accept)
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
-- [ ] Routing to: `done` (or `grooming` if production issue threshold met)
+- [ ] Routing to one legal successor: `done`, `grooming` (production issue threshold met), or `implementation` (rework only)
 - [ ] `task_id` in handoff matches the task I was given
 - [ ] `commit_hash` rule: for `deployment -> done` with code changes, it matches the merge commit on the primary branch; for No-Code Closures (type: research/grooming or R-* task ID, no task branch, no commit_hash), it is null/absent; for `deployment -> grooming` incident handoffs, it identifies the merged commit that caused the production issue
 - [ ] Eval record written to `.crucible/session/eval/eval-{task_id}.json`

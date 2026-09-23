@@ -99,7 +99,8 @@ Checkpoint verification is not a replacement for `crucible.ps1` gates. It is an 
     Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md,
     and .crucible/sops/grooming.md. Select the next eligible backlog item, write or
     update its spec, write the grooming -> implementation handoff, run crucible.ps1
-    -Init -TaskId <selected_task_id> -Quiet, then stop and report the task ID and
+    -Init -TaskId <selected_task_id> -ProjectRoot "{project_root}" -Quiet, then stop
+    and report the task ID and
     Crucible output. Follow your SOP checkpoint mandate: append `### CHECKPOINT`
     entries to task.md after each major pass, and do not write the handoff until
     required checklist items are complete.
@@ -114,7 +115,7 @@ Checkpoint verification is not a replacement for `crucible.ps1` gates. It is an 
 For an existing task, the parent runs:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {TASK_ID} -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}" -Quiet
 ```
 
 Then it reads:
@@ -157,7 +158,7 @@ Required prompt constraints:
 
 - Tell the subagent to read `AGENTS.md`.
 - Tell the subagent to read the generated `prompt.md` for its role when one exists.
-- Tell the subagent to run `crucible.ps1 -Init -TaskId {TASK_ID} -Quiet` at session end after writing handoff JSON.
+- Tell the subagent to run `crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}" -Quiet` at session end after writing handoff JSON.
 - Tell the subagent to append `### CHECKPOINT` markers to `task.md` after major phases.
 - Tell the subagent not to write handoff JSON until required checklist items are complete.
 - Tell the subagent to stop after Crucible output is produced and report the result to the parent.
@@ -179,9 +180,9 @@ Use parallelism to reduce cycle time without weakening control:
 
 Treat session lifecycle as a hard requirement:
 
-- On session start, run `crucible.ps1 -Init -TaskId {TASK_ID}` and verify artifacts exist before specialist launch.
+- On session start, run `crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}"` and verify artifacts exist before specialist launch.
 - On specialist completion, validate handoff + checkpoints, then re-run or verify `crucible.ps1` output before routing.
-- On session end, ensure handoff is written, clear lock/process residue per SOP, run `crucible.ps1 -Init -TaskId {TASK_ID}`, and report the exact output to the human.
+- On session end, ensure handoff is written, clear lock/process residue per SOP, run `crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}"`, and report the exact output to the human.
 
 ## Gate and Failure Protocols
 

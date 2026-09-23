@@ -1,4 +1,4 @@
-<!-- prompt_version: researcher-sop-v1 -->
+<!-- prompt_version: researcher-sop-v2 -->
 # SOP: Researcher
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -92,7 +92,7 @@ Do NOT hand-author or hand-edit the handoff JSON. You must use the `new-handoff.
 Run `new-handoff.ps1` to write the handoff JSON:
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete - findings approved at Research Gate" -HumanApproved "<approved actions>" -HumanDeferred "<deferred actions>" -HumanRejected "<rejected actions>"
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source research -Target grooming -Reason "Research complete - findings approved at Research Gate" -HumanApproved "<approved actions>" -HumanDeferred "<deferred actions>" -HumanRejected "<rejected actions>" -ProjectRoot "{project_root}"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats `human_decisions`.)
 
@@ -100,7 +100,7 @@ Run Crucible and present output to human:
 
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Quiet
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
 
 ---

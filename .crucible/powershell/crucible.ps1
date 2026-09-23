@@ -1,6 +1,6 @@
 # Crucible Orchestrator Script
 # Validates handoff.json, routes pipeline in code, assembles next prompt from template.
-# Usage: .\.crucible\\crucible.ps1 [-Target agent|claude|codex|antigravity] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>]
+# Usage: .\.crucible\\crucible.ps1 [-Target agent|claude|codex|antigravity] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>] [-ProjectRoot <path>]
 #
 # Dual-use note: -Init serves two purposes depending on call site:
 #   Session START: validates incoming handoff, scaffolds worktree + task.md, logs session_start event.
@@ -383,14 +383,14 @@ if ($Rewind) {
         exit 1
     }
 
-    Invoke-TaskRewind -TaskId $TaskId -ToPhase $ToPhase -ResetBudget:$ResetBudget -SessionDir $sessionDir -HandoffDir $HANDOFF_DIR -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE -Quiet:$Quiet -WorkspacesDir $workspacesDir
+    Invoke-TaskRewind -TaskId $TaskId -ToPhase $ToPhase -ResetBudget:$ResetBudget -SessionDir $sessionDir -HandoffDir $HANDOFF_DIR -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE -Quiet:$Quiet -WorkspacesDir $workspacesDir -ProjectRoot $REPO_ROOT
     exit 0
 }
 
 # --- 0a. Require -TaskId for all pipeline operations ---
 if ([string]::IsNullOrEmpty($TaskId)) {
     Write-Host "`n[ERROR] -TaskId is required." -ForegroundColor Red
-    Write-Host "Usage: .\.crucible\\crucible.ps1 -Init -TaskId {task_id}" -ForegroundColor Yellow
+    Write-Host "Usage: .\.crucible\\crucible.ps1 -Init -TaskId {task_id} -ProjectRoot `"{project_root}`"" -ForegroundColor Yellow
     Write-Host "       .\.crucible\\crucible.ps1 -Health  (no -TaskId needed for health checks)" -ForegroundColor DarkGray
     Write-Host "       .\.crucible\\crucible.ps1 -Doctor  (no -TaskId needed for readiness checks)" -ForegroundColor DarkGray
     exit 1

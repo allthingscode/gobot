@@ -9,7 +9,7 @@ This document summarizes the **Human <-> Agent** loop for the robust orchestrati
 | Step | Who | Action | Purpose |
 | :--- | :--- | :--- | :--- |
 | **1. Start** | **Human** | Gives directive ("Orchestrate {task_id}") | Human provides intent; agent initializes the pipeline. |
-| **2. Init** | **Orchestrator** | Runs `crucible.ps1 -Init` | Scaffolds the task worktree and instructions. |
+| **2. Init** | **Orchestrator** | Runs `crucible.ps1 -Init -ProjectRoot "{project_root}"` | Scaffolds the task worktree and instructions. |
 | **3. Work** | **Specialist** | (via `invoke_agent`) | Sub-agent executes the specific role (Groomer, Architect, etc.) |
 | **4. Verify** | **Orchestrator** | Checks task.md & handoff | Orchestrator confirms checkpoints/AC are met before proceeding. |
 | **5. Gate** | **Human** | Approve Findings/Merge | Human provides sign-off at mandatory protocol gates. |
@@ -41,7 +41,7 @@ Your role is to provide **high-level direction and approval**. You are the "Pilo
 
 ### Initial Task Bootstrapping
 
-When starting a task from the backlog using `crucible.ps1 -Init -TaskId {id}`, if no active session folder exists, Crucible automatically bootstraps the task:
+When starting a task from the backlog using `crucible.ps1 -Init -TaskId {id} -ProjectRoot "{project_root}"`, if no active session folder exists, Crucible automatically bootstraps the task:
 *   It parses the task's frontmatter in the backlog spec file (`{task_id}_{title}.md`) to read `budget_tier`.
 *   It always book-ends the task into the `grooming` phase first, regardless of `target_specialist`. Every backlog item enters the pipeline at grooming; the research phase is reached afterward via the `grooming -> research` transition, when the Groomer (or human) determines investigation is needed.
 *   It automatically generates an initial book-end handoff from `deployment` to `grooming`, scaffolds the workspace directories, and prepares the Groomer prompt.
@@ -61,8 +61,8 @@ When starting a task from the backlog using `crucible.ps1 -Init -TaskId {id}`, i
 These are invoked **by the agent**, not by you. Listed here for reference only.
 
 *   **`"Orchestrate the next task in the backlog."`**: High-level directive to drive a task through the pipeline using isolated sub-agents. All orchestrators share the same meta-role definition (`docs/orchestrator.md`) and SOP (`sops/orchestrator.md`). Tool-specific mechanics: Claude Code -> `docs/orchestrators/claude.md`; Antigravity CLI -> `docs/orchestrators/antigravity.md`; Codex CLI -> `docs/orchestrators/codex.md`; Grok TUI -> `docs/orchestrators/grok.md`.
-*   **`crucible.ps1 -Init -TaskId {task_id}`**: Dual-purpose - at session START it validates the incoming handoff and scaffolds the workspace; at session END it routes the pipeline to the next specialist. Run by agent via Bash after every handoff.
-*   **`crucible.ps1 -Init -TaskId {task_id} -AutoAdvance`**: Orchestrator mode - emits `[AUTO-ADVANCE]` for non-gate transitions so the orchestrator chains specialists without waiting for human confirmation. Gate transitions (Researcher->Groomer, Operator->*) always pause.
+*   **`crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}"`**: Dual-purpose - at session START it validates the incoming handoff and scaffolds the workspace; at session END it routes the pipeline to the next specialist. Run by agent via Bash after every handoff.
+*   **`crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -AutoAdvance`**: Orchestrator mode - emits `[AUTO-ADVANCE]` for non-gate transitions so the orchestrator chains specialists without waiting for human confirmation. Gate transitions (Researcher->Groomer, Operator->*) always pause.
 *   **`crucible.ps1 -Health`**: System health check - orphaned worktrees, stale locks, blocked tasks, oversized scratchpads. The only command that does not require `-TaskId`.
 *   **`crucible-status.ps1`**: Real-time pipeline dashboard - shows in-flight tasks, durations, and health stats.
 *   **`crucible.ps1 -Doctor`** (or `crucible-doctor.ps1`): Readiness check. In an installed bundle it verifies your config parses, the bundle resolves, a PowerShell host is available, the Crucible scripts are intact, and the tools your `verification` commands call are on PATH - exits non-zero only on a critical failure. Go / `golangci-lint` / `gh` are advisory for adopters (they matter only for the optional GitHub deployment gate).
@@ -71,7 +71,7 @@ These are invoked **by the agent**, not by you. Listed here for reference only.
 **Agent bash invocation** (how agents run the script from a bash shell; use `pwsh`):
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -Target agent -TaskId {task_id}
+  -File "{{crucible_root}}/powershell/crucible.ps1" -Init -Target agent -TaskId {task_id} -ProjectRoot "{project_root}"
 # -Target: agent (default) | claude | codex | antigravity
 ```
 
@@ -98,7 +98,7 @@ Grooming must be sequential because both write to `BACKLOG.md`.
 
 **2. Then run both in parallel - each in its own chat session:**
 
-Open two chat sessions. In each, tell the agent: `"Start Architect on {task_id}"` / `"Start Architect on {task_id}"`. Each agent runs `crucible.ps1 -Init -TaskId {id}` and chains forward automatically through Architect -> Reviewer -> Operator.
+Open two chat sessions. In each, tell the agent: `"Start Architect on {task_id}"` / `"Start Architect on {task_id}"`. Each agent runs `crucible.ps1 -Init -TaskId {id} -ProjectRoot "{project_root}"` and chains forward automatically through Architect -> Reviewer -> Operator.
 
 **3. Human Gate fires for each pipeline independently.** Approve each one when it arrives.
 

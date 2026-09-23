@@ -41,7 +41,7 @@ git commit -m "Add Crucible scaffold"
 
 ```powershell
 cd <your-project-path>
-./.crucible/powershell/crucible.ps1 -Init -TaskId F-001
+./.crucible/powershell/crucible.ps1 -Init -TaskId F-001 -ProjectRoot "<your-project-path>"
 ```
 Follow the prompts. Crucible will scaffold a Groomer session and tell you the next agent command.
 
@@ -204,7 +204,7 @@ or renaming the columns breaks it:
 From your project root:
 
 ```powershell
-./.crucible/powershell/crucible.ps1 -Init -TaskId F-002
+./.crucible/powershell/crucible.ps1 -Init -TaskId F-002 -ProjectRoot "<your-project-path>"
 ```
 *(Linux/macOS: prefix the script path with `pwsh`.)*
 
@@ -236,7 +236,7 @@ The Groomer will:
 1. Read your backlog item and config
 2. Write a detailed technical spec with implementation strategy and file scope
 3. Write `.crucible/session/handoffs/F-002-{timestamp}.json`
-4. Run `crucible.ps1 -Init -TaskId F-002`
+4. Run `crucible.ps1 -Init -TaskId F-002 -ProjectRoot "{project_root}"`
 5. Present the Crucible output to you
 
 You'll see something like:
