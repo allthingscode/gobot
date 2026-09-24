@@ -14,6 +14,7 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/dashboard"
 	"github.com/allthingscode/gobot/internal/memory"
 )
 
@@ -55,6 +56,108 @@ func TestSetupLogging(t *testing.T) {
 	content, _ = os.ReadFile(logFile)
 	if !strings.Contains(string(content), "\"msg\":\"test json log message\"") {
 		t.Errorf("expected json log message in file, got: %s", string(content))
+	}
+}
+
+//nolint:paralleltest // uses global state // sets global logger
+func TestSetupLogging_RedactsDurableLogsWithoutHub(t *testing.T) {
+	oldLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = tempLogRoot(t)
+
+	SetupLogging(cfg, nil)
+	slog.Info("gateway saw bearer sk-abcdefghij1234567890",
+		"text", "https://api.example/send?token=deadbeefdeadbeef1234",
+		"api_key", "stored-secret-value")
+
+	content := readLogFile(t, cfg)
+	assertNoLogLeaks(t, content,
+		"sk-abcdefghij1234567890",
+		"deadbeefdeadbeef1234",
+		"stored-secret-value",
+	)
+}
+
+//nolint:paralleltest // uses global state // sets global logger
+func TestSetupLogging_RedactsDurableLogsAndHubEntriesWithHub(t *testing.T) {
+	oldLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = tempLogRoot(t)
+
+	hub := dashboard.NewHub(10)
+	t.Cleanup(hub.Close)
+	sub, _ := hub.Subscribe()
+
+	SetupLogging(cfg, hub)
+	slog.Info("gateway saw bearer sk-abcdefghij1234567890",
+		"text", "https://api.example/send?token=deadbeefdeadbeef1234",
+		"api_key", "stored-secret-value")
+
+	var entry *dashboard.LogEntry
+	select {
+	case entry = <-sub:
+	default:
+		t.Fatal("expected log entry in hub")
+	}
+
+	for _, leak := range []string{
+		"sk-abcdefghij1234567890",
+		"deadbeefdeadbeef1234",
+		"stored-secret-value",
+	} {
+		if strings.Contains(entry.Message, leak) {
+			t.Fatalf("hub message leaked %q: %q", leak, entry.Message)
+		}
+		if text, _ := entry.Fields["text"].(string); strings.Contains(text, leak) {
+			t.Fatalf("hub text field leaked %q: %q", leak, text)
+		}
+	}
+	if entry.Fields["api_key"] != "[REDACTED]" {
+		t.Fatalf("hub api_key = %v, want [REDACTED]", entry.Fields["api_key"])
+	}
+
+	content := readLogFile(t, cfg)
+	assertNoLogLeaks(t, content,
+		"sk-abcdefghij1234567890",
+		"deadbeefdeadbeef1234",
+		"stored-secret-value",
+	)
+}
+
+func readLogFile(t *testing.T, cfg *config.Config) string {
+	t.Helper()
+	content, err := os.ReadFile(cfg.LogPath("gobot.log"))
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	return string(content)
+}
+
+func tempLogRoot(t *testing.T) string {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "gobot-redacted-log-test-*")
+	if err != nil {
+		t.Fatalf("create temp log root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tempDir) // Windows may keep lumberjack's file handle briefly.
+	})
+	return tempDir
+}
+
+func assertNoLogLeaks(t *testing.T, content string, leaks ...string) {
+	t.Helper()
+	for _, leak := range leaks {
+		if strings.Contains(content, leak) {
+			t.Fatalf("durable log leaked %q in %q", leak, content)
+		}
+	}
+	if !strings.Contains(content, "[REDACTED]") {
+		t.Fatalf("durable log = %q, want redacted spans", content)
 	}
 }
 
