@@ -167,9 +167,14 @@ models:
       strong: "Gemini 3.1 Pro (High)"
       default: "Gemini 3.5 Flash (High)"
       light: "Gemini 3.5 Flash (Medium)"
+    grok:
+      strong: inherit
+      default: inherit
+      light: inherit
 ```
 
-- **Targets**: `claude` | `codex` | `antigravity`. The default `-Target agent` uses the `claude` row.
+- **Targets**: `claude` | `codex` | `antigravity` | `grok`. The default `-Target agent` uses the `claude` row. `inherit` is not a model slug. The printed line says to omit `model` so the specialist inherits the session. A value in this block can replace `inherit` with a real slug.
+- **The printed line names its target.** `[RECOMMENDED MODEL] sonnet (target claude)` is a Claude dispatch. A Grok orchestrator does not pass that slug. It passes `-Target grok` once; the sticky target keeps it, and the line for that target says `inherit`.
 - **Resolution order**: a value in this block wins; if absent, the framework default map (same values shown above) applies; an unknown target/tier degrades to the tier token rather than throwing. The block is optional - omit it and the defaults apply.
 - **Quoting**: quote any value containing spaces (e.g. the Antigravity labels).
 - **Codex model availability (ChatGPT login)**: measured 2026-09-02 with `powershell/launch-codex-specialist.ps1 -Preflight -Model <slug>`. Plain `gpt-5.5` -> PASS and plain `gpt-5.4` -> PASS. For 5.6, `gpt-5.6-terra` -> PASS and `gpt-5.6-sol` -> PASS, while plain `gpt-5.6` -> FAIL, `gpt-5.6-codex` -> FAIL, and `gpt-5.6-mini` -> FAIL. Do not generalize a result across families: preflight the exact slug on the account that will run it. Reasoning effort is set separately in `~/.codex/config.toml`, not in the model slug.

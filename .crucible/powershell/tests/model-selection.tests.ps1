@@ -2,7 +2,7 @@
 #   1. Get-SpecialistModel maps (target_phase, budget_tier, design_required) to an abstract
 #      capability TIER (strong/default/light) -- provider-agnostic routing.
 #   2. Get-ConfiguredModel resolves that tier to a concrete model for the active -Target
-#      (claude/codex/antigravity), preferring the config.yaml `models:` block and falling
+#      (claude/codex/antigravity/grok), preferring the config.yaml `models:` block and falling
 #      back to the framework default map.
 
 $ErrorActionPreference = "Stop"
@@ -73,6 +73,12 @@ $results += Run-Test "Default map: codex tiers -> gpt-5.5/gpt-5.5/gpt-5.4" {
     Assert-Result "codex light" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'gpt-5.4') "expected gpt-5.4"
 }
 
+$results += Run-Test "Default map: grok tiers -> inherit, not a Claude slug" {
+    Assert-Result "grok strong" ((Get-ConfiguredModel -Target 'grok' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'inherit') "expected inherit"
+    Assert-Result "grok default" ((Get-ConfiguredModel -Target 'grok' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'inherit') "expected inherit"
+    Assert-Result "grok light" ((Get-ConfiguredModel -Target 'grok' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'inherit') "expected inherit"
+}
+
 $results += Run-Test "Default map: antigravity tiers -> Gemini labels" {
     Assert-Result "ag strong" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.1 Pro (High)') "expected Gemini 3.1 Pro (High)"
     Assert-Result "ag default" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.5 Flash (High)') "expected Gemini 3.5 Flash (High)"
@@ -102,6 +108,8 @@ models:
       strong: pinned-codex-x
     antigravity:
       default: "My Gemini (High)"
+    grok:
+      strong: grok-4.6
 verification:
   quick: []
 "@
@@ -111,12 +119,14 @@ $results += Run-Test "config.yaml models: block overrides the default map" {
     Assert-Result "override claude strong" ((Get-ConfiguredModel -Target 'claude' -Tier 'strong' -ProjectRoot $cfgRoot) -eq 'my-strong-claude') "expected my-strong-claude"
     Assert-Result "override codex strong" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $cfgRoot) -eq 'pinned-codex-x') "expected pinned-codex-x"
     Assert-Result "override antigravity default (quoted, spaces)" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'My Gemini (High)') "expected My Gemini (High)"
+    Assert-Result "override grok strong" ((Get-ConfiguredModel -Target 'grok' -Tier 'strong' -ProjectRoot $cfgRoot) -eq 'grok-4.6') "expected grok-4.6"
 }
 
 $results += Run-Test "Tiers absent from config fall back to the default map" {
     Assert-Result "claude default (not in cfg) -> sonnet" ((Get-ConfiguredModel -Target 'claude' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'sonnet') "expected sonnet"
     Assert-Result "codex default (not in cfg) -> gpt-5.5" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'gpt-5.5') "expected gpt-5.5"
     Assert-Result "codex light (not in cfg) -> gpt-5.4" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $cfgRoot) -eq 'gpt-5.4') "expected gpt-5.4"
+    Assert-Result "grok default (not in cfg) -> inherit" ((Get-ConfiguredModel -Target 'grok' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'inherit') "expected inherit"
 }
 
 # --- Stage 1b: capability tier -> Codex reasoning effort ---

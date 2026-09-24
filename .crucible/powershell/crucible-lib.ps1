@@ -73,7 +73,7 @@ $script:PHASE_ROLE_MAP = @{
 # Model selection is two stage. Get-SpecialistModel maps the activity (target_phase,
 # budget_tier, design_required) to an abstract CAPABILITY TIER (strong/default/light);
 # Get-ConfiguredModel (lib/config-helpers.ps1) then resolves that tier to a concrete model
-# for the active -Target (claude/codex/antigravity), reading the editable `models:` block in
+# for the active -Target (claude/codex/antigravity/grok), reading the editable `models:` block in
 # config.yaml. This keeps provider-specific model names out of the routing logic and in
 # config, where they are easy to update as models change. Default to the 'default' tier and
 # escalate to 'strong' only where the activity warrants deeper reasoning: open-ended research,
@@ -140,7 +140,7 @@ function Resolve-StickyTarget {
     }
     if (Test-Path -LiteralPath $stateFile) {
         $stored = (Get-Content -LiteralPath $stateFile -Raw).Trim()
-        if (@("agent", "claude", "codex", "antigravity") -contains $stored) {
+        if (@("agent", "claude", "codex", "antigravity", "grok") -contains $stored) {
             return $stored
         }
     }

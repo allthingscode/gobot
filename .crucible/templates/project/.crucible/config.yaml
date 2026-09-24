@@ -30,7 +30,8 @@ roles:
 
 # Concrete models per CLI target and capability tier. Crucible computes an abstract tier
 # (strong / default / light) from the phase, budget_tier, and design_required, then resolves
-# it here for the active -Target (claude | codex | antigravity; 'agent' uses the claude row).
+# it here for the active -Target (claude | codex | antigravity | grok; 'agent' uses the
+# claude row). grok's 'inherit' means omit model: the specialist inherits the session.
 # Edit these as providers release new models -- this is the single source of truth the
 # [RECOMMENDED MODEL] line reads. Quote any value containing spaces.
 # NOTE: Codex model availability differs by family. On ChatGPT login, measured 2026-09-02 with
@@ -51,6 +52,10 @@ models:
       strong: "Gemini 3.1 Pro (High)"
       default: "Gemini 3.5 Flash (High)"
       light: "Gemini 3.5 Flash (Medium)"
+    grok:
+      strong: inherit
+      default: inherit
+      light: inherit
 
 verification:
   quick:

@@ -83,7 +83,7 @@ Kinds carried by other event types. These are not degradations, and reporting MU
 The model a specialist runs on is **computed by Crucible, not fixed per role**, in two stages:
 
 1. **Activity -> capability tier.** `Get-SpecialistModel` derives an abstract tier - `strong`, `default`, or `light` - from the handoff's `target_phase`, `budget_tier`, and `design_required`. This stage is provider-agnostic; it knows nothing about specific model names.
-2. **Tier -> concrete model for the active target.** `Get-ConfiguredModel` resolves that tier to a real model for the active `-Target` (`claude` | `codex` | `antigravity`; `agent` uses the `claude` row), reading the editable `models:` block in `config.yaml`. Crucible prints the result as a `[RECOMMENDED MODEL]` line next to the dispatch command; the orchestrator dispatches with it and keeps no per-role table of its own.
+2. **Tier -> concrete model for the active target.** `Get-ConfiguredModel` resolves that tier to a real model for the active `-Target` (`claude` | `codex` | `antigravity` | `grok`; `agent` uses the `claude` row), reading the editable `models:` block in `config.yaml`. Crucible prints the result as a `[RECOMMENDED MODEL]` line that names the target. The orchestrator dispatches with that line and keeps no per-role table of its own. `inherit` is not a slug: omit `model` and let the specialist inherit the session.
 
 The tier policy defaults to the `default` workhorse and escalates to `strong` only where the activity warrants deeper reasoning:
 
@@ -103,6 +103,7 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 | `claude` (and `agent`) | opus | sonnet | haiku |
 | `codex` | gpt-5.5 | gpt-5.5 | gpt-5.4 |
 | `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.5 Flash (High) | Gemini 3.5 Flash (Medium) |
+| `grok` | inherit | inherit | inherit |
 
 `design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming->implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by Crucible.
 

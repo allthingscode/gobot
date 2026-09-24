@@ -37,7 +37,7 @@ Grok's `spawn_subagent` tool is the native specialist mechanism.
 
 `spawn_subagent` returns immediately (`background` defaults to true). Wait with `get_command_or_subagent_output` until that specialist finishes. Do not dispatch the next phase while one is running.
 
-Do not pass Claude or Codex model slugs (`sonnet`, `opus`, `gpt-5.5`) as `model`. Omit `model` so the child inherits this session, or pass `grok-4.6` / `grok-4.5` only when the human asked. There is no `models.targets.grok` row yet; native Grok specialists do not read `[RECOMMENDED MODEL]` from `-Target claude` or `-Target codex`.
+Do not pass Claude or Codex model slugs (`sonnet`, `opus`, `gpt-5.5`) as `model`. Pass `-Target grok` on the orchestrator's `crucible.ps1 -Init`. The sticky target keeps it for later Inits that omit `-Target`. Follow the `[RECOMMENDED MODEL]` line only when it says `(target grok)`. `inherit` means omit `model`: the child inherits this session. A line for any other target is not yours. Do not pass that slug. Pass a concrete Grok slug only when the human asked and the line prints that slug.
 
 ### Default Specialist Target: Native Grok
 
@@ -58,7 +58,7 @@ to task.md after each major phase. Do not write the final handoff until all
 required task checklist items are complete.
 
 After writing handoff JSON, run:
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{adopter project root}" -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target grok -ProjectRoot "{adopter project root}" -Quiet
 
 Report the Crucible output verbatim. Stop after reporting. Do not spawn successor agents.`
 })
@@ -89,7 +89,7 @@ needed) and use it for all ### CHECKPOINT entries throughout your session.
 
 Write or update the item's spec, write the grooming -> implementation handoff, then run:
 
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -ProjectRoot "{adopter project root}" -Quiet
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -Target grok -ProjectRoot "{adopter project root}" -Quiet
 
 Do not write the handoff until required checklist items are complete. Stop after
 Crucible output is produced. Report the selected task ID and Crucible output verbatim.`
@@ -119,7 +119,7 @@ Resolve `{model}` / `{effort}` with `crucible.ps1 -Init -Target codex`. Trust `[
 ## Running Crucible Commands
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{adopter project root}" -Quiet
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target grok -ProjectRoot "{adopter project root}" -Quiet
 ```
 
 On Windows, invoke `pwsh` directly. Do not wrap the call in `powershell.exe`, and do not look up `powershell.exe` on PATH.
@@ -135,7 +135,7 @@ cmd.exe strips only plain double quotes. Any other quoting reaches `pwsh` as par
 If exit 64 appears, drop the quotes. Set the working directory to the adopter root, pass `-File` a relative path, and pass the absolute adopter root to `-ProjectRoot` unquoted with no trailing backslash:
 
 ```
-pwsh -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -TaskId {task_id} -ProjectRoot {adopter project root} -Quiet
+pwsh -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -TaskId {task_id} -Target grok -ProjectRoot {adopter project root} -Quiet
 ```
 
 Keep `-ProjectRoot` absolute. Some code paths join a relative root against the current directory, so `.` is only safe while nothing changes directory. If the adopter root contains a space, it cannot go unquoted. Put the command in a `.cmd` wrapper in the adopter root, quote the root inside the wrapper, and run the wrapper.

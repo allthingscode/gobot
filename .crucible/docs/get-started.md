@@ -54,7 +54,7 @@ Expected output excerpt:
 [NEXT SESSION COMMAND] Run the following command:
 
 agent "Groomer: F-001 - read and follow all instructions in <abs path>/.crucible/session/F-001/grooming/prompt.md"
-[RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
+[RECOMMENDED MODEL] sonnet (target claude) - dispatch the specialist sub-agent with this model.
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -217,7 +217,7 @@ Expected output excerpt:
 [NEXT SESSION COMMAND] Run the following command:
 
 agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/grooming/prompt.md"
-[RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
+[RECOMMENDED MODEL] sonnet (target claude) - dispatch the specialist sub-agent with this model.
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -251,7 +251,7 @@ You'll see something like:
 
 [NEXT SESSION COMMAND]
 agent "Architect: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/implementation/prompt.md"
-[RECOMMENDED MODEL] sonnet - dispatch the specialist sub-agent with this model.
+[RECOMMENDED MODEL] sonnet (target claude) - dispatch the specialist sub-agent with this model.
 ```
 
 Confirm with "go" (or "go" in a new session if you prefer a fresh context).

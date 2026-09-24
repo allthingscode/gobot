@@ -57,6 +57,14 @@ try {
         Assert-Result -Name "nothing written" -Condition (-not (Test-Path -LiteralPath (Join-Path $sd "target.txt"))) -FailureMessage "unexpected file"
     }
 
+    $results += Run-Test -Name "explicit grok target is persisted and reloaded" -Body {
+        $sd = New-CaseDir
+        $r = Resolve-StickyTarget -TaskId "C-6" -SessionDir $sd -Target "grok" -Explicit $true
+        Assert-Result -Name "returns grok" -Condition ($r -eq "grok") -FailureMessage "got $r"
+        $reloaded = Resolve-StickyTarget -TaskId "C-6" -SessionDir $sd -Target "agent" -Explicit $false
+        Assert-Result -Name "reloaded grok" -Condition ($reloaded -eq "grok") -FailureMessage "got $reloaded"
+    }
+
     $results += Run-Test -Name "unrecognized stored value is ignored" -Body {
         $sd = New-CaseDir
         New-Item -ItemType Directory -Path (Join-Path $sd "C-5") -Force | Out-Null

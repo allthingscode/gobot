@@ -6,6 +6,7 @@ function Write-NextStep {
         [string]$Specialist,
         [string]$ActionCmd = $null,
         [string]$RecommendedModel = $null,
+        [string]$RecommendedTarget = $null,
         [string]$RecommendedEffort = $null,
         [switch]$ShouldAutoAdvance
     )
@@ -31,7 +32,15 @@ function Write-NextStep {
         Write-Host ""
         Write-Host $ActionCmd
         if (-not [string]::IsNullOrEmpty($RecommendedModel)) {
-            Write-Host ("[RECOMMENDED MODEL] " + $RecommendedModel + " - dispatch the specialist sub-agent with this model.") -ForegroundColor Cyan
+            $targetLabel = ""
+            if (-not [string]::IsNullOrWhiteSpace($RecommendedTarget)) {
+                $targetLabel = " (target " + $RecommendedTarget + ")"
+            }
+            if ($RecommendedModel -eq "inherit") {
+                Write-Host ("[RECOMMENDED MODEL] inherit" + $targetLabel + " - omit model. The specialist inherits this session. Do not pass a Claude or Codex slug.") -ForegroundColor Cyan
+            } else {
+                Write-Host ("[RECOMMENDED MODEL] " + $RecommendedModel + $targetLabel + " - dispatch the specialist sub-agent with this model.") -ForegroundColor Cyan
+            }
         }
         if (-not [string]::IsNullOrEmpty($RecommendedEffort)) {
             Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort (Codex only).") -ForegroundColor Cyan
@@ -646,6 +655,8 @@ function Write-CrucibleCiStatusBanner {
     $handoffTier = if ($handoff.PSObject.Properties["budget_tier"]) { [string]$handoff.budget_tier } else { "" }
     $capabilityTier = Get-SpecialistModel -TargetPhase $handoff.target_phase -BudgetTier $handoffTier -DesignRequired $designRequired
     $recommendedModel = Get-ConfiguredModel -Target $Target -Tier $capabilityTier
+    $recommendedTarget = if ($null -ne $Target) { $Target.Trim().ToLowerInvariant() } else { "" }
+    if ([string]::IsNullOrWhiteSpace($recommendedTarget) -or $recommendedTarget -eq "agent") { $recommendedTarget = "claude" }
     $recommendedEffort = ""
     if ($Target -eq "codex") { $recommendedEffort = Get-SpecialistEffort -Tier $capabilityTier }
 
@@ -654,7 +665,7 @@ function Write-CrucibleCiStatusBanner {
     $isGateTransition = (($handoff.source_phase -eq "deployment") -or ($handoff.source_phase -eq "research")) -and -not $isBootstrap
     $shouldAutoAdvance = $AutoAdvance -and -not $isGateTransition
 
-    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedEffort $recommendedEffort -ShouldAutoAdvance:$shouldAutoAdvance
+    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedTarget $recommendedTarget -RecommendedEffort $recommendedEffort -ShouldAutoAdvance:$shouldAutoAdvance
 
     $Context.ActionCmd = $actionCmd
     $Context.ShouldAutoAdvance = $shouldAutoAdvance

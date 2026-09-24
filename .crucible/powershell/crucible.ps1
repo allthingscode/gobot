@@ -1,6 +1,6 @@
 # Crucible Orchestrator Script
 # Validates handoff.json, routes pipeline in code, assembles next prompt from template.
-# Usage: .\.crucible\\crucible.ps1 [-Target agent|claude|codex|antigravity] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>] [-ProjectRoot <path>]
+# Usage: .\.crucible\\crucible.ps1 [-Target agent|claude|codex|antigravity|grok] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>] [-ProjectRoot <path>]
 #
 # Dual-use note: -Init serves two purposes depending on call site:
 #   Session START: validates incoming handoff, scaffolds worktree + task.md, logs session_start event.
@@ -12,7 +12,7 @@
 
 param (
     [Parameter(Mandatory=$false)]
-    [ValidateSet("agent", "claude", "codex", "antigravity")]
+    [ValidateSet("agent", "claude", "codex", "antigravity", "grok")]
     [string]$Target = "agent",
 
     [Parameter(Mandatory=$false)]

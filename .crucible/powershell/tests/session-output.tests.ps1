@@ -99,6 +99,18 @@ try {
         Assert-Result -Name "next_step content" -Condition ($content -eq $expected) -FailureMessage "next_step.txt content changed"
     }
 
+    $results += Run-Test -Name "Write-NextStep names the target and tells grok to omit model" -Body {
+        $sessionDir = Join-Path $tempRoot "model-line/session"
+        $grokLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-911" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "inherit" -RecommendedTarget "grok" 6>&1 | ForEach-Object { "$_" })
+        $grokLine = @($grokLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
+        Assert-Result -Name "grok line omits model" -Condition ($grokLine.Count -eq 1 -and $grokLine[0] -match 'inherit \(target grok\) - omit model') -FailureMessage ("got: " + ($grokLine -join " | "))
+        Assert-Result -Name "grok line does not name a Claude slug" -Condition ($grokLine[0] -notmatch 'sonnet|opus|haiku') -FailureMessage ("got: " + $grokLine[0])
+
+        $claudeLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "sonnet" -RecommendedTarget "claude" 6>&1 | ForEach-Object { "$_" })
+        $claudeLine = @($claudeLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
+        Assert-Result -Name "claude line names its target" -Condition ($claudeLine.Count -eq 1 -and $claudeLine[0] -match 'sonnet \(target claude\) - dispatch the specialist') -FailureMessage ("got: " + ($claudeLine -join " | "))
+    }
+
     $results += Run-Test -Name "New-CruciblePromptText applies replacement map" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "replace") -TaskId "F-902" -TargetPhase "verification"
         @"

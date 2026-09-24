@@ -318,8 +318,11 @@ function Get-ConfiguredManifestFiles {
 #   1. the config.yaml `models:` block (operator-editable; models change often)
 #   2. the framework default map below (source of truth when config is absent)
 #   3. the tier token itself (last resort; never throws)
-# 'agent' is the generic default CLI and runs the Claude models. An empty tier (the 'done'
-# phase) has no model. Keep the default map in sync with templates/project/.crucible/config.yaml.
+# 'agent' is the generic default CLI and runs the Claude models. 'grok' has no model
+# knob: the default for every tier is 'inherit', which tells the orchestrator to omit
+# model. A config.yaml value still wins, so an adopter can pin a slug later. An empty
+# tier (the 'done' phase) has no model. Keep the default map in sync with
+# templates/project/.crucible/config.yaml.
 function Get-ConfiguredModel {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Target,
@@ -337,6 +340,7 @@ function Get-ConfiguredModel {
         claude      = @{ strong = "opus";                   default = "sonnet";                  light = "haiku" }
         codex       = @{ strong = "gpt-5.5";                 default = "gpt-5.5";                  light = "gpt-5.4" }
         antigravity = @{ strong = "Gemini 3.1 Pro (High)";   default = "Gemini 3.5 Flash (High)";  light = "Gemini 3.5 Flash (Medium)" }
+        grok        = @{ strong = "inherit";                 default = "inherit";                  light = "inherit" }
     }
 
     $configured = Get-ModelFromConfig -Target $target -Tier $tier -ProjectRoot $ProjectRoot

@@ -72,7 +72,7 @@ These are invoked **by the agent**, not by you. Listed here for reference only.
 ```bash
 pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -Target agent -TaskId {task_id} -ProjectRoot "{project_root}"
-# -Target: agent (default) | claude | codex | antigravity
+# -Target: agent (default) | claude | codex | antigravity | grok
 ```
 
 ---
