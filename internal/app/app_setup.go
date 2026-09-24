@@ -62,6 +62,7 @@ func SetupLogging(cfg *config.Config, hub *dashboard.Hub) {
 	if cfg.LogFormat() == "json" {
 		handler = slog.NewJSONHandler(multi, opts)
 	}
+	handler = dashboard.NewRedactingSlogHandler(handler)
 
 	if hub != nil {
 		handler = dashboard.NewSlogHandler(hub, handler)

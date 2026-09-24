@@ -33,6 +33,40 @@ func NewSlogHandler(hub *Hub, next slog.Handler) *SlogHandler {
 	}
 }
 
+type redactingSlogHandler struct {
+	next slog.Handler
+}
+
+// NewRedactingSlogHandler wraps next with the dashboard log redaction policy.
+func NewRedactingSlogHandler(next slog.Handler) slog.Handler {
+	return &redactingSlogHandler{next: next}
+}
+
+func (h *redactingSlogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.next.Enabled(ctx, level)
+}
+
+func (h *redactingSlogHandler) Handle(ctx context.Context, r slog.Record) error {
+	if err := h.next.Handle(ctx, redactRecord(r)); err != nil {
+		return fmt.Errorf("next handler: %w", err)
+	}
+	return nil
+}
+
+func (h *redactingSlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
+	}
+	return &redactingSlogHandler{next: h.next.WithAttrs(redactAttrs(attrs))}
+}
+
+func (h *redactingSlogHandler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
+	return &redactingSlogHandler{next: h.next.WithGroup(name)}
+}
+
 // Enabled implements slog.Handler.
 func (h *SlogHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.next.Enabled(ctx, level)
@@ -40,6 +74,7 @@ func (h *SlogHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle implements slog.Handler.
 func (h *SlogHandler) Handle(ctx context.Context, r slog.Record) error {
+	redacted := redactRecord(r)
 	fields := make(map[string]any)
 
 	// Replay accumulated With* state first, then overlay the record's inline
@@ -56,15 +91,15 @@ func (h *SlogHandler) Handle(ctx context.Context, r slog.Record) error {
 			appendAttr(fields, prefix, a)
 		}
 	}
-	r.Attrs(func(a slog.Attr) bool {
+	redacted.Attrs(func(a slog.Attr) bool {
 		appendAttr(fields, prefix, a)
 		return true
 	})
 
 	entry := &LogEntry{
-		Timestamp: r.Time,
-		Level:     r.Level.String(),
-		Message:   redactSecrets(r.Message),
+		Timestamp: redacted.Time,
+		Level:     redacted.Level.String(),
+		Message:   redacted.Message,
 		Fields:    fields,
 	}
 
@@ -76,10 +111,63 @@ func (h *SlogHandler) Handle(ctx context.Context, r slog.Record) error {
 	h.hub.Emit(entry)
 
 	// Pass to the next handler
-	if err := h.next.Handle(ctx, r); err != nil {
+	if err := h.next.Handle(ctx, redacted); err != nil {
 		return fmt.Errorf("next handler: %w", err)
 	}
 	return nil
+}
+
+func redactRecord(r slog.Record) slog.Record {
+	redacted := slog.NewRecord(r.Time, r.Level, redactSecrets(r.Message), r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		redacted.AddAttrs(redactAttr(a))
+		return true
+	})
+	return redacted
+}
+
+func redactAttrs(attrs []slog.Attr) []slog.Attr {
+	if len(attrs) == 0 {
+		return nil
+	}
+	redacted := make([]slog.Attr, 0, len(attrs))
+	for _, a := range attrs {
+		ra := redactAttr(a)
+		if !ra.Equal(slog.Attr{}) {
+			redacted = append(redacted, ra)
+		}
+	}
+	return redacted
+}
+
+func redactAttr(a slog.Attr) slog.Attr {
+	a.Value = a.Value.Resolve()
+	if a.Equal(slog.Attr{}) {
+		return slog.Attr{}
+	}
+	if a.Value.Kind() == slog.KindGroup {
+		attrs := redactAttrs(a.Value.Group())
+		if len(attrs) == 0 {
+			return slog.Attr{}
+		}
+		return slog.Group(a.Key, attrsToAny(attrs)...)
+	}
+	if isSensitive(a.Key) {
+		a.Value = slog.StringValue(redactedToken)
+		return a
+	}
+	if a.Value.Kind() == slog.KindString {
+		a.Value = slog.StringValue(redactSecrets(a.Value.String()))
+	}
+	return a
+}
+
+func attrsToAny(attrs []slog.Attr) []any {
+	anyAttrs := make([]any, len(attrs))
+	for i, a := range attrs {
+		anyAttrs[i] = a
+	}
+	return anyAttrs
 }
 
 // appendAttr writes a single attr into fields under prefix, recursing into
@@ -130,7 +218,7 @@ func (h *SlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	}
 	return &SlogHandler{
 		hub:  h.hub,
-		next: h.next.WithAttrs(attrs),
+		next: h.next.WithAttrs(redactAttrs(attrs)),
 		goas: h.withGroupOrAttrs(groupOrAttrs{attrs: attrs}),
 	}
 }
@@ -230,10 +318,10 @@ var (
 	// secretTokenPatterns match self-identifying secret tokens whose entire span
 	// is the secret.
 	secretTokenPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`sk-[A-Za-z0-9]{16,}`),                                   // OpenAI-style API key
-		regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`),                            // GitHub PAT / OAuth token
-		regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),                          // GitHub fine-grained PAT
-		regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                                      // AWS access key ID
+		regexp.MustCompile(`sk-[A-Za-z0-9]{16,}`),                                     // OpenAI-style API key
+		regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`),                              // GitHub PAT / OAuth token
+		regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),                            // GitHub fine-grained PAT
+		regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                                        // AWS access key ID
 		regexp.MustCompile(`eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+`), // JWT
 	}
 )

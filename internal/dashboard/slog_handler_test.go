@@ -2,6 +2,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"strings"
@@ -264,9 +265,9 @@ func TestIsSensitive(t *testing.T) {
 		{"password", true},
 		{"PASSWORD", true}, // case-insensitive
 		{"secret", true},
-		{"api_key", true},   // delimiter split -> token "key"
-		{"apiKey", true},    // camelCase split -> token "key"
-		{"apikey", true},    // single token in the set
+		{"api_key", true}, // delimiter split -> token "key"
+		{"apiKey", true},  // camelCase split -> token "key"
+		{"apikey", true},  // single token in the set
 		{"Authorization", true},
 		{"auth", true},
 		{"key", true},
@@ -278,8 +279,8 @@ func TestIsSensitive(t *testing.T) {
 		{"donkey", false},
 		{"keyboard", false},
 		{"keyboard_layout", false},
-		{"key1", false},           // whole-token match: "key1" != "key" (was true under substring)
-		{"author", false},         // "author" != "auth"
+		{"key1", false},            // whole-token match: "key1" != "key" (was true under substring)
+		{"author", false},          // "author" != "auth"
 		{"oauth_flow_step", false}, // token "oauth" != "auth"
 	}
 
@@ -413,5 +414,74 @@ func TestSlogHandler_ValueRedaction_InlineGroup(t *testing.T) {
 	}
 	if entry.Fields["http.method"] != "GET" {
 		t.Errorf("benign grouped value altered: %v", entry.Fields["http.method"])
+	}
+}
+
+func TestRedactingSlogHandler_RedactsWrappedHandlerOutput(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	handler := NewRedactingSlogHandler(slog.NewTextHandler(&buf, nil))
+	logger := slog.New(handler).With("api_key", "stored-secret-value").WithGroup("gateway")
+
+	logger.Info("sending bearer sk-abcdefghij1234567890",
+		"text", "https://api.example/send?token=deadbeefdeadbeef1234",
+		"headers", slog.GroupValue(slog.String("Authorization", "Bearer sk-zyxwvutsrqponmlk1234")),
+	)
+
+	got := buf.String()
+	for _, leak := range []string{
+		"sk-abcdefghij1234567890",
+		"deadbeefdeadbeef1234",
+		"sk-zyxwvutsrqponmlk1234",
+		"stored-secret-value",
+	} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("wrapped handler output leaked %q in %q", leak, got)
+		}
+	}
+	if strings.Count(got, testRedacted) < 4 {
+		t.Fatalf("wrapped handler output = %q, want redacted message, key, value, and group spans", got)
+	}
+}
+
+func TestSlogHandler_ForwardsRedactedRecordToInnerHandler(t *testing.T) {
+	t.Parallel()
+	h := NewHub(10)
+	defer h.Close()
+	sub, _ := h.Subscribe()
+
+	var buf bytes.Buffer
+	logger := slog.New(NewSlogHandler(h, slog.NewTextHandler(&buf, nil))).With("api_key", "stored-secret-value")
+
+	logger.Info("sending bearer sk-abcdefghij1234567890",
+		"text", "https://api.example/send?token=deadbeefdeadbeef1234")
+
+	var entry *LogEntry
+	select {
+	case entry = <-sub:
+	default:
+		t.Fatal("expected log entry in hub")
+	}
+
+	for _, leak := range []string{
+		"sk-abcdefghij1234567890",
+		"deadbeefdeadbeef1234",
+		"stored-secret-value",
+	} {
+		if strings.Contains(entry.Message, leak) {
+			t.Fatalf("hub message leaked %q: %q", leak, entry.Message)
+		}
+		if text, _ := entry.Fields["text"].(string); strings.Contains(text, leak) {
+			t.Fatalf("hub text field leaked %q: %q", leak, text)
+		}
+		if strings.Contains(buf.String(), leak) {
+			t.Fatalf("inner handler output leaked %q in %q", leak, buf.String())
+		}
+	}
+	if entry.Fields["api_key"] != testRedacted {
+		t.Fatalf("hub sensitive key = %v, want %s", entry.Fields["api_key"], testRedacted)
+	}
+	if strings.Count(buf.String(), testRedacted) < 3 {
+		t.Fatalf("inner handler output = %q, want redacted message, key, and value spans", buf.String())
 	}
 }
