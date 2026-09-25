@@ -117,15 +117,19 @@ func TestMergeResults_ImportanceRanking(t *testing.T) {
 	// Two vector results at the same rank (rank 0 each, no FTS results).
 	// highImp has importance=5, lowImp has importance=1.
 	// After importance blending, highImp must score higher.
+	// Timestamps are current because time decay scales importance: with a fixed date,
+	// the importance edge fell below the one-rank RRF gap about 168 days later and the
+	// test started failing on 2026-09-25.
+	now := time.Now().UTC().Format(time.RFC3339)
 	fts := []FTSResult{}
 	vec := []chromem.Result{
 		{ID: "lowImp", Content: "low importance fact", Metadata: map[string]string{
-			"timestamp":  "2026-04-10T10:00:00Z",
+			"timestamp":  now,
 			"importance": "1",
 			"namespace":  "session:s",
 		}},
 		{ID: "highImp", Content: "high importance fact", Metadata: map[string]string{
-			"timestamp":  "2026-04-10T10:00:00Z",
+			"timestamp":  now,
 			"importance": "5",
 			"namespace":  "session:s",
 		}},
