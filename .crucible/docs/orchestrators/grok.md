@@ -111,7 +111,7 @@ Proceed only on `[CODEX PREFLIGHT] PASS`. Then:
 ```
 pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" `
   -TaskId {task_id} -Phase {phase} -Model {model} -Effort {effort} `
-  -WorkingDir {adopter-or-worktree}
+  -ProjectRoot {adopter-root} -WorkingDir {adopter-or-worktree}
 ```
 
 Resolve `{model}` / `{effort}` with `crucible.ps1 -Init -Target codex`. Trust `[CODEX SPECIALIST] STATUS=SUCCESS` plus the SOP Step 5 checks; never record `STATUS=LAUNCH_FAILED` as a review verdict. Full launcher rules (including the no-hand-holding rule for `prompt.md`) live in `docs/orchestrators/claude.md` ("Dispatching a Codex Specialist") and `docs/orchestrators/codex.md`.

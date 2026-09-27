@@ -19,7 +19,7 @@ mechanics - the parent invokes the Crucible launcher:
 
 ```
 pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
-  -TaskId {task_id} -Phase {phase} -Model {model}
+  -TaskId {task_id} -Phase {phase} -Model {model} -ProjectRoot "{project_root}"
 ```
 
 The launcher wraps `codex exec -s danger-full-access --skip-git-repo-check`, captures the final message

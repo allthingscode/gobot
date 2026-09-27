@@ -86,18 +86,33 @@ function Get-UnreadableStartTimeProcess {
 # A live process that provably started after $Directory was created - the pid-reuse shape item
 # 90 is about, with the ordering real rather than backdated. Start-Sleep bounds the leak if a
 # later assertion throws before the caller's finally runs.
+#
+# Linux derives a process start time from clock ticks since boot, which is coarser than a
+# file timestamp, so a process spawned right after the directory can report a start time that
+# ties it or lands just before it. CI run 36191923642 hit exactly that. A tie means the pair was
+# too close to order, not that the ordering is wrong, so the spawn is retried after a pause
+# long enough to clear the tick. Only a start that is still not later after every retry throws.
+# TODO item 134.
 function Start-ProcessStartedAfter {
     param([Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$Directory)
 
-    $proc = Start-HiddenHostProcess -Arguments @("-NoProfile", "-Command", "Start-Sleep -Seconds 60")
-    $startUtc = Get-RawProcessStartTimeUtc -Process $proc
-    if ($null -eq $startUtc -or $startUtc -le $Directory.CreationTimeUtc) {
+    $maxAttempts = 3
+    $attemptsMade = 0
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $attemptsMade = $attempt
+        $proc = Start-HiddenHostProcess -Arguments @("-NoProfile", "-Command", "Start-Sleep -Seconds 60")
+        $startUtc = Get-RawProcessStartTimeUtc -Process $proc
+        if ($null -ne $startUtc -and $startUtc -gt $Directory.CreationTimeUtc) {
+            return $proc
+        }
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        throw ("Start-ProcessStartedAfter: spawned pid " + $proc.Id + " reports start time '" + $startUtc +
-            "', which is not after the creation time '" + $Directory.CreationTimeUtc + "' of " +
-            $Directory.FullName + ". The pid-reuse case cannot be built on this pair.")
+        $proc.Dispose()
+        if ($null -eq $startUtc) { break }
+        if ($attempt -lt $maxAttempts) { Start-Sleep -Milliseconds 1100 }
     }
-    return $proc
+    throw ("Start-ProcessStartedAfter: spawned pid reports start time '" + $startUtc +
+        "', which is not after the creation time '" + $Directory.CreationTimeUtc.ToString("o") + "' of " +
+        $Directory.FullName + " after " + $attemptsMade + " attempt(s). The pid-reuse case cannot be built on this pair.")
 }
 
 function New-RunnerScratch {

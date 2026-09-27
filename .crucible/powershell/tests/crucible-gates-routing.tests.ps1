@@ -340,6 +340,12 @@ try {
 
         Assert-Result -Name "D44: human gate accept with auto-archive exits successfully" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
 
+        # The gate is the only finalizer, so a correct run must not report finalization as a
+        # skipped step or a fallback. TODO item 132.
+        Assert-Result -Name "D44: finalization is reported as the expected step" -Condition ($output -match '\[D44\] Finalizing task C-999 at the human gate' -and $output -notmatch '(?i)fallback|not explicitly finalized') -FailureMessage ("expected the D44 finalizing line without fallback wording. Output: " + $output)
+        $gateSource = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/crucible-gates.ps1") -Raw -Encoding UTF8
+        Assert-Result -Name "D44: finalizing line is not in warning color" -Condition ($gateSource -match '\[D44\] Finalizing task [^\r\n]*-ForegroundColor Cyan') -FailureMessage "expected the D44 finalizing Write-Host to use -ForegroundColor Cyan"
+
         # Verify task is now finalized
         # 1. Spec moved to archived/
         $activeExists = Test-Path -LiteralPath (Join-Path $backlogDir "chores/active/C-999_Test_Spec.md")

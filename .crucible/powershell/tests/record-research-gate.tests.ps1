@@ -61,6 +61,31 @@ try {
         Assert-Result "outcome closed" ($obj.outcome -eq "closed") "outcome should be closed when nothing approved"
     }
 
+    $results += Run-Test -Name "gate-filing never tells the Researcher to set a status the deployment gate refuses" -Body {
+        # R-031's Researcher followed "set R-031's own status to Production", and the Operator
+        # had to revert it: the deployment gate's premature-status guard (F12) refuses a
+        # terminal status before a human accepts. Read the terminal set from that guard so a
+        # status added there is checked here too.
+        $gatesText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/crucible-gates.ps1") -Raw
+        $terminal = @()
+        if ($gatesText -match "(?s)Premature Production/Resolved status guard.*?\\b\(\?:([A-Za-z|]+)\)\\b") {
+            $terminal = @($Matches[1] -split '\|')
+        }
+        Assert-Result "terminal set read from the F12 guard" ($terminal.Count -ge 2) "could not read the terminal statuses from the F12 guard in crucible-gates.ps1"
+        foreach ($case in @(@{ Name = "approved"; Args = @{ Approved = @("C-350") } }, @{ Name = "deferred"; Args = @{ Deferred = @("C-350") } })) {
+            $p = New-GateProject -Root (Join-Path $tempRoot ("status-" + $case.Name))
+            $gateArgs = $case.Args
+            & $SCRIPT -TaskId $p.TaskId -Reason "ok" -ProjectRoot $p.Root @gateArgs | Out-Null
+            $body = Get-Content -LiteralPath $p.GateFiling -Raw
+            $sentences = @(($body -replace "\s+", " ") -split "(?<=[.:;])\s+")
+            foreach ($status in $terminal) {
+                $offending = @($sentences | Where-Object { $_ -match "\b$status\b" -and $_ -notmatch "Do NOT" })
+                Assert-Result "$($case.Name): no instruction to set $status" ($offending.Count -eq 0) ("gate-filing tells the Researcher to set " + $status + ": " + ($offending -join " | "))
+            }
+            Assert-Result "$($case.Name): says to leave the parent status" ($body -match "Leave $($p.TaskId)'s own status as it is") "gate-filing should tell the Researcher to leave the parent status alone"
+        }
+    }
+
     $results += Run-Test -Name "generated gate-filing.md is ASCII and BOM-free" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "encoding")
         & $SCRIPT -TaskId $p.TaskId -Reason "clean" -Approved "C-350" -ProjectRoot $p.Root | Out-Null

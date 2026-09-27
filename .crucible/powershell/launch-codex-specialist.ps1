@@ -124,13 +124,13 @@ function New-BootstrapPrompt {
     param(
         [string]$RoleLabel,
         [string]$TaskIdValue,
-        [string]$PhaseValue,
-        [string]$CrucibleRootValue,
+        [string]$PromptPath,
+        [string]$CrucibleScriptPath,
+        [string]$ProjectRootValue,
         [bool]$RequireJsonVerdict
     )
-    $promptPath = "$CrucibleRootValue/session/$TaskIdValue/$PhaseValue/prompt.md"
     $lines = @(
-        "$RoleLabel`: $TaskIdValue - read and follow all instructions in $promptPath",
+        "$RoleLabel`: $TaskIdValue - read and follow all instructions in $PromptPath",
         "",
         "You are a Crucible pipeline specialist running under an orchestrator. Follow your SOP",
         "checkpoint mandate: append '### CHECKPOINT [brief summary]' to your task.md after each",
@@ -138,7 +138,7 @@ function New-BootstrapPrompt {
         "complete. You are not alone in the codebase; do not revert unrelated edits.",
         "",
         "After writing handoff JSON, run:",
-        "  pwsh -File `"$CrucibleRootValue/powershell/crucible.ps1`" -Init -TaskId $TaskIdValue -Quiet",
+        "  pwsh -File `"$CrucibleScriptPath`" -Init -TaskId $TaskIdValue -ProjectRoot `"$ProjectRootValue`" -Quiet",
         "Report the Crucible output. Do not spawn successor agents."
     )
     if ($RequireJsonVerdict) {
@@ -252,8 +252,7 @@ function Invoke-CodexExec {
 
 $REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot
 
-# -CrucibleRoot is Join-Path'd onto the repo root AND embedded RELATIVELY in the bootstrap
-# prompt (.crucible/session/...). An absolute value breaks both and previously surfaced only
+# -CrucibleRoot is Join-Path'd onto the repo root. An absolute value previously surfaced only
 # as an opaque "New-Item : The given path's format is not supported". Relativize an absolute
 # path that lives under the repo root; otherwise fail up front with a clear message.
 if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
@@ -357,6 +356,24 @@ if (-not [string]::IsNullOrWhiteSpace($PromptFile) -and [string]::IsNullOrWhiteS
     }
 }
 
+$crucibleDir = Join-Path $REPO_ROOT $CrucibleRoot
+$rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from script location" } else { "from -ProjectRoot" }
+
+# The bootstrap prompt names the phase prompt by absolute path: the specialist runs in
+# -WorkingDir, and a worktree holds no copy of the gitignored session dir, so a relative
+# path sent it searching (or reading another repo's prompt). Refuse before creating any
+# session dir when the prompt is not under the resolved root - usually a missing -ProjectRoot.
+$bootstrapPromptPath = ""
+if ([string]::IsNullOrWhiteSpace($PromptText)) {
+    $bootstrapPromptPath = Join-Path $crucibleDir (Join-Path "session" (Join-Path $TaskId (Join-Path $Phase "prompt.md")))
+    if (-not (Test-Path -LiteralPath $bootstrapPromptPath)) {
+        Write-Host ("[CODEX] Error: phase prompt not found: " + $bootstrapPromptPath) -ForegroundColor Red
+        Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
+        Write-Host ("Run crucible.ps1 -Init -TaskId " + $TaskId + " -ProjectRoot <adopter root> first, and pass that same -ProjectRoot here.") -ForegroundColor Yellow
+        exit 2
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($WorkingDir)) {
     $WorkingDir = $REPO_ROOT
 } else {
@@ -425,9 +442,10 @@ if ($ReviewSchema) {
     $useSchema = $true
 }
 
-if ([string]::IsNullOrWhiteSpace($PromptText)) {
-    $PromptText = New-BootstrapPrompt -RoleLabel $Role -TaskIdValue $TaskId -PhaseValue $Phase `
-        -CrucibleRootValue $CrucibleRoot -RequireJsonVerdict $useSchema
+if (-not [string]::IsNullOrWhiteSpace($bootstrapPromptPath)) {
+    $PromptText = New-BootstrapPrompt -RoleLabel $Role -TaskIdValue $TaskId -PromptPath $bootstrapPromptPath `
+        -CrucibleScriptPath (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) `
+        -ProjectRootValue $REPO_ROOT -RequireJsonVerdict $useSchema
 }
 
 $codexArgs = @(
@@ -445,7 +463,6 @@ if (-not [string]::IsNullOrWhiteSpace($Effort)) {
 Write-Host ""
 $launchTarget = if ($usingAdhocSession) { $adhocLabel + " (ad-hoc prompt)" } else { $TaskId + " (" + $Phase + ")" }
 Write-Host ("[CODEX SPECIALIST] Launching " + $Role + " for " + $launchTarget) -ForegroundColor Cyan
-$rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from script location" } else { "from -ProjectRoot" }
 Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
 Write-Host ("  model: " + $Model + "  |  access: danger-full-access  |  workdir: " + $WorkingDir)
 if ($useSchema) { Write-Host "  review verdict schema: enforced" }

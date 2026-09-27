@@ -340,6 +340,13 @@ $resolvedArtifacts = $normalizedArtifacts
 $baseAffinity = @()
 if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
     $baseAffinity = @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+    # Quotes escaped for a nested shell arrive as characters, and B-012's Groomer wrote
+    # "\"internal/app/\"" into file_affinity that way. Refuse rather than strip: a mangled
+    # value should reach the caller, not a handoff that counts against the budget.
+    $quotedAffinity = @($baseAffinity | Where-Object { $_ -match "[`"']" })
+    if ($quotedAffinity.Count -gt 0) {
+        throw ("-FileAffinity entry contains a quote character, which no path can: " + ($quotedAffinity -join ", ") + ". Pass the paths unquoted, as separate arguments or comma-joined.")
+    }
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["file_affinity"] -and $null -ne $latest.file_affinity -and @($latest.file_affinity).Count -gt 0) {
     $baseAffinity = @($latest.file_affinity)
 }

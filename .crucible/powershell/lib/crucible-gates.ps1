@@ -3129,7 +3129,9 @@ function Invoke-HumanGateAcceptRedirect {
         if ($backlogContent -match [regex]::Escape($TaskId)) {
             $finalization = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $ProjectRoot
             if (-not $finalization.IsFinalized) {
-                Write-Host "`n[D44] INFO: Task $TaskId was not explicitly finalized before accept/push. Auto-finalizing fallback now..." -ForegroundColor Yellow
+                # The expected path, not a recovery: the deployment prompt forbids the Operator
+                # from finalizing, so the gate is the only finalizer (TODO item 132).
+                Write-Host "`n[D44] Finalizing task $TaskId at the human gate: archiving its spec and updating BACKLOG.md." -ForegroundColor Cyan
 
                 # Locate active spec
                 $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $ProjectRoot

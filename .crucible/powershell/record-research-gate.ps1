@@ -115,6 +115,15 @@ if ($approvedQuoted -ne '') { $handoffArgs += " -HumanApproved $approvedQuoted -
 if ($deferredQuoted -ne '') { $handoffArgs += " -HumanDeferred $deferredQuoted" }
 if ($rejectedQuoted -ne '') { $handoffArgs += " -HumanRejected $rejectedQuoted" }
 
+# The deployment gate refuses a task marked Production or Resolved before a human accepts it,
+# and the human gate finalizes it on acceptance. Telling the Researcher to set it here sent
+# R-031 through grooming and verification already terminal, for the Operator to revert.
+$statusRule = @(
+    "Leave $TaskId's own status as it is. Do NOT set it to ``Production`` or ``Resolved``:",
+    "the human gate finalizes it on acceptance, and the deployment gate refuses it as terminal",
+    "before then."
+) -join "`n"
+
 $fileStep = if ($approvedList.Count -gt 0) {
 @"
 ## Step 1 - File the APPROVED backlog stubs
@@ -133,8 +142,10 @@ Encoding: UTF-8 without BOM, ASCII only. No em-dashes, smart quotes, or arrow gl
 ## Step 2 - Update BACKLOG.md
 
 Add one Active Items row per approved stub, bump the Priority Summary counts and Item IDs
-columns, update the Status Overview count, and set $TaskId's own status to `Production`.
-Do NOT file rows for deferred or rejected items.
+columns, and update the Status Overview count. Do NOT file rows for deferred or rejected
+items.
+
+$statusRule
 "@
 } else {
 @"
@@ -144,7 +155,9 @@ The human deferred or rejected every recommendation, so file NO new backlog stub
 
 ## Step 2 - Update BACKLOG.md
 
-Set $TaskId's own status to `Production`. Do NOT add rows for deferred or rejected items.
+Do NOT add rows for deferred or rejected items.
+
+$statusRule
 "@
 }
 
@@ -202,7 +215,7 @@ Write-Host ("  decision record: " + $decisionPath)
 Write-Host ("  continuation prompt: " + $gateFilingPath)
 Write-Host ""
 Write-Host "  Re-dispatch the Researcher with a ONE-LINE pointer to the continuation prompt:" -ForegroundColor Cyan
-Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -PromptText `"$pointer`"")
+Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -ProjectRoot `"$REPO_ROOT`" -PromptText `"$pointer`"")
 Write-Host ("    Claude: Agent tool, prompt = `"$pointer`"")
 Write-Host ""
 Write-Host "  The gate is CLOSED; the specialist will file the approved stubs and hand off without re-presenting."

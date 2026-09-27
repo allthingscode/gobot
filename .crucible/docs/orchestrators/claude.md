@@ -81,7 +81,7 @@ launch status.
 
    ```bash
    pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-specialist.ps1" \
-     -TaskId {task_id} -Phase {phase} -Model {model} -Effort {effort}
+     -TaskId {task_id} -Phase {phase} -Model {model} -Effort {effort} -ProjectRoot "{project_root}"
    ```
 
    Add `-WorkingDir {worktree}` for implementation/verification phases that operate in a task worktree,

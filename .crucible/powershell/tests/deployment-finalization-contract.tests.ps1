@@ -3,7 +3,7 @@
 # The gates are a matched pair keyed on whether a human has decided (crucible-gates.ps1):
 # before an accepted/redirected decision exists, a terminal BACKLOG.md status is refused
 # (F12); after it, a non-terminal status is refused, and the gate finalizes the task
-# itself via the D44 fallback. Both halves have their own tests.
+# itself at D44. Both halves have their own tests.
 #
 # What had no test was the instructions. The deployment prompt, the deployment SOP and
 # the generated task.md checklist all told the Operator to run archive-task.ps1 before

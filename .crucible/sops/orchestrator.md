@@ -1,4 +1,4 @@
-<!-- prompt_version: orchestrator-sop-v3 -->
+<!-- prompt_version: orchestrator-sop-v4 -->
 # SOP: Orchestrator
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -45,11 +45,11 @@ You enforce these. They are not negotiable and cannot be waived by a specialist'
 The only valid transitions are:
 
 ```
-grooming       -> implementation | research | done (terminal; requires a recorded human decision)
+grooming       -> implementation | research | verification (Stub-Only Close-Out) | done (terminal; requires a recorded human decision)
 research       -> grooming
 implementation -> verification
 verification   -> deployment (approved) | implementation (changes requested)
-deployment     -> done | grooming
+deployment     -> done | implementation (rejected with rework requested, or rebase re-entry) | grooming
 ```
 
 If a handoff's `target_phase` is not in the list above for that `source_phase`, it is a routing violation. Do not dispatch. Escalate to the human.

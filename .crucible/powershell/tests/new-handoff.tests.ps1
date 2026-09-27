@@ -258,6 +258,53 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "-FileAffinity entry with a quote character is refused and names the entry" -Script {
+        # B-012's Groomer passed -FileAffinity through a nested pwsh -Command, and the escaped
+        # quotes reached the script as characters.
+        foreach ($case in @(
+            @{ Suffix = "AFF-DQ"; Entry = '"internal/app/"'; Named = "internal app" },
+            @{ Suffix = "AFF-SQ"; Entry = "'internal/tools/'"; Named = "internal tools" }
+        )) {
+            $taskId = New-TestTaskId $case.Suffix
+            $result = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "grooming"
+                Target = "implementation"
+                Reason = "quoted affinity"
+                PromptVersion = "groomer_prompt-v16"
+                Artifacts = @("powershell/crucible.ps1")
+                FileAffinity = @(("powershell/," + $case.Entry))
+                SchemaPath = $schemaPath
+            }
+            if ($result.ExitCode -eq 0) { throw "Expected refusal for -FileAffinity $($case.Entry), but the generator succeeded" }
+            $normalized = ConvertTo-NormalizedOutput $result.Output
+            if ($normalized -notmatch "FileAffinity entry contains a quote character") { throw "Expected the quote refusal message, got: $($result.Output)" }
+            if ($normalized -notmatch $case.Named) { throw "Refusal should name the entry $($case.Entry), got: $($result.Output)" }
+            if ($normalized -match "powershell") { throw "Refusal should name only the quoted entry, got: $($result.Output)" }
+            if (Track-HandoffFile -TaskId $taskId) { throw "A refused -FileAffinity must not write a handoff for $taskId" }
+        }
+    }
+
+    Invoke-Test -Name "-FileAffinity accepts separate and comma-joined unquoted paths" -Script {
+        $taskId = New-TestTaskId "AFF-OK"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "unquoted affinity"
+            PromptVersion = "groomer_prompt-v16"
+            Artifacts = @("powershell/crucible.ps1")
+            FileAffinity = @("internal/app/, internal/tools/", "schemas/handoff.schema.json")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $affinity = @((Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).file_affinity)
+        $expected = @("internal/app/", "internal/tools/", "schemas/handoff.schema.json")
+        if (($affinity -join "|") -ne ($expected -join "|")) { throw "Expected file_affinity $($expected -join ', '), got: $($affinity -join ', ')" }
+    }
+
     Invoke-Test -Name "groomer->reviewer success (Stub-Only Close-Out stub-only pass)" -Script {
         $taskId = New-TestTaskId "GR"
         $result = Invoke-Generator -InputArgs @{

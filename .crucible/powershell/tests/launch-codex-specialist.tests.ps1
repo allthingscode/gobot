@@ -603,6 +603,48 @@ try {
             "-Model", "gpt-5.5", "-PromptText", "inline prompt", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "prompttext without taskid exit 2" -Condition ($res2.ExitCode -eq 2) -FailureMessage "expected exit 2 for -PromptText without -TaskId, got $($res2.ExitCode). Output:`n$($res2.Output)"
     }
+
+    $results += Run-Test -Name "Bootstrap prompt names paths that resolve from a worktree WorkingDir" -Body {
+        # A worktree has no copy of the gitignored session dir, so the relative
+        # .crucible/session/... path the bootstrap prompt used to carry did not exist from the
+        # specialist's cwd. Both the prompt path and the Crucible line must stand on their own.
+        $projectRoot = Join-Path $tempRoot "proj-bootstrap-worktree"
+        $promptDir = Join-Path $projectRoot ".crucible/session/C-979/implementation"
+        New-Item -ItemType Directory -Path $promptDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $promptDir "prompt.md"), "phase prompt")
+        $worktree = Join-Path $tempRoot "wt-bootstrap"
+        New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+        $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-979", "-Phase", "implementation", "-Model", "gpt-5.5",
+            "-ProjectRoot", $projectRoot, "-WorkingDir", $worktree)
+        Assert-Result -Name "worktree bootstrap succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
+        $transcript = Join-Path $promptDir "codex-transcript.txt"
+        $tx = if (Test-Path -LiteralPath $transcript) { Get-Content -LiteralPath $transcript -Raw } else { "" }
+        $promptRef = if ($tx -match "read and follow all instructions in ([^\r\n]+)") { $Matches[1].Trim() } else { "" }
+        $promptResolves = (-not [string]::IsNullOrWhiteSpace($promptRef)) -and [System.IO.Path]::IsPathRooted($promptRef) -and (Test-Path -LiteralPath $promptRef)
+        Assert-Result -Name "prompt path is absolute and exists" -Condition $promptResolves -FailureMessage "prompt path '$promptRef' must be absolute and exist. Transcript:`n$tx"
+        $rootRef = if ($tx -match '-Init -TaskId C-979 -ProjectRoot "([^"]+)"') { $Matches[1] } else { "" }
+        $rootResolves = (-not [string]::IsNullOrWhiteSpace($rootRef)) -and (Test-Path -LiteralPath (Join-Path $rootRef ".crucible/session/C-979"))
+        Assert-Result -Name "crucible line passes the project root" -Condition $rootResolves -FailureMessage "Crucible line must pass -ProjectRoot naming the adopter root. Transcript:`n$tx"
+        $scriptRef = if ($tx -match 'pwsh -File "([^"]+)" -Init') { $Matches[1] } else { "" }
+        Assert-Result -Name "crucible script path is absolute" -Condition ([System.IO.Path]::IsPathRooted($scriptRef)) -FailureMessage "crucible.ps1 path '$scriptRef' must be absolute. Transcript:`n$tx"
+    }
+
+    $results += Run-Test -Name "Bootstrap launch with no phase prompt under the root is refused before dispatch" -Body {
+        # Launching an adopter's task through the framework checkout's launcher without
+        # -ProjectRoot resolved the root to the framework repo, created a stray session dir there,
+        # and sent Codex hunting for a prompt that was not under its root.
+        $projectRoot = Join-Path $tempRoot "proj-bootstrap-noprompt"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-978", "-Phase", "implementation", "-Model", "gpt-5.5", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "missing prompt exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "missing prompt names the path" -Condition ($res.Output -match "phase prompt not found: .*C-978") -FailureMessage "expected the missing prompt path. Output:`n$($res.Output)"
+        Assert-Result -Name "missing prompt names the root source" -Condition ($res.Output -match "from -ProjectRoot") -FailureMessage "expected the root source. Output:`n$($res.Output)"
+        Assert-Result -Name "missing prompt dispatches nothing" -Condition (-not ($res.Output -match "\[CODEX SPECIALIST\]")) -FailureMessage "must exit before dispatch. Output:`n$($res.Output)"
+        $strayDir = Join-Path $projectRoot ".crucible/session/C-978"
+        Assert-Result -Name "missing prompt creates no session dir" -Condition (-not (Test-Path -LiteralPath $strayDir)) -FailureMessage "must not create $strayDir"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

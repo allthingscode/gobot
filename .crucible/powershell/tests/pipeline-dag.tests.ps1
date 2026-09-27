@@ -257,6 +257,40 @@ try {
         }
     }
 
+    # The orchestrator refuses to dispatch any route missing from this table, so a missing
+    # edge stops a legal handoff. It lacked grooming -> verification, which R-031 closed
+    # by. Item 133.
+    $results += Run-Test -Name "Orchestrator SOP routing table agrees with code" -Body {
+        $transitions = Get-PipelineValidTransitions -DeploymentRework $true
+
+        $inSection = $false
+        $inFence = $false
+        $documented = @{}
+        foreach ($line in (Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/orchestrator.md"))) {
+            if ($line -match '^### FSM Phase Routing DAG') { $inSection = $true; continue }
+            if (-not $inSection) { continue }
+            if ($line -match '^```') {
+                if ($inFence) { break }
+                $inFence = $true
+                continue
+            }
+            if (-not $inFence) { continue }
+            if ($line -notmatch '^([a-z]+)\s+->\s+(.*)$') { continue }
+            $source = $matches[1]
+            $targets = @($matches[2] -replace '\([^)]*\)', '' -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+            $documented[$source] = $targets
+        }
+
+        Assert-Result -Name "orchestrator SOP table was parsed" -Condition ($documented.Count -eq $transitions.Count) -FailureMessage ("expected " + $transitions.Count + " rows in the FSM Phase Routing DAG block but parsed " + $documented.Count + ": " + (($documented.Keys | Sort-Object) -join ", "))
+        if ($documented.Count -ne $transitions.Count) { return }
+
+        foreach ($phase in @($transitions.Keys | Sort-Object)) {
+            Assert-Result -Name ("orchestrator SOP routes " + $phase) -Condition ($documented.ContainsKey($phase)) -FailureMessage ("sops/orchestrator.md has no routing row for " + $phase)
+            if (-not $documented.ContainsKey($phase)) { continue }
+            Assert-StringArrayEqual -Name ("orchestrator SOP " + $phase + " successors match the DAG") -Actual $documented[$phase] -Expected @($transitions[$phase] | Sort-Object -Unique)
+        }
+    }
+
 } finally {
 }
 
