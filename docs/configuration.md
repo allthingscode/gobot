@@ -76,7 +76,7 @@ Controls default model parameters and specialist overrides.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `defaults.model` | string | Default LLM model (e.g., `gemini-2.5-flash`). |
+| `defaults.model` | string | Default LLM model (e.g., `gemini-3.8-flash`). |
 | `defaults.provider` | string | Default provider (`gemini`, `anthropic`, `openai`, `openrouter`). Use `auto` to let gobot select. |
 | `defaults.maxTokens` | int | Maximum output tokens per turn (0 = model default). |
 | `defaults.maxToolIterations` | int | Maximum consecutive tool calls allowed in one turn. |

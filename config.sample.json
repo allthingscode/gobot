@@ -1,7 +1,7 @@
 ﻿{
     "agents": {
         "defaults": {
-            "model": "gemini-3-flash-preview",
+            "model": "gemini-3.8-flash",
             "provider": "gemini",
             "maxTokens": 0,
             "maxToolIterations": 25,

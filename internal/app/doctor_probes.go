@@ -10,6 +10,7 @@ import (
 	"github.com/mymmrac/telego"
 	"google.golang.org/genai"
 
+	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/infra"
 	"github.com/allthingscode/gobot/internal/integrations/google"
@@ -61,7 +62,7 @@ func LiveProbesList() *doctor.Probes {
 				})
 				defer func() { _ = res.Close() }()
 
-				_, err = client.Models.GenerateContent(ctx, "gemini-2.0-flash",
+				_, err = client.Models.GenerateContent(ctx, config.DefaultGeminiModel,
 					[]*genai.Content{{Parts: []*genai.Part{{Text: "ping"}}}},
 					nil,
 				)

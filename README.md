@@ -151,7 +151,7 @@ manual steps below.
    Minimum working config — fill in the three `YOUR_*` placeholders:
    ```json
    {
-     "agents": { "defaults": { "model": "gemini-2.5-flash", "provider": "gemini" } },
+     "agents": { "defaults": { "model": "gemini-3.8-flash", "provider": "gemini" } },
      "channels": {
        "telegram": {
          "enabled": true,

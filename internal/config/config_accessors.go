@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// DefaultGeminiModel is the chat model used when agents.defaults.model is unset.
+const DefaultGeminiModel = "gemini-3.8-flash"
+
 // DefaultSummarizationThreshold is the default threshold for context summarization (70%).
 const DefaultSummarizationThreshold = 0.7
 
@@ -184,12 +187,12 @@ func (c *Config) EmbeddingModel() string {
 	return "text-embedding-004"
 }
 
-// DefaultModel returns the configured default model, falling back to gemini-3-flash-preview.
+// DefaultModel returns the configured default model, falling back to DefaultGeminiModel.
 func (c *Config) DefaultModel() string {
 	if c.Agents.Defaults.Model != "" {
 		return c.Agents.Defaults.Model
 	}
-	return "gemini-3-flash-preview"
+	return DefaultGeminiModel
 }
 
 // DefaultProvider returns the configured default provider, defaulting to "gemini".

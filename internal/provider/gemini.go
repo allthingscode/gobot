@@ -123,13 +123,9 @@ func (p *GeminiProvider) mapFunctionCallPart(part *genai.Part, msg *agentctx.Str
 func (p *GeminiProvider) Models() []ModelInfo {
 	// Return a static list or fetch from API. For now, static is fine.
 	return []ModelInfo{
+		{ID: "gemini-3.8-flash", SupportsToolUse: true, SupportsThinking: true},
 		{ID: "gemini-3.1-pro-preview", SupportsToolUse: true, SupportsThinking: true},
-		{ID: "gemini-3-flash-preview", SupportsToolUse: true, SupportsThinking: true},
-		{ID: "gemini-2.0-flash", SupportsToolUse: true, SupportsThinking: true},
-		{ID: "gemini-2.0-flash-lite-preview-02-05", SupportsToolUse: true, SupportsThinking: true},
-		{ID: "gemini-2.0-pro-exp-02-05", SupportsToolUse: true, SupportsThinking: true},
-		{ID: "gemini-1.5-flash", SupportsToolUse: true},
-		{ID: "gemini-1.5-pro", SupportsToolUse: true},
+		{ID: "gemini-3.5-flash-lite", SupportsToolUse: true, SupportsThinking: true},
 	}
 }
 

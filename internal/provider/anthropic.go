@@ -109,10 +109,10 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 // Models returns a list of supported Claude models.
 func (p *AnthropicProvider) Models() []ModelInfo {
 	return []ModelInfo{
-		{ID: "claude-3-7-sonnet-20250219", SupportsToolUse: true},
-		{ID: "claude-3-5-sonnet-20241022", SupportsToolUse: true},
-		{ID: "claude-3-5-haiku-20241022", SupportsToolUse: true},
-		{ID: "claude-3-opus-20240229", SupportsToolUse: true},
+		{ID: "claude-fable-5-1", SupportsToolUse: true},
+		{ID: "claude-opus-5-5", SupportsToolUse: true},
+		{ID: "claude-sonnet-5", SupportsToolUse: true},
+		{ID: "claude-haiku-4-5", SupportsToolUse: true},
 	}
 }
 

@@ -364,7 +364,7 @@ func TestDefaultModel(t *testing.T) {
 		{
 			name:  "empty falls back to default",
 			model: "",
-			want:  "gemini-3-flash-preview",
+			want:  DefaultGeminiModel,
 		},
 	}
 	for _, tc := range tests {

@@ -15,8 +15,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 
 - `config.json` is now written atomically to avoid partial writes on crash.
+- The default chat model is `gemini-3.8-flash` (was `gemini-3-flash-preview`),
+  used when `agents.defaults.model` is unset. The provider model lists name
+  current models: `gemini-3.8-flash`, `gemini-3.1-pro-preview`,
+  `gemini-3.5-flash-lite`; `claude-fable-5-1`, `claude-opus-5-5`,
+  `claude-sonnet-5`, `claude-haiku-4-5`; `gpt-6-astra`, `gpt-6-sol`,
+  `gpt-6-luna`. Retired and shut-down entries (Gemini 1.5/2.0, Claude 3.x,
+  GPT-4/3.5, o1) are gone.
 
 ### Fixed
+
+- **`gobot doctor` Gemini probe called a shut-down model.** The live probe sent
+  its ping to `gemini-2.0-flash`, which Google shut down on 2026-06-01, so it
+  could not pass. It now pings the default chat model.
 
 - **govulncheck finding GO-2026-6348 (`google.golang.org/grpc` v1.82.1).** An
   unauthenticated peer can fragment a gRPC payload into tiny HTTP/2 DATA frames

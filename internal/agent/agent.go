@@ -95,7 +95,7 @@ type SessionManager struct {
 
 // NewSessionManager creates a SessionManager backed by runner.
 // store may be nil for stateless operation.
-// model is recorded when creating new checkpoint threads (e.g. "gemini-2.5-flash").
+// model is recorded when creating new checkpoint threads (e.g. "gemini-3.8-flash").
 func NewSessionManager(runner Runner, store CheckpointStore, model string) *SessionManager {
 	return &SessionManager{
 		runner:       runner,

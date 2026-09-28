@@ -27,15 +27,15 @@ func TestGeminiProvider_NameAndModels(t *testing.T) {
 
 	found := false
 	for _, m := range models {
-		if m.ID == "gemini-2.0-flash" {
+		if m.ID == "gemini-3.8-flash" {
 			found = true
 			if !m.SupportsToolUse {
-				t.Error("expected gemini-2.0-flash to support tool use")
+				t.Error("expected gemini-3.8-flash to support tool use")
 			}
 		}
 	}
 	if !found {
-		t.Error("expected gemini-2.0-flash in models")
+		t.Error("expected gemini-3.8-flash in models")
 	}
 }
 
@@ -121,7 +121,7 @@ func TestGeminiProvider_Chat(t *testing.T) {
 		{
 			name:       "success with tool call",
 			httpStatus: http.StatusOK,
-			reqModel:   "gemini-2.0-flash",
+			reqModel:   "gemini-3.8-flash",
 			reqStr:     "hello",
 			mockResp: genai.GenerateContentResponse{
 				Candidates: []*genai.Candidate{
@@ -152,7 +152,7 @@ func TestGeminiProvider_Chat(t *testing.T) {
 		{
 			name:       "nil candidate response",
 			httpStatus: http.StatusOK,
-			reqModel:   "gemini-2.0-flash",
+			reqModel:   "gemini-3.8-flash",
 			reqStr:     "hello",
 			mockResp: genai.GenerateContentResponse{
 				Candidates: []*genai.Candidate{}, // empty
@@ -162,7 +162,7 @@ func TestGeminiProvider_Chat(t *testing.T) {
 		{
 			name:       "http error 500",
 			httpStatus: http.StatusInternalServerError,
-			reqModel:   "gemini-2.0-flash",
+			reqModel:   "gemini-3.8-flash",
 			reqStr:     "hello",
 			mockResp:   map[string]any{"error": map[string]string{"message": "internal error"}},
 			wantErr:    "internal error",

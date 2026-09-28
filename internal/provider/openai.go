@@ -151,12 +151,9 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 // Models returns a list of common OpenAI models.
 func (p *OpenAIProvider) Models() []ModelInfo {
 	return []ModelInfo{
-		{ID: "gpt-4o", SupportsToolUse: true},
-		{ID: "gpt-4o-mini", SupportsToolUse: true},
-		{ID: "gpt-4-turbo", SupportsToolUse: true},
-		{ID: "gpt-3.5-turbo", SupportsToolUse: true},
-		{ID: "o1-preview", SupportsToolUse: true},
-		{ID: "o1-mini", SupportsToolUse: true},
+		{ID: "gpt-6-astra", SupportsToolUse: true},
+		{ID: "gpt-6-sol", SupportsToolUse: true},
+		{ID: "gpt-6-luna", SupportsToolUse: true},
 	}
 }
 
