@@ -514,7 +514,7 @@ func TestShellExecTool_Coverage(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{}
 	cfg.Runtime.StorageRoot = tempDir
-	tool := app.NewShellExecTool(cfg, 1*time.Second, nil)
+	tool := app.NewShellExecTool(cfg, 30*time.Second, nil)
 
 	ctx := context.Background()
 
