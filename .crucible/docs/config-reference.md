@@ -160,13 +160,13 @@ models:
       default: sonnet
       light: haiku
     codex:
-      strong: gpt-5.5
-      default: gpt-5.5
-      light: gpt-5.4
+      strong: gpt-6-sol
+      default: gpt-5.6-terra
+      light: gpt-6-luna
     antigravity:
       strong: "Gemini 3.1 Pro (High)"
-      default: "Gemini 3.5 Flash (High)"
-      light: "Gemini 3.5 Flash (Medium)"
+      default: "Gemini 3.8 Flash (High)"
+      light: "Gemini 3.8 Flash (Medium)"
     grok:
       strong: inherit
       default: inherit
@@ -177,7 +177,8 @@ models:
 - **The printed line names its target.** `[RECOMMENDED MODEL] sonnet (target claude)` is a Claude dispatch. A Grok orchestrator does not pass that slug. It passes `-Target grok` once; the sticky target keeps it, and the line for that target says `inherit`.
 - **Resolution order**: a value in this block wins; if absent, the framework default map (same values shown above) applies; an unknown target/tier degrades to the tier token rather than throwing. The block is optional - omit it and the defaults apply.
 - **Quoting**: quote any value containing spaces (e.g. the Antigravity labels).
-- **Codex model availability (ChatGPT login)**: measured 2026-09-02 with `powershell/launch-codex-specialist.ps1 -Preflight -Model <slug>`. Plain `gpt-5.5` -> PASS and plain `gpt-5.4` -> PASS. For 5.6, `gpt-5.6-terra` -> PASS and `gpt-5.6-sol` -> PASS, while plain `gpt-5.6` -> FAIL, `gpt-5.6-codex` -> FAIL, and `gpt-5.6-mini` -> FAIL. Do not generalize a result across families: preflight the exact slug on the account that will run it. Reasoning effort is set separately in `~/.codex/config.toml`, not in the model slug.
+- **Codex model availability (ChatGPT login)**: measured with `powershell/launch-codex-specialist.ps1 -Preflight -Model <slug>`. On 2026-09-28, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, and `gpt-5.6-terra` -> PASS. The tier defaults are `gpt-6-sol` (strong), `gpt-5.6-terra` (default), and `gpt-6-luna` (light). `gpt-6-astra`, like Claude Fable, is not a tier default: it is for evaluation work, not routine pipeline phases. On 2026-09-02, `gpt-5.6-terra` -> PASS and `gpt-5.6-sol` -> PASS, while plain `gpt-5.6` -> FAIL, `gpt-5.6-codex` -> FAIL, and `gpt-5.6-mini` -> FAIL. Earlier families are retired or retiring and are not recommended. Do not generalize a result across slugs: preflight the exact slug on the account that will run it.
+- **Codex reasoning effort (`effort.codex`)**: Crucible prints a `[RECOMMENDED EFFORT]` line for a Codex target, and the orchestrator passes it to `launch-codex-specialist.ps1 -Effort`. A tier picks a rung: a model and an effort together. The built-in rungs are `strong` -> `gpt-6-sol` / `high`, `default` -> `gpt-5.6-terra` / `medium`, `light` -> `gpt-6-luna` / `high`. Luna is most effective at `high`, so the cheapest rung is Luna/high rather than a lower effort on a stronger model. valid values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`, the set the API accepted on 2026-09-28. An invalid value prints a warning naming it and falls back to the built-in value. The block is optional, and there is no effort setting for other targets.
 - **Dispatching Codex as a specialist**: when a phase is run by Codex (not the parent orchestrator), the parent launches it with `powershell/launch-codex-specialist.ps1`, which wraps `codex exec -s danger-full-access` and reports an explicit `STATUS=SUCCESS`/`STATUS=LAUNCH_FAILED` (so a broken runtime is never mistaken for a verdict). Run `launch-codex-specialist.ps1 -Preflight -Model <codex-model>` first. See `docs/orchestrators/claude.md`, `docs/orchestrators/grok.md`, and `docs/orchestrators/codex.md`.
 
 ---

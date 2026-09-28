@@ -59,9 +59,9 @@ param(
     # Bypass the pre-dispatch clean-tree provenance guard (dispatch onto a dirty tree deliberately).
     [switch]$AllowDirtyTree,
 
-    # Optional reasoning effort (none|minimal|low|medium|high|xhigh), applied via -c model_reasoning_effort.
+    # Optional reasoning effort (none|minimal|low|medium|high|xhigh|max), applied via -c model_reasoning_effort.
     [Parameter(Mandatory = $false)]
-    [ValidateSet("", "none", "minimal", "low", "medium", "high", "xhigh")]
+    [ValidateSet("", "none", "minimal", "low", "medium", "high", "xhigh", "max")]
     [string]$Effort = "",
 
     # Run only a cheap connectivity/runtime smoke check and exit. Catches a broken Codex runtime

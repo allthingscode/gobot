@@ -338,8 +338,8 @@ function Get-ConfiguredModel {
 
     $defaults = @{
         claude      = @{ strong = "opus";                   default = "sonnet";                  light = "haiku" }
-        codex       = @{ strong = "gpt-5.5";                 default = "gpt-5.5";                  light = "gpt-5.4" }
-        antigravity = @{ strong = "Gemini 3.1 Pro (High)";   default = "Gemini 3.5 Flash (High)";  light = "Gemini 3.5 Flash (Medium)" }
+        codex       = @{ strong = "gpt-6-sol";               default = "gpt-5.6-terra";            light = "gpt-6-luna" }
+        antigravity = @{ strong = "Gemini 3.1 Pro (High)";   default = "Gemini 3.8 Flash (High)";  light = "Gemini 3.8 Flash (Medium)" }
         grok        = @{ strong = "inherit";                 default = "inherit";                  light = "inherit" }
     }
 
@@ -362,6 +362,26 @@ function Get-ModelFromConfig {
         [string]$ProjectRoot = ""
     )
 
+    return Get-ModelsBlockValue -Path @("models", "targets", $Target, $Tier) -ProjectRoot $ProjectRoot
+}
+
+# Read models.effort.<target>.<tier> from config.yaml. Returns "" when absent.
+function Get-EffortFromConfig {
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][string]$Tier,
+        [string]$ProjectRoot = ""
+    )
+
+    return Get-ModelsBlockValue -Path @("models", "effort", $Target, $Tier) -ProjectRoot $ProjectRoot
+}
+
+function Get-ModelsBlockValue {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Path,
+        [string]$ProjectRoot = ""
+    )
+
     $root = ""
     if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
         $root = $ProjectRoot
@@ -376,7 +396,7 @@ function Get-ModelFromConfig {
     if (-not (Test-Path -LiteralPath $configPath)) { return "" }
 
     $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-    $val = Get-ConfigBlockValue -Content $content -Path @("models", "targets", $Target, $Tier) -Source $configPath
+    $val = Get-ConfigBlockValue -Content $content -Path $Path -Source $configPath
     if ($null -ne $val) { return $val }
 
     return ""

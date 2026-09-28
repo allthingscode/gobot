@@ -67,10 +67,10 @@ $results += Run-Test "Default map: 'agent' resolves to the claude row" {
     Assert-Result "empty target -> claude" ((Get-ConfiguredModel -Target '' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'haiku') "expected haiku"
 }
 
-$results += Run-Test "Default map: codex tiers -> gpt-5.5/gpt-5.5/gpt-5.4" {
-    Assert-Result "codex strong" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'gpt-5.5') "expected gpt-5.5"
-    Assert-Result "codex default" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'gpt-5.5') "expected gpt-5.5"
-    Assert-Result "codex light" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'gpt-5.4') "expected gpt-5.4"
+$results += Run-Test "Default map: codex tiers -> gpt-6-sol/gpt-5.6-terra/gpt-6-luna" {
+    Assert-Result "codex strong" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'gpt-6-sol') "expected gpt-6-sol"
+    Assert-Result "codex default" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+    Assert-Result "codex light" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'gpt-6-luna') "expected gpt-6-luna"
 }
 
 $results += Run-Test "Default map: grok tiers -> inherit, not a Claude slug" {
@@ -81,13 +81,13 @@ $results += Run-Test "Default map: grok tiers -> inherit, not a Claude slug" {
 
 $results += Run-Test "Default map: antigravity tiers -> Gemini labels" {
     Assert-Result "ag strong" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.1 Pro (High)') "expected Gemini 3.1 Pro (High)"
-    Assert-Result "ag default" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.5 Flash (High)') "expected Gemini 3.5 Flash (High)"
-    Assert-Result "ag light" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.5 Flash (Medium)') "expected Gemini 3.5 Flash (Medium)"
+    Assert-Result "ag default" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.8 Flash (High)') "expected Gemini 3.8 Flash (High)"
+    Assert-Result "ag light" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.8 Flash (Medium)') "expected Gemini 3.8 Flash (Medium)"
 }
 
 $results += Run-Test "Empty tier (done phase) resolves to empty model; unknown target/tier degrade safely" {
     Assert-Result "empty tier" ((Get-ConfiguredModel -Target 'codex' -Tier '' -ProjectRoot $noCfgRoot) -eq '') "expected empty"
-    Assert-Result "case-insensitive target" ((Get-ConfiguredModel -Target 'CODEX' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'gpt-5.4') "expected gpt-5.4"
+    Assert-Result "case-insensitive target" ((Get-ConfiguredModel -Target 'CODEX' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'gpt-6-luna') "expected gpt-6-luna"
     Assert-Result "unknown tier -> token" ((Get-ConfiguredModel -Target 'codex' -Tier 'bogus' -ProjectRoot $noCfgRoot) -eq 'bogus') "expected bogus token"
 }
 
@@ -124,35 +124,73 @@ $results += Run-Test "config.yaml models: block overrides the default map" {
 
 $results += Run-Test "Tiers absent from config fall back to the default map" {
     Assert-Result "claude default (not in cfg) -> sonnet" ((Get-ConfiguredModel -Target 'claude' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'sonnet') "expected sonnet"
-    Assert-Result "codex default (not in cfg) -> gpt-5.5" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'gpt-5.5') "expected gpt-5.5"
-    Assert-Result "codex light (not in cfg) -> gpt-5.4" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $cfgRoot) -eq 'gpt-5.4') "expected gpt-5.4"
+    Assert-Result "codex default (not in cfg) -> gpt-5.6-terra" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+    Assert-Result "codex light (not in cfg) -> gpt-6-luna" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $cfgRoot) -eq 'gpt-6-luna') "expected gpt-6-luna"
     Assert-Result "grok default (not in cfg) -> inherit" ((Get-ConfiguredModel -Target 'grok' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'inherit') "expected inherit"
 }
 
 # --- Stage 1b: capability tier -> Codex reasoning effort ---
 
-$results += Run-Test "Tier -> Codex effort: strong/light high, default medium" {
-    Assert-Result "strong -> high" ((Get-SpecialistEffort -Tier 'strong') -eq 'high') "expected high"
-    Assert-Result "default -> medium" ((Get-SpecialistEffort -Tier 'default') -eq 'medium') "expected medium"
-    Assert-Result "light -> high" ((Get-SpecialistEffort -Tier 'light') -eq 'high') "expected high"
+$results += Run-Test "Tier -> Codex effort: strong high, default medium, light high" {
+    Assert-Result "strong -> high" ((Get-SpecialistEffort -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
+    Assert-Result "default -> medium" ((Get-SpecialistEffort -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'medium') "expected medium"
+    Assert-Result "light -> high" ((Get-SpecialistEffort -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
 }
 
 $results += Run-Test "Effort: empty/unknown tier yields empty (nothing emitted)" {
-    Assert-Result "empty tier" ((Get-SpecialistEffort -Tier '') -eq '') "expected empty"
-    Assert-Result "unknown tier" ((Get-SpecialistEffort -Tier 'bogus') -eq '') "expected empty"
-    Assert-Result "case/space-insensitive" ((Get-SpecialistEffort -Tier '  STRONG ') -eq 'high') "expected high"
+    Assert-Result "empty tier" ((Get-SpecialistEffort -Tier '' -ProjectRoot $noCfgRoot) -eq '') "expected empty"
+    Assert-Result "unknown tier" ((Get-SpecialistEffort -Tier 'bogus' -ProjectRoot $noCfgRoot) -eq '') "expected empty"
+    Assert-Result "case/space-insensitive" ((Get-SpecialistEffort -Tier '  STRONG ' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
+}
+
+$effortRoot = New-TestFixtureRoot -NameHint "modelsel-effort"
+New-Item -ItemType Directory -Path (Join-Path $effortRoot ".crucible") -Force | Out-Null
+$effortBody = @"
+project:
+  name: Tmp
+models:
+  targets:
+    codex:
+      strong: gpt-5.6-terra
+  effort:
+    codex:
+      strong: Medium
+      default: Low
+      light: turbo
+verification:
+  quick: []
+"@
+[System.IO.File]::WriteAllText((Join-Path $effortRoot ".crucible/config.yaml"), $effortBody, (New-Object System.Text.UTF8Encoding $false))
+
+$results += Run-Test "config.yaml models.effort.codex overrides the built-in effort" {
+    Assert-Result "configured strong -> medium" ((Get-SpecialistEffort -Tier 'strong' -ProjectRoot $effortRoot) -eq 'medium') "expected medium"
+    Assert-Result "configured default -> low" ((Get-SpecialistEffort -Tier 'default' -ProjectRoot $effortRoot) -eq 'low') "expected low"
+    $warnings = $null
+    $light = Get-SpecialistEffort -Tier 'light' -ProjectRoot $effortRoot -WarningVariable warnings -WarningAction SilentlyContinue
+    Assert-Result "invalid light -> built-in high" ($light -eq 'high') ("expected high, got " + $light)
+    Assert-Result "invalid light names the value" ((@($warnings) -join "`n") -match "models\.effort\.codex\.light is 'turbo'") ("expected a warning naming 'turbo', got: " + (@($warnings) -join "`n"))
+    Assert-Result "effort does not leak into model resolution" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $effortRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
 }
 
 # --- End-to-end: phase -> tier -> model for a codex pipeline ---
 
-$results += Run-Test "End-to-end: low-tier grooming on codex resolves to gpt-5.5 + medium effort" {
+$results += Run-Test "End-to-end: low-tier grooming on codex resolves to gpt-5.6-terra + medium effort" {
     $tier = Get-SpecialistModel -TargetPhase 'grooming' -BudgetTier 'low'
     Assert-Result "tier is default" ($tier -eq 'default') "expected default tier"
-    Assert-Result "codex default -> gpt-5.5" ((Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot) -eq 'gpt-5.5') "expected gpt-5.5"
-    Assert-Result "codex default -> medium effort" ((Get-SpecialistEffort -Tier $tier) -eq 'medium') "expected medium"
+    Assert-Result "codex default -> gpt-5.6-terra" ((Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+    $model = Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot
+    Assert-Result "codex default -> medium effort" ((Get-SpecialistEffort -Tier $tier -ProjectRoot $noCfgRoot) -eq 'medium') "expected medium"
+}
+
+$results += Run-Test "End-to-end: deployment on codex resolves to the Luna/high rung" {
+    $tier = Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'low'
+    $model = Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot
+    Assert-Result "deployment -> gpt-6-luna" ($model -eq 'gpt-6-luna') ("expected gpt-6-luna, got " + $model)
+    Assert-Result "gpt-6-luna -> high effort" ((Get-SpecialistEffort -Tier $tier -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
 }
 
 Remove-Item -Recurse -Force -LiteralPath $noCfgRoot -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force -LiteralPath $effortRoot -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -LiteralPath $cfgRoot -ErrorAction SilentlyContinue
 
 if ($results -contains $false) {

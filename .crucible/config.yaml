@@ -43,13 +43,13 @@ models:
       default: sonnet
       light: haiku
     codex:
-      strong: gpt-5.6-terra
+      strong: gpt-6-sol
       default: gpt-5.6-terra
-      light: gpt-5.4
+      light: gpt-6-luna
     antigravity:
       strong: "Gemini 3.1 Pro (High)"
-      default: "Gemini 3.5 Flash (High)"
-      light: "Gemini 3.5 Flash (Medium)"
+      default: "Gemini 3.8 Flash (High)"
+      light: "Gemini 3.8 Flash (Medium)"
 
 verification:
   quick:
@@ -97,4 +97,4 @@ review:
   auto_push: false
   require_green_ci: true
 crucible_version: "0.4.0"
-crucible_install_commit: "ab204b4f4aa4a257de5aec6439f37d6489044e10"
+crucible_install_commit: "30dcba69ff44020cec4ac65113f5cbf42da078d3"

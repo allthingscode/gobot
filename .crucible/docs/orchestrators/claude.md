@@ -61,7 +61,7 @@ Crucible-blessed launcher, which wraps `codex exec -s danger-full-access` and re
 launch status.
 
 1. Compute the Codex model. Run `crucible.ps1 -Init -ProjectRoot "{project_root}"` with `-Target codex` so the `[RECOMMENDED MODEL]`
-   line resolves to the configured Codex model (e.g. `gpt-5.5`):
+   line resolves to the configured Codex model (e.g. `gpt-5.6-terra`):
 
    ```bash
    pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -ProjectRoot "{project_root}" -Quiet
@@ -88,8 +88,9 @@ launch status.
    and `-ReviewSchema` for a verification phase to enforce a structured review verdict.
 
    **Pass the recommended effort.** Alongside `[RECOMMENDED MODEL]`, Crucible prints a
-   `[RECOMMENDED EFFORT] <none|minimal|low|medium|high|xhigh>` line for a Codex target (it is the
-   capability tier mapped to a Codex reasoning effort: strong/light -> `high`, default -> `medium`).
+   `[RECOMMENDED EFFORT] <none|minimal|low|medium|high|xhigh|max>` line for a Codex target. Each tier is a rung, a model and an effort together:
+   strong -> `gpt-6-sol`/`high`, default -> `gpt-5.6-terra`/`medium`, light -> `gpt-6-luna`/`high`,
+   unless `config.yaml` sets `models.effort.codex.<tier>`.
    Pass that value as `-Effort`; the launcher forwards it as `-c model_reasoning_effort`. Effort is a
    Codex-only lever -- Claude's `Agent` dispatch has no effort knob (its effort is encoded in the model
    tier), so no effort line is printed for a Claude target.

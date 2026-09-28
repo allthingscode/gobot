@@ -37,7 +37,7 @@ Grok's `spawn_subagent` tool is the native specialist mechanism.
 
 `spawn_subagent` returns immediately (`background` defaults to true). Wait with `get_command_or_subagent_output` until that specialist finishes. Do not dispatch the next phase while one is running.
 
-Do not pass Claude or Codex model slugs (`sonnet`, `opus`, `gpt-5.5`) as `model`. Pass `-Target grok` on the orchestrator's `crucible.ps1 -Init`. The sticky target keeps it for later Inits that omit `-Target`. Follow the `[RECOMMENDED MODEL]` line only when it says `(target grok)`. `inherit` means omit `model`: the child inherits this session. A line for any other target is not yours. Do not pass that slug. Pass a concrete Grok slug only when the human asked and the line prints that slug.
+Do not pass Claude or Codex model slugs (`sonnet`, `opus`, `gpt-6-sol`) as `model`. Pass `-Target grok` on the orchestrator's `crucible.ps1 -Init`. The sticky target keeps it for later Inits that omit `-Target`. Follow the `[RECOMMENDED MODEL]` line only when it says `(target grok)`. `inherit` means omit `model`: the child inherits this session. A line for any other target is not yours. Do not pass that slug. Pass a concrete Grok slug only when the human asked and the line prints that slug.
 
 ### Default Specialist Target: Native Grok
 

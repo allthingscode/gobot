@@ -153,7 +153,7 @@ Write-FakeCodex -BinDir $binDir
 
 try {
     $results += Run-Test -Name "Preflight PASS on a healthy runtime" -Body {
-        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @("-Preflight", "-Model", "gpt-5.5")
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @("-Preflight", "-Model", "gpt-6-sol")
         Assert-Result -Name "preflight pass line" -Condition ($res.Output -match "\[CODEX PREFLIGHT\] PASS") -FailureMessage "expected PASS. Output:`n$($res.Output)"
         Assert-Result -Name "preflight exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
     }
@@ -170,7 +170,7 @@ try {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = (Get-PwshCommand)
         $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $LAUNCHER + '"' +
-            ' -TaskId C-998 -Phase verification -Model gpt-5.5 -PromptText "REVIEW" -ProjectRoot "' + $projectRoot + '"'
+            ' -TaskId C-998 -Phase verification -Model gpt-6-sol -PromptText "REVIEW" -ProjectRoot "' + $projectRoot + '"'
         $psi.UseShellExecute = $false
         $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
@@ -197,7 +197,7 @@ try {
     }
 
     $results += Run-Test -Name "Preflight FAIL on an infra-broken runtime" -Body {
-        $res = Invoke-Launcher -Mode "infra" -BinDir $binDir -LauncherArgs @("-Preflight", "-Model", "gpt-5.5")
+        $res = Invoke-Launcher -Mode "infra" -BinDir $binDir -LauncherArgs @("-Preflight", "-Model", "gpt-6-sol")
         Assert-Result -Name "preflight fail line" -Condition ($res.Output -match "\[CODEX PREFLIGHT\] FAIL") -FailureMessage "expected FAIL. Output:`n$($res.Output)"
         Assert-Result -Name "infra reason surfaced" -Condition ($res.Output -match "infra marker") -FailureMessage "expected infra marker reason. Output:`n$($res.Output)"
         Assert-Result -Name "preflight exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode). Output:`n$($res.Output)"
@@ -223,7 +223,7 @@ try {
         try {
             $env:PATH = $scopedPath
             $res = Invoke-ExternalCommand {
-                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $LAUNCHER -Preflight -Model "gpt-5.5"
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $LAUNCHER -Preflight -Model "gpt-6-sol"
             }
         } finally {
             $env:PATH = $originalPath
@@ -236,7 +236,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-success"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-999", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-999", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW THIS TASK", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "status success" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
         Assert-Result -Name "exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
@@ -252,7 +252,7 @@ try {
         $enc = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText((Join-Path $projectRoot "dirty.txt"), "uncommitted`n", $enc)
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-980", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-980", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         $transcript = Join-Path $projectRoot ".crucible/session/C-980/verification/codex-transcript.txt"
         Assert-Result -Name "dirty guard exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
@@ -268,7 +268,7 @@ try {
         $enc = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText((Join-Path $projectRoot "dirty.txt"), "uncommitted`n", $enc)
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-979", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-979", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot, "-AllowDirtyTree")
         Assert-Result -Name "override status line" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS with override. Output:`n$($res.Output)"
         Assert-Result -Name "override exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
@@ -278,7 +278,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-clean-git"
         New-TestGitProject -Root $projectRoot
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-978", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-978", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "clean status line" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS on clean git tree. Output:`n$($res.Output)"
         Assert-Result -Name "clean exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
@@ -288,7 +288,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-non-git-skip"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-977", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-977", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "skip note" -Condition ($res.Output -match "WorkingDir is not a git work tree") -FailureMessage "expected non-git skip note. Output:`n$($res.Output)"
         Assert-Result -Name "non-git status line" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS for non-git WorkingDir. Output:`n$($res.Output)"
@@ -299,7 +299,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-vanishrestore"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "vanishrestore" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-981", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-981", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "status line printed" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=") -FailureMessage "expected STATUS line after vanished session dir. Output:`n$($res.Output)"
         Assert-Result -Name "status success" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS after vanished session dir. Output:`n$($res.Output)"
@@ -313,12 +313,12 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-args"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-998", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-998", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         $transcript = Get-Content -LiteralPath (Join-Path $projectRoot ".crucible/session/C-998/verification/codex-transcript.txt") -Raw
         Assert-Result -Name "danger-full-access" -Condition ($transcript -match "danger-full-access") -FailureMessage "missing -s danger-full-access. Transcript:`n$transcript"
         Assert-Result -Name "skip-git-repo-check" -Condition ($transcript -match "--skip-git-repo-check") -FailureMessage "missing --skip-git-repo-check. Transcript:`n$transcript"
-        Assert-Result -Name "model passed" -Condition ($transcript -match "gpt-5\.5") -FailureMessage "missing model. Transcript:`n$transcript"
+        Assert-Result -Name "model passed" -Condition ($transcript -match "gpt-6-sol") -FailureMessage "missing model. Transcript:`n$transcript"
         Assert-Result -Name "output-last-message passed" -Condition ($transcript -match "--output-last-message") -FailureMessage "missing --output-last-message. Transcript:`n$transcript"
     }
 
@@ -326,7 +326,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-infra"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "infra" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-997", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-997", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "status launch_failed" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=LAUNCH_FAILED") -FailureMessage "expected LAUNCH_FAILED. Output:`n$($res.Output)"
         Assert-Result -Name "infrastructure reason" -Condition ($res.Output -match "infrastructure failure") -FailureMessage "expected infrastructure-failure reason. Output:`n$($res.Output)"
@@ -338,7 +338,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-markerok"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "markerok" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-992", "-Phase", "research", "-Model", "gpt-5.5",
+            "-TaskId", "C-992", "-Phase", "research", "-Model", "gpt-6-sol",
             "-PromptText", "RESEARCH", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "marker words do not fail a 0-exit run" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "0-exit run with marker words in transcript must be SUCCESS. Output:`n$($res.Output)"
         Assert-Result -Name "markerok exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
@@ -348,7 +348,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-empty"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "empty" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-996", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-996", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "status success empty" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
         Assert-Result -Name "empty exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
@@ -358,7 +358,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-schema-ok"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-995", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-995", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ReviewSchema", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "schema success" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "valid verdict JSON should be SUCCESS. Output:`n$($res.Output)"
         Assert-Result -Name "schema enforced banner" -Condition ($res.Output -match "review verdict schema: enforced") -FailureMessage "expected schema-enforced banner. Output:`n$($res.Output)"
@@ -368,7 +368,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-schema-bad"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "badverdict" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-994", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-994", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ReviewSchema", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "schema bad launch_failed" -Condition ($res.Output -match "STATUS=LAUNCH_FAILED") -FailureMessage "non-verdict should be LAUNCH_FAILED. Output:`n$($res.Output)"
         Assert-Result -Name "verdict reason" -Condition ($res.Output -match "valid review verdict") -FailureMessage "expected verdict-validation reason. Output:`n$($res.Output)"
@@ -378,7 +378,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-schema-empty"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "empty" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-993", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-993", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ReviewSchema", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "schema empty launch_failed" -Condition ($res.Output -match "STATUS=LAUNCH_FAILED") -FailureMessage "empty verdict should be LAUNCH_FAILED. Output:`n$($res.Output)"
         Assert-Result -Name "schema empty verdict reason" -Condition ($res.Output -match "valid review verdict") -FailureMessage "expected verdict-validation reason. Output:`n$($res.Output)"
@@ -401,7 +401,7 @@ try {
             $env:CODEX_FAKE_MODE = "success"
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $copied `
-                    -TaskId "C-991" -Phase "verification" -Model "gpt-5.5" -PromptText "REVIEW"
+                    -TaskId "C-991" -Phase "verification" -Model "gpt-6-sol" -PromptText "REVIEW"
             }
         } finally {
             $env:PATH = $originalPath
@@ -426,7 +426,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-stdin-prompt"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-990", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-990", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "Verify task (C-990) and mark it now", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "prompt-on-stdin launch should succeed. Output:`n$($res.Output)"
         $transcript = Get-Content -LiteralPath (Join-Path $projectRoot ".crucible/session/C-990/verification/codex-transcript.txt") -Raw
@@ -449,7 +449,7 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $absCrucible = (Resolve-Path -LiteralPath (Join-Path $projectRoot ".crucible")).Path
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-989", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-989", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-CrucibleRoot", $absCrucible, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "status success" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "absolute -CrucibleRoot under repo should be accepted. Output:`n$($res.Output)"
         $sessionUnder = Join-Path $projectRoot ".crucible/session/C-989/verification/codex-transcript.txt"
@@ -462,7 +462,7 @@ try {
         $outsideCrucible = Join-Path $tempRoot ("outside-" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $outsideCrucible -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-988", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-988", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-CrucibleRoot", $outsideCrucible, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2 for absolute -CrucibleRoot outside repo, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "clear error" -Condition ($res.Output -match "must be relative to the repo root") -FailureMessage "expected clear relativity error. Output:`n$($res.Output)"
@@ -476,7 +476,7 @@ try {
         [System.IO.File]::WriteAllText($promptFilePath, $promptContent)
 
         $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-987", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-987", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "promptfile launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "PromptFile launch should succeed. Output:`n$($res.Output)"
         $transcript = Get-Content -LiteralPath (Join-Path $projectRoot ".crucible/session/C-987/verification/codex-transcript.txt") -Raw
@@ -488,7 +488,7 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $missingPath = Join-Path $tempRoot "nonexistent-prompt.md"
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-986", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-986", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptFile", $missingPath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "missing promptfile exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "missing promptfile error message" -Condition ($res.Output -match "-PromptFile path does not exist") -FailureMessage "expected missing promptfile error message. Output:`n$($res.Output)"
@@ -500,7 +500,7 @@ try {
         $promptFilePath = Join-Path $tempRoot "dummy-prompt.md"
         [System.IO.File]::WriteAllText($promptFilePath, "some prompt")
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-985", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-985", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "text prompt", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "both prompts exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "both prompts error message" -Condition ($res.Output -match "-PromptText and -PromptFile are mutually exclusive") -FailureMessage "expected mutually exclusive error message. Output:`n$($res.Output)"
@@ -512,7 +512,7 @@ try {
         $emptyFilePath = Join-Path $tempRoot "empty-prompt.md"
         [System.IO.File]::WriteAllText($emptyFilePath, "   `r`n  `n ")
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-984", "-Phase", "verification", "-Model", "gpt-5.5",
+            "-TaskId", "C-984", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptFile", $emptyFilePath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "empty promptfile exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "empty promptfile error message" -Condition ($res.Output -match "-PromptFile is empty") -FailureMessage "expected empty promptfile error message. Output:`n$($res.Output)"
@@ -524,7 +524,7 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         New-Item -ItemType Directory -Path $wtDir -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-983", "-Phase", "deployment", "-Model", "gpt-5.5",
+            "-TaskId", "C-983", "-Phase", "deployment", "-Model", "gpt-6-sol",
             "-PromptText", "DEPLOY", "-ProjectRoot", $projectRoot, "-WorkingDir", $wtDir)
         Assert-Result -Name "deployment status success" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
         Assert-Result -Name "deployment notice emitted" -Condition ($res.Output -match "\[CODEX\] Notice: Deployment phase forces WorkingDir to main repo root") -FailureMessage "expected notice about deployment WorkingDir override. Output:`n$($res.Output)"
@@ -545,7 +545,7 @@ try {
         $promptFilePath = Join-Path $tempRoot "item-30-brief.md"
         [System.IO.File]::WriteAllText($promptFilePath, "Do the framework work described here.")
         $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
-            "-Model", "gpt-5.5", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+            "-Model", "gpt-6-sol", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "adhoc launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS without -TaskId/-Phase. Output:`n$($res.Output)"
         Assert-Result -Name "adhoc exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "adhoc banner names the prompt file" -Condition ($res.Output -match "Launching Specialist for item-30-brief \(ad-hoc prompt\)") -FailureMessage "expected ad-hoc banner. Output:`n$($res.Output)"
@@ -564,7 +564,7 @@ try {
         $promptFilePath = Join-Path $tempRoot "F-001.md"
         [System.IO.File]::WriteAllText($promptFilePath, "prompt that happens to be named like a task")
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-Model", "gpt-5.5", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+            "-Model", "gpt-6-sol", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "collide launch succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
         $taskShaped = Join-Path $projectRoot ".crucible/session/F-001"
         Assert-Result -Name "no task-shaped session dir created" -Condition (-not (Test-Path -LiteralPath $taskShaped)) -FailureMessage "ad-hoc prompt must not create a task-shaped session dir at $taskShaped"
@@ -580,7 +580,7 @@ try {
         $promptFilePath = Join-Path $tempRoot "half-id-brief.md"
         [System.IO.File]::WriteAllText($promptFilePath, "prompt body")
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-982", "-Model", "gpt-5.5", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
+            "-TaskId", "C-982", "-Model", "gpt-6-sol", "-PromptFile", $promptFilePath, "-ProjectRoot", $projectRoot)
         Assert-Result -Name "half-specified exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "half-specified names the missing arg" -Condition ($res.Output -match "-Phase is required") -FailureMessage "expected -Phase required message. Output:`n$($res.Output)"
         Assert-Result -Name "half-specified explains the ad-hoc alternative" -Condition ($res.Output -match "Omit both -TaskId and -Phase") -FailureMessage "expected the omit-both hint. Output:`n$($res.Output)"
@@ -593,14 +593,14 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-bootstrap-required"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-Model", "gpt-5.5", "-ProjectRoot", $projectRoot)
+            "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "bootstrap missing taskid exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "bootstrap missing taskid message" -Condition ($res.Output -match "-TaskId is required") -FailureMessage "expected -TaskId required message. Output:`n$($res.Output)"
 
         # -PromptText has no base name to derive a session directory from, so it does not get
         # the ad-hoc treatment and the two stay required there too.
         $res2 = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-Model", "gpt-5.5", "-PromptText", "inline prompt", "-ProjectRoot", $projectRoot)
+            "-Model", "gpt-6-sol", "-PromptText", "inline prompt", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "prompttext without taskid exit 2" -Condition ($res2.ExitCode -eq 2) -FailureMessage "expected exit 2 for -PromptText without -TaskId, got $($res2.ExitCode). Output:`n$($res2.Output)"
     }
 
@@ -615,7 +615,7 @@ try {
         $worktree = Join-Path $tempRoot "wt-bootstrap"
         New-Item -ItemType Directory -Path $worktree -Force | Out-Null
         $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-979", "-Phase", "implementation", "-Model", "gpt-5.5",
+            "-TaskId", "C-979", "-Phase", "implementation", "-Model", "gpt-6-sol",
             "-ProjectRoot", $projectRoot, "-WorkingDir", $worktree)
         Assert-Result -Name "worktree bootstrap succeeds" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
         $transcript = Join-Path $promptDir "codex-transcript.txt"
@@ -637,7 +637,7 @@ try {
         $projectRoot = Join-Path $tempRoot "proj-bootstrap-noprompt"
         New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
-            "-TaskId", "C-978", "-Phase", "implementation", "-Model", "gpt-5.5", "-ProjectRoot", $projectRoot)
+            "-TaskId", "C-978", "-Phase", "implementation", "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
         Assert-Result -Name "missing prompt exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "missing prompt names the path" -Condition ($res.Output -match "phase prompt not found: .*C-978") -FailureMessage "expected the missing prompt path. Output:`n$($res.Output)"
         Assert-Result -Name "missing prompt names the root source" -Condition ($res.Output -match "from -ProjectRoot") -FailureMessage "expected the root source. Output:`n$($res.Output)"
