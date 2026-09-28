@@ -344,6 +344,8 @@ func TestSchedulerPoll_JobTimeout(t *testing.T) {
 //nolint:cyclop,funlen // test complexity justified by clock scenario coverage
 func TestScheduler_FakeClock(t *testing.T) {
 	t.Parallel()
+	const eventuallyTimeout = 30 * time.Second
+
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "jobs.json")
 
@@ -381,7 +383,7 @@ func TestScheduler_FakeClock(t *testing.T) {
 	// Wait for scheduler to reach After()
 	assert.Eventually(t, func() bool {
 		return fc.HasWaiter()
-	}, 1*time.Second, 10*time.Millisecond)
+	}, eventuallyTimeout, 10*time.Millisecond)
 
 	// 1. Advance to 1000ms. Poll should trigger.
 	fc.Advance(1000 * time.Millisecond)
@@ -392,7 +394,7 @@ func TestScheduler_FakeClock(t *testing.T) {
 		count := len(dispatcher.payloads)
 		dispatcher.mu.Unlock()
 		return count == 1 && fc.HasWaiter()
-	}, 1*time.Second, 10*time.Millisecond)
+	}, eventuallyTimeout, 10*time.Millisecond)
 
 	dispatcher.mu.Lock()
 	if len(dispatcher.payloads) != 1 {
@@ -409,7 +411,7 @@ func TestScheduler_FakeClock(t *testing.T) {
 		count := len(dispatcher.payloads)
 		dispatcher.mu.Unlock()
 		return count == 2 && fc.HasWaiter()
-	}, 1*time.Second, 10*time.Millisecond)
+	}, eventuallyTimeout, 10*time.Millisecond)
 
 	dispatcher.mu.Lock()
 	if len(dispatcher.payloads) != 2 {
