@@ -9,6 +9,9 @@ import (
 // DefaultGeminiModel is the chat model used when agents.defaults.model is unset.
 const DefaultGeminiModel = "gemini-3.8-flash"
 
+// DefaultEmbeddingModel is used when runtime.embedding_model is unset.
+const DefaultEmbeddingModel = "gemini-embedding-2"
+
 // DefaultSummarizationThreshold is the default threshold for context summarization (70%).
 const DefaultSummarizationThreshold = 0.7
 
@@ -179,12 +182,12 @@ func parseDurationOrDefault(s string, defaultVal time.Duration) time.Duration {
 }
 
 // EmbeddingModel returns the configured embedding model name,
-// falling back to "text-embedding-004" if unset or empty.
+// falling back to DefaultEmbeddingModel if unset or empty.
 func (c *Config) EmbeddingModel() string {
 	if c.Runtime.EmbeddingModel != "" {
 		return c.Runtime.EmbeddingModel
 	}
-	return "text-embedding-004"
+	return DefaultEmbeddingModel
 }
 
 // DefaultModel returns the configured default model, falling back to DefaultGeminiModel.

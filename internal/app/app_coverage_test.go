@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -399,6 +400,40 @@ func TestInitVectorStore_GeminiWithAPIKey(t *testing.T) {
 	}
 	if embedProv == nil {
 		t.Error("expected non-nil embedding provider")
+	}
+}
+
+func TestInitVectorStore_UsesCompatibleCache(t *testing.T) {
+	storageRoot := t.TempDir()
+	legacyPath := filepath.Join(storageRoot, "memory", "vectors.db")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("create legacy cache directory: %v", err)
+	}
+	legacyContents := []byte("retain for manual recovery")
+	if err := os.WriteFile(legacyPath, legacyContents, 0o600); err != nil {
+		t.Fatalf("write legacy cache: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = storageRoot
+	cfg.Runtime.VectorSearchEnabled = true
+	cfg.Providers.Gemini.APIKey = "test-api-key"
+	store, _, cleanup := InitVectorStore(cfg, provider.NewGeminiProvider(nil), &AgentRunner{})
+	if store == nil {
+		t.Fatal("expected compatible vector store")
+	}
+	cleanup()
+
+	compatiblePath := filepath.Join(storageRoot, "memory", vector.CacheFilename(cfg.EmbeddingModel()))
+	if _, err := os.Stat(compatiblePath); err != nil {
+		t.Fatalf("compatible cache %q was not initialized: %v", compatiblePath, err)
+	}
+	gotLegacy, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("read legacy cache: %v", err)
+	}
+	if string(gotLegacy) != string(legacyContents) {
+		t.Error("legacy vectors.db was modified or imported")
 	}
 }
 

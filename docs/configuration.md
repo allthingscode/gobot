@@ -193,7 +193,11 @@ Settings for advanced agent features, including Google Workspace integration. Fo
 | `templates_path` | string | Directory containing custom email templates (`email.html`). |
 | `custom_css_path` | string | Path to a CSS file that overrides default email styling. |
 | `policy_file_path` | string | Path to a tool policy file for fine-grained allow/deny rules. |
-| `embedding_model` | string | Embedding model name for vector search (default `"text-embedding-004"`). |
+| `embedding_model` | string | Embedding model name for vector search (default `"gemini-embedding-2"`). Gobot requests a fixed 768-dimensional output for this integration. |
+
+#### Embedding-model upgrade
+
+After upgrading to a version that uses `gemini-embedding-2`, restart Gobot. Its semantic cache is model- and dimension-specific, so the prior `memory/vectors.db` cache is left untouched for manual recovery and is not loaded. SQLite FTS-backed memory remains available while fresh semantic vectors accrue; the normal workspace indexing schedule repopulates workspace vectors. Historical durable-memory vectors are not automatically reconstructed.
 
 #### Routing (`runtime.routing`)
 

@@ -163,7 +163,7 @@ func InitVectorStore(cfg *config.Config, prov provider.Provider, runner *AgentRu
 	}
 
 	embedProv = vector.NewGeminiProvider(apiKey, cfg.EmbeddingModel())
-	vsPath := filepath.Join(cfg.StorageRoot(), "memory", "vectors.db")
+	vsPath := filepath.Join(cfg.StorageRoot(), "memory", vector.CacheFilename(cfg.EmbeddingModel()))
 	vs, err := vector.NewStore(vsPath)
 	if err != nil {
 		slog.Warn("bootstrap: vector store unavailable", "err", err)

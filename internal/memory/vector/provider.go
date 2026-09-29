@@ -3,6 +3,7 @@ package vector
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,11 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// EmbeddingDimensions is the fixed Gemini output dimension used by vector
+// requests and cache identities. Keeping it here prevents cache compatibility
+// from drifting from the provider request.
+const EmbeddingDimensions = 768
 
 // EmbeddingProvider defines the interface for generating vector embeddings from text.
 type EmbeddingProvider interface {
@@ -49,6 +55,7 @@ type embedContentRequest struct {
 			Text string `json:"text"`
 		} `json:"parts"`
 	} `json:"content"`
+	OutputDimensionality int `json:"output_dimensionality"`
 }
 
 type embedContentResponse struct {
@@ -103,12 +110,31 @@ func (p *GeminiProvider) marshalRequest(text string) ([]byte, error) {
 	req.Content.Parts = []struct {
 		Text string `json:"text"`
 	}{{Text: text}}
+	req.OutputDimensionality = EmbeddingDimensions
 
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("gemini embed: marshal: %w", err)
 	}
 	return body, nil
+}
+
+// CacheFilename returns a deterministic filesystem-safe cache filename for an
+// embedding model and its fixed output dimension. The hash preserves distinct
+// identities where model names normalize to the same filesystem-safe slug.
+func CacheFilename(model string) string {
+	slug := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, model)
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "model"
+	}
+	digest := sha256.Sum256([]byte(model))
+	return fmt.Sprintf("vectors-%s-%d-%x.db", slug, EmbeddingDimensions, digest[:6])
 }
 
 func (p *GeminiProvider) buildURL() string {
