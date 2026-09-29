@@ -47,7 +47,7 @@ func TestNewGeminiProvider_StoresModel(t *testing.T) {
 
 func TestGeminiProvider_marshalRequest(t *testing.T) {
 	t.Parallel()
-	p := NewGeminiProvider("k", "text-embedding-004")
+	p := NewGeminiProvider("k", "gemini-embedding-2")
 	body, err := p.marshalRequest(`hi "world"`)
 	if err != nil {
 		t.Fatalf("marshalRequest: %v", err)
@@ -59,8 +59,25 @@ func TestGeminiProvider_marshalRequest(t *testing.T) {
 	if len(got.Content.Parts) != 1 || got.Content.Parts[0].Text != `hi "world"` {
 		t.Errorf("unexpected request shape: %s", body)
 	}
+	if got.OutputDimensionality != EmbeddingDimensions {
+		t.Errorf("output dimensionality = %d, want %d", got.OutputDimensionality, EmbeddingDimensions)
+	}
 	if !strings.Contains(string(body), `"parts"`) || !strings.Contains(string(body), `"text"`) {
 		t.Errorf("missing expected JSON keys: %s", body)
+	}
+}
+
+func TestCacheFilename(t *testing.T) {
+	t.Parallel()
+	defaultName := CacheFilename("gemini-embedding-2")
+	if defaultName != CacheFilename("gemini-embedding-2") {
+		t.Error("cache filename must be deterministic")
+	}
+	if !strings.Contains(defaultName, "gemini-embedding-2-768-") || strings.ContainsAny(defaultName, `\\/:*?\"<>|`) {
+		t.Errorf("cache filename %q is not model/dimension-specific and filesystem-safe", defaultName)
+	}
+	if defaultName == CacheFilename("custom/model") || CacheFilename("custom/model") == CacheFilename("custom-model") {
+		t.Error("distinct models must have distinct cache identities")
 	}
 }
 
@@ -166,7 +183,7 @@ func TestGeminiProvider_Embed(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		p := NewGeminiProvider("k", "text-embedding-004")
+		p := NewGeminiProvider("k", "gemini-embedding-2")
 		p.baseURL = srv.URL
 		p.httpClient = srv.Client()
 
@@ -177,11 +194,14 @@ func TestGeminiProvider_Embed(t *testing.T) {
 		if len(vals) != 3 {
 			t.Errorf("unexpected values: %v", vals)
 		}
-		if !strings.Contains(gotPath, "models/text-embedding-004:embedContent") {
+		if !strings.Contains(gotPath, "models/gemini-embedding-2:embedContent") {
 			t.Errorf("unexpected request path %q", gotPath)
 		}
 		if !strings.Contains(string(gotBody), `"hello"`) {
 			t.Errorf("request body missing text: %s", gotBody)
+		}
+		if !strings.Contains(string(gotBody), `"output_dimensionality":768`) {
+			t.Errorf("request body missing fixed output dimensionality: %s", gotBody)
 		}
 	})
 

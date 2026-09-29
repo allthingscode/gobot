@@ -933,7 +933,7 @@ func TestEmbeddingModel(t *testing.T) {
 		{
 			name:  "empty field returns default",
 			field: "",
-			want:  "text-embedding-004",
+			want:  DefaultEmbeddingModel,
 		},
 		{
 			name:  "explicit value is returned as-is",
