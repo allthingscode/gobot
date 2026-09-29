@@ -29,16 +29,16 @@ func TestAnthropicProvider_Models(t *testing.T) {
 	}
 	found := false
 	for _, m := range models {
-		if m.ID == "claude-sonnet-5" {
+		if m.ID == "claude-sonnet-5-5" {
 			found = true
 			if !m.SupportsToolUse {
-				t.Error("expected claude-sonnet-5 to support tool use")
+				t.Error("expected claude-sonnet-5-5 to support tool use")
 			}
 			break
 		}
 	}
 	if !found {
-		t.Error("expected claude-sonnet-5 in models")
+		t.Error("expected claude-sonnet-5-5 in models")
 	}
 }
 
@@ -91,7 +91,7 @@ func TestAnthropicProvider_Chat_Success(t *testing.T) {
 	p := NewAnthropicProvider("test-key", ts.URL)
 	str := "hello" //nolint:goconst // test fixture
 	req := ChatRequest{
-		Model:             "claude-sonnet-5",
+		Model:             "claude-sonnet-5-5",
 		SystemInstruction: "system prompt",
 		Messages: []agentctx.StrategicMessage{
 			{
@@ -134,7 +134,7 @@ func TestAnthropicProvider_Chat_Error(t *testing.T) {
 
 	p := NewAnthropicProvider("test-key", ts.URL)
 	req := ChatRequest{
-		Model: "claude-sonnet-5",
+		Model: "claude-sonnet-5-5",
 	}
 
 	_, err := p.Chat(context.Background(), req)

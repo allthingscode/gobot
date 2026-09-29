@@ -111,7 +111,7 @@ func (p *AnthropicProvider) Models() []ModelInfo {
 	return []ModelInfo{
 		{ID: "claude-fable-5-1", SupportsToolUse: true},
 		{ID: "claude-opus-5-5", SupportsToolUse: true},
-		{ID: "claude-sonnet-5", SupportsToolUse: true},
+		{ID: "claude-sonnet-5-5", SupportsToolUse: true},
 		{ID: "claude-haiku-4-5", SupportsToolUse: true},
 	}
 }

@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   used when `agents.defaults.model` is unset. The provider model lists name
   current models: `gemini-3.8-flash`, `gemini-3.1-pro-preview`,
   `gemini-3.5-flash-lite`; `claude-fable-5-1`, `claude-opus-5-5`,
-  `claude-sonnet-5`, `claude-haiku-4-5`; `gpt-6-astra`, `gpt-6-sol`,
+  `claude-sonnet-5-5`, `claude-haiku-4-5`; `gpt-6-astra`, `gpt-6-sol`,
   `gpt-6-luna`. Retired and shut-down entries (Gemini 1.5/2.0, Claude 3.x,
   GPT-4/3.5, o1) are gone.
 
