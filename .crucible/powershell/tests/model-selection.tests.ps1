@@ -40,10 +40,14 @@ $results += Run-Test "Reviewer defaults, escalates to strong on high/extended" {
     Assert-Result "rev high" ((Get-SpecialistModel -TargetPhase 'verification' -BudgetTier 'high') -eq 'strong') "expected strong"
 }
 
-$results += Run-Test "Operator is light, escalates only to default on high/extended" {
+$results += Run-Test "Operator is light whatever the budget; escalates to default only on deployment trouble" {
     Assert-Result "op low" ((Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'low') -eq 'light') "expected light"
     Assert-Result "op medium" ((Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'medium') -eq 'light') "expected light"
-    Assert-Result "op high" ((Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'high') -eq 'default') "expected default"
+    Assert-Result "op high" ((Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'high') -eq 'light') "expected light"
+    Assert-Result "op extended" ((Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'extended') -eq 'light') "expected light"
+    Assert-Result "op rebase re-entry" ((Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'low' -RebaseCount 1) -eq 'default') "expected default"
+    Assert-Result "op retried handoff" ((Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'low' -HandoffRetryCount 1) -eq 'default') "expected default"
+    Assert-Result "counters do not escalate other phases" ((Get-SpecialistModel -TargetPhase 'verification' -BudgetTier 'low' -RebaseCount 2 -HandoffRetryCount 2) -eq 'default') "expected default"
 }
 
 $results += Run-Test "done has no tier; blank/dirty tier defaults safely" {

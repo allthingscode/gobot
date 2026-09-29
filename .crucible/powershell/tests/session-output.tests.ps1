@@ -231,6 +231,34 @@ New-CruciblePromptText -Context `$ctx
         }
     }
 
+    # Item 140: the Operator's tier follows deployment trouble read from the handoff, not the budget.
+    $results += Run-Test -Name "Operator recommendation escalates on handoff rebase or retry counters, not budget" -Body {
+        $cases = @(
+            @{ Name = "clean high-budget deployment"; Budget = "high"; Rebase = 0; Retry = 0; Want = "haiku" },
+            @{ Name = "rebase re-entry"; Budget = "low"; Rebase = 1; Retry = 0; Want = "sonnet" },
+            @{ Name = "retried handoff"; Budget = "low"; Rebase = 0; Retry = 1; Want = "sonnet" }
+        )
+        $n = 0
+        foreach ($case in $cases) {
+            $n++
+            $ctx = New-TestContext -TempRoot (Join-Path $tempRoot ("op-tier-" + $n)) -TaskId "F-913" -TargetPhase "deployment"
+            $ctx.Handoff.budget_tier = $case.Budget
+            $ctx.Handoff.rebase_count = $case.Rebase
+            $ctx.Handoff.handoff_retry_count = $case.Retry
+            $ctx.PromptFilePath = Join-Path $ctx.SessionDir "F-913/deployment/prompt.md"
+            New-Item -ItemType Directory -Path (Split-Path -Parent $ctx.PromptFilePath) -Force | Out-Null
+            $oldPath = $env:PATH
+            try {
+                $env:PATH = ""
+                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+            } finally {
+                $env:PATH = $oldPath
+            }
+            $line = @(($output -split "`r?`n") | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
+            Assert-Result -Name ($case.Name + " -> " + $case.Want) -Condition ($line.Count -eq 1 -and $line[0] -match ('\] ' + $case.Want + ' \(target claude\)')) -FailureMessage ("got: " + ($line -join " | "))
+        }
+    }
+
     # Item 100: the success line on a normal run, and nothing matched it - so item 51b's
     # [FACTORY] -> [CRUCIBLE] rename of it was made on inspection alone. Its absence is the
     # signal, which is what makes it a contract rather than a message: a run that prints no

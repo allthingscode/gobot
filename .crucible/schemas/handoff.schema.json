@@ -115,6 +115,10 @@
       "type": ["string", "null"],
       "description": "The primary-branch commit hash from which the task was cut."
     },
+    "rebaselined_from": {
+      "type": ["string", "null"],
+      "description": "The base_commit this handoff replaced when new-handoff.ps1 -Rebaseline moved the task onto a bundle update committed mid-task. Null when the prior handoff carried no base_commit."
+    },
     "superseded": {
       "type": "boolean",
       "description": "Whether this handoff has been superseded by a newer duplicate handoff for the same transition key"

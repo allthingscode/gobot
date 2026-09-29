@@ -653,7 +653,9 @@ function Write-CrucibleCiStatusBanner {
     $designRequired = $false
     if ($handoff.PSObject.Properties["design_required"]) { $designRequired = [bool]$handoff.design_required }
     $handoffTier = if ($handoff.PSObject.Properties["budget_tier"]) { [string]$handoff.budget_tier } else { "" }
-    $capabilityTier = Get-SpecialistModel -TargetPhase $handoff.target_phase -BudgetTier $handoffTier -DesignRequired $designRequired
+    $rebaseCount = if ($handoff.PSObject.Properties["rebase_count"]) { [int]$handoff.rebase_count } else { 0 }
+    $retryCount = if ($handoff.PSObject.Properties["handoff_retry_count"]) { [int]$handoff.handoff_retry_count } else { 0 }
+    $capabilityTier = Get-SpecialistModel -TargetPhase $handoff.target_phase -BudgetTier $handoffTier -DesignRequired $designRequired -RebaseCount $rebaseCount -HandoffRetryCount $retryCount
     $recommendedModel = Get-ConfiguredModel -Target $Target -Tier $capabilityTier
     $recommendedTarget = if ($null -ne $Target) { $Target.Trim().ToLowerInvariant() } else { "" }
     if ([string]::IsNullOrWhiteSpace($recommendedTarget) -or $recommendedTarget -eq "agent") { $recommendedTarget = "claude" }

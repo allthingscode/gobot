@@ -149,9 +149,58 @@ try {
         $path = Track-HandoffFile -TaskId $taskId
         if (-not $path) { throw "No handoff file created for $taskId" }
         $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        if ($obj.reviewer_checks_passed.Count -lt 6) {
-            throw "Expected reviewer_checks_passed in $path"
+        if (@($obj.reviewer_checks_passed).Count -ne 6) {
+            throw "Expected six reviewer_checks_passed items in $path"
         }
+    }
+
+    # Item 136: the prompt and SOP pass the checks as one comma-joined string, which
+    # pwsh -File binds as a single-element array.
+    Invoke-Test -Name "verification->deployment splits a comma-joined -ReviewerChecksPassed" -Script {
+        $taskId = New-TestTaskId "RJ"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "verification"
+            Target = "deployment"
+            Reason = "review complete"
+            PromptVersion = "reviewer_prompt-v1"
+            SessionCycleId = "cycle-test"
+            Artifacts = @("powershell/crucible.ps1")
+            ReviewerChecksPassed = @("tests_pass,vet_pass,acceptance_criteria_met, scope_bounded,no_regressions,no_hard_mandates_violated")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $checks = @($obj.reviewer_checks_passed)
+        if ($checks.Count -ne 6 -or $checks -contains "tests_pass,vet_pass,acceptance_criteria_met, scope_bounded,no_regressions,no_hard_mandates_violated" -or $checks[3] -ne "scope_bounded") {
+            throw ("Expected six split and trimmed checks, got: " + ($checks -join " | "))
+        }
+    }
+
+    Invoke-Test -Name "verification->deployment refuses an incomplete -ReviewerChecksPassed" -Script {
+        $taskId = New-TestTaskId "RM"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "verification"
+            Target = "deployment"
+            Reason = "review complete"
+            PromptVersion = "reviewer_prompt-v1"
+            SessionCycleId = "cycle-test"
+            Artifacts = @("powershell/crucible.ps1")
+            ReviewerChecksPassed = @("tests_pass,vet_pass")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -eq 0) {
+            throw "Expected the generator to refuse two of six checks. Output: $($result.Output)"
+        }
+        if ((ConvertTo-NormalizedOutput $result.Output) -notmatch 'no_hard_mandates_violated') {
+            throw "Expected the refusal to name a missing check. Output: $($result.Output)"
+        }
+        if (Track-HandoffFile -TaskId $taskId) { throw "A refused handoff was written for $taskId" }
     }
 
     Invoke-Test -Name "researcher->groomer success with human decisions" -Script {

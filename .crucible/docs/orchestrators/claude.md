@@ -28,7 +28,7 @@ with that model. The canonical policy and the default/escalation table live in
 
 Quick reference: Sonnet is the default; Opus is reserved for Research (always), design-heavy
 or `high`/`extended`-tier Architect work (`design_required`), and `high`/`extended`-tier
-Grooming/Review; the Operator now runs at the high-capability tier (raised from `fast`, since deployment mutates BACKLOG.md, merges, and gates and must not use the lightest model); the orchestrator itself runs on Sonnet.
+Grooming/Review; the Operator runs on the light tier whatever the budget, because its work is procedural and does not grow with the item, and moves to the default tier only on a rebase re-entry or a retried handoff; the orchestrator itself runs on Sonnet.
 
 ### Standard Specialist Dispatch (Groomer, Architect, Reviewer, Operator)
 

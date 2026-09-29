@@ -112,6 +112,15 @@ pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -D
 
 7. **Commit.** Treat the update like any other change: review, test, commit.
 
+8. **Re-baseline in-flight tasks.** A task whose latest handoff was written before the update still carries the old `base_commit`, so its next `-Init` reads the update as a framework edit made during the task and stops with a framework integrity violation. Move each such task onto the update commit:
+
+   ```powershell
+   pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/new-handoff.ps1" `
+     -TaskId {task_id} -Rebaseline -BaseCommit {update_commit} -ProjectRoot .
+   ```
+
+   This copies the task's latest handoff with only `base_commit` changed, records the old value as `rebaselined_from`, and marks the old handoff superseded. It does not count against the handoff budget. The new base must descend from the old one. The breaker prints the same command with the task ID filled in.
+
 ---
 
 ## The update log

@@ -1,4 +1,4 @@
-<!-- prompt_version: deployment_prompt-v33 -->
+<!-- prompt_version: deployment_prompt-v34 -->
 Deployment: {task_id}
 
 {prev_session_summary}
@@ -43,8 +43,8 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 ## Deployment Workflow
 
 1. **Verify Task Dependencies ({task_id})**:
-   - Run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` (already done if you are reading this, but ensure it didn't emit a blocking dependency error).
-   - If `crucible.ps1` blocks due to unsatisfied dependencies, STOP. Do not proceed with the merge.
+   - The orchestrator's `crucible.ps1 -Init` already ran the dependency gate. A blocking result exits with code 2 before `task.md` is created, so an existing `task.md` means the gate passed. Do not re-run `-Init` at session start.
+   - If `task.md` is missing or you were shown a `[DEPENDENCY] BLOCKING` line, STOP. Do not proceed with the merge.
    - Hand off to **grooming** or wait for the prerequisite tasks to reach `Production`.
 
 2. **Verify Approval**: Ensure the latest Reviewer handoff for {task_id} has `status: "Ready for Deploy"`.

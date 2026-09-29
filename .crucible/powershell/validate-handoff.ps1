@@ -405,13 +405,13 @@ if ($handoff.PSObject.Properties["artifacts"] -and $null -ne $handoff.artifacts)
     }
 }
 
-if ($source -eq "reviewer" -and $target -eq "operator") {
+if ($handoff.PSObject.Properties["reviewer_checks_passed"] -and $null -ne $handoff.reviewer_checks_passed) {
     $expectedChecks = @()
     if ($schema.PSObject.Properties["properties"] -and
         $schema.properties.PSObject.Properties["reviewer_checks_passed"] -and
         $schema.properties.reviewer_checks_passed.PSObject.Properties["items"] -and
         $schema.properties.reviewer_checks_passed.items.PSObject.Properties["enum"]) {
-        $expectedChecks = @($schema.properties.reviewer_checks_passed.items.enum)
+        $expectedChecks = @($schema.properties.reviewer_checks_passed.items.enum | ForEach-Object { [string]$_ })
     }
 
     if ($expectedChecks.Count -eq 0) {
@@ -421,26 +421,23 @@ if ($source -eq "reviewer" -and $target -eq "operator") {
             -Details @{ field = "reviewer_checks_passed"; schema_path = $SchemaPath }
     }
 
-    if ($null -eq $handoff.PSObject.Properties["reviewer_checks_passed"] -or $null -eq $handoff.reviewer_checks_passed) {
+    $checks = @($handoff.reviewer_checks_passed | ForEach-Object { [string]$_ })
+    $unknownChecks = @($checks | Where-Object { $expectedChecks -cnotcontains $_ })
+    if ($unknownChecks.Count -gt 0) {
         Write-ValidationResult -Ok $false `
             -ReasonCode "reviewer_contract_failed" `
-            -Message "Reviewer handoff to Operator must include reviewer_checks_passed." `
-            -Details @{ field = "reviewer_checks_passed"; handoff_file = $HandoffFile }
+            -Message ("reviewer_checks_passed holds a value outside the allowed checks: '" + ($unknownChecks -join "', '") + "'. Each check must be its own array item, one of: " + ($expectedChecks -join ", ")) `
+            -Details @{ field = "reviewer_checks_passed"; invalid_checks = $unknownChecks; handoff_file = $HandoffFile }
     }
 
-    $checks = @($handoff.reviewer_checks_passed)
-    $missingChecks = @()
-    foreach ($check in $expectedChecks) {
-        if ($checks -notcontains $check) {
-            $missingChecks += $check
+    if ($source -eq "verification" -and $target -eq "deployment") {
+        $missingChecks = @($expectedChecks | Where-Object { $checks -cnotcontains $_ })
+        if ($missingChecks.Count -gt 0) {
+            Write-ValidationResult -Ok $false `
+                -ReasonCode "reviewer_contract_failed" `
+                -Message ("Verification approval handoff is missing reviewer checks: " + ($missingChecks -join ", ")) `
+                -Details @{ field = "reviewer_checks_passed"; missing_checks = $missingChecks; handoff_file = $HandoffFile }
         }
-    }
-
-    if ($missingChecks.Count -gt 0) {
-        Write-ValidationResult -Ok $false `
-            -ReasonCode "reviewer_contract_failed" `
-            -Message "Reviewer handoff contract is incomplete." `
-            -Details @{ missing_checks = $missingChecks; handoff_file = $HandoffFile }
     }
 }
 

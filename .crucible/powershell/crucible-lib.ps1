@@ -77,7 +77,9 @@ $script:PHASE_ROLE_MAP = @{
 # config.yaml. This keeps provider-specific model names out of the routing logic and in
 # config, where they are easy to update as models change. Default to the 'default' tier and
 # escalate to 'strong' only where the activity warrants deeper reasoning: open-ended research,
-# novel design, or high/extended budget. The mechanical Operator runs on the 'light' tier.
+# novel design, or high/extended budget. The Operator's work is procedural and does not grow
+# with the item, so it runs on the 'light' tier whatever the budget, and moves to 'default'
+# only when the deployment itself is in trouble: a rebase re-entry or a retried handoff.
 # The orchestrator reads the printed [RECOMMENDED MODEL] line rather than hard-coding a table.
 $script:TIER_STRONG  = "strong"
 $script:TIER_DEFAULT = "default"
@@ -98,7 +100,9 @@ function Get-SpecialistModel {
     param(
         [Parameter(Mandatory = $true)][string]$TargetPhase,
         [string]$BudgetTier = "medium",
-        [bool]$DesignRequired = $false
+        [bool]$DesignRequired = $false,
+        [int]$RebaseCount = 0,
+        [int]$HandoffRetryCount = 0
     )
 
     $phase = if ($null -ne $TargetPhase) { $TargetPhase.Trim().ToLowerInvariant() } else { "" }
@@ -110,7 +114,7 @@ function Get-SpecialistModel {
         "grooming"       { if ($tierEscalates) { return $script:TIER_STRONG } else { return $script:TIER_DEFAULT } }
         "implementation" { if ($DesignRequired -or $tierEscalates) { return $script:TIER_STRONG } else { return $script:TIER_DEFAULT } }
         "verification"   { if ($tierEscalates) { return $script:TIER_STRONG } else { return $script:TIER_DEFAULT } }
-        "deployment"     { if ($tierEscalates) { return $script:TIER_DEFAULT } else { return $script:TIER_LIGHT } }
+        "deployment"     { if ($RebaseCount -gt 0 -or $HandoffRetryCount -gt 0) { return $script:TIER_DEFAULT } else { return $script:TIER_LIGHT } }
         "done"           { return "" }
         default          { return $script:TIER_DEFAULT }
     }

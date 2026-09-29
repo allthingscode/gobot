@@ -93,7 +93,7 @@ The tier policy defaults to the `default` workhorse and escalates to `strong` on
 | grooming / Groomer | `default` | `budget_tier` is `high` or `extended` |
 | implementation / Architect | `default` | `design_required` is true, **or** `budget_tier` is `high`/`extended` |
 | verification / Reviewer | `default` | `budget_tier` is `high` or `extended` |
-| deployment / Operator | `light` | `budget_tier` is `high`/`extended` (escalates only to `default`) |
+| deployment / Operator | `light` | never on budget: escalates only to `default`, when `rebase_count` or `handoff_retry_count` is above 0 (a rebase re-entry or a retried handoff). The Operator's work is procedural and does not grow with the item. |
 | (orchestrator) | `default` | never - orchestration is procedural verification |
 
 The concrete model each tier maps to lives in `config.yaml` under `models:` (see `docs/config-reference.md`) so it is easy to update as providers ship new models. Framework defaults:

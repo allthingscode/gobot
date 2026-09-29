@@ -1,19 +1,25 @@
+[CmdletBinding(DefaultParameterSetName = "Transition")]
 param(
     [Parameter(Mandatory = $true)]
     [string]$TaskId,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Transition")]
     # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
     [ValidateSet("research", "grooming", "implementation", "verification", "deployment")]
     [string]$Source,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Transition")]
     # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
     [ValidateSet("research", "grooming", "implementation", "verification", "deployment", "done")]
     [string]$Target,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Transition")]
     [string]$Reason,
+
+    # Carries the latest active handoff forward with only base_commit moved to -BaseCommit,
+    # for a bundle update committed while the task is in flight (TODO item 139).
+    [Parameter(Mandatory = $true, ParameterSetName = "Rebaseline")]
+    [switch]$Rebaseline,
 
     [int]$HandoffRetryCount = -1,
     [int]$ReviewStrikeCount = -1,
@@ -123,10 +129,136 @@ function Get-LatestActiveHandoffForTask {
     return $null
 }
 
+function Get-HandoffOutputPath {
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+        return $OutputPath
+    }
+    return (Join-Path $handoffDir ($TaskId + "-" + (Get-UtcFileTimestamp) + ".json"))
+}
+
+function Write-ValidatedHandoff {
+    param($Payload, [string]$Path)
+
+    $tempPath = $Path + ".tmp"
+    try {
+        $json = $Payload | ConvertTo-Json -Depth 12
+        [System.IO.File]::WriteAllText($tempPath, $json, (New-Object System.Text.UTF8Encoding $false))
+
+        $validatorPath = Join-Path $PSScriptRoot "validate-handoff.ps1"
+        if (-not (Test-Path -LiteralPath $validatorPath)) {
+            throw "Validator not found: $validatorPath"
+        }
+
+        $validationRaw = & $validatorPath -HandoffFile $tempPath -SchemaPath $SchemaPath 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $validationText = ($validationRaw -join "`n").Trim()
+            if ([string]::IsNullOrWhiteSpace($validationText)) {
+                $validationText = "unknown validation error"
+            }
+            throw "Schema validation failed: $validationText"
+        }
+
+        Move-Item -LiteralPath $tempPath -Destination $Path -Force
+    } catch {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+}
+
 $sessionDir = Get-ConfiguredPath -Key "session"
 $handoffDir = Join-Path $sessionDir "handoffs"
 if (-not (Test-Path -LiteralPath $handoffDir)) {
     New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+}
+
+# A bundle update committed while a task is in flight lands between the task's
+# base_commit and HEAD, so the framework-integrity gate reads it as a specialist edit.
+# The human-approved fix is to move the baseline, and nothing else: writing a fresh
+# transition would mean re-authoring the specialist's handoff and spending a budget
+# handoff on a decision no specialist made. The copy keeps cumulative_handoff_count and
+# the transition key, and the budget gate counts session_end events, not files.
+if ($Rebaseline) {
+    $rebaselineAllowed = @("TaskId", "Rebaseline", "BaseCommit", "ProjectRoot", "SchemaPath", "OutputPath") + [System.Management.Automation.PSCmdlet]::CommonParameters
+    $rebaselineExtra = @($PSBoundParameters.Keys | Where-Object { $rebaselineAllowed -notcontains $_ })
+    if ($rebaselineExtra.Count -gt 0) {
+        throw ("-Rebaseline carries the latest handoff forward with only base_commit changed, so it takes no other handoff fields. Remove: -" + ($rebaselineExtra -join ", -"))
+    }
+    if ([string]::IsNullOrWhiteSpace($BaseCommit)) {
+        throw "-Rebaseline needs -BaseCommit: the commit to re-baseline $TaskId onto, normally the bundle update commit."
+    }
+
+    $rebaselineFile = $null
+    $rebaselineObj = $null
+    foreach ($file in @(Sort-HandoffFiles -Files @(Get-ChildItem -Path $handoffDir -Filter ($TaskId + "-*.json") -ErrorAction SilentlyContinue))) {
+        try {
+            $obj = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if (-not ($obj.PSObject.Properties["superseded"] -and $obj.superseded -eq $true)) {
+            $rebaselineFile = $file
+            $rebaselineObj = $obj
+            break
+        }
+    }
+    if ($null -eq $rebaselineObj) {
+        throw "No active handoff for $TaskId in $handoffDir, so there is nothing to re-baseline. A task with no handoff yet takes its base from the primary branch when its first handoff is written."
+    }
+
+    $newBase = (git -C $REPO_ROOT rev-parse --verify --quiet ($BaseCommit + "^{commit}") 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($newBase)) {
+        throw "-BaseCommit '$BaseCommit' does not name a commit in $REPO_ROOT."
+    }
+    $newBase = ([string]$newBase).Trim()
+
+    $oldBase = if ($rebaselineObj.PSObject.Properties["base_commit"] -and -not [string]::IsNullOrWhiteSpace([string]$rebaselineObj.base_commit)) { ([string]$rebaselineObj.base_commit).Trim() } else { $null }
+    if ($null -ne $oldBase) {
+        if ($oldBase -eq $newBase) {
+            throw "$TaskId is already based on $newBase ($($rebaselineFile.Name)). Nothing to re-baseline."
+        }
+        # Forward only. Moving the base sideways or back would also drop task commits
+        # from the integrity diff, which is a different decision from accepting an update.
+        git -C $REPO_ROOT merge-base --is-ancestor $oldBase $newBase 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "-BaseCommit $newBase does not descend from the current base_commit $oldBase in $($rebaselineFile.Name). A re-baseline moves a task forward onto a bundle update committed after its base; it does not move the base sideways or back."
+        }
+    }
+
+    $supersedeFields = @("superseded", "superseded_by", "superseded_at", "superseded_reason")
+    $rebaselinePayload = [ordered]@{}
+    foreach ($prop in $rebaselineObj.PSObject.Properties) {
+        if ($supersedeFields -contains $prop.Name) { continue }
+        $rebaselinePayload[$prop.Name] = $prop.Value
+    }
+    $rebaselinePayload["base_commit"] = $newBase
+    $rebaselinePayload["rebaselined_from"] = $oldBase
+
+    $rebaselinePath = Get-HandoffOutputPath
+    if (Test-Path -LiteralPath $rebaselinePath) {
+        throw "$rebaselinePath already exists. Wait a second and re-run: handoff file names carry a one-second timestamp."
+    }
+    Write-ValidatedHandoff -Payload $rebaselinePayload -Path $rebaselinePath
+
+    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded -Value $true -Force
+    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_by -Value (Split-Path -Leaf $rebaselinePath) -Force
+    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_at -Value (Get-UtcTimestamp) -Force
+    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_reason -Value "rebaseline" -Force
+    [System.IO.File]::WriteAllText($rebaselineFile.FullName, ($rebaselineObj | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding $false))
+
+    [ordered]@{
+        ok                       = $true
+        handoff_file             = $rebaselinePath
+        task_id                  = $TaskId
+        source                   = $rebaselineObj.source_phase
+        target                   = $rebaselineObj.target_phase
+        base_commit              = $newBase
+        rebaselined_from         = $oldBase
+        superseded               = $rebaselineFile.Name
+        cumulative_handoff_count = $rebaselineObj.cumulative_handoff_count
+    } | ConvertTo-Json
+    return
 }
 
 $latest = Get-LatestActiveHandoffForTask -HandoffDir $handoffDir -Task $TaskId
@@ -447,8 +579,9 @@ if ($Target -eq "implementation") {
 if (@($resolvedStubSpecsCreated).Count -gt 0) {
     $payload.stub_specs_created = $resolvedStubSpecsCreated
 }
-if (@($ReviewerChecksPassed).Count -gt 0) {
-    $payload.reviewer_checks_passed = @($ReviewerChecksPassed)
+[string[]]$resolvedReviewerChecks = @($ReviewerChecksPassed | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+if ($resolvedReviewerChecks.Count -gt 0) {
+    $payload.reviewer_checks_passed = $resolvedReviewerChecks
 }
 if (@($HumanApproved).Count -gt 0 -or @($HumanDeferred).Count -gt 0 -or @($HumanRejected).Count -gt 0) {
     $payload.human_decisions = [ordered]@{
@@ -458,47 +591,16 @@ if (@($HumanApproved).Count -gt 0 -or @($HumanDeferred).Count -gt 0 -or @($Human
     }
 }
 
-$timestamp = Get-UtcFileTimestamp
-$resolvedOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath
-} else {
-    Join-Path $handoffDir ($TaskId + "-" + $timestamp + ".json")
-}
-$tempOutputPath = $resolvedOutputPath + ".tmp"
+$resolvedOutputPath = Get-HandoffOutputPath
+Write-ValidatedHandoff -Payload $payload -Path $resolvedOutputPath
 
-try {
-    $json = $payload | ConvertTo-Json -Depth 12
-    [System.IO.File]::WriteAllText($tempOutputPath, $json, (New-Object System.Text.UTF8Encoding $false))
-
-    $validatorPath = Join-Path $PSScriptRoot "validate-handoff.ps1"
-    if (-not (Test-Path -LiteralPath $validatorPath)) {
-        throw "Validator not found: $validatorPath"
-    }
-
-    $validationRaw = & $validatorPath -HandoffFile $tempOutputPath -SchemaPath $SchemaPath 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        $validationText = ($validationRaw -join "`n").Trim()
-        if ([string]::IsNullOrWhiteSpace($validationText)) {
-            $validationText = "unknown validation error"
-        }
-        throw "Schema validation failed: $validationText"
-    }
-
-    Move-Item -LiteralPath $tempOutputPath -Destination $resolvedOutputPath -Force
-
-    [ordered]@{
-        ok           = $true
-        handoff_file = $resolvedOutputPath
-        task_id      = $TaskId
-        source       = $Source
-        target       = $Target
-    } | ConvertTo-Json
-} catch {
-    if (Test-Path -LiteralPath $tempOutputPath) {
-        Remove-Item -LiteralPath $tempOutputPath -Force -ErrorAction SilentlyContinue
-    }
-    throw
-}
+[ordered]@{
+    ok           = $true
+    handoff_file = $resolvedOutputPath
+    task_id      = $TaskId
+    source       = $Source
+    target       = $Target
+} | ConvertTo-Json
 } finally {
     Pop-Location
 }

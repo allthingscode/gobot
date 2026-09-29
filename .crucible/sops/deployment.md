@@ -1,4 +1,4 @@
-<!-- prompt_version: operator-sop-v6 -->
+<!-- prompt_version: operator-sop-v7 -->
 # SOP: Deployment
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -23,8 +23,8 @@
 ## Standard Deployment Workflow
 
 ### Step 1 - Verify Task Dependencies ({task_id})
-- Confirm `crucible.ps1 -Init -ProjectRoot "{project_root}"` did not emit a blocking dependency error
-- If it blocked due to unsatisfied dependencies: STOP. Hand off to grooming or wait for prerequisites to reach `Production`
+- The orchestrator's `crucible.ps1 -Init` already ran the dependency gate. A blocking result exits with code 2 before `task.md` is created, so an existing `task.md` means the gate passed. Do not re-run `-Init` at session start
+- If `task.md` is missing or a `[DEPENDENCY] BLOCKING` line was shown: STOP. Hand off to grooming or wait for prerequisites to reach `Production`
 
 ### Step 2 - Verify Approval
 Confirm the latest verification handoff for `{task_id}` has `status: "Ready for Deploy"`. Do not proceed if verification has not approved.

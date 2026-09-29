@@ -592,8 +592,9 @@ function Assert-CrucibleFrameworkIntegrity {
     # cleared by re-baselining the task onto it, which leaves the decision recorded in
     # the handoff instead of hidden in a commit the old check could not see.
     Write-Host "`n[STOP] Revert the framework-owned edits above before continuing." -ForegroundColor Red
-    Write-Host "       If this was a deliberate bundle update, commit it and re-baseline the task:" -ForegroundColor Red
-    Write-Host "         new-handoff.ps1 -TaskId <id> -ProjectRoot `"$(Get-RecoveryProjectRoot -Context $Context)`" -BaseCommit <commit-of-the-bundle-update>" -ForegroundColor Red
+    Write-Host "       If this was a deliberate bundle update, commit it and re-baseline the task onto that commit:" -ForegroundColor Red
+    Write-Host ("         pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/new-handoff.ps1`" -TaskId " + $handoff.task_id + " -Rebaseline -BaseCommit <commit-of-the-bundle-update> -ProjectRoot `"" + (Get-RecoveryProjectRoot -Context $Context) + "`"") -ForegroundColor Red
+    Write-Host "       This carries the incoming handoff forward with only base_commit changed. It does not count against the handoff budget." -ForegroundColor Red
     exit 2
 }
 
@@ -2083,7 +2084,18 @@ function Normalize-CrucibleInputState {
 
     if (Test-Path $targetDir) {
         $staleTask = Join-Path $targetDir "task.md"
-        if ((Test-Path $staleTask) -and (-not $Recover)) {
+        # A rerun on the handoff that created this session must keep task.md: it may hold
+        # checkpoints, and the recreate step runs only after minutes of isolated verification.
+        $ownedByThisHandoff = $false
+        if (Test-Path $staleTask) {
+            $handoffLine = Select-String -Path $staleTask -Pattern '^Handoff:\s+(\S+)' -List -Encoding UTF8
+            if ($handoffLine -and (Split-Path $handoffLine.Matches[0].Groups[1].Value -Leaf) -eq $latestHandoff.Name) {
+                $ownedByThisHandoff = $true
+            }
+        }
+        if ($ownedByThisHandoff) {
+            Write-Quiet ("[INIT] Keeping task.md for " + $handoff.target_phase + ": it was created from this handoff.") -ForegroundColor Gray
+        } elseif ((Test-Path $staleTask) -and (-not $Recover)) {
             Write-Quiet ("[CLEANUP] Removing stale task.md for " + $handoff.target_phase + "...") -ForegroundColor Cyan
             Remove-Item $staleTask -Force
         }
