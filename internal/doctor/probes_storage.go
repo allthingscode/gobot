@@ -223,7 +223,7 @@ func checkStorageSizes(cfg *config.Config) Result {
 	for _, s := range []storeTotal{
 		{"checkpoints.db", ckptDB + ckptWAL},
 		{"audit.db", auditDB + auditWAL},
-		{vectorDBName, vecDB + vecWAL},
+		{"vectors", vecDB + vecWAL},
 		{"sessions/", sessBytes},
 		{"logs/", logsBytes},
 	} {

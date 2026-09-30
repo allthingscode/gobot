@@ -165,8 +165,11 @@ func TestCheckStorageSizes_ActiveVectorCacheAboveThreshold(t *testing.T) {
 	if r.OK {
 		t.Error("active vector cache above threshold must be advisory WARN")
 	}
-	if !strings.Contains(r.Remediation, activeCache) {
-		t.Errorf("remediation should identify active cache %q, got %q", activeCache, r.Remediation)
+	if !strings.Contains(r.Remediation, "vectors is large") {
+		t.Errorf("remediation should identify logical vectors store, got %q", r.Remediation)
+	}
+	if strings.Contains(r.Remediation, activeCache) {
+		t.Errorf("remediation must not expose physical cache %q, got %q", activeCache, r.Remediation)
 	}
 }
 
