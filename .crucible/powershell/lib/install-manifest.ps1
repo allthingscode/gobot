@@ -157,6 +157,8 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/grooming-stub-deviation.tests.ps1",
         # Pins Crucible's own grooming and verification SOP text, for the same reason. Item 145.
         "powershell/tests/changed-path-consumers.tests.ps1",
+        # Pins Crucible's own verification SOP and prompt text, for the same reason. Item 146.
+        "powershell/tests/review-criteria-evidence.tests.ps1",
         # Pins the deployment SOP and prompt wording against the gate-reason rule, for the
         # same reason. Item 144.
         "powershell/tests/gate-reason-rule.tests.ps1",

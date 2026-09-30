@@ -1,4 +1,4 @@
-<!-- prompt_version: orchestrator-sop-v4 -->
+<!-- prompt_version: orchestrator-sop-v5 -->
 # SOP: Orchestrator
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -148,6 +148,16 @@ After the sub-agent returns:
    - **At or over ceiling** -> crucible.ps1 will block; do not attempt to bypass. Present as Circuit Breaker Gate.
 
 If any check in steps 1-4 fails -> go to **Failure Protocol**. Do NOT advance the pipeline.
+
+#### Reviewer Repair Pass (approved review with a concrete gap)
+
+The Reviewer's approval is not the last chance to catch a miss before the Operator runs. When the Reviewer has written a verification -> deployment handoff and you find a concrete gap in its review - an acceptance criterion or clause with no evidence in `review_report.md`, or a specific defect in the diff - do not dispatch the Operator and do not wait for the Human Gate:
+
+1. Tell the human what is missing, quoting the criterion or naming the `file:line`, and ask for a go. The human confirms the repair pass; you do not start it on your own.
+2. On their go, write a short prompt file at `.crucible/session/{task_id}/verification/repair-{slug}.md`. It tells the Reviewer to read and follow its `prompt.md` without repeating the full review, quotes the criterion or finding to re-check, names the file to check it against, and asks for the result in `review_report.md` and a `### CHECKPOINT` in `task.md`. It says: if unmet, issue CHANGES_REQUESTED and write a verification -> implementation handoff; if met, explain why and write a fresh verification -> deployment handoff. It does **not** state the verdict.
+3. Re-dispatch the Reviewer with `-PromptFile` pointing at that file, then verify its output as in Step 5.
+
+The Reviewer's newer handoff supersedes its approval: Crucible reads the latest handoff, and verification -> implementation needs no gate decision. The task then goes round normally. You never write the verdict, the fix spec, or the handoff yourself.
 
 ### Step 6 - Run Crucible and check for gates
 

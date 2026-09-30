@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v3 -->
+<!-- prompt_version: reviewer-sop-v4 -->
 # SOP: Verification
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -51,6 +51,8 @@ Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod
 ### Step 4 - Acceptance Criteria Review
 Read every checkbox in the spec's `Acceptance Criteria` section. Confirm each is implemented. Mark `acceptance_criteria_met: true` only when every item is checked off.
 
+A summary of the whole list is not a review. For **each criterion**, add one entry under `### Acceptance Criteria` in the review report that quotes the criterion and cites the evidence that it holds: a `file:line` or a test name. A criterion with several clauses (for example "including in its detail text and per-store warning evaluation") needs evidence for every clause. A criterion or clause with no evidence is a **BLOCKER** and `acceptance_criteria_met` is `false`.
+
 ### Step 5 - Quality Review
 Review the diff for:
 - Project language idioms and repository mandates declared in `.crucible/config.yaml` and agent instructions
@@ -79,6 +81,10 @@ critical_count: 0
 Format findings as:
 ```markdown
 ## Code Review: {task_id}
+
+### Acceptance Criteria
+- "quoted criterion" - met: file.go:42, TestName
+- "quoted criterion" - NOT MET: see BLOCKERS
 
 ### BLOCKERS (must fix before approval)
 - [ ] file.go:42 - description
@@ -162,6 +168,7 @@ pwsh -ExecutionPolicy Bypass \
 Before writing handoff.json, confirm:
 - [ ] Routing to: `deployment` (approved) or `implementation` (changes requested) - not to myself
 - [ ] `review_report.md` has the mandatory YAML header
+- [ ] `review_report.md` has one `### Acceptance Criteria` entry per criterion, quoted, with a `file:line` or test name for every clause
 - [ ] If CHANGES_REQUESTED: fix spec written to `{task_id}/implementation/task.md`
 - [ ] If APPROVED: backlog status updated to `Ready for Deploy`
 - [ ] `task_id` in handoff matches the task I was given

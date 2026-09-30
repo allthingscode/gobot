@@ -136,10 +136,12 @@ launch status.
    > your scaffolding would paper over it, and the run would prove only "Crucible + heavy orchestrator
    > hand-holding works," never "Crucible works." That is the opposite of what a dogfooding session
    > must establish. A phase that stumbles on the bare `prompt.md` is a **finding to file, not a gap to
-   > pre-patch**. Reserve `-PromptFile`/`-PromptText` for exactly three cases: (a) an argv-hostile prompt
+   > pre-patch**. Reserve `-PromptFile`/`-PromptText` for exactly four cases: (a) an argv-hostile prompt
    > the harness cannot pass cleanly, (b) a human-gate continuation (e.g. the Research Gate's
-   > `gate-filing.md`), and (c) a dispatch with no backlog task behind it, such as a Crucible `TODO.md`
-   > item (see the ad-hoc form above). Everything the specialist needs for a normal phase belongs in the
+   > `gate-filing.md`), (c) a dispatch with no backlog task behind it, such as a Crucible `TODO.md`
+   > item (see the ad-hoc form above), and (d) a Reviewer repair pass on an approved review, run on
+   > the human's go with a short `repair-{slug}.md` naming the one criterion or finding to re-check
+   > (see "Reviewer Repair Pass" in `sops/orchestrator.md`). Everything the specialist needs for a normal phase belongs in the
    > spec and the handoff - authored by the upstream phase - not in the dispatch call.
 
 4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=SUCCESS` or

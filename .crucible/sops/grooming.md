@@ -1,4 +1,4 @@
-<!-- prompt_version: groomer-sop-v4 -->
+<!-- prompt_version: groomer-sop-v5 -->
 # SOP: Grooming
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -81,6 +81,9 @@ When the stub or incoming handoff tells the Groomer to do something (for example
 
 Substitute evidence may be sound, but the orchestrator must not have to read the transcript to learn a check was swapped. Never report a premise as confirmed on substitute evidence without naming the substitution.
 
+#### Disclose Every Change to a Stub's Budget Tier, Priority, or Scope
+The Groomer owns these fields and may change them. When the groomed spec or handoff sets a stub's budget tier, priority, or scope (its listed files, packages, or affected areas) differently from the stub, list the change under `## Grooming Deviations` and mention it in the handoff `-Reason`. For each change, name the old value, the new value, and why (for example "budget_tier: low -> medium, the fix touches six files across two packages"). The orchestrator must not have to compare the stub with the handoff to learn a field changed.
+
 ### Mid-Session Progress (Checkpointing)
 Specialists MUST log their progress mid-session to ensure state recovery in case of failure.
 - **Mandate**: Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major sub-task or pass.
@@ -148,7 +151,7 @@ Write the handoff with `target_phase: "verification"` and **omit** `file_affinit
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "low",
-  "prompt_version": "groomer-sop-v4",
+  "prompt_version": "groomer-sop-v5",
   "reason": "Stub-Only Close-Out: stub rows filed, parent task closed - no implementation work",
   "artifacts": ["{{backlog_dir}}/BACKLOG.md", "{{backlog_dir}}/{type}/active/{task_id}_*.md"],
   "suspicious_content": null
@@ -184,6 +187,7 @@ Before writing handoff.json, confirm:
 - [ ] For vuln/dependency/build-artifact claims, ship-vs-local reality was checked before priority/severity was assigned
 - [ ] If the task renames or relocates a path, file, key, or exported identifier: every other consumer of the old name is in `file_affinity` or listed under `## Out of Scope` with a reason
 - [ ] Every stub instruction not carried out as written is named under `## Grooming Deviations` and in the handoff reason, with what was done instead and why
+- [ ] Every change to the stub's budget tier, priority, or scope is named under `## Grooming Deviations` and in the handoff reason, with the old value, the new value, and why
 
 ---
 
