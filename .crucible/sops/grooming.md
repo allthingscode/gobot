@@ -1,4 +1,4 @@
-<!-- prompt_version: groomer-sop-v2 -->
+<!-- prompt_version: groomer-sop-v4 -->
 # SOP: Grooming
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -65,6 +65,21 @@ Write such criteria against the task's own additions:
 - Avoid: "The file remains ASCII-clean with no BOM." (whole-file; snares pre-existing content)
 
 When a whole-file property genuinely IS the deliverable (for example a dedicated encoding-cleanup chore), state that explicitly and widen the `## Scope` / out-of-scope lists to permit the required edits.
+
+#### Search for Other Consumers of Anything the Task Renames or Relocates
+When the task renames or relocates a path, file, config key, or exported identifier, search the repository for every other consumer of the old name before setting `file_affinity` (for example `git grep -n "memory/vectors.db"`). For each hit outside the planned affinity, either:
+- Add its path to `file_affinity` and the spec's `## Affected Files` or `## Scope`, or
+- List it under `## Out of Scope` with the reason it may keep the old name
+
+`file_affinity` bounds where the change may go. It does not show what depends on what changed, so a consumer left out of it is left stale.
+
+#### Disclose Every Stub Instruction Not Carried Out As Written
+When the stub or incoming handoff tells the Groomer to do something (for example "confirm the failure on a live key" or "reproduce the crash"), and the Groomer did not do it as written, the spec MUST say so under a `## Grooming Deviations` heading, and the handoff `-Reason` MUST mention it. For each instruction, name:
+- The instruction, quoted from the stub
+- What was done instead (for example, cited the vendor's deprecation notice)
+- Why the instruction could not be carried out as written (for example, no API key in the environment)
+
+Substitute evidence may be sound, but the orchestrator must not have to read the transcript to learn a check was swapped. Never report a premise as confirmed on substitute evidence without naming the substitution.
 
 ### Mid-Session Progress (Checkpointing)
 Specialists MUST log their progress mid-session to ensure state recovery in case of failure.
@@ -133,7 +148,7 @@ Write the handoff with `target_phase: "verification"` and **omit** `file_affinit
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "low",
-  "prompt_version": "groomer-sop-v2",
+  "prompt_version": "groomer-sop-v4",
   "reason": "Stub-Only Close-Out: stub rows filed, parent task closed - no implementation work",
   "artifacts": ["{{backlog_dir}}/BACKLOG.md", "{{backlog_dir}}/{type}/active/{task_id}_*.md"],
   "suspicious_content": null
@@ -167,6 +182,8 @@ Before writing handoff.json, confirm:
 - [ ] Backlog validation script passes
 - [ ] `task_id` in handoff matches the task being handed off
 - [ ] For vuln/dependency/build-artifact claims, ship-vs-local reality was checked before priority/severity was assigned
+- [ ] If the task renames or relocates a path, file, key, or exported identifier: every other consumer of the old name is in `file_affinity` or listed under `## Out of Scope` with a reason
+- [ ] Every stub instruction not carried out as written is named under `## Grooming Deviations` and in the handoff reason, with what was done instead and why
 
 ---
 

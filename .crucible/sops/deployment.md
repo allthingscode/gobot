@@ -1,4 +1,4 @@
-<!-- prompt_version: operator-sop-v7 -->
+<!-- prompt_version: operator-sop-v8 -->
 # SOP: Deployment
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -135,7 +135,7 @@ happen (or hide one that will).
 **Before recording the decision, ask:**
 > "In one sentence, describe the output quality or reason for this decision (e.g. 'Clean, all AC met' or 'Accepted but error handling was thin')."
 
-The reason is required for **every** outcome, including `accepted` and `abandoned`. Placeholder text (`n/a`, `none`, `ok`, `looks good`) is invalid.
+The reason is required for **every** outcome, including `accepted` and `abandoned`. Crucible refuses a reason that is empty or is exactly one of these stock phrases, ignoring case and surrounding spaces: `n/a`, `na`, `none`, `ok`, `looks good`, `looks good.`, `approved`, `accept`, `accepted`, `done`, `ship it`, `auto`. Any longer reason is recorded as the human's own, even one that starts with a stock phrase. Ask for a concrete reason, but do not tell the human that a longer one will be refused.
 
 Once you have the human's sentence, patch it into the pending gate decision file and then call Crucible:
 

@@ -3061,6 +3061,25 @@ function Get-HumanGateOutcomes {
     return @("accepted", "rejected", "redirected", "abandoned")
 }
 
+function Get-LowSignalGateReasons {
+    # Exact phrases only, compared after trim and lowercase. A stock phrase with
+    # more words ("Looks good. I see nothing concerning.") is the human's reason
+    # and is recorded. sops/deployment.md and prompts/deployment_prompt.md list
+    # these; gate-reason-rule.tests.ps1 keeps them in step. Item 144.
+    return @(
+        "n/a", "na", "none", "ok", "looks good", "looks good.",
+        "approved", "accept", "accepted", "done", "ship it", "auto"
+    )
+}
+
+function Test-GateReasonRefused {
+    param([string]$Reason)
+    if ([string]::IsNullOrWhiteSpace($Reason)) { return $true }
+    $normalized = (ConvertTo-AsciiSafeText -Text $Reason).Trim().ToLowerInvariant()
+    if ($normalized -eq "") { return $true }
+    return ((Get-LowSignalGateReasons) -contains $normalized)
+}
+
 function Invoke-HumanGateAction {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -4068,11 +4087,6 @@ function Invoke-HumanGate {
             New-Item -ItemType Directory -Force -Path $pendingDir | Out-Null
         }
         $validOutcomes = Get-HumanGateOutcomes
-        $lowSignalGateReasons = @(
-            "n/a", "na", "none", "ok", "looks good", "looks good.",
-            "approved", "accept", "accepted", "done", "ship it", "auto"
-        )
-
         # Cycle that this gate is firing in. An advancing decision is only honored
         # as "already passed" on a re-run within the SAME cycle, so a stale accept
         # from a prior cycle cannot silently bypass a fresh human gate encounter.
@@ -4098,9 +4112,8 @@ function Invoke-HumanGate {
             }
 
             $trimmedGateReason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "" } else { (ConvertTo-AsciiSafeText -Text $GateReason).Trim() }
-            $normalizedGateReason = $trimmedGateReason.ToLowerInvariant()
-            if ([string]::IsNullOrWhiteSpace($trimmedGateReason) -or ($lowSignalGateReasons -contains $normalizedGateReason)) {
-                Write-Host "Error: -GateReason is required and must be specific (not placeholder text like 'ok' or 'n/a')." -ForegroundColor Red
+            if (Test-GateReasonRefused -Reason $GateReason) {
+                Write-Host ("Error: -GateReason is required and cannot be only a stock phrase (" + ((Get-LowSignalGateReasons) -join ", ") + ").") -ForegroundColor Red
                 exit 1
             }
             

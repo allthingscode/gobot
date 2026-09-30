@@ -1,4 +1,4 @@
-<!-- prompt_version: grooming_prompt-v27 -->
+<!-- prompt_version: grooming_prompt-v28 -->
 Grooming: {task_id}
 
 {prev_session_summary}
@@ -92,7 +92,7 @@ If the task is approved for closure without implementing code (e.g., already shi
 
 Do NOT ask the human to run this command. You run it via your Bash tool.
 
-Timestamp format: `yyyyMMddTHHmmssZ` (UTC) - e.g., `{task_id}.json`
+Timestamp format: `yyyyMMddTHHmmssZ` (UTC) - e.g., `{task_id}-20260418T143022Z.json`
 
 ---
 ## Final Check - Before Running new-handoff.ps1

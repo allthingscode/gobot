@@ -1,4 +1,4 @@
-<!-- prompt_version: deployment_prompt-v34 -->
+<!-- prompt_version: deployment_prompt-v35 -->
 Deployment: {task_id}
 
 {prev_session_summary}
@@ -98,7 +98,7 @@ When the pre-flight gate passes:
 3. **Human Gate Signal:** If `crucible.ps1` exits without `[NEXT SESSION COMMAND]`, check for `gate_pending.txt` in your session dir. That means the gate fired.
 4. **Present the Menu + Capture Reason:** Show the menu from `gate_pending.txt` (or the console output), which includes the visual review options (Launch visual diff tool, Command-line text diff, and Open the worktree folder in your editor) to help the human inspect changes. Ask for the human's choice (1, 2, 3, or 4), and require one concrete one-line quality reason for the chosen outcome.
    - This reason is mandatory for **all** outcomes, including `accepted` and `abandoned`.
-   - Do not accept placeholders such as `n/a`, `none`, `ok`, or `looks good`.
+   - Crucible refuses a reason that is empty or is exactly one of these stock phrases, ignoring case and surrounding spaces: `n/a`, `na`, `none`, `ok`, `looks good`, `looks good.`, `approved`, `accept`, `accepted`, `done`, `ship it`, `auto`. Any longer reason is recorded as the human's own, even one that starts with a stock phrase. Ask for a concrete reason, but do not tell the human that a longer one will be refused.
 5. **Advance with Outcome:** Once the human replies, run Crucible again with the outcome:
    ```bash
    pwsh -ExecutionPolicy Bypass \

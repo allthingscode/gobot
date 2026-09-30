@@ -150,6 +150,16 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/check-linux-leg.tests.ps1",
         "powershell/tests/check-culture-sensitive-time.tests.ps1",
         "powershell/tests/check-prompt-version.tests.ps1",
+        # Pins Crucible's own prompt text. An adopter may customize a prompt, and a shipped
+        # copy would fail their run over wording that is theirs to choose. Item 142.
+        "powershell/tests/phase-prompt-handoff-example.tests.ps1",
+        # Pins Crucible's own grooming SOP text, for the same reason. Item 143.
+        "powershell/tests/grooming-stub-deviation.tests.ps1",
+        # Pins Crucible's own grooming and verification SOP text, for the same reason. Item 145.
+        "powershell/tests/changed-path-consumers.tests.ps1",
+        # Pins the deployment SOP and prompt wording against the gate-reason rule, for the
+        # same reason. Item 144.
+        "powershell/tests/gate-reason-rule.tests.ps1",
         # Its ledger names the Crucible repo's own test files, one per entry, and an entry nothing
         # reaches is a failure by design. An adopter bundle ships a subset of powershell/tests, so
         # every entry naming an excluded file would report itself stale and fail the adopter's run

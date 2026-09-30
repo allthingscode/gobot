@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v2 -->
+<!-- prompt_version: reviewer-sop-v3 -->
 # SOP: Verification
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -34,6 +34,9 @@ Read your `task.md` - it contains a `## Scope Boundary (File Affinity)` section.
 git diff master...task/{task_id} --name-only
 ```
 Verify every modified file falls within the declared package paths. Any file outside scope is an automatic **BLOCKER** unless the implementation phase explicitly documented an escalation reason in their `task.md`.
+
+#### Consumers Outside the Diff
+Staying inside `file_affinity` does not prove nothing else depends on what changed. When the diff renames or relocates a path, file, config key, or exported identifier, search the task branch for remaining uses of the old name (for example `git grep -n "memory/vectors.db" task/{task_id}`). Each hit that the diff leaves unchanged and the spec does not list under `## Out of Scope` is a **BLOCKER**: the consumer still uses the old name.
 
 ### Step 3 - Automated Verification
 Run the canonical isolated checks. Every check MUST pass before proceeding to manual review:
@@ -162,3 +165,4 @@ Before writing handoff.json, confirm:
 - [ ] If CHANGES_REQUESTED: fix spec written to `{task_id}/implementation/task.md`
 - [ ] If APPROVED: backlog status updated to `Ready for Deploy`
 - [ ] `task_id` in handoff matches the task I was given
+- [ ] If the diff renames or relocates a path, file, key, or exported identifier: no unchanged consumer of the old name remains unless the spec lists it under `## Out of Scope`
