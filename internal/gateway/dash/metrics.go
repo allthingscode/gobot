@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/doctor"
 	"github.com/allthingscode/gobot/internal/observability"
 )
@@ -142,7 +143,11 @@ func (h *Handler) memoryPanel() metricPanelView {
 }
 
 func (h *Handler) storagePanel() metricPanelView {
-	summary, err := doctor.CollectStorageSizeSummary(h.storageRoot())
+	embeddingModel := config.DefaultEmbeddingModel
+	if h.res.Config != nil {
+		embeddingModel = h.res.Config.EmbeddingModel()
+	}
+	summary, err := doctor.CollectStorageSizeSummary(h.storageRoot(), embeddingModel)
 	if err != nil {
 		return metricPanel("Storage Size", metricStatusWarn, "Unavailable", err.Error(), nil)
 	}
