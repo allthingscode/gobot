@@ -192,6 +192,20 @@ if ($null -ne $reviewNode) {
     }
 }
 
+# hooks.project_dir is optional. When written, the same accessor the git hooks use
+# decides whether it is usable, so a value that validates here is one the hooks accept.
+$hooksNode = Find-Node -Path @("hooks")
+if ($null -ne $hooksNode) {
+    $result = Read-Value -Path @("hooks", "project_dir")
+    if ($result.Ok -and $null -ne $result.Value) {
+        try {
+            $null = Resolve-ProjectHooksDirValue -Value $result.Value -ProjectRoot (Split-Path -Parent (Split-Path -Parent $ConfigPath))
+        } catch {
+            $errors += $_.Exception.Message
+        }
+    }
+}
+
 foreach ($role in @("researcher", "groomer", "architect", "reviewer", "operator")) {
     $null = Test-RequiredSection -Path @("roles", $role) -Name ("roles." + $role)
 }

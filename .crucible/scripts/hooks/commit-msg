@@ -52,6 +52,52 @@ if [ -z "$PWSH" ]; then
     exit 1
 fi
 
+# Chain to the project's own hook of the same name. core.hooksPath points git at
+# Crucible's hooks, which shadows any hooks the project keeps elsewhere, so an adopter
+# names that directory in .crucible/config.yaml (hooks.project_dir) and each Crucible
+# hook runs the project's hook after its own checks. The grep is only a fast path that
+# keeps PowerShell off every commit that has not set the key; the one config parser
+# decides what the key says. The project hook runs through its shebang so a clone that
+# recorded it without the executable bit, as a Windows commit does, still runs it.
+# Item 150.
+PROJECT_HOOK_RAN=""
+run_project_hook() {
+    project_hook_name="$1"
+    shift
+    if ! grep -q 'project_dir' "$REPO_ROOT/.crucible/config.yaml" 2>/dev/null; then
+        return 0
+    fi
+    if ! project_hooks_dir="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/resolve-project-hooks-dir.ps1" -ProjectRoot "$REPO_ROOT")"; then
+        echo "ERROR: could not resolve hooks.project_dir; the project's $project_hook_name hook did not run." >&2
+        exit 1
+    fi
+    project_hooks_dir="$(printf '%s' "$project_hooks_dir" | tr -d '\r')"
+    if [ -z "$project_hooks_dir" ]; then
+        return 0
+    fi
+    project_hook="$project_hooks_dir/$project_hook_name"
+    if [ ! -f "$project_hook" ]; then
+        echo "No project $project_hook_name hook in $project_hooks_dir; nothing to chain."
+        return 0
+    fi
+    project_hook_first="$(head -n 1 "$project_hook" | tr -d '\r')"
+    case "$project_hook_first" in
+        '#!'*) project_hook_interp="${project_hook_first#??}" ;;
+        *) project_hook_interp="sh" ;;
+    esac
+    echo "Running project hook: $project_hook"
+    set +e
+    # Unquoted on purpose: '/usr/bin/env bash' is a command and an argument.
+    $project_hook_interp "$project_hook" "$@"
+    project_hook_status=$?
+    set -e
+    if [ "$project_hook_status" -ne 0 ]; then
+        echo "ERROR: project hook $project_hook failed (exit $project_hook_status)." >&2
+        exit "$project_hook_status"
+    fi
+    PROJECT_HOOK_RAN=1
+}
+
 echo "--- Crucible commit-msg verification started"
 
 # 1. Message file encoding, ahead of both short-circuits below.
@@ -73,6 +119,7 @@ if [ "$REPO_ROOT" != "$FRAMEWORK_ROOT" ]; then
     # it for adopters; running it here would judge an adopter's tests by Crucible's
     # convention.
     echo "Adopter: assertion deletion check skipped (framework-only)."
+    run_project_hook commit-msg "$@"
     echo "--- Commit-msg: all verification tests passed!"
     exit 0
 fi

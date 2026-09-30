@@ -64,6 +64,9 @@ review:                                   # optional
   ci_staging_branch_prefix: crucible-ci/  # optional; defaults to crucible-ci/
   ci_required_checks: ""                  # optional; comma-separated required job names
   ci_post_push_watch: false               # optional; defaults to false
+
+hooks:                                    # optional
+  project_dir: scripts/hooks              # optional; the project's own git hooks
 ```
 
 ---
@@ -320,6 +323,20 @@ Settings related to human review workflows.
 
 ---
 
+### `hooks` (optional)
+
+Installing Crucible sets `core.hooksPath` to `.crucible/scripts/hooks`. Git then runs only Crucible's hooks, so any hooks the project keeps elsewhere stop running. Name the project's hooks directory here, and Crucible's `pre-commit`, `commit-msg`, and `pre-push` hooks each run the project's hook of the same name after their own checks.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `project_dir` | string | (unset) | The project's hooks directory, relative to the project root, for example `scripts/hooks`. It must exist and must not be under `.crucible/`. Unset means Crucible runs no project hooks. |
+
+The project hook gets the same arguments git passed to Crucible's hook and, for `pre-push`, the same refs on stdin. It runs from the project root, through the interpreter on its `#!` line, so it runs even if the file is not marked executable. A failing project hook fails the commit or push with its exit code. A missing hook file of a given name is skipped. Other hook names, such as `post-checkout`, are not chained.
+
+`install-hooks.ps1` warns when the project tracks a directory holding a `pre-commit`, `commit-msg`, or `pre-push` file that `project_dir` does not name.
+
+---
+
 ## Validation
 
 Run before starting any pipeline work:
@@ -333,6 +350,7 @@ Run before starting any pipeline work:
 - `crucible_root` is absolute, contains `..` path traversal segments, or does not point to a complete installed Crucible bundle (missing `docs`, `prompts`, `personas`, `schemas`, `sops`, or `powershell` directories)
 - Any path under `paths` (except `backlog`) does not start with `.crucible/`
 - `paths.backlog` is absolute or contains `..` path traversal segments
+- `hooks.project_dir` is absolute, contains `..`, is under `.crucible/`, or does not exist
 - Any `verification` command still contains a scaffold placeholder (`replace-with-...`)
 
 **Warnings** (exit 0 - pipeline starts, but check these):

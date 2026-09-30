@@ -145,8 +145,9 @@ try {
     # proxy. git -C .crucible ls-files -- "*.md" with no slash is empty: the work tree
     # root is the adopter and .crucible/README.md has a slash. Nothing to drift, so the
     # guard is framework-only. Cases 1-8 above are layout-independent and do run in both
-    # contexts. Item 114.
-    $hookPath = Join-Path $REPO_ROOT "scripts/hooks/pre-commit"
+    # contexts. Item 114. The explicit list moved from pre-commit to pre-push when
+    # pre-commit went to -Staged, which filters by the script's own list. Item 151.
+    $hookPath = Join-Path $REPO_ROOT "scripts/hooks/pre-push"
     $trackedRootDocs = @(& git -C $REPO_ROOT ls-files --full-name -- "*.md" | Where-Object { $_ -notmatch "/" })
     if (-not (Test-Path -LiteralPath $hookPath) -or $trackedRootDocs.Count -eq 0) {
         Write-Host "SKIPPED: root-doc scope drift guard (framework-only; no tracked root *.md under this tree)" -ForegroundColor Yellow

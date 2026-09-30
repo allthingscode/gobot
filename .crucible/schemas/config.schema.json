@@ -208,6 +208,18 @@
           "description": "Whether to watch branch CI after fast-forwarding/pushing to primary branch."
         }
       }
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Optional. Git hook settings for an adopter project.",
+      "additionalProperties": false,
+      "properties": {
+        "project_dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The project's own git hooks directory, relative to the project root and outside .crucible. Crucible's pre-commit, commit-msg, and pre-push hooks run the project's hook of the same name after their own checks, because core.hooksPath otherwise shadows it."
+        }
+      }
     }
   },
   "definitions": {

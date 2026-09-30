@@ -94,6 +94,58 @@ if ($gitPathCode -ne 0 -or [string]::IsNullOrWhiteSpace($gitDirRel)) {
     }
 }
 
+# The .git/hooks check above cannot see an adopter's tracked hooks directory, such as
+# scripts/hooks, which core.hooksPath shadows just as completely. Crucible's hooks chain
+# to one named by hooks.project_dir, so warn about any tracked directory holding a
+# chained hook name that the setting does not name. Item 150.
+if ($hooksPath -ne "scripts/hooks") {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    Push-Location $repoRoot
+    try {
+        $tracked = @(git ls-files 2>$null)
+    } finally {
+        Pop-Location
+        $ErrorActionPreference = $prev
+    }
+    $chainedNames = @("pre-commit", "commit-msg", "pre-push")
+    $trackedHookDirs = @($tracked |
+        Where-Object { $_ -notmatch '^\.crucible/' -and ($chainedNames -contains ($_ -split '/')[-1]) } |
+        ForEach-Object { $i = $_.LastIndexOf('/'); if ($i -lt 0) { "." } else { $_.Substring(0, $i) } } |
+        Sort-Object -Unique)
+
+    if ($trackedHookDirs.Count -gt 0) {
+        $configured = $null
+        $configError = $null
+        $helpers = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
+        if (Test-Path -LiteralPath $helpers) {
+            . $helpers
+            try {
+                $configured = Get-ConfiguredProjectHooksDir -ProjectRoot $repoRoot
+            } catch {
+                $configError = $_.Exception.Message
+            }
+        }
+        if ($null -ne $configError) {
+            Write-InstallInfo ("Warning: hooks.project_dir in .crucible/config.yaml is unusable, so no project hook will run: " + $configError) -ForegroundColor Yellow
+        }
+        $unnamed = @($trackedHookDirs | Where-Object {
+            $full = (Join-Path $repoRoot $_)
+            $null -eq $configured -or ([System.IO.Path]::GetFullPath($full).TrimEnd('\', '/') -ne [System.IO.Path]::GetFullPath($configured).TrimEnd('\', '/'))
+        })
+        if ($unnamed.Count -gt 0) {
+            Write-InstallInfo ("Warning: core.hooksPath now shadows git hooks this project tracks, and they will not run:") -ForegroundColor Yellow
+            foreach ($d in $unnamed) {
+                Write-InstallInfo ("    - " + $d + "/") -ForegroundColor Yellow
+            }
+            Write-InstallInfo "    To run them after Crucible's checks, set this in .crucible/config.yaml:" -ForegroundColor Yellow
+            Write-InstallInfo "        hooks:" -ForegroundColor Yellow
+            Write-InstallInfo ("          project_dir: " + $unnamed[0]) -ForegroundColor Yellow
+            Write-InstallInfo "    Only pre-commit, commit-msg, and pre-push are chained. See docs/config-reference.md." -ForegroundColor Yellow
+        }
+    }
+}
+
 # On Unix, git only runs hooks that carry the executable bit. A bundle installed
 # or committed on Windows records mode 100644, so a clone on Linux/macOS would
 # silently skip every gate. Ensure the activated hooks are executable here. This

@@ -82,6 +82,9 @@ function Test-FrameworkDevOnlyFile {
         # ship, and should, because mis-decoded bytes are a defect in anybody's file.
         "powershell/gates/check-ascii.ps1",
         "powershell/tests/check-ascii.tests.ps1",
+        # Drives the -Staged split of check-ascii.ps1 and check-culture-sensitive-time.ps1,
+        # both dev-only, alongside check-mojibake.ps1. Item 151.
+        "powershell/tests/staged-gate-scans.tests.ps1",
         # Enforces that Crucible's own shipped files do not name the deprecated
         # factory.ps1 shim's path as one to invoke, which would let the shim record
         # deprecated_entrypoint events against itself and pollute item 52's deletion

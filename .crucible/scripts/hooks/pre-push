@@ -28,33 +28,106 @@ if [ ! -t 0 ]; then
     cat > "$PUSH_REFS_FILE"
 fi
 
+# PowerShell 7+ (pwsh) is required. Do not look up powershell.exe: under WSL,
+# Windows PATH interop puts /mnt/c/.../powershell.exe on PATH and would hand a
+# Linux repository to Windows PowerShell 5.1. That host sees the work tree as
+# \\wsl.localhost\... and cannot read its index. Regression:
+# check-assertion-deletion.tests.ps1 drives a real hook on Linux.
+# uname still decides: a Windows pwsh.exe on a Linux PATH is the same trap.
+# Resolved here rather than in the framework branch because the adopter branch needs
+# it too when it chains to a project hook (item 150). A missing pwsh is only an error
+# where something is about to call it.
+PWSH="$(command -v pwsh || true)"
+case "$(uname -s)" in
+    Linux|Darwin)
+        case "$PWSH" in
+            *.exe|/mnt/*)
+                echo "ERROR: pwsh resolved to a Windows binary ($PWSH). Install PowerShell 7+ in this OS." >&2
+                exit 1
+                ;;
+        esac
+        ;;
+esac
+
+# Chain to the project's own hook of the same name. core.hooksPath points git at
+# Crucible's hooks, which shadows any hooks the project keeps elsewhere, so an adopter
+# names that directory in .crucible/config.yaml (hooks.project_dir) and each Crucible
+# hook runs the project's hook after its own checks. The grep is only a fast path that
+# keeps PowerShell off every push that has not set the key; the one config parser
+# decides what the key says. The project hook runs through its shebang so a clone that
+# recorded it without the executable bit, as a Windows commit does, still runs it.
+# Item 150.
+PROJECT_HOOK_RAN=""
+run_project_hook() {
+    project_hook_name="$1"
+    shift
+    if ! grep -q 'project_dir' "$REPO_ROOT/.crucible/config.yaml" 2>/dev/null; then
+        return 0
+    fi
+    if [ -z "$PWSH" ]; then
+        echo "ERROR: pwsh (PowerShell 7+) was not found on PATH." >&2
+        exit 1
+    fi
+    if ! project_hooks_dir="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/resolve-project-hooks-dir.ps1" -ProjectRoot "$REPO_ROOT")"; then
+        echo "ERROR: could not resolve hooks.project_dir; the project's $project_hook_name hook did not run." >&2
+        exit 1
+    fi
+    project_hooks_dir="$(printf '%s' "$project_hooks_dir" | tr -d '\r')"
+    if [ -z "$project_hooks_dir" ]; then
+        return 0
+    fi
+    project_hook="$project_hooks_dir/$project_hook_name"
+    if [ ! -f "$project_hook" ]; then
+        echo "No project $project_hook_name hook in $project_hooks_dir; nothing to chain."
+        return 0
+    fi
+    project_hook_first="$(head -n 1 "$project_hook" | tr -d '\r')"
+    case "$project_hook_first" in
+        '#!'*) project_hook_interp="${project_hook_first#??}" ;;
+        *) project_hook_interp="sh" ;;
+    esac
+    echo "Running project hook: $project_hook"
+    set +e
+    # Unquoted on purpose: '/usr/bin/env bash' is a command and an argument.
+    $project_hook_interp "$project_hook" "$@"
+    project_hook_status=$?
+    set -e
+    if [ "$project_hook_status" -ne 0 ]; then
+        echo "ERROR: project hook $project_hook failed (exit $project_hook_status)." >&2
+        exit "$project_hook_status"
+    fi
+    PROJECT_HOOK_RAN=1
+}
+
 echo "--- Crucible pre-push verification started"
 
 if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
-    # PowerShell 7+ (pwsh) is required. Do not look up powershell.exe: under WSL,
-    # Windows PATH interop puts /mnt/c/.../powershell.exe on PATH and would hand a
-    # Linux repository to Windows PowerShell 5.1. That host sees the work tree as
-    # \\wsl.localhost\... and cannot read its index. Regression:
-    # check-assertion-deletion.tests.ps1 drives a real hook on Linux.
-    # uname still decides: a Windows pwsh.exe on a Linux PATH is the same trap.
-    PWSH="$(command -v pwsh)"
-    case "$(uname -s)" in
-        Linux|Darwin)
-            case "$PWSH" in
-                *.exe|/mnt/*)
-                    echo "ERROR: pwsh resolved to a Windows binary ($PWSH). Install PowerShell 7+ in this OS." >&2
-                    exit 1
-                    ;;
-            esac
-            ;;
-    esac
     if [ -z "$PWSH" ]; then
         echo "ERROR: pwsh (PowerShell 7+) was not found on PATH." >&2
         exit 1
     fi
+
+    # 0. Whole-tree encoding and timestamp scans. Pre-commit runs these over the staged
+    # files only, so a file that reached the tree without passing through a commit on
+    # this machine - a merge, a rebase, a checkout of someone else's work - is caught
+    # here, before it leaves. Item 151.
+    # The mojibake scope is listed explicitly so its reach is reviewable in the hook
+    # itself rather than inferred from the script's defaults. It must stay in sync with
+    # the framework branch of check-mojibake.ps1; check-mojibake.tests.ps1 pins both
+    # against the tracked root *.md files so a new root doc cannot silently fall out.
+    echo "Running mojibake check..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md TODO.md
+
+    # Every tracked file, because the three violations that sat outside the mojibake
+    # gate's .md/.ps1 walk were in a .json, a .go and an extensionless gitignore. Item 86.
+    echo "Running ASCII-only check..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-ascii.ps1
+
+    echo "Running culture-sensitive timestamp check..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-culture-sensitive-time.ps1
 
     # 1. Project Scaffolding unit tests
     echo "Running project scaffolding tests..."
@@ -191,6 +264,18 @@ else
     # commit-msg legs that do run for it. So this branch reports, and claims nothing. The
     # closing success line used to sit outside this if/else, which told a push that ran zero
     # checks that all verification and integration tests had passed. Item 115.
+    # The project's own pre-push hook, when hooks.project_dir names one, gets the same
+    # arguments and the same captured refs git gave this hook. Item 150.
+    cd "$REPO_ROOT"
     echo "Adopter: framework self-tests skipped (framework-only)."
-    echo "--- Pre-push: no checks apply to an adopter project; nothing was verified."
+    if [ -n "$PUSH_REFS_FILE" ]; then
+        run_project_hook pre-push "$@" < "$PUSH_REFS_FILE"
+    else
+        run_project_hook pre-push "$@"
+    fi
+    if [ -n "$PROJECT_HOOK_RAN" ]; then
+        echo "--- Pre-push: the project's pre-push hook passed; Crucible itself verified nothing."
+    else
+        echo "--- Pre-push: no checks apply to an adopter project; nothing was verified."
+    fi
 fi

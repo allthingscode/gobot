@@ -399,6 +399,27 @@ review:
         Assert-Result -Name "valueless message" -Condition ($cmd.Output -match "present but carries no value") -FailureMessage ("expected the unreadable-key message. Output: " + $cmd.Output)
     }
 
+    # hooks.project_dir is validated by the accessor the git hooks call, so a value that
+    # passes here is one the hooks accept. Item 150.
+    $results += Run-Test -Name "hooks.project_dir passes when it names a project directory and fails otherwise" -Body {
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot "scripts/hooks") -Force | Out-Null
+        $good = New-ReviewConfig -Name "hooks-good" -Review "`nhooks:`n  project_dir: scripts/hooks`n"
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $good }
+        Assert-Result -Name "good hooks exit" -Condition ($cmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+
+        $cases = @(
+            @{ Value = "scripts/missing"; Message = "does not exist" },
+            @{ Value = "../hooks"; Message = "must not escape the project root" },
+            @{ Value = ".crucible/scripts/hooks"; Message = "not a directory under \.crucible" }
+        )
+        foreach ($case in $cases) {
+            $path = New-ReviewConfig -Name ("hooks-bad-" + [guid]::NewGuid().ToString("N").Substring(0, 6)) -Review ("`nhooks:`n  project_dir: " + $case.Value + "`n")
+            $bad = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
+            Assert-Result -Name ("bad hooks exit: " + $case.Value) -Condition ($bad.ExitCode -eq 2) -FailureMessage ("expected exit 2 for project_dir " + $case.Value + ", got " + $bad.ExitCode + ". Output: " + $bad.Output)
+            Assert-Result -Name ("bad hooks message: " + $case.Value) -Condition ($bad.Output -match $case.Message) -FailureMessage ("expected '" + $case.Message + "' for " + $case.Value + ". Output: " + $bad.Output)
+        }
+    }
+
     $results += Run-Test -Name "Indent width does not change the verdict" -Body {
         # The runtime reads this file indent-agnostically. A validator that only
         # understands two spaces disagrees with it about the same config, and reports

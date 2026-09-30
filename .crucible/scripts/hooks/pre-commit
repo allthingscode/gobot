@@ -1,7 +1,8 @@
 #!/bin/sh
 # Crucible framework pre-commit hook
-# Runs generated-doc, mojibake, ASCII-only, timestamp, prompt-version and Go lint
-# checks, plus a merge conflict marker scan.
+# Runs generated-doc, prompt-version and Go lint checks, the mojibake, ASCII-only and
+# timestamp checks over the staged files, and a merge conflict marker scan. The
+# whole-tree forms of the staged scans run in pre-push.
 # A non-zero exit from any check aborts the commit.
 
 set -e
@@ -36,6 +37,52 @@ if [ -z "$PWSH" ]; then
     exit 1
 fi
 
+# Chain to the project's own hook of the same name. core.hooksPath points git at
+# Crucible's hooks, which shadows any hooks the project keeps elsewhere, so an adopter
+# names that directory in .crucible/config.yaml (hooks.project_dir) and each Crucible
+# hook runs the project's hook after its own checks. The grep is only a fast path that
+# keeps PowerShell off every commit that has not set the key; the one config parser
+# decides what the key says. The project hook runs through its shebang so a clone that
+# recorded it without the executable bit, as a Windows commit does, still runs it.
+# Item 150.
+PROJECT_HOOK_RAN=""
+run_project_hook() {
+    project_hook_name="$1"
+    shift
+    if ! grep -q 'project_dir' "$REPO_ROOT/.crucible/config.yaml" 2>/dev/null; then
+        return 0
+    fi
+    if ! project_hooks_dir="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/resolve-project-hooks-dir.ps1" -ProjectRoot "$REPO_ROOT")"; then
+        echo "ERROR: could not resolve hooks.project_dir; the project's $project_hook_name hook did not run." >&2
+        exit 1
+    fi
+    project_hooks_dir="$(printf '%s' "$project_hooks_dir" | tr -d '\r')"
+    if [ -z "$project_hooks_dir" ]; then
+        return 0
+    fi
+    project_hook="$project_hooks_dir/$project_hook_name"
+    if [ ! -f "$project_hook" ]; then
+        echo "No project $project_hook_name hook in $project_hooks_dir; nothing to chain."
+        return 0
+    fi
+    project_hook_first="$(head -n 1 "$project_hook" | tr -d '\r')"
+    case "$project_hook_first" in
+        '#!'*) project_hook_interp="${project_hook_first#??}" ;;
+        *) project_hook_interp="sh" ;;
+    esac
+    echo "Running project hook: $project_hook"
+    set +e
+    # Unquoted on purpose: '/usr/bin/env bash' is a command and an argument.
+    $project_hook_interp "$project_hook" "$@"
+    project_hook_status=$?
+    set -e
+    if [ "$project_hook_status" -ne 0 ]; then
+        echo "ERROR: project hook $project_hook failed (exit $project_hook_status)." >&2
+        exit "$project_hook_status"
+    fi
+    PROJECT_HOOK_RAN=1
+}
+
 echo "--- Crucible pre-commit verification started"
 
 if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
@@ -51,27 +98,19 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     echo "Running generated documentation check..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-generated-docs.ps1
 
-    # 2. Mojibake check
-    # The scope is listed explicitly so this gate's reach is reviewable in the hook
-    # itself rather than inferred from the script's defaults. It must stay in sync with
-    # the framework branch of check-mojibake.ps1; check-mojibake.tests.ps1 pins both
-    # against the tracked root *.md files so a new root doc cannot silently fall out.
-    # This leg scans a fixed path list, not the staged files - the adopter leg below is
-    # the one that scans what is being committed.
-    echo "Running mojibake check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md TODO.md
+    # 2-4. Mojibake, ASCII-only, and culture-sensitive timestamp checks, over the staged
+    # files only. The whole-tree scans took about 45 of this hook's 80 seconds and find
+    # nothing at commit that pre-push does not find before anything leaves the machine,
+    # so pre-push runs them in full. A staged file is still judged here, which is where
+    # its author can fix it. Item 151.
+    echo "Running mojibake check on staged files..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 -Staged
 
-    # 3. ASCII-only check
-    # The rule CONTRIBUTING.md has always stated, now enforced. It takes no path list:
-    # every tracked file is in scope, because the three violations that sat outside the
-    # mojibake gate's .md/.ps1 walk were in a .json, a .go and an extensionless
-    # gitignore - exactly what an extension allowlist would have missed. Item 86.
-    echo "Running ASCII-only check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-ascii.ps1
+    echo "Running ASCII-only check on staged files..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-ascii.ps1 -Staged
 
-    # 4. Culture-sensitive timestamp check
-    echo "Running culture-sensitive timestamp check..."
-    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-culture-sensitive-time.ps1
+    echo "Running culture-sensitive timestamp check on staged files..."
+    "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-culture-sensitive-time.ps1 -Staged
 
     # 5. Prompt version bump check
     # The operating manual calls the bump a MUST and nothing checked it, so three
@@ -87,9 +126,26 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # parser that only matched a 2-space paths: block; anything else fell back to the
     # default directory, which does not exist, and all three backlog lints passed
     # without looking at anything. tr strips the CR that powershell.exe appends.
+    # The linter runs from a binary cached under the gitignored .cache/, rebuilt when
+    # scripts/crucible_lint.go is newer than it. `go run` recompiled it on every commit,
+    # about 35 seconds. It is built to a temporary name and moved into place so an
+    # interrupted build never leaves a half-written binary to run next time. Item 151.
     echo "Running crucible lint checks..."
     BACKLOG_DIR="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "$REPO_ROOT" | tr -d '\r')"
-    go run scripts/crucible_lint.go -framework-root "$FRAMEWORK_ROOT" -backlog-dir "$BACKLOG_DIR"
+    LINT_EXT=""
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) LINT_EXT=".exe" ;;
+    esac
+    LINT_CACHE_DIR="$REPO_ROOT/.cache/crucible_lint"
+    LINT_BIN="$LINT_CACHE_DIR/crucible_lint$LINT_EXT"
+    if [ ! -f "$LINT_BIN" ] || [ scripts/crucible_lint.go -nt "$LINT_BIN" ]; then
+        echo "Building crucible_lint into .cache/crucible_lint (source changed or no cached binary)..."
+        mkdir -p "$LINT_CACHE_DIR"
+        LINT_TMP="$LINT_CACHE_DIR/crucible_lint.building.$$$LINT_EXT"
+        go build -o "$LINT_TMP" scripts/crucible_lint.go
+        mv -f "$LINT_TMP" "$LINT_BIN"
+    fi
+    "$LINT_BIN" -framework-root "$FRAMEWORK_ROOT" -backlog-dir "$BACKLOG_DIR"
 
     # 7. Unresolved Merge Conflict check
     echo "Scanning staged files for unresolved merge conflict markers..."
@@ -155,6 +211,9 @@ else
         # positional args. Regression: check-mojibake.tests.ps1.
         "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/gates/check-mojibake.ps1" $STAGED_FILES_MOJIBAKE
     fi
+
+    # 3. The project's own pre-commit hook, when hooks.project_dir names one
+    run_project_hook pre-commit "$@"
 fi
 
 echo "--- Pre-commit: all verification tests passed!"

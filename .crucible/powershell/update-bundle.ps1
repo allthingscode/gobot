@@ -225,6 +225,34 @@ function Invoke-UpdateBundle {
     $scriptRoot = Split-Path -Parent $PSCommandPath
     . (Join-Path $scriptRoot "lib/install-manifest.ps1")
     . (Join-Path $scriptRoot "lib/update-classification.ps1")
+
+    # Dev-only membership comes from the framework source at the target commit, not from
+    # this script's own lib. Run as docs/updating.md says, from the adopter's installed
+    # .crucible/powershell, that lib predates the update, so a test added and marked
+    # dev-only in the same range classified `add` and shipped; gobot's 9a91eaa update
+    # did exactly that. Only this one function is replaced: it is self-contained, and the
+    # rest of the installed lib is what the installed script was written against. The
+    # redefinition lands in this function's scope, where Get-FrameworkOwnedFiles looks
+    # it up. Item 149. A source with no manifest lib at all has no list of its own to
+    # disagree with this one, so only that case keeps the local copy.
+    $headManifestSpec = $frameworkHead + ":powershell/lib/install-manifest.ps1"
+    $null = git -C $frameworkRoot cat-file -e $headManifestSpec 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $headManifestLib = @(git -C $frameworkRoot show $headManifestSpec 2>$null) -join "`n"
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($headManifestLib)) {
+            throw "Could not read powershell/lib/install-manifest.ps1 at $frameworkHead in $frameworkRoot"
+        }
+        $headManifestAst = [System.Management.Automation.Language.Parser]::ParseInput($headManifestLib, [ref]$null, [ref]$null)
+        $devOnlyAst = $headManifestAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Test-FrameworkDevOnlyFile"
+        }, $true)
+        if ($null -eq $devOnlyAst) {
+            throw "Test-FrameworkDevOnlyFile not found in powershell/lib/install-manifest.ps1 at $frameworkHead"
+        }
+        Invoke-Expression $devOnlyAst.Extent.Text
+    }
+
     $manifest = Get-InstallManifest -FrameworkRoot $frameworkRoot
     $renameMap = Get-SupersededRenameMap -Manifest $manifest
 

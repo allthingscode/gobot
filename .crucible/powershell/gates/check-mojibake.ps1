@@ -16,8 +16,18 @@ param(
     # first character of a subject line that no later commit can correct once pushed. A
     # single string rather than an array because powershell.exe -File binds only the first
     # token of a named array parameter. Item 89.
-    [string]$MessageFile = ""
+    [string]$MessageFile = "",
+
+    # Scan only the staged files that fall inside the default scope below, which is what the
+    # framework pre-commit runs; pre-push runs the whole default scope, so a push still
+    # checks everything. Item 151.
+    [switch]$Staged
 )
+
+if ($Staged -and ($Paths.Count -gt 0 -or $MessageFile)) {
+    Write-Host "[FAIL] -Staged takes no paths and no -MessageFile; it scans the staged files in the default scope." -ForegroundColor Red
+    exit 1
+}
 
 if ($Paths.Count -eq 0 -and -not $MessageFile) {
     # ../.. because this script lives in <root>/powershell/gates. A single ".." landed on
@@ -27,7 +37,7 @@ if ($Paths.Count -eq 0 -and -not $MessageFile) {
     $isFramework = (Test-Path -LiteralPath (Join-Path $contentRoot "proposals")) -and (Test-Path -LiteralPath (Join-Path $contentRoot "powershell/run-all-tests.ps1"))
 
     if ($isFramework) {
-        # Keep in sync with the explicit list in scripts/hooks/pre-commit.
+        # Keep in sync with the explicit list in scripts/hooks/pre-push.
         # check-mojibake.tests.ps1 pins both against the tracked root *.md files.
         $Paths = @(
             (Join-Path $contentRoot "prompts"),
@@ -52,6 +62,36 @@ if ($Paths.Count -eq 0 -and -not $MessageFile) {
             (Join-Path $contentRoot "templates"),
             (Join-Path $contentRoot "README.md")
         )
+    }
+
+    if ($Staged) {
+        Push-Location $contentRoot
+        try {
+            $stagedNames = @(git diff --cached --name-only --diff-filter=ACMR)
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[FAIL] git diff --cached failed, so no staged file list could be built." -ForegroundColor Red
+                exit 1
+            }
+        } finally {
+            Pop-Location
+        }
+        $scope = @($Paths | ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\', '/') })
+        $stagedInScope = @()
+        foreach ($rel in $stagedNames) {
+            if ([string]::IsNullOrWhiteSpace($rel)) { continue }
+            if ($rel -notmatch '\.(md|ps1)$') { continue }
+            $full = [System.IO.Path]::GetFullPath((Join-Path $contentRoot $rel))
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+            foreach ($root in $scope) {
+                if ($full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+                    $full.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase) -or
+                    $full.StartsWith($root + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $stagedInScope += $full
+                    break
+                }
+            }
+        }
+        $Paths = $stagedInScope
     }
 }
 $ErrorActionPreference = "Stop"

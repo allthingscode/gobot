@@ -104,11 +104,12 @@ Invoke-FileLock -LockPath $LockPath -TimeoutMs 200 -ScriptBlock {
         }
 
         $holder = & $startWorker "holder" 1400
-        $deadline = (Get-Date).AddSeconds(5)
+        # Generous: pwsh startup alone can exceed 5s on a loaded parallel run.
+        $deadline = (Get-Date).AddSeconds(30)
         while ((-not (Test-Path -LiteralPath $eventsPath)) -and ((Get-Date) -lt $deadline)) {
             Start-Sleep -Milliseconds 25
         }
-        Assert-Result -Name "holder entered critical section" -Condition (Test-Path -LiteralPath $eventsPath) -FailureMessage "holder did not enter within five seconds"
+        Assert-Result -Name "holder entered critical section" -Condition (Test-Path -LiteralPath $eventsPath) -FailureMessage "holder did not enter within thirty seconds"
 
         $waiter = & $startWorker "waiter" 100
         $holder.WaitForExit()

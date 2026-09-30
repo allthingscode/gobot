@@ -86,3 +86,9 @@ file_affinity_examples:
 #   auto_push: false
 #   require_green_ci: false
 #   ci_timeout_minutes: 20
+
+# The project's own git hooks directory. Crucible's hooks take over core.hooksPath,
+# so name it here to have them run the project's pre-commit, commit-msg, and pre-push
+# hooks after their own checks. Optional; unset runs no project hooks.
+# hooks:
+#   project_dir: scripts/hooks

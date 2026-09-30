@@ -274,6 +274,52 @@ function Get-ConfiguredReview {
     return ""
 }
 
+# hooks.project_dir names the adopter's own hooks directory, which Crucible's hooks run
+# after their own checks because core.hooksPath otherwise shadows it. Absent means no
+# chaining. A present but unusable value throws rather than returning $null: a hook that
+# quietly stops chaining is the silent shadowing this setting exists to end. Item 150.
+function Get-ConfiguredProjectHooksDir {
+    param([string]$ProjectRoot = "")
+
+    $root = $ProjectRoot
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+    $root = (Resolve-Path -LiteralPath $root).Path
+
+    $configPath = Join-Path $root ".crucible/config.yaml"
+    if (-not (Test-Path -LiteralPath $configPath)) { return $null }
+
+    $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $val = Get-ConfigBlockValue -Content $content -Path @("hooks", "project_dir") -Source $configPath
+    if ($null -eq $val) { return $null }
+    return (Resolve-ProjectHooksDirValue -Value $val -ProjectRoot $root)
+}
+
+function Resolve-ProjectHooksDirValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Value,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot
+    )
+
+    $val = $Value
+    $root = $ProjectRoot
+    if ([System.IO.Path]::IsPathRooted($val) -or $val -match '^([A-Za-z]:|[\\/])') {
+        throw ("hooks.project_dir must be a relative path inside the project (got '" + $val + "').")
+    }
+    if ($val -match '^\.\.' -or $val -match '[\\/]\.\.') {
+        throw ("hooks.project_dir must not escape the project root (got '" + $val + "').")
+    }
+    # Crucible's own hooks live under .crucible; naming them would make each hook run itself.
+    if ($val -match '^\.crucible([\\/]|$)') {
+        throw ("hooks.project_dir must name the project's own hooks, not a directory under .crucible (got '" + $val + "').")
+    }
+
+    $full = Join-Path $root $val
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) {
+        throw ("hooks.project_dir names a directory that does not exist: " + $val)
+    }
+    return (Resolve-Path -LiteralPath $full).Path
+}
+
 function Get-ConfiguredManifestFiles {
     param(
         [string]$ProjectRoot = ""

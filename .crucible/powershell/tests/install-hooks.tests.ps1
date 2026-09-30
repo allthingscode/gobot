@@ -139,6 +139,33 @@ try {
         Assert-Result -Name "no shadowed-hook warning" -Condition ($r.Output -notmatch "shadowed by core.hooksPath") -FailureMessage ("expected no warning on a clean repo, got: " + $r.Output)
     }
 
+    $results += Run-Test -Name "Adopter mode warns about a tracked hooks directory that hooks.project_dir does not name" -Body {
+        # core.hooksPath shadows a tracked scripts/hooks as completely as .git/hooks, and
+        # the .git/hooks check cannot see it. gobot's lint and test hooks went unrun this
+        # way from the day its bundle was installed. Item 150.
+        $repo = Join-Path $tempRoot "trackedhooks"
+        git init -q $repo | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo ".crucible/powershell/lib") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo ".crucible/scripts/hooks") -Force | Out-Null
+        Copy-Item $SCRIPT_SRC (Join-Path $repo ".crucible/powershell/install-hooks.ps1") -Force
+        Copy-Item (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1") (Join-Path $repo ".crucible/powershell/lib/config-helpers.ps1") -Force
+        New-Item -ItemType Directory -Path (Join-Path $repo "scripts/hooks") -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo "scripts/hooks/pre-commit") -Value "#!/bin/sh`nexit 0`n" -NoNewline
+        git -C $repo add scripts/hooks/pre-commit | Out-Null
+
+        $r = Invoke-StagedScript -ScriptPath (Join-Path $repo ".crucible/powershell/install-hooks.ps1")
+        Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
+        Assert-Result -Name "warns about the tracked hooks" -Condition ($r.Output -match "shadows git hooks this project tracks") -FailureMessage ("expected the tracked-hooks warning, got: " + $r.Output)
+        Assert-Result -Name "names the directory" -Condition ($r.Output -match "(?m)^\s+- scripts/hooks/\s*$") -FailureMessage ("expected scripts/hooks/ to be named, got: " + $r.Output)
+        Assert-Result -Name "says how to set it" -Condition ($r.Output -match "project_dir: scripts/hooks") -FailureMessage ("expected the setting to be spelled out, got: " + $r.Output)
+
+        # Named by the setting: the same install says nothing.
+        [System.IO.File]::WriteAllText((Join-Path $repo ".crucible/config.yaml"), "hooks:`n  project_dir: scripts/hooks`n", (New-Object System.Text.UTF8Encoding($false)))
+        $r2 = Invoke-StagedScript -ScriptPath (Join-Path $repo ".crucible/powershell/install-hooks.ps1")
+        Assert-Result -Name "exit 0 when named" -Condition ($r2.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r2.ExitCode + ": " + $r2.Output)
+        Assert-Result -Name "no warning when named" -Condition ($r2.Output -notmatch "shadows git hooks this project tracks") -FailureMessage ("warned about a directory hooks.project_dir names: " + $r2.Output)
+    }
+
     $results += Run-Test -Name "Quiet suppresses host messages and still sets hooksPath" -Body {
         $repo = Join-Path $tempRoot "quiet"
         git init -q $repo | Out-Null
