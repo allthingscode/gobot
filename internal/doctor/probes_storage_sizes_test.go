@@ -7,7 +7,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/allthingscode/gobot/internal/memory/vector"
 )
+
+const testEmbeddingModel = "custom/model"
 
 // fakeFileInfo is a minimal os.FileInfo for injecting synthetic sizes via storageSizeStatFn.
 type fakeFileInfo struct{ size int64 }
@@ -94,6 +98,25 @@ func TestCheckStorageSizes_WALAbsent(t *testing.T) {
 	}
 }
 
+func TestCheckStorageSizes_UsesConfiguredVectorCache(t *testing.T) {
+	t.Parallel()
+	root := setupStorageRoot(t)
+	cfg := cfgWithRoot(root)
+	cfg.Runtime.EmbeddingModel = testEmbeddingModel
+	cacheName := vector.CacheFilename(cfg.EmbeddingModel())
+	writeTestFile(t, filepath.Join(root, "memory", cacheName), []byte("abc"))
+	writeTestFile(t, filepath.Join(root, "memory", cacheName+"-wal"), []byte("de"))
+	writeTestFile(t, filepath.Join(root, "memory", "vectors.db"), []byte("legacy cache must be excluded"))
+
+	r := checkStorageSizes(cfg)
+	if !r.OK {
+		t.Fatalf("configured vector cache should be OK, got detail=%q", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "vectors 3 B (+wal 2 B)") {
+		t.Errorf("detail should report active vector cache and WAL, got %q", r.Detail)
+	}
+}
+
 //nolint:paralleltest // mutates the package-global storageSizeStatFn seam; must not run concurrently with other storage-size tests
 func TestCheckStorageSizes_AboveThreshold(t *testing.T) {
 	orig := storageSizeStatFn
@@ -120,6 +143,30 @@ func TestCheckStorageSizes_AboveThreshold(t *testing.T) {
 	}
 	if !strings.Contains(r.Detail, "checkpoints") {
 		t.Errorf("detail must name the offending store, got %q", r.Detail)
+	}
+}
+
+//nolint:paralleltest // mutates the package-global storageSizeStatFn seam
+func TestCheckStorageSizes_ActiveVectorCacheAboveThreshold(t *testing.T) {
+	orig := storageSizeStatFn
+	t.Cleanup(func() { storageSizeStatFn = orig })
+
+	cfg := cfgWithRoot(setupStorageRoot(t))
+	cfg.Runtime.EmbeddingModel = testEmbeddingModel
+	activeCache := vector.CacheFilename(cfg.EmbeddingModel())
+	storageSizeStatFn = func(path string) (os.FileInfo, error) {
+		if strings.HasSuffix(path, activeCache) {
+			return fakeFileInfo{size: storageSizeWarnBytes + 1}, nil
+		}
+		return nil, os.ErrNotExist
+	}
+
+	r := checkStorageSizes(cfg)
+	if r.OK {
+		t.Error("active vector cache above threshold must be advisory WARN")
+	}
+	if !strings.Contains(r.Remediation, activeCache) {
+		t.Errorf("remediation should identify active cache %q, got %q", activeCache, r.Remediation)
 	}
 }
 

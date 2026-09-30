@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/cron"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 )
 
 func TestReadStartupSnapshot(t *testing.T) {
@@ -34,15 +35,19 @@ func TestCollectStorageSizeSummary(t *testing.T) {
 	root := setupStorageRoot(t)
 	writeTestFile(t, filepath.Join(root, "workspace", "checkpoints.db"), []byte("abc"))
 	writeTestFile(t, filepath.Join(root, "workspace", "checkpoints.db-wal"), []byte("de"))
-	writeTestFile(t, filepath.Join(root, "memory", "vectors.db"), []byte("fghi"))
+	embeddingModel := testEmbeddingModel
+	cacheName := vector.CacheFilename(embeddingModel)
+	writeTestFile(t, filepath.Join(root, "memory", cacheName), []byte("fghi"))
+	writeTestFile(t, filepath.Join(root, "memory", cacheName+"-wal"), []byte("lm"))
+	writeTestFile(t, filepath.Join(root, "memory", "vectors.db"), []byte("legacy cache must be excluded"))
 	writeTestFile(t, filepath.Join(root, "workspace", "sessions", "a.md"), []byte("j"))
 	writeTestFile(t, filepath.Join(root, "logs", "gobot.log"), []byte("klm"))
 
-	summary, err := CollectStorageSizeSummary(root)
+	summary, err := CollectStorageSizeSummary(root, embeddingModel)
 	if err != nil {
 		t.Fatalf("CollectStorageSizeSummary: %v", err)
 	}
-	if got, want := summary.TotalBytes(), int64(13); got != want {
+	if got, want := summary.TotalBytes(), int64(15); got != want {
 		t.Fatalf("TotalBytes = %d, want %d", got, want)
 	}
 	if len(summary.Stores) != 5 {
@@ -66,14 +71,16 @@ func TestCollectStorageSizeSummaryWarnsAboveThreshold(t *testing.T) {
 	orig := storageSizeStatFn
 	t.Cleanup(func() { storageSizeStatFn = orig })
 
+	embeddingModel := testEmbeddingModel
+	activeCache := vector.CacheFilename(embeddingModel)
 	storageSizeStatFn = func(path string) (os.FileInfo, error) {
-		if strings.HasSuffix(path, "vectors.db") {
+		if strings.HasSuffix(path, activeCache) {
 			return fakeFileInfo{size: storageSizeWarnBytes + 1}, nil
 		}
 		return nil, os.ErrNotExist
 	}
 
-	summary, err := CollectStorageSizeSummary(setupStorageRoot(t))
+	summary, err := CollectStorageSizeSummary(setupStorageRoot(t), embeddingModel)
 	if err != nil {
 		t.Fatalf("CollectStorageSizeSummary: %v", err)
 	}

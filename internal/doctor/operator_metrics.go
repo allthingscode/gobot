@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/allthingscode/gobot/internal/cron"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 )
 
 // StartupSnapshot is the typed dashboard/operator view of workspace/startup.json.
@@ -57,7 +58,7 @@ func (s StorageSizeSummary) TotalBytes() int64 {
 
 // CollectStorageSizeSummary reports storage sizes using the same read-only probe
 // semantics as gobot doctor.
-func CollectStorageSizeSummary(storageRoot string) (StorageSizeSummary, error) {
+func CollectStorageSizeSummary(storageRoot, embeddingModel string) (StorageSizeSummary, error) {
 	ws := filepath.Join(storageRoot, "workspace")
 	mem := filepath.Join(storageRoot, "memory")
 
@@ -69,9 +70,10 @@ func CollectStorageSizeSummary(storageRoot string) (StorageSizeSummary, error) {
 	if err != nil {
 		return StorageSizeSummary{}, fmt.Errorf("audit.db: %w", err)
 	}
-	vecDB, vecWAL, err := collectDBSize(filepath.Join(mem, "vectors.db"), filepath.Join(mem, "vectors.db-wal"))
+	vectorDBName := vector.CacheFilename(embeddingModel)
+	vecDB, vecWAL, err := collectDBSize(filepath.Join(mem, vectorDBName), filepath.Join(mem, vectorDBName+"-wal"))
 	if err != nil {
-		return StorageSizeSummary{}, fmt.Errorf("vectors.db: %w", err)
+		return StorageSizeSummary{}, fmt.Errorf("%s: %w", vectorDBName, err)
 	}
 	sessBytes, sessCount, err := dirSize(filepath.Join(ws, "sessions"))
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 )
 
 func checkStorageRoot(cfg *config.Config) Result {
@@ -193,9 +194,10 @@ func checkStorageSizes(cfg *config.Config) Result {
 	if err != nil {
 		return errStorageSizeResult("audit.db", err)
 	}
-	vecDB, vecWAL, err := collectDBSize(filepath.Join(mem, "vectors.db"), filepath.Join(mem, "vectors.db-wal"))
+	vectorDBName := vector.CacheFilename(cfg.EmbeddingModel())
+	vecDB, vecWAL, err := collectDBSize(filepath.Join(mem, vectorDBName), filepath.Join(mem, vectorDBName+"-wal"))
 	if err != nil {
-		return errStorageSizeResult("vectors.db", err)
+		return errStorageSizeResult(vectorDBName, err)
 	}
 
 	sessBytes, sessCount, err := dirSize(filepath.Join(ws, "sessions"))
@@ -221,7 +223,7 @@ func checkStorageSizes(cfg *config.Config) Result {
 	for _, s := range []storeTotal{
 		{"checkpoints.db", ckptDB + ckptWAL},
 		{"audit.db", auditDB + auditWAL},
-		{"vectors.db", vecDB + vecWAL},
+		{vectorDBName, vecDB + vecWAL},
 		{"sessions/", sessBytes},
 		{"logs/", logsBytes},
 	} {

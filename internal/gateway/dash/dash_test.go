@@ -16,6 +16,7 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/dashboard"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
 )
 
@@ -243,6 +244,41 @@ func TestMetricsMeasuredStates(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestMetricsUsesConfiguredVectorCache(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Runtime.EmbeddingModel = "custom/model"
+	writeMetricFixtures(t, cfg.Runtime.StorageRoot)
+	cacheName := vector.CacheFilename(cfg.EmbeddingModel())
+	vectorPath := filepath.Join(cfg.Runtime.StorageRoot, "memory", cacheName)
+	if err := os.MkdirAll(filepath.Dir(vectorPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vectorPath, []byte("active"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.Runtime.StorageRoot, "memory", "vectors.db"), make([]byte, 1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandler(Resources{Config: cfg})
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/dash/metrics", http.NoBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "11 B") {
+		t.Fatalf("dashboard should total the active vector cache, not the legacy cache: %s", body)
+	}
+	if strings.Contains(body, "1 KiB") {
+		t.Fatalf("dashboard must exclude the legacy vector cache from its total: %s", body)
 	}
 }
 
