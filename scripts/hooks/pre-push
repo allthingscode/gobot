@@ -3,7 +3,7 @@
 # Enforces the no-vendor policy before changes reach GitHub.
 # A non-zero exit aborts the push.
 #
-# Install: cp scripts/hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+# Invoked by Crucible's active hook through hooks.project_dir.
 
 set -e
 
