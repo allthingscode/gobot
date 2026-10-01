@@ -33,7 +33,7 @@ func TestTgAPI_HandleMessage(t *testing.T) {
 
 	select {
 	case msg := <-api.msgChan:
-		if msg.Text != "hello" {
+		if msg.Text != "hello" { //nolint:goconst // Test fixture assertion.
 			t.Errorf("expected text 'hello', got %q", msg.Text)
 		}
 		if msg.ChatID != 456 {

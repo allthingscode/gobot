@@ -3,9 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -171,21 +175,26 @@ func awaitReadyForBanner(ctx context.Context, cfg *config.Config, readiness *Rea
 }
 
 func printStartupBanner(cfg *config.Config, api *TgAPI) {
+	printStartupBannerTo(os.Stdout, cfg, api)
+}
+
+func printStartupBannerTo(w io.Writer, cfg *config.Config, api *TgAPI) {
 	username := "disabled"
 	if cfg.Channels.Telegram.Enabled && api != nil {
 		username = "@" + api.Username()
 	}
 
 	dashAddr := "disabled"
-	if cfg.Gateway.WebAddr != "" {
-		dashAddr = fmt.Sprintf("http://%s/dash/", cfg.Gateway.WebAddr)
+	if cfg.Gateway.Enabled && cfg.Gateway.DashboardEnabled {
+		host := strings.Trim(cfg.Gateway.Host, "[]")
+		dashAddr = fmt.Sprintf("http://%s/dash/", net.JoinHostPort(host, strconv.Itoa(cfg.Gateway.Port)))
 	}
 
-	fmt.Fprintf(os.Stdout, "gobot ready\n")
-	fmt.Fprintf(os.Stdout, "  Telegram:  %s\n", username)
-	fmt.Fprintf(os.Stdout, "  Provider:  %s (%s)\n", cfg.DefaultProvider(), cfg.DefaultModel())
-	fmt.Fprintf(os.Stdout, "  Dashboard: %s\n", dashAddr)
-	fmt.Fprintf(os.Stdout, "  Storage:   %s\n", cfg.StorageRoot())
+	fmt.Fprintf(w, "gobot ready\n")
+	fmt.Fprintf(w, "  Telegram:  %s\n", username)
+	fmt.Fprintf(w, "  Provider:  %s (%s)\n", cfg.DefaultProvider(), cfg.DefaultModel())
+	fmt.Fprintf(w, "  Dashboard: %s\n", dashAddr)
+	fmt.Fprintf(w, "  Storage:   %s\n", cfg.StorageRoot())
 }
 
 // reportStartupFailure forwards a non-graceful subsystem failure to startErr so

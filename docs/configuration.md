@@ -232,7 +232,7 @@ Internal HTTP server for the management dashboard and webhook ingress.
 | `authToken` | string | Bearer token required for authenticated gateway endpoints. _(legacy alias: `auth_token`)_ |
 | `host` | string | Host to bind to (default `"127.0.0.1"`). |
 | `port` | int | Port to listen on (default `18790`). |
-| `webAddr` | string | Override full bind address (e.g., `"0.0.0.0:9000"`). Takes precedence over `host`/`port`. _(legacy alias: `web_addr`)_ |
+| `webAddr` | string | Address for the separate SSE dashboard/log-stream listener (e.g., `"0.0.0.0:9000"`). The management dashboard is served at `http://<host>:<port>/dash/` when `enabled` and `dashboardEnabled` are true. _(legacy alias: `web_addr`)_ |
 
 ---
 
