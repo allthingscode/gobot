@@ -34,6 +34,38 @@ if (@($testFiles).Count -eq 0) {
     exit 1
 }
 
+# A file that measures its own timing or starts its own pwsh workers can miss a deadline
+# when it shares the pool with seven others, and pass alone; event-log.tests.ps1 did on an
+# 8-job Linux leg. Such a file declares, in its first 20 lines,
+#   # crucible-test: serial - <why it cannot share the pool>
+# and runs alone after the pool. A marker with no reason, or any other crucible-test
+# value, fails the run before anything starts: a typo would otherwise put the file back
+# in the pool with nothing to say so, and a reason is what keeps the marker from becoming
+# a place to park a flaky test. Item 154.
+$serialReasons = @{}
+$markerErrors = @()
+foreach ($f in $testFiles) {
+    foreach ($line in @(Get-Content -LiteralPath $f.FullName -TotalCount 20 -Encoding UTF8)) {
+        if ($line -notmatch '^\s*#\s*crucible-test:\s*(.*)$') { continue }
+        $value = $Matches[1].Trim()
+        if ($value -match '^serial\b\s*[-:]?\s*(.*)$') {
+            $reason = $Matches[1].Trim()
+            if ($reason) {
+                $serialReasons[$f.Name] = $reason
+            } else {
+                $markerErrors += ($f.Name + ": the serial marker gives no reason. Write '# crucible-test: serial - <why this file cannot share the pool>'.")
+            }
+        } else {
+            $markerErrors += ($f.Name + ": unknown crucible-test marker '" + $value + "'. The only marker is 'serial - <reason>'.")
+        }
+        break
+    }
+}
+if ($markerErrors.Count -gt 0) {
+    foreach ($err in $markerErrors) { Write-Host $err -ForegroundColor Red }
+    exit 1
+}
+
 
 # Determine throttle limit if not provided
 if ($ThrottleLimit -le 0) {
@@ -343,55 +375,71 @@ try {
     } else {
         Write-Host "Running tests in parallel (ThrottleLimit = $ThrottleLimit)..." -ForegroundColor Cyan
 
-        # Static scheduling weights (in seconds) based on Windows CI execution times.
-        # Unknown/new tests will default to 0 weight and sort alphabetically.
+        # Scheduling weights: seconds per file on an 8-job Windows run, 2026-09-30. The
+        # pool starts the heaviest first so the longest file is not left running alone
+        # after the rest have drained; adopter-update-materialization was unweighted and
+        # started after 39 lighter files. Only order matters, so a stale number costs
+        # time, never correctness. A file under 20s, or a new one, weighs 0 and sorts
+        # by name.
         $weights = @{
-            # Longest file in the suite. Most of it is nested runners started and waited
-            # on for real, including two that must be given a bounded window to prove they
-            # do not hang. An unweighted file sorts last, which for the longest one means
-            # the pool finishes it alone after everything else has drained.
-            'run-all-tests-runner.tests.ps1'         = 345
-            'crucible-gates-reject-abandon.tests.ps1' = 35
-            'adopter-pipeline-e2e.tests.ps1'         = 28
-            'shipped-tests-crucible-lint.tests.ps1'  = 28
-            'shipped-tests-framework-layout.tests.ps1' = 70
-            'crucible-gates-human.tests.ps1'          = 26
-            'crucible-gates-routing.tests.ps1'        = 25
-            'update-bundle-rename-prune.tests.ps1'   = 24
-            'archive-task.tests.ps1'                 = 22
-            'crucible.tests.ps1'                      = 21
-            'operator-merge-verification.tests.ps1'  = 20
-            'no-code-closure.tests.ps1'              = 18
-            'validate-config.tests.ps1'              = 18
-            'concurrent-worktrees.tests.ps1'         = 18
-            'adopter-bootstrap.tests.ps1'            = 18
-            'check-merge-conflicts.tests.ps1'        = 18
-            'validate-backlog.tests.ps1'             = 17
-            'crucible-gates-breakers.tests.ps1'       = 16
-            'update-bundle-core.tests.ps1'           = 15
-            'status-drift.tests.ps1'                 = 15
-            'update-bundle-custom-regions.tests.ps1' = 14
-            'init-project-config-version.tests.ps1'  = 11
-            'init-project-instructions.tests.ps1'    = 10
-            'new-handoff.tests.ps1'                  = 10
-            'update-session-state-stale-lock.tests.ps1' = 9
-            'crucible-gates-affinity.tests.ps1'       = 9
-            'run-isolated-checks.tests.ps1'          = 9
-            'fabricated-test-result-circuit-breaker.tests.ps1' = 8
-            'check-file-affinity.tests.ps1'          = 8
-            'update-bundle-scope-snapshot.tests.ps1' = 8
-            'adopter-smoke.tests.ps1'                = 8
-            'provenance-manifest.tests.ps1'          = 8
-            'crucible-health.tests.ps1'               = 8
-            'scope-violation-circuit-breaker.tests.ps1' = 7
-            'crucible-doctor.tests.ps1'               = 7
-            'crucible-gates-completion.tests.ps1'     = 6
-            'grooming-task-reason.tests.ps1'         = 5
-            'init-project-core.tests.ps1'            = 5
-            'install-hooks.tests.ps1'                = 5
+            'adopter-update-materialization.tests.ps1' = 461
+            'run-all-tests-runner.tests.ps1'         = 426
+            'crucible-gates-human.tests.ps1'          = 316
+            'operator-merge-verification.tests.ps1'  = 141
+            'check-assertion-deletion.tests.ps1'     = 136
+            'crucible.tests.ps1'                      = 133
+            'crucible-gates-reject-abandon.tests.ps1' = 125
+            'update-bundle-rename-prune.tests.ps1'   = 122
+            'shipped-tests-framework-layout.tests.ps1' = 118
+            'adopter-pipeline-e2e.tests.ps1'         = 114
+            'update-bundle-core.tests.ps1'           = 99
+            'update-bundle-scope-snapshot.tests.ps1' = 93
+            'launch-codex-specialist.tests.ps1'      = 89
+            'watch-adopter-ci.tests.ps1'             = 88
+            'init-project-config-version.tests.ps1'  = 82
+            'check-linux-leg.tests.ps1'              = 81
+            'implementation-hooks.tests.ps1'         = 79
+            'crucible-gates-breakers.tests.ps1'       = 75
+            'shipped-tests-crucible-lint.tests.ps1'  = 70
+            'project-hook-chaining.tests.ps1'        = 69
+            'check-generated-docs.tests.ps1'         = 62
+            'validate-config.tests.ps1'              = 61
+            'new-handoff.tests.ps1'                  = 56
+            'validate-backlog.tests.ps1'             = 55
+            'rebaseline-handoff.tests.ps1'           = 51
+            'init-project-core.tests.ps1'            = 51
+            'init-project-instructions.tests.ps1'    = 50
+            'check-prompt-version.tests.ps1'         = 49
+            'crucible-doctor.tests.ps1'               = 48
+            'examples-mirror-sync.tests.ps1'         = 45
+            'install-manifest.tests.ps1'             = 42
+            'crucible-gates-routing.tests.ps1'        = 42
+            'analyze-evals.tests.ps1'                = 36
+            'adopter-bootstrap.tests.ps1'            = 36
+            'concurrent-worktrees.tests.ps1'         = 36
+            'run-isolated-checks.tests.ps1'          = 36
+            'check-merge-conflicts.tests.ps1'        = 34
+            'check-mojibake.tests.ps1'               = 33
+            'scope-violation-circuit-breaker.tests.ps1' = 32
+            'init-rerun-task-md.tests.ps1'           = 32
+            'factory-shim.tests.ps1'                 = 31
+            'check-ascii.tests.ps1'                  = 31
+            'status-drift.tests.ps1'                 = 30
+            'crucible-gates-completion.tests.ps1'     = 30
+            'update-bundle-custom-regions.tests.ps1' = 29
+            'staged-gate-scans.tests.ps1'            = 29
+            'no-code-closure.tests.ps1'              = 27
+            'archive-task.tests.ps1'                 = 27
+            'crucible-gates-affinity.tests.ps1'       = 25
+            'crucible-gates-handoff.tests.ps1'        = 24
+            'install-hooks.tests.ps1'                = 23
+            'adopter-smoke.tests.ps1'                = 20
+            'provenance-manifest.tests.ps1'          = 20
+            'budget-overrun-circuit-breaker.tests.ps1' = 20
         }
 
-        $parallelFiles = @($testFiles)
+        $parallelFiles = @($testFiles | Where-Object { -not $serialReasons.ContainsKey($_.Name) })
+        $serialFiles = @($testFiles | Where-Object { $serialReasons.ContainsKey($_.Name) })
 
         # Sort parallel files by scheduling weight descending, then alphabetically ascending
         $parallelFiles = @($parallelFiles | Sort-Object @{Expression = {
@@ -404,125 +452,139 @@ try {
 
         $running = @()
         $completed = @()
-        $nextIndex = 0
 
         try {
-            # 1. Run parallel tests
-            while ($nextIndex -lt $parallelFiles.Count -or $running.Count -gt 0) {
-                # Fill the running pool up to ThrottleLimit
-                while ($running.Count -lt $ThrottleLimit -and $nextIndex -lt $parallelFiles.Count) {
-                    $file = $parallelFiles[$nextIndex]
-                    $nextIndex++
-
-                    $item = Start-TestProcess -file $file
-                    $running += $item
+            # 1. Run the pool, then each serial-marked file alone with the same loop.
+            $phases = @(
+                [PSCustomObject]@{ Files = $parallelFiles; Limit = $ThrottleLimit },
+                [PSCustomObject]@{ Files = $serialFiles; Limit = 1 }
+            )
+            foreach ($phase in $phases) {
+                $phaseFiles = @($phase.Files)
+                $phaseLimit = $phase.Limit
+                $nextIndex = 0
+                if ($phaseLimit -eq 1 -and $phaseFiles.Count -gt 0) {
+                    Write-Host "Running $($phaseFiles.Count) serial file(s) one at a time..." -ForegroundColor Cyan
                 }
-
-                # Check status of running processes
-                $stillRunning = @()
-                foreach ($item in $running) {
-                    $proc = $item.Proc
-                    $sw = $item.Stopwatch
-                    $file = $item.File
-
-                    $exited = $false
-                    $isTimeout = $false
-
-                    $item.OutRead = Read-PendingLines -Pending $item.OutRead -Reader $proc.StandardOutput -Lines $item.OutLines -Idle $item.Idle
-                    $item.ErrRead = Read-PendingLines -Pending $item.ErrRead -Reader $proc.StandardError -Lines $item.ErrLines -Idle $item.Idle
-
-                    $proc.Refresh()
-                    $streamsClosed = ($null -eq $item.OutRead -and $null -eq $item.ErrRead)
-
-                    if ($proc.HasExited -and $streamsClosed) {
-                        $proc.WaitForExit()
-                        $exited = $true
-                    } elseif (-not $NoTimeout -and $item.Idle.Elapsed.TotalSeconds -ge $IdleTimeoutSeconds) {
-                        # Silence for the whole window. A child still running is hung, and
-                        # is killed. A child that has already exited is not: its pipes are
-                        # held open by a process that inherited them, so report the exit
-                        # code it really had rather than calling a finished test a timeout.
-                        # Either way the pending reads are abandoned rather than waited
-                        # out, since waiting on them is the hang this exists to break.
-                        if (-not $proc.HasExited) {
-                            try {
-                                $proc.Kill()
-                                $proc.WaitForExit()
-                            } catch {}
-                            $isTimeout = $true
+                while ($nextIndex -lt $phaseFiles.Count -or $running.Count -gt 0) {
+                    # Fill the running pool up to the phase's limit
+                    while ($running.Count -lt $phaseLimit -and $nextIndex -lt $phaseFiles.Count) {
+                        $file = $phaseFiles[$nextIndex]
+                        $nextIndex++
+                        if ($serialReasons.ContainsKey($file.Name)) {
+                            Write-Host "SERIAL $($file.Name) - $($serialReasons[$file.Name])" -ForegroundColor Cyan
                         }
-                        $item.OutRead = $null
-                        $item.ErrRead = $null
-                        $exited = $true
+
+                        $item = Start-TestProcess -file $file
+                        $running += $item
                     }
 
-                    if ($exited) {
-                        $sw.Stop()
-                        $item.Idle.Stop()
-                        $duration = [Math]::Round($sw.Elapsed.TotalSeconds, 2)
-
-                        $outText = ($item.OutLines -join "`n")
-                        $errText = ($item.ErrLines -join "`n")
-
-                        $exitCodeValue = 0
-                        if ($isTimeout) {
-                            $exitCodeValue = -1
-                        } else {
-                            $exitCodeValue = $proc.ExitCode
-                        }
-
-                        $hasOutputFailure = ($exitCodeValue -eq 0) -and (Test-OutputHasFailure -Output $outText)
-
-                        if ($exitCodeValue -eq 0 -and -not $hasOutputFailure) {
-                            Write-Host "PASS  $($file.Name) ($($duration)s)" -ForegroundColor Green
-                        } else {
-                            if ($isTimeout) {
-                                Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
-                            } elseif ($hasOutputFailure) {
-                                Write-Host "FAIL  $($file.Name) ($($duration)s, Output Failure Signature)" -ForegroundColor Red
-                            } else {
-                                Write-Host "FAIL  $($file.Name) ($($duration)s, ExitCode: $exitCodeValue)" -ForegroundColor Red
-                            }
-                        }
-
-                        $completed += [PSCustomObject]@{
-                            File = $file
-                            ExitCode = $exitCodeValue
-                            Output = $outText
-                            Error = $errText
-                            Duration = $duration
-                            IsTimeout = $isTimeout
-                            Timeout = $IdleTimeoutSeconds
-                        }
-
-                        $proc.Dispose()
-                    } else {
-                        $stillRunning += $item
-                    }
-                }
-
-                $running = $stillRunning
-
-                if ($running.Count -gt 0 -or $nextIndex -lt $parallelFiles.Count) {
-                    # Wake as soon as any child produces a line rather than always
-                    # sleeping out the poll interval. Draining only on a fixed tick would
-                    # cap a child's throughput at one buffer per tick, and a child that
-                    # fills its pipe faster than that blocks on the write - which an idle
-                    # clock cannot distinguish from a hang, because a blocked writer is
-                    # exactly as silent as one.
-                    $pendingReads = New-Object System.Collections.Generic.List[System.Threading.Tasks.Task]
+                    # Check status of running processes
+                    $stillRunning = @()
                     foreach ($item in $running) {
-                        if ($null -ne $item.OutRead) { [void]$pendingReads.Add($item.OutRead) }
-                        if ($null -ne $item.ErrRead) { [void]$pendingReads.Add($item.ErrRead) }
+                        $proc = $item.Proc
+                        $sw = $item.Stopwatch
+                        $file = $item.File
+
+                        $exited = $false
+                        $isTimeout = $false
+
+                        $item.OutRead = Read-PendingLines -Pending $item.OutRead -Reader $proc.StandardOutput -Lines $item.OutLines -Idle $item.Idle
+                        $item.ErrRead = Read-PendingLines -Pending $item.ErrRead -Reader $proc.StandardError -Lines $item.ErrLines -Idle $item.Idle
+
+                        $proc.Refresh()
+                        $streamsClosed = ($null -eq $item.OutRead -and $null -eq $item.ErrRead)
+
+                        if ($proc.HasExited -and $streamsClosed) {
+                            $proc.WaitForExit()
+                            $exited = $true
+                        } elseif (-not $NoTimeout -and $item.Idle.Elapsed.TotalSeconds -ge $IdleTimeoutSeconds) {
+                            # Silence for the whole window. A child still running is hung, and
+                            # is killed. A child that has already exited is not: its pipes are
+                            # held open by a process that inherited them, so report the exit
+                            # code it really had rather than calling a finished test a timeout.
+                            # Either way the pending reads are abandoned rather than waited
+                            # out, since waiting on them is the hang this exists to break.
+                            if (-not $proc.HasExited) {
+                                try {
+                                    $proc.Kill()
+                                    $proc.WaitForExit()
+                                } catch {}
+                                $isTimeout = $true
+                            }
+                            $item.OutRead = $null
+                            $item.ErrRead = $null
+                            $exited = $true
+                        }
+
+                        if ($exited) {
+                            $sw.Stop()
+                            $item.Idle.Stop()
+                            $duration = [Math]::Round($sw.Elapsed.TotalSeconds, 2)
+
+                            $outText = ($item.OutLines -join "`n")
+                            $errText = ($item.ErrLines -join "`n")
+
+                            $exitCodeValue = 0
+                            if ($isTimeout) {
+                                $exitCodeValue = -1
+                            } else {
+                                $exitCodeValue = $proc.ExitCode
+                            }
+
+                            $hasOutputFailure = ($exitCodeValue -eq 0) -and (Test-OutputHasFailure -Output $outText)
+
+                            if ($exitCodeValue -eq 0 -and -not $hasOutputFailure) {
+                                Write-Host "PASS  $($file.Name) ($($duration)s)" -ForegroundColor Green
+                            } else {
+                                if ($isTimeout) {
+                                    Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
+                                } elseif ($hasOutputFailure) {
+                                    Write-Host "FAIL  $($file.Name) ($($duration)s, Output Failure Signature)" -ForegroundColor Red
+                                } else {
+                                    Write-Host "FAIL  $($file.Name) ($($duration)s, ExitCode: $exitCodeValue)" -ForegroundColor Red
+                                }
+                            }
+
+                            $completed += [PSCustomObject]@{
+                                File = $file
+                                ExitCode = $exitCodeValue
+                                Output = $outText
+                                Error = $errText
+                                Duration = $duration
+                                IsTimeout = $isTimeout
+                                Timeout = $IdleTimeoutSeconds
+                            }
+
+                            $proc.Dispose()
+                        } else {
+                            $stillRunning += $item
+                        }
                     }
 
-                    if ($pendingReads.Count -gt 0) {
-                        [void][System.Threading.Tasks.Task]::WaitAny(
-                            [System.Threading.Tasks.Task[]]$pendingReads.ToArray(),
-                            100
-                        )
-                    } else {
-                        Start-Sleep -Milliseconds 100
+                    $running = $stillRunning
+
+                    if ($running.Count -gt 0 -or $nextIndex -lt $phaseFiles.Count) {
+                        # Wake as soon as any child produces a line rather than always
+                        # sleeping out the poll interval. Draining only on a fixed tick would
+                        # cap a child's throughput at one buffer per tick, and a child that
+                        # fills its pipe faster than that blocks on the write - which an idle
+                        # clock cannot distinguish from a hang, because a blocked writer is
+                        # exactly as silent as one.
+                        $pendingReads = New-Object System.Collections.Generic.List[System.Threading.Tasks.Task]
+                        foreach ($item in $running) {
+                            if ($null -ne $item.OutRead) { [void]$pendingReads.Add($item.OutRead) }
+                            if ($null -ne $item.ErrRead) { [void]$pendingReads.Add($item.ErrRead) }
+                        }
+
+                        if ($pendingReads.Count -gt 0) {
+                            [void][System.Threading.Tasks.Task]::WaitAny(
+                                [System.Threading.Tasks.Task[]]$pendingReads.ToArray(),
+                                100
+                            )
+                        } else {
+                            Start-Sleep -Milliseconds 100
+                        }
                     }
                 }
             }

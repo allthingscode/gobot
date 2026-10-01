@@ -3637,20 +3637,7 @@ function Invoke-HumanGateRejectAbandon {
                 if ($LASTEXITCODE -ne 0) {
                     Write-Host "Warning: Failed to recreate implementation worktree at $wtPath" -ForegroundColor Yellow
                 } else {
-                    $prev = $ErrorActionPreference
-                    $ErrorActionPreference = 'Continue'
-                    $hasWorktreeConfig = (git config extensions.worktreeConfig 2>$null) -eq "true"
-                    $ErrorActionPreference = $prev
-                    if (-not $hasWorktreeConfig) {
-                        Invoke-GitChecked { git config extensions.worktreeConfig true }
-                    }
-                    $adopterHook = Join-Path $PSScriptRoot "..\..\scripts\hooks\architect"
-                    $repoHook = Join-Path $ProjectRoot "scripts/hooks/architect"
-                    $hookDir = if (Test-Path $adopterHook) { $adopterHook } else { $repoHook }
-                    if (-not (Test-Path $hookDir)) {
-                        New-Item -ItemType Directory -Force -Path $hookDir | Out-Null
-                    }
-                    Invoke-GitChecked { git -C $wtPath config --worktree core.hooksPath $hookDir }
+                    Initialize-ImplementationWorktreeHooks -WorktreePath $wtPath
                     Write-Quiet "[HUMAN GATE] Recreated implementation worktree at $wtPath"
                 }
             }

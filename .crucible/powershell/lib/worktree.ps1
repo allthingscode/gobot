@@ -56,6 +56,53 @@ function Resolve-ImplementationWorktreePath {
     return Join-Path $WorkspacesDir ("implementation-" + $TaskId)
 }
 
+# An implementation worktree runs the hooks the main checkout's core.hooksPath names.
+# That setting is relative (.crucible/scripts/hooks in an adopter, scripts/hooks in the
+# framework), and git resolves a relative hooksPath against the worktree's own root, so
+# the worktree runs the hooks committed on its branch. -Init used to override it per
+# worktree with a scripts/hooks/architect directory that, in an adopter, resolved to an
+# empty directory in the project tree, and held only a .ps1 git never runs anywhere: no
+# hook ran in any implementation worktree. This removes that override from a worktree
+# created before the fix. Without extensions.worktreeConfig, --worktree means the shared
+# config, so nothing is touched then: there can be no per-worktree override.
+#
+# On Unix it also marks the worktree's hooks executable. git skips a hook without the
+# bit, and a fresh worktree checks hooks out with the recorded mode, which is 100644 for
+# a bundle committed on Windows; install-hooks.ps1 fixes only the main checkout's copy.
+# Item 155.
+function Initialize-ImplementationWorktreeHooks {
+    param([Parameter(Mandatory=$true)][string]$WorktreePath)
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ((git -C $WorktreePath config --get extensions.worktreeConfig 2>$null) -eq "true") {
+            $override = git -C $WorktreePath config --worktree --get core.hooksPath 2>$null
+            if (-not [string]::IsNullOrWhiteSpace($override)) {
+                git -C $WorktreePath config --worktree --unset core.hooksPath 2>$null
+            }
+        }
+
+        $onWindows = $true
+        if ($PSVersionTable.PSEdition -eq "Core") {
+            $onWindows = (Get-Variable IsWindows -ValueOnly -ErrorAction SilentlyContinue) -ne $false
+        }
+        if (-not $onWindows) {
+            $hooksPath = git -C $WorktreePath config --get core.hooksPath 2>$null
+            if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
+                $hooksDir = $hooksPath.Trim()
+                if (-not [System.IO.Path]::IsPathRooted($hooksDir)) { $hooksDir = Join-Path $WorktreePath $hooksDir }
+                if (Test-Path -LiteralPath $hooksDir -PathType Container) {
+                    Get-ChildItem -LiteralPath $hooksDir -File | ForEach-Object { & chmod "+x" $_.FullName }
+                }
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+        $global:LASTEXITCODE = 0
+    }
+}
+
 function Get-ImplementationChangedFiles {
     param(
         [Parameter(Mandatory=$true)][string]$WorktreePath,

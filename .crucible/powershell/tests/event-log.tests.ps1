@@ -1,4 +1,5 @@
 # Tests for the shared event log helper.
+# crucible-test: serial - the file-lock test starts its own pwsh workers and waits on their startup; it timed out sharing an 8-job pool. Items 153, 154.
 
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path

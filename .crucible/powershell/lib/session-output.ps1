@@ -408,11 +408,6 @@ function Initialize-CrucibleTargetSession {
         Write-Quiet ("WORKTREE  : " + $wtPath) -ForegroundColor Cyan
         
         if ($Init) {
-            # Enable per-worktree config
-            if ((git config extensions.worktreeConfig) -ne "true") {
-                Write-Quiet "[INIT] Enabling extensions.worktreeConfig..." -ForegroundColor Gray
-                git config extensions.worktreeConfig true
-            }
 
             # Prune stale worktrees first
             Invoke-GitChecked { git worktree prune }
@@ -435,22 +430,10 @@ function Initialize-CrucibleTargetSession {
                     Write-Host ("Error: Failed to create implementation worktree at " + $wtPath) -ForegroundColor Red
                     exit 1
                 }
-                # Resolve absolute path for architect hooks and ensure it exists
-                $adopterHook = Join-Path $FRAMEWORK_POWERSHELL "..\..\scripts\hooks\architect"
-                $repoHook = Join-Path $REPO_ROOT "scripts/hooks/architect"
-                if (Test-Path $adopterHook) {
-                    $hookDir = $adopterHook
-                } else {
-                    $hookDir = $repoHook
-                }
-                if (-not (Test-Path $hookDir)) {
-                    New-Item -ItemType Directory -Force -Path $hookDir | Out-Null
-                }
-                git -C $wtPath config --worktree core.hooksPath $hookDir
-
             } else {
                 Write-Quiet ("[INIT] Worktree already exists at $wtPath.") -ForegroundColor Cyan
             }
+            Initialize-ImplementationWorktreeHooks -WorktreePath $wtPath
 
             # Create task-scoped session directory
             $archSessionDir = if (-not [string]::IsNullOrEmpty($TaskId)) {

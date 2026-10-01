@@ -351,7 +351,8 @@ exit 0
         $p.Dispose()
 
         if (Test-Path -LiteralPath $holderPidFile) {
-            $holderPid = (Get-Content -LiteralPath $holderPidFile -Raw).Trim()
+            # Empty when the runner killed the child between creating the file and writing it.
+            $holderPid = ([string](Get-Content -LiteralPath $holderPidFile -Raw)).Trim()
             if ($holderPid -match '^\d+$') {
                 $holderProc = Get-Process -Id ([int]$holderPid) -ErrorAction SilentlyContinue
                 if ($null -ne $holderProc) { try { $holderProc.Kill() } catch {} }
@@ -780,7 +781,8 @@ exit 0
         $p.Dispose()
 
         if (Test-Path -LiteralPath $holderPidFile) {
-            $holderPid = (Get-Content -LiteralPath $holderPidFile -Raw).Trim()
+            # Empty when the runner killed the child between creating the file and writing it.
+            $holderPid = ([string](Get-Content -LiteralPath $holderPidFile -Raw)).Trim()
             if ($holderPid -match '^\d+$') {
                 $holderProc = Get-Process -Id ([int]$holderPid) -ErrorAction SilentlyContinue
                 if ($null -ne $holderProc) { try { $holderProc.Kill() } catch {} }
@@ -864,7 +866,8 @@ exit 0
         $p.Dispose()
 
         if (Test-Path -LiteralPath $holderPidFile) {
-            $holderPid = (Get-Content -LiteralPath $holderPidFile -Raw).Trim()
+            # Empty when the runner killed the child between creating the file and writing it.
+            $holderPid = ([string](Get-Content -LiteralPath $holderPidFile -Raw)).Trim()
             if ($holderPid -match '^\d+$') {
                 $holderProc = Get-Process -Id ([int]$holderPid) -ErrorAction SilentlyContinue
                 if ($null -ne $holderProc) { try { $holderProc.Kill() } catch {} }

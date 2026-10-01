@@ -191,18 +191,17 @@ try {
         
         foreach ($wt in $implementationWtPaths) {
             $hooksPath = git -C $wt config core.hooksPath
-            # The worktree hooksPath is set to the resolved scripts/hooks/architect
-            # directory (absolute for current installs, relative for legacy ones).
-            # Validate by resolution + existence, not by matching a fixed literal.
+            # A worktree inherits the main checkout's relative hooksPath, which git
+            # resolves against the worktree root. It is misconfigured when that directory
+            # holds no pre-commit for git to run: the legacy scripts/hooks/architect
+            # override, or a bundle the worktree's branch does not track. Item 155.
             $ok = $false
             if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
                 $resolved = $hooksPath.Trim()
                 if (-not [System.IO.Path]::IsPathRooted($resolved)) {
                     $resolved = Join-Path $wt $resolved
                 }
-                try { $resolved = [System.IO.Path]::GetFullPath($resolved) } catch {}
-                $normalized = $resolved -replace '[\\/]+$', ''
-                if ((Test-Path -LiteralPath $resolved) -and ($normalized -match '[\\/]scripts[\\/]hooks[\\/]architect$')) {
+                if (Test-Path -LiteralPath (Join-Path $resolved "pre-commit") -PathType Leaf) {
                     $ok = $true
                 }
             }
@@ -220,8 +219,9 @@ try {
         } else {
             $misconfiguredWorktrees | ForEach-Object { 
                 $current = git -C $_ config core.hooksPath
-                Write-Quiet ("  - " + $_ + " - core.hooksPath: " + $current) -ForegroundColor Yellow 
+                Write-Quiet ("  - " + $_ + " - core.hooksPath: " + $current) -ForegroundColor Yellow
             }
+            Write-Quiet "  A legacy per-worktree override clears with: git -C <worktree> config --worktree --unset core.hooksPath" -ForegroundColor Gray
             $issueCount += $misconfiguredWorktrees.Count
         }
     

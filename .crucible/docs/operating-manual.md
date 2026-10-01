@@ -677,7 +677,7 @@ Run `crucible.ps1 -Health` to scan for orphaned artifacts, including:
 - Stale handoff files (> 24 hours old)
 - Stale session scratchpads (from legacy roles or inactive tasks)
 - Stale file locks (> 10 minutes old)
-- **Architect worktrees with misconfigured `core.hooksPath`** ({task_id}) - each worktree must point to `../../scripts/hooks/architect`
+- **Architect worktrees with misconfigured `core.hooksPath`** ({task_id}) - each worktree inherits the main checkout's `core.hooksPath`, which must resolve, from the worktree root, to a directory holding a `pre-commit` hook
 - **Orphaned pending gate files** ({task_id}) - `gate_decision_{task_id}_pending.json` files for tasks no longer active in the backlog
 - **Oversized scratchpads** - `task.md` > 500 lines or `review_report.md` > 300 lines risk context window saturation; specialist must compact before continuing
 

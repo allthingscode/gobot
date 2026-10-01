@@ -120,32 +120,37 @@ try {
         Assert-Result -Name "F-003 session dir archived" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session/F-003"))) -FailureMessage "expected F-003 session dir to be archived/removed"
     }
 
-    $results += Run-Test -Name "Health validates worktree hooksPath by resolution, not a fixed literal" -Body {
+    # Item 155: a worktree inherits the main checkout's relative hooksPath, resolved from
+    # the worktree root. The legacy per-worktree architect override ran no hook at all.
+    $results += Run-Test -Name "Health flags a worktree whose hooksPath holds no pre-commit" -Body {
         Push-Location $projectRoot
         try {
             git config core.longpaths true *> $null
             "seed" | Set-Content -LiteralPath (Join-Path $projectRoot "seed.txt") -Encoding UTF8
-            git add seed.txt *> $null
+            New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible/scripts/hooks") -Force | Out-Null
+            "#!/bin/sh`nexit 0`n" | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/scripts/hooks/pre-commit") -Encoding UTF8 -NoNewline
+            git add seed.txt .crucible/scripts/hooks/pre-commit *> $null
             git commit -q -m "init" *> $null
-            $hookDir = Join-Path $projectRoot "scripts/hooks/architect"
-            New-Item -ItemType Directory -Path $hookDir -Force | Out-Null
+            git config core.hooksPath ".crucible/scripts/hooks" *> $null
             $wtPath = Join-Path $projectRoot ".crucible/.agent-workspaces/implementation-F-009"
             git worktree add -q -b task/F-009 $wtPath *> $null
-            # Setters write the resolved (absolute) architect hooks dir; that must pass.
-            git -C $wtPath config core.hooksPath $hookDir *> $null
 
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Health -ProjectRoot $projectRoot
             }
             $okOut = $res.Output -join "`n"
-            Assert-Result -Name "absolute architect hooksPath not flagged" -Condition ($okOut -match "Misconfigured Implementation Worktrees \(hooksPath\): 0") -FailureMessage "a correctly-configured worktree must not be flagged. Output:`n$okOut"
+            Assert-Result -Name "inherited hooksPath not flagged" -Condition ($okOut -match "Misconfigured Implementation Worktrees \(hooksPath\): 0") -FailureMessage "a worktree inheriting a hooksPath with a pre-commit must not be flagged. Output:`n$okOut"
 
-            git -C $wtPath config core.hooksPath "totally/wrong/path" *> $null
+            $legacyDir = Join-Path $projectRoot "scripts/hooks/architect"
+            New-Item -ItemType Directory -Path $legacyDir -Force | Out-Null
+            git config extensions.worktreeConfig true *> $null
+            git -C $wtPath config --worktree core.hooksPath $legacyDir *> $null
             $res2 = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $HEALTH_SCRIPT -Health -ProjectRoot $projectRoot
             }
             $badOut = $res2.Output -join "`n"
-            Assert-Result -Name "wrong hooksPath flagged" -Condition ($badOut -match "Misconfigured Implementation Worktrees \(hooksPath\): 1") -FailureMessage "a misconfigured worktree must be flagged. Output:`n$badOut"
+            Assert-Result -Name "legacy architect override flagged" -Condition ($badOut -match "Misconfigured Implementation Worktrees \(hooksPath\): 1") -FailureMessage "the legacy override runs no hook and must be flagged. Output:`n$badOut"
+            Assert-Result -Name "names the fix" -Condition ($badOut -match "config --worktree --unset core\.hooksPath") -FailureMessage "expected the unset remediation. Output:`n$badOut"
         } finally {
             Pop-Location
         }
