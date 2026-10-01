@@ -3,7 +3,7 @@
 # Runs golangci-lint and go mod verify before every commit.
 # A non-zero exit from any command aborts the commit.
 #
-# Install: cp scripts/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Invoked by Crucible's active hook through hooks.project_dir.
 
 set -e
 
@@ -95,24 +95,6 @@ if command -v golangci-lint > /dev/null 2>&1; then
     fi
 else
     echo "WARN: golangci-lint not found locally; CI will enforce lint"
-fi
-
-# Crucible quality gate - mandatory when local Crucible policy files are modified
-if [ -f ".crucible/config.yaml" ] && git diff --cached --name-only | grep -qE '^\.crucible/(backlog/|prompts/|personas/|sops/|config\.yaml)'; then
-    CRUCIBLE_ROOT=$(sed -n 's/^[[:space:]]*crucible_root:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' .crucible/config.yaml | head -n 1 | sed 's#\\\\#/#g')
-    if [ -z "$CRUCIBLE_ROOT" ]; then
-        echo "ERROR: .crucible/config.yaml is missing crucible_root"
-        exit 1
-    fi
-    if [ ! -f "$CRUCIBLE_ROOT/powershell/tests/factory_lint.go" ]; then
-        echo "ERROR: Crucible factory lint not found at $CRUCIBLE_ROOT/powershell/tests/factory_lint.go"
-        exit 1
-    fi
-    if ! go run "$CRUCIBLE_ROOT/powershell/tests/factory_lint.go" "$CRUCIBLE_ROOT" > "$TEMP_LOG" 2>&1; then
-        echo "ERROR: factory lint failed"
-        cat "$TEMP_LOG"
-        exit 1
-    fi
 fi
 
 echo "--- Pre-commit: all checks passed (lint)"

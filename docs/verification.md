@@ -3,6 +3,25 @@
 gobot uses a two-lane verification model so local Windows development can stay
 pure Go while CI still exercises the Go race detector.
 
+## Local Git Hooks
+
+Crucible manages Git's active `core.hooksPath`. With
+`hooks.project_dir: scripts/hooks` in `.crucible/config.yaml`, its hooks chain
+to Gobot's same-named project hooks in `scripts/hooks`; developers should not
+replace `core.hooksPath` or copy these hooks into `.git/hooks`.
+
+Gobot's pre-commit hook blocks staged private runtime directories and added
+absolute drive paths, verifies modules, and runs the pinned `golangci-lint`
+configuration and lint checks when the linter is installed. The pre-push hook
+rejects tracked `vendor/`, runs the available security scan and remote CI
+status check, checks platform-specific commands and config formatting and
+validation, and performs the Windows Linux-target compile check.
+
+For tests, pre-push first runs the scoped race command. If its output says CGO
+or a C compiler is unavailable, it warns and falls back to scoped non-race
+tests; any other race-test failure, or a fallback test failure, still blocks
+the push.
+
 ## CI Race Lane
 
 GitHub Actions is the authoritative race-detector lane. The CI test job must
