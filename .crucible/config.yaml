@@ -5,6 +5,9 @@
 # This must point to the folder containing the installed Crucible framework bundle.
 crucible_root: ".crucible"
 
+hooks:
+  project_dir: scripts/hooks
+
 project:
   name: Gobot
   description: Go-based Telegram bot used as the reference application for Crucible.
