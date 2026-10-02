@@ -143,24 +143,41 @@ if (-not (Test-Path $BACKLOG_FILE)) {
 $backlogLines = Get-Content $BACKLOG_FILE
 
 # --- 2. Parse Backlog Metadata ---
+# Columns are read from each table's header row: BACKLOG.md has carried several
+# layouts (ID first, linked or plain, with or without Priority and Category), and a
+# fixed-layout regex matched none of the current ones, so every task read as unknown.
 $taskMeta = @{}
+$backlogColumns = $null
 foreach ($line in $backlogLines) {
-    # Match: | ID | [Title](path) | Category | Status | Specialist | Priority |
-    if ($line -match '^\|\s+([F|C|B]-\d+)\s+\|\s+\[(.*?)\]\(.*?\)\s+\|\s+(.*?)\s+\|\s+(.*?)\s+\|\s+(.*?)\s+\|\s+(.*?)\s+\|$') {
-        $id = $Matches[1]
-        $title = $Matches[2]
-        $category = $Matches[3]
-        $status = $Matches[4]
-        $specialist = $Matches[5]
-        $priority = $Matches[6]
-        
-        $taskMeta[$id] = @{
-            Title      = $title
-            Category   = $category
-            Status     = $status
-            Specialist = $specialist
-            Priority   = $priority
+    if ($line -notmatch '^\s*\|') { $backlogColumns = $null; continue }
+    $cells = @(($line.Trim().Trim('|') -split '\|') | ForEach-Object { $_.Trim() })
+    if ($cells[0] -eq "ID") {
+        $backlogColumns = @{}
+        for ($i = 0; $i -lt $cells.Count; $i++) { $backlogColumns[$cells[$i]] = $i }
+        continue
+    }
+    if ($null -eq $backlogColumns) { continue }
+    if ($cells[0] -notmatch '^\[?([A-Z]+-\d+[a-z]?)\]?(\(|$)') { continue }
+    $id = $Matches[1]
+    if ($taskMeta.ContainsKey($id)) { continue }
+
+    $meta = @{}
+    foreach ($name in @("Title", "Category", "Status", "Specialist", "Target", "Priority")) {
+        $value = ""
+        if ($backlogColumns.ContainsKey($name) -and $backlogColumns[$name] -lt $cells.Count) {
+            $value = $cells[$backlogColumns[$name]]
         }
+        $meta[$name] = $value
+    }
+    if ($meta.Title -match '^\[(.*?)\]\(') { $meta.Title = $Matches[1] }
+    if (-not $meta.Specialist) { $meta.Specialist = $meta.Target }
+
+    $taskMeta[$id] = @{
+        Title      = $meta.Title
+        Category   = $meta.Category
+        Status     = $meta.Status
+        Specialist = $meta.Specialist
+        Priority   = $meta.Priority
     }
 }
 
@@ -179,7 +196,8 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     # Check if any phase is still active
     $currentSpec = "N/A"
     $latestTs = [DateTime]::MinValue
-    
+    $phaseBlocked = $false
+
     $phasesMap = if ($taskState.PSObject.Properties["phases"]) { $taskState.phases } elseif ($taskState.PSObject.Properties["specialists"]) { $taskState.specialists } else { $null }
     if ($phasesMap) {
         foreach ($specName in $phasesMap.PSObject.Properties.Name) {
@@ -190,6 +208,8 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
             if ($specStatus -and $specStatus -notmatch "idle|Complete|deployed|Resolved") {
                 $isFinished = $false
             }
+            # A circuit breaker records the block on the phase, not the task.
+            if ($specStatus -eq "blocked") { $phaseBlocked = $true }
             
             # Track latest specialist/phase by timestamp
             if ($spec.timestamp) {
@@ -265,7 +285,7 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
                 $inDepends = $true
             } elseif ($inDepends -and $line -match "^---\s*$") {
                 break
-            } elseif ($inDepends -and $line -match "^\s*-\s*([F|C|B]-\d+)") {
+            } elseif ($inDepends -and $line -match "^\s*-\s*[`"']?([A-Z]+-\d+[a-z]?)") {
                 $deps += $Matches[1]
             } elseif ($inDepends -and $line -notmatch "^\s*-" -and $line.Trim() -ne "") {
                 $inDepends = $false
@@ -278,7 +298,7 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
 
     # Is it blocked?
     $isBlocked = $false
-    if ($taskState.PSObject.Properties["status"] -and $taskState.status -eq "blocked") { 
+    if ($phaseBlocked -or ($taskState.PSObject.Properties["status"] -and $taskState.status -eq "blocked")) {
         $isBlocked = $true 
         $isFinished = $false
     }
@@ -304,7 +324,7 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
 }
 
 # --- 4. Summary Stats ---
-$totalManaged = @($sessionState.tasks.PSObject.Properties.Name).Count
+$totalManaged = @($sessionState.tasks.PSObject.Properties).Count
 $inFlight = @($allTasks | Where-Object { $_.Status -match "In Progress|Ready for Review|Ready for Deploy" }).Count
 $blocked = @($allTasks | Where-Object { $_.Blocker -eq "YES" }).Count
 $ready = @($taskMeta.Values | Where-Object { $_.Status -eq "Ready" }).Count

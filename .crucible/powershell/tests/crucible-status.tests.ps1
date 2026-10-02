@@ -167,6 +167,74 @@ try {
         $statusSource = Get-Content -LiteralPath $STATUS_SCRIPT -Raw -Encoding UTF8
         Assert-Result -Name "seven day boundary cutoff is UTC based" -Condition ($statusSource -match '\(Get-Date\)\.ToUniversalTime\(\)\.AddDays\(-7\)') -FailureMessage "merge conflict cutoff must compare UTC to UTC"
     }
+
+    # Item 156: the fixture above uses a layout no current BACKLOG.md has. These rows are
+    # the template's layout (linked ID, Priority before Status) and gobot's (no Priority),
+    # with R- and suffixed IDs, and blocks recorded on the phase as a circuit breaker does.
+    $results += Run-Test -Name "Current BACKLOG.md layouts and phase-level blocks are read" -Body {
+        $layoutRoot = Join-Path $tempRoot "layouts"
+        Write-StatusFixture -ProjectRoot $layoutRoot
+        @"
+{
+  "tasks": {
+    "R-020": { "phases": { "research": { "circuit_breaker": "human_escalation", "status": "blocked", "timestamp": "2026-07-11T01:42:32Z" } } },
+    "R-040": { "phases": { "research": { "circuit_breaker": "human_escalation", "status": "blocked", "timestamp": "2026-07-11T01:42:32Z" } } },
+    "C-305a": { "phases": { "deployment": { "status": "in_progress", "timestamp": "2026-07-11T01:42:32Z" } } }
+  }
+}
+"@ | Set-Content -LiteralPath (Join-Path $layoutRoot ".crucible/session/global/session_state.json") -Encoding UTF8
+        @(
+            "# Backlog",
+            "",
+            "| Priority | Active Count | Item IDs |",
+            "|---|---|---|",
+            "| **P1** | 1 | C-305a |",
+            "",
+            "| ID | Priority | Status | Title | Target |",
+            "|---|---|---|---|---|",
+            "| [C-305a](chores/active/C-305a_Soak.md) | P1 | Ready | Execute the soak | Operator |",
+            "| [R-040](features/active/R-040_Audit.md) | P2 | Ready | Open audit | Researcher |",
+            "",
+            "## Archived",
+            "",
+            "| ID | Status | Title | Target |",
+            "|---|---|---|---|",
+            "| [R-020](features/archived/R-020_Audit.md) | Production | Finished audit | Researcher |"
+        ) | Set-Content -LiteralPath (Join-Path $layoutRoot ".crucible/backlog/BACKLOG.md") -Encoding UTF8
+
+        Push-Location $layoutRoot
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -ExportJSON
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "layout exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+        $json = $output | ConvertFrom-Json
+        $r020 = $json.tasks | Where-Object { $_.Task -eq "R-020" }
+        $r040 = $json.tasks | Where-Object { $_.Task -eq "R-040" }
+        $c305a = $json.tasks | Where-Object { $_.Task -eq "C-305a" }
+        Assert-Result -Name "archived row title and status" -Condition ($r020.Title -eq "Finished audit" -and $r020.Status -eq "Production" -and $r020.Blocker -eq "none") -FailureMessage "expected R-020 'Finished audit', Production, not blocked; got '$($r020.Title)', '$($r020.Status)', '$($r020.Blocker)'"
+        Assert-Result -Name "phase-level block shown" -Condition ($r040.Title -eq "Open audit" -and $r040.Status -eq "Blocked" -and $r040.Blocker -eq "YES") -FailureMessage "expected R-040 'Open audit', Blocked; got '$($r040.Title)', '$($r040.Status)', '$($r040.Blocker)'"
+        Assert-Result -Name "suffixed ID read" -Condition ($c305a.Title -eq "Execute the soak") -FailureMessage "expected C-305a title 'Execute the soak', got '$($c305a.Title)'"
+        Assert-Result -Name "blocked count" -Condition ($json.stats.blocked -eq 1) -FailureMessage "expected blocked=1, got $($json.stats.blocked). Output:`n$output"
+        Assert-Result -Name "ready count" -Condition ($json.stats.ready -eq 2) -FailureMessage "expected ready=2 (C-305a, R-040), got $($json.stats.ready). Output:`n$output"
+
+        '{ "tasks": {} }' | Set-Content -LiteralPath (Join-Path $layoutRoot ".crucible/session/global/session_state.json") -Encoding UTF8
+        Push-Location $layoutRoot
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -ExportJSON
+            }
+        } finally {
+            Pop-Location
+        }
+        $output = $res.Output -join "`n"
+        $json = $output | ConvertFrom-Json
+        Assert-Result -Name "no tasks counts zero" -Condition ($res.ExitCode -eq 0 -and $json.stats.total -eq 0) -FailureMessage "expected total=0 for an empty tasks map, got $($json.stats.total). Output:`n$output"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

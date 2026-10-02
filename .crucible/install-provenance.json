@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "5a92f0f8b6884ef582249bc31db9a28d936b65e2",
+  "source_commit": "6c378c7131041d5a0e5d1218020dfb6898c949aa",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -159,8 +159,8 @@
       "base_hash": "9ad0295db203168fc6cf39908de3502c669851b8c546d6d0991e70ace2c5d577"
     },
     "powershell/crucible-status.ps1": {
-      "hash": "a776cefb23cb72fa064abbe48ef7eb08e8ef178b79f55f371c2b10fe72bc85d9",
-      "base_hash": "a776cefb23cb72fa064abbe48ef7eb08e8ef178b79f55f371c2b10fe72bc85d9"
+      "hash": "fcf0b31c7cce6a367b1023fae9bd0fde037b206c26fedb4f4c27bba1f3e71ce1",
+      "base_hash": "fcf0b31c7cce6a367b1023fae9bd0fde037b206c26fedb4f4c27bba1f3e71ce1"
     },
     "powershell/crucible.ps1": {
       "hash": "4d8aa38996a130e5c9b031ae338ac6d85e2cb1ff64531068cf0cfe1faab1b6fd",
@@ -455,8 +455,8 @@
       "base_hash": "f79e7bd41931ef8dee88cbf5c41fe7d14d9187b0414c19ad5b992a43eb3bfc7a"
     },
     "powershell/tests/crucible-status.tests.ps1": {
-      "hash": "1b4a9203f69269fb823b132a9bf1748d80df9b26e4d59cf3d8c9d8f62d06bb81",
-      "base_hash": "1b4a9203f69269fb823b132a9bf1748d80df9b26e4d59cf3d8c9d8f62d06bb81"
+      "hash": "75e4af6ddddfe3ad47478652c07e577067ab897cdcf7744b1b7e6f88e8690984",
+      "base_hash": "75e4af6ddddfe3ad47478652c07e577067ab897cdcf7744b1b7e6f88e8690984"
     },
     "powershell/tests/crucible.tests.ps1": {
       "hash": "95cb20d57b77af595957b2ce6cf6038af0da64cadcfe2ee54b68fc994e2b635d",
