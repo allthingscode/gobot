@@ -328,7 +328,7 @@ All sensitive values can be supplied entirely via environment variables — no s
 | Variable | Purpose |
 |---|---|
 | `GOBOT_STORAGE` | Root data directory (databases, logs, secrets vault) |
-| `GOBOT_HOME` | Path to `config.json` (default `~/.gobot/config.json`) |
+| `GOBOT_HOME` | Root directory: config at `$GOBOT_HOME/.gobot/config.json` (default `~/.gobot/config.json`), data at `$GOBOT_HOME/data` when `GOBOT_STORAGE` is unset |
 | `GOBOT_ENCRYPTION_KEY_FILE` | Linux/macOS AES key path (default `~/.config/gobot/encryption.key`) |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `GEMINI_API_KEY` | Gemini API key |
@@ -367,4 +367,4 @@ Always backup the following:
 1. **Database:** `gobot.db` and `memory.db` in your `GOBOT_STORAGE` directory (default `~/gobot_data/`).
 2. **Linux/macOS encryption key:** `~/.config/gobot/encryption.key` (or `$GOBOT_ENCRYPTION_KEY_FILE` if overridden). **This file is not inside your data directory.** Back it up separately — e.g., export to a password manager. If it is lost, all secrets stored via `gobot secrets set` become permanently unrecoverable.
 3. **Windows:** The secrets vault is tied to your Windows user account via DPAPI. Ensure you retain access to that user profile; the vault cannot be decrypted on a different account or machine.
-4. **Config:** `~/.gobot/config.json` (or `$GOBOT_HOME` if overridden).
+4. **Config:** `~/.gobot/config.json` (or `$GOBOT_HOME/.gobot/config.json` if `GOBOT_HOME` is set).

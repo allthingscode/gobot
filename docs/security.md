@@ -126,7 +126,7 @@ Before moving to a new machine or account, export every secret while you can sti
 **Windows backup checklist (what to retain):**
 - [ ] The plaintext key/value list exported via `gobot secrets get` (store offline / in a password manager).
 - [ ] Your Google OAuth client secrets (`{storageRoot}/secrets/client_secrets.json`) so you can re-run `gobot reauth`.
-- [ ] Config: `~/.gobot/config.json` (or `$GOBOT_HOME`).
+- [ ] Config: `~/.gobot/config.json` (or `$GOBOT_HOME/.gobot/config.json` if `GOBOT_HOME` is set).
 - [ ] Database files (`gobot.db`, `memory.db`) from your `GOBOT_STORAGE` directory if you want to preserve history.
 
 > Do **not** rely on backing up `dpapi_secrets.json` itself — it cannot be decrypted on the new account or machine.
