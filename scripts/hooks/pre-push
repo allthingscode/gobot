@@ -115,7 +115,11 @@ mkdir -p "$TEMP_CONFIG_STORAGE/workspace"
 : > "$TEMP_CONFIG_STORAGE/workspace/AWARENESS.md"
 if ! GOBOT_STORAGE="$TEMP_CONFIG_STORAGE" go run -mod=readonly ./cmd/gobot config validate config.sample.json > /dev/null 2>&1; then
     echo "ERROR: config.sample.json validation failed."
-    echo "       Run 'go run ./cmd/gobot config validate config.sample.json' for details."
+    echo "       To validate config.sample.json with isolated storage, run:"
+    echo "         storage=\$(mktemp -d)"
+    echo "         mkdir -p \"\$storage/workspace\" && : > \"\$storage/workspace/AWARENESS.md\""
+    echo "         GOBOT_STORAGE=\"\$storage\" go run -mod=readonly ./cmd/gobot config validate config.sample.json"
+    echo "         rm -rf \"\$storage\""
     exit 1
 fi
 
