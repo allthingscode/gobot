@@ -227,6 +227,6 @@ func cmdRun() *cobra.Command {
 			return app.RunAgent(cmd.Context(), cfg)
 		},
 	}
-	cmd.Flags().StringVar(&webAddr, "web-addr", "", "Address for the web dashboard (e.g. 127.0.0.1:7331)")
+	cmd.Flags().StringVar(&webAddr, "web-addr", "", "Address for the separate SSE dashboard/log stream (e.g. 127.0.0.1:7331)")
 	return cmd
 }
