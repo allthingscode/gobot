@@ -65,7 +65,11 @@ fi
 
 echo "--- pre-push: running tests"
 TEMP_LOG=$(mktemp)
-cleanup() { rm -f "$TEMP_LOG"; }
+TEMP_CONFIG_STORAGE=$(mktemp -d)
+cleanup() {
+    rm -f "$TEMP_LOG"
+    rm -rf "$TEMP_CONFIG_STORAGE"
+}
 trap cleanup EXIT
 # Run tests with the race detector when a C compiler is available; fall back
 # gracefully when CGO is absent (e.g. bare Windows without WSL).
@@ -101,16 +105,17 @@ if ! ./scripts/check_platform_cmds.sh; then
     exit 1
 fi
 
-echo "--- pre-push: validating config.json"
-# We check the default config path (~/.gobot/config.json)
-if ! go run -mod=readonly ./cmd/gobot config reformat --check > /dev/null 2>&1; then
-    echo "ERROR: config.json is not correctly formatted."
-    echo "       Run 'go run ./cmd/gobot config reformat' to fix."
+echo "--- pre-push: validating config.sample.json"
+if ! go run -mod=readonly ./cmd/gobot config reformat --check config.sample.json > /dev/null 2>&1; then
+    echo "ERROR: config.sample.json is not correctly formatted."
+    echo "       Run 'go run ./cmd/gobot config reformat config.sample.json' to fix."
     exit 1
 fi
-if ! go run -mod=readonly ./cmd/gobot config validate > /dev/null 2>&1; then
-    echo "ERROR: config.json validation failed."
-    echo "       Run 'go run ./cmd/gobot config validate' for details."
+mkdir -p "$TEMP_CONFIG_STORAGE/workspace"
+: > "$TEMP_CONFIG_STORAGE/workspace/AWARENESS.md"
+if ! GOBOT_STORAGE="$TEMP_CONFIG_STORAGE" go run -mod=readonly ./cmd/gobot config validate config.sample.json > /dev/null 2>&1; then
+    echo "ERROR: config.sample.json validation failed."
+    echo "       Run 'go run ./cmd/gobot config validate config.sample.json' for details."
     exit 1
 fi
 
