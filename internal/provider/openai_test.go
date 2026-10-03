@@ -29,16 +29,16 @@ func TestOpenAIProvider_Models(t *testing.T) {
 	}
 	found := false
 	for _, m := range models {
-		if m.ID == "gpt-6-sol" {
+		if m.ID == "gpt-6.1-sol" {
 			found = true
 			if !m.SupportsToolUse {
-				t.Error("expected gpt-6-sol to support tool use")
+				t.Error("expected gpt-6.1-sol to support tool use")
 			}
 			break
 		}
 	}
 	if !found {
-		t.Error("expected gpt-6-sol in models")
+		t.Error("expected gpt-6.1-sol in models")
 	}
 }
 
@@ -104,7 +104,7 @@ func TestOpenAIProvider_Chat_Success(t *testing.T) {
 	p := NewOpenAIProvider("test-key", ts.URL)
 	str := "hello" //nolint:goconst // test fixture
 	req := ChatRequest{
-		Model:             "gpt-6-sol",
+		Model:             "gpt-6.1-sol",
 		SystemInstruction: "system prompt",
 		Messages: []agentctx.StrategicMessage{
 			{
@@ -147,7 +147,7 @@ func TestOpenAIProvider_Chat_Error(t *testing.T) {
 
 	p := NewOpenAIProvider("test-key", ts.URL)
 	req := ChatRequest{
-		Model: "gpt-6-sol",
+		Model: "gpt-6.1-sol",
 	}
 
 	_, err := p.Chat(context.Background(), req)

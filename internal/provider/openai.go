@@ -152,7 +152,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 func (p *OpenAIProvider) Models() []ModelInfo {
 	return []ModelInfo{
 		{ID: "gpt-6-astra", SupportsToolUse: true},
-		{ID: "gpt-6-sol", SupportsToolUse: true},
+		{ID: "gpt-6.1-sol", SupportsToolUse: true},
 		{ID: "gpt-6-luna", SupportsToolUse: true},
 	}
 }
