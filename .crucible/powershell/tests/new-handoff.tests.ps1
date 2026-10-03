@@ -994,6 +994,24 @@ budget_tier: "low"
             if ($objExplicit.commit_hash -ne $masterHead) {
                 throw "Expected the explicitly passed hash ($masterHead), got: $($objExplicit.commit_hash)"
             }
+
+            # With the branch gone the prior handoff's hash names work that no longer exists
+            # on any branch. Inheriting it let the handoff through on a dangling commit; with
+            # nothing to inherit, a feature task with no branch is refused for the missing
+            # field, as it should be. Found by TODO item 159.
+            & git branch -D "task/$taskId" --quiet
+            $noBranch = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "deployment"
+                Target = "done"
+                Reason = "Deployment complete. Pipeline resolved."
+                SessionCycleId = "cycle-test"
+                SchemaPath = $schemaPath
+                ProjectRoot = $gitRepoDir
+            } -NoRegister
+            if ($noBranch.ExitCode -eq 0 -or $noBranch.Output -notmatch 'commit_hash') {
+                throw "Expected a missing commit_hash refusal with no task branch, not an inherited hash. Exit: $($noBranch.ExitCode). Output: $($noBranch.Output)"
+            }
         } finally {
             $REPO_ROOT = $origRepoRoot
             Set-Location -LiteralPath $tempRoot

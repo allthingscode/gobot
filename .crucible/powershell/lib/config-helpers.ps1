@@ -384,7 +384,7 @@ function Get-ConfiguredModel {
 
     $defaults = @{
         claude      = @{ strong = "opus";                   default = "sonnet";                  light = "haiku" }
-        codex       = @{ strong = "gpt-6-sol";               default = "gpt-5.6-terra";            light = "gpt-6-luna" }
+        codex       = @{ strong = "gpt-6.1-sol";             default = "gpt-6.1-sol";              light = "gpt-6-luna" }
         antigravity = @{ strong = "Gemini 3.1 Pro (High)";   default = "Gemini 3.8 Flash (High)";  light = "Gemini 3.8 Flash (Medium)" }
         grok        = @{ strong = "inherit";                 default = "inherit";                  light = "inherit" }
     }

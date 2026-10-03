@@ -61,7 +61,7 @@ Crucible-blessed launcher, which wraps `codex exec -s danger-full-access` and re
 launch status.
 
 1. Compute the Codex model. Run `crucible.ps1 -Init -ProjectRoot "{project_root}"` with `-Target codex` so the `[RECOMMENDED MODEL]`
-   line resolves to the configured Codex model (e.g. `gpt-5.6-terra`):
+   line resolves to the configured Codex model (e.g. `gpt-6.1-sol`):
 
    ```bash
    pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -ProjectRoot "{project_root}" -Quiet
@@ -85,11 +85,13 @@ launch status.
    ```
 
    Add `-WorkingDir {worktree}` for implementation/verification phases that operate in a task worktree,
-   and `-ReviewSchema` for a verification phase to enforce a structured review verdict.
+   and `-ReviewSchema` for a verification phase to enforce a structured review verdict. When `-Init`
+   prints `WORKTREE  : none`, the phase is a no-code review-fix of a research item: omit `-WorkingDir`
+   so the specialist runs in the project root, where the files it must fix live.
 
    **Pass the recommended effort.** Alongside `[RECOMMENDED MODEL]`, Crucible prints a
    `[RECOMMENDED EFFORT] <none|minimal|low|medium|high|xhigh|max>` line for a Codex target. Each tier is a rung, a model and an effort together:
-   strong -> `gpt-6-sol`/`high`, default -> `gpt-5.6-terra`/`medium`, light -> `gpt-6-luna`/`high`,
+   strong -> `gpt-6.1-sol`/`high`, default -> `gpt-6.1-sol`/`low`, light -> `gpt-6-luna`/`high`,
    unless `config.yaml` sets `models.effort.codex.<tier>`.
    Pass that value as `-Effort`; the launcher forwards it as `-c model_reasoning_effort`. Effort is a
    Codex-only lever -- Claude's `Agent` dispatch has no effort knob (its effort is encoded in the model
@@ -148,6 +150,9 @@ launch status.
    `STATUS=LAUNCH_FAILED`. A verdict is only valid when `STATUS=SUCCESS` **and** the handoff +
    `### CHECKPOINT` checks below pass. `STATUS=LAUNCH_FAILED` is an infrastructure failure - re-run the
    preflight, fix the runtime, and re-dispatch; never record it as `CHANGES_REQUESTED`.
+   `STATUS=ADVANCE_INCOMPLETE` (exit 3) means the specialist's work and handoff are done but its
+   `crucible.ps1 -Init` was cut off mid-advance: the phase ended and the next one never started. Run
+   the `-Init` command the launcher prints, then dispatch the next phase as usual.
 
 Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, `crucible.ps1 -Init -ProjectRoot "{project_root}"`) is
 identical to a Claude specialist - see *After Each Sub-Agent Returns*.

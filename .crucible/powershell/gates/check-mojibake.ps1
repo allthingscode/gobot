@@ -34,7 +34,8 @@ if ($Paths.Count -eq 0 -and -not $MessageFile) {
     # powershell/ itself, where none of the content paths below exist, so every default
     # path was skipped as missing and a bare invocation scanned zero files and exited 0.
     $contentRoot = (Resolve-Path -Path "$PSScriptRoot/../..").Path
-    $isFramework = (Test-Path -LiteralPath (Join-Path $contentRoot "proposals")) -and (Test-Path -LiteralPath (Join-Path $contentRoot "powershell/run-all-tests.ps1"))
+    # docs/proposals/ is framework-development-only, so an adopter bundle never carries it.
+    $isFramework = (Test-Path -LiteralPath (Join-Path $contentRoot "docs/proposals")) -and (Test-Path -LiteralPath (Join-Path $contentRoot "powershell/run-all-tests.ps1"))
 
     if ($isFramework) {
         # Keep in sync with the explicit list in scripts/hooks/pre-push.

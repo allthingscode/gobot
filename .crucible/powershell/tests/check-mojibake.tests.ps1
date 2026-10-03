@@ -109,7 +109,7 @@ try {
     # nothing. Case 4 above cannot see that - a vacuous pass and a real pass both exit 0 -
     # so the content root is pinned here against a synthetic framework-shaped tree instead.
     $fwRoot = Join-Path $tempRoot "fwfixture"
-    New-Item -ItemType Directory -Path (Join-Path $fwRoot "proposals") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $fwRoot "docs/proposals") -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $fwRoot "powershell/gates") -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $fwRoot "docs") -Force | Out-Null
     $fwScript = Join-Path $fwRoot "powershell/gates/check-mojibake.ps1"

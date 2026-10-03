@@ -68,6 +68,40 @@ if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot "git.ps1")
 }
 
+if (-not (Get-Command Test-NoCodeClosure -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "no-code-closure.ps1")
+}
+
+# A review-fix sent back from verification on a research item with no task branch has no
+# code to change: what the Reviewer asked for lives in the main root's gitignored backlog
+# and session files. A worktree holds no copy of those, so the Architect edited stand-ins
+# there, committed an ignored spec, and the branch it ran on defeated the No-Code Closure
+# at deployment. Such a fix runs in the project root with no branch. Item 158.
+function Test-NoCodeReviewFix {
+    param(
+        [Parameter(Mandatory=$true)]$Handoff,
+        [Parameter(Mandatory=$true)][string]$RepoRoot
+    )
+
+    if ([string]$Handoff.source_phase -ne "verification" -or [string]$Handoff.target_phase -ne "implementation") {
+        return $false
+    }
+    return (Test-NoCodeClosure -TaskId ([string]$Handoff.task_id) -ProjectRoot $RepoRoot)
+}
+
+function Resolve-ImplementationWorkdir {
+    param(
+        [Parameter(Mandatory=$true)]$Handoff,
+        [Parameter(Mandatory=$true)][string]$WorkspacesDir,
+        [Parameter(Mandatory=$true)][string]$RepoRoot
+    )
+
+    if (Test-NoCodeReviewFix -Handoff $Handoff -RepoRoot $RepoRoot) {
+        return $RepoRoot
+    }
+    return (Resolve-ImplementationWorktreePath -TaskId $Handoff.task_id -WorkspacesDir $WorkspacesDir)
+}
+
 function New-CruciblePromptText {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -120,7 +154,7 @@ function New-CruciblePromptText {
         $promptText = $promptText.Replace("{{crucible_root}}", $resolvedCrucibleRoot)
         $promptText = $promptText.Replace("powershell.exe", (Get-PwshCommand))
         $promptText = $promptText.Replace("{task_id}", $handoff.task_id)
-        $promptText = $promptText.Replace("{worktree}", (Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir))
+        $promptText = $promptText.Replace("{worktree}", (Resolve-ImplementationWorkdir -Handoff $handoff -WorkspacesDir $workspacesDir -RepoRoot $repoRoot))
         $promptText = $promptText.Replace("{project_root}", $repoRoot)
         
         $rebaseCount = if ($handoff.psobject.Properties["rebase_count"]) { $handoff.rebase_count } else { 0 }
@@ -165,8 +199,11 @@ function New-CruciblePromptText {
             $promptText = $promptText.Replace("{rebase_section}", "")
         }
 
-        # Inject exact resolved handoff filename so agents don't have to glob
-        $promptText = $promptText.Replace("{handoff_file}", $relativeHandoffPath)
+        # Absolute, as is {session_dir} below: a specialist running in a worktree resolved the
+        # relative form against the worktree, which holds no copy of the gitignored session
+        # dir, and edited stand-ins there. Item 158.
+        $absoluteHandoffPath = if ($null -ne $latestHandoff) { $latestHandoff.FullName } else { Join-Path $sessionDir "handoffs" }
+        $promptText = $promptText.Replace("{handoff_file}", $absoluteHandoffPath)
 
         # Inject context bundle path
         $contextBundlePath = Join-Path $sessionDir "$TaskId/$($handoff.target_phase)/context.md"
@@ -176,14 +213,23 @@ function New-CruciblePromptText {
             $promptText = $promptText.Replace("{context_bundle_path}", "N/A")
         }
 
+        $sessionRootForPrompt = $sessionDir.TrimEnd('\', '/')
         if (-not [string]::IsNullOrEmpty($TaskId)) {
-            $promptText = $promptText.Replace("{session_dir}", (".crucible/session/" + $TaskId))
+            $promptText = $promptText.Replace("{session_dir}", ($sessionRootForPrompt + "/" + $TaskId))
         } else {
             # Legacy: use role-scoped path
-            $promptText = $promptText.Replace("{session_dir}", (".crucible/session/" + $handoff.target_phase))
+            $promptText = $promptText.Replace("{session_dir}", ($sessionRootForPrompt + "/" + $handoff.target_phase))
         }
 
         $promptText = $promptText.Replace("{type}", $typeDir)
+
+        if (Test-NoCodeReviewFix -Handoff $handoff -RepoRoot $repoRoot) {
+            $promptText += "`n`n## No-Code Review-Fix`n`n" +
+                "This is a research item with no task branch, so there is no worktree and no code to change. " +
+                "The fix is to the backlog spec and session files named above, which are gitignored: edit them in place under " +
+                $repoRoot + ". Do not create a branch or worktree, and do not commit or force-add these files; " +
+                "a task branch would also defeat the No-Code Closure at deployment.`n"
+        }
 
         # Handoff context injection
         $promptText = $promptText.Replace("{handoff_reason}", $handoff.reason)
@@ -403,10 +449,15 @@ function Initialize-CrucibleTargetSession {
         }
     }
 
-    if ($handoff.target_phase -eq "implementation") {
+    $noCodeReviewFix = ($handoff.target_phase -eq "implementation") -and (Test-NoCodeReviewFix -Handoff $handoff -RepoRoot $REPO_ROOT)
+    if ($noCodeReviewFix) {
+        Write-Quiet ("WORKTREE  : none - no-code review-fix of a research item; the Architect runs in " + $REPO_ROOT + " with no task branch") -ForegroundColor Cyan
+    }
+
+    if ($handoff.target_phase -eq "implementation" -and -not $noCodeReviewFix) {
         $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir
         Write-Quiet ("WORKTREE  : " + $wtPath) -ForegroundColor Cyan
-        
+
         if ($Init) {
 
             # Prune stale worktrees first
@@ -461,7 +512,7 @@ function Initialize-CrucibleTargetSession {
         $taskFile = Join-Path $targetDir "task.md"
         if (-not (Test-Path $taskFile)) {
             Write-Quiet ("[INIT] Initializing " + $taskFile + "...") -ForegroundColor Yellow
-            $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir
+            $wtPath = Resolve-ImplementationWorkdir -Handoff $handoff -WorkspacesDir $workspacesDir -RepoRoot $REPO_ROOT
             $sessionPath = if (-not [string]::IsNullOrEmpty($TaskId)) {
                 Join-Path $sessionDir $TaskId
             } else {

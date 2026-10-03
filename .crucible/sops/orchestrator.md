@@ -123,8 +123,9 @@ Use the sub-agent invocation mechanic for your environment (see tool-specific do
 
 **Non-Claude (multi-brand) specialists.** A phase may be run by a different agent brand (e.g. Codex)
 via a Crucible launcher rather than a native sub-agent. The launcher reports an explicit
-`STATUS=SUCCESS` / `STATUS=LAUNCH_FAILED`. See the tool-specific doc for the launch command and
-preflight. The verdict-not-label rule in Step 5 applies.
+`STATUS=SUCCESS` / `STATUS=LAUNCH_FAILED`, or `STATUS=ADVANCE_INCOMPLETE` when the specialist's
+`crucible.ps1 -Init` was cut off before the next phase started (run the `-Init` it prints, then
+continue). See the tool-specific doc for the launch command and preflight. The verdict-not-label rule in Step 5 applies.
 
 ### Step 5 - Verify specialist output and track budget
 
@@ -214,6 +215,11 @@ What was done: [1-2 sentence summary from Operator's dev log entry]
 Backlog item:  {task_id} - now marked Production / Resolved
 Eval data:     budget_pct_used={n}%  review_cycles={n}
 
+Changes ({base_sha}..{branch_sha}):
+[output of `git -C "{project_root}" diff --stat {base_sha}..{branch_sha}`]
+[the full diff in a ```diff block when it is about 150 lines or fewer]
+Review command: git -C "{project_root}" diff {base_sha}..{branch_sha}
+
 Choose an outcome:
   1) Accept     - {the Accept line from gate_pending.txt, verbatim; it states whether the merge also publishes to origin}
   2) Reject     - something is wrong; send back for rework
@@ -222,6 +228,8 @@ Choose an outcome:
 
 Your choice + reason (required):
 ```
+
+Take `base_sha` and `branch_sha` from `.crucible/session/global/gate_decisions/gate_decision_{task_id}_pending.json`. Always show the changes. The human cannot approve what they have not seen, and once the gate accepts, the task branch is deleted. For a diff longer than about 150 lines, show the stat and the review command, and point to the visual diff option in `gate_pending.txt`.
 
 Wait for a numbered choice and a reason. Record the gate decision:
 

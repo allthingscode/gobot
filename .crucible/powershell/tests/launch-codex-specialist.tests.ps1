@@ -76,6 +76,23 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
         exit 0
     }
+    { $_ -in @("halfadvance", "fulladvance") } {
+        # Mimic the specialist's crucible.ps1 -Init in the task's pipeline log. halfadvance is
+        # the run Codex killed mid-advance: the phase ended, the next one never started.
+        $phaseDir = Split-Path -Parent $outFile
+        $phaseName = Split-Path -Leaf $phaseDir
+        $taskDir = Split-Path -Parent $phaseDir
+        $taskName = Split-Path -Leaf $taskDir
+        $ts = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+        $events = @('{"event":"session_end","task_id":"' + $taskName + '","phase":"' + $phaseName + '","timestamp":"' + $ts + '","outcome":"success","notes":"Handoff to deployment"}')
+        if ($mode -eq "fulladvance") {
+            $events += '{"event":"session_start","task_id":"' + $taskName + '","phase":"deployment","timestamp":"' + $ts + '"}'
+        }
+        [System.IO.File]::AppendAllText((Join-Path $taskDir "pipeline.log.jsonl"), (($events -join "`n") + "`n"), $enc)
+        Write-Output "fake codex transcript CRUCIBLE_OK"
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, "Approved. Handoff created for deployment.", $enc) }
+        exit 0
+    }
     default {
         Write-Output "fake codex transcript CRUCIBLE_OK"
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
@@ -644,6 +661,42 @@ try {
         Assert-Result -Name "missing prompt dispatches nothing" -Condition (-not ($res.Output -match "\[CODEX SPECIALIST\]")) -FailureMessage "must exit before dispatch. Output:`n$($res.Output)"
         $strayDir = Join-Path $projectRoot ".crucible/session/C-978"
         Assert-Result -Name "missing prompt creates no session dir" -Condition (-not (Test-Path -LiteralPath $strayDir)) -FailureMessage "must not create $strayDir"
+    }
+
+    $results += Run-Test -Name "A phase ended without the next phase starting reports ADVANCE_INCOMPLETE" -Body {
+        # Regression: a Codex reviewer ended its turn while its crucible.ps1 -Init was still
+        # re-running the full checks. Codex killed it after verification's session_end was
+        # logged but before deployment started, and the launcher still reported SUCCESS.
+        $projectRoot = Join-Path $tempRoot "proj-half-advance"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "halfadvance" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-977", "-Phase", "verification", "-Model", "gpt-6-sol",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "status advance_incomplete" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=ADVANCE_INCOMPLETE") -FailureMessage "expected ADVANCE_INCOMPLETE. Output:`n$($res.Output)"
+        Assert-Result -Name "not reported as success" -Condition (-not ($res.Output -match "STATUS=SUCCESS")) -FailureMessage "must not report SUCCESS. Output:`n$($res.Output)"
+        Assert-Result -Name "exit 3" -Condition ($res.ExitCode -eq 3) -FailureMessage "expected exit 3, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "names the missing phase" -Condition ($res.Output -match "never started deployment") -FailureMessage "expected the missing phase named. Output:`n$($res.Output)"
+        Assert-Result -Name "gives the recovery command" -Condition ($res.Output -match "-Init -TaskId C-977 -ProjectRoot") -FailureMessage "expected the -Init recovery command. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "A completed advance and an older half-advance both stay SUCCESS" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-full-advance"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "fulladvance" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-976", "-Phase", "verification", "-Model", "gpt-6-sol",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "full advance success" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage "expected SUCCESS when the next phase started. Output:`n$($res.Output)"
+
+        # A half-advance logged before this launch belongs to an earlier run, not this one.
+        $staleRoot = Join-Path $tempRoot "proj-stale-advance"
+        $taskDir = Join-Path $staleRoot ".crucible/session/C-975"
+        New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        $stale = '{"event":"session_end","task_id":"C-975","phase":"verification","timestamp":"2020-01-01T00:00:00Z","outcome":"success","notes":"Handoff to deployment"}'
+        [System.IO.File]::WriteAllText((Join-Path $taskDir "pipeline.log.jsonl"), ($stale + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        $res2 = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-975", "-Phase", "verification", "-Model", "gpt-6-sol",
+            "-PromptText", "REVIEW", "-ProjectRoot", $staleRoot)
+        Assert-Result -Name "stale half-advance ignored" -Condition ($res2.Output -match "STATUS=SUCCESS") -FailureMessage "an event before launch must not flag this run. Output:`n$($res2.Output)"
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

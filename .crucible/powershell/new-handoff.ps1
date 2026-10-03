@@ -394,13 +394,14 @@ if ($isGitRepo) {
     }
 
     # On deployment -> done the commit being deployed is the tip of the task branch, and git
-    # is the only thing that knows it: no phase before deployment records a commit_hash, so
-    # an omitted -CommitHash inherited either nothing (and the handoff was refused for a
-    # missing field) or, after a rebase cycle, the stale hash an earlier deployment attempt
-    # had recorded. Deriving beats inheriting here for the same reason it does for
-    # base_commit just above. No task branch means nothing was built, which is the No-Code
-    # Closure the merge-verification gate looks for, so leave it null and let the gate judge.
+    # is the only thing that knows it. An inherited hash is stale by construction: it is
+    # whatever an earlier phase or deployment attempt recorded, before a rebase moved the
+    # branch or a recovery deleted it. No task branch means nothing was built, which is the
+    # No-Code Closure the merge-verification gate looks for, so write null and let the gate
+    # judge. Inheriting there named a deleted branch's commit, which defeated the closure
+    # and passed pre-gate verification because a dangling commit still exists (item 159).
     if ($Source -eq "deployment" -and $Target -eq "done" -and [string]::IsNullOrWhiteSpace($CommitHash)) {
+        $resolvedCommitHash = $null
         $deployBranch = "task/$TaskId"
         git show-ref --verify --quiet "refs/heads/$deployBranch" 2>$null
         if ($LASTEXITCODE -eq 0) {

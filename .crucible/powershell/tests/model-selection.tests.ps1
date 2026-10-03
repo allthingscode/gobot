@@ -71,9 +71,9 @@ $results += Run-Test "Default map: 'agent' resolves to the claude row" {
     Assert-Result "empty target -> claude" ((Get-ConfiguredModel -Target '' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'haiku') "expected haiku"
 }
 
-$results += Run-Test "Default map: codex tiers -> gpt-6-sol/gpt-5.6-terra/gpt-6-luna" {
-    Assert-Result "codex strong" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'gpt-6-sol') "expected gpt-6-sol"
-    Assert-Result "codex default" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+$results += Run-Test "Default map: codex tiers -> gpt-6.1-sol/gpt-6.1-sol/gpt-6-luna" {
+    Assert-Result "codex strong" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'gpt-6.1-sol') "expected gpt-6.1-sol"
+    Assert-Result "codex default" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'gpt-6.1-sol') "expected gpt-6.1-sol"
     Assert-Result "codex light" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'gpt-6-luna') "expected gpt-6-luna"
 }
 
@@ -128,16 +128,16 @@ $results += Run-Test "config.yaml models: block overrides the default map" {
 
 $results += Run-Test "Tiers absent from config fall back to the default map" {
     Assert-Result "claude default (not in cfg) -> sonnet" ((Get-ConfiguredModel -Target 'claude' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'sonnet') "expected sonnet"
-    Assert-Result "codex default (not in cfg) -> gpt-5.6-terra" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+    Assert-Result "codex default (not in cfg) -> gpt-6.1-sol" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'gpt-6.1-sol') "expected gpt-6.1-sol"
     Assert-Result "codex light (not in cfg) -> gpt-6-luna" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $cfgRoot) -eq 'gpt-6-luna') "expected gpt-6-luna"
     Assert-Result "grok default (not in cfg) -> inherit" ((Get-ConfiguredModel -Target 'grok' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'inherit') "expected inherit"
 }
 
 # --- Stage 1b: capability tier -> Codex reasoning effort ---
 
-$results += Run-Test "Tier -> Codex effort: strong high, default medium, light high" {
+$results += Run-Test "Tier -> Codex effort: strong high, default low, light high" {
     Assert-Result "strong -> high" ((Get-SpecialistEffort -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
-    Assert-Result "default -> medium" ((Get-SpecialistEffort -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'medium') "expected medium"
+    Assert-Result "default -> low" ((Get-SpecialistEffort -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'low') "expected low"
     Assert-Result "light -> high" ((Get-SpecialistEffort -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
 }
 
@@ -178,12 +178,12 @@ $results += Run-Test "config.yaml models.effort.codex overrides the built-in eff
 
 # --- End-to-end: phase -> tier -> model for a codex pipeline ---
 
-$results += Run-Test "End-to-end: low-tier grooming on codex resolves to gpt-5.6-terra + medium effort" {
+$results += Run-Test "End-to-end: low-tier grooming on codex resolves to gpt-6.1-sol + low effort" {
     $tier = Get-SpecialistModel -TargetPhase 'grooming' -BudgetTier 'low'
     Assert-Result "tier is default" ($tier -eq 'default') "expected default tier"
-    Assert-Result "codex default -> gpt-5.6-terra" ((Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+    Assert-Result "codex default -> gpt-6.1-sol" ((Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot) -eq 'gpt-6.1-sol') "expected gpt-6.1-sol"
     $model = Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot
-    Assert-Result "codex default -> medium effort" ((Get-SpecialistEffort -Tier $tier -ProjectRoot $noCfgRoot) -eq 'medium') "expected medium"
+    Assert-Result "codex default -> low effort" ((Get-SpecialistEffort -Tier $tier -ProjectRoot $noCfgRoot) -eq 'low') "expected low"
 }
 
 $results += Run-Test "End-to-end: deployment on codex resolves to the Luna/high rung" {

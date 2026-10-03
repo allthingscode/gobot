@@ -34,10 +34,10 @@ roles:
 # claude row). grok's 'inherit' means omit model: the specialist inherits the session.
 # Edit these as providers release new models -- this is the single source of truth the
 # [RECOMMENDED MODEL] line reads. Quote any value containing spaces.
-# NOTE: gpt-6-sol, gpt-5.6-terra, and gpt-6-luna passed launch-codex-specialist.ps1 -Preflight
-# on ChatGPT login on 2026-09-28. Preflight the exact slug for the running account.
+# NOTE: gpt-6-luna passed launch-codex-specialist.ps1 -Preflight on ChatGPT login on
+# 2026-09-28, and gpt-6.1-sol on 2026-10-02. Preflight the exact slug for the running account.
 # gpt-6-astra, like Claude Fable, is for evaluation work, not a pipeline tier.
-# Each Codex tier is a rung, a model plus an effort (strong sol/high, default terra/medium,
+# Each Codex tier is a rung, a model plus an effort (strong sol/high, default sol/low,
 # light luna/high). An optional effort.codex.<tier> block changes the effort half.
 models:
   default_target: claude
@@ -47,8 +47,8 @@ models:
       default: sonnet
       light: haiku
     codex:
-      strong: gpt-6-sol
-      default: gpt-5.6-terra
+      strong: gpt-6.1-sol
+      default: gpt-6.1-sol
       light: gpt-6-luna
     antigravity:
       strong: "Gemini 3.1 Pro (High)"

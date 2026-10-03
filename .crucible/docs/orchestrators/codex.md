@@ -24,7 +24,9 @@ pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/launch-codex-sp
 
 The launcher wraps `codex exec -s danger-full-access --skip-git-repo-check`, captures the final message
 and transcript, and reports `STATUS=SUCCESS` or `STATUS=LAUNCH_FAILED` so an infrastructure failure is
-never mistaken for a review verdict. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
+never mistaken for a review verdict. `STATUS=ADVANCE_INCOMPLETE` means the handoff was written but the
+specialist's `crucible.ps1 -Init` was cut off before the next phase started; run the `-Init` command it
+prints. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
 
 > **Why not the plugin `task` runtime / `codex-rescue` subagent for full-access specialist work?** That
 > path hardcodes a `read-only`/`workspace-write` sandbox and routes through the app-server broker, which

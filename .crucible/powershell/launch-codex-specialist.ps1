@@ -139,6 +139,9 @@ function New-BootstrapPrompt {
         "",
         "After writing handoff JSON, run:",
         "  pwsh -File `"$CrucibleScriptPath`" -Init -TaskId $TaskIdValue -ProjectRoot `"$ProjectRootValue`" -Quiet",
+        "That command can run for several minutes (an approved review re-runs the full project",
+        "checks) and prints nothing under -Quiet. Wait until the process itself has exited before",
+        "you end your session; ending early kills it and leaves the next phase unprepared.",
         "Report the Crucible output. Do not spawn successor agents."
     )
     if ($RequireJsonVerdict) {
@@ -197,6 +200,47 @@ function Test-InfraFailure {
         if ($lower.Contains($marker)) { return $marker }
     }
     return $null
+}
+
+# Returns the phase a handoff named when the specialist's crucible.ps1 -Init ended this phase
+# but never started that one, else $null. A Codex session that ends its turn while -Init is
+# still running kills it mid-advance: the session_end is logged, the next phase's prompt is not.
+function Get-IncompleteAdvanceTarget {
+    param([string]$LogPath, [string]$TaskIdValue, [string]$PhaseName, [datetime]$SinceUtc)
+    if (-not (Test-Path -LiteralPath $LogPath)) { return $null }
+    $phases = @("research", "grooming", "implementation", "verification", "deployment")
+    $events = @()
+    foreach ($line in @(Get-Content -LiteralPath $LogPath -Encoding UTF8)) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try { $entry = $line | ConvertFrom-Json } catch { continue }
+        if ($null -eq $entry -or [string]$entry.task_id -ne $TaskIdValue) { continue }
+        # pwsh 7 converts ISO strings to DateTime on parse; Windows PowerShell 5.1 does not.
+        $stamp = $entry.timestamp
+        if ($stamp -is [datetime]) {
+            $ts = $stamp.ToUniversalTime()
+        } else {
+            $ts = [datetime]::MinValue
+            $styles = [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
+            if (-not [datetime]::TryParse([string]$stamp, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$ts)) { continue }
+        }
+        if ($ts -lt $SinceUtc) { continue }
+        $events += $entry
+    }
+    $endIndex = -1
+    for ($i = $events.Count - 1; $i -ge 0; $i--) {
+        if ($events[$i].event -eq "session_end" -and $events[$i].phase -eq $PhaseName -and $events[$i].outcome -eq "success") {
+            $endIndex = $i
+            break
+        }
+    }
+    if ($endIndex -lt 0) { return $null }
+    if ([string]$events[$endIndex].notes -notmatch "^Handoff to (\S+)") { return $null }
+    $target = $Matches[1]
+    if ($phases -notcontains $target) { return $null }
+    for ($j = $endIndex + 1; $j -lt $events.Count; $j++) {
+        if ($events[$j].event -eq "session_start" -and $events[$j].phase -eq $target) { return $null }
+    }
+    return $target
 }
 
 function Test-GitWorkTree {
@@ -467,6 +511,8 @@ Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
 Write-Host ("  model: " + $Model + "  |  access: danger-full-access  |  workdir: " + $WorkingDir)
 if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 
+# Event timestamps carry whole seconds; back off one so an event in the launch second counts.
+$launchStartUtc = [datetime]::UtcNow.AddSeconds(-1)
 $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
 
 if (-not (Test-Path -LiteralPath $sessionDir)) {
@@ -514,8 +560,25 @@ if ($result.ExitCode -eq 127) {
     }
 }
 
+$advanceTarget = $null
+if ([string]::IsNullOrWhiteSpace($failReason) -and -not $usingAdhocSession) {
+    $pipelineLog = Join-Path $crucibleDir (Join-Path "session" (Join-Path $TaskId "pipeline.log.jsonl"))
+    $advanceTarget = Get-IncompleteAdvanceTarget -LogPath $pipelineLog -TaskIdValue $TaskId -PhaseName $Phase -SinceUtc $launchStartUtc
+}
+
 Write-Host ""
-if ([string]::IsNullOrWhiteSpace($failReason)) {
+if ($null -ne $advanceTarget) {
+    Write-Host "[CODEX SPECIALIST] STATUS=ADVANCE_INCOMPLETE" -ForegroundColor Yellow
+    Write-Host ("  exit code: " + $result.ExitCode)
+    Write-Host ("  last message: " + $lastMsgPath)
+    Write-Host ("  transcript: " + $transcriptPath)
+    Write-Host ""
+    Write-Host ("  Crucible ended the " + $Phase + " phase but never started " + $advanceTarget + ":")
+    Write-Host "  the specialist's crucible.ps1 -Init was cut off before it finished."
+    Write-Host "  The handoff is intact. Finish the advance, then dispatch the next phase:"
+    Write-Host ("    pwsh -File `"" + (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) + "`" -Init -TaskId " + $TaskId + " -ProjectRoot `"" + $REPO_ROOT + "`"")
+    exit 3
+} elseif ([string]::IsNullOrWhiteSpace($failReason)) {
     Write-Host "[CODEX SPECIALIST] STATUS=SUCCESS" -ForegroundColor Green
     Write-Host ("  exit code: " + $result.ExitCode)
     Write-Host ("  last message: " + $lastMsgPath)

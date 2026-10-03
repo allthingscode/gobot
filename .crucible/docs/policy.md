@@ -101,7 +101,7 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 | Target | `strong` | `default` | `light` |
 |---|---|---|---|
 | `claude` (and `agent`) | opus | sonnet | haiku |
-| `codex` | gpt-6-sol | gpt-5.6-terra | gpt-6-luna |
+| `codex` | gpt-6.1-sol | gpt-6.1-sol | gpt-6-luna |
 | `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.8 Flash (High) | Gemini 3.8 Flash (Medium) |
 | `grok` | inherit | inherit | inherit |
 

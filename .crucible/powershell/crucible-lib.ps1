@@ -88,11 +88,11 @@ $script:MODEL_ESCALATION_TIERS = @("high", "extended")
 
 # Codex reasoning effort. Claude's Agent dispatch has no effort knob, so this is consumed only
 # when the dispatch target is codex, via launch-codex-specialist.ps1 -Effort. A tier picks a rung:
-# a model and an effort together (strong gpt-6-sol/high, default gpt-5.6-terra/medium, light
+# a model and an effort together (strong gpt-6.1-sol/high, default gpt-6.1-sol/low, light
 # gpt-6-luna/high). Luna is most effective at high, so the cheapest rung is Luna/high, not a
 # lower effort. config.yaml models.effort.codex.<tier> overrides this map, alongside
 # models.targets.codex.<tier> for the model (e.g. light: gpt-5.6-terra with effort low).
-$script:TIER_EFFORT = @{ strong = "high"; default = "medium"; light = "high" }
+$script:TIER_EFFORT = @{ strong = "high"; default = "low"; light = "high" }
 $script:CODEX_EFFORT_VALUES = @("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 function Get-SpecialistModel {

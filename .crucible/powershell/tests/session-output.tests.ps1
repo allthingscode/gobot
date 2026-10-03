@@ -139,6 +139,47 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "type replaced" -Condition ($text -match "Type features") -FailureMessage "type dir was not replaced"
         Assert-Result -Name "version captured" -Condition ($ctx.PromptVersion -eq "9.9.9") -FailureMessage "prompt version was not captured"
         Assert-Result -Name "ceiling replaced" -Condition ($text -match "Ceiling 6") -FailureMessage "budget_ceiling was not replaced"
+        # Relative forms resolved inside a worktree, which holds no copy of the gitignored
+        # session dir. Item 158.
+        $sessionLine = @(($text -split "`r?`n") | Where-Object { $_ -like "Session *" })[0]
+        $handoffLine = @(($text -split "`r?`n") | Where-Object { $_ -like "Handoff *" })[0]
+        Assert-Result -Name "session dir absolute" -Condition ($sessionLine -eq ("Session " + $ctx.SessionDir.TrimEnd('\', '/') + "/F-902")) -FailureMessage ("got: " + $sessionLine)
+        Assert-Result -Name "handoff file absolute" -Condition ($handoffLine -eq ("Handoff " + $ctx.LatestHandoff.FullName)) -FailureMessage ("got: " + $handoffLine)
+    }
+
+    $results += Run-Test -Name "A no-code review-fix gets no worktree, no branch, and the project root as its workdir" -Body {
+        $caseRoot = Join-Path $tempRoot "no-code-fix"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "R-914" -TargetPhase "implementation"
+        $ctx.Handoff.source_phase = "verification"
+        $ctx.RepoRoot = $caseRoot
+        $ctx.TypeDir = "features"
+        $ctx.Init = $true
+        $activeDir = Join-Path $ctx.BacklogDir "features/active"
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+        "---`ntype: research`n---`nSpec`n" | Set-Content -LiteralPath (Join-Path $activeDir "R-914_spec.md") -Encoding UTF8
+        "# Backlog`n| [R-914](features/active/R-914_spec.md) | Spec | P2 | Ready |`n" | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+        "crucible_root: `".crucible`"`npaths:`n  backlog: `"" + ($ctx.BacklogDir -replace '\\', '/') + "`"`n" | Set-Content -LiteralPath (New-Item -ItemType File -Path (Join-Path $caseRoot ".crucible/config.yaml") -Force).FullName -Encoding UTF8
+        & git -C $caseRoot init --quiet -b master
+        & git -C $caseRoot -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
+
+        Assert-Result -Name "classified as a no-code review-fix" -Condition (Test-NoCodeReviewFix -Handoff $ctx.Handoff -RepoRoot $caseRoot) -FailureMessage "an R-* review-fix with no task branch should be a no-code review-fix"
+        $grooming = $ctx.Handoff.PSObject.Copy(); $grooming.source_phase = "grooming"
+        Assert-Result -Name "a fresh implementation is not" -Condition (-not (Test-NoCodeReviewFix -Handoff $grooming -RepoRoot $caseRoot)) -FailureMessage "grooming -> implementation must keep its worktree"
+
+        $Push = Get-Location
+        Set-Location -LiteralPath $caseRoot
+        try { Initialize-CrucibleTargetSession -Context $ctx 6>&1 | Out-Null } finally { Set-Location -LiteralPath $Push }
+
+        Assert-Result -Name "no worktree created" -Condition (-not (Test-Path -LiteralPath (Join-Path $ctx.WorkspacesDir "implementation-R-914"))) -FailureMessage "a worktree was created for a no-code review-fix"
+        & git -C $caseRoot show-ref --verify --quiet refs/heads/task/R-914
+        Assert-Result -Name "no task branch created" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task/R-914 was created, which defeats the No-Code Closure"
+        $taskText = Get-Content -LiteralPath (Join-Path $ctx.SessionDir "R-914/implementation/task.md") -Raw -Encoding UTF8
+        Assert-Result -Name "task.md names the project root" -Condition ($taskText -match ('Worktree:\s+' + [regex]::Escape($caseRoot))) -FailureMessage ("task.md: " + $taskText)
+
+        "<!-- prompt_version: 1 -->`nWork in {worktree}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
+        $text = New-CruciblePromptText -Context $ctx
+        Assert-Result -Name "prompt workdir is the project root" -Condition ($text -match ('Work in ' + [regex]::Escape($caseRoot) + '\r?\n')) -FailureMessage ("prompt: " + $text)
+        Assert-Result -Name "prompt says not to branch or commit" -Condition ($text -match 'No-Code Review-Fix' -and $text -match 'do not commit') -FailureMessage ("prompt: " + $text)
     }
 
     # Step 3 of the deployment prompt hands a failed merge simulation to implementation.

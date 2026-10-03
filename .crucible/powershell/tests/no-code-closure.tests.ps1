@@ -243,6 +243,34 @@ $results += Run-Test -Name "The validator refuses a null commit_hash once a task
     Assert-Result -Name "the refusal names commit_hash" -Condition ($after.Output -match "commit_hash") -FailureMessage ("expected the refusal to name the missing field. Output: " + $after.Output)
 }
 
+$results += Run-Test -Name "A closure does not inherit a deleted task branch's commit_hash" -Body {
+    # gobot R-032: an implementation handoff recorded the tip of task/R-032, the branch was
+    # deleted in a recovery, and every later handoff inherited the hash. The closure then
+    # named a dangling commit and was not recognised as one. Found by TODO item 159.
+    $root = New-ClosureFixture -Name "handoff-deleted-branch" -TaskId "R-514" -TypeLine 'type: "Research"' -WithTaskBranch
+    $staleTip = (Invoke-Git "rev-parse" "refs/heads/task/R-514" -Directory $root).Raw.Trim()
+    Write-FixtureFile (Join-Path $root ".crucible/session/handoffs/R-514-20261002T000000Z.json") (@"
+{
+  "task_id": "R-514",
+  "source_phase": "verification",
+  "target_phase": "deployment",
+  "reason": "approved",
+  "session_cycle_id": "cycle-0001",
+  "artifacts": [],
+  "commit_hash": "$staleTip"
+}
+"@)
+    Invoke-Git "branch" "-D" "task/R-514" -Directory $root | Out-Null
+
+    $r = Invoke-DeploymentDoneHandoff -Root $root -TaskId "R-514"
+    Assert-Result -Name "the closure is written" -Condition ($r.Ok) -FailureMessage ("expected the handoff to be written. Output: " + $r.Output)
+    $written = @(Get-ChildItem -Path (Join-Path $root ".crucible/session/handoffs") -Filter "R-514-*.json" | Sort-Object Name -Descending)
+    $handoff = (Get-Content -LiteralPath $written[0].FullName -Raw -Encoding UTF8) | ConvertFrom-Json
+    $claimed = if ($handoff.PSObject.Properties["commit_hash"]) { [string]$handoff.commit_hash } else { "" }
+    Assert-Result -Name "the closure claims no commit" -Condition ([string]::IsNullOrWhiteSpace($claimed)) -FailureMessage ("inherited the deleted branch's tip: " + $claimed)
+    Assert-Result -Name "the closure qualifies" -Condition (Test-NoCodeClosure -TaskId "R-514" -CommitHash $claimed -ProjectRoot $root) -FailureMessage "the written handoff should be a No-Code Closure"
+}
+
 # --- The two enforcement points ---
 
 $results += Run-Test -Name "The gate and the validator both decide No-Code Closure through the shared predicate" -Body {
