@@ -1,13 +1,24 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	policyAllowValue = "allow"
+	policyDenyValue  = "deny"
+	policyHITLValue  = "require_hitl"
+	yamlStringTag    = "!!str"
 )
 
 type PolicyDecision int
@@ -21,11 +32,11 @@ const (
 func (d PolicyDecision) String() string {
 	switch d {
 	case PolicyAllow:
-		return "allow"
+		return policyAllowValue
 	case PolicyDeny:
-		return "deny"
+		return policyDenyValue
 	case PolicyRequireHITL:
-		return "require_hitl"
+		return policyHITLValue
 	default:
 		return "unknown" //nolint:goconst // default sentinel value in switch
 	}
@@ -62,7 +73,7 @@ type FilePolicy struct {
 }
 
 // NewFilePolicy loads a tool execution policy from the specified YAML file.
-// If the path is empty or the file does not exist, it returns an AllowAllPolicy.
+// Only an empty path returns an AllowAllPolicy without reading a file.
 func NewFilePolicy(path string) (Policy, error) {
 	if path == "" {
 		slog.Debug("agent/policy: empty path, using allow-all policy")
@@ -71,34 +82,101 @@ func NewFilePolicy(path string) (Policy, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			slog.Info("agent/policy: file not found, using allow-all policy", "path", path)
-			return AllowAllPolicy{}, nil
-		}
-		return nil, fmt.Errorf("read policy file: %w", err)
+		return nil, fmt.Errorf("read policy file %q: %w", path, err)
 	}
 
+	if err := validatePolicyDocument(data); err != nil {
+		return nil, fmt.Errorf("validate policy file %q: %w", path, err)
+	}
 	var pf policyFile
-	if err := yaml.Unmarshal(data, &pf); err != nil {
-		return nil, fmt.Errorf("parse policy file: %w", err)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&pf); err != nil {
+		return nil, fmt.Errorf("decode policy file %q: %w", path, err)
 	}
 
 	return &FilePolicy{rules: pf.Rules}, nil
+}
+
+// Validate nodes before typed decoding so YAML scalar coercions cannot turn
+// malformed fields into usable rules. All rules are checked, even unreachable ones.
+func validatePolicyDocument(data []byte) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var doc yaml.Node
+	if err := decoder.Decode(&doc); err != nil {
+		return fmt.Errorf("expected policy document: %w", err)
+	}
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("expected exactly one YAML document")
+	}
+	if len(doc.Content) != 1 {
+		return fmt.Errorf("expected mapping root with rules")
+	}
+	root := doc.Content[0]
+	if !isPolicyRoot(root) {
+		return fmt.Errorf("root must contain only rules")
+	}
+	rules := root.Content[1]
+	if rules.Kind != yaml.SequenceNode {
+		return fmt.Errorf("rules must be a sequence")
+	}
+	for i, rule := range rules.Content {
+		if err := validatePolicyRule(rule); err != nil {
+			return fmt.Errorf("rules[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func isPolicyRoot(root *yaml.Node) bool {
+	return root.Kind == yaml.MappingNode && len(root.Content) == 2 && root.Content[0].Tag == yamlStringTag && root.Content[0].Value == "rules"
+}
+
+func validatePolicyRule(rule *yaml.Node) error {
+	if rule.Kind != yaml.MappingNode || len(rule.Content) != 4 {
+		return fmt.Errorf("rule must contain only tool and decision")
+	}
+	seen := make(map[string]bool, 2)
+	for i := 0; i < len(rule.Content); i += 2 {
+		key, value := rule.Content[i], rule.Content[i+1]
+		if key.Tag != yamlStringTag || (key.Value != "tool" && key.Value != "decision") || seen[key.Value] {
+			return fmt.Errorf("expected unique tool and decision fields")
+		}
+		seen[key.Value] = true
+		if err := validatePolicyValue(key.Value, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePolicyValue(field string, value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode || value.Tag != yamlStringTag {
+		return fmt.Errorf("%s must be a string", field)
+	}
+	if field == "tool" && strings.TrimSpace(value.Value) == "" {
+		return fmt.Errorf("tool must not be blank")
+	}
+	if field == "decision" && value.Value != policyAllowValue && value.Value != policyDenyValue && value.Value != policyHITLValue {
+		return fmt.Errorf("decision must be allow, deny, or require_hitl")
+	}
+	return nil
 }
 
 func (p *FilePolicy) Evaluate(_ context.Context, pc PolicyContext) PolicyDecision {
 	for _, rule := range p.rules {
 		if matchTool(rule.Tool, pc.ToolName) {
 			switch rule.Decision {
-			case "deny":
+			case policyDenyValue:
 				return PolicyDeny
-			case "require_hitl":
+			case policyHITLValue:
 				return PolicyRequireHITL
-			case "allow":
+			case policyAllowValue:
 				return PolicyAllow
 			default:
-				slog.Warn("agent/policy: unknown decision, treating as allow", "decision", rule.Decision)
-				return PolicyAllow
+				slog.Error("agent/policy: invalid decision, denying tool", "tool", pc.ToolName)
+				return PolicyDeny
 			}
 		}
 	}

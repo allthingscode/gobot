@@ -366,15 +366,23 @@ func TestSetupHooks_Coverage(t *testing.T) {
 
 	// Add a policy file
 	policyFile := filepath.Join(tempDir, "tool_policy.yaml")
-	_ = os.WriteFile(policyFile, []byte("policies:\n  - name: test\n    tool: '*'\n    decision: allow\n"), 0o600)
+	_ = os.WriteFile(policyFile, []byte("rules:\n  - tool: denied\n    decision: deny\n  - tool: approval\n    decision: require_hitl\n"), 0o600)
 
 	runner := &app.AgentRunner{}
 	mgr := agent.NewSessionManager(runner, nil, "model")
 	api := &mockBotAPI{}
 
-	hooks, hitl := app.SetupHooks(cfg, runner, mgr, api, nil)
+	hooks, hitl, setupErr := app.SetupHooks(cfg, runner, mgr, api, nil)
+	if setupErr != nil {
+		t.Fatalf("SetupHooks: %v", setupErr)
+	}
 	if hooks == nil || hitl == nil {
 		t.Error("SetupHooks returned nil")
+	}
+	for _, tool := range []string{"denied", "approval"} {
+		if _, err := hooks.RunPreTool(context.Background(), "cli:test", tool, nil); err == nil {
+			t.Errorf("%s should be denied without approval", tool)
+		}
 	}
 }
 

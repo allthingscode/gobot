@@ -52,12 +52,9 @@ func TestNewFilePolicy_EmptyPath(t *testing.T) {
 
 func TestNewFilePolicy_FileNotFound(t *testing.T) {
 	t.Parallel()
-	p, err := NewFilePolicy("/nonexistent/path/to/policy.yaml")
-	if err != nil {
-		t.Fatalf("NewFilePolicy(%q) error = %v", "/nonexistent/path/to/policy.yaml", err)
-	}
-	if _, ok := p.(AllowAllPolicy); !ok {
-		t.Error("expected AllowAllPolicy for nonexistent file")
+	p, err := NewFilePolicy(filepath.Join(t.TempDir(), "missing.yaml"))
+	if p != nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected missing-file error and no policy, got %v, %v", p, err)
 	}
 }
 
@@ -235,26 +232,9 @@ func TestFilePolicy_Evaluate_FirstMatchWins(t *testing.T) {
 
 func TestFilePolicy_Evaluate_UnknownDecision(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	policyPath := filepath.Join(tmpDir, "tool_policy.yaml")
-	policyContent := `rules:
-  - tool: "some_tool"
-    decision: invalid_decision
-`
-	if err := os.WriteFile(policyPath, []byte(policyContent), 0o600); err != nil {
-		t.Fatalf("failed to write test policy: %v", err)
-	}
-
-	p, err := NewFilePolicy(policyPath)
-	if err != nil {
-		t.Fatalf("NewFilePolicy error = %v", err)
-	}
-
-	ctx := context.Background()
-	pc := PolicyContext{ToolName: "some_tool"}
-	got := p.Evaluate(ctx, pc)
-	if got != PolicyAllow {
-		t.Errorf("FilePolicy.Evaluate() = %v, want %v (unknown decision should default to allow)", got, PolicyAllow)
+	p := &FilePolicy{rules: []policyRule{{Tool: "*", Decision: "invalid"}}}
+	if got := p.Evaluate(context.Background(), PolicyContext{ToolName: "some_tool"}); got != PolicyDeny {
+		t.Fatalf("invalid in-memory decision: %v", got)
 	}
 }
 

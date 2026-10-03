@@ -35,7 +35,7 @@ type cliRuntimeDeps struct {
 	runDoctorDiagnostics func(cfg *config.Config, probes *doctor.Probes) error
 	buildCLIStack        func(ctx context.Context, cfg *config.Config, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer) (*app.AgentStack, func(), error)
 	getCheckpointManager func(dbDir string) (*agentctx.CheckpointManager, error)
-	setupRuntimeHooks    func(cfg *config.Config, runner *app.AgentRunner, mgr *agent.SessionManager, api bot.API, store agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager)
+	setupRuntimeHooks    func(cfg *config.Config, runner *app.AgentRunner, mgr *agent.SessionManager, api bot.API, store agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager, error)
 }
 
 func newCLISessionManagerWithDeps(ctx context.Context, cfg *config.Config, mode cliHooksMode, deps cliRuntimeDeps) (*agent.SessionManager, func(), error) {
@@ -54,7 +54,10 @@ func newCLISessionManagerWithDeps(ctx context.Context, cfg *config.Config, mode 
 	mgr := stack.NewSessionManager(cfg, store, nil)
 
 	if mode == cliHooksModeInteractive {
-		_, _ = deps.setupRuntimeHooks(cfg, stack.Runner, mgr, nil, store)
+		if _, _, err := deps.setupRuntimeHooks(cfg, stack.Runner, mgr, nil, store); err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("initialize interactive hooks: %w", err)
+		}
 	}
 
 	return mgr, cleanup, nil
