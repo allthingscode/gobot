@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -30,9 +32,9 @@ func TestNewCLISessionManagerWithDepsSimulateMode(t *testing.T) {
 			return &app.AgentStack{Runner: runner, Model: "test-model"}, func() { cleanupCalled = true }, nil
 		},
 		getCheckpointManager: func(string) (*agentctx.CheckpointManager, error) { return nil, nil },
-		setupRuntimeHooks: func(_ *config.Config, _ *app.AgentRunner, _ *agent.SessionManager, _ bot.API, _ agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager) {
+		setupRuntimeHooks: func(_ *config.Config, _ *app.AgentRunner, _ *agent.SessionManager, _ bot.API, _ agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager, error) {
 			hooksCalled = true
-			return &agent.Hooks{}, nil
+			return &agent.Hooks{}, nil, nil
 		},
 	}
 
@@ -68,12 +70,12 @@ func TestNewCLISessionManagerWithDepsInteractiveMode(t *testing.T) {
 			return &app.AgentStack{Runner: runner, Model: "test-model"}, func() {}, nil
 		},
 		getCheckpointManager: func(string) (*agentctx.CheckpointManager, error) { return nil, nil },
-		setupRuntimeHooks: func(_ *config.Config, _ *app.AgentRunner, mgr *agent.SessionManager, _ bot.API, _ agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager) {
+		setupRuntimeHooks: func(_ *config.Config, _ *app.AgentRunner, mgr *agent.SessionManager, _ bot.API, _ agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager, error) {
 			hooksCalled = true
 			hooks := &agent.Hooks{}
 			mgr.SetHooks(hooks)
 			runner.SetHooks(hooks)
-			return hooks, nil
+			return hooks, nil, nil
 		},
 	}
 
@@ -100,8 +102,8 @@ func TestNewCLISessionManagerWithDepsBuildError(t *testing.T) {
 			return nil, nil, fmt.Errorf("boom")
 		},
 		getCheckpointManager: func(string) (*agentctx.CheckpointManager, error) { return nil, nil },
-		setupRuntimeHooks: func(_ *config.Config, _ *app.AgentRunner, _ *agent.SessionManager, _ bot.API, _ agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager) {
-			return &agent.Hooks{}, nil
+		setupRuntimeHooks: func(_ *config.Config, _ *app.AgentRunner, _ *agent.SessionManager, _ bot.API, _ agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager, error) {
+			return &agent.Hooks{}, nil, nil
 		},
 	}
 
@@ -121,4 +123,27 @@ func containsAll(s string, parts ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestInteractiveHooksFailureCleanup(t *testing.T) {
+	t.Parallel()
+	cleanupCalls := 0
+	deps := cliRuntimeDeps{
+		runDoctorDiagnostics: func(*config.Config, *doctor.Probes) error { return nil },
+		buildCLIStack: func(context.Context, *config.Config, *reporter.TemplateManager, *observability.DispatchTracer) (*app.AgentStack, func(), error) {
+			return &app.AgentStack{Runner: &app.AgentRunner{}, Model: "test"}, func() { cleanupCalls++ }, nil
+		},
+		getCheckpointManager: func(string) (*agentctx.CheckpointManager, error) { return nil, nil },
+		setupRuntimeHooks:    app.SetupHooks,
+	}
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Runtime.PolicyFilePath = cfg.StorageRoot() + "/missing.yaml"
+	mgr, cleanup, err := newCLISessionManagerWithDeps(context.Background(), cfg, cliHooksModeInteractive, deps)
+	if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "initialize interactive hooks") {
+		t.Fatalf("lost policy error: %v", err)
+	}
+	if mgr != nil || cleanup != nil || cleanupCalls != 1 {
+		t.Fatalf("usable state or incorrect cleanup count: mgr=%v cleanupNil=%v calls=%d", mgr, cleanup == nil, cleanupCalls)
+	}
 }

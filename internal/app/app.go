@@ -108,18 +108,15 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	startErr := make(chan error, 2)
 	readiness := NewReadiness()
 
-	checkpoints, err := agentctx.GetCheckpointManager(cfg.StorageRoot())
-	var store agent.CheckpointStore
-	if err != nil {
-		slog.Warn("run: checkpoint store unavailable", "err", err)
-	} else if checkpoints != nil {
-		store = checkpoints
-	}
-	InitIdempotency(ctx, cfg, stack.Runner, store, &wg)
+	store := runtimeCheckpointStore(cfg.StorageRoot())
 
 	mgr := stack.NewSessionManager(cfg, store, tracer)
 	api, _ := NewTgAPI(cfg.TelegramToken(), cfg.TelegramAllowedFrom(), cfg)
-	_, hitl := SetupHooks(cfg, stack.Runner, mgr, api, store)
+	_, hitl, err := SetupHooks(cfg, stack.Runner, mgr, api, store)
+	if err != nil {
+		return fmt.Errorf("run agent: %w", err)
+	}
+	InitIdempotency(ctx, cfg, stack.Runner, store, &wg)
 
 	handler := &DispatchHandler{Mgr: mgr, Memory: stack.MemStore, Hitl: hitl}
 	SetupConsolidator(cfg, stack, mgr, handler, otelProvider, tracer)
@@ -155,6 +152,16 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
 
 	return waitForShutdown(ctx, cancel, &wg, startErr, readiness)
+}
+
+// runtimeCheckpointStore preserves optional checkpoint storage during startup.
+func runtimeCheckpointStore(storageRoot string) agent.CheckpointStore {
+	checkpoints, err := agentctx.GetCheckpointManager(storageRoot)
+	if err != nil {
+		slog.Warn("run: checkpoint store unavailable", "err", err)
+		return nil
+	}
+	return checkpoints
 }
 
 // awaitReadyForBanner blocks until the gateway listener reports bound, the context

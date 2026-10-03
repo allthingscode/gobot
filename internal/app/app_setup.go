@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -124,24 +125,24 @@ func InitIdempotency(ctx context.Context, cfg *config.Config, runner *AgentRunne
 }
 
 // SetupHooks initializes and registers lifecycle hooks for the agent and runner.
-func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManager, api bot.API, store agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager) {
+func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManager, api bot.API, store agent.CheckpointStore) (*agent.Hooks, *agent.HITLManager, error) {
+	policyPath := agent.ResolvePolicyFilePath(cfg.PolicyFilePath(), cfg.StorageRoot())
+	policy, err := agent.NewFilePolicy(policyPath)
+	if cfg.PolicyFilePath() == "" && errors.Is(err, os.ErrNotExist) {
+		policy = agent.AllowAllPolicy{}
+	} else if err != nil {
+		return nil, nil, fmt.Errorf("setup hooks: %w", err)
+	}
 	hooks := &agent.Hooks{}
 	hitlStore, _ := store.(agent.HITLStore)
 	hitl := agent.NewHITLManager(api, hitlStore, cfg.HighRiskTools())
-
-	policyPath := agent.ResolvePolicyFilePath(cfg.PolicyFilePath(), cfg.StorageRoot())
-	policy, err := agent.NewFilePolicy(policyPath)
-	if err != nil {
-		slog.Warn("run: policy file load failed, using allow-all", "err", err)
-		policy = agent.AllowAllPolicy{}
-	}
 	policyHook := agent.NewPolicyHook(policy, hitl)
 	hooks.RegisterPreTool(policyHook.PreToolHook)
 	hooks.RegisterPreTool(hitl.PreToolHook)
 
 	mgr.SetHooks(hooks)
 	runner.SetHooks(hooks)
-	return hooks, hitl
+	return hooks, hitl, nil
 }
 
 // SetupConsolidator initializes the memory consolidation engine if a memory store is available.

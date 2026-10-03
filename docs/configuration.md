@@ -192,12 +192,30 @@ Settings for advanced agent features, including Google Workspace integration. Fo
 | `google_scopes` | []string | OAuth2 scopes requested by `gobot reauth`. Omit to use the defaults: `https://mail.google.com/`, `https://www.googleapis.com/auth/calendar`, `https://www.googleapis.com/auth/tasks`. See [Google Cloud Setup Guide](google-setup.md#customizing-oauth-scopes). |
 | `templates_path` | string | Directory containing custom email templates (`email.html`). |
 | `custom_css_path` | string | Path to a CSS file that overrides default email styling. |
-| `policy_file_path` | string | Path to a tool policy file for fine-grained allow/deny rules. |
+| `policy_file_path` | string | Path to a mandatory tool policy YAML file; missing, unreadable, or invalid configured files fail startup. |
 | `embedding_model` | string | Embedding model name for vector search (default `"gemini-embedding-2"`). Gobot requests a fixed 768-dimensional output for this integration. |
 
 #### Embedding-model upgrade
 
 After upgrading to a version that uses `gemini-embedding-2`, restart Gobot. Its semantic cache is model- and dimension-specific, so the prior `memory/vectors.db` cache is left untouched for manual recovery and is not loaded. SQLite FTS-backed memory remains available while fresh semantic vectors accrue; the normal workspace indexing schedule repopulates workspace vectors. Historical durable-memory vectors are not automatically reconstructed.
+
+#### Tool policy
+
+When `runtime.policy_file_path` is empty, Gobot looks for `{storage_root}/tool_policy.yaml`. An absent implicit file permits tools by default; an existing invalid or unreadable implicit file fails startup. Every explicitly configured path is mandatory, even if it equals the default path. Relative configured paths retain their normal working-directory semantics. Runtime and interactive CLI initialization report policy errors before starting services or accepting work.
+
+Use exactly one YAML document with only a `rules` sequence. Each rule must contain only a nonblank string `tool` and a string `decision` of `allow`, `deny`, or `require_hitl`. Missing/null fields, non-string values, unknown or duplicate keys, unknown decisions, empty documents, and trailing documents are rejected. Replace legacy `policies:` files with this supported schema:
+
+```yaml
+rules:
+  - tool: shell_exec
+    decision: deny
+  - tool: send_email
+    decision: require_hitl
+  - tool: "*"
+    decision: allow
+```
+
+Rules use ordered first-match evaluation with exact tool names or `*`. Unmatched tools are allowed, and `rules: []` explicitly permits all tools. Independent high-risk HITL approval still applies. Fix or remove an invalid implicit file, or correct the configured path/schema, before restarting.
 
 #### Routing (`runtime.routing`)
 
