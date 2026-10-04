@@ -19,9 +19,9 @@
         "FileSubtype": "00"
     },
     "StringFileInfo": {
-        "Comments": "Strategic Edition agent runtime",
+        "Comments": "gobot agent runtime",
         "CompanyName": "gobot Project",
-        "FileDescription": "gobot - Strategic Edition agent runtime",
+        "FileDescription": "gobot - agent runtime",
         "FileVersion": "0.1.0.0",
         "InternalName": "gobot",
         "LegalCopyright": "Copyright (c) 2026",
