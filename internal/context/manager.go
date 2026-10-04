@@ -386,6 +386,8 @@ func (m *CheckpointManager) SaveHITLApproval(ctx context.Context, reqID, session
 		ON CONFLICT(request_id) DO UPDATE SET
 			status = excluded.status,
 			decided_at = COALESCE(excluded.decided_at, decided_at)
+		WHERE excluded.status NOT IN ('sending', 'pending')
+			OR hitl_approvals.status NOT IN ('approved', 'rejected')
 	`, reqID, sessionKey, toolName, string(argBytes), status, decidedAt)
 	if err != nil {
 		return fmt.Errorf("SaveHITLApproval: %w", err)
