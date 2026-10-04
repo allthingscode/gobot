@@ -217,13 +217,26 @@ func (api *TgAPI) handleMessage(ctx context.Context, m *telego.Message) {
 }
 
 func (api *TgAPI) handleCallbackQuery(ctx context.Context, cb *telego.CallbackQuery) {
-	slog.Info("telegram: callback query received", "id", cb.ID, "data", cb.Data, "from", cb.From.ID)
-	var chatID int64
-	var msgID int64
-	if cb.Message != nil {
-		chatID = cb.Message.GetChat().ID
-		msgID = int64(cb.Message.GetMessageID())
+	if cb == nil || cb.Message == nil {
+		slog.Warn("telegram: callback without message dropped")
+		return
 	}
+	// Both telego message variants may hold a typed nil inside the interface.
+	if cb.Message.Message() == nil && cb.Message.InaccessibleMessage() == nil {
+		slog.Warn("telegram: callback without message dropped", "id", cb.ID)
+		return
+	}
+	chatID := cb.Message.GetChat().ID
+	if chatID == 0 {
+		slog.Warn("telegram: callback without chat ID dropped", "id", cb.ID)
+		return
+	}
+	if len(api.allowFrom) > 0 && !api.allowFrom[chatID] {
+		slog.Warn("telegram: callback from unlisted chat ID dropped", "chatID", chatID)
+		return
+	}
+	msgID := int64(cb.Message.GetMessageID())
+	slog.Info("telegram: callback query received", "id", cb.ID, "from", cb.From.ID)
 
 	// Answer callback immediately to stop loading spinner
 	_ = api.breaker.Execute(func() error {
