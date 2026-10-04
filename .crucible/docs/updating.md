@@ -100,6 +100,8 @@ pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -D
 
    If the project keeps its own git hooks, such as `scripts/hooks/pre-commit`, set `hooks.project_dir` in `.crucible/config.yaml` so Crucible's hooks run them; see [config-reference.md](config-reference.md#hooks-optional). A real apply, prune, restamp-only, or all-no-op run also runs the installed `.crucible/powershell/install-hooks.ps1`. `core.hooksPath` is local uncommitted config, so a clone or an unset leaves copied hooks inert until something sets it. A clone whose bundle is already current still heals: the run classifies all-no-op and activates hooks without restamping. Preview (`report-only`) does not.
 
+   Without `-Mode`, the updater runs `interactive` and asks before applying. An agent or script with no terminal cannot answer, so the run stops with exit 1 before applying anything and names `-Mode auto-safe`. Pass `-Mode auto-safe` from those callers.
+
    A file you have edited is never retired, whatever the rename says. It is reported as `needs-merge` so you can move your changes to the new path yourself.
 
 5. **Manually merge anything flagged.** For each `needs-merge` item, compare your local file against upstream HEAD, then edit the adopter file by hand.

@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "f4b06257a8fc97a30d387f97f2b8d3142d602032",
+  "source_commit": "7c8ec822d32cf33214d525782441c9869ce21c9b",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -87,8 +87,8 @@
       "base_hash": "1209d426a3b540504e78622ffcfc84fd4c5aadc7f501f18d732c3975754f03c5"
     },
     "docs/updating.md": {
-      "hash": "e59c13610bc5410b41865224314c9ba0132d925bb34aa18b489c0fdf03b201e1",
-      "base_hash": "82861d601dba2c39bd6d998b232f5d7b9d1a616629bccf5b0f0e019c942a04ac"
+      "hash": "dba2a3be2d90e3f668f5b0529770078308ddbb5395adb79b341d21b851bacbe2",
+      "base_hash": "692292737596a4bf0a474516d2ea82ccf9dab26e0bfada7dd6c5bb6cdce4cf7a"
     },
     "docs/when-to-use.md": {
       "hash": "cdf51c67f0434227744aaf9c7cac4425e3cc7da46e86ed47ced9499921963145",
@@ -691,8 +691,8 @@
       "base_hash": "3ed9bfb4f5006f5d68ff2e5a1dc05171dc7bc8093caf2386cb60f9e7bc5ecb8e"
     },
     "powershell/update-bundle.ps1": {
-      "hash": "caa59243b91ff5c58dd9ea7cb85e8170dac406d8263d78f015816fc8a0eb3630",
-      "base_hash": "caa59243b91ff5c58dd9ea7cb85e8170dac406d8263d78f015816fc8a0eb3630"
+      "hash": "4e3f9ded290086df796a55e427c91c420bbbd3a2746d7efb10ef16eb94f19d1d",
+      "base_hash": "4e3f9ded290086df796a55e427c91c420bbbd3a2746d7efb10ef16eb94f19d1d"
     },
     "powershell/update-session-state.ps1": {
       "hash": "0576fbd057dd6fc762ef49414d45eed798796500dc6463181b6a8ff083a20a0f",

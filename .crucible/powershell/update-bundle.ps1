@@ -109,6 +109,18 @@ function Write-Report {
     }
 }
 
+function Read-Confirmation {
+    param([Parameter(Mandatory=$true)][string]$Prompt)
+    # Read-Host on an empty or closed stdin returns an empty array, not a string, and -match
+    # on that is an array that later broke a [bool] parameter after nothing had been applied.
+    # A redirected stdin with no answer is a caller that cannot answer, not a "no" (item 161).
+    $answer = [string](Read-Host $Prompt)
+    if ([Console]::IsInputRedirected -and [string]::IsNullOrWhiteSpace($answer)) {
+        throw "Interactive mode got no answer on stdin (no terminal attached), so it stopped before this step. Rerun with -Mode auto-safe to apply safe updates without a prompt, or -DryRun to preview."
+    }
+    return ($answer -match '^(?i)y(es)?$')
+}
+
 function Write-ScaffoldNotice {
     # Instantiated scaffold content is the only part of the bundle an adopter may
     # decline, and the only signal that it is declinable. It fires on preview runs
@@ -443,8 +455,7 @@ function Invoke-UpdateBundle {
             } else {
                 "Apply " + $applyItems.Count + " safe/add update(s)? [y/N]"
             }
-            $answer = Read-Host $prompt
-            $shouldApply = ($answer -match '^(?i)y(es)?$')
+            $shouldApply = Read-Confirmation -Prompt $prompt
         }
     }
 
@@ -503,8 +514,7 @@ function Invoke-UpdateBundle {
         if ($Mode -eq "auto-safe") {
             $shouldPrune = $true
         } elseif ($Mode -eq "interactive") {
-            $answer = Read-Host ("Prune " + $pruneItems.Count + " obsolete framework file(s)? [y/N]")
-            $shouldPrune = ($answer -match '^(?i)y(es)?$')
+            $shouldPrune = Read-Confirmation -Prompt ("Prune " + $pruneItems.Count + " obsolete framework file(s)? [y/N]")
         }
     }
 
