@@ -291,7 +291,21 @@ function Resolve-CrucibleInputHandoff {
                 $Context.IsBootstrap = $true
                 Write-Quiet "[INIT] No handoff found for task $TaskId; auto-bootstrapped initial handoff from deployment to $targetPhase at $bootstrapFile" -ForegroundColor Green
             } else {
-                Write-Host ("Error: No active (non-superseded) handoff found for TaskId: " + $TaskId) -ForegroundColor Red
+                # With no handoff, the spec is what -Init needs; naming only the handoff
+                # sent R-033 down a hand-written bootstrap instead.
+                Write-Host ("Error: No active (non-superseded) handoff and no backlog spec found for TaskId: " + $TaskId) -ForegroundColor Red
+                if ([string]::IsNullOrWhiteSpace($backlogDir)) {
+                    Write-Host "No backlog directory is configured, so no spec could be searched for." -ForegroundColor Red
+                } else {
+                    $searched = @(foreach ($dir in $typeDirs) {
+                        foreach ($sub in @("$dir/active", $dir, "$dir/archived (recursive)")) {
+                            "  " + (Join-Path $backlogDir $sub)
+                        }
+                    })
+                    Write-Host ("Looked for " + $TaskId + "_*.md in:") -ForegroundColor Red
+                    $searched | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+                }
+                Write-Host ("Write the spec there, then rerun crucible.ps1 -Init -TaskId " + $TaskId + "; it bootstraps the task from the spec.") -ForegroundColor Red
                 exit 1
             }
         }

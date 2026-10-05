@@ -335,6 +335,9 @@ $resolvedSessionCycle = if (-not [string]::IsNullOrWhiteSpace($SessionCycleId)) 
     [string]$latest.session_cycle_id
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["cycle_id"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.cycle_id)) {
     [string]$latest.cycle_id
+} elseif ($null -eq $latest -and $Source -eq "deployment") {
+    # A hand-written task bootstrap: match the cycle id -Init's auto-bootstrap writes.
+    "initial"
 } else {
     ""
 }

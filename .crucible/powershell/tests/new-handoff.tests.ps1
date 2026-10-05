@@ -203,6 +203,50 @@ try {
         if (Track-HandoffFile -TaskId $taskId) { throw "A refused handoff was written for $taskId" }
     }
 
+    # Item 162: a hand-written bootstrap on a cold task has no handoff or task.md to
+    # take a cycle id from, and validation refused the empty one.
+    Invoke-Test -Name "cold deployment->grooming bootstrap defaults session_cycle_id to initial" -Script {
+        $taskId = New-TestTaskId "CB"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "deployment"
+            Target = "grooming"
+            Reason = "Initial task bootstrap"
+            BudgetTier = "low"
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "Generator failed: $($result.Output)"
+        }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ($obj.session_cycle_id -ne "initial") {
+            throw "Expected session_cycle_id 'initial', got '$($obj.session_cycle_id)'"
+        }
+    }
+
+    Invoke-Test -Name "cold non-deployment handoff without a cycle id fails and leaves no .tmp" -Script {
+        $taskId = New-TestTaskId "CT"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "implementation"
+            Target = "verification"
+            Reason = "cold implementation handoff"
+            Artifacts = @("powershell/crucible.ps1")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -eq 0) {
+            throw "Expected validation to refuse an empty session_cycle_id. Output: $($result.Output)"
+        }
+        if ((ConvertTo-NormalizedOutput $result.Output) -notmatch 'requires session_cycle_id') {
+            throw "Expected the refusal to name session_cycle_id. Output: $($result.Output)"
+        }
+        if (Track-HandoffFile -TaskId $taskId) { throw "A refused handoff was written for $taskId" }
+        $leftover = @(Get-ChildItem -Path $handoffDir -Filter ($taskId + "-*.tmp") -ErrorAction SilentlyContinue)
+        if ($leftover.Count -gt 0) { throw ("Validation failure left " + $leftover[0].Name) }
+    }
+
     Invoke-Test -Name "researcher->groomer success with human decisions" -Script {
         $taskId = New-TestTaskId "RH"
         $result = Invoke-Generator -InputArgs @{

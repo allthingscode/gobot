@@ -155,6 +155,46 @@ budget_tier: high
         Assert-Result -Name "budget_tier read from archived spec" -Condition ($handoff.budget_tier -eq "high") -FailureMessage "budget_tier was not read from archived spec"
     }
 
+    $results += Run-Test -Name "Resolve-CrucibleInputHandoff names the missing spec when there is no handoff and no spec" -Body {
+        $caseRoot = Join-Path $tempRoot "no-spec"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "R-033"
+        $scriptPath = Join-Path $caseRoot "run-no-spec.ps1"
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $script = @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    TaskId = 'R-033'
+    HandoffDir = '$($ctx.HandoffDir.Replace("'", "''"))'
+    BacklogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
+    Quiet = `$true
+    IsBootstrap = `$false
+    LatestHandoff = `$null
+    LogFile = '$($ctx.LogFile.Replace("'", "''"))'
+    CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
+}
+Resolve-CrucibleInputHandoff -Context `$ctx
+"@
+        $script | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+        $outputText = $output -join "`n"
+
+        Assert-Result -Name "exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit 1, got $exitCode. Output:`n$outputText"
+        Assert-Result -Name "names the missing spec" -Condition ($outputText -match "no backlog spec found for TaskId: R-033") -FailureMessage "missing spec wording. Output:`n$outputText"
+        Assert-Result -Name "names where it looked" -Condition ($outputText -match [regex]::Escape("R-033_*.md") -and $outputText -match [regex]::Escape((Join-Path $ctx.BacklogDir "features/active"))) -FailureMessage "missing search locations. Output:`n$outputText"
+        Assert-Result -Name "says -Init bootstraps once the spec exists" -Condition ($outputText -match "rerun crucible\.ps1 -Init -TaskId R-033") -FailureMessage "missing -Init guidance. Output:`n$outputText"
+        Assert-Result -Name "writes no handoff" -Condition (@(Get-ChildItem -Path $ctx.HandoffDir -Filter "R-033-*" -ErrorAction SilentlyContinue).Count -eq 0) -FailureMessage "a handoff was written without a spec"
+    }
+
     $results += Run-Test -Name "Resolve-CrucibleInputHandoff resolves latest handoff from archived handoffs folder" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "handoff-archived") -TaskId "C-381"
         $archivedHandoffDir = Join-Path $ctx.HandoffDir "archived"
