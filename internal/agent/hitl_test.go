@@ -13,12 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const (
-	statusApprovedVal = "approved"
-	statusRejectedVal = "rejected"
-	statusPendingVal  = "pending"
-)
-
 type mockBotAPI struct {
 	bot.API
 	mu           sync.Mutex
@@ -86,7 +80,7 @@ func TestHITLManager_PreToolHook_Approve(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		return len(m.pending) > 0
+		return len(m.pending) > 0 && len(api.getSentButtons()) > 0
 	}, 1*time.Second, 10*time.Millisecond)
 
 	// Extract reqID from sent buttons
@@ -137,7 +131,7 @@ func TestHITLManager_PreToolHook_Reject(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		return len(m.pending) > 0
+		return len(m.pending) > 0 && len(api.getSentButtons()) > 0
 	}, 1*time.Second, 10*time.Millisecond)
 
 	// Extract reqID from sent buttons
@@ -231,6 +225,9 @@ func (m *mockHITLStore) SaveHITLApproval(ctx context.Context, reqID, _, _ string
 	if m.approvals == nil {
 		m.approvals = make(map[string]string)
 	}
+	if (status == "sending" || status == hitlPending) && (m.approvals[reqID] == hitlApproved || m.approvals[reqID] == hitlRejected) {
+		return nil
+	}
 	m.approvals[reqID] = status
 	return nil
 }
@@ -247,7 +244,7 @@ func TestHITLManager_Persistence(t *testing.T) {
 	reqID := m.createRequestID(sessionKey, toolName, args)
 
 	// 1. Simulate a previous approval in the store
-	store.approvals[reqID] = statusApprovedVal
+	store.approvals[reqID] = hitlApproved
 
 	got, err := m.PreToolHook(context.Background(), sessionKey, toolName, args)
 	if err != nil {
@@ -262,7 +259,7 @@ func TestHITLManager_Persistence(t *testing.T) {
 
 	// 2. Simulate a previous rejection
 	reqID2 := m.createRequestID(sessionKey, toolName, map[string]any{"cmd": "rm"})
-	store.approvals[reqID2] = statusRejectedVal
+	store.approvals[reqID2] = hitlRejected
 
 	_, err = m.PreToolHook(context.Background(), sessionKey, toolName, map[string]any{"cmd": "rm"})
 	if !errors.Is(err, ErrToolDenied) {
@@ -271,7 +268,7 @@ func TestHITLManager_Persistence(t *testing.T) {
 
 	// 3. Simulate pending status (resuming)
 	reqID3 := m.createRequestID(sessionKey, toolName, map[string]any{"cmd": "mv"})
-	store.approvals[reqID3] = statusPendingVal
+	store.approvals[reqID3] = hitlPending
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -303,7 +300,7 @@ func TestHITLManager_Persistence(t *testing.T) {
 	}
 
 	<-done
-	if store.approvals[reqID3] != statusApprovedVal {
+	if store.approvals[reqID3] != hitlApproved {
 		t.Errorf("expected store to be updated to approved, got %q", store.approvals[reqID3])
 	}
 }
