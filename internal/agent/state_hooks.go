@@ -37,7 +37,7 @@ func (h *StateHook) OnWorkflowStart(_ context.Context, id state.WorkflowID, data
 // OnStepComplete checkpoints after each subagent step completes.
 func (h *StateHook) OnStepComplete(_ context.Context, id state.WorkflowID, stepData json.RawMessage) error {
 	// Load current state.
-	wfState, err := h.manager.LoadWorkflow(id)
+	wfState, err := h.manager.LoadWithRecovery(id)
 	if err != nil {
 		return fmt.Errorf("loading workflow: %w", err)
 	}

@@ -176,12 +176,15 @@ func (m *Manager) Archive(id WorkflowID) error {
 	}
 	defer func() { _ = lock.Release() }()
 
-	// Move checkpoint to archive.
-	src := m.checkpointPath(id)
+	// Materialize journaled state before publishing or removing source evidence.
+	finalState, err := m.LoadWithRecovery(id)
+	if err != nil {
+		return fmt.Errorf("loading workflow for archive: %w", err)
+	}
 	dst := filepath.Join(m.config.StateDir, "archived", string(id)+".json")
 
-	if err := os.Rename(src, dst); err != nil {
-		return fmt.Errorf("archiving checkpoint: %w", err)
+	if err := WriteFileJSON(dst, finalState, 0o640); err != nil {
+		return fmt.Errorf("writing workflow archive: %w", err)
 	}
 
 	// Remove journal and workflow directory.
