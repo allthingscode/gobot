@@ -16,7 +16,10 @@ import (
 func (m *SessionManager) loadHistory(ctx context.Context, sessionKey string, store CheckpointStore) (messages []agentctx.StrategicMessage, iteration int, stateless bool, err error) {
 	if store != nil {
 		snap, loadErr := store.LoadLatest(ctx, sessionKey)
-		if loadErr == nil && snap != nil {
+		if loadErr != nil {
+			return nil, 0, false, fmt.Errorf("load conversation checkpoint: %w", loadErr)
+		}
+		if snap != nil {
 			messages = snap.Messages
 			iteration = snap.Iteration
 		} else {
