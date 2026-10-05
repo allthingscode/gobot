@@ -103,13 +103,13 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName 
 		return m.waitForApproval(ctx, reqID, ch)
 	}
 
-	argBytes, _ := json.MarshalIndent(args, "", "  ")
+	approvalText := renderHITLApproval(toolName, args)
 
 	m.persistLifecycle(ctx, reqID, sessionKey, toolName, args, hitlSending)
 
 	msg := bot.OutboundMessage{
 		ChatID: chatID,
-		Text:   fmt.Sprintf("<b>Approval Required</b>\nTool: <code>%s</code>\nArgs:\n<pre>%s</pre>", toolName, string(argBytes)),
+		Text:   approvalText,
 	}
 	buttons := [][]bot.Button{
 		{
@@ -124,6 +124,16 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName 
 
 	m.persistLifecycle(ctx, reqID, sessionKey, toolName, args, hitlPending)
 	return m.waitForApproval(ctx, reqID, ch)
+}
+
+// renderHITLApproval protects dynamic JSON from the adapter's fixed code fences.
+func renderHITLApproval(toolName string, args map[string]any) string {
+	toolJSON, _ := json.Marshal(toolName)
+	argsJSON, _ := json.MarshalIndent(args, "", "  ")
+	protect := func(value []byte) string {
+		return strings.ReplaceAll(string(value), "`", `\u0060`)
+	}
+	return fmt.Sprintf("**Approval Required**\nTool:\n```\n%s\n```\nArgs:\n```\n%s\n```", protect(toolJSON), protect(argsJSON))
 }
 
 func (m *HITLManager) persistedStatus(ctx context.Context, reqID string) (string, error) {

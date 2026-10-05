@@ -3,13 +3,19 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"html"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/bot"
+	"github.com/allthingscode/gobot/internal/telegram"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -302,5 +308,130 @@ func TestHITLManager_Persistence(t *testing.T) {
 	<-done
 	if store.approvals[reqID3] != hitlApproved {
 		t.Errorf("expected store to be updated to approved, got %q", store.approvals[reqID3])
+	}
+}
+
+func assertHITLHTML(t *testing.T, markdown, tool string, args map[string]any) {
+	t.Helper()
+	toolJSON, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argsJSON, err := json.MarshalIndent(args, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloads := []string{strings.ReplaceAll(string(toolJSON), "`", `\u0060`), strings.ReplaceAll(string(argsJSON), "`", `\u0060`)}
+	expected := "<b>Approval Required</b>\nTool:\n<pre><code>" + html.EscapeString(payloads[0]) + "\n</code></pre>\nArgs:\n<pre><code>" + html.EscapeString(payloads[1]) + "\n</code></pre>"
+	actual := telegram.ToHTML(markdown)
+	if actual != expected {
+		t.Fatalf("HTML mismatch\ngot: %s\nwant: %s", actual, expected)
+	}
+	var decodedTool string
+	var decodedArgs, normalizedArgs map[string]any
+	blocks := strings.Split(actual, "<pre><code>")
+	if err := json.Unmarshal([]byte(html.UnescapeString(strings.Split(blocks[1], "</code></pre>")[0])), &decodedTool); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(html.UnescapeString(strings.Split(blocks[2], "</code></pre>")[0])), &decodedArgs); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(argsJSON, &normalizedArgs); err != nil {
+		t.Fatal(err)
+	}
+	if decodedTool != tool || !reflect.DeepEqual(decodedArgs, normalizedArgs) {
+		t.Fatalf("JSON round trip mismatch: %q, %#v", decodedTool, decodedArgs)
+	}
+}
+
+func TestRenderHITLApproval(t *testing.T) {
+	t.Parallel()
+	type testCase struct {
+		name, tool string
+		args       map[string]any
+	}
+	cases := append(make([]testCase, 0, 13), []testCase{
+		{"ordinary", "shell", map[string]any{"command": "pwd", "count": 2}},
+		{"nil", "shell", nil},
+		{"empty", "", map[string]any{}},
+		{"nested", "工具🙂", map[string]any{"nested": map[string]any{"list": []any{true, nil, 1, "é🙂"}}}},
+	}...)
+	for _, hostile := range []string{"line one\nline two", "<b>x</b>&<script>", "**bold** _italic_ [link](https://example.com)", "\"quote\"\\path\nnext", "`", "``", "```", "``````", `\u0060`} {
+		cases = append(cases, testCase{hostile, hostile, map[string]any{hostile: hostile}})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertHITLHTML(t, renderHITLApproval(tc.tool, tc.args), tc.tool, tc.args)
+		})
+	}
+}
+
+type formattingHITLAPI struct {
+	mockBotAPI
+	onSend func(context.Context, bot.OutboundMessage, [][]bot.Button) error
+}
+
+func (a *formattingHITLAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, buttons [][]bot.Button) error {
+	return a.onSend(ctx, msg, buttons)
+}
+
+type formattingHITLStore struct {
+	mockHITLStore
+	t                    *testing.T
+	session, tool, reqID string
+	args                 map[string]any
+	statuses             []string
+}
+
+func (s *formattingHITLStore) SaveHITLApproval(ctx context.Context, reqID, session, tool string, args map[string]any, status string) error {
+	s.t.Helper()
+	if reqID != s.reqID {
+		s.t.Fatalf("changed request ID: %s", reqID)
+	}
+	if status == hitlSending || status == hitlPending {
+		if session != s.session || tool != s.tool || !reflect.DeepEqual(args, s.args) {
+			s.t.Fatal("display encoding changed stored inputs")
+		}
+	}
+	s.statuses = append(s.statuses, status)
+	return s.mockHITLStore.SaveHITLApproval(ctx, reqID, session, tool, args, status)
+}
+
+func TestHITLRequestApprovalFormatting(t *testing.T) {
+	t.Parallel()
+	const session = "telegram:123:456"
+	const tool = "<b>**tool**```\\u0060"
+	args := map[string]any{"```<key>": "[value](url)&```\\u0060"}
+	argJSON, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(append([]byte(session+tool), argJSON...))
+	reqID := fmt.Sprintf("%x", sum)[:12]
+	store := &formattingHITLStore{t: t, session: session, tool: tool, args: args, reqID: reqID}
+	api := &formattingHITLAPI{}
+	manager := NewHITLManager(api, store, []string{tool})
+	sent := false
+	api.onSend = func(ctx context.Context, msg bot.OutboundMessage, buttons [][]bot.Button) error {
+		sent = true
+		if msg.ChatID != 123 {
+			t.Fatalf("wrong chat: %d", msg.ChatID)
+		}
+		assertHITLHTML(t, msg.Text, tool, args)
+		expected := [][]bot.Button{{{Text: "✅ Approve", Data: "hitl:approve:" + reqID}, {Text: "❌ Reject", Data: "hitl:reject:" + reqID}}}
+		if !reflect.DeepEqual(buttons, expected) {
+			t.Fatalf("buttons changed: %#v", buttons)
+		}
+		return manager.HandleCallback(ctx, bot.InboundCallback{ChatID: 123, Data: buttons[0][0].Data})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	approved, err := manager.RequestApproval(ctx, session, tool, args)
+	if err != nil || !approved || !sent {
+		t.Fatalf("request: approved=%v sent=%v err=%v", approved, sent, err)
+	}
+	if !reflect.DeepEqual(store.statuses, []string{hitlSending, hitlApproved, hitlPending}) {
+		t.Fatalf("lifecycle changed: %v", store.statuses)
 	}
 }
