@@ -3,12 +3,80 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
+
+//nolint:gocognit,cyclop // Table matrices inspect persisted lifecycle state and failure evidence together.
+func TestReopenedWorkflow_CheckpointAndArchive(t *testing.T) {
+	t.Parallel()
+	for _, terminal := range []WorkflowStatus{StatusCompleted, StatusFailed} {
+		t.Run(string(terminal), func(t *testing.T) {
+			t.Parallel()
+			cfg := ManagerConfig{StateDir: t.TempDir(), LockTimeout: time.Second}
+			mgr := NewManager(cfg)
+			if err := mgr.Init(); err != nil {
+				t.Fatal(err)
+			}
+			id := WorkflowID("durable")
+			if _, err := mgr.CreateWorkflow(id, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := mgr.UpdateStatus(id, StatusRunning); err != nil {
+				t.Fatal(err)
+			}
+			for step := 1; step <= 3; step++ {
+				wf, err := NewManager(cfg).LoadWithRecovery(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wf.Data = json.RawMessage(fmt.Sprintf(`{"step":%d}`, step))
+				if err := mgr.SaveCheckpoint(wf); err != nil {
+					t.Fatal(err)
+				}
+				reopened, err := NewManager(cfg).LoadWithRecovery(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var data struct {
+					Step int `json:"step"`
+				}
+				if err := json.Unmarshal(reopened.Data, &data); err != nil {
+					t.Fatal(err)
+				}
+				if reopened.Status != StatusRunning || data.Step != step || reopened.Version != 2+step {
+					t.Fatalf("reopened: %+v, data: %+v", reopened, data)
+				}
+				if _, err := os.Stat(mgr.journalPath(id)); !os.IsNotExist(err) {
+					t.Fatalf("checkpoint journal: %v", err)
+				}
+			}
+			if err := mgr.UpdateStatus(id, terminal); err != nil {
+				t.Fatal(err)
+			}
+			if err := NewManager(cfg).Archive(id); err != nil {
+				t.Fatal(err)
+			}
+			var archived WorkflowState
+			if err := ReadFileJSON(filepath.Join(cfg.StateDir, "archived", string(id)+".json"), &archived); err != nil {
+				t.Fatal(err)
+			}
+			var data struct {
+				Step int `json:"step"`
+			}
+			if err := json.Unmarshal(archived.Data, &data); err != nil {
+				t.Fatal(err)
+			}
+			if archived.Status != terminal || data.Step != 3 || archived.Version != 5 {
+				t.Fatalf("archive: %+v, data: %+v", archived, data)
+			}
+		})
+	}
+}
 
 // TestCrashRecovery_SimulatesPowerFailure verifies recovery after simulated crash.
 func TestCrashRecovery_SimulatesPowerFailure(t *testing.T) {
