@@ -101,11 +101,11 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 | Target | `strong` | `default` | `light` |
 |---|---|---|---|
 | `claude` (and `agent`) | opus | sonnet | haiku |
-| `codex` | gpt-6.1-sol | gpt-6.1-sol | gpt-6-luna |
+| `codex` | gpt-6.1-sol at high | gpt-6.1-sol at low | gpt-6-luna at high |
 | `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.8 Flash (High) | Gemini 3.8 Flash (Medium) |
 | `grok` | inherit | inherit | inherit |
 
-For a Codex target Crucible also prints a reasoning effort.  `models.effort.codex.<tier>` in `config.yaml` overrides it.
+For Codex a tier is a **level**: a model and a reasoning effort taken together, resolved as one pair by `Get-CodexLevel` and printed as `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`. A level is changed as a pair under `models.targets.codex.<tier>` (`model:` and `effort:`), never one half alone. Other targets have no effort setting, so their tiers are a model alone.
 
 `design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming->implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by Crucible.
 

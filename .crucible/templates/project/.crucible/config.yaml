@@ -37,8 +37,10 @@ roles:
 # NOTE: gpt-6-luna passed launch-codex-specialist.ps1 -Preflight on ChatGPT login on
 # 2026-09-28, and gpt-6.1-sol on 2026-10-02. Preflight the exact slug for the running account.
 # gpt-6-astra, like Claude Fable, is for evaluation work, not a pipeline tier.
-# Each Codex tier is a rung, a model plus an effort (strong sol/high, default sol/low,
-# light luna/high). An optional effort.codex.<tier> block changes the effort half.
+# A Codex tier is a level: a model and a reasoning effort taken together, never one without
+# the other. Change a level by changing its pair. Effort is one of none, minimal, low,
+# medium, high, xhigh, max. Luna is most effective at high, so the light level is Luna at
+# high rather than a stronger model at a lower effort.
 models:
   default_target: claude
   targets:
@@ -47,9 +49,15 @@ models:
       default: sonnet
       light: haiku
     codex:
-      strong: gpt-6.1-sol
-      default: gpt-6.1-sol
-      light: gpt-6-luna
+      strong:
+        model: gpt-6.1-sol
+        effort: high
+      default:
+        model: gpt-6.1-sol
+        effort: low
+      light:
+        model: gpt-6-luna
+        effort: high
     antigravity:
       strong: "Gemini 3.1 Pro (High)"
       default: "Gemini 3.8 Flash (High)"

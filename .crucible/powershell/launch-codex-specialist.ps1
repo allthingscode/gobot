@@ -312,7 +312,7 @@ if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Model)) {
-    Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED MODEL] value from crucible.ps1 -Init -Target codex)." -ForegroundColor Red
+    Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED LEVEL] pair from crucible.ps1 -Init -Target codex: its model as -Model, its effort as -Effort)." -ForegroundColor Red
     exit 2
 }
 
@@ -508,7 +508,12 @@ Write-Host ""
 $launchTarget = if ($usingAdhocSession) { $adhocLabel + " (ad-hoc prompt)" } else { $TaskId + " (" + $Phase + ")" }
 Write-Host ("[CODEX SPECIALIST] Launching " + $Role + " for " + $launchTarget) -ForegroundColor Cyan
 Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
-Write-Host ("  model: " + $Model + "  |  access: danger-full-access  |  workdir: " + $WorkingDir)
+if ([string]::IsNullOrWhiteSpace($Effort)) {
+    Write-Host ("  level: " + $Model + " at Codex's own default effort  |  access: danger-full-access  |  workdir: " + $WorkingDir)
+    Write-Host "  [WARN] No -Effort, so this is not a Crucible level. A level is a model and an effort together: pass the [RECOMMENDED LEVEL] pair." -ForegroundColor Yellow
+} else {
+    Write-Host ("  level: " + $Model + " at " + $Effort + " effort  |  access: danger-full-access  |  workdir: " + $WorkingDir)
+}
 if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 
 # Event timestamps carry whole seconds; back off one so an event in the launch second counts.

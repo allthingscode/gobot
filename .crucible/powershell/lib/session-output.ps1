@@ -8,6 +8,7 @@ function Write-NextStep {
         [string]$RecommendedModel = $null,
         [string]$RecommendedTarget = $null,
         [string]$RecommendedEffort = $null,
+        [string]$RecommendedLevel = $null,
         [switch]$ShouldAutoAdvance
     )
     $nsDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
@@ -31,6 +32,9 @@ function Write-NextStep {
         }
         Write-Host ""
         Write-Host $ActionCmd
+        if (-not [string]::IsNullOrEmpty($RecommendedLevel)) {
+            Write-Host ("[RECOMMENDED LEVEL] " + $RecommendedLevel + " = " + $RecommendedModel + " at " + $RecommendedEffort + " effort (target codex) - a level is the model and effort together; pass both.") -ForegroundColor Cyan
+        }
         if (-not [string]::IsNullOrEmpty($RecommendedModel)) {
             $targetLabel = ""
             if (-not [string]::IsNullOrWhiteSpace($RecommendedTarget)) {
@@ -43,7 +47,7 @@ function Write-NextStep {
             }
         }
         if (-not [string]::IsNullOrEmpty($RecommendedEffort)) {
-            Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort (Codex only).") -ForegroundColor Cyan
+            Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort, with -Model " + $RecommendedModel + " (Codex only).") -ForegroundColor Cyan
         }
         Write-Host ""
         Write-Quiet ("[NEXT PIPELINE STEP] Run at session end (also saved to " + $nsFile + "):") -ForegroundColor DarkGray
@@ -690,18 +694,26 @@ function Write-CrucibleCiStatusBanner {
     $rebaseCount = if ($handoff.PSObject.Properties["rebase_count"]) { [int]$handoff.rebase_count } else { 0 }
     $retryCount = if ($handoff.PSObject.Properties["handoff_retry_count"]) { [int]$handoff.handoff_retry_count } else { 0 }
     $capabilityTier = Get-SpecialistModel -TargetPhase $handoff.target_phase -BudgetTier $handoffTier -DesignRequired $designRequired -RebaseCount $rebaseCount -HandoffRetryCount $retryCount
-    $recommendedModel = Get-ConfiguredModel -Target $Target -Tier $capabilityTier
     $recommendedTarget = if ($null -ne $Target) { $Target.Trim().ToLowerInvariant() } else { "" }
     if ([string]::IsNullOrWhiteSpace($recommendedTarget) -or $recommendedTarget -eq "agent") { $recommendedTarget = "claude" }
+    $recommendedModel = ""
     $recommendedEffort = ""
-    if ($Target -eq "codex") { $recommendedEffort = Get-SpecialistEffort -Tier $capabilityTier }
+    $recommendedLevel = ""
+    $codexLevel = if ($recommendedTarget -eq "codex") { Get-CodexLevel -Tier $capabilityTier } else { $null }
+    if ($null -ne $codexLevel) {
+        $recommendedModel = $codexLevel.Model
+        $recommendedEffort = $codexLevel.Effort
+        $recommendedLevel = $codexLevel.Tier
+    } else {
+        $recommendedModel = Get-ConfiguredModel -Target $Target -Tier $capabilityTier
+    }
 
     # Gate transitions always require human confirmation regardless of -AutoAdvance.
     # Research Gate is enforced by Researcher SOP; Human Gate fires on all operator handoffs.
     $isGateTransition = (($handoff.source_phase -eq "deployment") -or ($handoff.source_phase -eq "research")) -and -not $isBootstrap
     $shouldAutoAdvance = $AutoAdvance -and -not $isGateTransition
 
-    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedTarget $recommendedTarget -RecommendedEffort $recommendedEffort -ShouldAutoAdvance:$shouldAutoAdvance
+    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedTarget $recommendedTarget -RecommendedEffort $recommendedEffort -RecommendedLevel $recommendedLevel -ShouldAutoAdvance:$shouldAutoAdvance
 
     $Context.ActionCmd = $actionCmd
     $Context.ShouldAutoAdvance = $shouldAutoAdvance

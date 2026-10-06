@@ -85,15 +85,8 @@ $script:TIER_STRONG  = "strong"
 $script:TIER_DEFAULT = "default"
 $script:TIER_LIGHT   = "light"
 $script:MODEL_ESCALATION_TIERS = @("high", "extended")
-
-# Codex reasoning effort. Claude's Agent dispatch has no effort knob, so this is consumed only
-# when the dispatch target is codex, via launch-codex-specialist.ps1 -Effort. A tier picks a rung:
-# a model and an effort together (strong gpt-6.1-sol/high, default gpt-6.1-sol/low, light
-# gpt-6-luna/high). Luna is most effective at high, so the cheapest rung is Luna/high, not a
-# lower effort. config.yaml models.effort.codex.<tier> overrides this map, alongside
-# models.targets.codex.<tier> for the model (e.g. light: gpt-5.6-terra with effort low).
-$script:TIER_EFFORT = @{ strong = "high"; default = "low"; light = "high" }
-$script:CODEX_EFFORT_VALUES = @("none", "minimal", "low", "medium", "high", "xhigh", "max")
+# For a codex target a tier is a level, a model and an effort together: Get-CodexLevel
+# (lib/config-helpers.ps1) resolves both halves at once.
 
 function Get-SpecialistModel {
     [CmdletBinding()]
@@ -152,29 +145,6 @@ function Resolve-StickyTarget {
         }
     }
     return $Target
-}
-
-# Resolve an abstract capability tier (strong/default/light) to a Codex reasoning effort.
-# Returns "" for an empty/unknown tier (e.g. the 'done' phase) so the caller emits nothing.
-function Get-SpecialistEffort {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Tier,
-        [string]$ProjectRoot = ""
-    )
-
-    $t = if ($null -ne $Tier) { $Tier.Trim().ToLowerInvariant() } else { "" }
-    if (-not $script:TIER_EFFORT.ContainsKey($t)) { return "" }
-
-    $builtIn = $script:TIER_EFFORT[$t]
-
-    $configured = Get-EffortFromConfig -Target "codex" -Tier $t -ProjectRoot $ProjectRoot
-    if (-not [string]::IsNullOrWhiteSpace($configured)) {
-        $value = $configured.Trim().ToLowerInvariant()
-        if ($script:CODEX_EFFORT_VALUES -contains $value) { return $value }
-        Write-Warning ("config.yaml models.effort.codex." + $t + " is '" + $configured + "', which is not one of " + ($script:CODEX_EFFORT_VALUES -join ", ") + "; using the default '" + $builtIn + "'.")
-    }
-    return $builtIn
 }
 
 function Write-Quiet {

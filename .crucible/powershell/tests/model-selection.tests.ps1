@@ -3,7 +3,8 @@
 #      capability TIER (strong/default/light) -- provider-agnostic routing.
 #   2. Get-ConfiguredModel resolves that tier to a concrete model for the active -Target
 #      (claude/codex/antigravity/grok), preferring the config.yaml `models:` block and falling
-#      back to the framework default map.
+#      back to the framework default map. For codex a tier is a level, a model and an effort
+#      together, resolved as one pair by Get-CodexLevel.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -133,18 +134,81 @@ $results += Run-Test "Tiers absent from config fall back to the default map" {
     Assert-Result "grok default (not in cfg) -> inherit" ((Get-ConfiguredModel -Target 'grok' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'inherit') "expected inherit"
 }
 
-# --- Stage 1b: capability tier -> Codex reasoning effort ---
+# --- Stage 2b: a Codex tier is a level, a model and an effort together ---
 
-$results += Run-Test "Tier -> Codex effort: strong high, default low, light high" {
-    Assert-Result "strong -> high" ((Get-SpecialistEffort -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
-    Assert-Result "default -> low" ((Get-SpecialistEffort -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'low') "expected low"
-    Assert-Result "light -> high" ((Get-SpecialistEffort -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
+function Get-LevelPair {
+    param([string]$Tier, [string]$Root)
+    $level = Get-CodexLevel -Tier $Tier -ProjectRoot $Root
+    if ($null -eq $level) { return "" }
+    return ($level.Model + "/" + $level.Effort)
 }
 
-$results += Run-Test "Effort: empty/unknown tier yields empty (nothing emitted)" {
-    Assert-Result "empty tier" ((Get-SpecialistEffort -Tier '' -ProjectRoot $noCfgRoot) -eq '') "expected empty"
-    Assert-Result "unknown tier" ((Get-SpecialistEffort -Tier 'bogus' -ProjectRoot $noCfgRoot) -eq '') "expected empty"
-    Assert-Result "case/space-insensitive" ((Get-SpecialistEffort -Tier '  STRONG ' -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
+function New-LevelConfigRoot {
+    param([string]$Name, [string]$Models)
+    $root = New-TestFixtureRoot -NameHint $Name
+    New-Item -ItemType Directory -Path (Join-Path $root ".crucible") -Force | Out-Null
+    $body = "project:`n  name: Tmp`n" + $Models.TrimEnd() + "`nverification:`n  quick: []`n"
+    [System.IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), $body, (New-Object System.Text.UTF8Encoding $false))
+    return $root
+}
+
+$results += Run-Test "Built-in Codex levels: strong sol/high, default sol/low, light luna/high" {
+    Assert-Result "strong" ((Get-LevelPair 'strong' $noCfgRoot) -eq 'gpt-6.1-sol/high') "expected gpt-6.1-sol/high"
+    Assert-Result "default" ((Get-LevelPair 'default' $noCfgRoot) -eq 'gpt-6.1-sol/low') "expected gpt-6.1-sol/low"
+    Assert-Result "light" ((Get-LevelPair 'light' $noCfgRoot) -eq 'gpt-6-luna/high') "expected gpt-6-luna/high"
+}
+
+$results += Run-Test "Codex level: empty/unknown tier has no level (nothing emitted)" {
+    Assert-Result "empty tier" ($null -eq (Get-CodexLevel -Tier '' -ProjectRoot $noCfgRoot)) "expected no level"
+    Assert-Result "unknown tier" ($null -eq (Get-CodexLevel -Tier 'bogus' -ProjectRoot $noCfgRoot)) "expected no level"
+    Assert-Result "case/space-insensitive" ((Get-LevelPair '  STRONG ' $noCfgRoot) -eq 'gpt-6.1-sol/high') "expected gpt-6.1-sol/high"
+}
+
+$pairRoot = New-LevelConfigRoot -Name "modelsel-pair" -Models @"
+models:
+  targets:
+    codex:
+      strong:
+        model: gpt-6.1-sol
+        effort: XHigh
+      light:
+        model: gpt-5.6-terra
+        effort: low
+"@
+
+$results += Run-Test "config.yaml sets a Codex level as one model and effort pair" {
+    $warnings = $null
+    $strong = Get-CodexLevel -Tier 'strong' -ProjectRoot $pairRoot -WarningVariable warnings
+    Assert-Result "strong pair" (($strong.Model + "/" + $strong.Effort) -eq 'gpt-6.1-sol/xhigh') "expected gpt-6.1-sol/xhigh"
+    Assert-Result "light pair" ((Get-LevelPair 'light' $pairRoot) -eq 'gpt-5.6-terra/low') "expected gpt-5.6-terra/low"
+    Assert-Result "unset level keeps its built-in pair" ((Get-LevelPair 'default' $pairRoot) -eq 'gpt-6.1-sol/low') "expected gpt-6.1-sol/low"
+    Assert-Result "pair form is silent" (@($warnings).Count -eq 0) ("expected no warning, got: " + (@($warnings) -join "`n"))
+    Assert-Result "model resolution reads the pair" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $pairRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+}
+
+$halfRoot = New-LevelConfigRoot -Name "modelsel-half" -Models @"
+models:
+  targets:
+    codex:
+      strong:
+        model: gpt-6.1-sol
+"@
+$badEffortRoot = New-LevelConfigRoot -Name "modelsel-badpair" -Models @"
+models:
+  targets:
+    codex:
+      light:
+        model: gpt-6-luna
+        effort: turbo
+"@
+
+$results += Run-Test "A Codex level missing a half, or with an unknown effort, is unreadable" {
+    $halfError = ""
+    try { Get-CodexLevel -Tier 'strong' -ProjectRoot $halfRoot | Out-Null } catch { $halfError = $_.Exception.Message }
+    Assert-Result "half a pair throws" ($halfError -match "models\.targets\.codex\.strong' is a Codex level, so it needs both a model and an effort") ("expected a both-halves error, got: " + $halfError)
+    $badError = ""
+    try { Get-CodexLevel -Tier 'light' -ProjectRoot $badEffortRoot | Out-Null } catch { $badError = $_.Exception.Message }
+    Assert-Result "unknown effort throws" ($badError -match "models\.targets\.codex\.light\.effort' is 'turbo'") ("expected an unknown-effort error, got: " + $badError)
 }
 
 $effortRoot = New-TestFixtureRoot -NameHint "modelsel-effort"
@@ -166,35 +230,48 @@ verification:
 "@
 [System.IO.File]::WriteAllText((Join-Path $effortRoot ".crucible/config.yaml"), $effortBody, (New-Object System.Text.UTF8Encoding $false))
 
-$results += Run-Test "config.yaml models.effort.codex overrides the built-in effort" {
-    Assert-Result "configured strong -> medium" ((Get-SpecialistEffort -Tier 'strong' -ProjectRoot $effortRoot) -eq 'medium') "expected medium"
-    Assert-Result "configured default -> low" ((Get-SpecialistEffort -Tier 'default' -ProjectRoot $effortRoot) -eq 'low') "expected low"
+$results += Run-Test "The older split form still reads, and warns that it splits a level" {
     $warnings = $null
-    $light = Get-SpecialistEffort -Tier 'light' -ProjectRoot $effortRoot -WarningVariable warnings -WarningAction SilentlyContinue
-    Assert-Result "invalid light -> built-in high" ($light -eq 'high') ("expected high, got " + $light)
+    $strong = Get-CodexLevel -Tier 'strong' -ProjectRoot $effortRoot -WarningVariable warnings -WarningAction SilentlyContinue
+    Assert-Result "split strong -> terra/medium" (($strong.Model + "/" + $strong.Effort) -eq 'gpt-5.6-terra/medium') "expected gpt-5.6-terra/medium"
+    Assert-Result "split effort warns" ((@($warnings) -join "`n") -match "models\.effort\.codex\.strong sets the effort of the strong level apart from its model") ("expected a split warning, got: " + (@($warnings) -join "`n"))
+    $warnings = $null
+    $light = Get-CodexLevel -Tier 'light' -ProjectRoot $effortRoot -WarningVariable warnings -WarningAction SilentlyContinue
+    Assert-Result "invalid light -> built-in high" ($light.Effort -eq 'high') ("expected high, got " + $light.Effort)
     Assert-Result "invalid light names the value" ((@($warnings) -join "`n") -match "models\.effort\.codex\.light is 'turbo'") ("expected a warning naming 'turbo', got: " + (@($warnings) -join "`n"))
-    Assert-Result "effort does not leak into model resolution" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $effortRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
+    Assert-Result "model resolution reads the split model" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $effortRoot) -eq 'gpt-5.6-terra') "expected gpt-5.6-terra"
 }
 
-# --- End-to-end: phase -> tier -> model for a codex pipeline ---
+$results += Run-Test "A bare model that changes a level's model, with no effort, warns" {
+    $warnings = $null
+    $strong = Get-CodexLevel -Tier 'strong' -ProjectRoot $cfgRoot -WarningVariable warnings -WarningAction SilentlyContinue
+    Assert-Result "pinned model at the built-in effort" (($strong.Model + "/" + $strong.Effort) -eq 'pinned-codex-x/high') "expected pinned-codex-x/high"
+    Assert-Result "half change warns" ((@($warnings) -join "`n") -match "changes the strong level's model to 'pinned-codex-x' but not its effort") ("expected a half-change warning, got: " + (@($warnings) -join "`n"))
+    $sameRoot = New-LevelConfigRoot -Name "modelsel-same" -Models "models:`n  targets:`n    codex:`n      strong: gpt-6.1-sol`n"
+    $warnings = $null
+    Get-CodexLevel -Tier 'strong' -ProjectRoot $sameRoot -WarningVariable warnings | Out-Null
+    Assert-Result "bare built-in model is silent" (@($warnings).Count -eq 0) ("expected no warning, got: " + (@($warnings) -join "`n"))
+    Remove-Item -Recurse -Force -LiteralPath $sameRoot -ErrorAction SilentlyContinue
+}
 
-$results += Run-Test "End-to-end: low-tier grooming on codex resolves to gpt-6.1-sol + low effort" {
+# --- End-to-end: phase -> tier -> level for a codex pipeline ---
+
+$results += Run-Test "End-to-end: low-tier grooming on codex resolves to the gpt-6.1-sol at low level" {
     $tier = Get-SpecialistModel -TargetPhase 'grooming' -BudgetTier 'low'
     Assert-Result "tier is default" ($tier -eq 'default') "expected default tier"
-    Assert-Result "codex default -> gpt-6.1-sol" ((Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot) -eq 'gpt-6.1-sol') "expected gpt-6.1-sol"
-    $model = Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot
-    Assert-Result "codex default -> low effort" ((Get-SpecialistEffort -Tier $tier -ProjectRoot $noCfgRoot) -eq 'low') "expected low"
+    Assert-Result "default level" ((Get-LevelPair $tier $noCfgRoot) -eq 'gpt-6.1-sol/low') "expected gpt-6.1-sol/low"
 }
 
-$results += Run-Test "End-to-end: deployment on codex resolves to the Luna/high rung" {
+$results += Run-Test "End-to-end: deployment on codex resolves to the gpt-6-luna at high level" {
     $tier = Get-SpecialistModel -TargetPhase 'deployment' -BudgetTier 'low'
-    $model = Get-ConfiguredModel -Target 'codex' -Tier $tier -ProjectRoot $noCfgRoot
-    Assert-Result "deployment -> gpt-6-luna" ($model -eq 'gpt-6-luna') ("expected gpt-6-luna, got " + $model)
-    Assert-Result "gpt-6-luna -> high effort" ((Get-SpecialistEffort -Tier $tier -ProjectRoot $noCfgRoot) -eq 'high') "expected high"
+    Assert-Result "light level" ((Get-LevelPair $tier $noCfgRoot) -eq 'gpt-6-luna/high') "expected gpt-6-luna/high"
 }
 
 Remove-Item -Recurse -Force -LiteralPath $noCfgRoot -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -LiteralPath $effortRoot -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force -LiteralPath $pairRoot -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force -LiteralPath $halfRoot -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force -LiteralPath $badEffortRoot -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -LiteralPath $cfgRoot -ErrorAction SilentlyContinue
 
 if ($results -contains $false) {

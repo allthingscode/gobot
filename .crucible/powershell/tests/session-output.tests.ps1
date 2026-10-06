@@ -109,6 +109,17 @@ try {
         $claudeLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "sonnet" -RecommendedTarget "claude" 6>&1 | ForEach-Object { "$_" })
         $claudeLine = @($claudeLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
         Assert-Result -Name "claude line names its target" -Condition ($claudeLine.Count -eq 1 -and $claudeLine[0] -match 'sonnet \(target claude\) - dispatch the specialist') -FailureMessage ("got: " + ($claudeLine -join " | "))
+        Assert-Result -Name "claude prints no level" -Condition (-not ($claudeLines -match '\[RECOMMENDED LEVEL\]')) -FailureMessage ("got: " + ($claudeLines -join " | "))
+    }
+
+    # Item 163: a Codex level is a model and an effort together, so it is printed as one pair.
+    $results += Run-Test -Name "Write-NextStep prints a Codex level as one model and effort pair" -Body {
+        $sessionDir = Join-Path $tempRoot "level-line/session"
+        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-914" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" 6>&1 | ForEach-Object { "$_" })
+        $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
+        Assert-Result -Name "level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = gpt-6\.1-sol at low effort \(target codex\)') -FailureMessage ("got: " + ($lines -join " | "))
+        $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
+        Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match 'low - .*-Model gpt-6\.1-sol') -FailureMessage ("got: " + ($effort -join " | "))
     }
 
     $results += Run-Test -Name "New-CruciblePromptText applies replacement map" -Body {

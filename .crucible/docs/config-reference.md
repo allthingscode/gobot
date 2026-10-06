@@ -163,9 +163,15 @@ models:
       default: sonnet
       light: haiku
     codex:
-      strong: gpt-6.1-sol
-      default: gpt-6.1-sol
-      light: gpt-6-luna
+      strong:
+        model: gpt-6.1-sol
+        effort: high
+      default:
+        model: gpt-6.1-sol
+        effort: low
+      light:
+        model: gpt-6-luna
+        effort: high
     antigravity:
       strong: "Gemini 3.1 Pro (High)"
       default: "Gemini 3.8 Flash (High)"
@@ -180,8 +186,9 @@ models:
 - **The printed line names its target.** `[RECOMMENDED MODEL] sonnet (target claude)` is a Claude dispatch. A Grok orchestrator does not pass that slug. It passes `-Target grok` once; the sticky target keeps it, and the line for that target says `inherit`.
 - **Resolution order**: a value in this block wins; if absent, the framework default map (same values shown above) applies; an unknown target/tier degrades to the tier token rather than throwing. The block is optional - omit it and the defaults apply.
 - **Quoting**: quote any value containing spaces (e.g. the Antigravity labels).
-- **Codex model availability (ChatGPT login)**: measured with `powershell/launch-codex-specialist.ps1 -Preflight -Model <slug>`. On 2026-10-02, `gpt-6.1-sol` -> PASS. On 2026-09-28, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, and `gpt-5.6-terra` -> PASS. The tier defaults are `gpt-6.1-sol` (strong and default, at different efforts) and `gpt-6-luna` (light). `gpt-6-astra`, like Claude Fable, is not a tier default: it is for evaluation work, not routine pipeline phases. On 2026-09-02, `gpt-5.6-terra` -> PASS and `gpt-5.6-sol` -> PASS, while plain `gpt-5.6` -> FAIL, `gpt-5.6-codex` -> FAIL, and `gpt-5.6-mini` -> FAIL. Earlier families are retired or retiring and are not recommended. Do not generalize a result across slugs: preflight the exact slug on the account that will run it.
-- **Codex reasoning effort (`effort.codex`)**: Crucible prints a `[RECOMMENDED EFFORT]` line for a Codex target, and the orchestrator passes it to `launch-codex-specialist.ps1 -Effort`. A tier picks a rung: a model and an effort together. The built-in rungs are `strong` -> `gpt-6.1-sol` / `high`, `default` -> `gpt-6.1-sol` / `low`, `light` -> `gpt-6-luna` / `high`. Luna is most effective at `high`, so the cheapest rung is Luna/high rather than a lower effort on a stronger model. valid values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`, the set the API accepted on 2026-09-28. An invalid value prints a warning naming it and falls back to the built-in value. The block is optional, and there is no effort setting for other targets.
+- **Codex model availability (ChatGPT login)**: measured with `powershell/launch-codex-specialist.ps1 -Preflight -Model <slug>`. On 2026-10-02, `gpt-6.1-sol` -> PASS. On 2026-09-28, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, and `gpt-5.6-terra` -> PASS. The default levels use `gpt-6.1-sol` (strong and default) and `gpt-6-luna` (light). `gpt-6-astra`, like Claude Fable, is not a tier default: it is for evaluation work, not routine pipeline phases. On 2026-09-02, `gpt-5.6-terra` -> PASS and `gpt-5.6-sol` -> PASS, while plain `gpt-5.6` -> FAIL, `gpt-5.6-codex` -> FAIL, and `gpt-5.6-mini` -> FAIL. Earlier families are retired or retiring and are not recommended. Do not generalize a result across slugs: preflight the exact slug on the account that will run it.
+- **A Codex tier is a level.** A level is a model and a reasoning effort taken together, and Crucible never sets one half without the other. The built-in levels are `strong` = `gpt-6.1-sol` at `high`, `default` = `gpt-6.1-sol` at `low`, and `light` = `gpt-6-luna` at `high`. Luna is most effective at `high`, so the cheapest level is Luna at high rather than a stronger model at a lower effort. To change a level, write its pair under `targets.codex.<tier>` as `model:` and `effort:`, as above. Both halves are required: a level with only one, or an effort outside `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (the set the API accepted on 2026-09-28), is an unreadable config and stops `-Init`. For a Codex target Crucible prints `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`, then `[RECOMMENDED MODEL]` and `[RECOMMENDED EFFORT]`; the orchestrator passes both halves to `launch-codex-specialist.ps1` as `-Model` and `-Effort`. Other targets have no effort setting, so their tiers stay a model alone.
+- **Older Codex form.** Through 0.5.0, a Codex tier was a bare model (`codex: strong: gpt-6.1-sol`) with an optional separate `models.effort.codex.<tier>`. That still reads, with a warning wherever it splits a level: a separate `effort.codex` value, or a bare model that differs from the built-in level's model with no effort beside it (it would run at the built-in effort). A bare model that matches the built-in is silent. To migrate, write each level as its pair and delete `models.effort`.
 - **Dispatching Codex as a specialist**: when a phase is run by Codex (not the parent orchestrator), the parent launches it with `powershell/launch-codex-specialist.ps1`, which wraps `codex exec -s danger-full-access` and reports an explicit `STATUS=SUCCESS`/`STATUS=LAUNCH_FAILED` (so a broken runtime is never mistaken for a verdict). Run `launch-codex-specialist.ps1 -Preflight -Model <codex-model>` first. See `docs/orchestrators/claude.md`, `docs/orchestrators/grok.md`, and `docs/orchestrators/codex.md`.
 
 ---

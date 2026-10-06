@@ -16,7 +16,7 @@ Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are disp
 
 ### Default Specialist Target: Codex
 
-In this operating configuration, **Claude is the orchestrator and Codex runs all specialist work** (Groomer, Architect, Reviewer, Operator, Researcher). Default every dispatch to a Codex specialist via `launch-codex-specialist.ps1` (see *Dispatching a Codex Specialist*), resolving the model/effort with `crucible.ps1 -Init -Target codex -ProjectRoot "{project_root}"`. Fall back to a Claude `Agent` sub-agent only when a Codex preflight fails or the human asks for Claude on a specific phase. The orchestrator itself stays Claude - it never becomes a specialist.
+In this operating configuration, **Claude is the orchestrator and Codex runs all specialist work** (Groomer, Architect, Reviewer, Operator, Researcher). Default every dispatch to a Codex specialist via `launch-codex-specialist.ps1` (see *Dispatching a Codex Specialist*), resolving the level (a model and an effort together) with `crucible.ps1 -Init -Target codex -ProjectRoot "{project_root}"`. Fall back to a Claude `Agent` sub-agent only when a Codex preflight fails or the human asks for Claude on a specific phase. The orchestrator itself stays Claude - it never becomes a specialist.
 
 ### Specialist Model Selection
 
@@ -60,8 +60,8 @@ fails through a missing sandbox helper - producing a false `CHANGES_REQUESTED`).
 Crucible-blessed launcher, which wraps `codex exec -s danger-full-access` and reports an explicit
 launch status.
 
-1. Compute the Codex model. Run `crucible.ps1 -Init -ProjectRoot "{project_root}"` with `-Target codex` so the `[RECOMMENDED MODEL]`
-   line resolves to the configured Codex model (e.g. `gpt-6.1-sol`):
+1. Compute the Codex level. Run `crucible.ps1 -Init -ProjectRoot "{project_root}"` with `-Target codex` so the `[RECOMMENDED LEVEL]`
+   line resolves to the configured Codex level, a model and an effort (e.g. `gpt-6.1-sol` at `low`):
 
    ```bash
    pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -ProjectRoot "{project_root}" -Quiet
@@ -89,11 +89,13 @@ launch status.
    prints `WORKTREE  : none`, the phase is a no-code review-fix of a research item: omit `-WorkingDir`
    so the specialist runs in the project root, where the files it must fix live.
 
-   **Pass the recommended effort.** Alongside `[RECOMMENDED MODEL]`, Crucible prints a
-   `[RECOMMENDED EFFORT] <none|minimal|low|medium|high|xhigh|max>` line for a Codex target. Each tier is a rung, a model and an effort together:
-   strong -> `gpt-6.1-sol`/`high`, default -> `gpt-6.1-sol`/`low`, light -> `gpt-6-luna`/`high`,
-   unless `config.yaml` sets `models.effort.codex.<tier>`.
-   Pass that value as `-Effort`; the launcher forwards it as `-c model_reasoning_effort`. Effort is a
+   **Pass the whole level.** For a Codex target each tier is a level, a model and an effort
+   together, and Crucible prints it as one pair:
+   `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`, followed by `[RECOMMENDED MODEL]` and
+   `[RECOMMENDED EFFORT]`. The built-in levels are strong = `gpt-6.1-sol` at `high`, default =
+   `gpt-6.1-sol` at `low`, light = `gpt-6-luna` at `high`, unless `config.yaml` sets the pair under
+   `models.targets.codex.<tier>`. Always pass both halves, `-Model` and `-Effort`; the launcher forwards
+   the effort as `-c model_reasoning_effort` and warns when `-Effort` is missing. Effort is a
    Codex-only lever -- Claude's `Agent` dispatch has no effort knob (its effort is encoded in the model
    tier), so no effort line is printed for a Claude target.
 
