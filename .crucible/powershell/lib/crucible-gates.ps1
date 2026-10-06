@@ -846,6 +846,10 @@ function Invoke-HandoffPreflightValidation {
         $specFile = Get-BacklogItemPathForTask -Task $handoff.task_id
         if ($specFile -and (Test-Path $specFile)) {
             $specContent = Get-Content $specFile -Raw -Encoding UTF8
+            # The frontmatter is the one record of scope, so it is checked first and at path
+            # granularity. The prose section is the fallback for specs without it, and only
+            # its top-level directories can be trusted from free text.
+            $frontmatterAffinity = @(Get-SpecFrontmatterAffinity -SpecContent $specContent)
             $hasAffectedSection = $false
             $affectedSection = ""
             $affectedMatches = [regex]::Matches($specContent, '(?ism)^##+\s+[^\r\n]*(?:affected|scope)[^\r\n]*\r?\n(.*?)(?=\r?\n##+\s+|\z)')
@@ -866,8 +870,20 @@ function Invoke-HandoffPreflightValidation {
                     $hasAffectedSection = $true
                 }
             }
-            
-            if ($hasAffectedSection) {
+
+            if ($frontmatterAffinity.Count -gt 0) {
+                $widened = @(Get-AffinityWidening -Affinity @($handoff.file_affinity) -Declared $frontmatterAffinity)
+                if ($widened.Count -gt 0) {
+                    $joinedWidened = $widened -join ", "
+                    $joinedSpec = $frontmatterAffinity -join ", "
+                    Write-Host "[WARN] Handoff file_affinity ($joinedWidened) is not covered by the spec's frontmatter file_affinity ($joinedSpec). The frontmatter is the record of scope: add the widened paths to file_affinity in $specFile, or narrow the handoff." -ForegroundColor Yellow
+                    Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                        -Outcome "warned" -Kind "file_affinity_scope" -Notes "Handoff file_affinity contains paths ($joinedWidened) not covered by spec frontmatter ($joinedSpec)" `
+                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                } else {
+                    Write-Host "[INFO] Handoff file_affinity validated against spec's frontmatter file_affinity." -ForegroundColor Green
+                }
+            } elseif ($hasAffectedSection) {
                 $mentionedPaths = New-Object System.Collections.ArrayList
                 $backtickMatches = [regex]::Matches($affectedSection, '`([^`\r\n]+)`')
                 foreach ($m in $backtickMatches) {
@@ -878,7 +894,7 @@ function Invoke-HandoffPreflightValidation {
                     $val = $m.Groups[1].Value.Trim() -replace '`','' -replace '\*',''
                     Add-AffectedPathCandidate -Candidates $mentionedPaths -Candidate $val -RepoRoot $Context.RepoRoot
                 }
-                
+
                 $specTopLevels = @()
                 foreach ($p in $mentionedPaths) {
                     $parts = $p -split '[/\\]'
@@ -887,7 +903,7 @@ function Invoke-HandoffPreflightValidation {
                     }
                 }
                 $specTopLevels = @($specTopLevels | Select-Object -Unique)
-                
+
                 if ($specTopLevels.Count -gt 0) {
                     $overbroad = @()
                     foreach ($aff in @($handoff.file_affinity)) {
@@ -902,7 +918,7 @@ function Invoke-HandoffPreflightValidation {
                             }
                         }
                     }
-                    
+
                     if ($overbroad.Count -gt 0) {
                         $joinedOverbroad = $overbroad -join ", "
                         $joinedSpec = $specTopLevels -join ", "
@@ -913,105 +929,11 @@ function Invoke-HandoffPreflightValidation {
                     }
                 }
             } else {
-                # Parse frontmatter from spec content
-                $specLines = $specContent -split '\r?\n'
-                $frontmatterLines = @()
-                $foundEnd = $false
-                if ($specLines.Count -ge 2 -and $specLines[0].Trim() -eq "---") {
-                    for ($i = 1; $i -lt $specLines.Count; $i++) {
-                        if ($specLines[$i].Trim() -eq "---") {
-                            $foundEnd = $true
-                            break
-                        }
-                        $frontmatterLines += $specLines[$i]
-                    }
-                }
-                
-                $frontmatterAffinity = @()
-                if ($foundEnd) {
-                    $inAffinityBlock = $false
-                    for ($i = 0; $i -lt $frontmatterLines.Count; $i++) {
-                        $line = $frontmatterLines[$i]
-                        if ($line -match '^\s*file_affinity:\s*(.*)$') {
-                            $rest = $Matches[1].Trim()
-                            if ($rest -match '^\[(.*)\]$') {
-                                $items = $Matches[1] -split ','
-                                foreach ($item in $items) {
-                                    $clean = $item.Trim().Trim('"' + "'")
-                                    if (-not [string]::IsNullOrWhiteSpace($clean)) {
-                                        $frontmatterAffinity += $clean
-                                    }
-                                }
-                                $inAffinityBlock = $false
-                            } else {
-                                $inAffinityBlock = $true
-                            }
-                            continue
-                        }
-                        if ($inAffinityBlock) {
-                            if ($line -match '^\s*-\s*(.*)$') {
-                                $item = $Matches[1].Trim().Trim('"' + "'")
-                                if (-not [string]::IsNullOrWhiteSpace($item)) {
-                                    $frontmatterAffinity += $item
-                                }
-                            } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
-                                continue
-                            } else {
-                                $inAffinityBlock = $false
-                            }
-                        }
-                    }
-                }
-                
-                if (@($frontmatterAffinity).Count -gt 0) {
-                    $specTopLevels = @()
-                    foreach ($p in $frontmatterAffinity) {
-                        $parts = $p -split '[/\\]'
-                        if ($parts.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
-                            $specTopLevels += $parts[0].Trim()
-                        }
-                    }
-                    $specTopLevels = @($specTopLevels | Select-Object -Unique)
-                    
-                    if ($specTopLevels.Count -gt 0) {
-                        $overbroad = @()
-                        foreach ($aff in @($handoff.file_affinity)) {
-                            $affTrimmed = $aff.Trim().Trim('/') -split '[/\\]'
-                            if ($affTrimmed.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($affTrimmed[0])) {
-                                $top = $affTrimmed[0]
-                                if ($top -match '\.[A-Za-z0-9]{2,4}$') {
-                                    continue
-                                }
-                                if ($specTopLevels -notcontains $top) {
-                                    $overbroad += $aff
-                                }
-                            }
-                        }
-                        
-                        if ($overbroad.Count -gt 0) {
-                            $joinedOverbroad = $overbroad -join ", "
-                            $joinedSpec = $specTopLevels -join ", "
-                            Write-Host "[WARN] Handoff file_affinity ($joinedOverbroad) lists top-level directories absent from the spec's frontmatter file_affinity ($joinedSpec)." -ForegroundColor Yellow
-                            Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
-                                -Outcome "warned" -Kind "file_affinity_scope" -Notes "Handoff file_affinity contains paths ($joinedOverbroad) not mentioned in spec frontmatter ($joinedSpec)" `
-                                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                        } else {
-                            Write-Host "[INFO] Handoff file_affinity validated against spec's frontmatter file_affinity." -ForegroundColor Green
-                        }
-                    } else {
-                        # Frontmatter parsed but has no valid top-level directories - fall through to the warning
-                        Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
-                        Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
-                            -Outcome "unverifiable" -Kind "file_affinity_unverifiable" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
-                            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                    }
-                } else {
-                    # D23: Spec has no affected-files/packages section to validate file_affinity against
-                    Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
-                    Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
-                        -Outcome "unverifiable" -Kind "file_affinity_unverifiable" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
-                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                }
+                # D23: Spec has no affected-files/packages section to validate file_affinity against
+                Write-Host "[WARN] Spec file does not declare an 'Affected Files' or 'Affected Packages' section. File affinity cannot be validated." -ForegroundColor Yellow
+                Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
+                    -Outcome "unverifiable" -Kind "file_affinity_unverifiable" -Notes "Spec file does not declare an affected files/packages section to validate file_affinity against." `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             }
         }
     }

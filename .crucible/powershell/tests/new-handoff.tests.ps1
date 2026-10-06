@@ -702,6 +702,55 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "grooming->implementation refuses -FileAffinity wider than the spec frontmatter (item 164)" -Script {
+        # B-022's shape: the frontmatter kept three files while the Groomer passed the two
+        # packages. Every path is under internal/, which the top-level check could not see.
+        $taskId = New-TestTaskId "AFFINITY-WIDEN"
+        $specPath = ".crucible/backlog/bugs/active/$($taskId)_Affinity_Widen.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+        @"
+---
+item_id: "$taskId"
+type: "Bug"
+status: "Ready"
+target_phase: "implementation"
+priority: "P2"
+created_at: "2026-10-05"
+file_affinity:
+  - "internal/agent/session_history.go"
+  - "internal/agent/*_test.go"
+  - "internal/context/manager_test.go"
+budget_tier: "low"
+---
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $script:createdSpecFiles += $specPath
+
+        $baseArgs = @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "affinity widening test"
+            PromptVersion = "groomer_prompt-v16"
+            Artifacts = @($specPath)
+            SchemaPath = $schemaPath
+        }
+
+        $refusedArgs = $baseArgs.Clone()
+        $refusedArgs.FileAffinity = @("internal/agent/", "internal/context/")
+        $refused = Invoke-Generator -InputArgs $refusedArgs
+        if ($refused.ExitCode -eq 0) { throw "Expected refusal for a widened -FileAffinity, but the generator succeeded" }
+        $normalized = ConvertTo-NormalizedOutput $refused.Output
+        if ($normalized -notmatch "internal agent internal context is not covered by the spec s frontmatter file_affinity") { throw "Expected the refusal to name both widened paths, got: $($refused.Output)" }
+        if ($normalized -notmatch (ConvertTo-NormalizedOutput "$($taskId)_Affinity_Widen md")) { throw "Expected the refusal to name the spec to update, got: $($refused.Output)" }
+        if (Track-HandoffFile -TaskId $taskId) { throw "A refused widening must not write a handoff for $taskId" }
+
+        $coveredArgs = $baseArgs.Clone()
+        $coveredArgs.FileAffinity = @("internal/agent/session_history.go", "internal/agent/history_test.go")
+        $accepted = Invoke-Generator -InputArgs $coveredArgs
+        if ($accepted.ExitCode -ne 0) { throw "Paths the frontmatter covers must be accepted, got: $($accepted.Output)" }
+        if (-not (Track-HandoffFile -TaskId $taskId)) { throw "No handoff file created for $taskId" }
+    }
+
     Invoke-Test -Name "file affinity falls back to spec frontmatter block list when not provided" -Script {
         $taskId = New-TestTaskId "AFFINITY-SPEC-BLOCK"
         $specPath = ".crucible/backlog/chores/active/$($taskId)_Spec_Affinity_Block.md"

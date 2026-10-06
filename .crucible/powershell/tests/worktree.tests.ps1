@@ -54,6 +54,31 @@ try {
         Assert-Result -Name "sibling non-test mismatch" -Condition (-not (Test-PathMatchesAffinity -ChangedPath "internal/config/vector_index_interval.go" -Affinity "internal/config/config.go")) -FailureMessage "non-test sibling should not match file-level affinity"
     }
 
+    $results += Run-Test -Name "Get-AffinityWidening finds a widening under the same top-level directory (item 164)" -Body {
+        # B-022's shape: three declared files, a handoff carrying the union with two packages.
+        $declared = @("internal/agent/session_history.go", "internal/agent/*_test.go", "internal/context/manager_test.go")
+        $handoff = @("internal/agent/session_history.go", "internal/agent/*_test.go", "internal/context/manager_test.go", "internal/agent/", "internal/context/")
+        $widened = @(Get-AffinityWidening -Affinity $handoff -Declared $declared)
+        Assert-Result -Name "both packages widened" -Condition ($widened.Count -eq 2 -and $widened -contains "internal/agent/" -and $widened -contains "internal/context/") -FailureMessage ("expected internal/agent/ and internal/context/, got: " + ($widened -join ", "))
+
+        $covered = @(Get-AffinityWidening -Affinity @("internal/agent/session_history.go", "internal/agent/history_test.go", "internal/app/run.go") -Declared @("internal/agent/session_history.go", "internal/app/"))
+        Assert-Result -Name "covered paths are not widenings" -Condition ($covered.Count -eq 0) -FailureMessage ("expected no widening, got: " + ($covered -join ", "))
+
+        $none = @(Get-AffinityWidening -Affinity @() -Declared @("internal/app/"))
+        Assert-Result -Name "empty handoff" -Condition ($none.Count -eq 0) -FailureMessage "an empty handoff affinity widens nothing"
+    }
+
+    $results += Run-Test -Name "Get-SpecFrontmatterAffinity reads flow and block lists and ignores the body" -Body {
+        $flow = @(Get-SpecFrontmatterAffinity -SpecContent "---`nitem_id: `"X`"`nfile_affinity: [`"cmd/`", 'docs/a.md']`n---`nfile_affinity: [`"body/`"]`n")
+        Assert-Result -Name "flow list" -Condition ($flow.Count -eq 2 -and $flow[0] -eq "cmd/" -and $flow[1] -eq "docs/a.md") -FailureMessage ("flow list parsed as: " + ($flow -join ", "))
+
+        $block = @(Get-SpecFrontmatterAffinity -SpecContent "---`r`nfile_affinity:`r`n  - `"internal/agent/`"`r`n`r`n  # note`r`n  - internal/app/`r`ncreated_at: `"2026-10-05`"`r`n---`r`n")
+        Assert-Result -Name "block list" -Condition ($block.Count -eq 2 -and $block[0] -eq "internal/agent/" -and $block[1] -eq "internal/app/") -FailureMessage ("block list parsed as: " + ($block -join ", "))
+
+        $absent = @(Get-SpecFrontmatterAffinity -SpecContent "## Affected Files`n- ``cmd/```n")
+        Assert-Result -Name "no frontmatter" -Condition ($absent.Count -eq 0) -FailureMessage "a spec without frontmatter declares no affinity"
+    }
+
     $results += Run-Test -Name "Get-OutOfScopeImplementationFiles is mirror-aware (issue #4)" -Body {
         $repoPath = Join-Path $tempRoot "mirror-test-repo"
         New-Item -ItemType Directory -Path $repoPath -Force | Out-Null

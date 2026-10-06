@@ -491,51 +491,15 @@ $specPath = Get-BacklogItemPathForTask -Task $TaskId
 $frontmatterAffinity = @()
 if ($specPath -and (Test-Path -LiteralPath $specPath)) {
     $specContent = Get-Content -LiteralPath $specPath -Raw -Encoding UTF8
-    $specLines = $specContent -split '\r?\n'
-    $frontmatterLines = @()
-    $foundEnd = $false
-    if ($specLines.Count -ge 2 -and $specLines[0].Trim() -eq "---") {
-        for ($i = 1; $i -lt $specLines.Count; $i++) {
-            if ($specLines[$i].Trim() -eq "---") {
-                $foundEnd = $true
-                break
-            }
-            $frontmatterLines += $specLines[$i]
-        }
-    }
-    if ($foundEnd) {
-        $inAffinityBlock = $false
-        for ($i = 0; $i -lt $frontmatterLines.Count; $i++) {
-            $line = $frontmatterLines[$i]
-            if ($line -match '^\s*file_affinity:\s*(.*)$') {
-                $rest = $Matches[1].Trim()
-                if ($rest -match '^\[(.*)\]$') {
-                    $items = $Matches[1] -split ','
-                    foreach ($item in $items) {
-                        $clean = $item.Trim().Trim('"' + "'")
-                        if (-not [string]::IsNullOrWhiteSpace($clean)) {
-                            $frontmatterAffinity += $clean
-                        }
-                    }
-                    $inAffinityBlock = $false
-                } else {
-                    $inAffinityBlock = $true
-                }
-                continue
-            }
-            if ($inAffinityBlock) {
-                if ($line -match '^\s*-\s*(.*)$') {
-                    $item = $Matches[1].Trim().Trim('"' + "'")
-                    if (-not [string]::IsNullOrWhiteSpace($item)) {
-                        $frontmatterAffinity += $item
-                    }
-                } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
-                    continue
-                } else {
-                    $inAffinityBlock = $false
-                }
-            }
-        }
+    $frontmatterAffinity = @(Get-SpecFrontmatterAffinity -SpecContent $specContent)
+}
+
+# The spec's frontmatter is the one record of a task's scope. A Groomer that widens it
+# must say so there, or the spec and the scope gate disagree with nothing reporting it.
+if ($Source -eq "grooming" -and $Target -eq "implementation" -and $frontmatterAffinity.Count -gt 0) {
+    $widenedAffinity = @(Get-AffinityWidening -Affinity $baseAffinity -Declared $frontmatterAffinity)
+    if ($widenedAffinity.Count -gt 0) {
+        throw ("file_affinity " + ($widenedAffinity -join ", ") + " is not covered by the spec's frontmatter file_affinity (" + ($frontmatterAffinity -join ", ") + "). The frontmatter is the record of scope: add the widened paths to file_affinity in " + $specPath + ", or narrow -FileAffinity, then write the handoff again.")
     }
 }
 

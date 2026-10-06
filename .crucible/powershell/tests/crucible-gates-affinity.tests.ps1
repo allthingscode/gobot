@@ -712,6 +712,101 @@ exit 0
         Assert-Result -Name "D23 fallback: overbroad detected" -Condition ($logContent -match "degraded" -and $logContent -match "Handoff file_affinity contains paths") -FailureMessage "expected overbroad validation warning in log: $logContent"
     }
 
+    $results += Run-Test -Name "D19: a widening under the same top-level directory as the frontmatter warns (item 164)" -Body {
+        # B-022: frontmatter kept three files, the handoff carried the union with two whole
+        # packages, and a Scope section sat in the body. The top-level comparison passed it.
+        $caseRoot = Join-Path $tempRoot "d19-same-top-level-widening"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "B-022"
+
+        Push-Location $caseRoot
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add README.md
+            git commit -m "init" --quiet
+        } finally {
+            Pop-Location
+        }
+
+        $backlogDir = Join-Path $caseRoot ".crucible/backlog"
+        $activeDir = Join-Path $backlogDir "bugs/active"
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+        $specPath = Join-Path $activeDir "B-022_test.md"
+        @'
+---
+item_id: "B-022"
+status: "Ready"
+file_affinity:
+  - "internal/agent/session_history.go"
+  - "internal/agent/*_test.go"
+  - "internal/context/manager_test.go"
+---
+## Scope
+Work stays in `internal/agent/` and `internal/context/`.
+'@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+
+        $frameworkDir = Join-Path $caseRoot "powershell"
+        New-Item -ItemType Directory -Path $frameworkDir -Force | Out-Null
+        @'
+param([string]$HandoffFile, [string]$SchemaPath)
+Write-Output '{"ok":true}'
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $frameworkDir "validate-handoff.ps1") -Encoding UTF8
+
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $cases = @(
+            @{ Name = "widened"; Affinity = @("internal/agent/session_history.go", "internal/agent/*_test.go", "internal/context/manager_test.go", "internal/agent/", "internal/context/") },
+            @{ Name = "covered"; Affinity = @("internal/agent/session_history.go", "internal/agent/history_test.go") }
+        )
+        foreach ($case in $cases) {
+            $handoffPath = Join-Path $handoffDir ("B-022-" + $case.Name + ".json")
+            $handoffObj = @{
+                task_id = "B-022"
+                source_phase = "grooming"
+                target_phase = "implementation"
+                cumulative_handoff_count = 1
+                file_affinity = $case.Affinity
+                budget_tier = "low"
+                reason = "test"
+                prompt_version = "1.0.0"
+            }
+            $handoffObj | ConvertTo-Json -Compress | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+
+            $ctx.BacklogDir = $backlogDir
+            $ctx.FrameworkPowerShell = $frameworkDir
+            $ctx.LatestHandoff = Get-Item $handoffPath
+            $ctx.Handoff = [PSCustomObject]$handoffObj
+            if (Test-Path -LiteralPath $ctx.LogFile) { Remove-Item -LiteralPath $ctx.LogFile -Force }
+
+            $origRepoRoot = $REPO_ROOT
+            $REPO_ROOT = $caseRoot
+            try {
+                Invoke-HandoffPreflightValidation -Context $ctx
+            } finally {
+                $REPO_ROOT = $origRepoRoot
+            }
+
+            $scopeEntries = @()
+            if (Test-Path -LiteralPath $ctx.LogFile) {
+                $scopeEntries = @(Get-Content -LiteralPath $ctx.LogFile -Encoding UTF8 |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                    ForEach-Object { $_ | ConvertFrom-Json } |
+                    Where-Object { $_.event -eq "degraded" -and $_.PSObject.Properties["kind"] -and $_.kind -eq "file_affinity_scope" })
+            }
+            if ($case.Name -eq "widened") {
+                Assert-Result -Name "widening warned" -Condition ($scopeEntries.Count -eq 1) -FailureMessage "expected one file_affinity_scope warning for the widened handoff"
+                Assert-Result -Name "widening names both packages" -Condition ($scopeEntries[0].notes -match [regex]::Escape("(internal/agent/, internal/context/) not covered by spec frontmatter")) -FailureMessage ("expected the notes to name only the widened paths, got: " + $scopeEntries[0].notes)
+            } else {
+                Assert-Result -Name "covered not warned" -Condition ($scopeEntries.Count -eq 0) -FailureMessage "paths the frontmatter covers must not warn"
+            }
+        }
+    }
+
     $results += Run-Test -Name "D23: Spec with neither prose section nor frontmatter" -Body {
         $caseRoot = Join-Path $tempRoot "d23-fallback-absent"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null

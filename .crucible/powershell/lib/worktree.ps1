@@ -47,6 +47,84 @@ function Test-PathMatchesAffinity {
     return ($changed -eq $scopePrefix -or $changed.StartsWith($scopePrefix + "/", [System.StringComparison]::OrdinalIgnoreCase))
 }
 
+function Get-SpecFrontmatterAffinity {
+    param([AllowEmptyString()][string]$SpecContent)
+
+    $affinity = @()
+    if ([string]::IsNullOrEmpty($SpecContent)) { return $affinity }
+    $specLines = $SpecContent -split '\r?\n'
+    if ($specLines.Count -lt 2 -or $specLines[0].Trim() -ne "---") { return $affinity }
+
+    $frontmatterLines = @()
+    $foundEnd = $false
+    for ($i = 1; $i -lt $specLines.Count; $i++) {
+        if ($specLines[$i].Trim() -eq "---") {
+            $foundEnd = $true
+            break
+        }
+        $frontmatterLines += $specLines[$i]
+    }
+    if (-not $foundEnd) { return $affinity }
+
+    $inAffinityBlock = $false
+    foreach ($line in $frontmatterLines) {
+        if ($line -match '^\s*file_affinity:\s*(.*)$') {
+            $rest = $Matches[1].Trim()
+            if ($rest -match '^\[(.*)\]$') {
+                foreach ($item in ($Matches[1] -split ',')) {
+                    $clean = $item.Trim().Trim('"' + "'")
+                    if (-not [string]::IsNullOrWhiteSpace($clean)) {
+                        $affinity += $clean
+                    }
+                }
+                $inAffinityBlock = $false
+            } else {
+                $inAffinityBlock = $true
+            }
+            continue
+        }
+        if ($inAffinityBlock) {
+            if ($line -match '^\s*-\s*(.*)$') {
+                $item = $Matches[1].Trim().Trim('"' + "'")
+                if (-not [string]::IsNullOrWhiteSpace($item)) {
+                    $affinity += $item
+                }
+            } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
+                continue
+            } else {
+                $inAffinityBlock = $false
+            }
+        }
+    }
+    return $affinity
+}
+
+# A handoff entry is a widening when no declared path covers it, judged by the same
+# matcher the scope gate uses. B-022 widened three files to two whole packages under
+# the same top-level directory, which a top-level comparison cannot see.
+function Get-AffinityWidening {
+    param(
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Affinity,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Declared
+    )
+
+    $declaredPaths = @($Declared | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $widened = @()
+    foreach ($entry in @($Affinity | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        $covered = $false
+        foreach ($declaredPath in $declaredPaths) {
+            if (Test-PathMatchesAffinity -ChangedPath $entry -Affinity $declaredPath) {
+                $covered = $true
+                break
+            }
+        }
+        if (-not $covered) {
+            $widened += $entry
+        }
+    }
+    return $widened
+}
+
 function Resolve-ImplementationWorktreePath {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
