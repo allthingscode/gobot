@@ -421,8 +421,8 @@ func TestDispatch_CheckpointSaveFailureIsNonFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error despite save failure, got: %v", err)
 	}
-	if resp != "ok" {
-		t.Errorf("response = %q, want %q", resp, "ok")
+	if want := checkpointSaveWarning + "ok"; resp != want {
+		t.Errorf("response = %q, want %q", resp, want)
 	}
 }
 

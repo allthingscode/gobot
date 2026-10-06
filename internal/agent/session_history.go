@@ -57,7 +57,8 @@ Conversation history:
 	// DefaultKeepContextMessages is the number of recent messages to retain after compaction.
 	DefaultKeepContextMessages = 20
 
-	statelessWarning = "⚠️ Warning: session history could not be initialized. This conversation will not be persisted.\n\n"
+	statelessWarning      = "⚠️ Warning: session history could not be initialized. This conversation will not be persisted.\n\n"
+	checkpointSaveWarning = "Warning: This turn could not be saved for future conversation context.\n\n"
 )
 
 // dispatch is the implementation of Dispatch, potentially wrapped by tracing.
@@ -85,7 +86,7 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userM
 
 	// 4. Update budget and persist
 	m.updateTokenBudget(ctx, sessionKey, updated, store)
-	m.persistResult(ctx, sessionKey, iteration, updated, stateless, store)
+	checkpointSaveFailed := m.persistResult(ctx, sessionKey, iteration, updated, stateless, store)
 
 	// 5. Post-dispatch hooks
 	if m.hooks != nil {
@@ -94,6 +95,9 @@ func (m *SessionManager) dispatch(ctx context.Context, sessionKey, userID, userM
 
 	if stateless {
 		response = statelessWarning + response
+	}
+	if checkpointSaveFailed {
+		response = checkpointSaveWarning + response
 	}
 
 	return response, nil
@@ -274,13 +278,14 @@ func (m *SessionManager) updateTokenBudget(ctx context.Context, sessionKey strin
 	}
 }
 
-func (m *SessionManager) persistResult(ctx context.Context, sessionKey string, iteration int, updated []agentctx.StrategicMessage, stateless bool, store CheckpointStore) {
+func (m *SessionManager) persistResult(ctx context.Context, sessionKey string, iteration int, updated []agentctx.StrategicMessage, stateless bool, store CheckpointStore) (checkpointSaveFailed bool) {
 	if stateless || store == nil || len(updated) == 0 {
-		return
+		return false
 	}
 
 	it := iteration + 1
 	if _, err := store.SaveSnapshot(ctx, sessionKey, it, updated); err != nil {
+		checkpointSaveFailed = true
 		slog.Warn("agent: SaveSnapshot failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 	}
 
@@ -289,6 +294,7 @@ func (m *SessionManager) persistResult(ctx context.Context, sessionKey string, i
 			slog.Warn("agent: session log write failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		}
 	}
+	return checkpointSaveFailed
 }
 
 // estimateTokensForMessages estimates the total token count for a message slice.
