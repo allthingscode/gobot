@@ -27,11 +27,17 @@ const checkpointTestReply = "completed"
 
 type saveOutcomeStore struct {
 	*mockStore
-	cancel   context.CancelFunc
-	deadline bool
+	cancel                  context.CancelFunc
+	deadline                bool
+	unacknowledged          bool
+	tokenReads, tokenWrites int
 }
 
 func (s *saveOutcomeStore) SaveSnapshot(ctx context.Context, key string, iteration int, messages []agentctx.StrategicMessage) (bool, error) {
+	if s.unacknowledged {
+		s.saveCalls++
+		return false, nil
+	}
 	if s.cancel != nil {
 		s.cancel()
 		s.saveErr = ctx.Err()
@@ -40,6 +46,16 @@ func (s *saveOutcomeStore) SaveSnapshot(ctx context.Context, key string, iterati
 		s.saveErr = context.DeadlineExceeded
 	}
 	return s.mockStore.SaveSnapshot(ctx, key, iteration, messages)
+}
+
+func (s *saveOutcomeStore) GetSessionTokens(ctx context.Context, key string) (int, *time.Time, error) {
+	s.tokenReads++
+	return s.mockStore.GetSessionTokens(ctx, key)
+}
+
+func (s *saveOutcomeStore) UpdateSessionTokens(ctx context.Context, key string, tokens int, at *time.Time) error {
+	s.tokenWrites++
+	return s.mockStore.UpdateSessionTokens(ctx, key, tokens, at)
 }
 
 type saveOutcomeRunner struct {
@@ -59,10 +75,11 @@ func (r *saveOutcomeRunner) Run(ctx context.Context, key, user string, messages 
 func TestDispatchCheckpointSaveOutcomes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name                                               string
-		fail, cancel, deadline, nilStore, stateless, empty bool
+		name                                                               string
+		fail, cancel, deadline, nilStore, stateless, empty, unacknowledged bool
 	}{
 		{name: "success"},
+		{name: "unacknowledged save", unacknowledged: true},
 		{name: "failure", fail: true},
 		{name: "cancelled at save", cancel: true},
 		{name: "deadline at save", deadline: true},
@@ -76,7 +93,7 @@ func TestDispatchCheckpointSaveOutcomes(t *testing.T) {
 				t.Parallel()
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
-				store := &saveOutcomeStore{mockStore: newMockStore(), deadline: tc.deadline}
+				store := &saveOutcomeStore{mockStore: newMockStore(), deadline: tc.deadline, unacknowledged: tc.unacknowledged}
 				if tc.cancel {
 					store.cancel = cancel
 				}
@@ -92,6 +109,7 @@ func TestDispatchCheckpointSaveOutcomes(t *testing.T) {
 				}
 				runner := &saveOutcomeRunner{mockRunner: &mockRunner{response: checkpointTestReply}, empty: tc.empty}
 				mgr := NewSessionManager(runner, activeStore, "model")
+				mgr.SetTokenBudget(100000)
 				hookCalls := 0
 				body := checkpointTestReply
 				if hooked {
@@ -119,6 +137,10 @@ func TestDispatchCheckpointSaveOutcomes(t *testing.T) {
 				}
 				if len(runner.calls) != 1 || len(runner.textCalls) != 0 || hookCalls != btoi(hooked) || store.saveCalls != btoi(!tc.nilStore && !tc.stateless && !tc.empty) {
 					t.Fatal("unexpected runner, hook, or save invocation count")
+				}
+				wantBudgetUpdates := btoi(!tc.fail && !tc.cancel && !tc.deadline && !tc.nilStore && !tc.stateless && !tc.empty && !tc.unacknowledged)
+				if store.tokenReads != wantBudgetUpdates || store.tokenWrites != wantBudgetUpdates {
+					t.Fatal("token budget changed without acknowledged persistence")
 				}
 				if snap := store.snapshots[t.Name()]; snap != nil {
 					for _, message := range snap.Messages {

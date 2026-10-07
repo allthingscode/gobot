@@ -225,6 +225,8 @@ func (s *AgentStack) NewSessionManager(cfg *config.Config, store agent.Checkpoin
 	mgr.SetMemoryWindow(cfg.MemoryWindow())
 	mgr.SetPruningPolicy(cfg.ContextPruning())
 	mgr.SetCompactionPolicy(cfg.Compaction())
+	mgr.SetTokenBudget(cfg.SessionTokenBudget())
+	mgr.SetSummaryTurns(cfg.CompactionSummaryTurns())
 	mgr.SetStorageRoot(cfg.StorageRoot())
 	mgr.SetLogger(agent.NewMarkdownLogger(cfg.StorageRoot())) // F-037
 

@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -133,6 +134,30 @@ func TestAgentStack_NewSessionManager(t *testing.T) {
 	mgr := stack.NewSessionManager(cfg, nil, nil)
 	if mgr == nil {
 		t.Fatal("NewSessionManager returned nil")
+	}
+}
+
+func TestAgentStack_TokenBudgetConfiguration(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                                 string
+		budget, turns, wantBudget, wantTurns int
+	}{
+		{"defaults", 0, 0, 80000, 20},
+		{"explicit", 1234, 7, 1234, 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &config.Config{}
+			cfg.Context.SessionTokenBudget = tc.budget
+			cfg.Context.CompactionSummaryTurns = tc.turns
+			stack := &AgentStack{Runner: &AgentRunner{}, Model: "test-model"}
+			mgr := stack.NewSessionManager(cfg, nil, nil)
+			fields := reflect.ValueOf(mgr).Elem()
+			if fields.FieldByName("tokenBudget").Int() != int64(tc.wantBudget) || fields.FieldByName("summaryTurns").Int() != int64(tc.wantTurns) {
+				t.Fatal("factory did not apply configured token compaction settings")
+			}
+		})
 	}
 }
 
