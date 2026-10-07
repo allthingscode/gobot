@@ -125,7 +125,7 @@ Use the sub-agent invocation mechanic for your environment (see tool-specific do
 via a Crucible launcher rather than a native sub-agent. The launcher reports an explicit
 `STATUS=SUCCESS` / `STATUS=LAUNCH_FAILED`, or `STATUS=ADVANCE_INCOMPLETE` when the specialist's
 `crucible.ps1 -Init` was cut off before the next phase started (run the `-Init` it prints, then
-continue). See the tool-specific doc for the launch command and preflight. The verdict-not-label rule in Step 5 applies.
+continue). See the tool-specific doc for the launch command and preflight. If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line. The verdict-not-label rule in Step 5 applies.
 
 ### Step 5 - Verify specialist output and track budget
 

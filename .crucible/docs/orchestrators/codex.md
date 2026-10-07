@@ -26,7 +26,9 @@ The launcher wraps `codex exec -s danger-full-access --skip-git-repo-check`, cap
 and transcript, and reports `STATUS=SUCCESS` or `STATUS=LAUNCH_FAILED` so an infrastructure failure is
 never mistaken for a review verdict. `STATUS=ADVANCE_INCOMPLETE` means the handoff was written but the
 specialist's `crucible.ps1 -Init` was cut off before the next phase started; run the `-Init` command it
-prints. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
+prints. The launcher also writes the STATUS line to `codex-launch-status.txt` in the session directory,
+with `STATUS=RUNNING` and its process ID while the run is in progress, so a lost stdout does not lose the
+result. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
 
 > **Why not the plugin `task` runtime / `codex-rescue` subagent for full-access specialist work?** That
 > path hardcodes a `read-only`/`workspace-write` sandbox and routes through the app-server broker, which

@@ -67,6 +67,14 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
         exit 0
     }
+    "statusprobe" {
+        # Report the launch status file as the launcher left it while codex runs.
+        $statusFile = Join-Path (Split-Path -Parent $outFile) "codex-launch-status.txt"
+        $statusText = if (Test-Path -LiteralPath $statusFile) { [System.IO.File]::ReadAllText($statusFile) } else { "<missing>" }
+        Write-Output ("STATUS_DURING_BEGIN>>>" + $statusText + "<<<STATUS_DURING_END")
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
+        exit 0
+    }
     "stdinprobe" {
         # Mimic real codex reading stdin: report whether stdin reaches EOF promptly.
         # If the launcher closes codex stdin (the fix), EOF is immediate -> STDIN_EOF.
@@ -261,6 +269,37 @@ try {
         $transcript = Join-Path $projectRoot ".crucible/session/C-999/verification/codex-transcript.txt"
         Assert-Result -Name "last message written" -Condition (Test-Path -LiteralPath $lastMsg) -FailureMessage "no last-message file"
         Assert-Result -Name "transcript written" -Condition (Test-Path -LiteralPath $transcript) -FailureMessage "no transcript file"
+    }
+
+    # A host shell lost the launcher's stdout in the gobot C-387 run while the launch finished.
+    # The status file is the durable copy of the STATUS line. Item 167.
+    $results += Run-Test -Name "Launch status file reads RUNNING during the run and the final STATUS after it" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-statusfile"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "statusprobe" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-976", "-Phase", "verification", "-Model", "gpt-6-sol", "-Effort", "low",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        $statusFile = Join-Path $projectRoot ".crucible/session/C-976/verification/codex-launch-status.txt"
+        $transcript = Get-Content -LiteralPath (Join-Path $projectRoot ".crucible/session/C-976/verification/codex-transcript.txt") -Raw
+        $during = ""
+        if ($transcript -match "(?s)STATUS_DURING_BEGIN>>>(.*)<<<STATUS_DURING_END") { $during = $Matches[1] }
+        Assert-Result -Name "running while codex runs" -Condition ($during.StartsWith("STATUS=RUNNING")) -FailureMessage "expected STATUS=RUNNING while codex ran, saw: $during"
+        Assert-Result -Name "running names the launcher process" -Condition ($during -match "launcher_pid: \d+") -FailureMessage "RUNNING does not name the launcher process: $during"
+        Assert-Result -Name "running names the level" -Condition ($during.Contains("level: gpt-6-sol at low effort")) -FailureMessage "RUNNING does not name the level: $during"
+        $final = [System.IO.File]::ReadAllText($statusFile)
+        Assert-Result -Name "final status success" -Condition ($final.StartsWith("STATUS=SUCCESS") -and $final.Contains("exit code: 0")) -FailureMessage "expected STATUS=SUCCESS and exit code 0 after the run, saw: $final"
+        Assert-Result -Name "exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Launch status file records LAUNCH_FAILED with its reason" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-statusfile-infra"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "infra" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-975", "-Phase", "verification", "-Model", "gpt-6-sol",
+            "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        $final = [System.IO.File]::ReadAllText((Join-Path $projectRoot ".crucible/session/C-975/verification/codex-launch-status.txt"))
+        Assert-Result -Name "final status launch_failed" -Condition ($final.StartsWith("STATUS=LAUNCH_FAILED") -and $final.Contains("reason: infrastructure failure")) -FailureMessage "expected STATUS=LAUNCH_FAILED with its reason, saw: $final"
+        Assert-Result -Name "exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode)."
     }
 
     $results += Run-Test -Name "Dirty git tree blocks specialist dispatch without override" -Body {

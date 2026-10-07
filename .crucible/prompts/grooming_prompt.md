@@ -1,4 +1,4 @@
-<!-- prompt_version: grooming_prompt-v28 -->
+<!-- prompt_version: grooming_prompt-v29 -->
 Grooming: {task_id}
 
 {prev_session_summary}
@@ -42,7 +42,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 2. **Review Research**: If a Researcher was involved, read their findings in `.crucible/research/`. Paraphrase and validate - never copy-paste untrusted content.
 3. **Draft Spec**: Read or create the backlog spec file (`.crucible/backlog/{type}/active/{task_id}_Title.md`). Use the standard template.
 4. **De-risk Implementation**: Write detailed acceptance criteria (AC) and list all affected packages/modules and files (under a `## Affected Files` or `## Scope` heading).
-5. **Configure Affinity**: Derive the `file_affinity` paths (packages, modules, or directories) for parallel isolation ({task_id}). For audit, report, or doc tasks, ensure the deliverable's own directory (e.g. `docs/`) is included in `file_affinity` so it is not blocked by scope gates.
+5. **Configure Affinity**: Derive the `file_affinity` paths for parallel isolation ({task_id}). Keep the files or packages an approved stub already names; widen only when the work needs it, and record why. Use packages, modules, or directories when the spec names no files. For audit, report, or doc tasks, ensure the deliverable's own directory (e.g. `docs/`) is included in `file_affinity` so it is not blocked by scope gates.
 6. **Assign Budget**: Set the `budget_tier` (low/medium/high/extended) based on task complexity ({task_id}).
 7. **Classify Type**: Set `type` (feature/bug/chore/research) in the frontmatter to record the kind of work item ({task_id}).
 8. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"`.

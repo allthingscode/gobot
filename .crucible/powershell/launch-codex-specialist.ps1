@@ -475,7 +475,24 @@ if (-not (Test-Path -LiteralPath $sessionDir)) {
 }
 $lastMsgPath   = Join-Path $sessionDir "codex-last-message.txt"
 $transcriptPath = Join-Path $sessionDir "codex-transcript.txt"
+$statusPath = Join-Path $sessionDir "codex-launch-status.txt"
 if (Test-Path -LiteralPath $lastMsgPath) { Remove-Item -LiteralPath $lastMsgPath -Force }
+
+# The STATUS line goes to stdout, and a host shell can lose stdout: in the gobot C-387 run the
+# orchestrator's shell reported exit 255 with no output while this launcher and its codex child
+# ran on and finished. The status file is the durable copy. RUNNING names this process so an
+# orchestrator can tell a live launch from a dead one. Item 167.
+function Write-LaunchStatus {
+    param([string]$Status, [string[]]$Detail = @())
+    $stamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+    $lines = @("STATUS=" + $Status, "launcher_pid: " + $PID, "updated: " + $stamp) + $Detail
+    try {
+        if (-not (Test-Path -LiteralPath $sessionDir)) { New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null }
+        [System.IO.File]::WriteAllText($statusPath, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        Write-Warning ("Could not write launch status to " + $statusPath + ": " + $_.Exception.Message)
+    }
+}
 
 $useSchema = $false
 if ($ReviewSchema) {
@@ -518,6 +535,8 @@ if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 
 # Event timestamps carry whole seconds; back off one so an event in the launch second counts.
 $launchStartUtc = [datetime]::UtcNow.AddSeconds(-1)
+$statusEffort = if ([string]::IsNullOrWhiteSpace($Effort)) { "Codex's own default effort" } else { $Effort + " effort" }
+Write-LaunchStatus -Status "RUNNING" -Detail @("level: " + $Model + " at " + $statusEffort)
 $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
 
 if (-not (Test-Path -LiteralPath $sessionDir)) {
@@ -573,6 +592,7 @@ if ([string]::IsNullOrWhiteSpace($failReason) -and -not $usingAdhocSession) {
 
 Write-Host ""
 if ($null -ne $advanceTarget) {
+    Write-LaunchStatus -Status "ADVANCE_INCOMPLETE" -Detail @("exit code: " + $result.ExitCode, "next phase never started: " + $advanceTarget)
     Write-Host "[CODEX SPECIALIST] STATUS=ADVANCE_INCOMPLETE" -ForegroundColor Yellow
     Write-Host ("  exit code: " + $result.ExitCode)
     Write-Host ("  last message: " + $lastMsgPath)
@@ -584,6 +604,7 @@ if ($null -ne $advanceTarget) {
     Write-Host ("    pwsh -File `"" + (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) + "`" -Init -TaskId " + $TaskId + " -ProjectRoot `"" + $REPO_ROOT + "`"")
     exit 3
 } elseif ([string]::IsNullOrWhiteSpace($failReason)) {
+    Write-LaunchStatus -Status "SUCCESS" -Detail @("exit code: " + $result.ExitCode)
     Write-Host "[CODEX SPECIALIST] STATUS=SUCCESS" -ForegroundColor Green
     Write-Host ("  exit code: " + $result.ExitCode)
     Write-Host ("  last message: " + $lastMsgPath)
@@ -593,6 +614,7 @@ if ($null -ne $advanceTarget) {
     Write-Host "  per the orchestrator SOP before trusting any verdict."
     exit 0
 } else {
+    Write-LaunchStatus -Status "LAUNCH_FAILED" -Detail @("exit code: " + $result.ExitCode, "reason: " + $failReason)
     Write-Host "[CODEX SPECIALIST] STATUS=LAUNCH_FAILED" -ForegroundColor Red
     Write-Host ("  reason: " + $failReason)
     Write-Host ("  exit code: " + $result.ExitCode)

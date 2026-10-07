@@ -206,6 +206,24 @@ try {
             Assert-Result -Name ($relative + " points at the repo's recent commits") -Condition ($text.Contains("style of this repo's recent commits")) -FailureMessage ($relative + " does not tell the Architect to match the repo's recent commit messages")
         }
     }
+
+    # The R-035 Groomer routed a Stub-Only Close-Out to verification and was left holding an
+    # unticked "Write handoff.json targeting implementation phase". Item 166.
+    $results += Run-Test -Name "The grooming task list names every route the handoff can take" -Body {
+        $text = [System.IO.File]::ReadAllText((Join-Path $REPO_ROOT "powershell/lib/session-output.ps1"))
+        Assert-Result -Name "no fixed implementation target" -Condition (-not $text.Contains("Write handoff.json targeting implementation phase")) -FailureMessage "the grooming task list still names implementation as the only successor"
+        Assert-Result -Name "names the routed phase" -Condition ($text.Contains("Write handoff.json to the routed phase (implementation, research, done, or verification for a Stub-Only Close-Out)")) -FailureMessage "the grooming task list does not name the routes a Groomer can hand off to"
+    }
+
+    # The C-387 Groomer widened five approved files to internal/agent because the Quality Bar
+    # required package-level paths; the B-024 Groomer in the same pass kept named files. Item 165.
+    $results += Run-Test -Name "Grooming keeps the file_affinity granularity the Research Gate approved" -Body {
+        $sop = [System.IO.File]::ReadAllText((Join-Path $REPO_ROOT "sops/grooming.md"))
+        $prompt = [System.IO.File]::ReadAllText((Join-Path $REPO_ROOT "prompts/grooming_prompt.md"))
+        Assert-Result -Name "SOP drops the package-level requirement" -Condition (-not $sop.Contains("populated with package-level paths")) -FailureMessage "sops/grooming.md still requires package-level file_affinity"
+        Assert-Result -Name "SOP keeps named files" -Condition ($sop.Contains("Keep the paths an approved stub already names")) -FailureMessage "sops/grooming.md does not tell the Groomer to keep the approved paths"
+        Assert-Result -Name "prompt keeps named files" -Condition ($prompt.Contains("Keep the files or packages an approved stub already names")) -FailureMessage "prompts/grooming_prompt.md does not tell the Groomer to keep the approved paths"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

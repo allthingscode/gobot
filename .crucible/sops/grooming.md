@@ -114,6 +114,8 @@ pwsh -ExecutionPolicy Bypass \
 
 **The spec's frontmatter `file_affinity` is the record of scope.** If grooming widens the scope, for example from named files to their packages, update the frontmatter first. For an implementation handoff, `new-handoff.ps1` refuses any `-FileAffinity` path the frontmatter does not cover and names the paths to add.
 
+Keep the paths an approved stub already names. Named files are a complete affinity: the scope gate matches a file path exactly, so tasks stay isolated at file granularity without widening to packages. Widen only when the work needs paths the stub does not name, and record why under `## Grooming Deviations`. Use package or directory paths when the spec starts without a file list.
+
 **`-DesignRequired` (implementation handoffs only):** Set this flag when the Architect must still produce the design - i.e. the spec states the goal and constraints but not the concrete approach. **Omit it** when your spec already contains a complete `## Design` the Architect only has to execute. This single bit drives the Architect's model (design -> strong model; execution -> default model) per `docs/policy.md` section 2.3; do not over-set it, as design-tier work is the expensive path.
 
 ### Step 3 - Run validation
@@ -180,7 +182,7 @@ When routing a task to the `research` phase, the Groomer defines the open questi
 
 Before writing handoff.json, confirm:
 - [ ] Routing to: `implementation`, `research`, `done` (closure path), or `verification` (Stub-Only Close-Out only) - not to myself
-- [ ] If routing to `implementation`: `file_affinity` is populated with package-level paths
+- [ ] If routing to `implementation`: `file_affinity` is populated, at the granularity the Research Gate approved (see Step 2)
 - [ ] If routing to `verification` (Stub-Only Close-Out): no `file_affinity` required; confirm no implementation spec was created
 - [ ] Spec file exists in `backlog/{type}/active/` with acceptance criteria (or stubs for Stub-Only Close-Out)
 - [ ] `BACKLOG.md` status is updated
