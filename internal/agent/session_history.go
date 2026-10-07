@@ -268,18 +268,23 @@ func (m *SessionManager) updateTokenBudget(ctx context.Context, sessionKey strin
 		return
 	}
 
-	tokens, _, err := store.GetSessionTokens(ctx, sessionKey)
+	_, compactedAt, err := store.GetSessionTokens(ctx, sessionKey)
 	if err != nil {
 		slog.Warn("agent: GetSessionTokens failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		return
 	}
-	newTokens := tokens + estimateTokensForMessages(updated)
-	if err := store.UpdateSessionTokens(ctx, sessionKey, newTokens, nil); err != nil {
+	if err := ctx.Err(); err != nil {
+		slog.Warn("agent: token budget update cancelled", logattr.SessionKey(sessionKey), logattr.Err(err))
+		return
+	}
+	// Cache the acknowledged retained history, rather than lifetime usage.
+	newTokens := estimateTokensForMessages(updated)
+	if err := store.UpdateSessionTokens(ctx, sessionKey, newTokens, compactedAt); err != nil {
 		slog.Warn("agent: UpdateSessionTokens failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		return
 	}
 	slog.Debug("agent: session token budget", logattr.SessionKey(sessionKey), slog.Int("tokens", newTokens), slog.Int("budget", m.tokenBudget))
-	if newTokens > m.tokenBudget {
+	if newTokens > m.tokenBudget && ctx.Err() == nil {
 		slog.Info("agent: session token budget exceeded, triggering compaction", logattr.SessionKey(sessionKey))
 		go m.compactSessionAsync(ctx, sessionKey, store)
 	}
@@ -368,25 +373,49 @@ func (m *SessionManager) loadCompactionSnapshot(ctx context.Context, sessionKey 
 	if store == nil || m.tokenBudget <= 0 || ctx.Err() != nil {
 		return nil
 	}
-	tokens, _, err := store.GetSessionTokens(ctx, sessionKey)
-	if err != nil {
-		slog.Warn("agent: compaction GetSessionTokens failed", logattr.SessionKey(sessionKey), logattr.Err(err))
-		return nil
-	}
-	if tokens <= m.tokenBudget {
-		return nil
-	}
-	slog.Info("agent: starting per-session compaction", logattr.SessionKey(sessionKey))
 	snap, err := store.LoadLatest(ctx, sessionKey)
 	if err != nil {
 		slog.Warn("agent: compactSessionAsync LoadLatest failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 		return nil
 	}
-	if snap == nil || len(snap.Messages) == 0 {
+	if snap == nil {
 		slog.Warn("agent: compactSessionAsync no messages to compact", logattr.SessionKey(sessionKey))
 		return nil
 	}
+	estimated := estimateTokensForMessages(snap.Messages)
+	if !m.refreshCompactionTokens(ctx, sessionKey, store, estimated) {
+		return nil
+	}
+	if estimated <= m.tokenBudget || len(snap.Messages) == 0 {
+		return nil
+	}
+	slog.Info("agent: starting per-session compaction", logattr.SessionKey(sessionKey))
 	return snap
+}
+
+// refreshCompactionTokens repairs the cache without publishing compaction success.
+func (m *SessionManager) refreshCompactionTokens(ctx context.Context, sessionKey string, store CheckpointStore, estimated int) bool {
+	tokens, compactedAt, err := store.GetSessionTokens(ctx, sessionKey)
+	if err != nil {
+		slog.Warn("agent: compaction GetSessionTokens failed", logattr.SessionKey(sessionKey), logattr.Err(err))
+		return false
+	}
+	if err := ctx.Err(); err != nil {
+		slog.Warn("agent: compaction refresh cancelled", logattr.SessionKey(sessionKey), logattr.Err(err))
+		return false
+	}
+	// Durable history is authoritative, even when legacy metadata is too low.
+	if tokens != estimated {
+		if err := store.UpdateSessionTokens(ctx, sessionKey, estimated, compactedAt); err != nil {
+			slog.Warn("agent: compaction token refresh failed", logattr.SessionKey(sessionKey), logattr.Err(err))
+			return false
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		slog.Warn("agent: compaction refresh cancelled", logattr.SessionKey(sessionKey), logattr.Err(err))
+		return false
+	}
+	return true
 }
 
 // compactSessionLocked summarizes and publishes while holding the session lock.

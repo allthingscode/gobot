@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/observability"
 )
@@ -403,5 +404,50 @@ func TestDispatchCorruptSQLiteHistoryPreserved(t *testing.T) {
 	}
 	if _, err := store.LoadLatest(ctx, key); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("corruption no longer observable: %v", err)
+	}
+}
+
+//nolint:cyclop,gocognit // checks retention and durable metadata in the same matrix.
+func TestDispatchRetentionReplacesTokenCache(t *testing.T) {
+	t.Parallel()
+	for _, ttl := range []bool{true, false} {
+		t.Run(fmt.Sprintf("ttl=%t", ttl), func(t *testing.T) {
+			t.Parallel()
+			store, mgr := sqliteCompactionFixture(t)
+			mgr.SetTokenBudget(1000)
+			if ttl {
+				snap, err := store.LoadLatest(context.Background(), t.Name())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := range snap.Messages {
+					snap.Messages[i].CreatedAt = time.Now().Add(-2 * time.Hour).Format(time.RFC3339)
+				}
+				if saved, err := store.SaveSnapshot(context.Background(), t.Name(), 1, snap.Messages); err != nil || !saved {
+					t.Fatalf("seed: %v %v", saved, err)
+				}
+				mgr.SetPruningPolicy(config.ContextPruningConfig{TTL: "1h"})
+			} else {
+				mgr.SetMemoryWindow(3)
+			}
+			if _, err := mgr.Dispatch(context.Background(), t.Name(), "alice", "hello"); err != nil {
+				t.Fatal(err)
+			}
+			snap, err := store.LoadLatest(context.Background(), t.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantMessages := 2
+			if !ttl {
+				wantMessages = 4
+			}
+			if len(snap.Messages) != wantMessages {
+				t.Fatalf("retained %d, want %d", len(snap.Messages), wantMessages)
+			}
+			tokens, at, err := store.GetSessionTokens(context.Background(), t.Name())
+			if err != nil || at != nil || tokens != estimateTokensForMessages(snap.Messages) {
+				t.Fatalf("retained metadata: %d %v %v", tokens, at, err)
+			}
+		})
 	}
 }
