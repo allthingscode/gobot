@@ -23,6 +23,162 @@ type historyOutcomeStore struct {
 	tokenReads, tokenWrites int
 }
 
+const checkpointTestReply = "completed"
+
+type saveOutcomeStore struct {
+	*mockStore
+	cancel   context.CancelFunc
+	deadline bool
+}
+
+func (s *saveOutcomeStore) SaveSnapshot(ctx context.Context, key string, iteration int, messages []agentctx.StrategicMessage) (bool, error) {
+	if s.cancel != nil {
+		s.cancel()
+		s.saveErr = ctx.Err()
+	}
+	if s.deadline {
+		s.saveErr = context.DeadlineExceeded
+	}
+	return s.mockStore.SaveSnapshot(ctx, key, iteration, messages)
+}
+
+type saveOutcomeRunner struct {
+	*mockRunner
+	empty bool
+}
+
+func (r *saveOutcomeRunner) Run(ctx context.Context, key, user string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+	response, updated, err := r.mockRunner.Run(ctx, key, user, messages)
+	if r.empty {
+		updated = nil
+	}
+	return response, updated, err
+}
+
+//nolint:gocognit,cyclop // matrix verifies response decoration and side effects together.
+func TestDispatchCheckpointSaveOutcomes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name                                               string
+		fail, cancel, deadline, nilStore, stateless, empty bool
+	}{
+		{name: "success"},
+		{name: "failure", fail: true},
+		{name: "cancelled at save", cancel: true},
+		{name: "deadline at save", deadline: true},
+		{name: "nil store", nilStore: true},
+		{name: "stateless", stateless: true},
+		{name: "empty history", empty: true},
+	}
+	for _, tc := range cases {
+		for _, hooked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/hooked=%t", tc.name, hooked), func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				store := &saveOutcomeStore{mockStore: newMockStore(), deadline: tc.deadline}
+				if tc.cancel {
+					store.cancel = cancel
+				}
+				if tc.fail {
+					store.saveErr = errors.New("secret-token at /private/checkpoints.db")
+				}
+				if tc.stateless {
+					store.createErr = errors.New("cannot initialize")
+				}
+				var activeStore CheckpointStore = store
+				if tc.nilStore {
+					activeStore = nil
+				}
+				runner := &saveOutcomeRunner{mockRunner: &mockRunner{response: checkpointTestReply}, empty: tc.empty}
+				mgr := NewSessionManager(runner, activeStore, "model")
+				hookCalls := 0
+				body := checkpointTestReply
+				if hooked {
+					body = "replacement"
+					hooks := &Hooks{}
+					hooks.RegisterPostDispatch(func(_ context.Context, key, response string) string {
+						hookCalls++
+						if key != t.Name() || response != checkpointTestReply || store.saveCalls != btoi(!tc.nilStore && !tc.stateless && !tc.empty) {
+							t.Errorf("unexpected hook input or persistence ordering: %q %q", key, response)
+						}
+						return "replacement"
+					})
+					mgr.SetHooks(hooks)
+				}
+				response, err := mgr.Dispatch(ctx, t.Name(), "alice", "hello")
+				want := body
+				if tc.fail || tc.cancel || tc.deadline {
+					want = checkpointSaveWarning + want
+				}
+				if tc.stateless {
+					want = statelessWarning + want
+				}
+				if err != nil || response != want {
+					t.Fatalf("response=%q error=%v; want %q", response, err, want)
+				}
+				if len(runner.calls) != 1 || len(runner.textCalls) != 0 || hookCalls != btoi(hooked) || store.saveCalls != btoi(!tc.nilStore && !tc.stateless && !tc.empty) {
+					t.Fatal("unexpected runner, hook, or save invocation count")
+				}
+				if snap := store.snapshots[t.Name()]; snap != nil {
+					for _, message := range snap.Messages {
+						if message.Content != nil && strings.Contains(message.Content.String(), "Warning:") {
+							t.Fatal("warning persisted in history")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func btoi(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+type saveOutcomeLogger struct {
+	calls int
+	err   error
+}
+
+func (l *saveOutcomeLogger) Log(_ string, _ int, _ []agentctx.StrategicMessage) error {
+	l.calls++
+	return l.err
+}
+
+//nolint:gocognit // table checks independent snapshot and transcript failure combinations.
+func TestDispatchCheckpointTranscriptOutcomes(t *testing.T) {
+	t.Parallel()
+	for _, saveFails := range []bool{false, true} {
+		for _, logFails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("saveFails=%t/logFails=%t", saveFails, logFails), func(t *testing.T) {
+				t.Parallel()
+				store := newMockStore()
+				logger := &saveOutcomeLogger{}
+				if saveFails {
+					store.saveErr = errors.New("snapshot unavailable")
+				}
+				if logFails {
+					logger.err = errors.New("transcript unavailable")
+				}
+				mgr := NewSessionManager(&mockRunner{response: checkpointTestReply}, store, "model")
+				mgr.SetLogger(logger)
+				response, err := mgr.Dispatch(context.Background(), t.Name(), "", "hello")
+				want := checkpointTestReply
+				if saveFails {
+					want = checkpointSaveWarning + want
+				}
+				if err != nil || response != want || logger.calls != 1 || store.saveCalls != 1 {
+					t.Fatalf("response=%q error=%v logs=%d saves=%d", response, err, logger.calls, store.saveCalls)
+				}
+			})
+		}
+	}
+}
+
 func (s *historyOutcomeStore) LoadLatest(context.Context, string) (*agentctx.ThreadSnapshot, error) {
 	return s.snapshot, s.cause
 }
