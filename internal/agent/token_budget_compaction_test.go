@@ -132,18 +132,26 @@ func TestSessionManager_UpdateTokenBudgetThresholds(t *testing.T) {
 			wantTokens:  12,
 		},
 		{
-			name:        "below threshold accumulates existing total",
+			name:        "below threshold replaces existing total",
 			budget:      30,
 			store:       &tokenBudgetStore{tokens: 10},
 			wantUpdates: 1,
-			wantTokens:  10 + estimated,
+			wantTokens:  estimated,
 		},
 		{
 			name:        "at threshold persists without compaction",
-			budget:      10 + estimated,
+			budget:      estimated,
 			store:       &tokenBudgetStore{tokens: 10},
 			wantUpdates: 1,
-			wantTokens:  10 + estimated,
+			wantTokens:  estimated,
+		},
+		{
+			name:         "above threshold schedules worker",
+			budget:       estimated - 1,
+			store:        &tokenBudgetStore{tokens: 10, loadStarted: make(chan struct{})},
+			wantUpdates:  1,
+			wantTokens:   estimated,
+			wantCompacts: true,
 		},
 	}
 
@@ -152,7 +160,14 @@ func TestSessionManager_UpdateTokenBudgetThresholds(t *testing.T) {
 			t.Parallel()
 			mgr := &SessionManager{tokenBudget: tt.budget, runner: &mockRunner{response: compactionTestSummary}}
 
-			mgr.updateTokenBudget(context.Background(), testSess, messages, tt.store)
+			mgr.updateTokenBudget(context.Background(), t.Name(), messages, tt.store)
+			if tt.wantCompacts {
+				waitForClosed(t, tt.store.loadStarted, "above-budget worker")
+				waitForCondition(t, "worker cleanup", func() bool {
+					_, exists := GetLockMetrics()[t.Name()]
+					return !exists
+				})
+			}
 
 			updates := tt.store.updateCalls()
 			if len(updates) != tt.wantUpdates {
@@ -183,7 +198,7 @@ func TestSessionManager_UpdateTokenBudgetPersistsTotalBeforeAsyncCompaction(t *t
 		tokenBudgetMessage(agentctx.RoleUser, "one two three four"),
 	}
 	initialTokens := 10
-	accumulatedTokens := initialTokens + estimateTokensForMessages(messages)
+	retainedTokens := estimateTokensForMessages(messages)
 	store := &tokenBudgetStore{
 		tokens:      initialTokens,
 		snapshot:    tokenBudgetSnapshot(7, []string{"old 1", "old 2", "recent 1", "recent 2"}),
@@ -191,7 +206,7 @@ func TestSessionManager_UpdateTokenBudgetPersistsTotalBeforeAsyncCompaction(t *t
 		unblockLoad: make(chan struct{}),
 	}
 	mgr := &SessionManager{
-		tokenBudget:  accumulatedTokens - 1,
+		tokenBudget:  retainedTokens - 1,
 		summaryTurns: 2,
 		runner:       &mockRunner{response: "summary after trigger"},
 	}
@@ -212,8 +227,8 @@ func TestSessionManager_UpdateTokenBudgetPersistsTotalBeforeAsyncCompaction(t *t
 	if len(updates) != 1 {
 		t.Fatalf("updates before compaction = %d, want 1", len(updates))
 	}
-	if updates[0].tokens != accumulatedTokens {
-		t.Fatalf("pre-compaction tokens = %d, want %d", updates[0].tokens, accumulatedTokens)
+	if updates[0].tokens != retainedTokens {
+		t.Fatalf("pre-compaction tokens = %d, want %d", updates[0].tokens, retainedTokens)
 	}
 	if updates[0].compactedAt != nil {
 		t.Fatal("pre-compaction update should not set compacted timestamp")
@@ -236,7 +251,7 @@ func TestSessionManager_CompactSessionAsyncPersistsSummaryAndMetadata(t *testing
 		snapshot: tokenBudgetSnapshot(42, []string{"turn 1", "turn 2", "turn 3", "turn 4", "turn 5"}),
 	}
 	mgr := &SessionManager{
-		tokenBudget:  100,
+		tokenBudget:  20,
 		summaryTurns: 2,
 		runner:       &mockRunner{response: "compacted summary"},
 	}
@@ -247,7 +262,7 @@ func TestSessionManager_CompactSessionAsyncPersistsSummaryAndMetadata(t *testing
 	assertCompactedSnapshot(t, saves)
 
 	updates := store.updateCalls()
-	assertCompactedTokenUpdate(t, updates, saves[0].messages)
+	assertCompactedTokenUpdate(t, updates[1:], saves[0].messages)
 }
 
 func assertCompactedSnapshot(t *testing.T, saves []tokenSnapshotSave) {
@@ -403,7 +418,7 @@ func sqliteCompactionFixture(t *testing.T) (*compactionStore, *SessionManager) {
 	seedCompactionSession(t, store, t.Name())
 	wrapped := &compactionStore{CheckpointStore: store}
 	mgr := NewSessionManager(&compactionRunner{}, wrapped, "mock")
-	mgr.SetTokenBudget(100)
+	mgr.SetTokenBudget(30)
 	mgr.SetSummaryTurns(2)
 	return wrapped, mgr
 }
@@ -413,7 +428,7 @@ func seedCompactionSession(t *testing.T, store CheckpointStore, key string) {
 	if err := store.CreateThread(ctx, key, "mock", nil); err != nil {
 		t.Fatal(err)
 	}
-	messages := tokenBudgetSnapshot(1, []string{"old one", "old two", "recent one", "recent two"}).Messages
+	messages := tokenBudgetSnapshot(1, []string{"old one with several extra words to exceed the retained budget", "old two with several extra words to exceed the retained budget", "recent one", "recent two"}).Messages
 	if saved, err := store.SaveSnapshot(ctx, key, 1, messages); err != nil || !saved {
 		t.Fatalf("seed save: %v %v", saved, err)
 	}
@@ -502,7 +517,7 @@ func TestCompactionSQLiteWorkerFirstAndIndependentSessions(t *testing.T) {
 	other := t.Name() + "/independent"
 	seedCompactionSession(t, store.CheckpointStore, other)
 	otherManager := NewSessionManager(runner, nil, "mock")
-	otherManager.SetTokenBudget(100)
+	otherManager.SetTokenBudget(30)
 	otherManager.SetSummaryTurns(2)
 	otherManager.SetCheckpointStoreProvider(func(string) (CheckpointStore, error) { return store, nil })
 	otherHooks := &Hooks{}
@@ -625,7 +640,7 @@ func TestCompactionSQLiteSaveBeforeTrigger(t *testing.T) {
 	assertCompactionLockReleased(t)
 }
 
-//nolint:paralleltest,gocognit,cyclop // synchronous failure matrix captures global slog and checks durable state separately from metadata.
+//nolint:paralleltest,gocognit,cyclop,funlen // synchronous failure matrix captures global slog and checks durable state separately from metadata.
 func TestCompactionSQLitePublicationFailures(t *testing.T) {
 	oldLogger := slog.Default()
 	var logs bytes.Buffer
@@ -669,7 +684,12 @@ func TestCompactionSQLitePublicationFailures(t *testing.T) {
 			s.save = func(context.Context, string, int, []agentctx.StrategicMessage) (bool, error) { return false, nil }
 		}, false},
 		{"metadata error", func(s *compactionStore, _ *SessionManager, _ context.CancelFunc) {
-			s.write = func(context.Context, string, int, *time.Time) error { return errors.New("metadata unavailable") }
+			s.write = func(ctx context.Context, key string, tokens int, at *time.Time) error {
+				if at != nil {
+					return errors.New("metadata unavailable")
+				}
+				return s.CheckpointStore.UpdateSessionTokens(ctx, key, tokens, at)
+			}
 		}, true},
 		{"cancel after save", func(s *compactionStore, _ *SessionManager, cancel context.CancelFunc) {
 			s.save = func(ctx context.Context, key string, iteration int, messages []agentctx.StrategicMessage) (bool, error) {
@@ -687,13 +707,17 @@ func TestCompactionSQLitePublicationFailures(t *testing.T) {
 			defer cancel()
 			tc.configure(store, mgr, cancel)
 			mgr.compactSessionAsync(ctx, t.Name(), store)
-			want := []string{"old one", "old two", "recent one", "recent two"}
+			want := []string{"old one with several extra words to exceed the retained budget", "old two with several extra words to exceed the retained budget", "recent one", "recent two"}
 			if tc.durable {
 				want = []string{compactionTestSummary, "recent one", "recent two"}
 			}
 			assertCompactionLatest(t, store.CheckpointStore, 1, want)
 			tokens, at, err := store.CheckpointStore.GetSessionTokens(context.Background(), t.Name())
-			if err != nil || tokens != 1000 || at != nil {
+			wantTokens := 48
+			if tc.name == "token read" || tc.name == "load" || tc.name == "cancel before model" {
+				wantTokens = 1000
+			}
+			if err != nil || tokens != wantTokens || at != nil {
 				t.Fatalf("failure published metadata: %d %v %v", tokens, at, err)
 			}
 			if strings.Contains(logs.String(), "per-session compaction complete") {
@@ -703,13 +727,13 @@ func TestCompactionSQLitePublicationFailures(t *testing.T) {
 				t.Fatal("missing partial-publication warning")
 			}
 			assertCompactionLockReleased(t)
-			assertCompactionRetry(t, store, mgr)
+			assertCompactionRetry(t, store, mgr, tc.durable)
 		})
 	}
 }
 
 // assertCompactionRetry verifies recovery against the latest durable snapshot.
-func assertCompactionRetry(t *testing.T, store *compactionStore, mgr *SessionManager) {
+func assertCompactionRetry(t *testing.T, store *compactionStore, mgr *SessionManager, alreadyCompacted bool) {
 	t.Helper()
 	store.load, store.save, store.read, store.write = nil, nil, nil, nil
 	mgr.runner = &compactionRunner{}
@@ -720,7 +744,7 @@ func assertCompactionRetry(t *testing.T, store *compactionStore, mgr *SessionMan
 		t.Fatal(err)
 	}
 	tokens, at, err := store.GetSessionTokens(context.Background(), t.Name())
-	if err != nil || at == nil || tokens != estimateTokensForMessages(snap.Messages) {
+	if err != nil || (at == nil) != alreadyCompacted || tokens != estimateTokensForMessages(snap.Messages) {
 		t.Fatalf("retry metadata: %d %v %v", tokens, at, err)
 	}
 }
@@ -749,7 +773,7 @@ func TestCompactionLockCancellationAndTimeout(t *testing.T) {
 			if refs != 1 {
 				t.Fatalf("waiting worker leaked reference: %d", refs)
 			}
-			assertCompactionLatest(t, store, 1, []string{"old one", "old two", "recent one", "recent two"})
+			assertCompactionLatest(t, store, 1, []string{"old one with several extra words to exceed the retained budget", "old two with several extra words to exceed the retained budget", "recent one", "recent two"})
 			assertCompactionLockReleased(t)
 		})
 	}
@@ -811,13 +835,14 @@ func TestCompactionQueuedWorkerStillAboveBudgetUsesLatest(t *testing.T) {
 		t.Fatalf("summaries = %d", len(prompts))
 	}
 	<-prompts
-	if prompt := <-prompts; !strings.Contains(prompt, "system: summary") || strings.Contains(prompt, "old one") {
+	if prompt := <-prompts; !strings.Contains(prompt, "system: summary") || strings.Contains(prompt, "old one with several extra words to exceed the retained budget") {
 		t.Fatalf("second worker captured stale history: %s", prompt)
 	}
 	assertCompactionLatest(t, store, 1, []string{compactionTestSummary, "recent two"})
 	assertCompactionLockReleased(t)
 }
 
+//nolint:gocognit // matrix verifies guard and repair outcomes together.
 func TestCompactionEligibilitySkips(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -830,7 +855,7 @@ func TestCompactionEligibilitySkips(t *testing.T) {
 		{"cancelled", 100, 4, false, true},
 		{"no snapshot", 100, -1, false, false},
 		{"empty snapshot", 100, 0, false, false},
-		{"short history", 100, 2, false, false},
+		{"short history", 1, 2, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -857,7 +882,11 @@ func TestCompactionEligibilitySkips(t *testing.T) {
 			}
 			mgr.compactSessionAsync(ctx, t.Name(), active)
 			tokens, at, err := store.CheckpointStore.GetSessionTokens(context.Background(), t.Name())
-			if err != nil || tokens != 1000 || at != nil {
+			wantTokens := 1000
+			if tc.name == "empty snapshot" || tc.name == "short history" {
+				wantTokens = tc.count * 4
+			}
+			if err != nil || tokens != wantTokens || at != nil {
 				t.Fatal("ineligible worker changed metadata")
 			}
 			assertCompactionLockReleased(t)
@@ -865,6 +894,7 @@ func TestCompactionEligibilitySkips(t *testing.T) {
 	}
 }
 
+//nolint:cyclop // verifies cancellation and later durable recovery together.
 func TestDispatchAcknowledgedSaveWithCancelledContextDoesNotAccumulate(t *testing.T) {
 	t.Parallel()
 	store, mgr := sqliteCompactionFixture(t)
@@ -883,6 +913,122 @@ func TestDispatchAcknowledgedSaveWithCancelledContextDoesNotAccumulate(t *testin
 	if err != nil || tokens != 1000 || at != nil {
 		t.Fatalf("cancelled turn changed tokens: %d %v %v", tokens, at, err)
 	}
-	assertCompactionLatest(t, store, 2, []string{"old one", "old two", "recent one", "recent two", "newest user", compactionTestReply})
+	assertCompactionLatest(t, store, 2, []string{"old one with several extra words to exceed the retained budget", "old two with several extra words to exceed the retained budget", "recent one", "recent two", "newest user", compactionTestReply})
 	assertCompactionLockReleased(t)
+	store.save = nil
+	mgr.SetTokenBudget(1000)
+	if _, err := mgr.Dispatch(context.Background(), t.Name(), "alice", "repair"); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := store.LoadLatest(context.Background(), t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, at, err = store.GetSessionTokens(context.Background(), t.Name())
+	if err != nil || at != nil || tokens != estimateTokensForMessages(snap.Messages) {
+		t.Fatalf("later turn did not repair cache: %d %v %v", tokens, at, err)
+	}
+}
+
+//nolint:gocognit,cyclop // matrix checks metadata before model calls and after publication.
+func TestTokenBudgetDurableBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                   string
+		budget, cached         int
+		failWrite, cancelWrite bool
+	}{
+		{name: "inflated below", budget: 49, cached: 1000},
+		{name: "inflated equal", budget: 48, cached: 1000},
+		{name: "stale low above", budget: 47, cached: 1},
+		{name: "matching above", budget: 47, cached: 48},
+		{name: "refresh fails", budget: 47, cached: 1, failWrite: true},
+		{name: "refresh cancels", budget: 47, cached: 1, cancelWrite: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store, mgr := sqliteCompactionFixture(t)
+			mgr.tokenBudget = tc.budget
+			seededAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+			if err := store.UpdateSessionTokens(context.Background(), t.Name(), tc.cached, &seededAt); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			mgr.runner = &compactionRunner{text: func(context.Context, string, string) (string, error) {
+				tokens, at, err := store.GetSessionTokens(context.Background(), t.Name())
+				if err != nil || tokens != 48 || at == nil || !at.Equal(seededAt) {
+					t.Fatalf("model before refresh: %d %v %v", tokens, at, err)
+				}
+				calls++
+				return compactionTestSummary, nil
+			}}
+			if tc.failWrite || tc.cancelWrite {
+				store.write = func(ctx context.Context, key string, tokens int, at *time.Time) error {
+					if tc.failWrite {
+						return errors.New("refresh unavailable")
+					}
+					err := store.CheckpointStore.UpdateSessionTokens(ctx, key, tokens, at)
+					cancel()
+					return err
+				}
+			}
+			mgr.compactSessionAsync(ctx, t.Name(), store)
+			wantCalls := 0
+			if tc.budget < 48 && !tc.failWrite && !tc.cancelWrite {
+				wantCalls = 1
+			}
+			if calls != wantCalls {
+				t.Fatalf("model calls %d, want %d", calls, wantCalls)
+			}
+			tokens, at, err := store.CheckpointStore.GetSessionTokens(context.Background(), t.Name())
+			wantTokens := 48
+			if tc.failWrite {
+				wantTokens = tc.cached
+			}
+			if wantCalls == 1 {
+				wantTokens = 17
+			}
+			if err != nil || tokens != wantTokens || at == nil {
+				t.Fatalf("metadata %d %v %v", tokens, at, err)
+			}
+			if wantCalls == 0 && !at.Equal(seededAt) {
+				t.Fatal("refresh changed compaction timestamp")
+			}
+			assertCompactionLockReleased(t)
+		})
+	}
+}
+
+//nolint:cyclop // verifies each real SQLite turn and timestamp together.
+func TestDispatchRetainedTokensSQLite(t *testing.T) {
+	t.Parallel()
+	store, mgr := sqliteCompactionFixture(t)
+	key := t.Name() + "/turns"
+	ctx := context.Background()
+	if err := store.CreateThread(ctx, key, "mock", nil); err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := store.SaveSnapshot(ctx, key, 0, nil); err != nil || !saved {
+		t.Fatalf("seed empty snapshot: %v %v", saved, err)
+	}
+	seededAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := store.UpdateSessionTokens(ctx, key, 999, &seededAt); err != nil {
+		t.Fatal(err)
+	}
+	mgr.SetTokenBudget(1000)
+	for _, want := range []int{10, 20, 30} {
+		if response, err := mgr.Dispatch(ctx, key, "alice", "hello"); err != nil || response != compactionTestReply {
+			t.Fatalf("dispatch: %q %v", response, err)
+		}
+		snap, err := store.LoadLatest(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokens, at, err := store.GetSessionTokens(ctx, key)
+		if err != nil || tokens != want || tokens != estimateTokensForMessages(snap.Messages) || at == nil || !at.Equal(seededAt) {
+			t.Fatalf("metadata: %d %v %v, want %d", tokens, at, err, want)
+		}
+	}
 }
