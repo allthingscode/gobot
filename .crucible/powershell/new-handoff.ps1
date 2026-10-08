@@ -317,10 +317,14 @@ $resolvedCumulativeCount = if ($CumulativeHandoffCount -ge 1) {
     1
 }
 
-$resolvedPromptVersion = if (-not [string]::IsNullOrWhiteSpace($PromptVersion)) {
-    $PromptVersion
-} elseif (-not [string]::IsNullOrWhiteSpace($promptVersionFromPrompt)) {
+# The source prompt names the prompt that actually ran, so it wins over a copied -PromptVersion. Item 168.
+$resolvedPromptVersion = if (-not [string]::IsNullOrWhiteSpace($promptVersionFromPrompt)) {
+    if (-not [string]::IsNullOrWhiteSpace($PromptVersion) -and $PromptVersion -ne $promptVersionFromPrompt) {
+        Write-Warning "-PromptVersion '$PromptVersion' does not match '$promptVersionFromPrompt' in $sourcePromptPath; recording '$promptVersionFromPrompt'."
+    }
     $promptVersionFromPrompt
+} elseif (-not [string]::IsNullOrWhiteSpace($PromptVersion)) {
+    $PromptVersion
 } elseif ($null -ne $latest -and $latest.PSObject.Properties["prompt_version"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.prompt_version)) {
     [string]$latest.prompt_version
 } else {

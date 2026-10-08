@@ -1356,6 +1356,32 @@ budget_tier: "low"
         }
     }
 
+    # A Groomer copied the SOP's own version into -PromptVersion. The source prompt names
+    # the prompt that ran, so it wins. Item 168.
+    Invoke-Test -Name "The source prompt's version wins over a mismatched -PromptVersion" -Script {
+        $taskId = New-TestTaskId "PV-MISMATCH"
+        $promptDir = Join-Path $tempRoot ".crucible/session/$taskId/grooming"
+        New-Item -ItemType Directory -Path $promptDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $promptDir "prompt.md") -Value "<!-- prompt_version: grooming_prompt-v29 -->`nGrooming: $taskId" -Encoding UTF8
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "Ready for implementation"
+            PromptVersion = "groomer-sop-v5"
+            Artifacts = @("powershell/crucible.ps1")
+            FileAffinity = @("powershell/")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -ne 0) { throw "Generator failed: $($result.Output)" }
+        $path = Track-HandoffFile -TaskId $taskId
+        if (-not $path) { throw "No handoff file created for $taskId" }
+        $obj = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        if ($obj.prompt_version -ne "grooming_prompt-v29") {
+            throw "Expected the source prompt's grooming_prompt-v29, got: $($obj.prompt_version)"
+        }
+    }
+
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
 } finally {
     Set-Location -LiteralPath $origLocation

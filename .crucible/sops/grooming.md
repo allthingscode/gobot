@@ -1,4 +1,4 @@
-<!-- prompt_version: groomer-sop-v5 -->
+<!-- prompt_version: groomer-sop-v6 -->
 # SOP: Grooming
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -145,7 +145,7 @@ If there are no active items to implement:
 
 When a Research Gate produces only stub backlog rows (no implementation spec and no implementation work to dispatch), hand off directly to `verification` instead of `implementation`. This allows the Verification phase to validate BACKLOG.md structure and parent-task closure before Deployment finalizes the cycle.
 
-Write the handoff with `target_phase: "verification"` and **omit** `file_affinity` (no implementation scope):
+Write the handoff with `target_phase: "verification"` and **omit** `file_affinity` (no implementation scope). Do not pass `-PromptVersion`: `new-handoff.ps1` records the version from your session prompt.
 
 ```json
 {
@@ -155,7 +155,6 @@ Write the handoff with `target_phase: "verification"` and **omit** `file_affinit
   "handoff_retry_count": 0,
   "cumulative_handoff_count": N,
   "budget_tier": "low",
-  "prompt_version": "groomer-sop-v5",
   "reason": "Stub-Only Close-Out: stub rows filed, parent task closed - no implementation work",
   "artifacts": ["{{backlog_dir}}/BACKLOG.md", "{{backlog_dir}}/{type}/active/{task_id}_*.md"],
   "suspicious_content": null
