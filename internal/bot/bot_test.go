@@ -2,14 +2,19 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 )
@@ -390,7 +395,7 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 	go func() {
 		// Wait for goroutines to potentially complete.
 		assert.Eventually(t, func() bool {
-			return customHandler.callCount() >= 2
+			return len(api.getSent()) >= 2
 		}, 1*time.Second, 10*time.Millisecond)
 		close(api.updates)
 		cancel()
@@ -400,10 +405,10 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 	if customHandler.callCount() != 2 {
 		t.Errorf("expected 2 handler calls, got %d", customHandler.callCount())
 	}
-	// Exactly one message should have been sent successfully.
+	// The failed handler receives a notice and the successful handler a reply.
 	sent := api.getSent()
-	if len(sent) != 1 {
-		t.Errorf("expected exactly one successful send, got %v", sent)
+	if len(sent) != 2 {
+		t.Errorf("expected a failure notice and a successful reply, got %v", sent)
 	}
 }
 
@@ -648,4 +653,184 @@ func TestBot_Run_DropsInvalidMessages(t *testing.T) {
 	if len(calls) > 0 {
 		assert.Equal(t, "telegram:123", calls[0])
 	}
+}
+
+// recoveryAPI records attempts, including failed sends, and typing lifecycle.
+type recoveryAPI struct {
+	*mockAPI
+	attempts     []OutboundMessage
+	typingStarts int
+	typingStops  int
+}
+
+func (a *recoveryAPI) Send(_ context.Context, msg OutboundMessage) error {
+	a.attempts = append(a.attempts, msg)
+	return a.sendErr
+}
+
+func (a *recoveryAPI) Typing(_ context.Context, _, _ int64) func() {
+	a.typingStarts++
+	return func() { a.typingStops++ }
+}
+
+type recoveryHandler struct {
+	*mockHandler
+	beforeReturn func()
+}
+
+func (h *recoveryHandler) Handle(ctx context.Context, key string, msg InboundMessage) (string, error) {
+	if h.beforeReturn != nil {
+		h.beforeReturn()
+	}
+	return h.mockHandler.Handle(ctx, key, msg)
+}
+
+type recoveryCase struct {
+	name     string
+	reply    string
+	err      error
+	sendErr  error
+	cancel   bool
+	expired  bool
+	invalid  bool
+	noTarget bool
+	wantText string
+}
+
+//nolint:paralleltest // captures the process-wide logger and restores it
+func TestBot_HandlerFailureRecovery(t *testing.T) {
+	const notice = "I couldn't finish processing your message. Some actions may already have completed. Please check before trying again."
+	handlerErr := errors.New("secret-token C:/private/credentials session-internal-42")
+	deliveryErr := errors.New("delivery unavailable")
+	cases := []recoveryCase{{name: "generic failure", err: handlerErr, wantText: notice},
+		{name: "reply plus error", reply: "secret response", err: handlerErr, wantText: notice},
+		{name: "inner lock timeout", err: fmt.Errorf("session lock: %w", context.DeadlineExceeded), wantText: notice},
+		{name: "inner cancellation", err: fmt.Errorf("inner operation: %w", context.Canceled), wantText: notice},
+		{name: "notice delivery failure", err: handlerErr, sendErr: deliveryErr, wantText: notice},
+		{name: "shutdown during handler", err: handlerErr, cancel: true},
+		{name: "delivery deadline expired", err: handlerErr, expired: true},
+		{name: "generated reply delivery failure", reply: "normal reply", sendErr: deliveryErr, wantText: "normal reply"},
+		{name: "successful reply", reply: "normal reply", wantText: "normal reply"},
+		{name: "empty success"},
+		{name: "invalid ingress", err: handlerErr, invalid: true},
+		{name: "zero topic and message", err: handlerErr, noTarget: true, wantText: notice}}
+	for _, traced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("traced=%t", traced), func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					testRecoveryModes(t, tc, traced)
+				})
+			}
+		})
+	}
+}
+
+func testRecoveryModes(t *testing.T, tc recoveryCase, traced bool) {
+	t.Helper()
+	for _, direct := range []bool{false, true} {
+		t.Run(fmt.Sprintf("direct=%t", direct), func(t *testing.T) {
+			if direct && tc.invalid {
+				return
+			}
+			testRecoveryCase(t, tc, traced, direct)
+		})
+	}
+}
+
+func testRecoveryCase(t *testing.T, tc recoveryCase, traced, direct bool) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if tc.expired {
+		var deadlineCancel context.CancelFunc
+		ctx, deadlineCancel = context.WithDeadline(ctx, time.Time{})
+		defer deadlineCancel()
+	}
+	api := &recoveryAPI{mockAPI: newMockAPI()}
+	api.sendErr = tc.sendErr
+	handler := &recoveryHandler{mockHandler: &mockHandler{response: tc.reply, err: tc.err}}
+	if tc.cancel {
+		handler.beforeReturn = cancel
+	}
+	b := New(api, handler)
+	if traced {
+		b.SetTracer(observability.NewDispatchTracer(nil))
+	}
+	msg := InboundMessage{ChatID: 123, SenderID: 456, ThreadID: 7, MessageID: 89, Text: "secret-token C:/private/credentials session-internal-42"}
+	if tc.invalid {
+		msg.ChatID = 0
+	}
+	if tc.noTarget {
+		msg.ThreadID, msg.MessageID = 0, 0
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	func() {
+		defer slog.SetDefault(previous)
+		if direct {
+			err := b.handleAndSend(ctx, SessionKey(msg.ChatID, msg.ThreadID, msg.SenderID), msg)
+			assertRecoveryError(t, tc, err)
+		} else {
+			b.dispatch(ctx, msg)
+		}
+	}()
+	assertRecoveryLifecycle(t, tc, direct, api, handler, logs.String())
+	assertRecoverySend(t, tc, api, msg)
+}
+
+func assertRecoveryError(t *testing.T, tc recoveryCase, err error) {
+	t.Helper()
+	if tc.err != nil {
+		assert.ErrorIs(t, err, tc.err)
+	}
+	if tc.sendErr != nil {
+		assert.ErrorIs(t, err, tc.sendErr)
+	}
+	if tc.err == nil && tc.sendErr == nil {
+		assert.NoError(t, err)
+	}
+}
+
+func assertRecoveryLifecycle(t *testing.T, tc recoveryCase, direct bool, api *recoveryAPI, handler *recoveryHandler, logs string) {
+	t.Helper()
+	wantCalls := 1
+	if tc.invalid {
+		wantCalls = 0
+	}
+	assert.Len(t, handler.getCalls(), wantCalls)
+	if direct {
+		assert.Zero(t, api.typingStarts)
+		assert.Zero(t, api.typingStops)
+	} else {
+		assert.Equal(t, wantCalls, api.typingStarts)
+		assert.Equal(t, wantCalls, api.typingStops)
+		if (tc.err != nil || tc.sendErr != nil) && !tc.invalid {
+			assert.Contains(t, logs, `"level":"ERROR"`)
+			assert.Contains(t, logs, `"msg":"bot: handleAndSend failed"`)
+			assert.Contains(t, logs, `"err":`)
+			if tc.err != nil && tc.sendErr != nil {
+				assert.Contains(t, logs, "send failure notice")
+			}
+		}
+	}
+}
+
+func assertRecoverySend(t *testing.T, tc recoveryCase, api *recoveryAPI, msg InboundMessage) {
+	t.Helper()
+	if tc.wantText == "" {
+		assert.Empty(t, api.attempts)
+		return
+	}
+	if !assert.Len(t, api.attempts, 1) {
+		return
+	}
+	want := OutboundMessage{ChatID: msg.ChatID, ThreadID: msg.ThreadID, Text: tc.wantText}
+	if tc.err != nil {
+		want.ReplyToID = msg.MessageID
+		for _, sentinel := range strings.Fields(msg.Text) {
+			assert.NotContains(t, api.attempts[0].Text, sentinel)
+		}
+	}
+	assert.Equal(t, want, api.attempts[0])
 }

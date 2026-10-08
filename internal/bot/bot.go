@@ -324,14 +324,16 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 	stopTyping := b.api.Typing(ctx, msg.ChatID, msg.ThreadID)
 	defer stopTyping()
 
+	var err error
 	if b.tracer != nil {
-		_ = b.tracer.TraceBotDispatch(ctx, sessionKey, func(ctx context.Context) error {
+		err = b.tracer.TraceBotDispatch(ctx, sessionKey, func(ctx context.Context) error {
 			return b.handleAndSend(ctx, sessionKey, msg)
 		})
-		return
+	} else {
+		err = b.handleAndSend(ctx, sessionKey, msg)
 	}
 
-	if err := b.handleAndSend(ctx, sessionKey, msg); err != nil {
+	if err != nil {
 		slog.Error("bot: handleAndSend failed", logattr.SessionKey(sessionKey), logattr.Err(err))
 	}
 }
@@ -340,7 +342,19 @@ func (b *Bot) dispatch(ctx context.Context, msg InboundMessage) {
 func (b *Bot) handleAndSend(ctx context.Context, sessionKey string, msg InboundMessage) error {
 	reply, err := b.handler.Handle(ctx, sessionKey, msg)
 	if err != nil {
-		return fmt.Errorf("handle: %w", err)
+		handleErr := fmt.Errorf("handle: %w", err)
+		if ctx.Err() == nil {
+			out := OutboundMessage{
+				ChatID:    msg.ChatID,
+				ThreadID:  msg.ThreadID,
+				ReplyToID: msg.MessageID,
+				Text:      "I couldn't finish processing your message. Some actions may already have completed. Please check before trying again.",
+			}
+			if sendErr := b.api.Send(ctx, out); sendErr != nil {
+				return errors.Join(handleErr, fmt.Errorf("send failure notice: %w", sendErr))
+			}
+		}
+		return handleErr
 	}
 	if reply == "" {
 		return nil
