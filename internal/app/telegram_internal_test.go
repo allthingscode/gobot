@@ -21,7 +21,7 @@ func TestTgAPI_HandleMessage(t *testing.T) {
 	t.Parallel()
 	api := &TgAPI{
 		msgChan:   make(chan bot.InboundMessage, 10),
-		allowFrom: make(map[int64]bool),
+		allowFrom: map[int64]bool{456: true},
 	}
 
 	ctx := context.Background()
@@ -54,9 +54,10 @@ func TestTgAPI_HandleMessage(t *testing.T) {
 func TestTgAPI_HandleUpdate(t *testing.T) {
 	t.Parallel()
 	api := &TgAPI{
-		msgChan:  make(chan bot.InboundMessage, 10),
-		cbChan:   make(chan bot.InboundCallback, 10),
-		seenMsgs: sync.Map{},
+		msgChan:   make(chan bot.InboundMessage, 10),
+		cbChan:    make(chan bot.InboundCallback, 10),
+		seenMsgs:  sync.Map{},
+		allowFrom: map[int64]bool{1: true},
 	}
 
 	ctx := context.Background()
@@ -175,13 +176,13 @@ func TestTgAPI_CallbackIngress(t *testing.T) {
 		{"listed chat different sender", ordinary, map[int64]bool{123: true}, true},
 		{"listed sender unlisted chat", ordinary, map[int64]bool{789: true}, false},
 		{"false whitelist entry", ordinary, map[int64]bool{123: false}, false},
-		{"nil whitelist", ordinary, nil, true},
-		{"empty whitelist", ordinary, map[int64]bool{}, true},
+		{"nil whitelist", ordinary, nil, false},
+		{"empty whitelist", ordinary, map[int64]bool{}, false},
 		{"negative group", &telego.Message{MessageID: 42, Chat: telego.Chat{ID: -123}}, map[int64]bool{-123: true}, true},
 		{"negative group unlisted", &telego.Message{MessageID: 42, Chat: telego.Chat{ID: -123}}, map[int64]bool{123: true}, false},
 		{"inaccessible listed", inaccessible, map[int64]bool{123: true}, true},
 		{"inaccessible unlisted", inaccessible, map[int64]bool{789: true}, false},
-		{"inaccessible nil whitelist", inaccessible, nil, true},
+		{"inaccessible nil whitelist", inaccessible, nil, false},
 		{"inline only", nil, nil, false},
 		{"typed nil message", nilMessage, nil, false},
 		{"typed nil inaccessible", nilInaccessible, nil, false},
@@ -225,7 +226,7 @@ func assertCallbackQueued(t *testing.T, api *TgAPI, caller *callbackCaller, cb *
 
 //nolint:paralleltest // breaker registry is shared with ResetAll tests.
 func TestTgAPI_CallbackNil(t *testing.T) {
-	api, caller := newCallbackAPI(t, nil)
+	api, caller := newCallbackAPI(t, map[int64]bool{123: true})
 	api.handleCallbackQuery(context.Background(), nil)
 	if caller.calls != 0 || len(api.cbChan) != 0 || len(api.msgChan) != 0 {
 		t.Fatal("nil callback acknowledged or queued")
@@ -236,7 +237,7 @@ func TestTgAPI_CallbackNil(t *testing.T) {
 func TestTgAPI_CallbackAcknowledgement(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		t.Run(fmt.Sprintf("circuit open=%t", open), func(t *testing.T) {
-			api, caller := newCallbackAPI(t, nil)
+			api, caller := newCallbackAPI(t, map[int64]bool{123: true})
 			caller.fail = true
 			if open {
 				_ = api.breaker.Execute(func() error { return errors.New("open circuit") })
@@ -260,7 +261,7 @@ func TestTgAPI_CallbackAcknowledgement(t *testing.T) {
 
 //nolint:paralleltest // breaker registry is shared with ResetAll tests.
 func TestTgAPI_CallbackCancelledFullQueue(t *testing.T) {
-	api, caller := newCallbackAPI(t, nil)
+	api, caller := newCallbackAPI(t, map[int64]bool{123: true})
 	for range cap(api.cbChan) {
 		api.cbChan <- bot.InboundCallback{Data: "existing"}
 	}
@@ -296,9 +297,10 @@ func TestTgAPI_MessageIngressMatrix(t *testing.T) {
 		admit bool
 	}{
 		{"listed chat", map[int64]bool{123: true, 456: true}, true},
+		{"false entries", map[int64]bool{123: false, 456: false}, false},
 		{"unlisted chat listed sender", map[int64]bool{789: true}, false},
-		{"nil whitelist", nil, true},
-		{"empty whitelist", map[int64]bool{}, true},
+		{"nil whitelist", nil, false},
+		{"empty whitelist", map[int64]bool{}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -333,5 +335,28 @@ func assertMessageIngress(t *testing.T, api *TgAPI, admit bool) {
 		if got := <-api.msgChan; got != want {
 			t.Errorf("message = %+v, want %+v", got, want)
 		}
+	}
+}
+
+func TestTgAPI_SignedMessageIngress(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name  string
+		allow map[int64]bool
+		want  int
+	}{
+		{"listed negative group", map[int64]bool{-123: true}, 1},
+		{"unlisted negative group", map[int64]bool{123: true}, 0},
+		{"false negative group", map[int64]bool{-123: false}, 0},
+		{"nil", nil, 0}, {"empty", map[int64]bool{}, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			api := &TgAPI{allowFrom: tt.allow, msgChan: make(chan bot.InboundMessage, 1)}
+			api.handleMessage(context.Background(), &telego.Message{MessageID: 42, Chat: telego.Chat{ID: -123}, Text: "group message"})
+			if len(api.msgChan) != tt.want {
+				t.Fatalf("queued=%d want=%d", len(api.msgChan), tt.want)
+			}
+		})
 	}
 }

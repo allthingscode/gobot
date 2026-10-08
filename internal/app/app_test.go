@@ -275,3 +275,58 @@ func TestRunPreFlightDiagnostics(t *testing.T) {
 	cfg := &config.Config{}
 	runPreFlightDiagnostics(cfg)
 }
+
+func TestReconcileWhitelistParsing(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		ids  []string
+		want int
+	}{
+		{"nil", nil, 0}, {"empty", []string{}, 0},
+		{"invalid", []string{"", "abc", "0", "+0", "-0", " 123", "9223372036854775808", "-9223372036854775809"}, 0},
+		{"mixed signed duplicates", []string{"abc", "0", "123", "+123", "00123", "-100123"}, 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cm, pairing := newWhitelistReconciliationStore(t)
+			cfg := &config.Config{}
+			cfg.Channels.Telegram.AllowFrom = tt.ids
+			if got := ReconcileAuthorizedFromAllowFrom(cfg, cm); got != tt.want {
+				t.Fatalf("reconciled=%d want=%d", got, tt.want)
+			}
+			if got := ReconcileAuthorizedFromAllowFrom(cfg, cm); got != 0 {
+				t.Fatalf("repeat reconciled=%d", got)
+			}
+			assertReconciledWhitelist(t, pairing, tt.want == 2)
+		})
+	}
+}
+
+func assertReconciledWhitelist(t *testing.T, pairing *agentctx.PairingStore, mixed bool) {
+	t.Helper()
+	for _, id := range []int64{0, 123, -100123, 999} {
+		got, err := pairing.IsAuthorized(id)
+		want := id == 999 || (mixed && (id == 123 || id == -100123))
+		if err != nil || got != want {
+			t.Fatalf("authorized(%d)=%t,%v want=%t", id, got, err, want)
+		}
+	}
+}
+
+func newWhitelistReconciliationStore(t *testing.T) (*agentctx.CheckpointManager, *agentctx.PairingStore) {
+	t.Helper()
+	cm, err := agentctx.GetCheckpointManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cm.DB().Close() })
+	pairing, err := agentctx.NewPairingStore(cm.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pairing.AuthorizeByChatID(999, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	return cm, pairing
+}

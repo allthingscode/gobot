@@ -528,3 +528,75 @@ func TestValidationResult_FormatActionable_Empty(t *testing.T) {
 		t.Errorf("expected empty string for no errors, got %q", got)
 	}
 }
+
+func TestParseTelegramChatID(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		raw     string
+		want    int64
+		invalid bool
+	}{
+		{"", 0, true}, {"abc", 0, true}, {" 123", 0, true}, {"123 ", 0, true},
+		{"0", 0, true}, {"+0", 0, true}, {"-0", 0, true}, {"0x10", 0, true},
+		{"1.5", 0, true}, {"*", 0, true}, {"@user", 0, true},
+		{"9223372036854775808", 0, true}, {"-9223372036854775809", 0, true},
+		{"123", 123, false}, {"-100123", -100123, false}, {"+123", 123, false},
+		{"00123", 123, false}, {"9223372036854775807", 9223372036854775807, false},
+		{"-9223372036854775808", -9223372036854775808, false},
+	} {
+		t.Run(tt.raw, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseTelegramChatID(tt.raw)
+			if (err != nil) != tt.invalid || got != tt.want {
+				t.Fatalf("parse %q = %d, %v; want %d invalid=%t", tt.raw, got, err, tt.want, tt.invalid)
+			}
+		})
+	}
+}
+
+//nolint:paralleltest // token environment isolation.
+func TestTelegramWhitelistValidation(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	for _, tt := range []struct {
+		name    string
+		ids     []string
+		invalid bool
+	}{
+		{"nil", nil, true}, {"empty", []string{}, true}, {"blank", []string{""}, true},
+		{"all invalid", []string{"abc", "0"}, true}, {"mixed", []string{"123", "abc"}, true},
+		{"whitespace", []string{" 123"}, true}, {"signed zero", []string{"+0", "-0"}, true},
+		{"overflow", []string{"9223372036854775808", "-9223372036854775809"}, true},
+		{"valid", []string{"123"}, false}, {"signed groups", []string{"-100123", "+123", "00123"}, false},
+		{"duplicates", []string{"123", "123"}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, enabled := range []bool{false, true} {
+				for _, token := range []string{"", "123:token"} {
+					cfg := &Config{}
+					cfg.Channels.Telegram.Enabled = enabled
+					cfg.Channels.Telegram.Token = token
+					cfg.Channels.Telegram.AllowFrom = tt.ids
+					result := &ValidationResult{}
+					NewValidator(cfg).validateTelegram(result)
+					assertTelegramWhitelistDiagnostics(t, result, enabled && tt.invalid)
+				}
+			}
+		})
+	}
+}
+
+func assertTelegramWhitelistDiagnostics(t *testing.T, result *ValidationResult, want bool) {
+	t.Helper()
+	found := false
+	for _, e := range result.Errors {
+		if strings.HasPrefix(e.Field, "channels.telegram.allowFrom") {
+			found = true
+			if e.Severity != SeverityCritical || !strings.Contains(e.Remedy, "nonzero signed decimal") {
+				t.Fatalf("non-actionable whitelist diagnostic: %+v", e)
+			}
+		}
+	}
+	if found != want {
+		t.Fatalf("whitelist error=%t want=%t errors=%v", found, want, result.Errors)
+	}
+}
