@@ -274,7 +274,13 @@ Defaults when not configured: 5 failures, 60s window, 30s timeout.
 | Field | Type | Description |
 |-------|------|-------------|
 | `sessionTokenBudget` | int | Token budget per session before compaction is triggered (default 80000). _(legacy alias: `session_token_budget`)_ |
-| `compactionSummaryTurns` | int | Number of oldest turns to summarize per compaction pass (default 20). _(legacy alias: `compaction_summary_turns`)_ |
+| `compactionSummaryTurns` | int | Number of newest individual messages retained unchanged during token-budget compaction (default 20). _(legacy alias: `compaction_summary_turns`)_ |
+
+Token-budget compaction runs asynchronously after a successfully persisted turn and rechecks the current durable history under the session lock. For an eligible history longer than N messages, where N is `compactionSummaryTurns`, it summarizes the older prefix and retains the newest N individual messages unchanged. Successful publication replaces the prefix with one system summary followed by those N messages. N counts individual messages, not conversation exchanges. Histories with at most N messages skip summarization even if their token estimate exceeds `sessionTokenBudget`. This setting applies to token-budget compaction, rather than other compaction strategies or memory-window policies; summarization is not guaranteed to preserve every detail.
+
+The background worker holds the same session lock used by Dispatch while loading, summarizing, and publishing. A subsequent request for that session can wait until the worker releases the lock; the wait can fail on cancellation or lock timeout. Other sessions use independent locks and do not incur this same-session wait.
+
+Telegram shows its generic typing action while a request is being handled; this is not a compaction progress signal. The running bot's `/dash/metrics` page shows session-lock hold age and contention, with stale-held warnings after 60 seconds, but does not identify compaction as the holder. A separate `gobot doctor` CLI process cannot inspect the running bot's in-memory lock map.
 
 ---
 

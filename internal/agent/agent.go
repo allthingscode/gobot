@@ -90,7 +90,7 @@ type SessionManager struct {
 	pruningPolicy           config.ContextPruningConfig
 	compactionPolicy        config.CompactionPolicyConfig
 	tokenBudget             int // per-session token budget before triggering compaction (F-104)
-	summaryTurns            int // how many oldest turns to summarize per compaction pass (F-104)
+	summaryTurns            int // newest individual messages retained during token-budget compaction (F-104)
 }
 
 // NewSessionManager creates a SessionManager backed by runner.
@@ -194,7 +194,8 @@ func (m *SessionManager) SetTokenBudget(budget int) {
 	}
 }
 
-// SetSummaryTurns configures how many turns to summarize per compaction (F-104).
+// SetSummaryTurns configures how many newest individual messages to retain
+// unchanged during token-budget compaction (F-104).
 func (m *SessionManager) SetSummaryTurns(turns int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

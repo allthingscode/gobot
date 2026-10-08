@@ -103,8 +103,8 @@ func (c *Config) SessionTokenBudget() int {
 	return 80000
 }
 
-// CompactionSummaryTurns returns how many oldest turns to summarize per compaction
-// pass, defaulting to 20 if unset or zero.
+// CompactionSummaryTurns returns the number of newest individual messages retained
+// unchanged during token-budget compaction, defaulting to 20 if unset or zero.
 func (c *Config) CompactionSummaryTurns() int {
 	if c.Context.CompactionSummaryTurns > 0 {
 		return c.Context.CompactionSummaryTurns
