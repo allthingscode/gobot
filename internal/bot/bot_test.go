@@ -834,3 +834,107 @@ func assertRecoverySend(t *testing.T, tc recoveryCase, api *recoveryAPI, msg Inb
 	}
 	assert.Equal(t, want, api.attempts[0])
 }
+
+type reconnectAPI struct {
+	*mockAPI
+	muReconnect   sync.Mutex
+	messageCalls  int
+	callbackCalls int
+	joined        chan string
+}
+
+func (a *reconnectAPI) Updates(ctx context.Context, timeout int) (<-chan InboundMessage, error) {
+	a.muReconnect.Lock()
+	a.messageCalls++
+	first := a.messageCalls == 1
+	a.muReconnect.Unlock()
+	if first {
+		c := make(chan InboundMessage)
+		close(c)
+		return c, nil
+	}
+	select {
+	case a.joined <- "messages":
+	case <-ctx.Done():
+		return nil, fmt.Errorf("reconnect: %w", ctx.Err())
+	}
+	return a.mockAPI.Updates(ctx, timeout)
+}
+func (a *reconnectAPI) Callbacks(ctx context.Context) (<-chan InboundCallback, error) {
+	a.muReconnect.Lock()
+	a.callbackCalls++
+	first := a.callbackCalls == 1
+	a.muReconnect.Unlock()
+	if first {
+		c := make(chan InboundCallback)
+		close(c)
+		return c, nil
+	}
+	select {
+	case a.joined <- "callbacks":
+	case <-ctx.Done():
+		return nil, fmt.Errorf("reconnect: %w", ctx.Err())
+	}
+	return a.mockAPI.Callbacks(ctx)
+}
+
+type reconnectHandler struct{ handled chan string }
+
+func (h *reconnectHandler) Handle(_ context.Context, _ string, _ InboundMessage) (string, error) {
+	h.handled <- "message"
+	return "", nil
+}
+func (h *reconnectHandler) HandleCallback(_ context.Context, _ InboundCallback) error {
+	h.handled <- "callback"
+	return nil
+}
+func TestBot_BothStreamsReconnect(t *testing.T) {
+	t.Parallel()
+	api := &reconnectAPI{mockAPI: newMockAPI(), joined: make(chan string, 2)}
+	handler := &reconnectHandler{handled: make(chan string, 2)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	joined := make(chan struct{})
+	go func() { defer close(joined); done <- New(api, handler).Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-joined:
+		case <-time.After(time.Second):
+			t.Error("Run cleanup timed out")
+		}
+	})
+	for range 2 {
+		awaitReconnectSignal(t, api.joined)
+	}
+	api.updates <- InboundMessage{ChatID: 123, MessageID: 42, SenderID: 789, Text: "after reconnect"}
+	api.callbacks <- InboundCallback{ChatID: 123, Data: "after reconnect"}
+	seen := map[string]bool{}
+	for range 2 {
+		seen[awaitReconnectSignal(t, handler.handled)] = true
+	}
+	if !seen["message"] || !seen["callback"] {
+		t.Fatalf("deliveries=%v", seen)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not terminate")
+	}
+}
+
+func awaitReconnectSignal(t *testing.T, signals <-chan string) string {
+	t.Helper()
+	select {
+	case signal := <-signals:
+		return signal
+	case <-time.After(time.Second):
+		t.Fatal("reconnect signal timed out")
+		return ""
+	}
+}
