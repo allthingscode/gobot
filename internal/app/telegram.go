@@ -18,13 +18,17 @@ import (
 
 // TgAPI implements bot.API using the telego library.
 type TgAPI struct {
-	client    *telego.Bot
-	breaker   *resilience.Breaker
-	seenMsgs  sync.Map
-	allowFrom map[int64]bool
-	msgChan   chan bot.InboundMessage
-	cbChan    chan bot.InboundCallback
-	username  string
+	// Legacy direct-handler fixtures; polling never publishes or sends through these fields.
+	msgChan      chan bot.InboundMessage
+	cbChan       chan bot.InboundCallback
+	client       *telego.Bot
+	breaker      *resilience.Breaker
+	seenMsgs     sync.Map
+	allowFrom    map[int64]bool
+	lifecycle    sync.Mutex
+	generation   *pollingGeneration
+	nextUpdateID int
+	username     string
 }
 
 // NewTgAPI initializes a new Telegram API adapter using the telego library.
@@ -58,8 +62,6 @@ func NewTgAPI(token string, allowFrom []string, cfg *config.Config) (*TgAPI, err
 		client:    client,
 		breaker:   breaker,
 		allowFrom: af,
-		msgChan:   make(chan bot.InboundMessage, 100),
-		cbChan:    make(chan bot.InboundCallback, 100),
 		username:  self.Username,
 	}, nil
 }
@@ -94,53 +96,112 @@ func (api *TgAPI) isDuplicate(key string) bool {
 	return false
 }
 
-// Updates starts the Telegram update poller and returns a channel for inbound messages.
-func (api *TgAPI) Updates(ctx context.Context, _ int) (<-chan bot.InboundMessage, error) {
-	if api.breaker.State() == "open" {
-		return nil, resilience.ErrCircuitOpen
-	}
-
-	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
-	// Always reinit both â€” cbChan may be closed (not nil) from a prior poller
-	// session, and writing to a closed channel panics.
-	api.msgChan = make(chan bot.InboundMessage, 100)
-	api.cbChan = make(chan bot.InboundCallback, 100)
-	go api.startPoller(ctx)
-	return api.msgChan, nil
+// pollingGeneration owns both subscriptions until its worker terminates.
+type pollingGeneration struct {
+	msgChan chan bot.InboundMessage
+	cbChan  chan bot.InboundCallback
+	ctx     context.Context
+	cancel  context.CancelFunc
+	start   chan struct{}
+	done    chan struct{}
+	started bool
+	closed  bool
 }
 
-// Callbacks returns a channel for inbound Telegram callback queries.
-func (api *TgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, error) {
-	// Re-initialize channels to allow multiple Run attempts (F-054 fix).
-	if api.cbChan == nil {
-		api.cbChan = make(chan bot.InboundCallback, 100)
-	}
-	return api.cbChan, nil
-}
-
-func (api *TgAPI) startPoller(ctx context.Context) {
-	defer close(api.msgChan)
-	defer close(api.cbChan)
-	defer RecoverWithStack("telegram-poller")
-
-	offset := 0
+// acquire waits outside the lifecycle lock while a cancelled worker finishes.
+func (api *TgAPI) acquire(ctx context.Context, start bool) (*pollingGeneration, error) {
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("telegram acquire: %w", err)
 		}
-
-		updates, err := api.fetchUpdates(ctx, offset)
+		g, waiting, err := api.acquireGeneration(ctx, start)
 		if err != nil {
-			return // Return to allow Bot.Run to handle retry delay
+			return nil, err
 		}
+		if !waiting {
+			return g, nil
+		}
+		select {
+		case <-g.done:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("telegram acquire: %w", ctx.Err())
+		}
+	}
+}
 
+func (api *TgAPI) acquireGeneration(ctx context.Context, start bool) (*pollingGeneration, bool, error) {
+	api.lifecycle.Lock()
+	defer api.lifecycle.Unlock()
+	g := api.generation
+	if g != nil && !g.closed && g.ctx.Err() != nil {
+		return g, true, nil
+	}
+	if start && api.breaker.State() == "open" {
+		return nil, false, resilience.ErrCircuitOpen
+	}
+	if g == nil || g.closed {
+		// The generation worker cancels its context on every exit; Stop also cancels it.
+		owner, cancel := context.WithCancel(ctx) //nolint:gosec // cancellation ownership transfers to runGeneration.
+		g = &pollingGeneration{msgChan: make(chan bot.InboundMessage, 100), cbChan: make(chan bot.InboundCallback, 100), ctx: owner, cancel: cancel, start: make(chan struct{}), done: make(chan struct{})}
+		api.generation = g
+		go api.runGeneration(g)
+	}
+	if start && !g.started {
+		g.started = true
+		close(g.start)
+	}
+	return g, false, nil
+}
+
+// Updates starts at most one poller for the current paired subscriptions.
+func (api *TgAPI) Updates(ctx context.Context, _ int) (<-chan bot.InboundMessage, error) {
+	g, err := api.acquire(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	return g.msgChan, nil
+}
+
+// Callbacks reserves or joins the same generation as Updates, in either order.
+func (api *TgAPI) Callbacks(ctx context.Context) (<-chan bot.InboundCallback, error) {
+	g, err := api.acquire(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	return g.cbChan, nil
+}
+
+func (api *TgAPI) runGeneration(g *pollingGeneration) {
+	defer func() {
+		g.cancel()
+		api.lifecycle.Lock()
+		defer api.lifecycle.Unlock()
+		g.closed = true
+		close(g.msgChan)
+		close(g.cbChan)
+		close(g.done)
+	}()
+	defer RecoverWithStack("telegram-poller")
+	select {
+	case <-g.ctx.Done():
+		return
+	case <-g.start:
+	}
+	api.startPoller(g)
+}
+
+func (api *TgAPI) startPoller(g *pollingGeneration) {
+	for g.ctx.Err() == nil {
+		updates, err := api.fetchUpdates(g.ctx, api.nextUpdateID)
+		if err != nil {
+			return
+		}
 		for _, update := range updates {
-			if update.UpdateID >= offset {
-				offset = update.UpdateID + 1
+			if update.UpdateID < api.nextUpdateID {
+				continue
 			}
-			api.handleUpdate(ctx, update)
+			api.nextUpdateID = update.UpdateID + 1
+			api.handleGenerationUpdate(g.ctx, g, update)
 		}
 	}
 }
@@ -175,6 +236,10 @@ func (api *TgAPI) fetchUpdates(ctx context.Context, offset int) ([]telego.Update
 }
 
 func (api *TgAPI) handleUpdate(ctx context.Context, update telego.Update) {
+	api.handleGenerationUpdate(ctx, &pollingGeneration{msgChan: api.msgChan, cbChan: api.cbChan}, update)
+}
+
+func (api *TgAPI) handleGenerationUpdate(ctx context.Context, g *pollingGeneration, update telego.Update) {
 	slog.Info("telegram: raw update received",
 		"updateID", update.UpdateID,
 		"hasMessage", update.Message != nil,
@@ -182,15 +247,15 @@ func (api *TgAPI) handleUpdate(ctx context.Context, update telego.Update) {
 	)
 
 	if update.Message != nil && update.Message.Text != "" {
-		api.handleMessage(ctx, update.Message)
+		api.handleMessage(ctx, g, update.Message)
 	}
 
 	if update.CallbackQuery != nil {
-		api.handleCallbackQuery(ctx, update.CallbackQuery)
+		api.handleCallbackQuery(ctx, g, update.CallbackQuery)
 	}
 }
 
-func (api *TgAPI) handleMessage(ctx context.Context, m *telego.Message) {
+func (api *TgAPI) handleMessage(ctx context.Context, g *pollingGeneration, m *telego.Message) {
 	msgID := int64(m.MessageID)
 	dedupKey := fmt.Sprintf("%d:%d", m.Chat.ID, msgID)
 	if api.isDuplicate(dedupKey) {
@@ -209,7 +274,7 @@ func (api *TgAPI) handleMessage(ctx context.Context, m *telego.Message) {
 	}
 
 	select {
-	case api.msgChan <- bot.InboundMessage{
+	case g.msgChan <- bot.InboundMessage{
 		ChatID:    m.Chat.ID,
 		MessageID: msgID,
 		ThreadID:  int64(m.MessageThreadID),
@@ -220,7 +285,7 @@ func (api *TgAPI) handleMessage(ctx context.Context, m *telego.Message) {
 	}
 }
 
-func (api *TgAPI) handleCallbackQuery(ctx context.Context, cb *telego.CallbackQuery) {
+func (api *TgAPI) handleCallbackQuery(ctx context.Context, g *pollingGeneration, cb *telego.CallbackQuery) {
 	if cb == nil || cb.Message == nil {
 		slog.Warn("telegram: callback without message dropped")
 		return
@@ -251,7 +316,7 @@ func (api *TgAPI) handleCallbackQuery(ctx context.Context, cb *telego.CallbackQu
 
 	slog.Debug("telegram: forwarding callback to channel", "id", cb.ID, "reqID", cb.Data)
 	select {
-	case api.cbChan <- bot.InboundCallback{
+	case g.cbChan <- bot.InboundCallback{
 		ChatID:     chatID,
 		MessageID:  msgID,
 		SenderID:   cb.From.ID,
@@ -377,4 +442,14 @@ func (api *TgAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, 
 }
 
 // Stop performs a graceful shutdown of the Telegram API adapter.
-func (api *TgAPI) Stop() {}
+func (api *TgAPI) Stop() {
+	api.lifecycle.Lock()
+	g := api.generation
+	if g != nil {
+		g.cancel()
+	}
+	api.lifecycle.Unlock()
+	if g != nil {
+		<-g.done
+	}
+}
