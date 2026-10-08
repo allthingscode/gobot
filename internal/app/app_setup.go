@@ -9,7 +9,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -208,9 +207,9 @@ func ReconcileAuthorizedFromAllowFrom(cfg *config.Config, store agent.Checkpoint
 
 	reconciled := 0
 	for _, raw := range cfg.TelegramAllowedFrom() {
-		chatID, perr := strconv.ParseInt(raw, 10, 64)
+		chatID, perr := config.ParseTelegramChatID(raw)
 		if perr != nil {
-			continue // non-numeric entries are ignored, mirroring NewTgAPI
+			continue // invalid and zero entries are ignored; valid entries still reconcile
 		}
 		authorized, aerr := pairingStore.IsAuthorized(chatID)
 		if aerr != nil {

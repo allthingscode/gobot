@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +29,18 @@ type TgAPI struct {
 
 // NewTgAPI initializes a new Telegram API adapter using the telego library.
 func NewTgAPI(token string, allowFrom []string, cfg *config.Config) (*TgAPI, error) {
+	af := make(map[int64]bool, len(allowFrom))
+	for i, raw := range allowFrom {
+		id, err := config.ParseTelegramChatID(raw)
+		if err != nil {
+			return nil, fmt.Errorf("telegram whitelist allowFrom[%d]: %w", i, err)
+		}
+		af[id] = true
+	}
+	if len(af) == 0 {
+		return nil, errors.New("telegram whitelist channels.telegram.allowFrom: at least one nonzero signed decimal chat ID is required")
+	}
+
 	client, err := telego.NewBot(token, telego.WithDiscardLogger())
 	if err != nil {
 		return nil, fmt.Errorf("telego: %w", err)
@@ -39,13 +50,6 @@ func NewTgAPI(token string, allowFrom []string, cfg *config.Config) (*TgAPI, err
 		return nil, fmt.Errorf("telego GetMe: %w", err)
 	}
 	slog.Info("telegram: bot connected", "username", self.Username)
-
-	af := make(map[int64]bool, len(allowFrom))
-	for _, s := range allowFrom {
-		if id, err := strconv.ParseInt(s, 10, 64); err == nil {
-			af[id] = true
-		}
-	}
 
 	maxFail, window, timeout := cfg.Breaker("telegram")
 	breaker := resilience.New("telegram", maxFail, window, timeout)
@@ -193,7 +197,7 @@ func (api *TgAPI) handleMessage(ctx context.Context, m *telego.Message) {
 		return
 	}
 
-	if len(api.allowFrom) > 0 && !api.allowFrom[m.Chat.ID] {
+	if !api.allowFrom[m.Chat.ID] {
 		slog.Warn("telegram: message from unlisted chat ID dropped", "chatID", m.Chat.ID)
 		return
 	}
@@ -231,7 +235,7 @@ func (api *TgAPI) handleCallbackQuery(ctx context.Context, cb *telego.CallbackQu
 		slog.Warn("telegram: callback without chat ID dropped", "id", cb.ID)
 		return
 	}
-	if len(api.allowFrom) > 0 && !api.allowFrom[chatID] {
+	if !api.allowFrom[chatID] {
 		slog.Warn("telegram: callback from unlisted chat ID dropped", "chatID", chatID)
 		return
 	}

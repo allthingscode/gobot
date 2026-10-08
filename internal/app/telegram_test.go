@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,5 +74,27 @@ func TestUpdates_CircuitOpen(t *testing.T) {
 	_, err := api.Updates(context.Background(), 30)
 	if err == nil {
 		t.Error("expected error when circuit is open, got nil")
+	}
+}
+
+func TestNewTgAPI_InvalidWhitelistPreflight(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		ids  []string
+	}{
+		{"nil", nil}, {"empty", []string{}}, {"blank", []string{""}},
+		{"all malformed", []string{"abc", "@user"}}, {"mixed", []string{"123", "abc"}},
+		{"zero", []string{"0"}}, {"signed zeros", []string{"+0", "-0"}},
+		{"whitespace", []string{" 123"}}, {"positive overflow", []string{"9223372036854775808"}},
+		{"negative overflow", []string{"-9223372036854775809"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			api, err := NewTgAPI("unusable-token", tt.ids, nil)
+			if api != nil || err == nil || !strings.Contains(err.Error(), "whitelist") || !strings.Contains(err.Error(), "allowFrom") {
+				t.Fatalf("expected local whitelist error before token initialization: api=%v err=%v", api, err)
+			}
+		})
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -311,6 +312,18 @@ func (v *Validator) validateGoogleSearch(result *ValidationResult) {
 	}
 }
 
+// ParseTelegramChatID parses a nonzero signed decimal Telegram chat ID.
+func ParseTelegramChatID(raw string) (int64, error) {
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("channels.telegram.allowFrom: invalid chat ID: %w", err)
+	}
+	if id == 0 {
+		return 0, errors.New("channels.telegram.allowFrom: chat ID must be nonzero")
+	}
+	return id, nil
+}
+
 func (v *Validator) validateTelegram(result *ValidationResult) {
 	if !v.cfg.Channels.Telegram.Enabled {
 		return // Telegram disabled, skip validation
@@ -324,11 +337,10 @@ func (v *Validator) validateTelegram(result *ValidationResult) {
 			Remedy:   "set channels.telegram.token or TELEGRAM_BOT_TOKEN env var",
 			Severity: SeverityCritical,
 		})
-		return
 	}
 
 	// Basic bot token format validation: should contain a colon
-	if !strings.Contains(token, ":") {
+	if token != "" && !strings.Contains(token, ":") {
 		result.Errors = append(result.Errors, ValidationError{
 			Field:    "channels.telegram.token",
 			Message:  "token format appears invalid (should contain ':')",
@@ -337,12 +349,25 @@ func (v *Validator) validateTelegram(result *ValidationResult) {
 		})
 	}
 
-	// Validate allowFrom entries
-	if len(v.cfg.Channels.Telegram.AllowFrom) == 0 {
+	// Validate every entry; mixed valid/invalid lists are unsafe too.
+	valid := 0
+	for i, raw := range v.cfg.Channels.Telegram.AllowFrom {
+		if _, err := ParseTelegramChatID(raw); err != nil {
+			result.Errors = append(result.Errors, ValidationError{
+				Field:    fmt.Sprintf("channels.telegram.allowFrom[%d]", i),
+				Message:  err.Error(),
+				Remedy:   "supply a nonzero signed decimal int64 chat ID",
+				Severity: SeverityCritical,
+			})
+		} else {
+			valid++
+		}
+	}
+	if valid == 0 {
 		result.Errors = append(result.Errors, ValidationError{
 			Field:    "channels.telegram.allowFrom",
 			Message:  "no authorized chat IDs configured",
-			Remedy:   "add your Telegram chat ID to channels.telegram.allowFrom",
+			Remedy:   "add a nonzero signed decimal int64 chat ID to channels.telegram.allowFrom",
 			Severity: SeverityCritical,
 		})
 	}
