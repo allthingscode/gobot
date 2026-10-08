@@ -5,9 +5,90 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// flushedEventsRecorder is read and written only by the handler until it exits.
+type flushedEventsRecorder struct {
+	*httptest.ResponseRecorder
+	buffered     chan struct{}
+	live         chan struct{}
+	bufferedOnce sync.Once
+	liveOnce     sync.Once
+}
+
+func (w *flushedEventsRecorder) Flush() {
+	w.ResponseRecorder.Flush()
+	frames := strings.Split(w.Body.String(), "\n\n")
+	// The last segment may be incomplete, so only inspect terminated frames.
+	for _, frame := range frames[:len(frames)-1] {
+		if !strings.HasPrefix(frame, "data: {") {
+			continue
+		}
+		if strings.Contains(frame, `"message":"buffered"`) {
+			w.bufferedOnce.Do(func() { close(w.buffered) })
+		}
+		if strings.Contains(frame, `"message":"live"`) {
+			w.liveOnce.Do(func() { close(w.live) })
+		}
+	}
+}
+
+func streamTestEvents(t *testing.T, h *Hub, req *http.Request, handler http.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	ctx, cancel := context.WithCancel(req.Context())
+	w := &flushedEventsRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		buffered:         make(chan struct{}),
+		live:             make(chan struct{}),
+	}
+	done := make(chan struct{})
+	// Cancel and join even when a delivery wait calls Fatal. Close the hub only
+	// after joining; never inspect the recorder on a cleanup timeout.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+			h.Close()
+		case <-time.After(5 * time.Second):
+			t.Error("timed out joining SSE handler during cleanup")
+		}
+	})
+	go func() {
+		defer close(done)
+		handler(w, req.WithContext(ctx))
+	}()
+
+	waitForFlush := func(signal <-chan struct{}, message string) {
+		t.Helper()
+		select {
+		case <-done:
+			t.Fatalf("SSE handler exited before observing %s flush", message)
+		case <-signal:
+			// A flush and premature exit may both be ready.
+			select {
+			case <-done:
+				t.Fatalf("SSE handler exited while observing %s flush", message)
+			default:
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s SSE flush", message)
+		}
+	}
+	waitForFlush(w.buffered, "buffered")
+	h.Emit(&LogEntry{Message: "live"})
+	waitForFlush(w.live, "live")
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out joining SSE handler after cancellation")
+	}
+	return w.ResponseRecorder
+}
 
 func TestServer_Index(t *testing.T) {
 	t.Parallel()
@@ -30,27 +111,12 @@ func TestServer_Index(t *testing.T) {
 func TestServer_Events(t *testing.T) {
 	t.Parallel()
 	h := NewHub(10)
-	defer h.Close()
 	s := NewServer(h, "127.0.0.1:0", "")
 
 	h.Emit(&LogEntry{Message: "buffered"})
 
 	req := httptest.NewRequest("GET", "/events", http.NoBody) //nolint:noctx // test request
-	ctx, cancel := context.WithCancel(req.Context())
-	req = req.WithContext(ctx)
-
-	// Use a real ResponseWriter that supports Flushing if possible,
-	// but httptest.ResponseRecorder supports it in newer Go versions.
-	w := httptest.NewRecorder()
-
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		h.Emit(&LogEntry{Message: "live"})
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
-
-	s.handleEvents(w, req)
+	w := streamTestEvents(t, h, req, s.handleEvents)
 
 	body := w.Body.String()
 	if body == "" {
@@ -86,24 +152,12 @@ func TestServer_Auth_RejectsWithoutToken(t *testing.T) {
 func TestServer_Auth_AllowsWithToken(t *testing.T) {
 	t.Parallel()
 	h := NewHub(10)
-	defer h.Close()
 	s := NewServer(h, "127.0.0.1:0", "secret")
 
 	h.Emit(&LogEntry{Message: "buffered"})
 
 	req := httptest.NewRequest("GET", "/events?token=secret", http.NoBody) //nolint:noctx // test request
-	ctx, cancel := context.WithCancel(req.Context())
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		h.Emit(&LogEntry{Message: "live"})
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
-
-	s.handler().ServeHTTP(w, req)
+	w := streamTestEvents(t, h, req, s.handler().ServeHTTP)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 with valid token, got %d", w.Code)
