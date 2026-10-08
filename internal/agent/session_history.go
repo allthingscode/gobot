@@ -330,10 +330,8 @@ func estimateTokensForMessages(messages []agentctx.StrategicMessage) int {
 	return total
 }
 
-// compactSessionAsync loads the session history, compacts the oldest N turns by
-// summarizing them into a single system message, and persists the result.
-// store is the resolved per-user (or shared) CheckpointStore for this session.
-// Errors are logged but not returned since compaction runs in a background goroutine.
+// buildCompactionSummary asks the summarization model to summarize the older
+// message prefix selected for token-budget compaction and returns the text or error.
 func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey string, toSummarize []agentctx.StrategicMessage) (string, error) {
 	model := m.compactionPolicy.Summarization.SummarizationModel(m.model)
 	var sb strings.Builder
@@ -351,6 +349,11 @@ func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey 
 	return result, nil
 }
 
+// compactSessionAsync runs token-budget compaction in a background goroutine.
+// It holds Dispatch's session lock while loading, summarizing, and publishing,
+// so a subsequent same-session request can wait or fail on cancellation or timeout.
+// Other sessions use independent locks. store is the resolved per-user (or shared)
+// CheckpointStore for this session. Errors are logged rather than returned.
 func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey string, store CheckpointStore) {
 	m.mu.RLock()
 	lockTimeout := m.lockTimeout
@@ -418,7 +421,10 @@ func (m *SessionManager) refreshCompactionTokens(ctx context.Context, sessionKey
 	return true
 }
 
-// compactSessionLocked summarizes and publishes while holding the session lock.
+// compactSessionLocked rechecks current durable history under the session lock.
+// Histories with at most N individual messages skip summarization, even over budget.
+// Otherwise it summarizes the older prefix into one system message and publishes
+// that summary followed by the newest N messages unchanged (N defaults to 20).
 func (m *SessionManager) compactSessionLocked(ctx context.Context, sessionKey string, store CheckpointStore) {
 	snap := m.loadCompactionSnapshot(ctx, sessionKey, store)
 	if snap == nil {
