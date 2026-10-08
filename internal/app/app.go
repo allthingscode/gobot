@@ -98,6 +98,32 @@ func shutdownOTel(p *observability.Provider) {
 }
 
 func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager, startupStart time.Time) error {
+	return runAgentLoopWithTelegram(ctx, cfg, stack, otelProvider, hub, tracer, tmgr, startupStart, NewTgAPI)
+}
+
+func runAgentLoopWithTelegram(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager, startupStart time.Time, newTelegram func(string, []string, *config.Config) (*TgAPI, error)) error {
+	api, err := initializeStartupTelegram(cfg, newTelegram)
+	if err != nil {
+		return err
+	}
+	return runInitializedAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer, tmgr, startupStart, api)
+}
+
+func initializeStartupTelegram(cfg *config.Config, newTelegram func(string, []string, *config.Config) (*TgAPI, error)) (*TgAPI, error) {
+	var api *TgAPI
+	if cfg.Channels.Telegram.Enabled {
+		var err error
+		api, err = newTelegram(cfg.TelegramToken(), cfg.TelegramAllowedFrom(), cfg)
+		if err != nil || api == nil {
+			// Constructor errors may contain credentials, request URLs, or server
+			// bodies. Retain only a safe replacement at the startup boundary.
+			return nil, fmt.Errorf("run agent: %w", fmt.Errorf("telegram initialization failed; check configured credentials and connectivity"))
+		}
+	}
+	return api, nil
+}
+
+func runInitializedAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager, startupStart time.Time, api *TgAPI) error {
 	var wg sync.WaitGroup
 	// Derive a cancellable context so a critical subsystem failure can trigger
 	// shutdown of the rest. startErr collects the first non-graceful failure from
@@ -111,7 +137,6 @@ func runAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, ot
 	store := runtimeCheckpointStore(cfg.StorageRoot())
 
 	mgr := stack.NewSessionManager(cfg, store, tracer)
-	api, _ := NewTgAPI(cfg.TelegramToken(), cfg.TelegramAllowedFrom(), cfg)
 	_, hitl, err := SetupHooks(cfg, stack.Runner, mgr, api, store)
 	if err != nil {
 		return fmt.Errorf("run agent: %w", err)
@@ -185,13 +210,15 @@ func printStartupBanner(cfg *config.Config, api *TgAPI) {
 	printStartupBannerTo(os.Stdout, cfg, api)
 }
 
+const startupDisabled = "disabled"
+
 func printStartupBannerTo(w io.Writer, cfg *config.Config, api *TgAPI) {
-	username := "disabled"
+	username := startupDisabled
 	if cfg.Channels.Telegram.Enabled && api != nil {
 		username = "@" + api.Username()
 	}
 
-	dashAddr := "disabled"
+	dashAddr := startupDisabled
 	if cfg.Gateway.Enabled && cfg.Gateway.DashboardEnabled {
 		host := strings.Trim(cfg.Gateway.Host, "[]")
 		dashAddr = fmt.Sprintf("http://%s/dash/", net.JoinHostPort(host, strconv.Itoa(cfg.Gateway.Port)))

@@ -2,10 +2,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -164,6 +168,7 @@ func assertNoLogLeaks(t *testing.T, content string, leaks ...string) {
 func TestValidateRunPrerequisites(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runtime.StorageRoot = t.TempDir()
+	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(cfg.StorageRoot()) })
 
 	// Case 1: Telegram disabled, no token needed
 	cfg.Channels.Telegram.Enabled = false
@@ -256,9 +261,13 @@ func TestRunAgentLoop(t *testing.T) {
 	cancel()
 
 	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(cfg.StorageRoot()) })
 	stack := &AgentStack{Runner: &AgentRunner{}}
 
-	_ = runAgentLoop(ctx, cfg, stack, nil, nil, nil, nil, time.Now())
+	if err := runAgentLoop(ctx, cfg, stack, nil, nil, nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestInitIdempotencyHandlesTypedNilCheckpointManager(t *testing.T) {
@@ -329,4 +338,205 @@ func newWhitelistReconciliationStore(t *testing.T) (*agentctx.CheckpointManager,
 		t.Fatal(err)
 	}
 	return cm, pairing
+}
+
+type telegramStartupCase struct {
+	name     string
+	enabled  bool
+	local    bool
+	failure  bool
+	nilAPI   bool
+	existing bool
+}
+
+//nolint:paralleltest // captures process stdout and the default structured logger
+func TestRunAgentLoopTelegramConstruction(t *testing.T) {
+	for _, tc := range []telegramStartupCase{
+		{name: "malformed token", enabled: true, local: true, failure: true},
+		{name: "simulated GetMe failure fresh", enabled: true, failure: true},
+		{name: "simulated GetMe failure preserves marker", enabled: true, failure: true, existing: true},
+		{name: "nil adapter", enabled: true, nilAPI: true, failure: true},
+		{name: "enabled success", enabled: true},
+		{name: "disabled invalid token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testTelegramStartupCase(t, tc) })
+	}
+}
+
+func testTelegramStartupCase(t *testing.T, tc telegramStartupCase) {
+	t.Helper()
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(cfg.StorageRoot()) })
+	cfg.Channels.Telegram.Enabled = tc.enabled
+	cfg.Channels.Telegram.Token = "synthetic-invalid-secret"
+	if tc.enabled {
+		cfg.Channels.Telegram.AllowFrom = []string{"123"}
+	}
+	marker := startupMarkerPath(cfg.StorageRoot())
+	previous := []byte("historical startup marker\n")
+	if tc.existing {
+		if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marker, previous, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var logs bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+	output := captureTelegramStartupOutput(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var stack *AgentStack
+	var api *TgAPI
+	if !tc.failure {
+		stack = &AgentStack{Runner: &AgentRunner{}}
+		if tc.enabled {
+			api, _ = newPollingAPI(t)
+			api.username = "fixture_bot"
+		}
+		// Explicit cancellation permits a bounded full-loop completion without network.
+		cancel()
+	} else {
+		// These would require runtime setup if the constructor failure were ignored.
+		cfg.Gateway.Enabled = true
+		cfg.Gateway.WebAddr = "127.0.0.1:0"
+		cfg.Cron.Enabled = true
+		cfg.Heartbeat.Enabled = true
+	}
+	calls := 0
+	raw := "telego GetMe: https://api.telegram.org/bot" + cfg.Channels.Telegram.Token + "/getMe response-body-sensitive"
+	factory := telegramStartupFactory(t, tc, cfg, api, raw, &calls)
+	err := runAgentLoopWithTelegram(ctx, cfg, stack, nil, nil, nil, nil, time.Now(), factory)
+	stdout := output()
+	wantCalls := 0
+	if tc.enabled {
+		wantCalls = 1
+	}
+	if calls != wantCalls {
+		t.Fatalf("constructor calls=%d want=%d", calls, wantCalls)
+	}
+	assertTelegramStartupResult(t, tc, cfg, err, stdout, logs.String(), raw, previous)
+}
+
+func assertTelegramStartupResult(t *testing.T, tc telegramStartupCase, cfg *config.Config, err error, stdout, logs, raw string, previous []byte) {
+	t.Helper()
+	content, markerErr := os.ReadFile(startupMarkerPath(cfg.StorageRoot()))
+	if tc.failure {
+		assertTelegramStartupFailure(t, tc, cfg, err, stdout, logs, raw, previous, content, markerErr)
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if markerErr != nil {
+		t.Fatalf("success marker: %v", markerErr)
+	}
+	assertTelegramSuccessOutput(t, tc.enabled, stdout, logs)
+}
+
+func assertTelegramStartupFailure(t *testing.T, tc telegramStartupCase, cfg *config.Config, err error, stdout, logs, raw string, previous, content []byte, markerErr error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected startup failure")
+	}
+	if !strings.Contains(err.Error(), "telegram initialization") || !strings.Contains(err.Error(), "credentials and connectivity") {
+		t.Fatalf("unsafe or unhelpful error: %v", err)
+	}
+	assertTelegramStartupSafe(t, err, stdout, logs, cfg.Channels.Telegram.Token, raw)
+	if stdout != "" || strings.Contains(logs, "startup ready") || strings.Contains(logs, "started") {
+		t.Fatalf("failure emitted startup success: %s %s", stdout, logs)
+	}
+	assertTelegramFailureStorage(t, tc, cfg, previous, content, markerErr)
+}
+
+func assertTelegramStartupSafe(t *testing.T, err error, stdout, logs, token, raw string) {
+	t.Helper()
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		for _, sensitive := range []string{token, raw, "https://api.telegram.org", "response-body-sensitive"} {
+			if strings.Contains(current.Error()+stdout+logs, sensitive) {
+				t.Fatalf("startup leaked %q", sensitive)
+			}
+		}
+	}
+}
+
+func captureTelegramStartupOutput(t *testing.T) func() string {
+	t.Helper()
+	file, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = file
+	t.Cleanup(func() { os.Stdout = old; _ = file.Close() })
+	return func() string {
+		os.Stdout = old
+		if _, err := file.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+}
+
+func telegramStartupFactory(t *testing.T, tc telegramStartupCase, cfg *config.Config, api *TgAPI, raw string, calls *int) func(string, []string, *config.Config) (*TgAPI, error) {
+	t.Helper()
+	return func(token string, allow []string, gotCfg *config.Config) (*TgAPI, error) {
+		(*calls)++
+		if token != cfg.TelegramToken() || !reflect.DeepEqual(allow, cfg.TelegramAllowedFrom()) || gotCfg != cfg {
+			t.Fatal("constructor arguments changed")
+		}
+		if tc.local {
+			return NewTgAPI(token, allow, gotCfg)
+		}
+		if tc.nilAPI {
+			return nil, nil
+		}
+		if tc.failure {
+			return nil, errors.New(raw)
+		}
+		return api, nil
+	}
+}
+
+func assertTelegramFailureStorage(t *testing.T, tc telegramStartupCase, cfg *config.Config, previous, content []byte, markerErr error) {
+	t.Helper()
+	if tc.existing {
+		if markerErr != nil || !bytes.Equal(content, previous) {
+			t.Fatalf("existing marker changed: %q, %v", content, markerErr)
+		}
+	} else if !errors.Is(markerErr, os.ErrNotExist) {
+		t.Fatalf("fresh marker exists: %v", markerErr)
+	}
+	entries, readErr := os.ReadDir(cfg.StorageRoot())
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !tc.existing && len(entries) != 0 {
+		t.Fatalf("failure created runtime storage: %v", entries)
+	}
+}
+
+func assertTelegramSuccessOutput(t *testing.T, enabled bool, stdout, logs string) {
+	t.Helper()
+	label := startupDisabled
+	if enabled {
+		label = "@fixture_bot"
+	}
+	if !strings.Contains(stdout, "gobot ready") || !strings.Contains(stdout, label) || !strings.Contains(logs, "startup ready") {
+		t.Fatalf("missing startup success: %s %s", stdout, logs)
+	}
+	if enabled && !strings.Contains(logs, "telegram bot started") {
+		t.Fatal("enabled adapter did not reach bot startup")
+	}
+	if strings.Contains(logs, "drain timed out") {
+		t.Fatal("shutdown was not bounded cleanly")
+	}
 }
