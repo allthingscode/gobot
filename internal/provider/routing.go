@@ -15,14 +15,16 @@ import (
 // manager model for classification and simple turns, escalating to a specialist
 // executor model only when tool use or complex reasoning is required.
 type RoutingProvider struct {
+	resolver Resolver
 	executor Provider
 	manager  Provider
 	cfg      config.RoutingConfig
 }
 
 // NewRoutingProvider creates a new RoutingProvider wrapping the given models.
-func NewRoutingProvider(executor, manager Provider, cfg config.RoutingConfig) *RoutingProvider {
+func NewRoutingProvider(executor, manager Provider, cfg config.RoutingConfig, resolver Resolver) *RoutingProvider {
 	return &RoutingProvider{
+		resolver: resolver,
 		executor: executor,
 		manager:  manager,
 		cfg:      cfg,
@@ -45,15 +47,13 @@ func (p *RoutingProvider) Models() []ModelInfo {
 func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	// If the model is explicitly prefixed with "openrouter/", route to that
 	// provider directly if it exists.
-	if strings.HasPrefix(req.Model, "openrouter/") {
-		if op, err := Get("openrouter"); err == nil {
-			slog.Info("routing: model prefix forced openrouter", "model", req.Model)
-			resp, err := op.Chat(ctx, req)
-			if err != nil {
-				return nil, fmt.Errorf("openrouter prefix chat: %w", err)
-			}
-			return resp, nil
+	if op := p.prefixProvider(req.Model); op != nil {
+		slog.Info("routing: model prefix forced openrouter", "model", req.Model)
+		resp, err := op.Chat(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("openrouter prefix chat: %w", err)
 		}
+		return resp, nil
 	}
 
 	if !p.cfg.Enabled {
@@ -104,6 +104,18 @@ func (p *RoutingProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespo
 	}
 
 	return p.managerChat(ctx, req)
+}
+
+// prefixProvider resolves an explicit override through the owning resolver.
+func (p *RoutingProvider) prefixProvider(model string) Provider {
+	if !strings.HasPrefix(model, "openrouter/") || p.resolver == nil {
+		return nil
+	}
+	prov, err := p.resolver.Get("openrouter")
+	if err != nil {
+		return nil
+	}
+	return prov
 }
 
 func (p *RoutingProvider) managerChat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {

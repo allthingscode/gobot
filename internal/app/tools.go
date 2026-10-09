@@ -122,10 +122,10 @@ func (t *ReadTextFileTool) readFileFromRoot(path, root string) ([]byte, error) {
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
-func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer) []Tool {
+func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer, resolver provider.Resolver) []Tool {
 	specialistModels := buildSpecialistModels(cfg)
 	secretsRoot := cfg.SecretsRoot()
-	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv, registry)
+	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv, registry, resolver)
 	tools = appendCalendarTaskTools(secretsRoot, tools, tracer)
 	tools = appendMCPtools(cfg, tools)
 	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools, tracer)
@@ -171,9 +171,9 @@ func buildSpecialistModels(cfg *config.Config) map[string]string {
 	return specialistModels
 }
 
-func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, specialistModels map[string]string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry) []Tool {
+func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, specialistModels map[string]string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, resolver provider.Resolver) []Tool {
 	tools := []Tool{
-		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg),
+		newSpawnTool(prov, model, nil, specialistModels, memStore, cfg, resolver),
 		NewReadTextFileTool(cfg),
 		newShellExecTool(cfg, cfg.ExecTimeout(), registry),
 	}

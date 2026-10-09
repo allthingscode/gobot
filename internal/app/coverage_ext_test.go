@@ -93,6 +93,7 @@ func TestCronDispatcher_MoreBranches_Part1(t *testing.T) {
 }
 
 func TestCronDispatcher_MoreBranches_Part2(t *testing.T) {
+	registry := provider.NewRegistry()
 	t.Parallel()
 	cfg := &config.Config{}
 	cfg.Runtime.UserEmail = testEmail
@@ -127,8 +128,9 @@ func TestCronDispatcher_MoreBranches_Part2(t *testing.T) {
 	cfg.Agents.Specialists = map[string]config.SpecialistConfig{
 		"researcher": {Model: "gpt-4", Provider: "mock"},
 	}
-	if err := provider.Register(mockProv); err != nil {
-		t.Logf("provider.Register: %v", err)
+	cd.resolver = registry
+	if err := registry.Register(mockProv); err != nil {
+		t.Fatalf("registry.Register: %v", err)
 	}
 
 	respText := "specialist response"
@@ -157,6 +159,7 @@ func TestCronDispatcher_MoreBranches_Part2(t *testing.T) {
 }
 
 func TestSpawnTool_HandleFallback_Coverage(t *testing.T) {
+	registry := provider.NewRegistry()
 	t.Parallel()
 	cfg := &config.Config{}
 
@@ -168,14 +171,15 @@ func TestSpawnTool_HandleFallback_Coverage(t *testing.T) {
 		{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: &s}}},
 	}
 
-	if err := provider.Register(mockProv1); err != nil {
-		t.Logf("provider.Register mock1: %v", err)
+	if err := registry.Register(mockProv1); err != nil {
+		t.Fatalf("registry.Register mock1: %v", err)
 	}
-	if err := provider.Register(mockProv2); err != nil {
-		t.Logf("provider.Register mock2: %v", err)
+	if err := registry.Register(mockProv2); err != nil {
+		t.Fatalf("registry.Register mock2: %v", err)
 	}
 
 	st := &SpawnTool{
+		Resolver:    registry,
 		DefaultProv: mockProv2,
 		Model:       "model2",
 		RunnerFactory: func(p provider.Provider, m, systemPrompt string) agent.Runner {

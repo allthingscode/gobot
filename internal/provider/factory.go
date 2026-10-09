@@ -12,6 +12,7 @@ import (
 
 // Factory initializes all configured providers and registers them.
 type Factory struct {
+	Registry          *Registry
 	GeminiAPIKey      string
 	AnthropicAPIKey   string
 	OpenAIAPIKey      string
@@ -24,6 +25,9 @@ type Factory struct {
 //
 //nolint:gocognit,cyclop // Provider registration is inherently linear
 func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
+	if f.Registry == nil {
+		f.Registry = NewRegistry()
+	}
 	// Gemini
 	if f.GeminiAPIKey != "" {
 		client, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -33,28 +37,28 @@ func (f *Factory) InitAll(ctx context.Context, cfg *config.Config) error {
 		if err != nil {
 			return fmt.Errorf("gemini client: %w", err)
 		}
-		if err := Register(NewGeminiProvider(client)); err != nil {
+		if err := f.Registry.Register(NewGeminiProvider(client)); err != nil {
 			return fmt.Errorf("register gemini: %w", err)
 		}
 	}
 
 	// Anthropic
 	if f.AnthropicAPIKey != "" {
-		if err := Register(NewAnthropicProvider(f.AnthropicAPIKey, "")); err != nil {
+		if err := f.Registry.Register(NewAnthropicProvider(f.AnthropicAPIKey, "")); err != nil {
 			return fmt.Errorf("register anthropic: %w", err)
 		}
 	}
 
 	// OpenAI / Compatible
 	if f.OpenAIAPIKey != "" || f.OpenAIBaseURL != "" {
-		if err := Register(NewOpenAIProvider(f.OpenAIAPIKey, f.OpenAIBaseURL)); err != nil {
+		if err := f.Registry.Register(NewOpenAIProvider(f.OpenAIAPIKey, f.OpenAIBaseURL)); err != nil {
 			return fmt.Errorf("register openai: %w", err)
 		}
 	}
 
 	// OpenRouter
 	if f.OpenRouterAPIKey != "" || f.OpenRouterBaseURL != "" {
-		if err := Register(NewOpenRouterProvider(f.OpenRouterAPIKey, f.OpenRouterBaseURL)); err != nil {
+		if err := f.Registry.Register(NewOpenRouterProvider(f.OpenRouterAPIKey, f.OpenRouterBaseURL)); err != nil {
 			return fmt.Errorf("register openrouter: %w", err)
 		}
 	}
@@ -74,7 +78,7 @@ func (f *Factory) setupRouting(cfg *config.Config) error {
 
 	// Default provider is the 'executor' for routing.
 	execProvName := cfg.DefaultProvider()
-	execProv, err := Get(execProvName)
+	execProv, err := f.Registry.Get(execProvName)
 	if err != nil {
 		return fmt.Errorf("executor provider %q: %w", execProvName, err)
 	}
@@ -83,15 +87,15 @@ func (f *Factory) setupRouting(cfg *config.Config) error {
 	if mgrProvName == "" {
 		mgrProvName = execProvName
 	}
-	mgrProv, err := Get(mgrProvName)
+	mgrProv, err := f.Registry.Get(mgrProvName)
 	if err != nil {
 		return fmt.Errorf("manager provider %q: %w", mgrProvName, err)
 	}
 
-	routingProv := NewRoutingProvider(execProv, mgrProv, rCfg)
+	routingProv := NewRoutingProvider(execProv, mgrProv, rCfg, f.Registry)
 	slog.Info("factory: cost routing initialized", "manager", rCfg.ManagerModel)
 
 	// Register the routing provider centrally. App layer can now retrieve
-	// it via provider.Get("routing") if enabled.
-	return Register(routingProv)
+	// it via the owning registry if enabled.
+	return f.Registry.Register(routingProv)
 }

@@ -6,30 +6,45 @@ import (
 	"sync"
 )
 
-//nolint:gochecknoglobals // Global provider registry; thread-safe via sync.RWMutex
-var (
-	providers   = make(map[string]Provider)
-	providersMu sync.RWMutex
-)
+// Resolver exposes provider lookup to consumers without registration access.
+type Resolver interface {
+	Get(name string) (Provider, error)
+}
 
-// Register adds a provider to the global registry.
+// Registry owns a thread-safe collection of providers. Do not copy it after use.
+// Its zero value is ready for use.
+type Registry struct {
+	providers   map[string]Provider
+	providersMu sync.RWMutex
+}
+
+// NewRegistry creates an independent provider registry.
+func NewRegistry() *Registry { return &Registry{providers: make(map[string]Provider)} }
+
+// Register adds a provider to the registry.
 // Returns an error if a provider with the same name is already registered.
-func Register(p Provider) error {
-	providersMu.Lock()
-	defer providersMu.Unlock()
+func (r *Registry) Register(p Provider) error {
+	r.providersMu.Lock()
+	defer r.providersMu.Unlock()
+	if r.providers == nil {
+		r.providers = make(map[string]Provider)
+	}
 	name := p.Name()
-	if _, dup := providers[name]; dup {
+	if _, dup := r.providers[name]; dup {
 		return fmt.Errorf("provider already registered: %s", name)
 	}
-	providers[name] = p
+	r.providers[name] = p
 	return nil
 }
 
 // Get returns a registered provider by name.
-func Get(name string) (Provider, error) {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-	p, ok := providers[name]
+func (r *Registry) Get(name string) (Provider, error) {
+	if r == nil {
+		return nil, fmt.Errorf("provider not found: %s", name)
+	}
+	r.providersMu.RLock()
+	defer r.providersMu.RUnlock()
+	p, ok := r.providers[name]
 	if !ok {
 		return nil, fmt.Errorf("provider not found: %s", name)
 	}
@@ -37,21 +52,13 @@ func Get(name string) (Provider, error) {
 }
 
 // List returns the names of all registered providers, sorted.
-func List() []string {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-	names := make([]string, 0, len(providers))
-	for name := range providers {
+func (r *Registry) List() []string {
+	r.providersMu.RLock()
+	defer r.providersMu.RUnlock()
+	names := make([]string, 0, len(r.providers))
+	for name := range r.providers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
-}
-
-// ResetForTest clears all registered providers. Must only be called from tests.
-// Use t.Cleanup(provider.ResetForTest) to ensure cleanup on test exit.
-func ResetForTest() {
-	providersMu.Lock()
-	defer providersMu.Unlock()
-	providers = make(map[string]Provider)
 }

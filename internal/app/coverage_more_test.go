@@ -506,12 +506,10 @@ func TestIterLimitRunnerBranches(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // Registers a package-global fake provider.
 func TestBuildAgentStackWithRegisteredFakeProvider(t *testing.T) {
-	//nolint:paralleltest // mutates global provider registry
-	provider.ResetForTest()
-	t.Cleanup(provider.ResetForTest)
-	if err := provider.Register(fakeBuildProvider{}); err != nil {
+	t.Parallel()
+	registry := provider.NewRegistry()
+	if err := registry.Register(fakeBuildProvider{}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -520,7 +518,7 @@ func TestBuildAgentStackWithRegisteredFakeProvider(t *testing.T) {
 	cfg.Agents.Defaults.Provider = coverageFakeProvider
 	cfg.Agents.Defaults.Model = "fake-model"
 
-	stack, cleanup, err := BuildAgentStack(context.Background(), cfg, nil, nil)
+	stack, cleanup, err := buildAgentStack(context.Background(), cfg, nil, nil, registry)
 	if err != nil {
 		t.Fatalf("BuildAgentStack: %v", err)
 	}

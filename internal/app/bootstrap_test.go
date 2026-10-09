@@ -10,20 +10,21 @@ import (
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
-//nolint:paralleltest // uses global state // touches global provider registry
 func TestInitProviders_OpenRouterRouting(t *testing.T) {
-	// Not parallel because it touches the global provider registry.
-	t.Cleanup(provider.ResetForTest)
+	registry := provider.NewRegistry()
+	t.Parallel()
 
 	// Register a mock openrouter provider.
-	_ = provider.Register(&MockProvider{name: "openrouter"})
+	if err := registry.Register(&MockProvider{name: "openrouter"}); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx := context.Background()
 	cfg := &config.Config{}
 	cfg.Agents.Defaults.Provider = "gemini"
 	cfg.Agents.Defaults.Model = "openrouter/mistralai/mistral-7b-instruct"
 
-	prov, model, err := InitProviders(ctx, cfg)
+	prov, model, err := initProviders(ctx, cfg, registry)
 	if err != nil {
 		t.Fatalf("InitProviders failed: %v", err)
 	}
@@ -49,12 +50,16 @@ func TestInitProviders_ManagerModel(t *testing.T) {
 	}
 }
 
-func TestInitProviders_CostRouting(t *testing.T) { //nolint:paralleltest // uses global state // touches global provider registry
-	t.Cleanup(provider.ResetForTest)
-
+func TestInitProviders_CostRouting(t *testing.T) {
+	t.Parallel()
+	registry := provider.NewRegistry()
 	// Register mock providers.
-	_ = provider.Register(&MockProvider{name: "gemini"})
-	_ = provider.Register(&MockProvider{name: "anthropic"})
+	if err := registry.Register(&MockProvider{name: "gemini"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(&MockProvider{name: "anthropic"}); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx := context.Background()
 	cfg := &config.Config{}
@@ -63,7 +68,7 @@ func TestInitProviders_CostRouting(t *testing.T) { //nolint:paralleltest // uses
 	cfg.Runtime.Routing.ManagerProvider = "anthropic"
 	cfg.Runtime.Routing.ManagerModel = "claude-3-haiku"
 
-	prov, _, err := InitProviders(ctx, cfg)
+	prov, _, err := initProviders(ctx, cfg, registry)
 	if err != nil {
 		t.Fatalf("InitProviders failed: %v", err)
 	}
@@ -167,5 +172,55 @@ func TestAgentRunner_SetTools(t *testing.T) {
 	r.SetTools([]Tool{&mockTool{name: "test"}})
 	if len(r.ToolsByName) == 0 {
 		t.Error("SetTools failed to set r.ToolsByName")
+	}
+}
+
+//nolint:gocognit,cyclop // Keep cross-owner setup and provider identity assertions together.
+func TestBuildAgentStack_IndependentOwners(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, model, selected string
+		routing               bool
+	}{
+		{"default", "local-model", "openai", false},
+		{"prefix", "openrouter/local-model", "openrouter", false},
+		{"routing", "local-model", "routing", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stacks := make([]*AgentStack, 2)
+			cleanups := make([]func(), 2)
+			for i := range stacks {
+				cfg := &config.Config{}
+				cfg.Runtime.StorageRoot = t.TempDir()
+				cfg.Providers.OpenAI.BaseURL = []string{"http://127.0.0.1:1", "http://127.0.0.1:3"}[i]
+				cfg.Providers.OpenRouter.BaseURL = []string{"http://127.0.0.1:2", "http://127.0.0.1:4"}[i]
+				cfg.Agents.Defaults.Provider = "openai"
+				cfg.Agents.Defaults.Model = tc.model
+				cfg.Runtime.Routing.Enabled = tc.routing
+				stack, cleanup, err := BuildAgentStack(context.Background(), cfg, nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stacks[i], cleanups[i] = stack, cleanup
+				t.Cleanup(cleanup)
+				got, err := stack.Providers.Get(tc.selected)
+				if err != nil || got != stack.Prov || stack.Model != tc.model {
+					t.Fatalf("selection = %v, %v", got, err)
+				}
+				spawn, ok := stack.Runner.ToolsByName[spawnToolName].(*SpawnTool)
+				if !ok || spawn.Resolver != stack.Providers {
+					t.Fatal("spawn lost owning resolver")
+				}
+			}
+			if stacks[0].Providers == stacks[1].Providers || stacks[0].Prov == stacks[1].Prov {
+				t.Fatal("stacks share provider ownership")
+			}
+			cleanups[0]()
+			got, err := stacks[1].Providers.Get(tc.selected)
+			if err != nil || got != stacks[1].Prov {
+				t.Fatal("cleanup invalidated other owner")
+			}
+		})
 	}
 }

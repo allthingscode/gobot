@@ -47,8 +47,8 @@ func SetUserHomeDir(f func() (string, error)) func() (string, error) {
 }
 
 // Unexported constructors and helpers.
-func NewSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
-	return newSpawnTool(prov, model, specialistPrompts, specialistModels, memStore, cfg)
+func NewSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config, resolver provider.Resolver) *SpawnTool {
+	return newSpawnTool(prov, model, specialistPrompts, specialistModels, memStore, cfg, resolver)
 }
 
 func NewShellExecTool(cfg *config.Config, timeout time.Duration, registry *ToolRegistry) Tool {

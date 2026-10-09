@@ -79,19 +79,18 @@ func TestSpawnTool_Execute_Error(t *testing.T) {
 // the parent agent's default provider. Regression for the bug where all sub-agents
 // were always dispatched through the parent provider (e.g. Gemini receiving an
 // OpenRouter-only model, causing 404s).
-func TestSpawnTool_Execute_UsesSpecialistProvider(t *testing.T) { //nolint:paralleltest // uses global state // modifies global provider registry
+func TestSpawnTool_Execute_UsesSpecialistProvider(t *testing.T) {
+	t.Parallel()
+	registry := provider.NewRegistry()
 	const defaultProvName = "default-prov"
 	const specialistProvName = "specialist-prov"
 
 	defaultProv := &mockNamedProvider{name: defaultProvName}
 	specialistProv := &mockNamedProvider{name: specialistProvName}
-
-	provider.ResetForTest()
-	t.Cleanup(provider.ResetForTest)
-	if err := provider.Register(defaultProv); err != nil {
+	if err := registry.Register(defaultProv); err != nil {
 		t.Fatalf("register default provider: %v", err)
 	}
-	if err := provider.Register(specialistProv); err != nil {
+	if err := registry.Register(specialistProv); err != nil {
 		t.Fatalf("register specialist provider: %v", err)
 	}
 
@@ -105,6 +104,7 @@ func TestSpawnTool_Execute_UsesSpecialistProvider(t *testing.T) { //nolint:paral
 
 	var capturedProv provider.Provider
 	tool := &SpawnTool{
+		Resolver: registry,
 		RunnerFactory: func(prov provider.Provider, _, _ string) agent.Runner {
 			capturedProv = prov
 			return &mockSubAgentRunner{response: "ok"}
@@ -153,5 +153,45 @@ func TestDefaultSpecialistPrompt(t *testing.T) {
 		if got == "" {
 			t.Errorf("DefaultSpecialistPrompt(%q) returned empty string", tt)
 		}
+	}
+}
+
+//nolint:gocognit // Keep cross-owner setup and provider identity assertions together.
+func TestSpawnTool_IndependentSpecialistOwners(t *testing.T) {
+	t.Parallel()
+	for _, owner := range []string{"owner-a", "owner-b"} {
+		t.Run(owner, func(t *testing.T) {
+			t.Parallel()
+			parent := &mockNamedProvider{name: "parent"}
+			specialist := &mockNamedProvider{name: "specialist"}
+			registry := provider.NewRegistry()
+			if err := registry.Register(specialist); err != nil {
+				t.Fatal(err)
+			}
+			cfg := &config.Config{}
+			cfg.Agents.Specialists = map[string]config.SpecialistConfig{RoleResearcher: {Provider: "specialist", Model: "specialist-model"}}
+			for _, tc := range []struct {
+				name     string
+				resolver provider.Resolver
+				want     provider.Provider
+			}{
+				{"owner", registry, specialist}, {"nil", nil, parent}, {"missing", provider.NewRegistry(), parent},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					tool := newSpawnTool(parent, "parent-model", nil, map[string]string{RoleResearcher: "specialist-model"}, nil, cfg, tc.resolver)
+					tool.RunnerFactory = func(got provider.Provider, model, _ string) agent.Runner {
+						if got != tc.want || model != "specialist-model" {
+							t.Fatal("incorrect provider/model selection")
+						}
+						return &mockSubAgentRunner{response: owner}
+					}
+					got, err := tool.Execute(context.Background(), "session", "user", map[string]any{"objective": "work"})
+					if err != nil || got != owner {
+						t.Fatalf("Execute = %q, %v", got, err)
+					}
+				})
+			}
+		})
 	}
 }
