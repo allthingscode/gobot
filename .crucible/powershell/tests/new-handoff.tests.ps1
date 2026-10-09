@@ -1151,6 +1151,86 @@ budget_tier: "low"
         }
     }
 
+    # Item 170: C-393's Architect passed an eight-character -CommitHash and it was written as
+    # given, with nothing checking that it named a commit.
+    Invoke-Test -Name "-CommitHash and -BaseCommit are recorded as full SHAs, and one naming no commit is refused" -Script {
+        $taskId = "F-HASH-RESOLVE"
+        $gitRepoDir = [System.IO.Path]::Combine($tempRoot, "git-hash-resolve-test")
+        New-Item -ItemType Directory -Path $gitRepoDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $tempRoot "powershell") -Destination (Join-Path $gitRepoDir "powershell") -Recurse -Force | Out-Null
+
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $gitRepoDir
+        Set-Location -LiteralPath $gitRepoDir
+        try {
+            & git init -b master --quiet
+            & git config user.name "Test"
+            & git config user.email "test@example.com"
+            & git config commit.gpgSign false
+
+            $configDir = Join-Path $gitRepoDir ".crucible"
+            New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+            @(
+                "project: HandoffHashResolveTest",
+                "paths:",
+                "  backlog: .crucible/backlog",
+                "  session: .crucible/session",
+                "  workspaces: .crucible/.agent-workspaces"
+            ) | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+            $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
+            New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
+            "- $taskId" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+            Set-Content -LiteralPath "dummy.txt" -Value "hello"
+            & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
+            & git commit -m "initial commit" --quiet
+            $fullSha = (& git rev-parse HEAD).Trim()
+            $shortSha = $fullSha.Substring(0, 8)
+            $sessionHandoffDir = Join-Path $gitRepoDir ".crucible/session/handoffs"
+
+            $short = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "deployment"
+                Target = "done"
+                Reason = "Deployment complete. Pipeline resolved."
+                SessionCycleId = "cycle-test"
+                CommitHash = $shortSha
+                BaseCommit = $shortSha
+                SchemaPath = $schemaPath
+                ProjectRoot = $gitRepoDir
+            } -NoRegister
+            if ($short.ExitCode -ne 0) { throw "An abbreviated hash naming a commit must be accepted: $($short.Output)" }
+            $written = Get-ChildItem -Path $sessionHandoffDir -Filter ($taskId + "-*.json") | Sort-Object Name -Descending | Select-Object -First 1
+            $obj = Get-Content -LiteralPath $written.FullName -Raw | ConvertFrom-Json
+            if ($obj.commit_hash -ne $fullSha) { throw "Expected commit_hash $fullSha, got: $($obj.commit_hash)" }
+            if ($obj.base_commit -ne $fullSha) { throw "Expected base_commit $fullSha, got: $($obj.base_commit)" }
+            Remove-Item -LiteralPath $written.FullName -Force
+
+            foreach ($case in @(@{ Param = "CommitHash"; Other = "BaseCommit" }, @{ Param = "BaseCommit"; Other = "CommitHash" })) {
+                $bad = Invoke-Generator -InputArgs @{
+                    TaskId = $taskId
+                    Source = "deployment"
+                    Target = "done"
+                    Reason = "Deployment complete. Pipeline resolved."
+                    SessionCycleId = "cycle-test"
+                    $case.Param = "deadbeef"
+                    $case.Other = $fullSha
+                    SchemaPath = $schemaPath
+                    ProjectRoot = $gitRepoDir
+                } -NoRegister
+                if ($bad.ExitCode -eq 0) { throw "Expected -$($case.Param) naming no commit to be refused, but the generator succeeded" }
+                if ($bad.Output -notmatch [regex]::Escape("-$($case.Param) [deadbeef] does not name a commit")) { throw "Refusal should name -$($case.Param) and the exact value, got: $($bad.Output)" }
+                if (Get-ChildItem -Path $sessionHandoffDir -Filter ($taskId + "-*.json") -ErrorAction SilentlyContinue) { throw "A refused -$($case.Param) must not write a handoff" }
+            }
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+            Set-Location -LiteralPath $tempRoot
+            if (Test-Path -LiteralPath $gitRepoDir) {
+                Remove-Item -Recurse -Force -LiteralPath $gitRepoDir -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     # "omit it to inherit the commit hash automatically" was not a true description of
     # anything: no phase before deployment records a commit_hash, so there was never a value
     # to inherit and the handoff was refused for a missing field. The tool derives one now,

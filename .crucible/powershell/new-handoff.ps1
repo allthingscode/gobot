@@ -385,6 +385,18 @@ while (-not [string]::IsNullOrEmpty($checkDir)) {
 }
 
 if ($isGitRepo) {
+    # Item 170: C-393's Architect passed an eight-character -CommitHash and it was written
+    # as given. Resolve a passed hash to the full SHA and refuse one that names no commit;
+    # inherited values were resolved when their own handoff was written.
+    foreach ($passed in @(@{ Name = "CommitHash"; Value = $CommitHash }, @{ Name = "BaseCommit"; Value = $BaseCommit })) {
+        if ([string]::IsNullOrWhiteSpace($passed.Value)) { continue }
+        $fullSha = (git -C $REPO_ROOT rev-parse --verify --quiet ($passed.Value.Trim() + "^{commit}") 2>$null)
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($fullSha)) {
+            throw ("-" + $passed.Name + " [" + $passed.Value + "] does not name a commit in " + $REPO_ROOT + ". Pass the commit's SHA, for example from git rev-parse HEAD in the implementation worktree.")
+        }
+        if ($passed.Name -eq "CommitHash") { $resolvedCommitHash = ([string]$fullSha).Trim() } else { $resolvedBaseCommit = ([string]$fullSha).Trim() }
+    }
+
     if ([string]::IsNullOrWhiteSpace($resolvedBaseCommit)) {
         $taskBranch = "task/$TaskId"
         git show-ref --verify --quiet "refs/heads/$taskBranch" 2>$null

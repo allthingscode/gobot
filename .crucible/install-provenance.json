@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "f7b17024c0a92e567c5efd13312478bc73eacff3",
+  "source_commit": "8821f680e20b6acb79b64e4d6c674deb82a99232",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -307,8 +307,8 @@
       "base_hash": "7ba57d7176b25df7900521a8c5021144e038227269b02cf78ef887d4e34226f8"
     },
     "powershell/new-handoff.ps1": {
-      "hash": "31311e99e153da605b54eda85393f3fc2fd0c1e6b7ac6af8de74c66061d83d2d",
-      "base_hash": "31311e99e153da605b54eda85393f3fc2fd0c1e6b7ac6af8de74c66061d83d2d"
+      "hash": "517bc05f3757516b886f2cd3760ef6d83632c457d983562e7f24c965a92457a1",
+      "base_hash": "517bc05f3757516b886f2cd3760ef6d83632c457d983562e7f24c965a92457a1"
     },
     "powershell/record-research-gate.ps1": {
       "hash": "5e02c1ce32a2df9d7465e960b9f5c7a0280906735ff1ace9777e895c506d3c4d",
@@ -551,8 +551,8 @@
       "base_hash": "94ecad8c5491e783bf510a0d3e3aca11484a0c837dc62f2d8d416aa69de2b03d"
     },
     "powershell/tests/new-handoff.tests.ps1": {
-      "hash": "28a0f8e0e906dd1aaebcfcb8694821103376fee650cdd24b08a51a0c040e6ddd",
-      "base_hash": "28a0f8e0e906dd1aaebcfcb8694821103376fee650cdd24b08a51a0c040e6ddd"
+      "hash": "9d625fc45475affc878fc44eee96477ed5f20f81e76e75d53e712cf725982998",
+      "base_hash": "9d625fc45475affc878fc44eee96477ed5f20f81e76e75d53e712cf725982998"
     },
     "powershell/tests/no-code-closure.tests.ps1": {
       "hash": "02e2791fb9ff61915059b4efa1e47b422dd797ae2270cb92f7e0e4c19132d83e",
