@@ -18,9 +18,6 @@ import (
 
 // TgAPI implements bot.API using the telego library.
 type TgAPI struct {
-	// Legacy direct-handler fixtures; polling never publishes or sends through these fields.
-	msgChan      chan bot.InboundMessage
-	cbChan       chan bot.InboundCallback
 	client       *telego.Bot
 	breaker      *resilience.Breaker
 	seenMsgs     sync.Map
@@ -233,10 +230,6 @@ func (api *TgAPI) fetchUpdates(ctx context.Context, offset int) ([]telego.Update
 		return nil, fmt.Errorf("breaker execute: %w", err)
 	}
 	return updates, nil
-}
-
-func (api *TgAPI) handleUpdate(ctx context.Context, update telego.Update) {
-	api.handleGenerationUpdate(ctx, &pollingGeneration{msgChan: api.msgChan, cbChan: api.cbChan}, update)
 }
 
 func (api *TgAPI) handleGenerationUpdate(ctx context.Context, g *pollingGeneration, update telego.Update) {

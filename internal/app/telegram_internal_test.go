@@ -78,8 +78,7 @@ func TestTgAPI_HandleUpdate(t *testing.T) {
 		t.Error("expected message from u1")
 	}
 
-	// Case 2: Callback update (will panic if client is nil and AnswerCallbackQuery is called)
-	// We'll skip testing callback query logic here or mock the client.
+	// Callback behavior is covered by TestTgAPI_CallbackIngress with a fake API caller.
 }
 
 func TestTgAPI_AllowFrom(t *testing.T) {
