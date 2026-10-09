@@ -12,6 +12,19 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
 
+// toolCallState carries the local state for one tool invocation.
+type toolCallState struct {
+	sessionKey string
+	userID     string
+	name       string
+	args       map[string]any
+	iter       int
+	seqLen     int
+	paramsHash string
+	hashFailed bool
+	idemKey    string
+}
+
 func (r *AgentRunner) processToolCalls(ctx context.Context, sessionKey, userID string, toolCalls []agentctx.ToolCall, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
 	messages := make([]agentctx.StrategicMessage, 0, len(toolCalls))
 	for _, tc := range toolCalls {
@@ -59,7 +72,10 @@ func (r *AgentRunner) executeSingleToolCall(ctx context.Context, sessionKey, use
 		slog.Int("iter", iter),
 	)
 
-	result, err := r.runToolWithHooks(ctx, sessionKey, userID, name, args, iter, seqLen, paramsHash, hashErr != nil)
+	result, err := r.runToolWithHooks(ctx, toolCallState{
+		sessionKey: sessionKey, userID: userID, name: name, args: args,
+		iter: iter, seqLen: seqLen, paramsHash: paramsHash, hashFailed: hashErr != nil,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -67,8 +83,8 @@ func (r *AgentRunner) executeSingleToolCall(ctx context.Context, sessionKey, use
 	return TruncateToolResult(result, r.MaxToolResultBytes), nil
 }
 
-func (r *AgentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
-	override, err := r.preToolStep(ctx, sessionKey, name, args, paramsHash)
+func (r *AgentRunner) runToolWithHooks(ctx context.Context, call toolCallState) (string, error) {
+	override, err := r.preToolStep(ctx, call)
 	if err != nil {
 		return "", fmt.Errorf("pre-tool hook: %w", err)
 	}
@@ -76,7 +92,7 @@ func (r *AgentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, 
 		return override, nil
 	}
 
-	result, execErr := r.mainToolStep(ctx, sessionKey, userID, name, args, iter, seqLen, paramsHash, hashErr)
+	result, execErr := r.mainToolStep(ctx, call)
 
 	if execErr != nil {
 		if errors.Is(execErr, context.Canceled) ||
@@ -84,14 +100,14 @@ func (r *AgentRunner) runToolWithHooks(ctx context.Context, sessionKey, userID, 
 			errors.Is(execErr, agent.ErrToolDenied) {
 			return "", execErr
 		}
-		if bot.IsCronSession(sessionKey) {
-			return "", fmt.Errorf("tool failure in fail-closed cron session [%s]: %w", name, execErr)
+		if bot.IsCronSession(call.sessionKey) {
+			return "", fmt.Errorf("tool failure in fail-closed cron session [%s]: %w", call.name, execErr)
 		}
-		return r.handleCategoryAError(sessionKey, name, paramsHash, result, execErr), nil
+		return r.handleCategoryAError(call.sessionKey, call.name, call.paramsHash, result, execErr), nil
 	}
 
 	if r.Hooks != nil {
-		result = r.runPostToolHooks(ctx, name, result)
+		result = r.runPostToolHooks(ctx, call.name, result)
 	}
 
 	return result, nil
@@ -125,19 +141,19 @@ func (r *AgentRunner) runPostToolHooks(ctx context.Context, name, result string)
 	return fmt.Sprintf("%v", anyResult)
 }
 
-func (r *AgentRunner) preToolStep(ctx context.Context, sessionKey, name string, args map[string]any, paramsHash string) (string, error) {
+func (r *AgentRunner) preToolStep(ctx context.Context, call toolCallState) (string, error) {
 	if r.Hooks == nil {
 		return "", nil
 	}
-	override, err := r.Hooks.RunPreTool(ctx, sessionKey, name, args)
+	override, err := r.Hooks.RunPreTool(ctx, call.sessionKey, call.name, call.args)
 	if err != nil {
 		return "", fmt.Errorf("pre tool hook: %w", err)
 	}
 	if override != "" {
 		slog.Debug("runner: tool pre-hook override",
-			slog.String("session", sessionKey),
-			slog.String("tool", name),
-			slog.String("params_hash", paramsHash),
+			slog.String("session", call.sessionKey),
+			slog.String("tool", call.name),
+			slog.String("params_hash", call.paramsHash),
 			slog.String("result", override),
 		)
 		return override, nil
@@ -145,18 +161,17 @@ func (r *AgentRunner) preToolStep(ctx context.Context, sessionKey, name string, 
 	return "", nil
 }
 
-func (r *AgentRunner) mainToolStep(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int, paramsHash string, hashErr bool) (string, error) {
+func (r *AgentRunner) mainToolStep(ctx context.Context, call toolCallState) (string, error) {
 	start := time.Now()
-	var idemKey string
-	if !hashErr {
-		idemKey = fmt.Sprintf("%s-%d-%d-%s-%s", sessionKey, iter, seqLen, name, paramsHash)
+	if !call.hashFailed {
+		call.idemKey = fmt.Sprintf("%s-%d-%d-%s-%s", call.sessionKey, call.iter, call.seqLen, call.name, call.paramsHash)
 	}
-	result, execErr := r.executeTool(ctx, sessionKey, userID, idemKey, name, args, paramsHash)
+	result, execErr := r.executeToolCall(ctx, call)
 	if execErr == nil {
 		slog.Info("runner: tool execution completed",
-			slog.String("session", sessionKey),
-			slog.String("tool", name),
-			slog.String("params_hash", paramsHash),
+			slog.String("session", call.sessionKey),
+			slog.String("tool", call.name),
+			slog.String("params_hash", call.paramsHash),
 			slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 			slog.Int("result_len", len(result)),
 		)
@@ -165,31 +180,38 @@ func (r *AgentRunner) mainToolStep(ctx context.Context, sessionKey, userID, name
 }
 
 func (r *AgentRunner) executeTool(ctx context.Context, sessionKey, userID, idemKey, name string, args map[string]any, paramsHash string) (string, error) {
-	if !r.SideEffectingTools[name] || r.IdempStore == nil {
-		return r.executeToolInner(ctx, sessionKey, userID, name, args)
+	return r.executeToolCall(ctx, toolCallState{
+		sessionKey: sessionKey, userID: userID, idemKey: idemKey,
+		name: name, args: args, paramsHash: paramsHash,
+	})
+}
+
+func (r *AgentRunner) executeToolCall(ctx context.Context, call toolCallState) (string, error) {
+	if !r.SideEffectingTools[call.name] || r.IdempStore == nil {
+		return r.executeToolInner(ctx, call.sessionKey, call.userID, call.name, call.args)
 	}
 
-	if paramsHash == "" {
+	if call.paramsHash == "" {
 		var err error
-		paramsHash, err = agentctx.HashParams(args)
+		call.paramsHash, err = agentctx.HashParams(call.args)
 		if err != nil {
 			return "", fmt.Errorf("executeTool: hash params: %w", err)
 		}
 	}
 
-	checkResult, err := r.IdempStore.Check(ctx, idemKey, name, paramsHash)
+	checkResult, err := r.IdempStore.Check(ctx, call.idemKey, call.name, call.paramsHash)
 	if err != nil {
 		return "", fmt.Errorf("executeTool: %w", err)
 	}
 
 	if checkResult.Found {
-		slog.Debug("executeTool: idempotency cache hit", "tool", name, "key", idemKey)
+		slog.Debug("executeTool: idempotency cache hit", "tool", call.name, "key", call.idemKey)
 		return checkResult.CachedResult, nil
 	}
 
-	result, execErr := r.executeToolInner(ctx, sessionKey, userID, name, args)
+	result, execErr := r.executeToolInner(ctx, call.sessionKey, call.userID, call.name, call.args)
 	if execErr == nil {
-		if storeErr := r.IdempStore.Store(ctx, idemKey, name, paramsHash, result, sessionKey); storeErr != nil {
+		if storeErr := r.IdempStore.Store(ctx, call.idemKey, call.name, call.paramsHash, result, call.sessionKey); storeErr != nil {
 			slog.Warn("executeTool: failed to store idempotency key", "err", storeErr)
 		}
 	}
