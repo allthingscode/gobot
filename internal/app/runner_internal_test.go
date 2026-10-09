@@ -3,12 +3,15 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/time/rate"
 
+	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
@@ -204,5 +207,193 @@ func TestResearcherPromptPrefersGoogleAISearch(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Do not use the regular `google_search` tool") {
 		t.Fatalf("researcher prompt should discourage regular google_search for briefing, got %q", prompt)
+	}
+}
+
+type stateCheckingTool struct {
+	name string
+	run  func(context.Context, string, string, map[string]any) (string, error)
+}
+
+func (s stateCheckingTool) Name() string { return s.name }
+func (s stateCheckingTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{Name: s.name}
+}
+func (s stateCheckingTool) Execute(ctx context.Context, session, user string, args map[string]any) (string, error) {
+	return s.run(ctx, session, user, args)
+}
+
+//nolint:cyclop,paralleltest // Checks identity, exact keys and cache behavior against one shared DB.
+func TestRunner_CallStateKeys(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+	mgr, err := agentctx.GetCheckpointManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := agentctx.NewIdempotencyStore(mgr.DB(), time.Hour)
+	args := map[string]any{"value": "original"}
+	hash, err := agentctx.HashParams(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	tool := stateCheckingTool{name: "write", run: func(_ context.Context, session, user string, got map[string]any) (string, error) {
+		calls++
+		if user != testUser || got["value"] != "original" || (session != testSess && session != "other") {
+			t.Fatalf("identity/args lost: %s %s %v", session, user, got)
+		}
+		return "full stored result", nil
+	}}
+	other := tool
+	other.name = "other_tool"
+	r := &AgentRunner{IdempStore: store, SideEffectingTools: map[string]bool{"write": true, "other_tool": true}, MaxToolResultBytes: 4}
+	r.ToolsByName = map[string]Tool{"write": tool, "other_tool": other}
+	for _, tc := range []struct {
+		label, session, name string
+		iter, seq, wantCalls int
+	}{
+		{"first", testSess, "write", 2, 7, 1},
+		{"repeat", testSess, "write", 2, 7, 1},
+		{"session", "other", "write", 2, 7, 2},
+		{"iteration", testSess, "write", 3, 7, 3},
+		{"sequence", testSess, "write", 2, 8, 4},
+		{"tool", testSess, "other_tool", 2, 7, 5},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			got, err := r.executeSingleToolCall(context.Background(), tc.session, testUser, tc.name, args, tc.iter, tc.seq)
+			if err != nil || got != TruncateToolResult("full stored result", 4) || calls != tc.wantCalls {
+				t.Fatalf("got %q, %v, calls %d", got, err, calls)
+			}
+			key := fmt.Sprintf("%s-%d-%d-%s-%s", tc.session, tc.iter, tc.seq, tc.name, hash)
+			cached, err := store.Check(context.Background(), key, tc.name, hash)
+			if err != nil || !cached.Found || cached.CachedResult != "full stored result" {
+				t.Fatalf("key %q: %+v, %v", key, cached, err)
+			}
+		})
+	}
+}
+
+//nolint:gocognit,paralleltest // Compares hash-failure behavior across side-effect/store combinations.
+func TestRunner_CallStateHashFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+	mgr, err := agentctx.GetCheckpointManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name                     string
+		side, store, wantFailure bool
+	}{
+		{"read with store", false, true, false}, {"write without store", true, false, false}, {"write with store", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool := &countingTool{name: "write", resp: testResult}
+			r := &AgentRunner{SideEffectingTools: map[string]bool{"write": tc.side}}
+			if tc.store {
+				r.IdempStore = agentctx.NewIdempotencyStore(mgr.DB(), time.Hour)
+			}
+			r.ToolsByName = map[string]Tool{"write": tool}
+			got, err := r.executeSingleToolCall(context.Background(), testSess, testUser, "write", map[string]any{"bad": make(chan int)}, 1, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantFailure {
+				if tool.calls != 0 || !strings.Contains(got, "TOOL_ERROR [write]: executeTool: hash params:") {
+					t.Fatalf("got %q, calls %d", got, tool.calls)
+				}
+			} else if got != testResult || tool.calls != 1 {
+				t.Fatalf("got %q, calls %d", got, tool.calls)
+			}
+		})
+	}
+}
+
+//nolint:cyclop,gocognit // Table covers hook order and the distinct error propagation branches.
+func TestRunner_CallStateHookFlow(t *testing.T) {
+	t.Parallel()
+	const mutatedValue = "after"
+	for _, tc := range []struct {
+		name, override string
+		toolErr        error
+		cron           bool
+	}{
+		{name: "success"}, {name: "override", override: "override result"},
+		{name: "ordinary", toolErr: errors.New("failed")}, {name: "cron", toolErr: errors.New("failed"), cron: true},
+		{name: "cancel", toolErr: context.Canceled}, {name: "deadline", toolErr: context.DeadlineExceeded}, {name: "denied", toolErr: agent.ErrToolDenied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			args := map[string]any{"value": "before"}
+			events := []string{}
+			hooks := &agent.Hooks{}
+			hooks.RegisterPreTool(func(_ context.Context, session, name string, got map[string]any) (string, error) {
+				events = append(events, "pre")
+				if name != "write" || session == "" {
+					t.Fatal("hook identity lost")
+				}
+				got["value"] = mutatedValue
+				return tc.override, nil
+			})
+			hooks.RegisterPostTool(func(_ context.Context, _ string, result any) any {
+				events = append(events, "post")
+				return result.(string) + " post"
+			})
+			tool := stateCheckingTool{name: "write", run: func(_ context.Context, _, user string, got map[string]any) (string, error) {
+				events = append(events, "execute")
+				if user != testUser || got["value"] != mutatedValue {
+					t.Fatal("identity or hook mutation lost")
+				}
+				return testResult, tc.toolErr
+			}}
+			r := &AgentRunner{Hooks: hooks, MaxToolResultBytes: 8}
+			r.SetTools([]Tool{tool})
+			session := testSess
+			if tc.cron {
+				session = "cron:test:user"
+			}
+			got, err := r.executeSingleToolCall(context.Background(), session, testUser, "write", args, 1, 1)
+			wantEvents, want := "pre,execute,post", testResult+" post"
+			switch {
+			case tc.override != "":
+				wantEvents, want = "pre", tc.override
+			case tc.toolErr != nil:
+				wantEvents = "pre,execute"
+				if tc.cron || errors.Is(tc.toolErr, context.Canceled) || errors.Is(tc.toolErr, context.DeadlineExceeded) || errors.Is(tc.toolErr, agent.ErrToolDenied) {
+					if !errors.Is(err, tc.toolErr) || got != "" {
+						t.Fatalf("got %q, %v", got, err)
+					}
+					if tc.cron && !strings.Contains(err.Error(), "tool failure in fail-closed cron session [write]") {
+						t.Fatal(err)
+					}
+				} else {
+					want = r.handleCategoryAError(session, "write", "", testResult, fmt.Errorf("execute tool: %w", tc.toolErr))
+				}
+			}
+			if err == nil && got != TruncateToolResult(want, 8) {
+				t.Fatalf("got %q, want %q", got, TruncateToolResult(want, 8))
+			}
+			if tc.toolErr == nil && err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(events, ",") != wantEvents || args["value"] != mutatedValue {
+				t.Fatalf("events %v, args %v", events, args)
+			}
+		})
+	}
+}
+
+func TestRunner_CallStatePreHookError(t *testing.T) {
+	t.Parallel()
+	failure := errors.New("pre failed")
+	hooks := &agent.Hooks{}
+	hooks.RegisterPreTool(func(context.Context, string, string, map[string]any) (string, error) { return "", failure })
+	tool := &countingTool{name: "write", resp: testResult}
+	r := &AgentRunner{Hooks: hooks}
+	r.SetTools([]Tool{tool})
+	got, err := r.executeSingleToolCall(context.Background(), testSess, testUser, "write", nil, 1, 1)
+	if got != "" || !errors.Is(err, failure) || err.Error() != "pre-tool hook: pre tool hook: pre failed" || tool.calls != 0 {
+		t.Fatalf("got %q, %v, calls %d", got, err, tool.calls)
 	}
 }
