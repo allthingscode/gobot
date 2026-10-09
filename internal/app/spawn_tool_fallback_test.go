@@ -71,7 +71,7 @@ type configuredFallbackResult struct {
 	err      error
 }
 
-func runFallbackTest(t *testing.T, tt fallbackTestCase, defaultProv, specialistProv provider.Provider) {
+func runFallbackTest(t *testing.T, tt fallbackTestCase, defaultProv, specialistProv provider.Provider, resolver provider.Resolver) {
 	t.Helper()
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -83,6 +83,7 @@ func runFallbackTest(t *testing.T, tt fallbackTestCase, defaultProv, specialistP
 
 	runnerCount := 0
 	tool := &SpawnTool{
+		Resolver: resolver,
 		RunnerFactory: func(prov provider.Provider, _, _ string) agent.Runner {
 			runnerCount++
 			if runnerCount == 1 {
@@ -133,20 +134,18 @@ func runFallbackTest(t *testing.T, tt fallbackTestCase, defaultProv, specialistP
 	}
 }
 
-//nolint:paralleltest // uses global state
 func TestSpawnTool_Execute_Fallback(t *testing.T) {
+	t.Parallel()
+	registry := provider.NewRegistry()
 	const defaultProvName = "default-prov"
 	const specialistProvName = "specialist-prov"
 
 	defaultProv := &mockNamedProvider{name: defaultProvName}
 	specialistProv := &mockNamedProvider{name: specialistProvName}
-
-	provider.ResetForTest()
-	t.Cleanup(provider.ResetForTest)
-	if err := provider.Register(defaultProv); err != nil {
+	if err := registry.Register(defaultProv); err != nil {
 		t.Fatalf("register default provider: %v", err)
 	}
-	if err := provider.Register(specialistProv); err != nil {
+	if err := registry.Register(specialistProv); err != nil {
 		t.Fatalf("register specialist provider: %v", err)
 	}
 
@@ -188,13 +187,15 @@ func TestSpawnTool_Execute_Fallback(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			runFallbackTest(t, tt, defaultProv, specialistProv)
+			t.Parallel()
+			runFallbackTest(t, tt, defaultProv, specialistProv, registry)
 		})
 	}
 }
 
-//nolint:paralleltest // uses global provider registry
 func TestSpawnTool_Execute_ConfiguredModelFallbacks(t *testing.T) {
+	t.Parallel()
+	registry := provider.NewRegistry()
 	const (
 		defaultProvName = "default-prov"
 		altProvName     = "alt-prov"
@@ -202,20 +203,18 @@ func TestSpawnTool_Execute_ConfiguredModelFallbacks(t *testing.T) {
 
 	defaultProv := &mockNamedProvider{name: defaultProvName}
 	altProv := &mockNamedProvider{name: altProvName}
-
-	provider.ResetForTest()
-	t.Cleanup(provider.ResetForTest)
-	if err := provider.Register(defaultProv); err != nil {
+	if err := registry.Register(defaultProv); err != nil {
 		t.Fatalf("register default provider: %v", err)
 	}
-	if err := provider.Register(altProv); err != nil {
+	if err := registry.Register(altProv); err != nil {
 		t.Fatalf("register alt provider: %v", err)
 	}
 
 	for _, tt := range configuredFallbackTestCases(defaultProvName, altProvName) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			runConfiguredFallbackTest(t, tt, defaultProv)
+			t.Parallel()
+			runConfiguredFallbackTest(t, tt, defaultProv, registry)
 		})
 	}
 }
@@ -349,7 +348,7 @@ func configuredFallbackAlternateProviderCase(defaultProvName, altProvName string
 	}
 }
 
-func runConfiguredFallbackTest(t *testing.T, tt configuredFallbackTestCase, defaultProv provider.Provider) {
+func runConfiguredFallbackTest(t *testing.T, tt configuredFallbackTestCase, defaultProv provider.Provider, resolver provider.Resolver) {
 	t.Helper()
 
 	cfg := &config.Config{
@@ -360,6 +359,7 @@ func runConfiguredFallbackTest(t *testing.T, tt configuredFallbackTestCase, defa
 
 	var attempts []configuredFallbackAttempt
 	tool := &SpawnTool{
+		Resolver: resolver,
 		RunnerFactory: func(prov provider.Provider, model, _ string) agent.Runner {
 			attempts = append(attempts, configuredFallbackAttempt{
 				provider: prov.Name(),
@@ -397,5 +397,60 @@ func runConfiguredFallbackTest(t *testing.T, tt configuredFallbackTestCase, defa
 		if !strings.Contains(formatted, want) {
 			t.Errorf("formatted metadata missing %q in:\n%s", want, formatted)
 		}
+	}
+}
+
+//nolint:gocognit,cyclop // Keep cross-owner setup and provider identity assertions together.
+func TestSpawnTool_IndependentFallbackOwners(t *testing.T) {
+	t.Parallel()
+	for _, owner := range []string{"owner-a", "owner-b"} {
+		t.Run(owner, func(t *testing.T) {
+			t.Parallel()
+			parent := &mockNamedProvider{name: "parent"}
+			specialist := &mockNamedProvider{name: "specialist"}
+			alternate := &mockNamedProvider{name: "alternate"}
+			registry := provider.NewRegistry()
+			for _, prov := range []provider.Provider{specialist, alternate} {
+				if err := registry.Register(prov); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg := &config.Config{}
+			cfg.Agents.Specialists = map[string]config.SpecialistConfig{
+				RoleResearcher:                 {Provider: "specialist", Model: "primary"},
+				RoleResearcher + "_fallback":   {Provider: "alternate", Model: "fallback"},
+				RoleResearcher + "_escalation": {Provider: "alternate", Model: "escalation"},
+			}
+			for _, successModel := range []string{"parent-model", "fallback", "escalation"} {
+				t.Run(successModel, func(t *testing.T) {
+					t.Parallel()
+					wantProviders := []provider.Provider{specialist, parent, alternate, alternate}
+					wantModels := []string{"primary", "parent-model", "fallback", "escalation"}
+					attempts := 0
+					tool := newSpawnTool(parent, "parent-model", nil, map[string]string{RoleResearcher: "primary"}, nil, cfg, registry)
+					tool.RunnerFactory = func(prov provider.Provider, model, _ string) agent.Runner {
+						if attempts >= len(wantModels) || prov != wantProviders[attempts] || model != wantModels[attempts] {
+							t.Fatalf("incorrect attempt %d: %v/%s", attempts, prov, model)
+						}
+						attempts++
+						if model == successModel {
+							return &mockSubAgentRunner{response: owner}
+						}
+						return &mockSubAgentRunner{err: errors.New("retry")}
+					}
+					ctx, meta := withToolMeta(context.Background())
+					got, err := tool.Execute(ctx, "session", "user", map[string]any{"objective": "work"})
+					if err != nil || got != owner {
+						t.Fatalf("Execute = %q, %v", got, err)
+					}
+					if !strings.Contains(formatToolMetaBlock(got, meta), "model: "+successModel) {
+						t.Fatal("fallback metadata lost")
+					}
+					if wantModels[attempts-1] != successModel {
+						t.Fatal("sequence ended before success model")
+					}
+				})
+			}
+		})
 	}
 }

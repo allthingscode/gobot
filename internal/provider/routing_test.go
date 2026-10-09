@@ -39,7 +39,7 @@ func TestRoutingProvider_Disabled(t *testing.T) {
 	manager := &MockProvider{name: "mgr"}
 	cfg := config.RoutingConfig{Enabled: false}
 
-	p := provider.NewRoutingProvider(exec, manager, cfg)
+	p := provider.NewRoutingProvider(exec, manager, cfg, nil)
 	resp, err := p.Chat(context.Background(), provider.ChatRequest{})
 
 	if err != nil {
@@ -68,7 +68,7 @@ func TestRoutingProvider_BypassConversational(t *testing.T) {
 	}
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
 
-	p := provider.NewRoutingProvider(exec, manager, cfg)
+	p := provider.NewRoutingProvider(exec, manager, cfg, nil)
 	// No tools, short message
 	req := provider.ChatRequest{
 		Messages: []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("hello")}}},
@@ -112,7 +112,7 @@ func TestRoutingProvider_EscalateToExecutor(t *testing.T) {
 	}
 
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
-	p := provider.NewRoutingProvider(exec, manager, cfg)
+	p := provider.NewRoutingProvider(exec, manager, cfg, nil)
 
 	// Force classification by including tools
 	req := provider.ChatRequest{
@@ -157,7 +157,7 @@ func TestRoutingProvider_HandleByManager(t *testing.T) {
 	}
 
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
-	p := provider.NewRoutingProvider(exec, manager, cfg)
+	p := provider.NewRoutingProvider(exec, manager, cfg, nil)
 
 	// Long message (> 100 chars) to force classification even without tools
 	longMsg := strings.Repeat("this is a very long message that should trigger classification logic even if there are no tools attached to the request ", 2)
@@ -200,7 +200,7 @@ func TestRoutingProvider_FallbackOnError(t *testing.T) {
 	}
 
 	cfg := config.RoutingConfig{Enabled: true, ManagerModel: "small-model"}
-	p := provider.NewRoutingProvider(exec, manager, cfg)
+	p := provider.NewRoutingProvider(exec, manager, cfg, nil)
 
 	// Force classification attempt by using a long message
 	longMsg := strings.Repeat("long message ", 20)
@@ -220,11 +220,9 @@ func TestRoutingProvider_FallbackOnError(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // touches global provider registry
 func TestRoutingProvider_OpenRouterPrefix(t *testing.T) {
-	// Not parallel because it touches the global provider registry.
-	provider.ResetForTest()
-	t.Cleanup(provider.ResetForTest)
+	registry := provider.NewRegistry()
+	t.Parallel()
 
 	openRouterCalled := false
 	op := &MockProvider{
@@ -234,12 +232,14 @@ func TestRoutingProvider_OpenRouterPrefix(t *testing.T) {
 			return &provider.ChatResponse{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: strPtr("openrouter response")}}}, nil
 		},
 	}
-	_ = provider.Register(op)
+	if err := registry.Register(op); err != nil {
+		t.Fatal(err)
+	}
 
 	exec := &MockProvider{name: "exec"}
 	manager := &MockProvider{name: "mgr"}
 	cfg := config.RoutingConfig{Enabled: true}
-	p := provider.NewRoutingProvider(exec, manager, cfg)
+	p := provider.NewRoutingProvider(exec, manager, cfg, registry)
 
 	req := provider.ChatRequest{
 		Model: "openrouter/mistral-7b",
@@ -254,5 +254,40 @@ func TestRoutingProvider_OpenRouterPrefix(t *testing.T) {
 	}
 	if resp.Message.Content.String() != "openrouter response" {
 		t.Errorf("got %q, want %q", resp.Message.Content.String(), "openrouter response")
+	}
+}
+
+func TestRoutingProvider_IndependentOverrides(t *testing.T) {
+	t.Parallel()
+	for _, response := range []string{"owner-a", "owner-b"} {
+		t.Run(response, func(t *testing.T) {
+			t.Parallel()
+			registry := provider.NewRegistry()
+			op := &MockProvider{name: "openrouter", chatFunc: func(provider.ChatRequest) (*provider.ChatResponse, error) {
+				return &provider.ChatResponse{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: strPtr(response)}}}, nil
+			}}
+			if err := registry.Register(op); err != nil {
+				t.Fatal(err)
+			}
+			p := provider.NewRoutingProvider(&MockProvider{name: "exec"}, &MockProvider{name: "mgr"}, config.RoutingConfig{}, registry)
+			got, err := p.Chat(context.Background(), provider.ChatRequest{Model: "openrouter/model"})
+			if err != nil || got.Message.Content.String() != response {
+				t.Fatalf("override = %v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestRoutingProvider_MissingOverride(t *testing.T) {
+	t.Parallel()
+	for _, resolver := range []provider.Resolver{nil, provider.NewRegistry()} {
+		exec := &MockProvider{name: "exec", chatFunc: func(provider.ChatRequest) (*provider.ChatResponse, error) {
+			return &provider.ChatResponse{Message: agentctx.StrategicMessage{Content: &agentctx.MessageContent{Str: strPtr("executor")}}}, nil
+		}}
+		p := provider.NewRoutingProvider(exec, exec, config.RoutingConfig{}, resolver)
+		got, err := p.Chat(context.Background(), provider.ChatRequest{Model: "openrouter/model"})
+		if err != nil || got.Message.Content.String() != "executor" {
+			t.Fatalf("fallback = %v, %v", got, err)
+		}
 	}
 }

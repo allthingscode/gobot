@@ -28,6 +28,7 @@ const (
 
 // AgentStack holds the core components required to run the strategic agent.
 type AgentStack struct {
+	Providers *provider.Registry
 	Prov      provider.Provider
 	Model     string
 	Runner    *AgentRunner
@@ -40,7 +41,11 @@ type AgentStack struct {
 // initialization sequence used by both 'run' and 'simulate' commands.
 // Returns a stack of components and a cleanup function (to close memory store).
 func BuildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer) (*AgentStack, func(), error) {
-	prov, model, err := InitProviders(ctx, cfg)
+	return buildAgentStack(ctx, cfg, tmgr, tracer, provider.NewRegistry())
+}
+
+func buildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer, providers *provider.Registry) (*AgentStack, func(), error) {
+	prov, model, err := initProviders(ctx, cfg, providers)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -62,7 +67,7 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.Tem
 	sessionRoot := filepath.Join(cfg.StorageRoot(), "sessions")
 	registry := NewToolRegistry(sessionRoot)
 
-	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry, tmgr, tracer))
+	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry, tmgr, tracer, providers))
 
 	finalCleanup := func() {
 		cleanup()
@@ -70,6 +75,7 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.Tem
 	}
 
 	return &AgentStack{
+		Providers: providers,
 		Prov:      prov,
 		Model:     model,
 		Runner:    runner,
@@ -81,7 +87,12 @@ func BuildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.Tem
 
 // InitProviders initializes all configured LLM providers and returns the default provider and model.
 func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, string, error) {
+	return initProviders(ctx, cfg, provider.NewRegistry())
+}
+
+func initProviders(ctx context.Context, cfg *config.Config, providers *provider.Registry) (provider.Provider, string, error) {
 	factory := &provider.Factory{
+		Registry:          providers,
 		GeminiAPIKey:      cfg.GeminiAPIKey(),
 		AnthropicAPIKey:   cfg.AnthropicAPIKey(),
 		OpenAIAPIKey:      cfg.OpenAIAPIKey(),
@@ -104,12 +115,12 @@ func InitProviders(ctx context.Context, cfg *config.Config) (provider.Provider, 
 
 	// Use cost-based routing if enabled (F-116)
 	if cfg.Runtime.Routing.Enabled {
-		if rp, err := provider.Get("routing"); err == nil {
+		if rp, err := providers.Get("routing"); err == nil {
 			return rp, model, nil
 		}
 	}
 
-	prov, err := provider.Get(provName)
+	prov, err := providers.Get(provName)
 	if err != nil {
 		return nil, "", fmt.Errorf("provider: %w", err)
 	}

@@ -25,6 +25,7 @@ const (
 // It routes job payloads to the agent SessionManager and sends
 // any non-empty response back via the Telegram bot.
 type CronDispatcher struct {
+	resolver    provider.Resolver
 	mgr         *agent.SessionManager
 	b           *bot.Bot
 	storageRoot string
@@ -46,7 +47,12 @@ type CronDispatcher struct {
 
 // NewCronDispatcher initializes a new CronDispatcher using the given stack and bot.
 func NewCronDispatcher(cfg *config.Config, mgr *agent.SessionManager, stack *AgentStack, b *bot.Bot, tmgr *reporter.TemplateManager) *CronDispatcher {
+	var resolver provider.Resolver
+	if stack.Providers != nil {
+		resolver = stack.Providers
+	}
 	return &CronDispatcher{
+		resolver:     resolver,
 		mgr:          mgr,
 		b:            b,
 		storageRoot:  cfg.StorageRoot(),

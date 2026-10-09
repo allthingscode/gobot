@@ -179,7 +179,7 @@ func TestSpawnTool_Coverage(t *testing.T) {
 	prov := &mockProvider{name: "mock"}
 	cfg := &config.Config{}
 
-	tool := app.NewSpawnTool(prov, "model", nil, nil, nil, cfg)
+	tool := app.NewSpawnTool(prov, "model", nil, nil, nil, cfg, nil)
 
 	ctx := context.Background()
 	// This will still use NewAgentRunner internally which might be hard to mock completely without more work,
@@ -313,7 +313,7 @@ func TestRegisterTools_Coverage(t *testing.T) {
 	cfg.Runtime.GmailReadonly = false
 
 	reg := app.NewToolRegistry(t.TempDir())
-	tools := app.RegisterTools(cfg, nil, "model", nil, nil, nil, reg, nil, nil)
+	tools := app.RegisterTools(cfg, nil, "model", nil, nil, nil, reg, nil, nil, nil)
 	if len(tools) == 0 {
 		t.Error("RegisterTools returned no tools")
 	}
@@ -643,7 +643,6 @@ func TestStartGateway_NilListener_Coverage(t *testing.T) {
 
 func TestInitProviders_Coverage(t *testing.T) {
 	t.Parallel()
-	provider.ResetForTest()
 	cfg := &config.Config{}
 	cfg.Providers.Gemini.APIKey = "AIzaSyTest"
 
@@ -658,8 +657,8 @@ func TestBuildAgentStack_Routing_Coverage(t *testing.T) {
 	_, _, _ = app.BuildAgentStack(context.Background(), cfg, nil, nil)
 }
 
-func TestBuildAgentStack_Errors(t *testing.T) { //nolint:paralleltest // uses global state // resets global provider registry
-	provider.ResetForTest()
+func TestBuildAgentStack_Errors(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{}
 	_, _, err := app.BuildAgentStack(context.Background(), cfg, nil, nil)
 	if err == nil {

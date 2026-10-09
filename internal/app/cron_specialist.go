@@ -8,11 +8,13 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/cron"
-	"github.com/allthingscode/gobot/internal/provider"
 )
 
 func (cd *CronDispatcher) prepareSpecialistRunner(agentName string, spec config.SpecialistConfig) (*AgentRunner, error) {
-	prov, err := provider.Get(cd.cfg.SpecialistProvider(agentName))
+	if cd.resolver == nil {
+		return nil, fmt.Errorf("specialist provider %q: resolver unavailable", cd.cfg.SpecialistProvider(agentName))
+	}
+	prov, err := cd.resolver.Get(cd.cfg.SpecialistProvider(agentName))
 	if err != nil {
 		return nil, fmt.Errorf("specialist provider: %w", err)
 	}

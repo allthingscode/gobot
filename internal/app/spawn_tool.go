@@ -24,6 +24,7 @@ const (
 // SpawnTool implements Tool and enables the main agent to delegate complex
 // tasks to ephemeral, specialized sub-agents (F-001).
 type SpawnTool struct {
+	Resolver          provider.Resolver
 	RunnerFactory     func(prov provider.Provider, model, systemPrompt string) agent.Runner
 	DefaultProv       provider.Provider
 	Model             string
@@ -72,8 +73,9 @@ func (r *iterLimitRunner) Run(ctx context.Context, sessionKey, userID string, me
 }
 
 // newSpawnTool creates a SpawnTool that builds sub-runners from a provider.
-func newSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config) *SpawnTool {
+func newSpawnTool(prov provider.Provider, model string, specialistPrompts, specialistModels map[string]string, memStore *memory.MemoryStore, cfg *config.Config, resolver provider.Resolver) *SpawnTool {
 	st := &SpawnTool{
+		Resolver:          resolver,
 		DefaultProv:       prov,
 		Model:             model,
 		SpecialistPrompts: specialistPrompts,
@@ -131,9 +133,7 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 	// Resolve the provider configured for this specialist; fall back to the parent's provider.
 	prov := t.DefaultProv
 	if t.Cfg != nil {
-		if p, err := provider.Get(t.Cfg.SpecialistProvider(agentType)); err == nil {
-			prov = p
-		}
+		prov = t.resolveProvider(t.Cfg.SpecialistProvider(agentType))
 	}
 	subRunner := t.RunnerFactory(prov, model, systemPrompt)
 
@@ -165,6 +165,16 @@ func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args
 		m.Set("iterations", strconv.Itoa(limitedRunner.Count))
 	}
 	return reply, nil
+}
+
+// resolveProvider preserves the parent provider when an owning lookup is unavailable.
+func (t *SpawnTool) resolveProvider(name string) provider.Provider {
+	if t.Resolver != nil {
+		if prov, err := t.Resolver.Get(name); err == nil {
+			return prov
+		}
+	}
+	return t.DefaultProv
 }
 
 func (t *SpawnTool) handleFallback(ctx context.Context, subKey, userID, objective, agentType, systemPrompt string, failedProv provider.Provider, failedModel string, start time.Time, originalErr error) (string, error) {
@@ -220,10 +230,7 @@ func (t *SpawnTool) tryConfiguredModelFallbacks(ctx context.Context, subKey, use
 			continue
 		}
 
-		altProv := t.DefaultProv
-		if p, err := provider.Get(t.Cfg.SpecialistProvider(key)); err == nil {
-			altProv = p
-		}
+		altProv := t.resolveProvider(t.Cfg.SpecialistProvider(key))
 
 		slog.Warn("spawn: attempting configured model fallback",
 			"type", agentType,

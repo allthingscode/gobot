@@ -47,11 +47,11 @@ func (m *mockChatProvider) Chat(_ context.Context, _ provider.ChatRequest) (*pro
 	}, nil
 }
 
-func TestCronDispatcher_DispatchSpecialist_Telegram(t *testing.T) { //nolint:paralleltest // uses global state // modifies global provider registry
+func TestCronDispatcher_DispatchSpecialist_Telegram(t *testing.T) {
+	t.Parallel()
+	registry := provider.NewRegistry()
 	mockProv := &mockChatProvider{resp: "Mock Specialist Result"}
-	provider.ResetForTest()
-	t.Cleanup(provider.ResetForTest)
-	if err := provider.Register(mockProv); err != nil {
+	if err := registry.Register(mockProv); err != nil {
 		t.Fatalf("failed to register mock provider: %v", err)
 	}
 
@@ -76,8 +76,9 @@ func TestCronDispatcher_DispatchSpecialist_Telegram(t *testing.T) { //nolint:par
 
 	var capturedModel string
 	cd := &CronDispatcher{
-		cfg: cfg,
-		b:   b,
+		resolver: registry,
+		cfg:      cfg,
+		b:        b,
 		runnerFactory: func(prov provider.Provider, model, systemPrompt string) *AgentRunner {
 			capturedModel = model
 			return NewAgentRunner(prov, model, systemPrompt, cfg)
@@ -128,5 +129,34 @@ func TestCronDispatcher_DispatchSpecialist_Unknown(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown specialist: unknown-spec") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestCronDispatcher_IndependentSpecialists(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Agents.Specialists = map[string]config.SpecialistConfig{RoleResearcher: {Provider: mockName, Model: "specialist-model"}}
+	for _, response := range []string{"owner-a", "owner-b"} {
+		registry := provider.NewRegistry()
+		prov := &mockChatProvider{resp: response}
+		if err := registry.Register(prov); err != nil {
+			t.Fatal(err)
+		}
+		cd := NewCronDispatcher(cfg, nil, &AgentStack{Providers: registry}, nil, nil)
+		cd.runnerFactory = func(got provider.Provider, model, _ string) *AgentRunner {
+			if got != prov || model != "specialist-model" {
+				t.Fatal("specialist resolved another owner")
+			}
+			return &AgentRunner{}
+		}
+		if _, err := cd.prepareSpecialistRunner(RoleResearcher, cfg.Agents.Specialists[RoleResearcher]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, registry := range []*provider.Registry{nil, provider.NewRegistry()} {
+		cd := NewCronDispatcher(cfg, nil, &AgentStack{Providers: registry}, nil, nil)
+		if _, err := cd.prepareSpecialistRunner(RoleResearcher, cfg.Agents.Specialists[RoleResearcher]); err == nil || !strings.Contains(err.Error(), "specialist provider") {
+			t.Fatalf("missing resolver error = %v", err)
+		}
 	}
 }
