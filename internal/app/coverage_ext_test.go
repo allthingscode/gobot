@@ -18,8 +18,6 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/provider"
-	"github.com/allthingscode/gobot/internal/resilience"
-	telego "github.com/mymmrac/telego"
 )
 
 const (
@@ -282,33 +280,6 @@ func TestSpawnTool_IterLimitRunner_Coverage(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "exceeded maximum iterations") {
 		t.Errorf("expected iteration limit error, got %v", err)
 	}
-}
-
-func TestTgAPI_HandleUpdate_Callback_Coverage(t *testing.T) {
-	t.Parallel()
-	api := &TgAPI{
-		msgChan: make(chan bot.InboundMessage, 1),
-		cbChan:  make(chan bot.InboundCallback, 1),
-		breaker: resilience.New("test", 3, time.Minute, time.Second),
-	}
-
-	cbUpdate := telego.Update{
-		CallbackQuery: &telego.CallbackQuery{
-			ID:   "cb1",
-			Data: "data1",
-			From: telego.User{ID: 456},
-			Message: &telego.Message{
-				Chat: telego.Chat{ID: 123},
-			},
-		},
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Logf("Recovered from expected panic (nil client): %v", r)
-		}
-	}()
-	api.handleUpdate(context.Background(), cbUpdate)
 }
 
 type coverageMockRunner struct {

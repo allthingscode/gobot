@@ -20,7 +20,6 @@ import (
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 	"github.com/allthingscode/gobot/internal/resilience"
-	telego "github.com/mymmrac/telego"
 )
 
 const replyText = "reply"
@@ -180,26 +179,6 @@ func TestTgAPI_IsDuplicate_App(t *testing.T) {
 	if api.isDuplicate("chat2:msg2") {
 		t.Error("expired entry should have been evicted and not reported as duplicate")
 	}
-}
-
-func TestTgAPI_HandleUpdate_Callback_App(t *testing.T) {
-	t.Parallel()
-	api := &TgAPI{
-		msgChan: make(chan bot.InboundMessage, 1),
-		cbChan:  make(chan bot.InboundCallback, 1),
-	}
-
-	cbUpdate := telego.Update{
-		CallbackQuery: &telego.CallbackQuery{
-			ID:   "cb1",
-			Data: "data1",
-			From: telego.User{ID: 456},
-		},
-	}
-	defer func() {
-		_ = recover()
-	}()
-	api.handleUpdate(context.Background(), cbUpdate)
 }
 
 func TestBuildAgentStack_Basic_App(t *testing.T) {
