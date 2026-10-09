@@ -314,7 +314,21 @@ if ([string]::IsNullOrWhiteSpace($Commit)) {
     $Commit = Get-CurrentCommit -Root $CrucibleRoot
 }
 # The head_sha= query matches full SHAs only.
+$requestedCommit = $Commit
 $Commit = Resolve-FullCommitSha -CommitSha $Commit -Root $CrucibleRoot
+# Item 171: a mistyped prefix used to reach the query unresolved, poll out the no-runs
+# grace window and report NO_RUNS, which reads as "no CI" and is advisory at the gate.
+# A full SHA passes through because the commit may exist only on the remote.
+if ($Commit -notmatch '^[0-9a-fA-F]{40}$') {
+    Write-Host "[CI WATCH] STATUS=INVALID_COMMIT"
+    if ([string]::IsNullOrWhiteSpace($requestedCommit)) {
+        Write-Host ("  no -Commit was given and HEAD could not be read in " + $CrucibleRoot)
+    } else {
+        Write-Host ("  commit: [" + $requestedCommit + "] does not resolve to a commit in " + $CrucibleRoot)
+    }
+    Write-Host "  pass the full 40-character SHA, or a prefix of a commit in that repository"
+    exit 7
+}
 
 $noRunsDeadline = (Get-Date).AddMinutes($NoRunsGraceMinutes)
 $queuedDeadline = (Get-Date).AddMinutes($QueuedGraceMinutes)

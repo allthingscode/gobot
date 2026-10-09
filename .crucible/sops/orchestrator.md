@@ -1,4 +1,4 @@
-<!-- prompt_version: orchestrator-sop-v5 -->
+<!-- prompt_version: orchestrator-sop-v6 -->
 # SOP: Orchestrator
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -202,7 +202,7 @@ indicate: approved / deferred / rejected. I will pass your decisions to the Groo
 
 The Human Gate fires after every Operator session. The loop halts here.
 
-A task that merges code to trunk is not done until adopter CI for the merge commit is GREEN. Whether an accepted merge publishes at all is the project's `review.auto_push` setting, not the gate's choice: with it off the merge stays local and the gate prints the `git push` command for the human to run. When it is on, an accepted merge publishes the primary branch ONLY after CI is confirmed GREEN on a staging ref (`crucible-ci/<TaskId>`); a confirmed-RED CI leaves the primary branch local and routes to fix-forward; inconclusive CI (timeout / not-started / no-runs) finalizes with a warning as before. After recording an accepted Human Gate that pushes task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>` and trust the `[CI WATCH] STATUS=...` value. `STATUS=RED` means the task is not done: fix forward and re-run the gate. `[CI WATCH] SKIPPED (gh unavailable)`, `STATUS=NO_RUNS`, and `STATUS=PENDING_TIMEOUT` are advisory unless project policy says otherwise.
+A task that merges code to trunk is not done until adopter CI for the merge commit is GREEN. Whether an accepted merge publishes at all is the project's `review.auto_push` setting, not the gate's choice: with it off the merge stays local and the gate prints the `git push` command for the human to run. When it is on, an accepted merge publishes the primary branch ONLY after CI is confirmed GREEN on a staging ref (`crucible-ci/<TaskId>`); a confirmed-RED CI leaves the primary branch local and routes to fix-forward; inconclusive CI (timeout / not-started / no-runs) finalizes with a warning as before. After recording an accepted Human Gate that pushes task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>` and trust the `[CI WATCH] STATUS=...` value. `STATUS=RED` means the task is not done: fix forward and re-run the gate. `[CI WATCH] SKIPPED (gh unavailable)`, `STATUS=NO_RUNS`, and `STATUS=PENDING_TIMEOUT` are advisory unless project policy says otherwise. `STATUS=INVALID_COMMIT` (exit 7) means the `-Commit` value names no commit: correct it and re-run; it is never advisory.
 
 Present to the human:
 

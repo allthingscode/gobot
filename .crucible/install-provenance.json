@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "8821f680e20b6acb79b64e4d6c674deb82a99232",
+  "source_commit": "0b370738d4140d5b42f5d26f817218195a0f0a21",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -55,8 +55,8 @@
       "base_hash": "2979f6d7a76b69aab35325ed072a64c16b08a614abe961116ee59bad6f16de4e"
     },
     "docs/orchestrators/claude.md": {
-      "hash": "a850db7b0d452494a4cb016024b63aefa076b74d141a876952515061a84976ca",
-      "base_hash": "a850db7b0d452494a4cb016024b63aefa076b74d141a876952515061a84976ca"
+      "hash": "0a0befb110996a1f2250c56f108652fa67b4d58a79aac791548213f5c942b25c",
+      "base_hash": "0a0befb110996a1f2250c56f108652fa67b4d58a79aac791548213f5c942b25c"
     },
     "docs/orchestrators/codex.md": {
       "hash": "62f9aa4dfee987815c3b68d6dd29b58809b18844010dd2892368075a2824d904",
@@ -715,8 +715,8 @@
       "base_hash": "fd452b76ff7b878a451b975668ae9d0d4bf8c5aa64a31919c45a170b63d9f96a"
     },
     "powershell/watch-adopter-ci.ps1": {
-      "hash": "b3da508f8b98ee301dcd5ea7992137b930130dba06d12331a00d2b9b90edf1ae",
-      "base_hash": "b3da508f8b98ee301dcd5ea7992137b930130dba06d12331a00d2b9b90edf1ae"
+      "hash": "ae7940db8b6909b27bfa4aa680432f1989661e7cf32616b6b454bb20affb68f2",
+      "base_hash": "ae7940db8b6909b27bfa4aa680432f1989661e7cf32616b6b454bb20affb68f2"
     },
     "prompts/deployment_prompt.md": {
       "hash": "0c44ae10b3d0ac83a04d92d633563c5ddb4f811586f68a5d7152c50663633436",
@@ -791,8 +791,8 @@
       "base_hash": "cb184ef4fd03f9101f8cae81353a7747a1278723756d772fed0172bd68dd240b"
     },
     "sops/orchestrator.md": {
-      "hash": "b1959f37cbc1c73e1d76d09f29f75eab7706180ff9baadbfdc026cfbd71f956f",
-      "base_hash": "b1959f37cbc1c73e1d76d09f29f75eab7706180ff9baadbfdc026cfbd71f956f"
+      "hash": "c464617308553df21d6cf35bebcbc9b019bfc4d158f4d6893ce2df44f3c19bcf",
+      "base_hash": "c464617308553df21d6cf35bebcbc9b019bfc4d158f4d6893ce2df44f3c19bcf"
     },
     "sops/README.md": {
       "hash": "480e853535199c05ca05ff988e9f73577164dd8b792677ebdd0869e560d53c4a",
