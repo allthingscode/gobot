@@ -452,6 +452,48 @@ Complete-CrucibleSourceSession -Context `$ctx
         $logContent2 = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
         Assert-Result -Name "D26 logs circuit_breaker on retry" -Condition ($logContent2 -match "circuit_breaker") -FailureMessage "expected circuit_breaker logged on retry"
     }
+    # Item 169: C-390's handoff carried quote characters inside each artifact path, the
+    # files existed under the unquoted names, and the gate told the specialist only that
+    # they did not exist.
+    $results += Run-Test -Name "A quoted artifact path is named as the likely cause, a plain missing one is not" -Body {
+        $caseRoot = Join-Path $tempRoot "item169-quoted-artifact"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot "docs") -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $caseRoot "docs/REAL.md") -Value "real" -Encoding UTF8
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-169"
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $runGate = {
+            param([string]$ArtifactLiteral)
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
+                LogFile = '$($ctx.LogFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-169'
+                    source_phase = 'implementation'
+                    target_phase = 'verification'
+                    cumulative_handoff_count = 1
+                    artifacts = @($ArtifactLiteral)
+                }
+            }
+            Invoke-CrucibleRuntimeValidation -Context `$ctx
+"@ 2>&1
+        }
+
+        $quotedOutput = (& $runGate "`"'docs/REAL.md'`"") -join "`n"
+        Assert-Result -Name "quoted artifact still stops the gate" -Condition ($LASTEXITCODE -eq 2) -FailureMessage "expected exit code 2, got $LASTEXITCODE"
+        Assert-Result -Name "quoted artifact named as the cause" -Condition ($quotedOutput -match "carry quote characters" -and $quotedOutput -match [regex]::Escape("['docs/REAL.md']")) -FailureMessage ("expected the quote hint naming ['docs/REAL.md'], got: " + $quotedOutput)
+
+        Remove-Item -LiteralPath $ctx.LogFile -Force -ErrorAction SilentlyContinue
+        $plainOutput = (& $runGate "'docs/NOT_THERE.md'") -join "`n"
+        Assert-Result -Name "plain missing artifact still stops the gate" -Condition ($LASTEXITCODE -eq 2) -FailureMessage "expected exit code 2, got $LASTEXITCODE"
+        Assert-Result -Name "plain missing artifact gets no quote hint" -Condition ($plainOutput -notmatch "carry quote characters") -FailureMessage ("a plain missing path must not get the quote hint, got: " + $plainOutput)
+    }
     $results += Run-Test -Name "D38: Verification check failure logs quality_gate_retry on first run" -Body {
         $caseRoot = Join-Path $tempRoot "d38-test-fail-first"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null

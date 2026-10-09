@@ -278,7 +278,7 @@ try {
             Target = "grooming"
             Reason = "research complete"
             PromptVersion = "researcher_prompt-v1"
-            Artifacts = @("docs/operating-manual.md")
+            Artifacts = @("powershell/crucible.ps1")
             SchemaPath = $schemaPath
         }
         if ($result.ExitCode -eq 0) {
@@ -376,6 +376,43 @@ budget_tier: "low"
             if ($normalized -match "powershell") { throw "Refusal should name only the quoted entry, got: $($result.Output)" }
             if (Track-HandoffFile -TaskId $taskId) { throw "A refused -FileAffinity must not write a handoff for $taskId" }
         }
+    }
+
+    # Item 169: C-390's Architect passed quoted artifact paths through a native pwsh call.
+    # The handoff was written, and only the next crucible.ps1 run caught the paths.
+    Invoke-Test -Name "-Artifacts entry with a quote character is refused and names the exact value" -Script {
+        $taskId = New-TestTaskId "ART-SQ"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "implementation"
+            Target = "verification"
+            Reason = "quoted artifact"
+            SessionCycleId = "cycle-test"
+            Artifacts = @("powershell/crucible.ps1", "'powershell/new-handoff.ps1'")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -eq 0) { throw "Expected refusal for a quoted -Artifacts entry, but the generator succeeded" }
+        if ($result.Output -notmatch "Artifacts entry contains a quote character") { throw "Expected the quote refusal message, got: $($result.Output)" }
+        if ($result.Output -notmatch [regex]::Escape("['powershell/new-handoff.ps1']")) { throw "Refusal should show the exact value received, got: $($result.Output)" }
+        if ($result.Output -match [regex]::Escape("[powershell/crucible.ps1]")) { throw "Refusal should name only the quoted entry, got: $($result.Output)" }
+        if (Track-HandoffFile -TaskId $taskId) { throw "A refused -Artifacts must not write a handoff for $taskId" }
+    }
+
+    Invoke-Test -Name "-Artifacts entry that does not exist is refused and names it" -Script {
+        $taskId = New-TestTaskId "ART-MISS"
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "implementation"
+            Target = "verification"
+            Reason = "missing artifact"
+            SessionCycleId = "cycle-test"
+            Artifacts = @("powershell/crucible.ps1,docs/NO_SUCH_FILE.md")
+            SchemaPath = $schemaPath
+        }
+        if ($result.ExitCode -eq 0) { throw "Expected refusal for a nonexistent -Artifacts entry, but the generator succeeded" }
+        if ($result.Output -notmatch "Artifacts entry does not exist") { throw "Expected the missing-artifact refusal message, got: $($result.Output)" }
+        if ($result.Output -notmatch [regex]::Escape("[docs/NO_SUCH_FILE.md]")) { throw "Refusal should name the missing entry, got: $($result.Output)" }
+        if (Track-HandoffFile -TaskId $taskId) { throw "A refused -Artifacts must not write a handoff for $taskId" }
     }
 
     Invoke-Test -Name "-FileAffinity accepts separate and comma-joined unquoted paths" -Script {

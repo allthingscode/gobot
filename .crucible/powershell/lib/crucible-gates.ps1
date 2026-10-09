@@ -1443,6 +1443,10 @@ function Invoke-CrucibleRuntimeValidation {
         }
         if ($missingArtifacts.Count -gt 0) {
             $joined = ($missingArtifacts -join ", ")
+            $quotedMissing = @($missingArtifacts | Where-Object { $_ -match "[`"']" -or $_ -ne $_.Trim() })
+            if ($quotedMissing.Count -gt 0) {
+                Write-Host ("[HINT] These artifact paths carry quote characters or surrounding whitespace, so the file may exist under the unquoted name: " + (($quotedMissing | ForEach-Object { "[" + $_ + "]" }) -join ", ") + ". The quotes reached new-handoff.ps1 as part of the path; write the handoff again with the paths unquoted.") -ForegroundColor Yellow
+            }
 
             # Check if this is a retry (prior missing-artifact quality_gate_retry in event log)
             $hasPriorRetry = $false

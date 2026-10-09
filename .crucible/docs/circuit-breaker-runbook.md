@@ -199,7 +199,9 @@ Were the files supposed to be created?
 1. List what actually exists in the worktree: `git -C .crucible/.agent-workspaces/implementation-{task_id} status`
 2. Compare against the spec's acceptance criteria.
 3. If work is genuinely missing: re-dispatch the Architect with "Your handoff lists {file} as an artifact but it does not exist. Create it."
-4. If the handoff just listed the wrong path: have the agent correct the handoff JSON and re-run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}"`.
+4. If the handoff just listed the wrong path: have the agent write the handoff again with `new-handoff.ps1` and the corrected `-Artifacts`, then re-run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}"`. Never hand-edit the handoff JSON. A `[HINT]` line naming quote characters means the files exist and the quotes reached `new-handoff.ps1` as part of each path; pass them unquoted.
+
+`new-handoff.ps1` refuses an `-Artifacts` entry that contains a quote character or does not exist in the implementation worktree or the project root, naming each rejected value in brackets, so a handoff it writes should not trip this breaker. An inherited artifact list is not re-checked.
 
 ---
 

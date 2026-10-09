@@ -477,6 +477,24 @@ foreach ($art in $resolvedArtifacts) {
 }
 $resolvedArtifacts = $normalizedArtifacts
 
+# Item 169: C-390's Architect passed quoted paths through a native pwsh call, the quotes
+# arrived as characters, and only the next crucible.ps1 run caught the paths, with a
+# message that blamed the files. Refuse here, naming the exact value received. Inherited
+# artifacts were checked when their own handoff was written, so only passed ones are.
+if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
+    $quotedArtifacts = @($resolvedArtifacts | Where-Object { $_ -match "[`"']" })
+    if ($quotedArtifacts.Count -gt 0) {
+        throw ("-Artifacts entry contains a quote character, which no path can: " + (($quotedArtifacts | ForEach-Object { "[" + $_ + "]" }) -join ", ") + ". The quotes reached new-handoff.ps1 as part of the path. Pass the paths unquoted, as a PowerShell array (-Artifacts @('a.md','b.md')) or comma-joined (-Artifacts a.md,b.md).")
+    }
+    $missingArtifacts = @($resolvedArtifacts | Where-Object {
+        if ([System.IO.Path]::IsPathRooted($_)) { -not (Test-Path -LiteralPath $_) }
+        else { -not (Test-Path -LiteralPath (Join-Path $resolvedWtPath $_)) -and -not (Test-Path -LiteralPath (Join-Path $resolvedRepoRoot $_)) }
+    })
+    if ($missingArtifacts.Count -gt 0) {
+        throw ("-Artifacts entry does not exist in the implementation worktree (" + $resolvedWtPath + ") or the project root (" + $resolvedRepoRoot + "): " + (($missingArtifacts | ForEach-Object { "[" + $_ + "]" }) -join ", ") + ". Create the file or correct the path, then write the handoff again.")
+    }
+}
+
 $baseAffinity = @()
 if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
     $baseAffinity = @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
