@@ -1,4 +1,4 @@
-// Package memory implements RAG, context-pruning, and journal helpers (F-030 port).
+// Package memory implements RAG and journal helpers (F-030 port).
 // Pure functions live here; file I/O lives in journal.go.
 package memory
 
@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -33,113 +32,6 @@ var ragNoisePatterns = []string{
 	"specialist has been assigned id",
 	"your turn is now over",
 	"provide a single brief acknowledgement",
-}
-
-// timestampFormats tried in order when parsing message timestamps.
-//
-//nolint:gochecknoglobals // Immutable timestamp formats for parsing
-var timestampFormats = []string{
-	time.RFC3339,
-	"2006-01-02T15:04:05",
-	"2006-01-02 15:04:05",
-	"2006-01-02T15:04:05Z07:00",
-}
-
-// ── PruneContext ──────────────────────────────────────────────────────────────
-
-// PruneContext prunes a slice of messages based on TTL and mandatory retention
-// of recent assistant turns. Returns a new slice in the original order.
-//
-// Rules:
-//   - User messages are always kept.
-//   - The most recent keepLastAssistants assistant messages are always kept,
-//     regardless of age.
-//   - Older assistant messages are dropped if their timestamp predates the cutoff.
-//   - Tool messages whose tool_call_id is referenced by a kept assistant turn
-//     are kept to preserve the conversation structure.
-func PruneContext(messages []map[string]any, ttlHours, keepLastAssistants int) []map[string]any {
-	cutoff := time.Now().Add(-time.Duration(ttlHours) * time.Hour)
-
-	keepSet := make(map[int]bool, len(messages))
-	assistantCount := 0
-	neededToolIDs := make(map[string]bool)
-
-	// Pass 1: identify keepers (reverse order so newest assistant turns count first).
-	for i := len(messages) - 1; i >= 0; i-- {
-		m := messages[i]
-		role := stringVal(m, "role")
-
-		keep := false
-		switch role {
-		case "user":
-			keep = true
-		case "assistant":
-			assistantCount++
-			if shouldKeepAssistant(m, cutoff, assistantCount, keepLastAssistants) {
-				keep = true
-				collectToolIDs(m, neededToolIDs)
-			}
-		}
-		if keep {
-			keepSet[i] = true
-		}
-	}
-
-	return buildPrunedResult(messages, keepSet, neededToolIDs)
-}
-
-func shouldKeepAssistant(m map[string]any, cutoff time.Time, count, minKeep int) bool {
-	if count <= minKeep {
-		return true
-	}
-	if ts, ok := m["timestamp"].(string); ok {
-		if t := parseTimestamp(ts); !t.IsZero() {
-			return !t.Before(cutoff)
-		}
-	}
-	return true // keep if timestamp missing or unparseable
-}
-
-func collectToolIDs(m map[string]any, needed map[string]bool) {
-	tcs, ok := m["tool_calls"].([]any)
-	if !ok {
-		return
-	}
-	for _, tc := range tcs {
-		tcm, ok := tc.(map[string]any)
-		if !ok {
-			continue
-		}
-		if id, ok := tcm["id"].(string); ok && id != "" {
-			needed[id] = true
-		}
-	}
-}
-
-func buildPrunedResult(messages []map[string]any, keepSet map[int]bool, neededToolIDs map[string]bool) []map[string]any {
-	result := make([]map[string]any, 0, len(messages))
-	for i, m := range messages {
-		if keepSet[i] {
-			result = append(result, m)
-			continue
-		}
-		role := stringVal(m, "role")
-		if role == "tool" {
-			if id, ok := m["tool_call_id"].(string); ok && neededToolIDs[id] {
-				result = append(result, m)
-			}
-		}
-	}
-	return result
-}
-
-func parseTimestamp(s string) time.Time {
-	for _, f := range timestampFormats {
-		if t, err := time.Parse(f, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
 }
 
 // ── FormatConsolidationMessages ───────────────────────────────────────────────
