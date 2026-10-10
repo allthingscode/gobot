@@ -4,7 +4,9 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -19,8 +21,64 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/dashboard"
+	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/allthingscode/gobot/internal/memory"
 )
+
+//nolint:paralleltest,gocognit,cyclop // serialized all-sink matrix captures global logger and stderr
+func TestSetupLogging_AnyAllSinks(t *testing.T) {
+	for _, format := range []string{"text", "json"} {
+		for _, withHub := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/hub=%v", format, withHub), func(t *testing.T) {
+				oldLogger, oldStderr := slog.Default(), os.Stderr
+				reader, writer, err := os.Pipe()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { slog.SetDefault(oldLogger); os.Stderr = oldStderr; _ = writer.Close(); _ = reader.Close() })
+				os.Stderr = writer
+				drained := make(chan string, 1)
+				go func() { data, _ := io.ReadAll(reader); drained <- string(data) }()
+				cfg := &config.Config{}
+				cfg.Runtime.StorageRoot = tempLogRoot(t)
+				cfg.Logging.Format = format
+				var hub *dashboard.Hub
+				var sub chan *dashboard.LogEntry
+				if withHub {
+					hub = dashboard.NewHub(10)
+					defer hub.Close()
+					sub, _ = hub.Subscribe()
+				}
+				SetupLogging(cfg, hub)
+				slog.Default().WithGroup("request").With("bound", []string{"token=bound-marker"}).LogAttrs(context.Background(), slog.LevelInfo,
+					"diagnostic", logattr.Err(fmt.Errorf("request failed: %w", errors.New("token=error-marker"))),
+					slog.Any("args", []string{"first", "token=args-marker", "last"}),
+					slog.Any("nested", map[string]any{"password": "map-marker", "detail": "token=nested-marker"}))
+				os.Stderr = oldStderr
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				outputs := []string{<-drained, readLogFile(t, cfg)}
+				if withHub {
+					entry := <-sub
+					encoded, err := json.Marshal(entry)
+					if err != nil {
+						t.Fatal(err)
+					}
+					outputs = append(outputs, string(encoded))
+				}
+				for _, output := range outputs {
+					assertNoLogLeaks(t, output, "bound-marker", "error-marker", "args-marker", "map-marker", "nested-marker")
+					for _, keep := range []string{"request failed", "first", "last", "[REDACTED]"} {
+						if !strings.Contains(output, keep) {
+							t.Fatalf("missing %q: %s", keep, output)
+						}
+					}
+				}
+			})
+		}
+	}
+}
 
 //nolint:paralleltest // uses global state // sets global logger
 func TestSetupLogging(t *testing.T) {
