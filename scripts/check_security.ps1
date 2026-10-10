@@ -1,48 +1,66 @@
 #!/usr/bin/env pwsh
-# check_security.ps1 - Local security validation. Mirrors the CI govulncheck job.
-# Usage: ./scripts/check_security.ps1
-
+# Single scanner-version policy for local, CI and release source checks.
+param([string]$ToolDirectory)
 Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
-# Ensure UTF-8 output for Windows PowerShell
-$OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+function Invoke-SecurityNative {
+    param([string]$Command, [string[]]$Arguments)
+    $output = & $Command @Arguments 2>&1
+    $code = $LASTEXITCODE
+    [pscustomobject]@{ Output = @($output); Code = $code }
+}
 
-Write-Host "Running govulncheck..." -ForegroundColor Cyan
+function Test-SecurityIdentity {
+    param([string]$Path)
+    if (-not $Path) { return $false }
+    $result = Invoke-SecurityNative 'go' @('version', '-m', $Path)
+    return ($result.Code -eq 0 -and (($result.Output -join "`n") -match '(?m)^\s*mod\s+golang\.org/x/vuln\s+v1\.8\.0(?:\s|$)') -and (($result.Output -join "`n") -match '(?m)^\s*path\s+golang\.org/x/vuln/cmd/govulncheck\s*$'))
+}
 
-# Check if govulncheck is in the PATH
-if (-not (Get-Command govulncheck -ErrorAction SilentlyContinue)) {
-    # If not in PATH, check if it exists in GOPATH/bin
-    $gopath = go env GOPATH
-    $vulnCheckPath = Join-Path $gopath "bin" "govulncheck"
-    if (Test-Path "$vulnCheckPath.exe") {
-        Write-Host "govulncheck found in GOPATH/bin. Adding to session PATH." -ForegroundColor Yellow
-        $env:PATH += ";$gopath\bin"
-    } else {
-        Write-Host "govulncheck not found. Installing..." -ForegroundColor Yellow
-        go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
-        # Ensure it's in the PATH for this session
-        $env:PATH += ";$gopath\bin"
+function Invoke-SecurityCheck {
+    param([string]$ToolDirectory)
+    $oldLocation = Get-Location
+    $saved = @{}
+    foreach ($name in @('GOFLAGS', 'GOBIN', 'GOOS', 'GOARCH', 'CGO_ENABLED')) {
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+    try {
+        Set-Location (Split-Path -Parent $PSScriptRoot)
+        $env:GOFLAGS = (($env:GOFLAGS, '-mod=readonly') | Where-Object { $_ }) -join ' '
+        $env:CGO_ENABLED = '0'
+        $candidate = Get-Command govulncheck -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        $scanner = if ($candidate) { $candidate.Source } else { $null }
+        if (-not (Test-SecurityIdentity $scanner)) {
+            if (-not $ToolDirectory) {
+                $ToolDirectory = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.gobot-tools'
+            }
+            $ToolDirectory = [IO.Path]::GetFullPath($ToolDirectory)
+            New-Item -ItemType Directory -Force -Path $ToolDirectory | Out-Null
+            $env:GOBIN = $ToolDirectory
+            # Install a host executable even when scanning a different target.
+            [Environment]::SetEnvironmentVariable('GOOS', $null, 'Process')
+            [Environment]::SetEnvironmentVariable('GOARCH', $null, 'Process')
+            $install = Invoke-SecurityNative 'go' @('install', 'golang.org/x/vuln/cmd/govulncheck@v1.8.0')
+            $install.Output | ForEach-Object { Write-Host $_ }
+            if ($install.Code -ne 0) { return $install.Code }
+            $suffix = if ([IO.Path]::DirectorySeparatorChar -eq '\') { '.exe' } else { '' }
+            $scanner = Join-Path $ToolDirectory ('govulncheck' + $suffix)
+            if (-not (Test-SecurityIdentity $scanner)) { throw 'Installed scanner identity could not be verified as govulncheck v1.8.0.' }
+            foreach ($name in @('GOOS', 'GOARCH')) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
+        }
+        Write-Host 'Running verified govulncheck v1.8.0...'
+        $scan = Invoke-SecurityNative $scanner @('./internal/...', './cmd/...')
+        $scan.Output | ForEach-Object { Write-Host $_ }
+        if ($scan.Code -ne 0) { Write-Host 'Security scan failed: findings or scanner/database error. Release/push must stop.' }
+        return $scan.Code
+    } catch {
+        Write-Host ('Security check failed: ' + $_.Exception.Message)
+        return 1
+    } finally {
+        foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
+        Set-Location $oldLocation
     }
 }
 
-# Run govulncheck with package scopes that work with this repository layout.
-# Avoid bare ./... from repo root due known package-pattern failures in scripts/.
-$oldGOFLAGS = $env:GOFLAGS
-$exitCode = 0
-try {
-    $env:GOFLAGS = (($oldGOFLAGS, "-mod=readonly") | Where-Object { $_ }) -join " "
-    govulncheck ./internal/... ./cmd/...
-    $exitCode = $LASTEXITCODE
-} finally {
-    $env:GOFLAGS = $oldGOFLAGS
-}
-
-if ($exitCode -ne 0) {
-    Write-Host "`nSECURITY: Reachable vulnerabilities detected. Fix before pushing." -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "`nNo reachable vulnerabilities found." -ForegroundColor Green
-exit 0
+if ($MyInvocation.InvocationName -ne '.') { exit (Invoke-SecurityCheck $ToolDirectory) }

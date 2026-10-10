@@ -9,7 +9,37 @@ permissions:
   contents: write
 
 jobs:
+  security:
+    permissions:
+        contents: read
+    timeout-minutes: 15
+    strategy:
+        fail-fast: false
+        matrix:
+            os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+        GOARCH: amd64
+        CGO_ENABLED: '0'
+    steps:
+        - uses: actions/checkout@v7
+        - uses: actions/setup-go@v6
+          with:
+              go-version-file: go.mod
+              cache: true
+        - name: Offline security helper tests
+          shell: pwsh
+          run: pwsh -NoProfile -File scripts/check_security_test.ps1
+        - name: Windows PowerShell compatibility
+          if: runner.os == 'Windows'
+          shell: powershell
+          run: powershell.exe -NoProfile -File scripts/check_security_test.ps1
+        - name: Scan production sources
+          shell: pwsh
+          run: ./scripts/check_security.ps1
+
   build-and-release:
+    needs: security
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

@@ -195,7 +195,7 @@ ones, diverging from CI without any warning.
   commit. Then rely on the module cache + `go.mod` as normal.
 - Use `go mod verify` to confirm cached modules match their `go.sum` hashes.
   Scan for reachable vulnerabilities with
-  `GOFLAGS="-mod=readonly" govulncheck ./internal/... ./cmd/...`
+  `pwsh -NoProfile -File scripts/check_security.ps1`
   (the same scoped, readonly command CI and `scripts/check_security.ps1` use;
   bare `./...` is intentionally avoided).
 
@@ -208,3 +208,30 @@ ones, diverging from CI without any warning.
 - [ ] **Enable HITL:** Keep `channels.telegram.hitl` enabled for any bot that has access to sensitive tools like `shell_exec`.
 - [ ] **Regular Audits:** Use `gobot secrets list` periodically to review what secrets are stored and delete any that are no longer in use.
 - [ ] **Environment Isolation:** Use different `storageRoot` directories for production and development to prevent secret leakage between environments.
+
+## 9. Recurring and Release Vulnerability Checks
+
+CI scans production sources on Linux/amd64 and Windows/amd64 with CGO disabled
+on every push and pull request, daily at 06:17 UTC (`17 6 * * *`), and through
+Actions > CI > Run workflow (manual dispatch). Daily/manual runs execute only
+security checks. Each remote scanner job has a 15-minute timeout and read-only
+contents permission. Schedule delivery is best effort and can be delayed.
+
+Tag releases require fresh successful scans of the event tag/commit on both
+shipped platforms before building or publishing. Findings, installation,
+identity verification, scanner or database errors return nonzero and block the
+dependent release job. Prior CI success is never reused as release approval.
+
+Run `pwsh -NoProfile -File scripts/check_security.ps1` at the start and end of
+extended local work and before pushing; remote scans cannot inspect unpushed
+changes. Windows PowerShell 5.1 also supports
+`powershell.exe -NoProfile -File scripts/check_security.ps1`.
+The pre-push hook requires one of these shells and retains its other checks.
+
+The helper enforces the explicit govulncheck v1.8.0 pin in go.mod using Go build
+metadata. Missing or mismatched tools are installed into `~/.gobot-tools`
+(or `-ToolDirectory <writable-path>`), reverified, and invoked by absolute path.
+It uses plain-text output, readonly modules and only `./internal/... ./cmd/...`.
+Run offline regression tests with
+`pwsh -NoProfile -File scripts/check_security_test.ps1`.
+These source scans do not attest previously built or deployed executables.

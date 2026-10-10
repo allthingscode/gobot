@@ -6,8 +6,13 @@ on:
     pull_request:
         branches: ["**"]
 
+    workflow_dispatch:
+    schedule:
+        - cron: '17 6 * * *'
+
 jobs:
     lint:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             -   uses: actions/checkout@v7
@@ -22,19 +27,36 @@ jobs:
                     args: --modules-download-mode=readonly
 
     vuln-check:
-        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        timeout-minutes: 15
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+        env:
+            GOARCH: amd64
+            CGO_ENABLED: '0'
         steps:
-            -   uses: actions/checkout@v7
-            -   uses: actions/setup-go@v6
-                with:
-                    go-version-file: go.mod
-                    cache: true
-            -   name: Install govulncheck
-                run: go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
-            -   name: Run govulncheck
-                run: GOFLAGS="-mod=readonly" govulncheck ./internal/... ./cmd/...
- 
+            - uses: actions/checkout@v7
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: go.mod
+                  cache: true
+            - name: Offline security helper tests
+              shell: pwsh
+              run: pwsh -NoProfile -File scripts/check_security_test.ps1
+            - name: Windows PowerShell compatibility
+              if: runner.os == 'Windows'
+              shell: powershell
+              run: powershell.exe -NoProfile -File scripts/check_security_test.ps1
+            - name: Scan production sources
+              shell: pwsh
+              run: ./scripts/check_security.ps1
+
     version-check:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             -   uses: actions/checkout@v7
@@ -47,6 +69,7 @@ jobs:
 
 
     test:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         strategy:
             matrix:
                 os: [ubuntu-latest, windows-latest]
@@ -67,6 +90,7 @@ jobs:
                 run: go test -race -mod=readonly ./internal/... ./cmd/...
 
     mod-tidy:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             -   uses: actions/checkout@v7
@@ -80,6 +104,7 @@ jobs:
                     git diff --exit-code go.mod go.sum
 
     coverage:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             -   uses: actions/checkout@v7
@@ -99,6 +124,7 @@ jobs:
                     awk "BEGIN { if (${COVERAGE} < ${COVERAGE_THRESHOLD}) { print \"Coverage ${COVERAGE}% is below ${COVERAGE_THRESHOLD}% threshold\"; exit 1 } }"
 
     coverage-windows:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: windows-latest
         defaults:
             run:
@@ -122,6 +148,7 @@ jobs:
                     path: artifacts/coverage-windows.out
 
     doc-lint:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             -   uses: actions/checkout@v7
@@ -133,6 +160,7 @@ jobs:
                 run: go run scripts/doc_lint.go
 
     bench:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             -   uses: actions/checkout@v7
@@ -151,6 +179,7 @@ jobs:
                     path: artifacts/bench.txt
 
     config-check:
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             -   uses: actions/checkout@v7
