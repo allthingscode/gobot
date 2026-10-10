@@ -1,36 +1,47 @@
-# scripts/build.ps1 - Build gobot with version injection
-# Usage: .\scripts\build.ps1
+$oldBuildLocation = Get-Location
+$oldBuildCGO = [Environment]::GetEnvironmentVariable('CGO_ENABLED', 'Process')
+try {
+    Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
+    $env:CGO_ENABLED = '0'
+    # scripts/build.ps1 - Build gobot with version injection
+    # Usage: .\scripts\build.ps1
 
-$VERSION = git describe --tags --always --dirty 2>$null
-if (-not $VERSION) { $VERSION = "v0.1.0-dev" }
-$COMMIT = git rev-parse --short HEAD
-$BUILD_TIME = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-$LDFLAGS = "-X main.version=$VERSION -X main.commitHash=$COMMIT -X main.buildTime=$BUILD_TIME"
+    $VERSION = git describe --tags --always --dirty 2>$null
+    if (-not $VERSION) { $VERSION = "v0.1.0-dev" }
+    $COMMIT = git rev-parse --short HEAD
+    $BUILD_TIME = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+    $LDFLAGS = "-X main.version=$VERSION -X main.commitHash=$COMMIT -X main.buildTime=$BUILD_TIME"
 
-if (Get-Command goversioninfo -ErrorAction SilentlyContinue) {
-    Write-Host "Generating Windows version resources..."
-    goversioninfo -platform-specific -o resource.syso versioninfo.json
-}
+    if (Get-Command goversioninfo -ErrorAction SilentlyContinue) {
+        Write-Host "Generating Windows version resources..."
+        goversioninfo -platform-specific -o resource.syso versioninfo.json
+    }
 
-Write-Host "Resolving modules in readonly mode..."
-go list -mod=readonly -m all > $null
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Module resolution failed"
-    exit 1
-}
+    Write-Host "Resolving modules in readonly mode..."
+    go list -mod=readonly -m all > $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Module resolution failed"
+        exit 1
+    }
 
-if (-not (Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }
-Write-Host "Building gobot $VERSION ($COMMIT)..."
-go build -mod=readonly -ldflags $LDFLAGS -o bin/gobot.exe ./cmd/gobot
-$EXIT_CODE = $LASTEXITCODE
+    if (-not (Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }
+    Write-Host "Building gobot $VERSION ($COMMIT)..."
+    go build -mod=readonly -ldflags $LDFLAGS -o bin/gobot.exe ./cmd/gobot
+    $EXIT_CODE = $LASTEXITCODE
 
-if (Test-Path resource.syso) {
-    Remove-Item resource.syso
-}
+    if (Test-Path resource.syso) {
+        Remove-Item resource.syso
+    }
 
-if ($EXIT_CODE -eq 0) {
-    Write-Host "Build successful: bin/gobot.exe"
-} else {
-    Write-Error "Build failed"
-    exit 1
+    if ($EXIT_CODE -eq 0) {
+        Write-Host "Build successful: bin/gobot.exe"
+    } else {
+        Write-Error "Build failed"
+        exit 1
+    }
+
+    Write-Host 'Verify before human launch/registration: pwsh -NoProfile -File scripts/check_selected_binary.ps1'
+} finally {
+    [Environment]::SetEnvironmentVariable('CGO_ENABLED', $oldBuildCGO, 'Process')
+    Set-Location $oldBuildLocation
 }

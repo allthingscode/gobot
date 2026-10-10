@@ -35,7 +35,7 @@ function Invoke-SecurityNative {
         return [pscustomobject]@{ Output = @(); Code = $script:case.InstallCode }
     }
     Assert-Security ([IO.Path]::IsPathRooted($Command)) 'Scanner must use absolute path'
-    Assert-Security (($Arguments -join ' ') -eq './internal/... ./cmd/...') 'Wrong production scopes'
+    if ($script:binaryMode) { Assert-Security ($Arguments.Count -eq 2 -and $Arguments[0] -eq '-mode=binary' -and $Arguments[1] -eq $script:binaryFile) 'Wrong binary arguments' } else { Assert-Security (($Arguments -join ' ') -eq './internal/... ./cmd/...') 'Wrong production scopes' }
     Assert-Security ($env:GOFLAGS -eq '-tags=test -mod=readonly') 'Readonly flags not preserved'
     Assert-Security ($env:CGO_ENABLED -eq '0' -and $env:GOOS -eq $TargetOS -and $env:GOARCH -eq 'amd64') 'Wrong scan target'
     Assert-Security ((Get-Location).Path -eq (Split-Path $PSScriptRoot -Parent)) 'Wrong repository location'
@@ -55,22 +55,32 @@ $cases = @(
     @{Name='tool failure'; Identity='selected'; InstallCode=0; ScanCode=1; Expected=1; Installs=0}
 )
 try {
-    foreach ($case in $cases) {
-        $script:case = $case; $script:calls = @(); $script:identityCount = 0
-        $env:GOFLAGS='-tags=test'; $env:GOBIN='original bin'; $env:GOOS=$TargetOS; $env:GOARCH='amd64'; $env:CGO_ENABLED='1'
-        Set-Location $fixture
-        $result = Invoke-SecurityCheck -ToolDirectory (Join-Path $fixture 'tools with spaces')
-        Assert-Security ($result -eq $case.Expected) ($case.Name + ': unexpected exit ' + $result)
-        $installs = @($script:calls | Where-Object { $_[1] -like 'install *' }).Count
-        Assert-Security ($installs -eq $case.Installs) ($case.Name + ': wrong install count')
-        Assert-Security ((Get-Location).Path -eq $fixture) 'Location not restored'
-        Assert-Security ($env:GOFLAGS -eq '-tags=test' -and $env:GOBIN -eq 'original bin' -and $env:GOOS -eq $TargetOS -and $env:GOARCH -eq 'amd64' -and $env:CGO_ENABLED -eq '1') 'Environment not restored'
-        Write-Host ('PASS: ' + $case.Name)
+    $script:binaryFile = Join-Path $fixture 'selected gobot.exe'
+    Set-Content -LiteralPath $script:binaryFile -Value 'not executable'
+    foreach ($binaryMode in @($false, $true)) {
+        $script:binaryMode = $binaryMode
+        foreach ($case in $cases) {
+            $script:case = $case; $script:calls = @(); $script:identityCount = 0
+            $env:GOFLAGS='-tags=test'; $env:GOBIN='original bin'; $env:GOOS=$TargetOS; $env:GOARCH='amd64'; $env:CGO_ENABLED='1'
+            Set-Location $fixture
+            $binaryArgument = if ($binaryMode) { 'selected gobot.exe' } else { '' }
+            $result = Invoke-SecurityCheck -ToolDirectory (Join-Path $fixture 'tools with spaces') -BinaryPath $binaryArgument
+            Assert-Security ($result -eq $case.Expected) ($case.Name + ': unexpected exit ' + $result)
+            $installs = @($script:calls | Where-Object { $_[1] -like 'install *' }).Count
+            Assert-Security ($installs -eq $case.Installs) ($case.Name + ': wrong install count')
+            Assert-Security ((Get-Location).Path -eq $fixture) 'Location not restored'
+            Assert-Security ($env:GOFLAGS -eq '-tags=test' -and $env:GOBIN -eq 'original bin' -and $env:GOOS -eq $TargetOS -and $env:GOARCH -eq 'amd64' -and $env:CGO_ENABLED -eq '1') 'Environment not restored'
+            Write-Host ('PASS: ' + $case.Name)
+        }
     }
+    $script:calls = @()
+    $invalid = Invoke-SecurityCheck -BinaryPath (Join-Path $fixture 'missing.exe')
+    Assert-Security ($invalid -ne 0 -and $script:calls.Count -eq 0) 'Missing binary reached native scanner/provisioning'
 } finally {
     foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $before[$name], 'Process') }
     Set-Location $original
-    # The fixture is an explicit unique child of the system temp directory.
-    Remove-Item -LiteralPath $fixture -Recurse -Force
+    $resolved = [IO.Path]::GetFullPath($fixture)
+    if (-not $resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe fixture cleanup' }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
 }
-Write-Host ('All ' + $cases.Count + ' offline security cases passed.')
+Write-Host ('All ' + ($cases.Count * 2) + ' offline source/binary security cases passed.')

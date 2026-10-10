@@ -1,4 +1,5 @@
 # Gobot - Windows Task Scheduler Registration
+# Before registration: build, then pwsh -NoProfile -File scripts/check_selected_binary.ps1; require exit 0.
 # Run once as Administrator: .\scripts\install_task.ps1
 # Registers gobot to start automatically at user logon.
 # start_gobot.ps1 resolves the binary from bin\gobot.exe first, falling back to project root.
@@ -20,6 +21,7 @@ if ($Uninstall) {
 }
 
 # Remove stale registration if present
+Write-Host 'Before registration, require exit 0 from: pwsh -NoProfile -File scripts/check_selected_binary.ps1'
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $LegacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
 
