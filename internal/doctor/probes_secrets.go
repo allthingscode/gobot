@@ -368,9 +368,9 @@ func checkHITL(cfg *config.Config) Result {
 		return Result{
 			Name:        "human-in-the-loop",
 			OK:          false,
-			Detail:      "HITL is disabled; high-risk tools will run without approval",
-			Remediation: "Set channels.telegram.hitl=true in config.json for enhanced security.",
+			Detail:      "Telegram side-effect approval is disabled; independent high-risk and policy approval remain active. Cron approval is automatic.",
+			Remediation: "Set channels.telegram.hitl=true in config.json to require approval for declared side-effecting tools in Telegram sessions.",
 		}
 	}
-	return Result{Name: "human-in-the-loop", OK: true, Detail: "enabled for Telegram"}
+	return Result{Name: "human-in-the-loop", OK: true, Detail: "Telegram side-effect approval is enabled; independent high-risk and policy approval remain active. Cron approval is automatic."}
 }

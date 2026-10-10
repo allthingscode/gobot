@@ -9,7 +9,7 @@ Gobot employs a defense-in-depth approach to security, ensuring that sensitive d
 ### Core Principles
 - **Hard Whitelisting:** Inbound Telegram messages are ignored unless the sender's Chat ID is explicitly listed in `channels.telegram.allowFrom`.
 - **Pairing Gate:** Even whitelisted users must be "paired" in the local database to interact with the agent. Authorization is managed via `gobot authorize <code-or-id>`.
-- **Human-in-the-Loop (HITL):** High-risk operations (e.g., executing shell commands, sending emails) require explicit user approval via Telegram before execution.
+- **Human-in-the-Loop (HITL):** With `channels.telegram.hitl` enabled, tools declared side-effecting (e.g., shell commands and sending emails) require Telegram approval before execution, including topic sessions and custom registered tools. `tools.highRisk` and policy `require_hitl` independently require approval with either channel flag value; policy allow does not bypass these controls. Policy deny blocks before prompting. Independent approval fails closed on unsupported channels or unavailable Telegram API; the channel-only switch applies to Telegram sessions. Scheduled `cron:` sessions automatically approve high-risk and policy-required requests without prompts; policy deny still blocks them. Existing durable approval decisions are reused.
 - **Pure-Go Architecture:** By avoiding CGO, the project eliminates many categories of memory-safety and injection vulnerabilities inherent in C libraries.
 - **Isolated Storage:** Each user workspace (in multi-user mode) is isolated into separate directories and SQLite databases.
 

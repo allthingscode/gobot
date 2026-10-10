@@ -116,7 +116,7 @@ Controls default model parameters and specialist overrides.
 | `enabled` | bool | Enable the Telegram bot interface. |
 | `token` | string | Telegram Bot API token. Falls back to DPAPI key `telegram_token` or `TELEGRAM_BOT_TOKEN` env. |
 | `allowFrom` | array[string] | Whitelist of numeric Telegram Chat/User IDs allowed to interact. On startup, every ID here is auto-promoted into the access-control database (idempotent), so single-user setups need no separate `gobot authorize` step. `allowFrom` is the network-layer drop list; the database backs conversation history and per-user state. Use `gobot authorize <chat-id>` only to grant an ID that is *not* in `allowFrom`. |
-| `hitl` | bool | Enable Human-in-the-Loop approval for side-effecting tools (sending email, creating calendar events, etc.). |
+| `hitl` | bool | Require Telegram Human-in-the-Loop approval for tools declared side-effecting (shell commands, sending email, creating calendar events, etc.), including topic sessions. Independent high-risk and policy approval remain active when false. |
 
 ---
 
@@ -215,7 +215,11 @@ rules:
     decision: allow
 ```
 
-Rules use ordered first-match evaluation with exact tool names or `*`. Unmatched tools are allowed, and `rules: []` explicitly permits all tools. Independent high-risk HITL approval still applies. Fix or remove an invalid implicit file, or correct the configured path/schema, before restarting.
+Rules use ordered first-match evaluation with exact tool names or `*`. Unmatched tools are allowed, and `rules: []` explicitly permits all tools. Policy deny blocks before any approval prompt or execution; policy allow still requires channel or independent high-risk approval when applicable. Fix or remove an invalid implicit file, or correct the configured path/schema, before restarting.
+
+Telegram channel approval derives from the owning runner's current tool declarations, including custom tools. It works with `hitl: true` and an empty `tools.highRisk` list, as shown in the sample. Channel-only approval does not apply to other channels; independent high-risk and policy `require_hitl` approval fail closed on unsupported channels or unavailable Telegram API. Existing durable approval and callback behavior applies.
+
+Scheduled `cron:` sessions preserve unattended execution: high-risk and policy-required approvals are automatic, and channel approval adds no prompt. Policy deny still blocks scheduled execution. This exception means cron writes do not require interactive approval.
 
 #### Routing (`runtime.routing`)
 

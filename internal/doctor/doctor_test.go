@@ -862,6 +862,14 @@ func TestCheckHITL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			r := checkHITL(tt.cfg)
+			for _, phrase := range []string{"Telegram side-effect approval", "independent high-risk and policy approval remain active", "Cron approval is automatic"} {
+				if !strings.Contains(r.Detail, phrase) {
+					t.Errorf("missing %q in %q", phrase, r.Detail)
+				}
+			}
+			if !r.OK && !strings.Contains(r.Remediation, "declared side-effecting tools") {
+				t.Error("missing channel remediation")
+			}
 			if r.OK != tt.wantOK {
 				t.Errorf("got OK=%v, want %v", r.OK, tt.wantOK)
 			}

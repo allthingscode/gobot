@@ -135,6 +135,9 @@ func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManag
 	hooks := &agent.Hooks{}
 	hitlStore, _ := store.(agent.HITLStore)
 	hitl := agent.NewHITLManager(api, hitlStore, cfg.HighRiskTools())
+	hitl.ConfigureChannelApproval(cfg.HumanInTheLoop(), func(name string) bool {
+		return runner.SideEffectingTools[name]
+	})
 	policyHook := agent.NewPolicyHook(policy, hitl)
 	hooks.RegisterPreTool(policyHook.PreToolHook)
 	hooks.RegisterPreTool(hitl.PreToolHook)

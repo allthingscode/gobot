@@ -229,7 +229,8 @@ func (c *Config) ExecTimeout() time.Duration {
 	return 2 * time.Minute
 }
 
-// HumanInTheLoop returns true if the human-in-the-loop approval framework is enabled.
+// HumanInTheLoop enables Telegram approval for declared side-effecting tools.
+// HighRiskTools and policy-required approval remain independent of this flag.
 func (c *Config) HumanInTheLoop() bool {
 	return c.Channels.Telegram.HITL
 }
