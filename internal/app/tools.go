@@ -59,66 +59,26 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 		return "", fmt.Errorf("read_text_file: file_path is required")
 	}
 
-	// F-073: Determine workspace root for this user
-	workspace := t.cfg.WorkspacePath(userID)
-	project := t.cfg.ProjectRoot()
-
-	// 1. Try Workspace Root
-	data, err := t.readFileFromRoot(path, workspace)
-	if err == nil {
-		return string(data), nil
-	}
-	if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "outside root") {
-		return "", fmt.Errorf("read_text_file: %w", err)
-	}
-
-	// 2. Try Project Root (source code)
-	if project != "" {
-		data, err := t.readFileFromRoot(path, project)
+	// Each fallback candidate gets its own root capability. Only lexical rejection
+	// or absence permits fallback; containment and access failures are terminal.
+	var lastErr error
+	for _, root := range []string{t.cfg.WorkspacePath(userID), t.cfg.ProjectRoot()} {
+		data, err := t.readFileFromRoot(path, root)
 		if err == nil {
 			return string(data), nil
 		}
-		if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "outside root") {
+		if !errors.Is(err, errFileOutsideRoot) && !errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("read_text_file: %w", err)
 		}
-	}
-
-	// If we got here, it's either not found or outside both roots.
-	// For security, if it was outside the workspace and project, report that.
-	if strings.Contains(err.Error(), "outside root") {
-		return "", fmt.Errorf("read_text_file: path %q is outside allowed roots (workspace and project)", path)
-	}
-
-	return "", fmt.Errorf("read_text_file: open %s: The system cannot find the file specified in workspace or project root", path)
-}
-
-func (t *ReadTextFileTool) readFileFromRoot(path, root string) ([]byte, error) {
-	if root == "" {
-		return nil, fmt.Errorf("empty root (outside root)")
-	}
-
-	fullPath := path
-	if !filepath.IsAbs(fullPath) {
-		fullPath = filepath.Join(root, path)
-	}
-
-	cleanPath := filepath.Clean(fullPath)
-	cleanRoot := filepath.Clean(root)
-
-	// Normalize drive letters on Windows for comparison
-	if strings.EqualFold(filepath.VolumeName(cleanPath), filepath.VolumeName(cleanRoot)) {
-		rel, err := filepath.Rel(cleanRoot, cleanPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return nil, fmt.Errorf("path %q is outside root %q", path, root)
+		// An unconfigured project does not overwrite the workspace outcome.
+		if root != "" {
+			lastErr = err
 		}
-		data, err := os.ReadFile(cleanPath)
-		if err != nil {
-			return nil, fmt.Errorf("read file: %w", err)
-		}
-		return data, nil
 	}
-
-	return nil, fmt.Errorf("path %q is on a different drive than root %q (outside root)", path, root)
+	if errors.Is(lastErr, errFileOutsideRoot) {
+		return "", fmt.Errorf("read_text_file: path %q is outside allowed roots (workspace and project): %w", path, lastErr)
+	}
+	return "", fmt.Errorf("read_text_file: file %q not found in workspace or project root: %w", path, lastErr)
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
