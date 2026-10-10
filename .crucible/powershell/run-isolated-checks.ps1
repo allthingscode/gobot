@@ -336,17 +336,20 @@ function Invoke-ProjectPrePushHook {
     $hookArgs = @("origin")
     $urlRes = Invoke-Git -Directory $worktree remote get-url origin
     if ($urlRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($urlRes.Raw)) { $hookArgs += $urlRes.Raw.Trim() }
-    $previousFlag = $env:CRUCIBLE_PRE_PUSH_PREFLIGHT
-    $env:CRUCIBLE_PRE_PUSH_PREFLIGHT = "1"
-    Push-Location $worktree
-    try {
-        # Empty stdin: there are no refs being pushed, and a hook reading them must not block.
-        $null | & $interpreter $hook @hookArgs
-        $hookExit = $LASTEXITCODE
-    } finally {
-        Pop-Location
-        $env:CRUCIBLE_PRE_PUSH_PREFLIGHT = $previousFlag
-    }
+    $psi = [System.Diagnostics.ProcessStartInfo]::new($interpreter)
+    $psi.ArgumentList.Add($hook)
+    foreach ($a in $hookArgs) { $psi.ArgumentList.Add($a) }
+    $psi.WorkingDirectory = $worktree
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.Environment["CRUCIBLE_PRE_PUSH_PREFLIGHT"] = "1"
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    # Empty stdin, closed at once: no refs are being pushed, and a hook reading them must not
+    # block. Piping $null instead races the hook's exit and fails with a broken pipe on Linux.
+    $proc.StandardInput.Close()
+    $proc.WaitForExit()
+    $hookExit = $proc.ExitCode
+    $proc.Dispose()
     if ($hookExit -ne 0) {
         Write-Host ("The project's pre-push hook exits {0} on task/{1}, so the push after the Human Gate would be refused." -f $hookExit, $TaskId)
         Write-Host ("Check failed: {0}" -f $checkName)
