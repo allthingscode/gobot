@@ -1,9 +1,12 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -158,8 +161,144 @@ func redactAttr(a slog.Attr) slog.Attr {
 	}
 	if a.Value.Kind() == slog.KindString {
 		a.Value = slog.StringValue(redactSecrets(a.Value.String()))
+	} else if a.Value.Kind() == slog.KindAny {
+		a.Value = slog.AnyValue(normalizeLogValue(a.Value.Any(), 0))
 	}
 	return a
+}
+
+// normalizeLogValue snapshots values into inert diagnostics. Unsafe branches,
+// including cycles that reach the depth bound, fail closed instead of retaining
+// an object or exposing a serialization error. Methods are consumed here once;
+// downstream renderers receive only scalars and copied collections.
+func normalizeLogValue(value any, depth int) any {
+	if depth >= 32 {
+		return redactedToken
+	}
+	if value == nil {
+		return nil
+	}
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+		if rv.IsNil() {
+			return nil
+		}
+	default:
+	}
+	return normalizeNonNilValue(value, rv, depth)
+}
+
+func normalizeNonNilValue(value any, rv reflect.Value, depth int) any {
+	switch v := value.(type) {
+	case json.Number:
+		return normalizeNumber(v)
+	case time.Time, time.Duration:
+		return v
+	case slog.LogValuer:
+		return normalizeLogValue(slog.AnyValue(v).Resolve(), depth+1)
+	case slog.Value:
+		if v.Kind() == slog.KindGroup {
+			return attrsAsMap(v.Group(), depth+1)
+		}
+		return normalizeLogValue(v.Resolve().Any(), depth+1)
+	case error:
+		return redactSecrets(v.Error())
+	case fmt.Stringer:
+		return redactSecrets(v.String())
+	}
+	// Custom JSON (including RawMessage) must be decoded before treating its
+	// underlying map/slice/byte representation as an ordinary collection.
+	if _, ok := value.(json.Marshaler); ok {
+		return normalizeJSON(value, depth)
+	}
+	return normalizeReflectedValue(rv, depth)
+}
+
+func normalizeNumber(value json.Number) any {
+	if _, err := json.Marshal(value); err != nil {
+		return redactedToken
+	}
+	return value
+}
+
+func normalizeReflectedValue(rv reflect.Value, depth int) any {
+	switch rv.Kind() {
+	case reflect.String:
+		return redactSecrets(rv.String())
+	case reflect.Bool:
+		return rv.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return rv.Uint()
+	case reflect.Float32, reflect.Float64:
+		return rv.Float()
+	case reflect.Map:
+		return normalizeMap(rv, depth)
+	case reflect.Slice, reflect.Array:
+		return normalizeSequence(rv, depth)
+	default:
+		return normalizeJSON(rv.Interface(), depth)
+	}
+}
+
+func normalizeSequence(rv reflect.Value, depth int) any {
+	if rv.Type().Elem().Kind() == reflect.Uint8 {
+		text := make([]byte, rv.Len())
+		for i := range text {
+			text[i] = byte(rv.Index(i).Uint() & 0xff)
+		}
+		return redactSecrets(string(text))
+	}
+	result := make([]any, rv.Len())
+	for i := range result {
+		result[i] = normalizeLogValue(rv.Index(i).Interface(), depth+1)
+	}
+	return result
+}
+
+func normalizeMap(rv reflect.Value, depth int) any {
+	if rv.Type().Key().Kind() != reflect.String {
+		return redactedToken
+	}
+	result := make(map[string]any, rv.Len())
+	iter := rv.MapRange()
+	for iter.Next() {
+		key := iter.Key().String()
+		if isSensitive(key) {
+			result[key] = redactedToken
+		} else {
+			result[key] = normalizeLogValue(iter.Value().Interface(), depth+1)
+		}
+	}
+	return result
+}
+
+func attrsAsMap(attrs []slog.Attr, depth int) map[string]any {
+	fields := make(map[string]any, len(attrs))
+	for _, a := range attrs {
+		if isSensitive(a.Key) {
+			fields[a.Key] = redactedToken
+		} else {
+			fields[a.Key] = normalizeLogValue(a.Value, depth)
+		}
+	}
+	return fields
+}
+
+func normalizeJSON(value any, depth int) any {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return redactedToken
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return redactedToken
+	}
+	return normalizeLogValue(decoded, depth+1)
 }
 
 func attrsToAny(attrs []slog.Attr) []any {
@@ -173,7 +312,7 @@ func attrsToAny(attrs []slog.Attr) []any {
 // appendAttr writes a single attr into fields under prefix, recursing into
 // group-valued attrs and applying redaction to sensitive leaf keys.
 func appendAttr(fields map[string]any, prefix string, a slog.Attr) {
-	a.Value = a.Value.Resolve()
+	a = redactAttr(a)
 	if a.Equal(slog.Attr{}) {
 		return
 	}
@@ -216,9 +355,10 @@ func (h *SlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(attrs) == 0 {
 		return h
 	}
+	attrs = redactAttrs(attrs)
 	return &SlogHandler{
 		hub:  h.hub,
-		next: h.next.WithAttrs(redactAttrs(attrs)),
+		next: h.next.WithAttrs(attrs),
 		goas: h.withGroupOrAttrs(groupOrAttrs{attrs: attrs}),
 	}
 }

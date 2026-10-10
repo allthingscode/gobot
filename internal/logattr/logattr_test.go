@@ -1,12 +1,31 @@
 package logattr_test
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 
+	"github.com/allthingscode/gobot/internal/dashboard"
 	"github.com/allthingscode/gobot/internal/logattr"
 )
+
+func TestErrRedactingSink(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf("request failed: %w", errors.New("token=synthetic-marker"))
+	attr := logattr.Err(err)
+	if attr.Key != "err" || !errors.Is(attr.Value.Any().(error), err) {
+		t.Fatal("Err constructor contract changed")
+	}
+	var output bytes.Buffer
+	logger := slog.New(dashboard.NewRedactingSlogHandler(slog.NewJSONHandler(&output, nil)))
+	logger.Info("diagnostic", attr)
+	if strings.Contains(output.String(), "synthetic-marker") || !strings.Contains(output.String(), "request failed") {
+		t.Fatal(output.String())
+	}
+}
 
 func TestConstructors(t *testing.T) {
 	t.Parallel()
