@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v4 -->
+<!-- prompt_version: reviewer-sop-v5 -->
 # SOP: Verification
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -43,6 +43,8 @@ Run the canonical isolated checks. Every check MUST pass before proceeding to ma
 ```powershell
 pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
 ```
+
+In full mode this also runs the project's own `pre-push` hook on the task branch when `hooks.project_dir` names one. A failure there is a **BLOCKER**: the push after the Human Gate would be refused. Quote the hook's output in the finding.
 
 Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod tidy -diff` for Go, or equivalent lockfile checks).
 

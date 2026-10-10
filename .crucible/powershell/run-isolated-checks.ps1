@@ -281,9 +281,81 @@ if ($uncoveredOs.Count -gt 0) {
     Write-Host "[cross-platform] OS-divergent behavior (filesystem error text, path separators, line endings, case sensitivity) can pass here yet fail on origin CI. Assert such behavior platform-independently; origin CI (the gate's CI-watch) is the authoritative cross-platform signal." -ForegroundColor Yellow
 }
 
+function Resolve-HookInterpreter {
+    param([Parameter(Mandatory = $true)][string]$HookPath)
+    $first = (Get-Content -LiteralPath $HookPath -TotalCount 1 -Encoding UTF8)
+    $name = "sh"
+    if ($null -ne $first -and $first.StartsWith("#!")) {
+        $words = @($first.Substring(2).Trim() -split '\s+' | Where-Object { $_ })
+        if ($words.Count -gt 0) {
+            $name = Split-Path -Leaf $words[0]
+            if ($name -eq "env" -and $words.Count -gt 1) { $name = $words[1] }
+        }
+    }
+    $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $cmd) { return $cmd.Source }
+    # Git for Windows runs hooks with its own sh, which is often not on PATH.
+    $git = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $git) {
+        $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+        foreach ($rel in @("usr/bin/$name.exe", "bin/$name.exe")) {
+            $candidate = Join-Path $gitRoot $rel
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+    return $null
+}
+
+# The project's own pre-push hook, when hooks.project_dir names one, runs in full mode
+# against the task branch. Nothing else runs it before the Human Gate, so a check it
+# makes first failed at the push, after the work was accepted. Item 172.
+function Invoke-ProjectPrePushHook {
+    . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+    $checkName = "Project pre-push hook"
+    try {
+        $hooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot
+    } catch {
+        Write-Host ("hooks.project_dir is unusable, so the project's pre-push hook cannot run: " + $_.Exception.Message)
+        Write-Host ("Check failed: {0}" -f $checkName)
+        throw ("Check failed: {0}" -f $checkName)
+    }
+    if ([string]::IsNullOrWhiteSpace($hooksDir)) { return }
+    $relDir = [System.IO.Path]::GetRelativePath($ProjectRoot, $hooksDir)
+    $hook = Join-Path (Join-Path $worktree $relDir) "pre-push"
+    if (-not (Test-Path -LiteralPath $hook -PathType Leaf)) {
+        Write-Host ("No project pre-push hook in {0} on task/{1}; nothing to run." -f $relDir.Replace('\', '/'), $TaskId)
+        return
+    }
+    $interpreter = Resolve-HookInterpreter -HookPath $hook
+    if ($null -eq $interpreter) {
+        Write-Host ("The interpreter on the first line of {0} was not found, so the hook cannot run." -f $hook)
+        Write-Host ("Check failed: {0}" -f $checkName)
+        throw ("Check failed: {0}" -f $checkName)
+    }
+    Write-Host ("==> {0} ({1})" -f $checkName, (Join-Path $relDir "pre-push").Replace('\', '/'))
+    $hookArgs = @("origin")
+    $urlRes = Invoke-Git -Directory $worktree remote get-url origin
+    if ($urlRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($urlRes.Raw)) { $hookArgs += $urlRes.Raw.Trim() }
+    $previousFlag = $env:CRUCIBLE_PRE_PUSH_PREFLIGHT
+    $env:CRUCIBLE_PRE_PUSH_PREFLIGHT = "1"
+    Push-Location $worktree
+    try {
+        # Empty stdin: there are no refs being pushed, and a hook reading them must not block.
+        $null | & $interpreter $hook @hookArgs
+        $hookExit = $LASTEXITCODE
+    } finally {
+        Pop-Location
+        $env:CRUCIBLE_PRE_PUSH_PREFLIGHT = $previousFlag
+    }
+    if ($hookExit -ne 0) {
+        Write-Host ("The project's pre-push hook exits {0} on task/{1}, so the push after the Human Gate would be refused." -f $hookExit, $TaskId)
+        Write-Host ("Check failed: {0}" -f $checkName)
+        throw ("Check failed: {0}" -f $checkName)
+    }
+}
+
 if ($commands.Count -eq 0) {
     Write-Host "No commands found for verification mode '${targetMode}'. Skipping checks." -ForegroundColor Yellow
-    exit 0
 }
 
 Push-Location $worktree
@@ -293,4 +365,8 @@ try {
     }
 } finally {
     Pop-Location
+}
+
+if ($targetMode -eq "full") {
+    Invoke-ProjectPrePushHook
 }

@@ -340,6 +340,8 @@ Installing Crucible sets `core.hooksPath` to `.crucible/scripts/hooks`. Git then
 
 The project hook gets the same arguments git passed to Crucible's hook and, for `pre-push`, the same refs on stdin. It runs from the project root, through the interpreter on its `#!` line, so it runs even if the file is not marked executable. A failing project hook fails the commit or push with its exit code. A missing hook file of a given name is skipped. Other hook names, such as `post-checkout`, are not chained.
 
+`run-isolated-checks.ps1 -Mode full` also runs the project's `pre-push` hook, the task branch's copy, in the implementation worktree, and fails as a named check when the hook fails. Crucible runs full mode itself before it accepts a verification approval, so a check the hook makes fails before the Human Gate instead of at the push after it. That run passes the arguments `origin` and the origin URL, gives no refs on stdin, and sets `CRUCIBLE_PRE_PUSH_PREFLIGHT=1`. A hook can test that variable to skip a step that only makes sense at a real push.
+
 `install-hooks.ps1` warns when the project tracks a directory holding a `pre-commit`, `commit-msg`, or `pre-push` file that `project_dir` does not name.
 
 ---

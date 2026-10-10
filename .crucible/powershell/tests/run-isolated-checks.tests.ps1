@@ -273,6 +273,56 @@ try {
         $output = $res.Output -join "`n"
         Assert-Result -Name "no advisory" -Condition ($output -notmatch "\[cross-platform\]") -FailureMessage "advisory should not fire when CI only targets host OS. Output:`n$output"
     }
+
+    # Item 172: the project's pre-push hook runs on the task branch in full mode, so a
+    # check it makes fails before the Human Gate instead of at the push after it.
+    $hookConfig = @(
+        "project: RunIsolatedChecksTest",
+        "verification:",
+        "  quick:",
+        "    - name: no-op",
+        "      command: $pwshCmd -NoProfile -Command exit 0",
+        "  full:",
+        "    - name: no-op-full",
+        "      command: $pwshCmd -NoProfile -Command exit 0",
+        "hooks:",
+        "  project_dir: project-hooks"
+    )
+    New-Item -ItemType Directory -Path (Join-Path $projectRoot "project-hooks") -Force | Out-Null
+    $worktreeHooksDir = Join-Path $worktreePath "project-hooks"
+    New-Item -ItemType Directory -Path $worktreeHooksDir -Force | Out-Null
+    $worktreeHook = Join-Path $worktreeHooksDir "pre-push"
+
+    $results += Run-Test -Name "A failing project pre-push hook fails full mode and its output is shown (item 172)" -Body {
+        $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+        [System.IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho `"project hook ran, preflight=`$CRUCIBLE_PRE_PUSH_PREFLIGHT`"`nexit 3`n")
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -ne 0) -FailureMessage "expected the failing project hook to fail full mode, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "hook output shown" -Condition ($output -match "project hook ran, preflight=1") -FailureMessage "expected the hook's own output, with CRUCIBLE_PRE_PUSH_PREFLIGHT=1. Output:`n$output"
+        Assert-Result -Name "named failure" -Condition ($output -match "Check failed: Project pre-push hook") -FailureMessage "expected the stable failure marker the gate parses. Output:`n$output"
+    }
+
+    $results += Run-Test -Name "A passing project pre-push hook lets full mode pass, and quick mode does not run it (item 172)" -Body {
+        $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+        [System.IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho `"project hook passed`"`nexit 0`n")
+        $full = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot
+        }
+        $fullOutput = $full.Output -join "`n"
+        Assert-Result -Name "full exit code" -Condition ($full.ExitCode -eq 0) -FailureMessage "expected success, got $($full.ExitCode). Output:`n$fullOutput"
+        Assert-Result -Name "hook ran in full" -Condition ($fullOutput -match "project hook passed") -FailureMessage "expected the hook to run in full mode. Output:`n$fullOutput"
+
+        [System.IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho `"project hook ran in quick`"`nexit 3`n")
+        $quick = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot
+        }
+        $quickOutput = $quick.Output -join "`n"
+        Assert-Result -Name "quick exit code" -Condition ($quick.ExitCode -eq 0) -FailureMessage "expected quick mode to skip the hook, got $($quick.ExitCode). Output:`n$quickOutput"
+        Assert-Result -Name "hook skipped in quick" -Condition ($quickOutput -notmatch "project hook ran in quick") -FailureMessage "the hook should not run in quick mode. Output:`n$quickOutput"
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath
