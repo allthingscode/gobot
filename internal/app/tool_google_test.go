@@ -4,12 +4,21 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/integrations/google"
+	"github.com/allthingscode/gobot/internal/observability"
+	"github.com/allthingscode/gobot/internal/provider"
 )
 
 func TestWebSearchTool(t *testing.T) {
@@ -210,5 +219,168 @@ func TestUpdateTaskTool_Declaration(t *testing.T) {
 	reqs, _ := decl.Parameters["required"].([]string)
 	if len(reqs) != 1 || reqs[0] != "task_id" {
 		t.Errorf("Required should be [task_id], got %v", reqs)
+	}
+}
+
+type googleSearchTransport func(*http.Request) (*http.Response, error)
+
+func (f googleSearchTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+const googleSearchSyntheticKey = "synthetic/key+ secret"
+
+func failingSearchTool(traced, redirect bool, cause error) *WebSearchTool {
+	var tracer *observability.DispatchTracer
+	if traced {
+		tracer = observability.NewDispatchTracer(nil)
+	}
+	tool := newWebSearchTool(googleSearchSyntheticKey, "cx", tracer)
+	tool.baseURL = "https://search.invalid/search"
+	tool.httpClient = &http.Client{
+		Transport: googleSearchTransport(func(r *http.Request) (*http.Response, error) {
+			if redirect {
+				return &http.Response{StatusCode: 302, Header: http.Header{"Location": {r.URL.String() + "&redirect=1"}}, Body: http.NoBody}, nil
+			}
+			return nil, fmt.Errorf("request %s: %w", r.URL, cause)
+		}),
+		CheckRedirect: func(r *http.Request, _ []*http.Request) error { return fmt.Errorf("redirect %s: %w", r.URL, cause) },
+	}
+	return tool
+}
+
+func assertSafeGoogleSearch(t *testing.T, text string) {
+	t.Helper()
+	for _, required := range []string{"google_search", "search request", "transport or redirect failure"} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("missing %q in %q", required, text)
+		}
+	}
+	for _, secret := range []string{googleSearchSyntheticKey, url.QueryEscape(googleSearchSyntheticKey), "https://search.invalid", "key="} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("disclosed %q in %q", secret, text)
+		}
+	}
+}
+
+//nolint:gocognit // Matrix checks both tracing paths against all error classifications.
+func TestWebSearchSafeErrors(t *testing.T) {
+	t.Parallel()
+	sentinel := errors.New("offline sentinel")
+	for _, traced := range []bool{false, true} {
+		for _, cause := range []error{sentinel, context.Canceled, context.DeadlineExceeded, &net.DNSError{IsTimeout: true}} {
+			t.Run(fmt.Sprintf("traced=%v/%v", traced, cause), func(t *testing.T) {
+				t.Parallel()
+				tool := failingSearchTool(traced, false, cause)
+				_, err := tool.Execute(context.Background(), "session", "user", map[string]any{"query": "q"})
+				if err == nil || !errors.Is(err, cause) {
+					t.Fatalf("lost cause: %v", err)
+				}
+				assertSafeGoogleSearch(t, err.Error())
+				var timeout net.Error
+				if errors.As(cause, &timeout) {
+					var got net.Error
+					if !errors.As(err, &got) || !got.Timeout() {
+						t.Fatal("lost timeout")
+					}
+				}
+			})
+		}
+	}
+}
+
+type googleSearchProvider struct{ requests []provider.ChatRequest }
+
+func (*googleSearchProvider) Name() string                 { return "offline-search" }
+func (*googleSearchProvider) Models() []provider.ModelInfo { return nil }
+func (p *googleSearchProvider) Chat(_ context.Context, req provider.ChatRequest) (*provider.ChatResponse, error) {
+	p.requests = append(p.requests, req)
+	if len(p.requests) == 1 {
+		return &provider.ChatResponse{Message: agentctx.StrategicMessage{Role: agentctx.RoleAssistant, ToolCalls: []agentctx.ToolCall{{ID: "search-1", Name: webSearchToolName, Args: map[string]any{"query": "q"}}}}}, nil
+	}
+	text := "Search is unavailable."
+	return &provider.ChatResponse{Message: agentctx.StrategicMessage{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: &text}}}, nil
+}
+
+func assertGoogleSearchToolMessage(t *testing.T, messages []agentctx.StrategicMessage) {
+	t.Helper()
+	found := false
+	for _, msg := range messages {
+		if msg.Role == agentctx.RoleTool {
+			found = true
+			text := ExtractText(msg)
+			if !strings.Contains(text, "TOOL_ERROR [google_search]") {
+				t.Fatalf("missing actual TOOL_ERROR: %q", text)
+			}
+			assertSafeGoogleSearch(t, text)
+		}
+	}
+	if !found {
+		t.Fatal("missing tool message")
+	}
+	data, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{googleSearchSyntheticKey, url.QueryEscape(googleSearchSyntheticKey), "https://search.invalid", "key="} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("history disclosed %q", secret)
+		}
+	}
+}
+
+//nolint:gocognit // End-to-end matrix includes real runner, model and reopened SQLite evidence.
+func TestGoogleSearchPipelineBoundary(t *testing.T) {
+	t.Parallel()
+	for _, redirect := range []bool{false, true} {
+		for _, traced := range []bool{false, true} {
+			t.Run(fmt.Sprintf("redirect=%v/traced=%v", redirect, traced), func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				store, err := agentctx.GetCheckpointManager(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(dir) })
+				prov := &googleSearchProvider{}
+				runner := NewAgentRunner(prov, "offline", "", &config.Config{})
+				runner.SetTools([]Tool{failingSearchTool(traced, redirect, errors.New("offline"))})
+				mgr := agent.NewSessionManager(runner, store, "offline")
+				_, err = mgr.Dispatch(context.Background(), "search-session", "user", "search")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(prov.requests) != 2 {
+					t.Fatalf("model calls=%d, want 2", len(prov.requests))
+				}
+				assertGoogleSearchToolMessage(t, prov.requests[1].Messages)
+				// Close and reopen the real SQLite store to prove durability.
+				agentctx.EvictCheckpointManagerForTest(dir)
+				reopened, err := agentctx.GetCheckpointManager(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				snap, err := reopened.LoadLatest(context.Background(), "search-session")
+				if err != nil || snap == nil {
+					t.Fatalf("missing stored snapshot: %v", err)
+				}
+				assertGoogleSearchToolMessage(t, snap.Messages)
+			})
+		}
+	}
+}
+
+func TestGoogleSearchRunnerCancellation(t *testing.T) {
+	t.Parallel()
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			t.Parallel()
+			prov := &googleSearchProvider{}
+			runner := NewAgentRunner(prov, "offline", "", &config.Config{})
+			runner.SetTools([]Tool{failingSearchTool(false, false, cause)})
+			mgr := agent.NewSessionManager(runner, nil, "offline")
+			result, err := mgr.Dispatch(context.Background(), "search-session", "user", "search")
+			if !errors.Is(err, cause) || result != "" || len(prov.requests) != 1 {
+				t.Fatalf("cancellation became tool result: result=%q err=%v calls=%d", result, err, len(prov.requests))
+			}
+		})
 	}
 }

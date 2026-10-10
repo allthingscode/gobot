@@ -3,8 +3,10 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -48,6 +50,50 @@ type SearchResponse struct {
 	} `json:"error"`
 }
 
+// searchError keeps opaque causes available for classification without rendering
+// their credential-bearing URLs or arbitrary transport/response text.
+type searchError struct {
+	message string
+	cause   error
+}
+
+func (e *searchError) Error() string { return e.message }
+func (e *searchError) Unwrap() error { return e.cause }
+
+func (e *searchError) Timeout() bool {
+	for cause := e.cause; cause != nil; cause = errors.Unwrap(cause) {
+		var timeout net.Error
+		if errors.As(cause, &timeout) && timeout.Timeout() {
+			return true
+		}
+	}
+	return false
+}
+
+// Temporary is retained for the legacy net.Error classification interface.
+func (e *searchError) Temporary() bool { return e.Timeout() }
+
+func safeSearchError(message string, cause error) error {
+	var original *url.Error
+	if errors.As(cause, &original) {
+		copyError := *original
+		copyError.URL = "[redacted]"
+		cause = &copyError
+	}
+	return &searchError{message: message, cause: cause}
+}
+
+func searchAPIDiagnostic(body []byte, apiKey string) string {
+	var response SearchResponse
+	if json.Unmarshal(body, &response) == nil && response.Error != nil {
+		message := response.Error.Message
+		if (message == "invalid key or cx" || message == "bad request") && !strings.Contains(message, apiKey) {
+			return message
+		}
+	}
+	return "request rejected"
+}
+
 // ExecuteSearch performs a web search using the Google Custom Search API with default settings.
 func ExecuteSearch(ctx context.Context, apiKey, cx, query string) ([]SearchResult, error) {
 	svc := NewSearchService()
@@ -69,31 +115,27 @@ func (s *SearchService) Execute(ctx context.Context, apiKey, cx, query string) (
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, http.NoBody)
 	if err != nil {
-		return nil, fmt.Errorf("create search request: %w", err)
+		return nil, safeSearchError("create search request: invalid request", err)
 	}
 
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("search request: %w", err)
+		return nil, safeSearchError("search request: transport or redirect failure", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, safeSearchError("read response: read failure", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		var errResp SearchResponse
-		if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil {
-			return nil, fmt.Errorf("google API %d: %s", resp.StatusCode, errResp.Error.Message)
-		}
-		return nil, fmt.Errorf("google API %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("google API %d: %s", resp.StatusCode, searchAPIDiagnostic(body, apiKey))
 	}
 
 	var searchResp SearchResponse
 	if err := json.Unmarshal(body, &searchResp); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
+		return nil, safeSearchError("parse response: decode failure", err)
 	}
 
 	return searchResp.Items, nil

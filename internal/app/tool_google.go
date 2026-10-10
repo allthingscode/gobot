@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -411,10 +412,11 @@ const webSearchToolName = "google_search"
 
 // WebSearchTool performs a web search using Google Custom Search API.
 type WebSearchTool struct {
-	apiKey  string
-	cx      string
-	baseURL string
-	tracer  *observability.DispatchTracer
+	apiKey     string
+	cx         string
+	baseURL    string
+	tracer     *observability.DispatchTracer
+	httpClient *http.Client
 }
 
 func newWebSearchTool(apiKey, cx string, tracer *observability.DispatchTracer) *WebSearchTool {
@@ -449,6 +451,9 @@ func (t *WebSearchTool) Execute(ctx context.Context, _, _ string, args map[strin
 	svc := &google.SearchService{
 		BaseURL:    t.baseURL,
 		HTTPClient: google.DefaultSearchClient,
+	}
+	if t.httpClient != nil {
+		svc.HTTPClient = t.httpClient
 	}
 	var results []google.SearchResult
 	var err error
