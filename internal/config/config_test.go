@@ -782,9 +782,14 @@ func TestHumanInTheLoop(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := &Config{Channels: ChannelsConfig{Telegram: TelegramConfig{HITL: tc.hitl}}}
-			if got := cfg.HumanInTheLoop(); got != tc.want {
-				t.Errorf("HumanInTheLoop() = %v, want %v", got, tc.want)
+			for _, highRisk := range [][]string{nil, {"shell_exec"}} {
+				cfg := &Config{Channels: ChannelsConfig{Telegram: TelegramConfig{HITL: tc.hitl}}, Tools: ToolsConfig{HighRisk: highRisk}}
+				if got := cfg.HighRiskTools(); strings.Join(got, ",") != strings.Join(highRisk, ",") {
+					t.Fatal("channel flag changed independent high-risk tools")
+				}
+				if got := cfg.HumanInTheLoop(); got != tc.want {
+					t.Errorf("HumanInTheLoop() = %v, want %v", got, tc.want)
+				}
 			}
 		})
 	}

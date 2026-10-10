@@ -32,6 +32,8 @@ type HITLManager struct {
 	api             bot.API
 	store           HITLStore
 	highRiskTools   map[string]bool
+	channelEnabled  bool
+	sideEffecting   func(string) bool
 	pending         map[string]chan bool
 	mu              sync.Mutex
 	approvalTimeout time.Duration
@@ -52,9 +54,18 @@ func NewHITLManager(api bot.API, store HITLStore, tools []string) *HITLManager {
 	}
 }
 
+// ConfigureChannelApproval enables Telegram approval for declared side effects.
+// Configure before registering hooks; the predicate reads the owning runner's current registry.
+func (m *HITLManager) ConfigureChannelApproval(enabled bool, sideEffecting func(string) bool) {
+	m.channelEnabled = enabled
+	m.sideEffecting = sideEffecting
+}
+
 // PreToolHook is the hook function to be registered with agent.Hooks.
 func (m *HITLManager) PreToolHook(ctx context.Context, sessionKey, toolName string, args map[string]any) (string, error) {
-	if !m.highRiskTools[toolName] {
+	channelRequired := m.channelEnabled && bot.IsTelegramSession(sessionKey) &&
+		m.sideEffecting != nil && m.sideEffecting(toolName)
+	if !m.highRiskTools[toolName] && !channelRequired {
 		return "", nil
 	}
 
@@ -83,6 +94,9 @@ func (m *HITLManager) RequestApproval(ctx context.Context, sessionKey, toolName 
 	chatID, err := m.parseTelegramChatID(sessionKey, toolName)
 	if err != nil {
 		return false, err
+	}
+	if m.api == nil {
+		return false, fmt.Errorf("HITL: approval requires an available Telegram API")
 	}
 
 	reqID := m.createRequestID(sessionKey, toolName, args)

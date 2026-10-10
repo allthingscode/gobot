@@ -26,6 +26,53 @@ type mockBotAPI struct {
 	sentButtons  [][][]bot.Button
 }
 
+func TestHITLChannelTimeout(t *testing.T) {
+	t.Parallel()
+	api := &mockBotAPI{}
+	m := NewHITLManager(api, nil, nil)
+	m.ConfigureChannelApproval(true, func(string) bool { return true })
+	m.approvalTimeout = time.Millisecond
+	_, err := m.PreToolHook(context.Background(), "telegram:123:456", "custom_write", nil)
+	if err == nil || !strings.Contains(err.Error(), "approval timeout") {
+		t.Fatalf("expected approval timeout, got %v", err)
+	}
+	if len(api.getSentButtons()) != 1 || len(m.pending) != 0 {
+		t.Fatal("timeout must send one request and release the waiter")
+	}
+}
+
+func TestHITLUnavailableAPI(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{"channel", "high risk", "policy"} {
+		t.Run(source, func(t *testing.T) {
+			t.Parallel()
+			m := NewHITLManager(nil, nil, []string{"risky"})
+			m.ConfigureChannelApproval(true, func(string) bool { return true })
+			var err error
+			switch source {
+			case "channel":
+				_, err = m.PreToolHook(context.Background(), "telegram:123", "write", nil)
+			case "high risk":
+				_, err = m.PreToolHook(context.Background(), "telegram:123", "risky", nil)
+			case "policy":
+				_, err = m.RequestApproval(context.Background(), "telegram:123", "read", nil)
+			}
+			if err == nil || !strings.Contains(err.Error(), "available Telegram API") {
+				t.Fatalf("approval must fail closed without API, got %v", err)
+			}
+		})
+	}
+}
+
+func TestHITLChannelWithoutPredicate(t *testing.T) {
+	t.Parallel()
+	m := NewHITLManager(nil, nil, nil)
+	m.ConfigureChannelApproval(true, nil)
+	if _, err := m.PreToolHook(context.Background(), "telegram:123", "read", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (m *mockBotAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
