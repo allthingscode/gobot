@@ -164,12 +164,27 @@ tail -f ~/gobot_data/logs/gobot.log
 On Windows, the `start_gobot.ps1` script provides built-in restart logic and is the preferred way to run Gobot persistently.
 
 ### 1. Preparation
-Build the binary. The `start_gobot.ps1` script resolves `bin\gobot.exe` automatically.
+Build, then explicitly check the executable before human launch or registration.
 
 ```powershell
 # Build the binary
-.\scripts\build.ps1
+pwsh -NoProfile -File scripts/build.ps1
+pwsh -NoProfile -File scripts/check_selected_binary.ps1
+# Equivalent inspection-only entry: .\start_gobot.ps1 -CheckBinaryOnly
 ```
+
+The check prefers `bin/gobot.exe`, falling back to root `gobot.exe`, independent of
+caller location. It never runs Gobot. Go and git must be available; the maintained
+helper verifies govulncheck v1.8.0 or installs that pin. Provisioning and the
+vulnerability database require network access. Missing tools/evidence, dirty builds,
+revision/toolchain/dependency differences, findings and scanner/database errors
+all fail with a rebuild/recheck command. Resolve the intended checkout/toolchain,
+rebuild, and repeat until exit 0 before manually launching or registering the task.
+Build alone does not establish a clean scan. A revision mismatch means a different
+checkout, not necessarily an older build. Binary findings are retained-symbol
+advisories, not demonstrated runtime exploits; source checks are separate evidence.
+This is a point-in-time check and cannot prevent subsequent artifact replacement.
+Normal launch/restart stays human-operated and does not run automatic online scans.
 
 ### 2. Security & DPAPI (Critical)
 Windows uses DPAPI for secret encryption, which is tied to the **specific Windows User account**.
@@ -358,7 +373,8 @@ docker run \
 To update a deployed instance:
 1. Pull the latest code: `git pull`
 2. Rebuild: `sh scripts/build.sh` or `.\scripts\build.ps1`
-3. Restart the service:
+3. On Windows, run `pwsh -NoProfile -File scripts/check_selected_binary.ps1` and require exit 0 before human restart or task registration.
+4. Restart the service:
    - **Linux:** `sudo systemctl restart gobot`
    - **Windows:** Stop the `powershell.exe` process or the Task, then restart it.
 

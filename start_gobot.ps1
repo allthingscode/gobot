@@ -1,13 +1,16 @@
 # Gobot - Startup Script
 # Usage: .\start_gobot.ps1
 
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
-$AppPath    = $PSScriptRoot
-$GobotExe   = Join-Path $AppPath "bin\gobot.exe"
-if (-not (Test-Path $GobotExe)) {
-    $GobotExe = Join-Path $AppPath "gobot.exe"
+param([switch]$CheckBinaryOnly)
+. (Join-Path $PSScriptRoot 'scripts/check_selected_binary.ps1')
+if ($CheckBinaryOnly) {
+    exit (Invoke-SelectedBinaryCheck -ProjectRoot $PSScriptRoot)
 }
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$AppPath = $PSScriptRoot
+try { $GobotExe = Resolve-SelectedBinary $AppPath }
+catch { Write-Host $_.Exception.Message; exit 1 }
 
 # Resolve StorageRoot using the executable to ensure consistency with config.json
 if (Test-Path $GobotExe) {

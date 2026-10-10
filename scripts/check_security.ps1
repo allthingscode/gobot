@@ -1,8 +1,6 @@
 #!/usr/bin/env pwsh
 # Single scanner-version policy for local, CI and release source checks.
-param([string]$ToolDirectory)
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+param([string]$ToolDirectory, [string]$BinaryPath)
 
 function Invoke-SecurityNative {
     param([string]$Command, [string[]]$Arguments)
@@ -19,13 +17,18 @@ function Test-SecurityIdentity {
 }
 
 function Invoke-SecurityCheck {
-    param([string]$ToolDirectory)
+    param([string]$ToolDirectory, [string]$BinaryPath)
+    $ErrorActionPreference = 'Stop'
     $oldLocation = Get-Location
     $saved = @{}
     foreach ($name in @('GOFLAGS', 'GOBIN', 'GOOS', 'GOARCH', 'CGO_ENABLED')) {
         $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     try {
+        if ($BinaryPath) {
+            $BinaryPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($BinaryPath)
+            if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) { throw 'Binary path is not a file.' }
+        }
         Set-Location (Split-Path -Parent $PSScriptRoot)
         $env:GOFLAGS = (($env:GOFLAGS, '-mod=readonly') | Where-Object { $_ }) -join ' '
         $env:CGO_ENABLED = '0'
@@ -50,7 +53,8 @@ function Invoke-SecurityCheck {
             foreach ($name in @('GOOS', 'GOARCH')) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         }
         Write-Host 'Running verified govulncheck v1.8.0...'
-        $scan = Invoke-SecurityNative $scanner @('./internal/...', './cmd/...')
+        $scanArguments = if ($BinaryPath) { @('-mode=binary', $BinaryPath) } else { @('./internal/...', './cmd/...') }
+        $scan = Invoke-SecurityNative $scanner $scanArguments
         $scan.Output | ForEach-Object { Write-Host $_ }
         if ($scan.Code -ne 0) { Write-Host 'Security scan failed: findings or scanner/database error. Release/push must stop.' }
         return $scan.Code
@@ -63,4 +67,4 @@ function Invoke-SecurityCheck {
     }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { exit (Invoke-SecurityCheck $ToolDirectory) }
+if ($MyInvocation.InvocationName -ne '.') { exit (Invoke-SecurityCheck -ToolDirectory $ToolDirectory -BinaryPath $BinaryPath) }
