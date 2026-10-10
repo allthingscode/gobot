@@ -23,15 +23,13 @@ if [ -d vendor ]; then
 fi
 
 echo "--- pre-push: running security scan"
-if command -v powershell.exe > /dev/null 2>&1; then
+if command -v pwsh > /dev/null 2>&1; then
+    pwsh -NoProfile -File ./scripts/check_security.ps1
+elif command -v powershell.exe > /dev/null 2>&1; then
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/check_security.ps1
 else
-    # Fallback for Linux/macOS if govulncheck is installed
-    if command -v govulncheck > /dev/null 2>&1; then
-        GOFLAGS="${GOFLAGS:+$GOFLAGS }-mod=readonly" govulncheck ./internal/... ./cmd/...
-    else
-        echo "WARN: govulncheck not found; skipping local security scan (CI will enforce)"
-    fi
+    echo "ERROR: security scan requires PowerShell. Install PowerShell 7 (pwsh), then retry."
+    exit 1
 fi
 
 echo "--- pre-push: checking CI status on remote branch"
