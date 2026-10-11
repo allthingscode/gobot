@@ -153,6 +153,7 @@ func MergeModularJobs(storeJobs, modularJobs []Job, stateCache map[string]JobSta
 			storeJobs[j].Schedule = mj.Schedule
 			storeJobs[j].Payload = mj.Payload
 			storeJobs[j].Name = mj.Name
+			storeJobs[j].Enabled = mj.Enabled
 			found = true
 			break
 		}

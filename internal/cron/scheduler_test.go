@@ -581,6 +581,147 @@ func jobsByID(jobs []Job) map[string]Job {
 	return byID
 }
 
+func TestSchedulerModularEnabledRefresh(t *testing.T) {
+	t.Parallel()
+	for _, schedule := range []struct {
+		name, definition string
+		nextDelay        time.Duration
+	}{
+		{"every", "every(2h)", 2 * time.Hour},
+		{"cron", "cron(0 10 * * *, UTC)", time.Hour},
+	} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/enabled=%t", schedule.name, enabled), func(t *testing.T) {
+				t.Parallel()
+				testSchedulerEnabledRefresh(t, schedule.definition, schedule.nextDelay, enabled)
+			})
+		}
+	}
+}
+
+func testSchedulerEnabledRefresh(t *testing.T, definition string, nextDelay time.Duration, enabled bool) {
+	t.Helper()
+	now := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	prior := JobState{LastRunAtMS: now.Add(-time.Hour).UnixMilli(),
+		NextRunAtMS: now.Add(-time.Minute).UnixMilli(), RunCount: 9, SuccessCount: 6, FailureCount: 3}
+	root := t.TempDir()
+	storePath := filepath.Join(root, "jobs.json")
+	initial := Store{Jobs: []Job{{ID: "refresh", Name: "Original", Enabled: !enabled,
+		Schedule: Schedule{Kind: KindEvery, EveryMS: ptr(int64(1000))},
+		Payload:  Payload{Channel: "telegram", Message: "original"}, State: prior}}}
+	data, err := initial.EncodeJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(storePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	itemsDir := filepath.Join(root, "items")
+	if err := os.Mkdir(itemsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definitionPath := filepath.Join(itemsDir, "refresh.md")
+	writeEnabledRefreshDefinition(t, definitionPath, definition, !enabled, now.Add(-time.Hour))
+	dispatcher := &mockDispatcher{}
+	s := NewScheduler(storePath, itemsDir, dispatcher).WithClock(NewFakeClock(now))
+	s.reloadModularJobs()
+	assertEnabledRefreshJob(t, s.Jobs(), !enabled, prior)
+	firstMtime := s.lastModularMtime
+
+	writeEnabledRefreshDefinition(t, definitionPath, definition, enabled, now)
+	s.reloadModularJobs()
+	assert.NotEqual(t, firstMtime, s.lastModularMtime, "edited definition must actually reload")
+	assertEnabledRefreshJob(t, s.Jobs(), enabled, prior)
+	// A flag-only reload does not save: check disk before invoking the explicit save path.
+	assertEnabledRefreshJob(t, readEnabledRefreshStore(t, storePath).Jobs, !enabled, prior)
+	if !enabled {
+		if err := s.poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		assert.Empty(t, dispatcher.payloads)
+		assertEnabledRefreshJob(t, s.Jobs(), false, prior)
+	}
+	s.saveStore()
+	assertEnabledRefreshJob(t, readEnabledRefreshStore(t, storePath).Jobs, enabled, prior)
+
+	// Inspect constructor-loaded JSON before a modular refresh could mask a bad save.
+	// Give the restart its own copy so the original poll cannot overwrite its due state.
+	restartPath := filepath.Join(root, "restart.json")
+	savedData, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both paths are fixed filenames under t.TempDir; savedData is fixture JSON, not a path.
+	if err := os.WriteFile(restartPath, savedData, 0o600); err != nil { //nolint:gosec // G703: isolated temporary fixture copy
+		t.Fatal(err)
+	}
+	restartedDispatcher := &mockDispatcher{}
+	restarted := NewScheduler(restartPath, itemsDir, restartedDispatcher).WithClock(NewFakeClock(now))
+	assertEnabledRefreshJob(t, restarted.Jobs(), enabled, prior)
+	assertEnabledRefreshPolling(t, s, restarted, dispatcher, restartedDispatcher, enabled, prior, now, nextDelay)
+}
+
+func assertEnabledRefreshPolling(t *testing.T, s, restarted *Scheduler, dispatcher, restartedDispatcher *mockDispatcher, enabled bool, prior JobState, now time.Time, nextDelay time.Duration) {
+	t.Helper()
+	for _, scheduler := range []*Scheduler{s, restarted} {
+		if err := scheduler.poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		want := prior
+		if enabled {
+			want.LastRunAtMS = now.UnixMilli()
+			want.NextRunAtMS = now.Add(nextDelay).UnixMilli()
+			want.RunCount++
+			want.SuccessCount++
+		}
+		assertEnabledRefreshJob(t, scheduler.Jobs(), enabled, want)
+		if err := scheduler.poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		assertEnabledRefreshJob(t, scheduler.Jobs(), enabled, want)
+	}
+	wantDispatches := 0
+	if enabled {
+		wantDispatches = 1
+	}
+	assert.Len(t, dispatcher.payloads, wantDispatches)
+	assert.Len(t, restartedDispatcher.payloads, wantDispatches)
+	assert.Empty(t, dispatcher.alerts)
+	assert.Empty(t, restartedDispatcher.alerts)
+}
+
+func writeEnabledRefreshDefinition(t *testing.T, path, schedule string, enabled bool, mtime time.Time) {
+	t.Helper()
+	content := fmt.Sprintf("---\nid: refresh\nname: Refreshed\nschedule: %s\nenabled: %t\nchannel: telegram\n---\nrefreshed body\n", schedule, enabled)
+	writeTestFile(t, path, content)
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readEnabledRefreshStore(t *testing.T, path string) Store {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var store Store
+	if err := store.DecodeJSON(data); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func assertEnabledRefreshJob(t *testing.T, jobs []Job, enabled bool, state JobState) {
+	t.Helper()
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %+v, want exactly one retained job", jobs)
+	}
+	assert.Equal(t, "refresh", jobs[0].ID)
+	assert.Equal(t, enabled, jobs[0].Enabled)
+	assert.Equal(t, state, jobs[0].State)
+}
+
 type blockingDispatcher struct {
 	mu       sync.Mutex
 	delay    time.Duration

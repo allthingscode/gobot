@@ -4,6 +4,7 @@ package cron
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -174,5 +175,40 @@ func TestMergeModularJobs(t *testing.T) {
 		if j.ID == "existing1" && j.Name != "Updated Name" {
 			t.Errorf("expected existing1 name to be updated")
 		}
+	}
+}
+
+func TestMergeModularJobsEnabledRefresh(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name          string
+		before, after bool
+	}{
+		{"disable", true, false},
+		{"enable", false, true},
+		{"remain enabled", true, true},
+		{"remain disabled", false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			state := JobState{LastRunAtMS: 100, NextRunAtMS: 200, RunCount: 9, SuccessCount: 6, FailureCount: 3}
+			cached := JobState{LastRunAtMS: 300, NextRunAtMS: 400, RunCount: 7, SuccessCount: 5, FailureCount: 2}
+			existing := Job{ID: "existing", Name: "old", Enabled: tt.before,
+				Schedule: Schedule{Kind: KindEvery, EveryMS: ptr(int64(1000))},
+				Payload:  Payload{Channel: "cli", Message: "old"}, State: state}
+			unrelated := Job{ID: "unrelated", Enabled: true, State: cached}
+			updated := Job{ID: existing.ID, Name: "updated", Enabled: tt.after,
+				Schedule: Schedule{Kind: KindCron, Expr: "0 9 * * *", TZ: "UTC"},
+				Payload:  Payload{Channel: "telegram", To: "123", Message: "updated"}}
+			added := Job{ID: "new", Name: "new", Enabled: true}
+			got := MergeModularJobs([]Job{existing, unrelated}, []Job{updated, added},
+				map[string]JobState{existing.ID: cached, added.ID: cached})
+			updated.State = state
+			added.State = cached
+			want := []Job{updated, unrelated, added}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("merged jobs = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
