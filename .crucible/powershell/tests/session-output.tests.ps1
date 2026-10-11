@@ -193,6 +193,33 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "prompt says not to branch or commit" -Condition ($text -match 'No-Code Review-Fix' -and $text -match 'do not commit') -FailureMessage ("prompt: " + $text)
     }
 
+    $results += Run-Test -Name "The re-review after a no-code review-fix is sent to the Stub-Only Close-Out, not the isolated checker" -Body {
+        $caseRoot = Join-Path $tempRoot "no-code-rereview"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "R-915" -TargetPhase "verification"
+        $ctx.Handoff.source_phase = "implementation"
+        $ctx.RepoRoot = $caseRoot
+        $activeDir = Join-Path $ctx.BacklogDir "features/active"
+        New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+        "---`ntype: research`n---`nSpec`n" | Set-Content -LiteralPath (Join-Path $activeDir "R-915_spec.md") -Encoding UTF8
+        "# Backlog`n| [R-915](features/active/R-915_spec.md) | Spec | P2 | Ready |`n" | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+        "crucible_root: `".crucible`"`npaths:`n  backlog: `"" + ($ctx.BacklogDir -replace '\\', '/') + "`"`n" | Set-Content -LiteralPath (New-Item -ItemType File -Path (Join-Path $caseRoot ".crucible/config.yaml") -Force).FullName -Encoding UTF8
+        & git -C $caseRoot init --quiet -b master
+        & git -C $caseRoot -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
+        "<!-- prompt_version: 1 -->`nReview {task_id}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "verification_prompt.md") -Encoding UTF8
+
+        Assert-Result -Name "classified as a no-code re-review" -Condition (Test-NoCodeReReview -Handoff $ctx.Handoff -RepoRoot $caseRoot) -FailureMessage "an R-* re-review with no task branch should be a no-code re-review"
+        $text = New-CruciblePromptText -Context $ctx
+        Assert-Result -Name "prompt routes to the Stub-Only Close-Out" -Condition ($text -match '## No-Code Re-Review' -and $text -match 'Stub-Only Close-Out' -and $text -match 'Do not run run-isolated-checks\.ps1') -FailureMessage ("prompt: " + $text)
+
+        $fromGrooming = $ctx.Handoff.PSObject.Copy(); $fromGrooming.source_phase = "grooming"
+        Assert-Result -Name "a first close-out review is not" -Condition (-not (Test-NoCodeReReview -Handoff $fromGrooming -RepoRoot $caseRoot)) -FailureMessage "grooming -> verification already reads as the Stub-Only Close-Out"
+
+        & git -C $caseRoot branch task/R-915
+        Assert-Result -Name "a re-review with a task branch is not" -Condition (-not (Test-NoCodeReReview -Handoff $ctx.Handoff -RepoRoot $caseRoot)) -FailureMessage "a task with a branch has code to review"
+        $text = New-CruciblePromptText -Context $ctx
+        Assert-Result -Name "and its prompt keeps the code review" -Condition ($text -notmatch 'No-Code Re-Review') -FailureMessage ("prompt: " + $text)
+    }
+
     # Step 3 of the deployment prompt hands a failed merge simulation to implementation.
     # Validation refuses deployment -> implementation at rebase_count 0, so the command the
     # Operator copies has to carry the next count. Rendered from the real prompt, because

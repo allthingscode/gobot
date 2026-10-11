@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v5 -->
+<!-- prompt_version: reviewer-sop-v6 -->
 # SOP: Verification
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -148,7 +148,7 @@ pwsh -ExecutionPolicy Bypass \
 
 ## Stub-Only Close-Out (grooming -> verification shortcut)
 
-When the incoming handoff has `source_phase: grooming` and **no** Architect worktree exists (i.e., this is a pure data-grooming pass with no implementation), run this abbreviated checklist instead of the full code-review workflow above.
+When the incoming handoff has `source_phase: grooming` and **no** Architect worktree exists (i.e., this is a pure data-grooming pass with no implementation), run this abbreviated checklist instead of the full code-review workflow above. The same applies to the re-review after a no-code review-fix on such a task: the handoff comes from `implementation`, but there is still no worktree or task branch, and the prompt says so under `## No-Code Re-Review`. Do not run `run-isolated-checks.ps1` there; it needs a worktree.
 
 ### Stub-Only Close-Out Checklist
 1. **BACKLOG.md structure** - run `{{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"` and confirm it exits 0.

@@ -93,6 +93,22 @@ function Test-NoCodeReviewFix {
     return (Test-NoCodeClosure -TaskId ([string]$Handoff.task_id) -ProjectRoot $RepoRoot)
 }
 
+# The re-review after such a fix comes from implementation, which the verification prompt
+# reads as a code review: the R-040 Reviewer ran run-isolated-checks.ps1, found no worktree,
+# and blocked on the checker it could not run. There is still no branch and no code, so
+# the review is the Stub-Only Close-Out. Item 175.
+function Test-NoCodeReReview {
+    param(
+        [Parameter(Mandatory=$true)]$Handoff,
+        [Parameter(Mandatory=$true)][string]$RepoRoot
+    )
+
+    if ([string]$Handoff.source_phase -ne "implementation" -or [string]$Handoff.target_phase -ne "verification") {
+        return $false
+    }
+    return (Test-NoCodeClosure -TaskId ([string]$Handoff.task_id) -ProjectRoot $RepoRoot)
+}
+
 function Resolve-ImplementationWorkdir {
     param(
         [Parameter(Mandatory=$true)]$Handoff,
@@ -233,6 +249,14 @@ function New-CruciblePromptText {
                 "The fix is to the backlog spec and session files named above, which are gitignored: edit them in place under " +
                 $repoRoot + ". Do not create a branch or worktree, and do not commit or force-add these files; " +
                 "a task branch would also defeat the No-Code Closure at deployment.`n"
+        }
+
+        if (Test-NoCodeReReview -Handoff $handoff -RepoRoot $repoRoot) {
+            $promptText += "`n`n## No-Code Re-Review`n`n" +
+                "This handoff comes from implementation, but it is a no-code review-fix on a research item with no task branch: " +
+                "there is no worktree, no diff and no code to check. Use the Stub-Only Close-Out workflow, not Pattern A/B. " +
+                "Do not run run-isolated-checks.ps1 and do not create a branch or worktree; the backlog validator is the automated check. " +
+                "Also confirm every fix in " + ($sessionRootForPrompt + "/" + $TaskId) + "/implementation/task.md was made.`n"
         }
 
         # Handoff context injection

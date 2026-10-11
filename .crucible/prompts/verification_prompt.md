@@ -1,4 +1,4 @@
-<!-- prompt_version: verification_prompt-v32 -->
+<!-- prompt_version: verification_prompt-v33 -->
 Verification: {task_id}
 
 {prev_session_summary}
@@ -44,7 +44,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 ## Reviewer Workflow
 
 ### Pattern A/B: Standard Code Implementation Review
-(Use this workflow if the incoming handoff is from the `implementation` phase or if an implementation worktree exists.)
+(Use this workflow if the incoming handoff is from the `implementation` phase or if an implementation worktree exists, unless a `## No-Code Re-Review` section below says otherwise.)
 1. **Setup**: Operate inside the assigned worktree: `.crucible/.agent-workspaces/implementation-{task_id}`. Do not run `git checkout task/{task_id}` from the main checkout.
 2. **Scope Check**: Run `git diff master...task/{task_id} --name-only` and verify all modified files match the spec's `file_affinity`.
 3. **Automated Verification**: Run the canonical isolated checker before manual review:
@@ -70,7 +70,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 ### Stub-Only Close-Out: Pure Data-Grooming Review (grooming -> verification Shortcut)
-(Use this workflow if the incoming handoff has `source_phase: grooming` and no implementation worktree/code changes exist.)
+(Use this workflow if the incoming handoff has `source_phase: grooming` and no implementation worktree/code changes exist, or if a `## No-Code Re-Review` section below says so.)
 1. **Validation Check (Mandatory)**: Run the backlog validator and verify it exits 0:
    ```bash
     pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"
