@@ -128,6 +128,42 @@ func TestWaitForShutdown(t *testing.T) {
 	}
 }
 
+func TestWaitForShutdown_DrainTimeout(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	cleanupStarted := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		close(cleanupStarted)
+		<-release
+	}()
+	t.Cleanup(func() { cancel(); close(release); wg.Wait() })
+	signals := make(chan os.Signal, 1)
+	signals <- os.Interrupt
+	result := make(chan error, 1)
+	go func() {
+		result <- waitForShutdownTrigger(ctx, cancel, &wg, nil, nil, signals, 20*time.Millisecond)
+	}()
+	select {
+	case <-cleanupStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not observe cancellation")
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Errorf("drain timeout introduced an error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown exceeded its injected drain budget")
+	}
+}
+
 func TestRunAgent_PrerequisiteFail(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Channels.Telegram.Enabled = true

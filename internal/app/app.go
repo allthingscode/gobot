@@ -251,9 +251,20 @@ func reportStartupFailure(ctx context.Context, startErr chan<- error, subsystem 
 // last case, so the process exits non-zero when a subsystem fails to start;
 // signal/context shutdown returns nil (graceful, exit 0).
 func waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, startErr <-chan error, readiness *Readiness) error {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	return waitForShutdownWithSignals(ctx, cancel, wg, startErr, readiness, signal.Notify, signal.Stop)
+}
 
+// waitForShutdownWithSignals owns the subscription; callbacks are per-call so
+// tests can exercise its lifetime without delivering process-wide signals.
+func waitForShutdownWithSignals(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, startErr <-chan error, readiness *Readiness, notify func(chan<- os.Signal, ...os.Signal), stop func(chan<- os.Signal)) error {
+	sigChan := make(chan os.Signal, 1)
+	notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer stop(sigChan)
+
+	return waitForShutdownTrigger(ctx, cancel, wg, startErr, readiness, sigChan, 5*time.Second)
+}
+
+func waitForShutdownTrigger(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, startErr <-chan error, readiness *Readiness, sigChan <-chan os.Signal, drainTimeout time.Duration) error {
 	var subsystemErr error
 	select {
 	case sig := <-sigChan:
@@ -263,7 +274,6 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.Wa
 	case err := <-startErr:
 		slog.Error("gobot: critical subsystem failed to start, shutting down", "err", err)
 		subsystemErr = err
-		cancel()
 	}
 
 	// Flip readiness off as soon as shutdown begins, before draining, so /ready
@@ -272,7 +282,8 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.Wa
 		readiness.SetNotReady()
 	}
 
-	const drainTimeout = 5 * time.Second
+	// Let cancellation-dependent workers begin cleanup within the drain budget.
+	cancel()
 	DrainGoroutines(wg, drainTimeout)
 	return subsystemErr
 }
