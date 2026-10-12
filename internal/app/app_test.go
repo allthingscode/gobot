@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -580,6 +582,46 @@ func assertTelegramFailureStorage(t *testing.T, tc telegramStartupCase, cfg *con
 	if !tc.existing && len(entries) != 0 {
 		t.Fatalf("failure created runtime storage: %v", entries)
 	}
+}
+
+//nolint:paralleltest // captures stdout and the default logger
+func TestRunAgentLoopCanceledGatewaySuppressesStartup(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) { testCanceledGatewayStartup(t, existing) })
+	}
+}
+
+func testCanceledGatewayStartup(t *testing.T, existing bool) {
+	t.Helper()
+
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Gateway.Enabled = true
+	cfg.Gateway.Host = net.IPv4(127, 0, 0, 1).String()
+	cfg.Gateway.Port = 0
+	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(cfg.StorageRoot()) })
+	path := startupMarkerPath(cfg.StorageRoot())
+	if existing {
+		if err := writeStartupMarker(cfg.StorageRoot(), startupMarker{Version: startupMarkerVersion, ReadyAt: time.Now().Add(-time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := os.ReadFile(path)
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	output := captureTelegramStartupOutput(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := runAgentLoop(ctx, cfg, &AgentStack{Runner: &AgentRunner{}}, nil, nil, nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if stdout := output(); stdout != "" || strings.Contains(logs.String(), "startup_ms") || strings.Contains(logs.String(), "gobot: startup ready") {
+		t.Fatalf("canceled gateway published success: %s %s", stdout, &logs)
+	}
+	after, err := os.ReadFile(path)
+	assertFailedPublication(t, existing, before, after, err, "", "")
 }
 
 func assertTelegramSuccessOutput(t *testing.T, enabled bool, stdout, logs string) {

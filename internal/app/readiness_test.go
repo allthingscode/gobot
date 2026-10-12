@@ -12,6 +12,35 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 )
 
+func TestAwaitReadyForBanner(t *testing.T) {
+	t.Parallel()
+	for _, ready := range []bool{false, true} {
+		t.Run(strconv.FormatBool(ready), func(t *testing.T) {
+			t.Parallel()
+			cfg := &config.Config{}
+			cfg.Gateway.Enabled = true
+			r := NewReadiness()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan bool, 1)
+			go func() { result <- awaitReadyForBanner(ctx, cfg, r) }()
+			if ready {
+				r.SetReady()
+			} else {
+				cancel()
+			}
+			select {
+			case got := <-result:
+				if got != ready {
+					t.Fatalf("readiness=%v want=%v", got, ready)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("readiness wait did not finish")
+			}
+		})
+	}
+}
+
 // TestReadiness_Transitions covers the latch states and the one-shot Ready()
 // channel (C-324).
 func TestReadiness_Transitions(t *testing.T) {
