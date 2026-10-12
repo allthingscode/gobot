@@ -163,15 +163,7 @@ func runInitializedAgentLoop(ctx context.Context, cfg *config.Config, stack *Age
 		}
 	}
 
-	awaitReadyForBanner(ctx, cfg, readiness)
-	readyAt := time.Now()
-	if cfg.Gateway.Enabled {
-		if readinessAt, ok := readiness.ReadyAt(); ok {
-			readyAt = readinessAt
-		}
-	}
-	recordStartupReady(cfg, startupStart, readyAt)
-	printStartupBanner(cfg, api)
+	publishStartupReady(ctx, cfg, readiness, startupStart, api, os.Stdout, 2*time.Second)
 
 	StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
 	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
@@ -189,25 +181,44 @@ func runtimeCheckpointStore(storageRoot string) agent.CheckpointStore {
 	return checkpoints
 }
 
-// awaitReadyForBanner blocks until the gateway listener reports bound, the context
-// is cancelled, or a short timeout elapses, so the "gobot ready" banner does not
-// print ahead of the bound listener. No-op when the gateway is disabled. On a bind
-// failure (no ready signal) it returns after the timeout; waitForShutdown then
-// surfaces the error via startErr.
-func awaitReadyForBanner(ctx context.Context, cfg *config.Config, readiness *Readiness) {
-	if !cfg.Gateway.Enabled || readiness == nil {
-		return
+// awaitReadyForBanner reports whether startup success can be published.
+func awaitReadyForBanner(ctx context.Context, cfg *config.Config, readiness *Readiness) bool {
+	return awaitReadyForBannerWithTimeout(ctx, cfg, readiness, 2*time.Second)
+}
+
+func awaitReadyForBannerWithTimeout(ctx context.Context, cfg *config.Config, readiness *Readiness, timeout time.Duration) bool {
+	if !cfg.Gateway.Enabled {
+		return true
 	}
-	const bannerBindWait = 2 * time.Second
+	if readiness == nil || ctx.Err() != nil {
+		return false
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-readiness.Ready():
+		return ctx.Err() == nil && readiness.IsReady()
 	case <-ctx.Done():
-	case <-time.After(bannerBindWait):
+		return false
+	case <-timer.C:
+		return false
 	}
 }
 
-func printStartupBanner(cfg *config.Config, api *TgAPI) {
-	printStartupBannerTo(os.Stdout, cfg, api)
+// publishStartupReady keeps the banner, metric and marker behind one readiness gate.
+// Subsystem errors remain buffered for waitForShutdown to classify and propagate.
+func publishStartupReady(ctx context.Context, cfg *config.Config, readiness *Readiness, startupStart time.Time, api *TgAPI, w io.Writer, timeout time.Duration) {
+	if !awaitReadyForBannerWithTimeout(ctx, cfg, readiness, timeout) {
+		return
+	}
+	readyAt := time.Now()
+	if cfg.Gateway.Enabled {
+		if readinessAt, ok := readiness.ReadyAt(); ok {
+			readyAt = readinessAt
+		}
+	}
+	recordStartupReady(cfg, startupStart, readyAt)
+	printStartupBannerTo(w, cfg, api)
 }
 
 const startupDisabled = "disabled"
