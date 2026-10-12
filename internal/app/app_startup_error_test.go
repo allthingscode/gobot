@@ -5,14 +5,141 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
 )
+
+func TestWaitForShutdown_TriggerOrderingAndSubscription(t *testing.T) {
+	t.Parallel()
+	for _, trigger := range []string{"signal", "parent", "subsystem"} {
+		t.Run(trigger, func(t *testing.T) {
+			t.Parallel()
+			checkShutdownTrigger(t, trigger)
+		})
+	}
+}
+
+func checkShutdownTrigger(t *testing.T, trigger string) {
+	t.Helper()
+	ctx, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+	// A separate worker context observes the explicit runtime cancel even
+	// when the selected parent context is already canceled.
+	workerCtx, runtimeCancel := context.WithCancel(context.Background())
+	readiness := NewReadiness()
+	readiness.SetReady()
+	cleanupStarted := make(chan bool, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseWorker := func() { releaseOnce.Do(func() { close(release) }) }
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-workerCtx.Done()
+		cleanupStarted <- readiness.IsReady()
+		<-release
+	}()
+	t.Cleanup(func() { runtimeCancel(); releaseWorker(); wg.Wait() })
+
+	startErr := make(chan error, 1)
+	wantErr := errors.New("unique shutdown subsystem failure")
+	registered := make(chan chan<- os.Signal, 1)
+	stopped := make(chan chan<- os.Signal, 2)
+	notify := func(ch chan<- os.Signal, signals ...os.Signal) {
+		checkShutdownRegistration(t, ch, signals)
+		registered <- ch
+	}
+	stop := func(ch chan<- os.Signal) { stopped <- ch }
+	result := make(chan error, 1)
+	go func() {
+		result <- waitForShutdownWithSignals(ctx, runtimeCancel, &wg, startErr, readiness, notify, stop)
+	}()
+	var signals chan<- os.Signal
+	select {
+	case signals = <-registered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not register signals")
+	}
+	if ctx.Err() != nil || workerCtx.Err() != nil {
+		t.Fatal("contexts must be live before triggering shutdown")
+	}
+	switch trigger {
+	case "signal":
+		signals <- os.Interrupt
+	case "parent":
+		parentCancel()
+	case "subsystem":
+		startErr <- wantErr
+	}
+	checkShutdownDrain(t, cleanupStarted, result, stopped)
+	releaseWorker()
+	if trigger != "subsystem" {
+		wantErr = nil
+	}
+	checkShutdownResult(t, result, wantErr)
+	checkShutdownStopped(t, readiness, stopped, signals)
+}
+
+func checkShutdownRegistration(t *testing.T, ch chan<- os.Signal, signals []os.Signal) {
+	t.Helper()
+	if cap(ch) != 1 || len(signals) != 2 || signals[0] != os.Interrupt || signals[1] != syscall.SIGTERM {
+		t.Error("expected buffered subscription to Interrupt and SIGTERM")
+	}
+}
+
+func checkShutdownStopped(t *testing.T, readiness *Readiness, stopped <-chan chan<- os.Signal, signals chan<- os.Signal) {
+	t.Helper()
+	if readiness.IsReady() {
+		t.Error("readiness restored after shutdown")
+	}
+	if len(stopped) != 1 || <-stopped != signals {
+		t.Error("expected exactly one stop on the registered channel")
+	}
+}
+
+func checkShutdownDrain(t *testing.T, cleanupStarted <-chan bool, result <-chan error, stopped <-chan chan<- os.Signal) {
+	t.Helper()
+	select {
+	case ready := <-cleanupStarted:
+		if ready {
+			t.Error("worker cleanup began before readiness was cleared")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime cancellation did not start worker cleanup within drain window")
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("shutdown returned before worker release: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if len(stopped) != 0 {
+		t.Error("subscription stopped before wait returned")
+	}
+}
+
+func checkShutdownResult(t *testing.T, result <-chan error, wantErr error) {
+	t.Helper()
+	select {
+	case err := <-result:
+		if wantErr != nil {
+			if !errors.Is(err, wantErr) {
+				t.Errorf("subsystem identity lost: %v", err)
+			}
+		} else if err != nil {
+			t.Errorf("graceful shutdown returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not return promptly after release")
+	}
+}
 
 // AC2/AC3: a critical subsystem startup error makes waitForShutdown return a
 // non-nil error (which propagates to a non-zero process exit) and triggers
@@ -60,9 +187,13 @@ func TestReportStartupFailure(t *testing.T) {
 
 	// Live context, room in buffer: error is forwarded.
 	live := make(chan error, 1)
-	reportStartupFailure(context.Background(), live, "gateway", errors.New("boom"))
+	cause := errors.New("boom")
+	reportStartupFailure(context.Background(), live, "gateway", cause)
 	select {
 	case err := <-live:
+		if !errors.Is(err, cause) {
+			t.Errorf("startup failure lost underlying error: %v", err)
+		}
 		if !strings.Contains(err.Error(), "gateway: boom") {
 			t.Errorf("expected wrapped subsystem error, got %v", err)
 		}
