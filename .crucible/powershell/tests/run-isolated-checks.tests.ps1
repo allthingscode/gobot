@@ -323,6 +323,27 @@ try {
         Assert-Result -Name "quick exit code" -Condition ($quick.ExitCode -eq 0) -FailureMessage "expected quick mode to skip the hook, got $($quick.ExitCode). Output:`n$quickOutput"
         Assert-Result -Name "hook skipped in quick" -Condition ($quickOutput -notmatch "project hook ran in quick") -FailureMessage "the hook should not run in quick mode. Output:`n$quickOutput"
     }
+
+    $results += Run-Test -Name "A hook run by Git for Windows' sh finds sed though Git's tool directories are not on PATH (item 176)" -Body {
+        if (-not (Test-PlatformIsWindows)) { Skip-Test "Git for Windows' fallback sh exists only on Windows"; return }
+        $gitRoot = Split-Path -Parent (Split-Path -Parent (Get-Command git -CommandType Application).Source)
+        $toolDirs = @("usr/bin", "mingw64/bin", "bin") | ForEach-Object { (Join-Path $gitRoot $_).TrimEnd('\') }
+        $strippedPath = (($env:PATH -split ';') | Where-Object { $_ -and ($toolDirs -notcontains $_.TrimEnd('\')) }) -join ';'
+        $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+        [System.IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho before | sed 's/before/sed ran/'`n")
+        $savedPath = $env:PATH
+        $env:PATH = $strippedPath
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot
+            }
+        } finally {
+            $env:PATH = $savedPath
+        }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected the hook to find Git's sed, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "sed ran" -Condition ($output -match "sed ran") -FailureMessage "expected sed's output. Output:`n$output"
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath

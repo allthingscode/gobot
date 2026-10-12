@@ -295,15 +295,33 @@ function Resolve-HookInterpreter {
     $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $cmd) { return $cmd.Source }
     # Git for Windows runs hooks with its own sh, which is often not on PATH.
-    $git = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $git) {
-        $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+    $gitRoot = Get-GitForWindowsRoot
+    if ($null -ne $gitRoot) {
         foreach ($rel in @("usr/bin/$name.exe", "bin/$name.exe")) {
             $candidate = Join-Path $gitRoot $rel
             if (Test-Path -LiteralPath $candidate) { return $candidate }
         }
     }
     return $null
+}
+
+function Get-GitForWindowsRoot {
+    $git = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $git) { return $null }
+    return (Split-Path -Parent (Split-Path -Parent $git.Source))
+}
+
+# Git puts its own tool directories first on PATH when it runs a hook, so a hook may call
+# sed, awk or grep without them being on the user's PATH. Running Git's sh without them
+# failed gobot's pre-push hook on sed (exit 127). Item 176.
+function Get-GitHookToolPath {
+    param([Parameter(Mandatory = $true)][string]$Interpreter)
+    $gitRoot = Get-GitForWindowsRoot
+    if ($null -eq $gitRoot) { return $null }
+    $prefix = $gitRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $Interpreter.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+    $dirs = @("usr/bin", "mingw64/bin", "bin") | ForEach-Object { Join-Path $gitRoot $_ } | Where-Object { Test-Path -LiteralPath $_ }
+    return ((@($dirs) + @($env:PATH)) -join [System.IO.Path]::PathSeparator)
 }
 
 # The project's own pre-push hook, when hooks.project_dir names one, runs in full mode
@@ -343,6 +361,8 @@ function Invoke-ProjectPrePushHook {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
     $psi.Environment["CRUCIBLE_PRE_PUSH_PREFLIGHT"] = "1"
+    $hookPath = Get-GitHookToolPath -Interpreter $interpreter
+    if ($null -ne $hookPath) { $psi.Environment["PATH"] = $hookPath }
     $proc = [System.Diagnostics.Process]::Start($psi)
     # Empty stdin, closed at once: no refs are being pushed, and a hook reading them must not
     # block. Piping $null instead races the hook's exit and fails with a broken pipe on Linux.
