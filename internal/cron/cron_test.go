@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestShouldReload(t *testing.T) {
@@ -204,11 +206,66 @@ func TestMergeModularJobsEnabledRefresh(t *testing.T) {
 			got := MergeModularJobs([]Job{existing, unrelated}, []Job{updated, added},
 				map[string]JobState{existing.ID: cached, added.ID: cached})
 			updated.State = state
+			updated.Source = sourceModular
 			added.State = cached
+			added.Source = sourceModular
 			want := []Job{updated, unrelated, added}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("merged jobs = %+v, want %+v", got, want)
 			}
 		})
+	}
+}
+
+func TestReconcileModularOwnership(t *testing.T) {
+	t.Parallel()
+	state := JobState{LastRunAtMS: 11, NextRunAtMS: 22, RunCount: 7, SuccessCount: 5, FailureCount: 2}
+	for _, tc := range []struct {
+		name, source                string
+		complete, present, retained bool
+	}{
+		{"remove owned", sourceModular, true, false, false},
+		{"retain owned", sourceModular, true, true, true},
+		{"incomplete retains owned", sourceModular, false, false, true},
+		{"legacy preserved", "", true, false, true},
+		{"unknown preserved", "operator", true, false, true},
+		{"legacy adopted", "", true, true, true},
+		{"unknown adopted", "future", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			prior := Job{ID: "job", Source: tc.source, Name: "old", Enabled: true, State: state}
+			var definitions []Job
+			if tc.present {
+				definitions = []Job{{ID: "job", Name: "new", Payload: Payload{Message: "updated"}}}
+			}
+			got := reconcileModularJobs([]Job{prior}, definitions, tc.complete)
+			if !tc.retained {
+				require.Empty(t, got)
+				return
+			}
+			want := prior
+			if tc.present {
+				want = definitions[0]
+				want.Source, want.State = sourceModular, state
+			}
+			require.Equal(t, []Job{want}, got)
+			store := Store{Jobs: got}
+			data, err := store.EncodeJSON()
+			require.NoError(t, err)
+			var restored Store
+			require.NoError(t, restored.DecodeJSON(data))
+			require.Equal(t, got, restored.Jobs)
+		})
+	}
+}
+
+func TestDetectModularChangeLastRemoval(t *testing.T) {
+	t.Parallel()
+	for _, last := range []int64{0, 123} {
+		changed, stamp := DetectModularChange(t.TempDir(), last)
+		if changed != (last != 0) || stamp != 0 {
+			t.Fatalf("last=%d: got %t/%d", last, changed, stamp)
+		}
 	}
 }
