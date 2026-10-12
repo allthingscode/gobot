@@ -243,6 +243,37 @@ function Get-IncompleteAdvanceTarget {
     return $target
 }
 
+# A grooming, implementation or verification run must end its phase with a handoff, which
+# crucible.ps1 -Init logs as a successful session_end. The gobot B-036 Architect stopped to
+# ask for plan approval with no handoff, and the launcher reported SUCCESS. Research may end
+# at the Research Gate and deployment at the Human Gate, so neither is checked. A log with no
+# session_start for the phase is not a pipeline run this check can judge. Item 177.
+function Test-PhaseEndedWithoutHandoff {
+    param([string]$LogPath, [string]$TaskIdValue, [string]$PhaseName, [datetime]$SinceUtc)
+    if (@("grooming", "implementation", "verification") -notcontains $PhaseName) { return $false }
+    if (-not (Test-Path -LiteralPath $LogPath)) { return $false }
+    $started = $false
+    foreach ($line in @(Get-Content -LiteralPath $LogPath -Encoding UTF8)) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try { $entry = $line | ConvertFrom-Json } catch { continue }
+        if ($null -eq $entry -or [string]$entry.task_id -ne $TaskIdValue) { continue }
+        $entryPhase = if ($entry.PSObject.Properties["phase"]) { [string]$entry.phase } else { [string]$entry.specialist }
+        if ($entryPhase -ne $PhaseName) { continue }
+        if ($entry.event -eq "session_start") { $started = $true; continue }
+        if ($entry.event -ne "session_end" -or $entry.outcome -ne "success") { continue }
+        $stamp = $entry.timestamp
+        if ($stamp -is [datetime]) {
+            $ts = $stamp.ToUniversalTime()
+        } else {
+            $ts = [datetime]::MinValue
+            $styles = [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
+            if (-not [datetime]::TryParse([string]$stamp, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$ts)) { continue }
+        }
+        if ($ts -ge $SinceUtc) { return $false }
+    }
+    return $started
+}
+
 function Test-GitWorkTree {
     param([string]$Directory)
     $res = Invoke-Git -Directory $Directory rev-parse --is-inside-work-tree
@@ -585,9 +616,13 @@ if ($result.ExitCode -eq 127) {
 }
 
 $advanceTarget = $null
+$noHandoff = $false
 if ([string]::IsNullOrWhiteSpace($failReason) -and -not $usingAdhocSession) {
     $pipelineLog = Join-Path $crucibleDir (Join-Path "session" (Join-Path $TaskId "pipeline.log.jsonl"))
     $advanceTarget = Get-IncompleteAdvanceTarget -LogPath $pipelineLog -TaskIdValue $TaskId -PhaseName $Phase -SinceUtc $launchStartUtc
+    if ($null -eq $advanceTarget) {
+        $noHandoff = Test-PhaseEndedWithoutHandoff -LogPath $pipelineLog -TaskIdValue $TaskId -PhaseName $Phase -SinceUtc $launchStartUtc
+    }
 }
 
 Write-Host ""
@@ -603,6 +638,17 @@ if ($null -ne $advanceTarget) {
     Write-Host "  The handoff is intact. Finish the advance, then dispatch the next phase:"
     Write-Host ("    pwsh -File `"" + (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) + "`" -Init -TaskId " + $TaskId + " -ProjectRoot `"" + $REPO_ROOT + "`"")
     exit 3
+} elseif ($noHandoff) {
+    Write-LaunchStatus -Status "NO_HANDOFF" -Detail @("exit code: " + $result.ExitCode, "phase ended without a handoff: " + $Phase)
+    Write-Host "[CODEX SPECIALIST] STATUS=NO_HANDOFF" -ForegroundColor Yellow
+    Write-Host ("  exit code: " + $result.ExitCode)
+    Write-Host ("  last message: " + $lastMsgPath)
+    Write-Host ("  transcript: " + $transcriptPath)
+    Write-Host ""
+    Write-Host ("  The run ended but Crucible logged no completed " + $Phase + " phase: no handoff was")
+    Write-Host "  processed. Read the last message: the specialist may have stopped to ask a question,"
+    Write-Host "  escalated to the human (see backlog/blocked/), or quit early. This is not a verdict."
+    exit 4
 } elseif ([string]::IsNullOrWhiteSpace($failReason)) {
     Write-LaunchStatus -Status "SUCCESS" -Detail @("exit code: " + $result.ExitCode)
     Write-Host "[CODEX SPECIALIST] STATUS=SUCCESS" -ForegroundColor Green

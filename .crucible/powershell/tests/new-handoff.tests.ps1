@@ -378,6 +378,28 @@ budget_tier: "low"
         }
     }
 
+    # Item 174: gobot R-040 passed -SuspiciousContent none twice, and each stored "none"
+    # tripped the human_escalation breaker.
+    Invoke-Test -Name "-SuspiciousContent that reads as 'nothing found' is refused" -Script {
+        foreach ($value in @("none", "N/A", "None found")) {
+            $taskId = New-TestTaskId ("SUSP-" + ($value -replace '[^A-Za-z]', ''))
+            $result = Invoke-Generator -InputArgs @{
+                TaskId = $taskId
+                Source = "grooming"
+                Target = "implementation"
+                Reason = "sentinel suspicious content"
+                PromptVersion = "groomer_prompt-v16"
+                Artifacts = @("powershell/crucible.ps1")
+                FileAffinity = @("powershell/")
+                SuspiciousContent = $value
+                SchemaPath = $schemaPath
+            }
+            if ($result.ExitCode -eq 0) { throw "Expected refusal for -SuspiciousContent '$value', but the generator succeeded" }
+            if ((ConvertTo-NormalizedOutput $result.Output) -notmatch "reads as nothing found") { throw "Expected the sentinel refusal message, got: $($result.Output)" }
+            if (Track-HandoffFile -TaskId $taskId) { throw "A refused -SuspiciousContent must not write a handoff for $taskId" }
+        }
+    }
+
     # Item 169: C-390's Architect passed quoted artifact paths through a native pwsh call.
     # The handoff was written, and only the next crucible.ps1 run caught the paths.
     Invoke-Test -Name "-Artifacts entry with a quote character is refused and names the exact value" -Script {

@@ -239,6 +239,14 @@ Ceiling {budget_ceiling}
         }
     }
 
+    $results += Run-Test -Name "The implementation prompt says a pipeline dispatch carries plan approval (item 177)" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "impl-approval") -TaskId "F-908" -TargetPhase "implementation"
+        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "prompts/implementation_prompt.md") -Destination (Join-Path $ctx.PromptLib "implementation_prompt.md")
+        $text = New-CruciblePromptText -Context $ctx
+        Assert-Result -Name "dispatch is the approval" -Condition ($text -match 'This dispatch is your approval to implement') -FailureMessage ("prompt: " + $text)
+        Assert-Result -Name "a project pause rule does not apply" -Condition ($text -match 'pause for plan approval' -and $text -match 'does not apply here') -FailureMessage ("prompt: " + $text)
+    }
+
     $results += Run-Test -Name "New-CruciblePromptText substitutes PowerShell host for non-Windows prompts" -Body {
         $oldPlatformMock = $script:MockPlatformIsWindows
         $oldPwshMock = $script:MockPwshCommandExists

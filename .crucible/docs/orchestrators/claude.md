@@ -155,6 +155,9 @@ launch status.
    `STATUS=ADVANCE_INCOMPLETE` (exit 3) means the specialist's work and handoff are done but its
    `crucible.ps1 -Init` was cut off mid-advance: the phase ended and the next one never started. Run
    the `-Init` command the launcher prints, then dispatch the next phase as usual.
+   `STATUS=NO_HANDOFF` (exit 4) means a grooming, implementation or verification run ended without
+   completing its phase: no handoff was processed. Read its last message (it may have stopped to ask a
+   question, escalated, or quit early) and bring it to the human; it is not a verdict.
    If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line.
 
 Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, `crucible.ps1 -Init -ProjectRoot "{project_root}"`) is

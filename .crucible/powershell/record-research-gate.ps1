@@ -48,8 +48,13 @@ function Split-ItemList {
     foreach ($raw in @($Items)) {
         if ($null -eq $raw) { continue }
         foreach ($part in ($raw -split ',')) {
-            $t = $part.Trim()
-            if ($t -ne "") { $out += $t }
+            # pwsh -File passes "B-034","B-035" as one string with its quotes kept. Item 174.
+            $t = $part.Trim().Trim('"', "'").Trim()
+            if ($t -eq "") { continue }
+            if ($t -notmatch '^[A-Z]+-\d+[a-z]?$') {
+                throw ("'" + $t + "' is not a backlog item ID (for example B-034 or C-305a). Pass IDs separated by commas, without extra quoting.")
+            }
+            $out += $t
         }
     }
     return , @($out)
@@ -110,7 +115,7 @@ $approvedQuoted = if ($approvedList.Count -gt 0) { ($approvedList | ForEach-Obje
 $deferredQuoted = if ($deferredList.Count -gt 0) { ($deferredList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
 $rejectedQuoted = if ($rejectedList.Count -gt 0) { ($rejectedList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
 
-$handoffArgs = "-TaskId $TaskId -Source research -Target grooming -Reason `"$Reason`" -SuspiciousContent none"
+$handoffArgs = "-TaskId $TaskId -Source research -Target grooming -Reason `"$Reason`""
 if ($approvedQuoted -ne '') { $handoffArgs += " -HumanApproved $approvedQuoted -StubSpecsCreated $approvedQuoted" }
 if ($deferredQuoted -ne '') { $handoffArgs += " -HumanDeferred $deferredQuoted" }
 if ($rejectedQuoted -ne '') { $handoffArgs += " -HumanRejected $rejectedQuoted" }
@@ -129,19 +134,19 @@ $fileStep = if ($approvedList.Count -gt 0) {
 ## Step 1 - File the APPROVED backlog stubs
 
 For each APPROVED item above, create a stub under the correct backlog directory
-(`$CrucibleRoot/backlog/{bugs,chores,features}/active/` by ID prefix B-/C-/F-). Each
-stub MUST have valid YAML frontmatter (item_id, title, type, status: "Ready", priority,
+(``$CrucibleRoot/backlog/{bugs,chores,features}/active/`` by ID prefix B-/C-/F-). Each
+stub MUST have valid YAML frontmatter (item_id, title, type, status: "Stub", priority,
 target_specialist, budget_tier, parent_task: "$TaskId", depends_on, file_affinity,
-created_at), a `## Summary`, a concrete testable `## Acceptance Criteria` checklist, and a
-`## Rationale` line citing the specific finding in the findings artifact. Take the title,
+created_at), a ``## Summary``, a concrete testable ``## Acceptance Criteria`` checklist, and a
+``## Rationale`` line citing the specific finding in the findings artifact. Take the title,
 type, priority, effort, and rationale from the "Recommended Backlog Items" table in
-`$findingsRel`. Do NOT invent items beyond the approved list.
+``$findingsRel``. Do NOT invent items beyond the approved list.
 
 Encoding: UTF-8 without BOM, ASCII only. No em-dashes, smart quotes, or arrow glyphs.
 
 ## Step 2 - Update BACKLOG.md
 
-Add one Active Items row per approved stub, bump the Priority Summary counts and Item IDs
+Add one Active Items row per approved stub with Status ``Stub``, bump the Priority Summary counts and Item IDs
 columns, and update the Status Overview count. Do NOT file rows for deferred or rejected
 items.
 
@@ -167,7 +172,7 @@ $gateFilingContent = @"
 
 The Research Gate for $TaskId is ALREADY DECIDED by the human. Do NOT re-run the audit,
 do NOT regenerate the findings artifact, and do NOT ask any further gate questions. The
-findings report `$findingsRel` is accepted as-is. Your ONLY job now is the mechanical
+findings report ``$findingsRel`` is accepted as-is. Your ONLY job now is the mechanical
 filing below, then the handoff.
 
 ## Human gate decision ($timestamp)
@@ -191,14 +196,14 @@ Run new-handoff.ps1:
 
     $CrucibleRoot/powershell/new-handoff.ps1 $handoffArgs
 
-This records the human decision in the handoff `human_decisions` block.
+This records the human decision in the handoff ``human_decisions`` block.
 
 ## Step 4 - Validate and advance
 
     $CrucibleRoot/powershell/validate-backlog.ps1 -ProjectRoot "$REPO_ROOT"
     $CrucibleRoot/powershell/crucible.ps1 -Init -TaskId $TaskId -Quiet -ProjectRoot "$REPO_ROOT"
 
-Fix any validate-backlog count mismatch before finishing. Append a `### CHECKPOINT` line to
+Fix any validate-backlog count mismatch before finishing. Append a ``### CHECKPOINT`` line to
 your research task.md noting the stubs filed and the handoff written. Report the Crucible
 output. Do NOT spawn successor agents.
 "@

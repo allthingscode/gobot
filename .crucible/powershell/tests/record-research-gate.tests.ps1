@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $SCRIPT = Join-Path $REPO_ROOT "powershell/record-research-gate.ps1"
 
 $results = @()
@@ -94,6 +95,32 @@ try {
         Assert-Result "no BOM" (-not $hasBom) "gate-filing.md must be BOM-free"
         $nonAscii = @($bytes | Where-Object { $_ -gt 0x7F })
         Assert-Result "ascii only" ($nonAscii.Count -eq 0) "gate-filing.md must be ASCII-only"
+    }
+
+    $results += Run-Test -Name "a gate recorded through pwsh -File stores bare IDs and a prompt with real paths (item 174)" -Body {
+        # gobot R-040: the quotes reached the script, and the prompt named `$findingsRel and
+        # `$CrucibleRoot literally because a Markdown backtick escaped the dollar sign.
+        $p = New-GateProject -Root (Join-Path $tempRoot "pwsh-file")
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved '"C-350","C-351"' -ProjectRoot $p.Root }
+        Assert-Result "exit 0" ($run.ExitCode -eq 0) ("record-research-gate failed: " + $run.Output)
+        $gateDir = Join-Path $p.Root ".crucible/session/global/research_gate"
+        $obj = Get-Content -LiteralPath (Get-ChildItem -LiteralPath $gateDir -Filter "$($p.TaskId)-*.json")[0].FullName -Raw | ConvertFrom-Json
+        Assert-Result "bare IDs recorded" ((@($obj.approved) -join ",") -eq "C-350,C-351") ("approved recorded as: " + (@($obj.approved) -join ","))
+        $body = Get-Content -LiteralPath $p.GateFiling -Raw
+        Assert-Result "no dollar sign" ($body -notmatch '\$') ("gate-filing.md holds an unexpanded variable: " + $body)
+        Assert-Result "names the findings artifact" ($body -match '`\.crucible/research/R-021_Quality_Audit_20260715\.md`') "gate-filing.md should name the findings artifact in backticks"
+        Assert-Result "names the backlog path" ($body -match '`\.crucible/backlog/\{bugs,chores,features\}/active/`') "gate-filing.md should name the backlog directory in backticks"
+        Assert-Result "handoff IDs singly quoted" ($body -match '-HumanApproved "C-350","C-351"') "handoff command should quote each ID once"
+        Assert-Result "no suspicious-content sentinel" ($body -notmatch 'SuspiciousContent') "the handoff command must not pass -SuspiciousContent"
+        Assert-Result "stubs filed as Stub" ($body -match 'status: "Stub"' -and $body -notmatch 'status: "Ready"') "stubs must be filed with status Stub for the Stub-Only Close-Out"
+    }
+
+    $results += Run-Test -Name "a value that is not a backlog ID is refused (item 174)" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "bad-id")
+        $threw = $false
+        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -Approved "C-350","B034" -ProjectRoot $p.Root 2>$null } catch { $threw = ($_.Exception.Message -match "'B034' is not a backlog item ID") }
+        Assert-Result "refuses B034" $threw "expected a refusal naming B034"
+        Assert-Result "writes no gate-filing" (-not (Test-Path -LiteralPath $p.GateFiling)) "a refused gate must not write gate-filing.md"
     }
 
     $results += Run-Test -Name "empty decision is refused" -Body {

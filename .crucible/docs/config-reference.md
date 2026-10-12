@@ -342,6 +342,8 @@ The project hook gets the same arguments git passed to Crucible's hook and, for 
 
 `run-isolated-checks.ps1 -Mode full` also runs the project's `pre-push` hook, the task branch's copy, in the implementation worktree, and fails as a named check when the hook fails. Crucible runs full mode itself before it accepts a verification approval, so a check the hook makes fails before the Human Gate instead of at the push after it. That run passes the arguments `origin` and the origin URL, gives no refs on stdin, and sets `CRUCIBLE_PRE_PUSH_PREFLIGHT=1`. A hook can test that variable to skip a step that only makes sense at a real push. When the interpreter is Git for Windows' own `sh`, the run puts Git's `usr/bin`, `mingw64/bin` and `bin` first on PATH, as Git does when it runs a hook, so tools such as `sed` are found.
 
+A task with no implementation worktree, such as research, runs the configured checks with `run-isolated-checks.ps1 -Commit <rev>`. The commands run in a temporary detached worktree at that commit under `.crucible/.agent-workspaces/`, which is removed afterwards whether the checks pass or fail, so files they write never reach the main checkout. Each command's exit code is printed. The pre-push hook does not run in this mode.
+
 `install-hooks.ps1` warns when the project tracks a directory holding a `pre-commit`, `commit-msg`, or `pre-push` file that `project_dir` does not name.
 
 ---

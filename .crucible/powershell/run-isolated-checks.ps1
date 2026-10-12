@@ -4,7 +4,9 @@ param(
     [ValidateSet("quick", "full", "test")]
     [string]$Mode = "full",
     [Parameter(Mandatory = $false)]
-    [string]$ProjectRoot = ""
+    [string]$ProjectRoot = "",
+    [Parameter(Mandatory = $false)]
+    [string]$Commit = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,18 +25,51 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 }
 
 $worktreeRoot = Join-Path $ProjectRoot ".crucible/.agent-workspaces"
-$worktree = Join-Path $worktreeRoot ("implementation-" + $TaskId)
-if (-not (Test-Path -LiteralPath $worktree)) {
-    Write-Error ("Worktree missing: {0}" -f $worktree)
+$commitWorktree = $null
+function Remove-CommitWorktree {
+    if ($null -eq $commitWorktree) { return }
+    Set-Location -LiteralPath $ProjectRoot
+    $rmRes = Invoke-Git -Directory $ProjectRoot worktree remove --force $commitWorktree
+    if ($rmRes.ExitCode -ne 0) {
+        Write-Warning ("Could not remove the temporary worktree {0}: {1}" -f $commitWorktree, $rmRes.Raw)
+    }
 }
-$worktree = (Resolve-Path -LiteralPath $worktree).Path
+# A trap covers the whole script, including lines before this one, so it tests the variable
+# rather than calling the function before it exists.
+trap { if ($null -ne $commitWorktree) { Remove-CommitWorktree }; break }
+if (-not [string]::IsNullOrWhiteSpace($Commit)) {
+    # A research task has no implementation worktree or task branch, so gobot R-040's
+    # Researcher built its own runner and one check passed vacuously. -Commit runs the
+    # configured checks in a throwaway detached worktree at that commit, so artifacts the
+    # commands write never touch the main checkout. Item 173.
+    $commitRes = Invoke-Git -Directory $ProjectRoot rev-parse --verify --quiet ($Commit + "^{commit}")
+    if ($commitRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($commitRes.Raw)) {
+        Write-Error ("-Commit '{0}' does not name a commit in {1}." -f $Commit, $ProjectRoot)
+    }
+    $commitSha = $commitRes.Raw.Trim()
+    $stamp = [datetime]::UtcNow.ToString("yyyyMMddTHHmmssfffZ", [System.Globalization.CultureInfo]::InvariantCulture)
+    $commitWorktree = Join-Path $worktreeRoot ("checks-" + $TaskId + "-" + $stamp)
+    $addRes = Invoke-Git -Directory $ProjectRoot worktree add --detach $commitWorktree $commitSha
+    if ($addRes.ExitCode -ne 0) {
+        Write-Error ("Could not create a worktree at {0} for {1}: {2}" -f $commitWorktree, $commitSha, $addRes.Raw)
+    }
+    $worktree = (Resolve-Path -LiteralPath $commitWorktree).Path
+    Write-Host ("Running the configured checks for {0} at {1} in a temporary worktree: {2}" -f $TaskId, $commitSha, $worktree)
+} else {
+    $worktree = Join-Path $worktreeRoot ("implementation-" + $TaskId)
+    if (-not (Test-Path -LiteralPath $worktree)) {
+        Write-Error ("Worktree missing: {0}. A task with no implementation worktree (research, for example) passes -Commit <rev> instead." -f $worktree)
+    }
+    $worktree = (Resolve-Path -LiteralPath $worktree).Path
 
-$branchRes = Invoke-Git -Directory $worktree rev-parse --abbrev-ref HEAD
-$branch = $branchRes.Raw.Trim()
-$expectedBranch = "task/$TaskId"
-if ($branchRes.ExitCode -ne 0 -or $branch -ne $expectedBranch) {
-    Write-Error ("Worktree branch mismatch. Expected '{0}', found '{1}'." -f $expectedBranch, $branch)
+    $branchRes = Invoke-Git -Directory $worktree rev-parse --abbrev-ref HEAD
+    $branch = $branchRes.Raw.Trim()
+    $expectedBranch = "task/$TaskId"
+    if ($branchRes.ExitCode -ne 0 -or $branch -ne $expectedBranch) {
+        Write-Error ("Worktree branch mismatch. Expected '{0}', found '{1}'." -f $expectedBranch, $branch)
+    }
 }
+
 
 $configPath = Join-Path $ProjectRoot ".crucible/config.yaml"
 if (-not (Test-Path -LiteralPath $configPath)) {
@@ -181,6 +216,7 @@ function Invoke-Check {
     Write-Host ("==> {0}" -f $Name)
     # Execute the string as a command line
     Invoke-Expression $CommandString
+    Write-Host ("    exit code: {0}" -f $LASTEXITCODE)
     if ($LASTEXITCODE -ne 0) {
         # Emit a stable stdout marker before throwing. The orchestrator parses this line
         # to name the failing check; child-process error rendering differs across
@@ -390,6 +426,11 @@ try {
     Pop-Location
 }
 
-if ($targetMode -eq "full") {
+if ($null -ne $commitWorktree) {
+    if ($targetMode -eq "full") {
+        Write-Host "The project pre-push hook checks a branch push, so it does not run for -Commit."
+    }
+    Remove-CommitWorktree
+} elseif ($targetMode -eq "full") {
     Invoke-ProjectPrePushHook
 }

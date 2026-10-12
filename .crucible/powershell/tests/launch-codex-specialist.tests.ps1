@@ -737,6 +737,43 @@ try {
             "-PromptText", "REVIEW", "-ProjectRoot", $staleRoot)
         Assert-Result -Name "stale half-advance ignored" -Condition ($res2.Output -match "STATUS=SUCCESS") -FailureMessage "an event before launch must not flag this run. Output:`n$($res2.Output)"
     }
+
+    $results += Run-Test -Name "A started phase that ends without a handoff reports NO_HANDOFF (item 177)" -Body {
+        # Regression: the gobot B-036 Architect stopped to ask for plan approval, wrote no
+        # handoff, and the launcher still reported SUCCESS.
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        $start = '{"event":"session_start","task_id":"C-974","phase":"implementation","timestamp":"2020-01-01T00:00:00Z"}'
+        $projectRoot = Join-Path $tempRoot "proj-no-handoff"
+        $taskDir = Join-Path $projectRoot ".crucible/session/C-974"
+        New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $taskDir "pipeline.log.jsonl"), ($start + "`n"), $enc)
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-974", "-Phase", "implementation", "-Model", "gpt-6-sol",
+            "-PromptText", "IMPLEMENT", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "status no_handoff" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=NO_HANDOFF") -FailureMessage "expected NO_HANDOFF. Output:`n$($res.Output)"
+        Assert-Result -Name "not reported as success" -Condition (-not ($res.Output -match "STATUS=SUCCESS")) -FailureMessage "must not report SUCCESS. Output:`n$($res.Output)"
+        Assert-Result -Name "exit 4" -Condition ($res.ExitCode -eq 4) -FailureMessage "expected exit 4, got $($res.ExitCode). Output:`n$($res.Output)"
+        $statusText = [System.IO.File]::ReadAllText((Join-Path $taskDir "implementation/codex-launch-status.txt"))
+        Assert-Result -Name "status file no_handoff" -Condition ($statusText.StartsWith("STATUS=NO_HANDOFF")) -FailureMessage "expected STATUS=NO_HANDOFF in the status file, saw: $statusText"
+
+        $researchRoot = Join-Path $tempRoot "proj-research-no-handoff"
+        $researchDir = Join-Path $researchRoot ".crucible/session/R-974"
+        New-Item -ItemType Directory -Path $researchDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $researchDir "pipeline.log.jsonl"), (($start -replace "C-974", "R-974" -replace "implementation", "research") + "`n"), $enc)
+        $res2 = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "R-974", "-Phase", "research", "-Model", "gpt-6-sol",
+            "-PromptText", "RESEARCH", "-ProjectRoot", $researchRoot)
+        Assert-Result -Name "research gate stop stays success" -Condition ($res2.Output -match "STATUS=SUCCESS") -FailureMessage "a research run may stop at the Research Gate. Output:`n$($res2.Output)"
+
+        $handoffRoot = Join-Path $tempRoot "proj-handoff-written"
+        $handoffDir = Join-Path $handoffRoot ".crucible/session/C-973"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $handoffDir "pipeline.log.jsonl"), (($start -replace "C-974", "C-973" -replace "implementation", "verification") + "`n"), $enc)
+        $res3 = Invoke-Launcher -Mode "fulladvance" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-973", "-Phase", "verification", "-Model", "gpt-6-sol",
+            "-PromptText", "REVIEW", "-ProjectRoot", $handoffRoot)
+        Assert-Result -Name "handoff written stays success" -Condition ($res3.Output -match "STATUS=SUCCESS") -FailureMessage "a run that ended its phase must be SUCCESS. Output:`n$($res3.Output)"
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

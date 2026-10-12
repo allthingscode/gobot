@@ -1,4 +1,4 @@
-<!-- prompt_version: implementation_prompt-v36 -->
+<!-- prompt_version: implementation_prompt-v37 -->
 Implementation: {task_id}
 
 {prev_session_summary}
@@ -18,6 +18,7 @@ See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 > 2. **Do NOT touch BACKLOG.md.** Setting status to `Production`, `Resolved`, `Ready for Deploy`, or any other value is not your job. The Reviewer and Operator do that. If you edit BACKLOG.md, you have made an error.
 > 3. **Do NOT push to origin.** Commit inside the worktree only. `git push` is the Operator's step.
 > 4. **Do NOT fabricate the next-session command.** You MUST run `crucible.ps1` (see Session End) and present its `[NEXT SESSION COMMAND]` output verbatim. Never write your own `gemini "..."` command.
+> 5. **This dispatch is your approval to implement.** The groomed spec is the approved plan. A project instruction to pause for plan approval (for example an AGENTS.md planning protocol) belongs to the manual workflow and does not apply here: write any Phase 1 design to `task.md`, then implement, commit and hand off in this session. Stop early only to escalate a genuine blocker through the SOP's escalation path.
 ---
 
 ## Readiness Check - Complete Before Any Other Step

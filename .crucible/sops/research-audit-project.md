@@ -1,4 +1,4 @@
-<!-- prompt_version: research-audit-project-v2 -->
+<!-- prompt_version: research-audit-project-v3 -->
 # SOP: Researcher - Adopter-Project Quality Audit
 
 **Use when:** Asked to run a structured quality audit of the adopter project.
@@ -79,6 +79,19 @@ Run the configured verification commands that are appropriate for an audit:
 .crucible/config.yaml verification.quick
 .crucible/config.yaml verification.full
 ```
+
+Run them through Crucible's checker at the commit you are auditing, not with a runner of
+your own. A research task has no implementation worktree, so pass `-Commit`:
+
+```text
+pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -Commit HEAD -ProjectRoot "{project_root}"
+pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -Commit HEAD -ProjectRoot "{project_root}"
+```
+
+It runs the configured commands in a temporary detached worktree at that commit, prints
+each command's exit code, stops at the first failure, and removes the worktree, so files
+the commands write (coverage output, for example) never reach the main checkout. The
+project pre-push hook does not run in this mode.
 
 Record command, exit code, and concise findings. Failures are audit findings, not blockers to continuing unless they prevent the audit from running safely.
 

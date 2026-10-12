@@ -489,6 +489,12 @@ foreach ($art in $resolvedArtifacts) {
 }
 $resolvedArtifacts = $normalizedArtifacts
 
+# Item 174: any -SuspiciousContent value trips the human_escalation breaker, so a "none
+# found" placeholder raised a false escalation in gobot R-040 twice. Refuse it here.
+if ($SuspiciousContent.Trim() -match '^(?i)(none|none found|n/?a|null|no|false|nothing|-)\.?$') {
+    throw ("-SuspiciousContent '" + $SuspiciousContent + "' reads as 'nothing found', but any value is recorded as suspicious content and escalates to the human. Omit -SuspiciousContent when there is none; pass it only to describe content that is suspicious.")
+}
+
 # Item 169: C-390's Architect passed quoted paths through a native pwsh call, the quotes
 # arrived as characters, and only the next crucible.ps1 run caught the paths, with a
 # message that blamed the files. Refuse here, naming the exact value received. Inherited

@@ -344,6 +344,48 @@ try {
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected the hook to find Git's sed, got $($res.ExitCode). Output:`n$output"
         Assert-Result -Name "sed ran" -Condition ($output -match "sed ran") -FailureMessage "expected sed's output. Output:`n$output"
     }
+
+    $results += Run-Test -Name "-Commit runs the configured checks for a task with no worktree and reports each exit code (item 173)" -Body {
+        # gobot R-040's Researcher had no worktree to run the checks in, built its own runner,
+        # and a quoted coverage command passed without running.
+        $commitRoot = Join-Path $tempRoot "commit-project"
+        Initialize-Repo -ProjectRoot $commitRoot
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: writes-artifact",
+            "      command: Set-Content -LiteralPath artifact.txt -Value x; $pwshCmd -NoProfile -Command exit 0",
+            "  full:",
+            "    - name: fails-with-3",
+            "      command: $pwshCmd -NoProfile -Command exit 3"
+        ) | Set-Content -LiteralPath (Join-Path $commitRoot ".crucible/config.yaml") -Encoding UTF8
+        git -C $commitRoot add .crucible/config.yaml
+        git -C $commitRoot commit -m "checks" --quiet
+        $workspaces = Join-Path $commitRoot ".crucible/.agent-workspaces"
+
+        $quick = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-001 -Mode quick -Commit HEAD -ProjectRoot $commitRoot }
+        $quickOut = $quick.Output -join "`n"
+        Assert-Result -Name "quick passes" -Condition ($quick.ExitCode -eq 0) -FailureMessage "expected 0, got $($quick.ExitCode). Output:`n$quickOut"
+        Assert-Result -Name "quick ran its check" -Condition ($quickOut -match "==> writes-artifact" -and $quickOut -match "exit code: 0") -FailureMessage "expected the check and its exit code. Output:`n$quickOut"
+        Assert-Result -Name "main checkout untouched" -Condition (-not (Test-Path -LiteralPath (Join-Path $commitRoot "artifact.txt"))) -FailureMessage "the check's artifact must land in the temporary worktree, not the main checkout"
+
+        $full = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-001 -Mode full -Commit HEAD -ProjectRoot $commitRoot }
+        $fullOut = $full.Output -join "`n"
+        Assert-Result -Name "full fails" -Condition ($full.ExitCode -ne 0) -FailureMessage "a failing check must fail the run. Output:`n$fullOut"
+        Assert-Result -Name "full names the check and its exit code" -Condition ($fullOut -match "Check failed: fails-with-3" -and $fullOut -match "exit code: 3") -FailureMessage "expected the failing check and exit 3. Output:`n$fullOut"
+
+        $left = @(Get-ChildItem -LiteralPath $workspaces -Directory -Filter "checks-*" -ErrorAction SilentlyContinue)
+        Assert-Result -Name "temporary worktrees removed" -Condition ($left.Count -eq 0) -FailureMessage ("left behind: " + (($left | ForEach-Object { $_.Name }) -join ", "))
+        $worktrees = @(git -C $commitRoot worktree list | Where-Object { $_ })
+        Assert-Result -Name "git forgets them" -Condition ($worktrees.Count -eq 1) -FailureMessage ("git worktree list: " + ($worktrees -join " | "))
+
+        $bad = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-001 -Mode quick -Commit no-such-rev -ProjectRoot $commitRoot }
+        Assert-Result -Name "unknown commit refused" -Condition ($bad.ExitCode -ne 0 -and (($bad.Output -join "`n") -match "does not name a commit")) -FailureMessage ("Output:`n" + ($bad.Output -join "`n"))
+
+        $none = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-001 -Mode quick -ProjectRoot $commitRoot }
+        Assert-Result -Name "no worktree points at -Commit" -Condition ($none.ExitCode -ne 0 -and (($none.Output -join "`n") -match "passes -Commit")) -FailureMessage ("Output:`n" + ($none.Output -join "`n"))
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath
