@@ -90,6 +90,9 @@ func splitModularFile(content string) (frontMatter, body []string, err error) {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, nil, fmt.Errorf("scan modular file: %w", err)
+	}
 	if frontMatterCount < 2 {
 		return nil, nil, fmt.Errorf("missing front-matter delimiters")
 	}
@@ -214,22 +217,43 @@ func ptr[T any](v T) *T {
 // LoadModularJobs scans itemsDir for .md files and parses each into a Job.
 // Files that fail to parse are logged and skipped.
 func LoadModularJobs(itemsDir string) ([]Job, error) {
+	snapshot, err := loadModularSnapshot(itemsDir)
+	return snapshot.jobs, err
+}
+
+type modularSnapshot struct {
+	jobs        []Job
+	fingerprint string
+	complete    bool
+}
+
+func loadModularSnapshot(itemsDir string) (modularSnapshot, error) {
 	entries, err := os.ReadDir(itemsDir)
 	if err != nil {
-		return nil, fmt.Errorf("read items dir: %w", err)
+		return modularSnapshot{}, fmt.Errorf("read items dir %q: %w", itemsDir, err)
 	}
-	jobs := make([]Job, 0, len(entries))
+	snapshot := modularSnapshot{jobs: make([]Job, 0, len(entries)), complete: true}
+	var fingerprint strings.Builder
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
 			continue
 		}
 		path := filepath.Join(itemsDir, e.Name())
+		info, err := e.Info()
+		if err != nil {
+			snapshot.complete = false
+			slog.Warn("cron: stat modular file failed", slog.String("file", path), logattr.Err(err))
+			continue
+		}
+		fmt.Fprintf(&fingerprint, "%q:%d:%d;", e.Name(), info.Size(), info.ModTime().UnixNano())
 		job, err := ParseModularJobFile(path)
 		if err != nil {
+			snapshot.complete = false
 			slog.Warn("Cron: skipping malformed job file", slog.String("file", e.Name()), logattr.Err(err))
 			continue
 		}
-		jobs = append(jobs, *job)
+		snapshot.jobs = append(snapshot.jobs, *job)
 	}
-	return jobs, nil
+	snapshot.fingerprint = fingerprint.String()
+	return snapshot, nil
 }

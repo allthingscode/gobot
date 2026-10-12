@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 
@@ -47,19 +48,21 @@ type Alerter interface {
 
 // Scheduler handles the lifecycle of scheduled jobs.
 type Scheduler struct {
-	mu               sync.RWMutex
-	storePath        string
-	itemsDir         string
-	dispatcher       Dispatcher
-	pollInterval     time.Duration
-	jobTimeout       time.Duration
-	store            *Store
-	lastMtime        int64
-	lastSize         int64
-	lastModularMtime int64
-	lastReloadErr    error
-	lastReloadErrAt  time.Time
-	clock            Clock
+	mu                 sync.RWMutex
+	storePath          string
+	itemsDir           string
+	dispatcher         Dispatcher
+	pollInterval       time.Duration
+	jobTimeout         time.Duration
+	store              *Store
+	lastMtime          int64
+	lastSize           int64
+	modularFingerprint string
+	modularCommitted   bool
+	modularDirty       bool
+	lastReloadErr      error
+	lastReloadErrAt    time.Time
+	clock              Clock
 }
 
 // NewScheduler creates a new background scheduler.
@@ -230,6 +233,9 @@ func (s *Scheduler) poll(ctx context.Context) error {
 }
 
 func (s *Scheduler) reloadJobsJSON() {
+	if s.modularDirty {
+		return
+	}
 	info, err := os.Stat(s.storePath)
 	if err != nil {
 		if s.lastMtime != 0 {
@@ -254,6 +260,7 @@ func (s *Scheduler) reloadJobsJSON() {
 			s.recordReloadError(fmt.Errorf("decode jobs.json: %w", err))
 		} else {
 			s.store = &newStore
+			s.modularCommitted = false
 			s.lastMtime = info.ModTime().UnixNano()
 			s.lastSize = info.Size()
 			s.clearReloadError()
@@ -276,29 +283,39 @@ func (s *Scheduler) reloadModularJobs() {
 		return
 	}
 
-	changed, newMtime := DetectModularChange(s.itemsDir, s.lastModularMtime)
-	if !changed {
-		return
-	}
-
-	modularJobs, err := LoadModularJobs(s.itemsDir)
+	snapshot, err := loadModularSnapshot(s.itemsDir)
 	if err != nil {
 		slog.Warn("cron: failed to load modular jobs", logattr.Err(err))
+		if s.modularDirty {
+			s.saveStore()
+		}
 		return
 	}
-
-	stateCache := make(map[string]JobState)
-	if s.store != nil {
-		for _, j := range s.store.Jobs {
-			stateCache[j.ID] = j.State
-		}
+	if snapshot.complete && s.modularCommitted && !s.modularDirty && snapshot.fingerprint == s.modularFingerprint {
+		return
 	}
+	s.reconcileSnapshot(snapshot)
+}
+
+func (s *Scheduler) reconcileSnapshot(snapshot modularSnapshot) {
 	if s.store == nil {
 		s.store = &Store{}
 	}
-	s.store.Jobs = MergeModularJobs(s.store.Jobs, modularJobs, stateCache)
-	s.lastModularMtime = newMtime
-	slog.Info("cron: loaded modular jobs", "count", len(modularJobs))
+	jobs := reconcileModularJobs(s.store.Jobs, snapshot.jobs, snapshot.complete)
+	if !reflect.DeepEqual(s.store.Jobs, jobs) && (len(s.store.Jobs) != 0 || len(jobs) != 0) {
+		s.store.Jobs = jobs
+		s.modularDirty = true
+	}
+	if s.modularDirty {
+		if err := s.writeStore(); err != nil {
+			slog.Error("cron: failed to persist modular reconciliation", logattr.Err(err))
+			return
+		}
+	}
+	if snapshot.complete {
+		s.modularFingerprint = snapshot.fingerprint
+		s.modularCommitted = true
+	}
 }
 
 // dueJob captures the state needed to dispatch a single job concurrently.
@@ -412,19 +429,25 @@ func (s *Scheduler) sendFailureAlert(ctx context.Context, dj dueJob, err error) 
 }
 
 func (s *Scheduler) saveStore() {
+	if err := s.writeStore(); err != nil {
+		slog.Error("cron: failed to save jobs store", logattr.Err(err))
+	}
+}
+
+func (s *Scheduler) writeStore() error {
 	data, err := s.store.EncodeJSON()
 	if err != nil {
-		slog.Error("cron: failed to encode jobs store", logattr.Err(err))
-		return
+		return fmt.Errorf("encode jobs store: %w", err)
 	}
 	if err := state.WriteFileAtomic(s.storePath, data, 0o600); err != nil {
-		slog.Error("cron: failed to save jobs store", logattr.Err(err))
-		return
+		return fmt.Errorf("save jobs store: %w", err)
 	}
+	s.modularDirty = false
 	if info, err := os.Stat(s.storePath); err == nil {
 		s.lastMtime = info.ModTime().UnixNano()
 		s.lastSize = info.Size()
 	}
+	return nil
 }
 
 func (s *Scheduler) recordReloadError(err error) {

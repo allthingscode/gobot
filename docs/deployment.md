@@ -260,6 +260,21 @@ If you manage the storage root through `config.json` instead, no task change is 
 
 ---
 
+## Modular Cron Ownership and Legacy Cleanup
+
+Imported Markdown cron definitions acquire `"source": "modular"` in `jobs.json`, including an existing job with the same ID. A valid definition controls that job's name, schedule, payload and enabled flag while preserving its execution state. Use unique IDs across modular definitions, operator jobs and seeded jobs to avoid adopting an unrelated job.
+
+Removing a definition removes its modular-owned job on the next complete, readable scan, including when the last definition is removed or the scheduler starts with an empty items directory. Ownership and removals persist atomically before due selection. Already dispatched work continues. Missing directories, unreadable files and malformed definitions cannot authorize deletion; reconciliation retries after the problem is corrected.
+
+Jobs with missing, empty or unknown `source` values remain unowned and survive reconciliation. This conservative upgrade policy intentionally preserves possible legacy orphans: origin cannot be inferred from a job's ID, name, schedule or payload. A legacy job acquires modular ownership only when a valid same-ID definition is imported. Do not bulk-mark legacy jobs as modular.
+
+For a confirmed obsolete legacy job:
+
+1. Stop the Gobot service or scheduled process using your deployment's service controls.
+2. Back up the durable storage root's `jobs.json`.
+3. Remove only the record whose ID you have verified as obsolete, preserving all other jobs and valid JSON.
+4. Restart the service and confirm the retained jobs are present.
+
 ## Cron Job Scheduling & Missed Job Behavior
 
 Gobot can run scheduled background jobs (for example, a daily morning briefing). These are evaluated by the internal scheduler on a short polling interval while Gobot is running. This section explains what happens to a scheduled job when Gobot is **not** running at the job's scheduled time, and how to run such a job on demand.

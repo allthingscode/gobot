@@ -17,6 +17,7 @@ const (
 	KindCron  ScheduleKind = "cron"
 
 	fallbackChannel = "telegram"
+	sourceModular   = "modular"
 )
 
 // Schedule defines when a job should run.
@@ -50,6 +51,7 @@ type JobState struct {
 // Job represents a single scheduled task.
 type Job struct {
 	ID       string   `json:"id"`
+	Source   string   `json:"source,omitempty"`
 	Name     string   `json:"name"`
 	Enabled  bool     `json:"enabled"`
 	Schedule Schedule `json:"schedule"`
@@ -128,7 +130,7 @@ func DetectModularChange(itemsDir string, lastItemsMtime int64) (changed bool, n
 	}
 
 	if !found {
-		return false, 0
+		return lastItemsMtime != 0, 0
 	}
 
 	if totalMtime != lastItemsMtime {
@@ -141,6 +143,7 @@ func DetectModularChange(itemsDir string, lastItemsMtime int64) (changed bool, n
 // MergeModularJobs merges modular jobs into the store, preserving state.
 func MergeModularJobs(storeJobs, modularJobs []Job, stateCache map[string]JobState) []Job {
 	for i, mj := range modularJobs {
+		modularJobs[i].Source = sourceModular
 		if state, ok := stateCache[mj.ID]; ok {
 			modularJobs[i].State = state
 		}
@@ -154,6 +157,7 @@ func MergeModularJobs(storeJobs, modularJobs []Job, stateCache map[string]JobSta
 			storeJobs[j].Payload = mj.Payload
 			storeJobs[j].Name = mj.Name
 			storeJobs[j].Enabled = mj.Enabled
+			storeJobs[j].Source = sourceModular
 			found = true
 			break
 		}
@@ -163,4 +167,21 @@ func MergeModularJobs(storeJobs, modularJobs []Job, stateCache map[string]JobSta
 		}
 	}
 	return storeJobs
+}
+
+// reconcileModularJobs prunes only explicitly owned jobs from complete snapshots.
+func reconcileModularJobs(storeJobs, modularJobs []Job, complete bool) []Job {
+	stateCache := make(map[string]JobState, len(storeJobs))
+	present := make(map[string]bool, len(modularJobs))
+	for _, job := range modularJobs {
+		present[job.ID] = true
+	}
+	retained := make([]Job, 0, len(storeJobs))
+	for _, job := range storeJobs {
+		stateCache[job.ID] = job.State
+		if !complete || job.Source != sourceModular || present[job.ID] {
+			retained = append(retained, job)
+		}
+	}
+	return MergeModularJobs(retained, modularJobs, stateCache)
 }

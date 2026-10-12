@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -50,6 +51,37 @@ func TestSeedJob_IdempotentOnExistingID(t *testing.T) {
 	}
 	if seeded {
 		t.Error("expected seeded=false when job already present")
+	}
+}
+
+func TestSeedJobSurvivesModularReconciliation(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "jobs.json")
+	items := t.TempDir()
+	seed := EveryJob(testIndexJobID, "Index", "[SYSTEM] INDEX_WORKSPACE", 1000)
+	seed.Enabled = false
+	seed.State = JobState{LastRunAtMS: 10, NextRunAtMS: 20, RunCount: 7, SuccessCount: 5, FailureCount: 2}
+	if _, err := SeedJob(path, seed); err != nil {
+		t.Fatal(err)
+	}
+	operator := Job{ID: "operator", State: seed.State}
+	if _, err := SeedJob(path, operator); err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(items, "modular.md")
+	writeTestFile(t, definition, "---\nid: modular\nenabled: false\nschedule: every(1h)\n---\nbody")
+	s := NewScheduler(path, items, nil)
+	s.reloadModularJobs()
+	if err := os.Remove(definition); err != nil {
+		t.Fatal(err)
+	}
+	s.reloadModularJobs()
+	for _, jobs := range [][]Job{s.Jobs(), readEnabledRefreshStore(t, path).Jobs, NewScheduler(path, items, nil).Jobs()} {
+		byID := jobsByID(jobs)
+		if len(byID) != 2 || !reflect.DeepEqual(byID[seed.ID], seed) || !reflect.DeepEqual(byID[operator.ID], operator) {
+			t.Fatalf("seed/operator changed: %+v", jobs)
+		}
 	}
 }
 

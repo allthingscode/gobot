@@ -6,7 +6,75 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+func TestModularSnapshotCompleteness(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, badContent      string
+		badLink, wantComplete bool
+	}{
+		{"valid", "", false, true},
+		{"malformed", "---\nid: bad\n---\nno schedule", false, false},
+		{"scanner failure", "---\nschedule: every(1h)\n---\n" + strings.Repeat("x", 70*1024), false, false},
+		{"unreadable", "", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeTestFile(t, filepath.Join(dir, "valid.MD"), modularJobContent("valid", "Valid", "every(1h)", "body"))
+			if tc.badContent != "" {
+				writeTestFile(t, filepath.Join(dir, "bad.md"), tc.badContent)
+			}
+			if tc.badLink {
+				// A symlink to a directory stats successfully but cannot be read as a file.
+				if err := os.Symlink(dir, filepath.Join(dir, "bad.md")); err != nil {
+					t.Skipf("unreadable symlink fixture unavailable: %v", err)
+				}
+			}
+			got, err := loadModularSnapshot(dir)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantComplete, got.complete)
+			require.Len(t, got.jobs, 1)
+			require.Equal(t, "valid", got.jobs[0].ID)
+			jobs, err := LoadModularJobs(dir)
+			require.NoError(t, err)
+			require.Len(t, jobs, 1)
+		})
+	}
+}
+
+func TestModularSnapshotFingerprint(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	empty, err := loadModularSnapshot(dir)
+	require.NoError(t, err)
+	require.True(t, empty.complete)
+	require.Empty(t, empty.jobs)
+	path := filepath.Join(dir, "a.md")
+	writeTestFile(t, path, modularJobContent("a", "A", "every(1h)", "body"))
+	first, err := loadModularSnapshot(dir)
+	require.NoError(t, err)
+	same, err := loadModularSnapshot(dir)
+	require.NoError(t, err)
+	require.Equal(t, first.fingerprint, same.fingerprint)
+	renamedPath := filepath.Join(dir, "b.md")
+	require.NoError(t, os.Rename(path, renamedPath))
+	renamed, err := loadModularSnapshot(dir)
+	require.NoError(t, err)
+	require.NotEqual(t, first.fingerprint, renamed.fingerprint)
+	writeTestFile(t, renamedPath, modularJobContent("a", "A", "every(1h)", "longer body"))
+	resized, err := loadModularSnapshot(dir)
+	require.NoError(t, err)
+	require.NotEqual(t, renamed.fingerprint, resized.fingerprint)
+	require.NoError(t, os.Remove(renamedPath))
+	last, err := loadModularSnapshot(dir)
+	require.NoError(t, err)
+	require.True(t, last.complete)
+	require.Equal(t, empty.fingerprint, last.fingerprint)
+}
 
 func TestParseModularJobFile(t *testing.T) {
 	t.Parallel()

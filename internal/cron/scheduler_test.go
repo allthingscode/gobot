@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -533,10 +535,9 @@ func TestSchedulerReloadModularJobsLoadsValidJobsAndPreservesState(t *testing.T)
 
 	s.reloadModularJobs()
 
-	firstReloadMtime := s.lastModularMtime
-	if firstReloadMtime <= 0 {
-		t.Fatalf("lastModularMtime = %d, want positive value after successful reload", firstReloadMtime)
-	}
+	firstReloadMtime := s.modularFingerprint
+	assert.Empty(t, firstReloadMtime, "incomplete scan must not commit a fingerprint")
+	assert.False(t, s.modularCommitted)
 	jobs := jobsByID(s.Jobs())
 	if len(jobs) != 2 {
 		t.Fatalf("scheduler jobs = %+v, want 2 valid modular jobs", s.Jobs())
@@ -562,14 +563,14 @@ func TestSchedulerReloadModularJobsLoadsValidJobsAndPreservesState(t *testing.T)
 	}
 
 	s.reloadModularJobs()
-	if s.lastModularMtime != firstReloadMtime {
-		t.Errorf("lastModularMtime changed without detected modular change: got %d, want %d", s.lastModularMtime, firstReloadMtime)
+	if s.modularFingerprint != firstReloadMtime {
+		t.Errorf("modularFingerprint changed without detected modular change: got %q, want %q", s.modularFingerprint, firstReloadMtime)
 	}
 
 	s.itemsDir = filepath.Join(tmpDir, "missing")
 	s.reloadModularJobs()
-	if s.lastModularMtime != firstReloadMtime {
-		t.Errorf("lastModularMtime changed after unsuccessful modular reload: got %d, want %d", s.lastModularMtime, firstReloadMtime)
+	if s.modularFingerprint != firstReloadMtime {
+		t.Errorf("modularFingerprint changed after unsuccessful modular reload: got %q, want %q", s.modularFingerprint, firstReloadMtime)
 	}
 }
 
@@ -579,6 +580,170 @@ func jobsByID(jobs []Job) map[string]Job {
 		byID[job.ID] = job
 	}
 	return byID
+}
+
+func TestSchedulerModularRemovalLifecycle(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name          string
+		keep, restart bool
+	}{
+		{"one live", true, false}, {"last live", false, false},
+		{"one restart", true, true}, {"empty restart", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			dir := filepath.Join(root, "items")
+			require.NoError(t, os.Mkdir(dir, 0o700))
+			path := filepath.Join(root, "jobs.json")
+			prior := JobState{LastRunAtMS: 10, NextRunAtMS: 50, RunCount: 7, SuccessCount: 5, FailureCount: 2}
+			writeTestFile(t, filepath.Join(dir, "removed.md"), modularJobContent("removed", "Removed", "every(1h)", "removed"))
+			if tc.keep {
+				writeTestFile(t, filepath.Join(dir, "kept.md"), modularJobContent("kept", "Kept", "every(1h)", "kept"))
+			}
+			s := NewScheduler(path, dir, nil)
+			s.store = &Store{Jobs: []Job{{ID: "removed", State: prior}, {ID: "kept", State: prior}, {ID: "operator", State: prior}}}
+			s.reloadModularJobs()
+			if jobsByID(readEnabledRefreshStore(t, path).Jobs)["removed"].Source != sourceModular {
+				t.Fatal("ownership not persisted")
+			}
+			require.NoError(t, os.Remove(filepath.Join(dir, "removed.md")))
+			if tc.restart {
+				s = NewScheduler(path, dir, nil)
+			}
+			dispatcher := &mockDispatcher{}
+			s.dispatcher = dispatcher
+			s.WithClock(NewFakeClock(time.UnixMilli(100)))
+			require.NoError(t, s.poll(context.Background()))
+			assert.NotContains(t, jobsByID(s.Jobs()), "removed")
+			assert.Equal(t, prior, jobsByID(s.Jobs())["operator"].State)
+			if tc.keep {
+				require.Len(t, dispatcher.payloads, 1)
+				assert.Equal(t, "kept", dispatcher.payloads[0].ID)
+				assert.Equal(t, prior.RunCount+1, jobsByID(s.Jobs())["kept"].State.RunCount)
+			} else {
+				assert.Empty(t, dispatcher.payloads)
+			}
+			persisted := readEnabledRefreshStore(t, path)
+			assert.NotContains(t, jobsByID(persisted.Jobs), "removed")
+			restarted := NewScheduler(path, dir, &mockDispatcher{})
+			assert.NotContains(t, jobsByID(restarted.Jobs()), "removed")
+		})
+	}
+}
+
+func TestSchedulerModularIncompleteRecovery(t *testing.T) {
+	t.Parallel()
+	for _, failure := range []string{"missing", "not directory", "malformed", "unreadable"} {
+		t.Run(failure, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			dir := filepath.Join(root, "items")
+			require.NoError(t, os.Mkdir(dir, 0o700))
+			path := filepath.Join(root, "jobs.json")
+			definition := filepath.Join(dir, "job.md")
+			writeTestFile(t, definition, modularJobContent("job", "Job", "every(1h)", "body")+"\n")
+			s := NewScheduler(path, dir, nil)
+			prior := JobState{LastRunAtMS: 10, NextRunAtMS: 5000, RunCount: 7, SuccessCount: 5, FailureCount: 2}
+			s.store = &Store{Jobs: []Job{{ID: "job", State: prior}}}
+			s.reloadModularJobs()
+			fingerprint := s.modularFingerprint
+			require.NoError(t, os.Remove(definition))
+			switch failure {
+			case "missing":
+				s.itemsDir = filepath.Join(root, "missing")
+			case "not directory":
+				s.itemsDir = path
+			case "malformed":
+				writeTestFile(t, definition, "---\nschedule: invalid\n---\nbad")
+			case "unreadable":
+				if err := os.Symlink(dir, definition); err != nil {
+					t.Skipf("unreadable symlink fixture unavailable: %v", err)
+				}
+			}
+			s.reloadModularJobs()
+			assert.Equal(t, prior, jobsByID(s.Jobs())["job"].State)
+			assert.Equal(t, fingerprint, s.modularFingerprint)
+			assert.Contains(t, jobsByID(readEnabledRefreshStore(t, path).Jobs), "job")
+			if failure == "malformed" || failure == "unreadable" {
+				require.NoError(t, os.Remove(definition))
+			}
+			s.itemsDir = dir
+			s.reloadModularJobs()
+			assert.Empty(t, s.Jobs())
+			assert.Empty(t, readEnabledRefreshStore(t, path).Jobs)
+		})
+	}
+}
+
+func TestSchedulerModularPersistenceAndReload(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "items")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	path := filepath.Join(root, "jobs.json")
+	definition := filepath.Join(dir, "job.md")
+	writeTestFile(t, definition, "---\nid: job\nenabled: false\nschedule: every(1h)\n---\nbody")
+	s := NewScheduler(path, dir, nil)
+	s.reloadModularJobs()
+	assert.Equal(t, sourceModular, readEnabledRefreshStore(t, path).Jobs[0].Source)
+	stamp := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, os.Chtimes(path, stamp, stamp))
+	s.reloadJobsJSON()
+	require.NoError(t, s.poll(context.Background()))
+	require.NoError(t, s.poll(context.Background()))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, stamp.UnixNano(), info.ModTime().UnixNano(), "unchanged disabled job requires no write")
+	require.NoError(t, os.Remove(definition))
+	s.reloadModularJobs()
+	assert.Empty(t, readEnabledRefreshStore(t, path).Jobs)
+	// Replace JSON externally with a due orphan under the unchanged empty snapshot.
+	orphan := Store{Jobs: []Job{{ID: "orphan", Source: sourceModular, Enabled: true, State: JobState{NextRunAtMS: 1}}}}
+	data, err := orphan.EncodeJSON()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	dispatcher := &mockDispatcher{}
+	s.dispatcher = dispatcher
+	require.NoError(t, s.poll(context.Background()))
+	assert.Empty(t, dispatcher.payloads)
+	assert.Empty(t, readEnabledRefreshStore(t, path).Jobs)
+}
+
+func TestSchedulerModularFailedWriteRetry(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	items := t.TempDir()
+	path := filepath.Join(root, "jobs.json")
+	// A directory at the target path deterministically prevents atomic file replacement.
+	require.NoError(t, os.Mkdir(path, 0o700))
+	prior := Job{ID: "orphan", Source: sourceModular, Enabled: true, State: JobState{NextRunAtMS: 1}}
+	dispatcher := &mockDispatcher{}
+	s := NewScheduler(path, items, dispatcher)
+	s.store = &Store{Jobs: []Job{prior}}
+	require.NoError(t, s.poll(context.Background()))
+	assert.True(t, s.modularDirty)
+	assert.False(t, s.modularCommitted)
+	assert.Empty(t, s.Jobs())
+	assert.Empty(t, dispatcher.payloads)
+	// A subsequent directory error must retain and retry the pending safe view.
+	s.itemsDir = filepath.Join(root, "missing")
+	require.NoError(t, s.poll(context.Background()))
+	assert.True(t, s.modularDirty)
+	assert.False(t, s.modularCommitted)
+	assert.Empty(t, dispatcher.payloads)
+	s.itemsDir = items
+	require.NoError(t, os.Remove(path))
+	// Stale JSON must not overwrite safe in-memory removal while persistence is pending.
+	data, err := (&Store{Jobs: []Job{prior}}).EncodeJSON()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	require.NoError(t, s.poll(context.Background()))
+	assert.False(t, s.modularDirty)
+	assert.True(t, s.modularCommitted)
+	assert.Empty(t, readEnabledRefreshStore(t, path).Jobs)
+	assert.Empty(t, dispatcher.payloads)
 }
 
 func TestSchedulerModularEnabledRefresh(t *testing.T) {
@@ -626,14 +791,14 @@ func testSchedulerEnabledRefresh(t *testing.T, definition string, nextDelay time
 	s := NewScheduler(storePath, itemsDir, dispatcher).WithClock(NewFakeClock(now))
 	s.reloadModularJobs()
 	assertEnabledRefreshJob(t, s.Jobs(), !enabled, prior)
-	firstMtime := s.lastModularMtime
+	firstMtime := s.modularFingerprint
 
 	writeEnabledRefreshDefinition(t, definitionPath, definition, enabled, now)
 	s.reloadModularJobs()
-	assert.NotEqual(t, firstMtime, s.lastModularMtime, "edited definition must actually reload")
+	assert.NotEqual(t, firstMtime, s.modularFingerprint, "edited definition must actually reload")
 	assertEnabledRefreshJob(t, s.Jobs(), enabled, prior)
-	// A flag-only reload does not save: check disk before invoking the explicit save path.
-	assertEnabledRefreshJob(t, readEnabledRefreshStore(t, storePath).Jobs, !enabled, prior)
+	// Definition refresh persists immediately, even before due selection.
+	assertEnabledRefreshJob(t, readEnabledRefreshStore(t, storePath).Jobs, enabled, prior)
 	if !enabled {
 		if err := s.poll(context.Background()); err != nil {
 			t.Fatal(err)
