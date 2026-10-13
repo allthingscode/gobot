@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,18 +15,19 @@ import (
 
 // toolCallState carries the local state for one tool invocation.
 type toolCallState struct {
-	sessionKey string
-	userID     string
-	name       string
-	args       map[string]any
-	iter       int
-	seqLen     int
-	paramsHash string
-	hashFailed bool
-	idemKey    string
+	invocationID string
+	sessionKey   string
+	userID       string
+	name         string
+	args         map[string]any
+	iter         int
+	seqLen       int
+	paramsHash   string
+	hashFailed   bool
+	idemKey      string
 }
 
-func (r *AgentRunner) processToolCalls(ctx context.Context, sessionKey, userID string, toolCalls []agentctx.ToolCall, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
+func (r *AgentRunner) processToolCalls(ctx context.Context, invocationID, sessionKey, userID string, toolCalls []agentctx.ToolCall, iter int, toolSeq *[]string) ([]agentctx.StrategicMessage, error) {
 	messages := make([]agentctx.StrategicMessage, 0, len(toolCalls))
 	for _, tc := range toolCalls {
 		name := tc.Name
@@ -39,7 +41,10 @@ func (r *AgentRunner) processToolCalls(ctx context.Context, sessionKey, userID s
 
 		*toolSeq = append(*toolSeq, name)
 		callCtx, meta := withToolMeta(ctx)
-		result, err := r.executeSingleToolCall(callCtx, sessionKey, userID, name, args, iter, len(*toolSeq))
+		result, err := r.executeToolCallState(callCtx, toolCallState{
+			invocationID: invocationID, sessionKey: sessionKey, userID: userID,
+			name: name, args: args, iter: iter, seqLen: len(*toolSeq),
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -56,26 +61,32 @@ func (r *AgentRunner) processToolCalls(ctx context.Context, sessionKey, userID s
 }
 
 func (r *AgentRunner) executeSingleToolCall(ctx context.Context, sessionKey, userID, name string, args map[string]any, iter, seqLen int) (string, error) {
-	paramsHash, hashErr := agentctx.HashParams(args)
+	return r.executeToolCallState(ctx, toolCallState{
+		invocationID: rand.Text(), sessionKey: sessionKey, userID: userID,
+		name: name, args: args, iter: iter, seqLen: seqLen,
+	})
+}
+
+// executeToolCallState preserves invocation identity when a logical call is replayed.
+func (r *AgentRunner) executeToolCallState(ctx context.Context, call toolCallState) (string, error) {
+	paramsHash, hashErr := agentctx.HashParams(call.args)
+	call.paramsHash, call.hashFailed = paramsHash, hashErr != nil
 	if hashErr != nil {
 		slog.Warn("runner: failed to hash tool params, skipping idempotency check",
-			slog.String("session", sessionKey),
-			slog.String("tool", name),
+			slog.String("session", call.sessionKey),
+			slog.String("tool", call.name),
 			slog.Any("err", hashErr),
 		)
 	}
 
 	slog.Info("runner: tool call",
-		slog.String("session", sessionKey),
-		slog.String("tool", name),
+		slog.String("session", call.sessionKey),
+		slog.String("tool", call.name),
 		slog.String("params_hash", paramsHash),
-		slog.Int("iter", iter),
+		slog.Int("iter", call.iter),
 	)
 
-	result, err := r.runToolWithHooks(ctx, toolCallState{
-		sessionKey: sessionKey, userID: userID, name: name, args: args,
-		iter: iter, seqLen: seqLen, paramsHash: paramsHash, hashFailed: hashErr != nil,
-	})
+	result, err := r.runToolWithHooks(ctx, call)
 	if err != nil {
 		return "", err
 	}
@@ -164,7 +175,7 @@ func (r *AgentRunner) preToolStep(ctx context.Context, call toolCallState) (stri
 func (r *AgentRunner) mainToolStep(ctx context.Context, call toolCallState) (string, error) {
 	start := time.Now()
 	if !call.hashFailed {
-		call.idemKey = fmt.Sprintf("%s-%d-%d-%s-%s", call.sessionKey, call.iter, call.seqLen, call.name, call.paramsHash)
+		call.idemKey = fmt.Sprintf("auto-v2:%s:%s:%d:%d:%s:%s", call.invocationID, call.sessionKey, call.iter, call.seqLen, call.name, call.paramsHash)
 	}
 	result, execErr := r.executeToolCall(ctx, call)
 	if execErr == nil {
