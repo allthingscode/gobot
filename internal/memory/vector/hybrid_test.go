@@ -22,6 +22,146 @@ func (m *mockSearcher) Search(ctx context.Context, query, sessionKey string, lim
 
 type mockEmbedder struct{}
 
+type factIdentityEmbedder struct{}
+
+func TestFactKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, namespace, content, otherNamespace, otherContent string }{
+		{"boundary", "a", "bc", "ab", "c"},
+		{"separator", "a:", "b", "a", ":b"},
+		{"namespace", "global", "same", "session:s", "same"},
+		{"case", "s", "Atlas", "s", "atlas"},
+		{"whitespace", "s", "atlas", "s", "atlas "},
+		{"unicode", "é", "x", "e", "́x"},
+		{"empty", "", "a", "a", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			key := factKey(tt.namespace, tt.content)
+			if key != factKey(tt.namespace, tt.content) {
+				t.Error("identity is not stable")
+			}
+			if key == factKey(tt.otherNamespace, tt.otherContent) {
+				t.Error("different exact pairs share identity")
+			}
+		})
+	}
+}
+
+func (factIdentityEmbedder) Embed(context.Context, string) ([]float32, error) {
+	return []float32{1, 2, 3}, nil
+}
+
+func TestHybridSearch_FactIdentity(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		fts   []map[string]any
+		docs  []chromem.Document
+		want  int
+		fused bool
+	}{
+		{name: "distinct FTS facts", fts: []map[string]any{
+			{"namespace": "session:s", "content": "atlas first"},
+			{"namespace": "session:s", "content": "atlas second"},
+		}, want: 2},
+		{name: "cross-index fusion", fts: []map[string]any{
+			{"namespace": "session:s", "content": "atlas", "timestamp": "fts-invalid"},
+		}, docs: []chromem.Document{
+			{ID: "unrelated-storage-id", Content: "atlas", Metadata: map[string]string{"namespace": "session:s", "importance": "5", "timestamp": "vector-invalid"}},
+		}, want: 1, fused: true},
+		{name: "exact content", fts: []map[string]any{
+			{"namespace": "session:s", "content": "atlas"},
+			{"namespace": "session:s", "content": "Atlas"},
+			{"namespace": "session:s", "content": "atlas "},
+		}, want: 3},
+		{name: "namespace isolation", fts: []map[string]any{
+			{"namespace": "session:s", "content": "atlas"},
+			{"namespace": "global", "content": "atlas"},
+		}, docs: []chromem.Document{
+			{ID: "local", Content: "atlas", Metadata: map[string]string{"namespace": "session:s"}},
+			{ID: "shared", Content: "atlas", Metadata: map[string]string{"namespace": "global"}},
+			{ID: "private", Content: "private atlas", Metadata: map[string]string{"namespace": "session:other"}},
+		}, want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			store, err := NewStore(filepath.Join(t.TempDir(), "vectors.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			embed := factIdentityEmbedder{}
+			seedIdentityDocuments(t, store, tt.docs)
+			results, err := HybridSearch(context.Background(), &mockSearcher{results: tt.fts}, store, embed, "atlas", "s", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != tt.want {
+				t.Fatalf("results = %v, want %d facts", results, tt.want)
+			}
+			assertHybridFacts(t, results, tt.fts)
+			if tt.fused {
+				assertFusedFact(t, results[0])
+			}
+			assertStoredFactIDs(t, store, tt.docs)
+		})
+	}
+}
+
+func seedIdentityDocuments(t *testing.T, store *Store, docs []chromem.Document) {
+	t.Helper()
+	if len(docs) == 0 {
+		return
+	}
+	if err := store.AddDocuments(context.Background(), "memory_facts", docs, factIdentityEmbedder{}.Embed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertFusedFact(t *testing.T, result HybridResult) {
+	t.Helper()
+	if abs(result.Score-2.0/61.0) > 1e-9 {
+		t.Errorf("fused score = %g, want %g", result.Score, 2.0/61.0)
+	}
+	if result.Timestamp != "vector-invalid" {
+		t.Errorf("timestamp = %q", result.Timestamp)
+	}
+}
+
+func assertHybridFacts(t *testing.T, results []HybridResult, facts []map[string]any) {
+	t.Helper()
+	contents := make(map[string]bool)
+	for _, result := range results {
+		contents[result.Content] = true
+	}
+	for _, fact := range facts {
+		content, _ := fact["content"].(string)
+		if !contents[content] {
+			t.Errorf("missing fact %q", content)
+		}
+	}
+}
+
+func assertStoredFactIDs(t *testing.T, store *Store, docs []chromem.Document) {
+	t.Helper()
+	stored, err := store.Search(context.Background(), "memory_facts", "atlas", 10, nil, factIdentityEmbedder{}.Embed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make(map[string]bool)
+	for _, result := range stored {
+		ids[result.ID] = true
+	}
+	for _, doc := range docs {
+		if !ids[doc.ID] {
+			t.Errorf("stored ID %q changed", doc.ID)
+		}
+	}
+}
+
 func (m *mockEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	// Return a dummy embedding
 	return make([]float32, 768), nil
