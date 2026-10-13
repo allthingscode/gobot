@@ -267,7 +267,7 @@ None of that is Claude-specific, so it lives in the SOP alone. This section used
 
 Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3 - not a one-liner. The human is the Pilot in Command; every dispatch is their decision. Include the budget tracking line so they can see spend at a glance.
 
-Do not dispatch until the human confirms with an explicit "go" or redirect. Do not infer confirmation from prior messages or session context.
+Do not dispatch until the human confirms with an explicit "go" or redirect. Do not infer confirmation from prior messages or session context. The one exception is the `[APPROVAL MODE] to-gate` line that `crucible.ps1 -Init` prints when the human has opted in; then follow "Approval mode" in `.crucible/sops/orchestrator.md` Step 3.
 
 ---
 

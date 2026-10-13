@@ -122,6 +122,37 @@ try {
         Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match 'low - .*-Model gpt-6\.1-sol') -FailureMessage ("got: " + ($effort -join " | "))
     }
 
+    # Item 178: -Init prints the approval mode in effect, and a dispatch after a gate always waits.
+    $results += Run-Test -Name "Write-CrucibleCiStatusBanner prints the approval mode, per-phase after a gate" -Body {
+        $cases = @(
+            @{ Name = "no setting"; Local = $null; Source = "grooming"; Target = "implementation"; Want = "per-phase" },
+            @{ Name = "local to-gate"; Local = "to-gate"; Source = "grooming"; Target = "implementation"; Want = "to-gate" },
+            @{ Name = "to-gate after the Research Gate"; Local = "to-gate"; Source = "research"; Target = "grooming"; Want = "per-phase" }
+        )
+        $n = 0
+        foreach ($case in $cases) {
+            $n++
+            $ctx = New-TestContext -TempRoot (Join-Path $tempRoot ("approval-" + $n)) -TaskId "F-915" -TargetPhase $case.Target
+            $ctx.Handoff.source_phase = $case.Source
+            if ($null -ne $case.Local) {
+                $crucibleDir = Join-Path $ctx.RepoRoot ".crucible"
+                New-Item -ItemType Directory -Path $crucibleDir -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $crucibleDir "config.local.yaml") -Value ("orchestration:`n  approval: " + $case.Local + "`n") -Encoding UTF8
+            }
+            $ctx.PromptFilePath = Join-Path $ctx.SessionDir ("F-915/" + $case.Target + "/prompt.md")
+            New-Item -ItemType Directory -Path (Split-Path -Parent $ctx.PromptFilePath) -Force | Out-Null
+            $oldPath = $env:PATH
+            try {
+                $env:PATH = ""
+                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+            } finally {
+                $env:PATH = $oldPath
+            }
+            $line = @(($output -split "`r?`n") | Where-Object { $_ -match '\[APPROVAL MODE\]' })
+            Assert-Result -Name ($case.Name + " -> " + $case.Want) -Condition ($line.Count -eq 1 -and $line[0] -match ('\] ' + $case.Want + ' - ')) -FailureMessage ("got: " + ($line -join " | "))
+        }
+    }
+
     $results += Run-Test -Name "New-CruciblePromptText applies replacement map" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "replace") -TaskId "F-902" -TargetPhase "verification"
         @"

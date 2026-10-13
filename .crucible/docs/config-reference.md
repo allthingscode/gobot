@@ -348,6 +348,24 @@ A task with no implementation worktree, such as research, runs the configured ch
 
 ---
 
+### `orchestration` (optional)
+
+How the orchestrator asks the human before it dispatches a specialist. This is usually a personal preference, so set it in `.crucible/config.local.yaml`, a gitignored file beside `config.yaml`. A value there wins over one in `config.yaml`. Crucible reads only this key from the local file.
+
+```yaml
+# .crucible/config.local.yaml
+orchestration:
+  approval: to-gate
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `approval` | `per-phase` or `to-gate` | `per-phase` | `per-phase`: the orchestrator waits for a "go" before every dispatch. `to-gate`: one "go" starts an item, and the orchestrator then runs each phase at the recommended level until a gate, an escalation, a launcher status other than `SUCCESS`, or a surprise. |
+
+`crucible.ps1 -Init` prints the mode in effect as an `[APPROVAL MODE]` line, and prints `per-phase` for the dispatch that follows a gate whatever the setting. Gate decisions are never automatic. Any other value is an error, at `-Init` and in `validate-config.ps1`. See "Approval mode" in `sops/orchestrator.md` Step 3.
+
+---
+
 ## Validation
 
 Run before starting any pipeline work:
@@ -362,6 +380,7 @@ Run before starting any pipeline work:
 - Any path under `paths` (except `backlog`) does not start with `.crucible/`
 - `paths.backlog` is absolute or contains `..` path traversal segments
 - `hooks.project_dir` is absolute, contains `..`, is under `.crucible/`, or does not exist
+- `orchestration.approval`, in `config.yaml` or the `config.local.yaml` beside it, is not `per-phase` or `to-gate`
 - Any `verification` command still contains a scaffold placeholder (`replace-with-...`)
 
 **Warnings** (exit 0 - pipeline starts, but check these):
@@ -379,6 +398,7 @@ The project-local `.crucible/.gitignore` (created by `init-project.ps1`) handles
 | Path | Commit | Why |
 |------|--------|-----|
 | `.crucible/config.yaml` | Yes | Configuration |
+| `.crucible/config.local.yaml` | No | One person's settings, such as `orchestration.approval` |
 | `.crucible/.gitignore` | Yes | The policy file itself |
 | `.crucible/.gitattributes` | Yes | Line-ending policy for the bundle |
 | `.crucible/README.md` | Yes | What the bundle is and how to work with it |

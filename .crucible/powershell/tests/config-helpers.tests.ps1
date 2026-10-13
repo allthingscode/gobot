@@ -208,6 +208,36 @@ try {
         $absent = Get-ConfigBlockValue -Content $content -Path @("review", "require_green_ci") -Source $template
         Assert-Result -Name "commented-out block is absent" -Condition ($null -eq $absent) -FailureMessage "a commented-out review block must read as absent, not as a value"
     }
+
+    # Item 178: the approval mode is a personal setting, read from the gitignored local file first.
+    $results += Run-Test -Name "Get-ConfiguredApprovalMode prefers config.local.yaml and refuses unknown values" -Body {
+        $proj = Join-Path $tempRoot "approval"
+        $crucibleDir = Join-Path $proj ".crucible"
+        New-Item -ItemType Directory -Path $crucibleDir -Force | Out-Null
+        $shared = Join-Path $crucibleDir "config.yaml"
+        $local = Join-Path $crucibleDir "config.local.yaml"
+
+        Assert-Result -Name "no config is per-phase" -Condition ((Get-ConfiguredApprovalMode -ProjectRoot $proj) -eq "per-phase") -FailureMessage "default must be per-phase"
+
+        Set-Content -LiteralPath $shared -Value "review:`n  require_green_ci: true`n" -Encoding UTF8
+        Assert-Result -Name "absent key is per-phase" -Condition ((Get-ConfiguredApprovalMode -ProjectRoot $proj) -eq "per-phase") -FailureMessage "absent key must be per-phase"
+
+        Set-Content -LiteralPath $local -Value "orchestration:`n  approval: to-gate`nreview:`n  require_green_ci: false`n" -Encoding UTF8
+        Assert-Result -Name "local to-gate wins" -Condition ((Get-ConfiguredApprovalMode -ProjectRoot $proj) -eq "to-gate") -FailureMessage "local to-gate must be read"
+        Assert-Result -Name "local file changes no other key" -Condition ((Get-ConfiguredReview -Key "require_green_ci" -ProjectRoot $proj) -eq "true") -FailureMessage "config.local.yaml must not override review keys"
+
+        Set-Content -LiteralPath $shared -Value "orchestration:`n  approval: per-phase`n" -Encoding UTF8
+        Assert-Result -Name "local beats shared" -Condition ((Get-ConfiguredApprovalMode -ProjectRoot $proj) -eq "to-gate") -FailureMessage "local must win over config.yaml"
+
+        Remove-Item -LiteralPath $local -Force
+        Set-Content -LiteralPath $shared -Value "orchestration:`n  approval: `"To-Gate`"`n" -Encoding UTF8
+        Assert-Result -Name "shared value used without local" -Condition ((Get-ConfiguredApprovalMode -ProjectRoot $proj) -eq "to-gate") -FailureMessage "config.yaml value must apply when there is no local file"
+
+        Set-Content -LiteralPath $local -Value "orchestration:`n  approval: auto`n" -Encoding UTF8
+        $message = ""
+        try { $null = Get-ConfiguredApprovalMode -ProjectRoot $proj } catch { $message = $_.Exception.Message }
+        Assert-Result -Name "unknown value throws naming the allowed values" -Condition ($message -match "per-phase, to-gate" -and $message -match "'auto'") -FailureMessage ("got: " + $message)
+    }
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

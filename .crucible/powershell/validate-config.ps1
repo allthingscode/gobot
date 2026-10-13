@@ -206,6 +206,20 @@ if ($null -ne $hooksNode) {
     }
 }
 
+# orchestration.approval is optional and may also be set in the gitignored
+# config.local.yaml beside this file. The runtime accessor reads both and refuses an
+# unrecognized value, so both files are checked with the reader it uses. Item 178.
+$approvalFiles = @($ConfigPath)
+$localConfigPath = Join-Path (Split-Path -Parent $ConfigPath) "config.local.yaml"
+if (Test-Path -LiteralPath $localConfigPath) { $approvalFiles += $localConfigPath }
+foreach ($approvalFile in $approvalFiles) {
+    try {
+        $null = Get-ConfigFileApprovalMode -ConfigPath $approvalFile
+    } catch {
+        $errors += $_.Exception.Message
+    }
+}
+
 foreach ($role in @("researcher", "groomer", "architect", "reviewer", "operator")) {
     $null = Test-RequiredSection -Path @("roles", $role) -Name ("roles." + $role)
 }

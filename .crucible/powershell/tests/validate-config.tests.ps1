@@ -420,6 +420,28 @@ review:
         }
     }
 
+    # Item 178: orchestration.approval is checked in config.yaml and in the local file beside it.
+    $results += Run-Test -Name "orchestration.approval accepts the two modes and refuses others, in either file" -Body {
+        $good = New-ReviewConfig -Name "approval-good" -Review "`norchestration:`n  approval: to-gate`n"
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $good }
+        Assert-Result -Name "good approval exit" -Condition ($cmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+
+        $bad = New-ReviewConfig -Name "approval-bad" -Review "`norchestration:`n  approval: always`n"
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $bad }
+        Assert-Result -Name "bad approval exit" -Condition ($cmd.ExitCode -eq 2) -FailureMessage ("expected exit 2 for approval: always, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+        Assert-Result -Name "bad approval message" -Condition ($cmd.Output -match "must be one of: per-phase, to-gate") -FailureMessage ("expected the allowed values. Output: " + $cmd.Output)
+
+        $localPath = Join-Path $projectRoot ".crucible/config.local.yaml"
+        try {
+            [System.IO.File]::WriteAllText($localPath, "orchestration:`n  approval: sometimes`n", (New-Object System.Text.UTF8Encoding($false)))
+            $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $good }
+            Assert-Result -Name "bad local exit" -Condition ($cmd.ExitCode -eq 2) -FailureMessage ("expected exit 2 for a bad config.local.yaml, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+            Assert-Result -Name "bad local names the file" -Condition ($cmd.Output -match "config\.local\.yaml") -FailureMessage ("expected the local file to be named. Output: " + $cmd.Output)
+        } finally {
+            Remove-Item -LiteralPath $localPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     $results += Run-Test -Name "Indent width does not change the verdict" -Body {
         # The runtime reads this file indent-agnostically. A validator that only
         # understands two spaces disagrees with it about the same config, and reports

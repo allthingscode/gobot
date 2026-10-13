@@ -220,6 +220,18 @@
           "description": "The project's own git hooks directory, relative to the project root and outside .crucible. Crucible's pre-commit, commit-msg, and pre-push hooks run the project's hook of the same name after their own checks, because core.hooksPath otherwise shadows it."
         }
       }
+    },
+    "orchestration": {
+      "type": "object",
+      "description": "Optional. How the orchestrator asks the human before a dispatch. Usually set in the gitignored config.local.yaml, which wins over config.yaml.",
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "type": "string",
+          "enum": ["per-phase", "to-gate"],
+          "description": "per-phase (default): wait for a go before every dispatch. to-gate: one go starts an item, then each phase runs to the next gate, escalation, non-SUCCESS launch, or surprise."
+        }
+      }
     }
   },
   "definitions": {

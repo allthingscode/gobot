@@ -9,6 +9,7 @@ function Write-NextStep {
         [string]$RecommendedTarget = $null,
         [string]$RecommendedEffort = $null,
         [string]$RecommendedLevel = $null,
+        [string]$ApprovalMode = $null,
         [switch]$ShouldAutoAdvance
     )
     $nsDir = if (-not [string]::IsNullOrEmpty($TaskId)) {
@@ -48,6 +49,11 @@ function Write-NextStep {
         }
         if (-not [string]::IsNullOrEmpty($RecommendedEffort)) {
             Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort, with -Model " + $RecommendedModel + " (Codex only).") -ForegroundColor Cyan
+        }
+        if ($ApprovalMode -eq "to-gate") {
+            Write-Host '[APPROVAL MODE] to-gate - the human''s "go" for this item covers this dispatch. Still stop at a gate, an escalation, a launcher status other than SUCCESS, or a surprise.' -ForegroundColor Cyan
+        } elseif ($ApprovalMode -eq "per-phase") {
+            Write-Host '[APPROVAL MODE] per-phase - report to the human and wait for an explicit "go" before this dispatch.' -ForegroundColor Cyan
         }
         Write-Host ""
         Write-Quiet ("[NEXT PIPELINE STEP] Run at session end (also saved to " + $nsFile + "):") -ForegroundColor DarkGray
@@ -737,7 +743,12 @@ function Write-CrucibleCiStatusBanner {
     $isGateTransition = (($handoff.source_phase -eq "deployment") -or ($handoff.source_phase -eq "research")) -and -not $isBootstrap
     $shouldAutoAdvance = $AutoAdvance -and -not $isGateTransition
 
-    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedTarget $recommendedTarget -RecommendedEffort $recommendedEffort -RecommendedLevel $recommendedLevel -ShouldAutoAdvance:$shouldAutoAdvance
+    # The dispatch after a gate is the human's next decision, so it never rides on an
+    # earlier "go", whatever the configured approval mode. Item 178.
+    $approvalRoot = if ($Context.ContainsKey("RepoRoot") -and -not [string]::IsNullOrWhiteSpace([string]$Context.RepoRoot)) { [string]$Context.RepoRoot } else { "" }
+    $approvalMode = if ($isGateTransition) { "per-phase" } else { Get-ConfiguredApprovalMode -ProjectRoot $approvalRoot }
+
+    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedTarget $recommendedTarget -RecommendedEffort $recommendedEffort -RecommendedLevel $recommendedLevel -ApprovalMode $approvalMode -ShouldAutoAdvance:$shouldAutoAdvance
 
     $Context.ActionCmd = $actionCmd
     $Context.ShouldAutoAdvance = $shouldAutoAdvance

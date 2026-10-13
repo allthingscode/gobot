@@ -150,7 +150,7 @@ The parent Codex session is responsible for:
 - Waiting for specialist completion when on the critical path; if parallel specialists are running, continue non-overlapping parent checks/work.
 - Reading the latest handoff for the task and validating that `crucible.ps1` produced the next session artifacts.
 - Inspecting the completed specialist `task.md` for required checkpoints and unchecked required task-list items.
-- Presenting the Step 3 status report (from `.crucible/sops/orchestrator.md`) before each specialist launch, including budget tracking, and waiting for explicit human confirmation.
+- Presenting the Step 3 status report (from `.crucible/sops/orchestrator.md`) before each specialist launch, including budget tracking, and waiting for explicit human confirmation (or, when `crucible.ps1 -Init` prints `[APPROVAL MODE] to-gate`, following "Approval mode" in that Step 3).
 - Pulling CI diagnostics directly with `gh run view <id> --log` when CI status affects gates; do not ask humans to paste logs.
 - Stopping on all gates, circuit breakers, missing artifacts, failed validation, or ambiguous task state.
 - Logging or reporting enough detail for the human to understand the current task, role, and next action.

@@ -77,7 +77,7 @@ Step 5 includes the **budget ladder** that warns, then escalates and waits, then
 
 Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3 - including the budget tracking line. The human is the Pilot in Command; every dispatch is their decision, not a formality.
 
-Wait for an explicit "go" or redirect. Do not dispatch without confirmation.
+Wait for an explicit "go" or redirect. Do not dispatch without confirmation, unless `crucible.ps1 -Init` printed `[APPROVAL MODE] to-gate`; then follow "Approval mode" in `.crucible/sops/orchestrator.md` Step 3.
 
 ---
 

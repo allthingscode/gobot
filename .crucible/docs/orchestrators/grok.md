@@ -153,7 +153,7 @@ Point at Step 5; do not re-inline it.
 
 ## Human Confirmation Model
 
-Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3. The human is the Pilot in Command. Do not dispatch until the human confirms with an explicit "go" or redirect.
+Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3. The human is the Pilot in Command. Do not dispatch until the human confirms with an explicit "go" or redirect, unless `crucible.ps1 -Init` printed `[APPROVAL MODE] to-gate`; then follow "Approval mode" in `.crucible/sops/orchestrator.md` Step 3.
 
 ## Gate and Failure Protocols
 

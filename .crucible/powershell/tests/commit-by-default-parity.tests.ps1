@@ -195,6 +195,7 @@ $surfaces = @(
             "locks"             = "runtime state, listed so the table answers the question for every directory"
             "research"          = "generated artifacts, listed so the table answers the question for every directory"
             "dev-logs"          = "generated artifacts, listed so the table answers the question for every directory"
+            "config.local.yaml" = "one person's gitignored settings, listed No so the table answers the question for it too (item 178)"
         }
     }
 )

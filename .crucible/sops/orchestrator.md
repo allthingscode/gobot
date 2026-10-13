@@ -107,6 +107,13 @@ Ready to dispatch {Role}. Say "go" to continue, or redirect.
 
 This is not a formality. The human is the Pilot in Command. Every dispatch is a decision they make, not one you make on their behalf. Wait for an explicit "go" or redirect before proceeding.
 
+**Approval mode.** `crucible.ps1 -Init` prints `[APPROVAL MODE]` next to the dispatch command. Read it on every step; do not carry it in memory.
+
+- `per-phase` (the default) - follow this step as written: report and wait for a "go" before every dispatch.
+- `to-gate` - the human has chosen, in their personal `.crucible/config.local.yaml` (`orchestration.approval`), to approve a whole item at once. Ask for a "go" once, before the item's first dispatch. After that, give the status report above and dispatch without waiting, at the recommended level, until the item reaches a gate. Stop and wait for the human on: the Research Gate, the Human Gate, a Circuit Breaker Gate or escalation, a launcher status other than `SUCCESS`, a Step 5 check that fails, and anything else that surprises you. Crucible prints `per-phase` for the dispatch that follows a gate, so that dispatch always waits for a fresh "go".
+
+The mode only removes the wait between phases. It never decides a gate, picks a different level, or starts the next backlog item.
+
 ### Step 4 - Spawn the specialist
 
 **Pre-spawn tree check.** Run `git status` before spawning. The working tree must match what you expect. If it holds changes you did not author or authorize, STOP: do not dispatch onto an unknown tree, and do not later commit that work as if it were the specialist's. Establish provenance first (ask the human; inspect diffs and mtimes), because unexpected changes may embed decisions that are the human's to make.

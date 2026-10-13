@@ -320,6 +320,40 @@ function Resolve-ProjectHooksDirValue {
     return (Resolve-Path -LiteralPath $full).Path
 }
 
+# orchestration.approval says whether the orchestrator asks for a "go" before every
+# dispatch (per-phase) or once per item and then runs each phase to the Human Gate
+# (to-gate). It is a personal preference, so the gitignored .crucible/config.local.yaml
+# is read first and wins; the committed config.yaml is the fallback. An unrecognized value
+# throws rather than falling back, so a typo never silently changes who approves. Item 178.
+function Get-ConfigFileApprovalMode {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+
+    $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
+    $val = Get-ConfigBlockValue -Content $content -Path @("orchestration", "approval") -Source $ConfigPath
+    if ($null -eq $val) { return $null }
+    $allowed = @("per-phase", "to-gate")
+    $mode = $val.Trim().ToLowerInvariant()
+    if ($allowed -notcontains $mode) {
+        throw ("orchestration.approval in " + $ConfigPath + " must be one of: " + ($allowed -join ", ") + " (got '" + $val + "').")
+    }
+    return $mode
+}
+
+function Get-ConfiguredApprovalMode {
+    param([string]$ProjectRoot = "")
+
+    $root = $ProjectRoot
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+
+    foreach ($name in @("config.local.yaml", "config.yaml")) {
+        $configPath = Join-Path $root (".crucible/" + $name)
+        if (-not (Test-Path -LiteralPath $configPath)) { continue }
+        $mode = Get-ConfigFileApprovalMode -ConfigPath $configPath
+        if ($null -ne $mode) { return $mode }
+    }
+    return "per-phase"
+}
+
 function Get-ConfiguredManifestFiles {
     param(
         [string]$ProjectRoot = ""

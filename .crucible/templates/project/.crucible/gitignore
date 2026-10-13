@@ -23,6 +23,9 @@
 # Uncomment the next line if you want to commit your backlog (e.g. public roadmap).
 /backlog/
 
+# Personal settings that override config.yaml for one person - see docs/config-reference.md.
+/config.local.yaml
+
 # Keep this policy file committed.
 !.gitignore
 
