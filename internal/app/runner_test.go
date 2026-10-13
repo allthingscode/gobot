@@ -327,6 +327,135 @@ func (m *MockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provide
 
 func strPtr(s string) *string { return &s }
 
+const automaticTurnDone = "automatic turn complete"
+
+//nolint:gocognit,paralleltest // Table checks results, provider IDs and SQLite rows; cleanup uses global test state.
+func TestRunner_AutomaticIdempotencyFreshTurns(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ids  [2]string
+	}{
+		{name: "distinct provider IDs", ids: [2]string{"first", "second"}},
+		{name: "reused provider ID", ids: [2]string{"same", "same"}},
+		{name: "empty provider IDs"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, err := agentctx.GetCheckpointManager(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+			calls := 0
+			tool := stateCheckingTool{name: "write", run: func(context.Context, string, string, map[string]any) (string, error) {
+				calls++
+				return fmt.Sprintf("effect-%d", calls), nil
+			}}
+			r := NewAgentRunner(&MockProvider{}, testModel, basePrompt, &config.Config{})
+			r.Limiter = rate.NewLimiter(rate.Inf, 1)
+			r.SetTools([]Tool{tool})
+			r.SideEffectingTools[tool.name] = true
+			r.IdempStore = agentctx.NewIdempotencyStore(mgr.DB(), time.Hour)
+			ctx := context.Background()
+			for turn, id := range tc.ids {
+				messages := runAutomaticToolTurn(t, ctx, r, []agentctx.ToolCall{{ID: id, Name: tool.name, Args: map[string]any{"value": "same"}}})
+				want := fmt.Sprintf("effect-%d", turn+1)
+				if got := ExtractText(messages[2]); got != want {
+					t.Errorf("turn %d tool result %q, want %q", turn+1, got, want)
+				}
+				assertAutomaticToolCallID(t, messages[2].ToolCallID, id)
+			}
+			var rows int
+			if err := mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM idempotency_keys").Scan(&rows); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 2 || rows != 2 {
+				t.Errorf("fresh turns: executions=%d, stored keys=%d; want 2 each", calls, rows)
+			}
+		})
+	}
+}
+
+func assertAutomaticToolCallID(t *testing.T, got *string, want string) {
+	t.Helper()
+	if want == "" {
+		if got != nil {
+			t.Error("empty provider ID should remain absent")
+		}
+	} else if got == nil || *got != want {
+		t.Error("provider correlation ID lost")
+	}
+}
+
+// runAutomaticToolTurn reuses the runner/provider, context and identical user history.
+func runAutomaticToolTurn(t *testing.T, ctx context.Context, r *AgentRunner, calls []agentctx.ToolCall) []agentctx.StrategicMessage {
+	t.Helper()
+	mock := r.Prov.(*MockProvider)
+	mock.Responses = append(mock.Responses,
+		&provider.ChatResponse{Message: agentctx.StrategicMessage{Role: agentctx.RoleAssistant, ToolCalls: calls}},
+		&provider.ChatResponse{Message: agentctx.StrategicMessage{Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: strPtr(automaticTurnDone)}}},
+	)
+	text, messages, err := r.Run(ctx, testSess, testUser, []agentctx.StrategicMessage{
+		{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: strPtr("repeat the action")}},
+	})
+	if err != nil || text != automaticTurnDone || len(messages) != len(calls)+3 {
+		t.Fatalf("Run: text=%q, messages=%d, error=%v", text, len(messages), err)
+	}
+	return messages
+}
+
+//nolint:gocognit,paralleltest // Compares batched and iterative dispatch against SQLite; cleanup uses global test state.
+func TestRunner_AutomaticIdempotencyLaterPositions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		batch bool
+	}{
+		{name: "same iteration", batch: true},
+		{name: "later iteration"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, err := agentctx.GetCheckpointManager(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+			calls := 0
+			tool := stateCheckingTool{name: "write", run: func(context.Context, string, string, map[string]any) (string, error) {
+				calls++
+				return fmt.Sprintf("effect-%d", calls), nil
+			}}
+			mock := &MockProvider{}
+			r := NewAgentRunner(mock, testModel, basePrompt, &config.Config{})
+			r.Limiter = rate.NewLimiter(rate.Inf, 1)
+			r.SetTools([]Tool{tool})
+			r.SideEffectingTools[tool.name] = true
+			r.IdempStore = agentctx.NewIdempotencyStore(mgr.DB(), time.Hour)
+			call := agentctx.ToolCall{ID: "same", Name: tool.name, Args: map[string]any{"value": "same"}}
+			batches := [][]agentctx.ToolCall{{call}, {call}}
+			if tc.batch {
+				batches = [][]agentctx.ToolCall{{call, call}}
+			}
+			for _, batch := range batches {
+				mock.Responses = append(mock.Responses, &provider.ChatResponse{Message: agentctx.StrategicMessage{
+					Role: agentctx.RoleAssistant, ToolCalls: batch,
+				}})
+			}
+			mock.Responses = append(mock.Responses, &provider.ChatResponse{Message: agentctx.StrategicMessage{
+				Role: agentctx.RoleAssistant, Content: &agentctx.MessageContent{Str: strPtr(automaticTurnDone)},
+			}})
+			_, messages, err := r.Run(context.Background(), testSess, testUser, nil)
+			results := []string{}
+			for _, message := range messages {
+				if message.Role == agentctx.RoleTool {
+					results = append(results, ExtractText(message))
+				}
+			}
+			if err != nil || calls != 2 || strings.Join(results, ",") != "effect-1,effect-2" {
+				t.Fatalf("later position: results=%v, executions=%d, error=%v", results, calls, err)
+			}
+		})
+	}
+}
+
 func TestRunner_ReflectionLoop(t *testing.T) {
 	t.Parallel()
 	rubricJSON := `{"task_goal":"test","criteria":[{"name":"Quality","description":"good","weight":1.0}],"success_threshold":0.9}`

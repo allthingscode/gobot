@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -130,6 +131,7 @@ func (r *AgentRunner) SetTools(tools []Tool) {
 
 // Run executes the tool-call/response loop until the provider returns a terminal text response.
 func (r *AgentRunner) Run(ctx context.Context, sessionKey, userID string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+	invocationID := rand.Text()
 	memStore := r.MemStore
 	if r.MemStoreProvider != nil && userID != "" {
 		memStore = r.MemStoreProvider(userID)
@@ -173,7 +175,7 @@ func (r *AgentRunner) Run(ctx context.Context, sessionKey, userID string, messag
 			continue
 		}
 
-		newMsgs, err := r.processToolCalls(ctx, sessionKey, userID, resp.Message.ToolCalls, iter, &toolSeq)
+		newMsgs, err := r.processToolCalls(ctx, invocationID, sessionKey, userID, resp.Message.ToolCalls, iter, &toolSeq)
 		if err != nil {
 			return "", nil, err
 		}

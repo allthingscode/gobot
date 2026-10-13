@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,7 +13,55 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
+	"golang.org/x/time/rate"
 )
+
+//nolint:paralleltest // Checkpoint manager cleanup uses process-wide test state.
+func TestRunner_ExplicitExecutionIDFreshTurns(t *testing.T) {
+	mgr, err := agentctx.GetCheckpointManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+	registry := NewToolRegistry(t.TempDir())
+	visits, effects := 0, 0
+	tool := stateCheckingTool{name: "explicit_write", run: func(_ context.Context, session, _ string, args map[string]any) (string, error) {
+		visits++
+		id := args["execution_id"].(string)
+		if result, found := registry.Check(session, id); found {
+			return result, nil
+		}
+		effects++
+		result := fmt.Sprintf("effect-%d", effects)
+		if err := registry.Store(session, id, result); err != nil {
+			return "", fmt.Errorf("store fake effect: %w", err)
+		}
+		return result, nil
+	}}
+	r := NewAgentRunner(&MockProvider{}, testModel, basePrompt, &config.Config{})
+	r.Limiter = rate.NewLimiter(rate.Inf, 1)
+	r.SetTools([]Tool{tool})
+	r.SideEffectingTools[tool.name] = true
+	r.IdempStore = agentctx.NewIdempotencyStore(mgr.DB(), time.Hour)
+	for _, tc := range []struct {
+		id, want string
+	}{
+		{"explicit-1", "effect-1"},
+		{"explicit-1", "effect-1"},
+		{"explicit-2", "effect-2"},
+	} {
+		messages := runAutomaticToolTurn(t, context.Background(), r, []agentctx.ToolCall{{
+			ID: "same-provider-id", Name: tool.name, Args: map[string]any{"execution_id": tc.id},
+		}})
+		if got := ExtractText(messages[2]); got != tc.want {
+			t.Fatalf("execution_id %s: got %q, want %q", tc.id, got, tc.want)
+		}
+	}
+	if visits != 3 || effects != 2 {
+		t.Fatalf("registry visits=%d, effects=%d; want 3 and 2", visits, effects)
+	}
+}
 
 const (
 	testSessionKey = "test-session"

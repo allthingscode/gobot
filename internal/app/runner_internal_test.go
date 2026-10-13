@@ -21,11 +21,13 @@ import (
 )
 
 const (
-	testSess   = "sess"
-	testUser   = "user"
-	testModel  = "test-model"
-	testResult = "result"
-	basePrompt = "base prompt"
+	testSess            = "sess"
+	testUser            = "user"
+	testModel           = "test-model"
+	testResult          = "result"
+	basePrompt          = "base prompt"
+	callStateFullResult = "full stored result"
+	callStatePreEvent   = "pre"
 )
 
 func TestRunner_BuildSystemPrompt_NoMemStore(t *testing.T) {
@@ -243,34 +245,206 @@ func TestRunner_CallStateKeys(t *testing.T) {
 		if user != testUser || got["value"] != "original" || (session != testSess && session != "other") {
 			t.Fatalf("identity/args lost: %s %s %v", session, user, got)
 		}
-		return "full stored result", nil
+		return callStateFullResult, nil
 	}}
 	other := tool
 	other.name = "other_tool"
 	r := &AgentRunner{IdempStore: store, SideEffectingTools: map[string]bool{"write": true, "other_tool": true}, MaxToolResultBytes: 4}
 	r.ToolsByName = map[string]Tool{"write": tool, "other_tool": other}
 	for _, tc := range []struct {
-		label, session, name string
-		iter, seq, wantCalls int
+		label, invocation, session, name string
+		iter, seq, wantCalls             int
 	}{
-		{"first", testSess, "write", 2, 7, 1},
-		{"repeat", testSess, "write", 2, 7, 1},
-		{"session", "other", "write", 2, 7, 2},
-		{"iteration", testSess, "write", 3, 7, 3},
-		{"sequence", testSess, "write", 2, 8, 4},
-		{"tool", testSess, "other_tool", 2, 7, 5},
+		{"first", "turn", testSess, "write", 2, 7, 1},
+		{"repeat", "turn", testSess, "write", 2, 7, 1},
+		{"session", "turn", "other", "write", 2, 7, 2},
+		{"iteration", "turn", testSess, "write", 3, 7, 3},
+		{"sequence", "turn", testSess, "write", 2, 8, 4},
+		{"tool", "turn", testSess, "other_tool", 2, 7, 5},
+		{"invocation", "fresh", testSess, "write", 2, 7, 6},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
-			got, err := r.executeSingleToolCall(context.Background(), tc.session, testUser, tc.name, args, tc.iter, tc.seq)
-			if err != nil || got != TruncateToolResult("full stored result", 4) || calls != tc.wantCalls {
+			call := toolCallState{invocationID: tc.invocation, sessionKey: tc.session, userID: testUser,
+				name: tc.name, args: args, iter: tc.iter, seqLen: tc.seq}
+			got, err := r.executeToolCallState(context.Background(), call)
+			if err != nil || got != TruncateToolResult(callStateFullResult, 4) || calls != tc.wantCalls {
 				t.Fatalf("got %q, %v, calls %d", got, err, calls)
 			}
-			key := fmt.Sprintf("%s-%d-%d-%s-%s", tc.session, tc.iter, tc.seq, tc.name, hash)
+			key := fmt.Sprintf("auto-v2:%s:%s:%d:%d:%s:%s", tc.invocation, tc.session, tc.iter, tc.seq, tc.name, hash)
 			cached, err := store.Check(context.Background(), key, tc.name, hash)
-			if err != nil || !cached.Found || cached.CachedResult != "full stored result" {
+			if err != nil || !cached.Found || cached.CachedResult != callStateFullResult {
 				t.Fatalf("key %q: %+v, %v", key, cached, err)
 			}
 		})
+	}
+}
+
+//nolint:gocognit,paralleltest // Table covers successful replay and denied/overridden closed-DB paths.
+func TestRunner_CallStateReplayHooks(t *testing.T) {
+	for _, tc := range []struct {
+		name, override string
+		denied         bool
+	}{
+		{name: "cached success"},
+		{name: "cached override", override: "override result"},
+		{name: "cached denial", denied: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, err := agentctx.GetCheckpointManager(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+			store := agentctx.NewIdempotencyStore(mgr.DB(), time.Hour)
+			events := []string{}
+			tool := stateCheckingTool{name: "write", run: func(context.Context, string, string, map[string]any) (string, error) {
+				events = append(events, "execute")
+				return callStateFullResult, nil
+			}}
+			hooks := &agent.Hooks{}
+			deny, override := false, ""
+			hooks.RegisterPreTool(func(context.Context, string, string, map[string]any) (string, error) {
+				events = append(events, callStatePreEvent)
+				if deny {
+					return "", agent.ErrToolDenied
+				}
+				return override, nil
+			})
+			hooks.RegisterPostTool(func(_ context.Context, _ string, result any) any {
+				events = append(events, "post")
+				return "post:" + result.(string)
+			})
+			r := &AgentRunner{Hooks: hooks, IdempStore: store, MaxToolResultBytes: 8,
+				ToolsByName: map[string]Tool{"write": tool}, SideEffectingTools: map[string]bool{"write": true}}
+			call := toolCallState{invocationID: "retained", sessionKey: testSess, userID: testUser,
+				name: "write", args: map[string]any{"value": "same"}, iter: 0, seqLen: 1}
+			got, err := r.executeToolCallState(context.Background(), call)
+			want := TruncateToolResult("post:full stored result", 8)
+			if err != nil || got != want || strings.Join(events, ",") != "pre,execute,post" {
+				t.Fatalf("first: %q, %v, events=%v", got, err, events)
+			}
+			assertStoredCallResult(t, store, call, callStateFullResult)
+			deny, override = tc.denied, tc.override
+			if deny || override != "" {
+				// A closed DB makes any attempted cache lookup fail observably.
+				if err := mgr.DB().Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			events = nil
+			got, err = r.executeToolCallState(context.Background(), call)
+			assertReplayHookResult(t, got, err, events, want, override, deny)
+		})
+	}
+}
+
+func assertReplayHookResult(t *testing.T, got string, err error, events []string, want, override string, denied bool) {
+	t.Helper()
+	wantEvents := "pre,post"
+	if denied {
+		if !errors.Is(err, agent.ErrToolDenied) || got != "" {
+			t.Fatalf("denial: %q, %v", got, err)
+		}
+		wantEvents = callStatePreEvent
+	} else {
+		if override != "" {
+			want, wantEvents = TruncateToolResult(override, 8), callStatePreEvent
+		}
+		if err != nil || got != want {
+			t.Fatalf("replay: %q, %v, want %q", got, err, want)
+		}
+	}
+	if strings.Join(events, ",") != wantEvents {
+		t.Fatalf("replay events=%v, want %s", events, wantEvents)
+	}
+}
+
+func assertStoredCallResult(t *testing.T, store *agentctx.IdempotencyStore, call toolCallState, want string) {
+	t.Helper()
+	hash, err := agentctx.HashParams(call.args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("auto-v2:%s:%s:%d:%d:%s:%s", call.invocationID, call.sessionKey, call.iter, call.seqLen, call.name, hash)
+	cached, err := store.Check(context.Background(), key, call.name, hash)
+	if err != nil || !cached.Found || cached.CachedResult != want {
+		t.Fatalf("key %q: %+v, %v; want full result %q", key, cached, err, want)
+	}
+}
+
+//nolint:gocognit,paralleltest // Table compares failure, read-only and absent-store paths through real SQLite.
+func TestRunner_CallStateUncachedExecutions(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		side, store, fail bool
+	}{
+		{name: "failed side effect", side: true, store: true, fail: true},
+		{name: "read-only tool", store: true},
+		{name: "no store", side: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, err := agentctx.GetCheckpointManager(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+			calls := 0
+			tool := stateCheckingTool{name: "write", run: func(context.Context, string, string, map[string]any) (string, error) {
+				calls++
+				if tc.fail {
+					return "", errors.New("fake failure")
+				}
+				return testResult, nil
+			}}
+			r := &AgentRunner{ToolsByName: map[string]Tool{"write": tool}, SideEffectingTools: map[string]bool{"write": tc.side}}
+			if tc.store {
+				r.IdempStore = agentctx.NewIdempotencyStore(mgr.DB(), time.Hour)
+			}
+			call := toolCallState{invocationID: "retained", sessionKey: testSess, userID: testUser, name: "write", iter: 0, seqLen: 1}
+			for range 2 {
+				got, err := r.executeToolCallState(context.Background(), call)
+				assertUncachedToolResult(t, got, err, tc.fail)
+			}
+			var rows int
+			if err := mgr.DB().QueryRowContext(context.Background(), "SELECT COUNT(*) FROM idempotency_keys").Scan(&rows); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 2 || rows != 0 {
+				t.Fatalf("executions=%d, keys=%d; want 2 and 0", calls, rows)
+			}
+		})
+	}
+}
+
+func assertUncachedToolResult(t *testing.T, got string, err error, failed bool) {
+	t.Helper()
+	if err != nil || (failed && !strings.Contains(got, "TOOL_ERROR [write]")) || (!failed && got != testResult) {
+		t.Fatalf("got %q, error %v", got, err)
+	}
+}
+
+//nolint:paralleltest // Confirms standalone adapter freshness through actual SQLite rows.
+func TestRunner_CallStateStandaloneAdapter(t *testing.T) {
+	mgr, err := agentctx.GetCheckpointManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(agentctx.ResetCheckpointManagerInstancesForTest)
+	tool := &countingTool{name: "write", resp: testResult}
+	r := &AgentRunner{IdempStore: agentctx.NewIdempotencyStore(mgr.DB(), time.Hour),
+		ToolsByName: map[string]Tool{"write": tool}, SideEffectingTools: map[string]bool{"write": true}}
+	for range 2 {
+		got, err := r.executeSingleToolCall(context.Background(), testSess, testUser, "write", nil, 0, 1)
+		if err != nil || got != testResult {
+			t.Fatalf("standalone call: %q, %v", got, err)
+		}
+	}
+	var rows int
+	if err := mgr.DB().QueryRowContext(context.Background(), "SELECT COUNT(*) FROM idempotency_keys WHERE key LIKE 'auto-v2:%'").Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if tool.calls != 2 || rows != 2 {
+		t.Fatalf("standalone executions=%d, versioned keys=%d; want 2 each", tool.calls, rows)
 	}
 }
 
