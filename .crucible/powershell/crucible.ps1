@@ -503,9 +503,12 @@ $handoff = $crucibleContext.Handoff
 
 Invoke-CircuitBreakerGates -Context $crucibleContext
 
-Invoke-HumanGate -Context $crucibleContext
-
+# The integrity checks run before the Human Gate because the gate exits on every
+# deployment path: after it, they never ran, so a human could accept work they refuse.
+# Item 182.
 Invoke-RepositoryIntegrityGates -Context $crucibleContext
+
+Invoke-HumanGate -Context $crucibleContext
 
 $transitionDecision = Resolve-CrucibleTransition -Context $crucibleContext
 if ($transitionDecision.ShouldExit) {

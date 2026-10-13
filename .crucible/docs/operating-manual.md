@@ -468,7 +468,8 @@ To detect conflicts early, Crucible performs a **Merge Simulation** during the O
 ### 1. Simulation (Operator)
 The Operator runs `{{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id}`.
 - **Success**: Proceed with real merge to `master` using `git merge --no-ff --no-edit task/{task_id}` - never omit `--no-ff` or `--no-edit`.
-- **Failure**: Hand off back to the **Architect** with status `"Ready for Rebase"`, passing `-RebaseCount` one above the incoming handoff's `rebase_count`. The Operator is the only role that increments it.
+- **Exit 2**: the main checkout has uncommitted tracked changes, or the simulated merge could not be undone. Not a conflict: escalate to the human.
+- **Failure (exit 1, a conflict)**: Hand off back to the **Architect** with status `"Ready for Rebase"`, passing `-RebaseCount` one above the incoming handoff's `rebase_count`. The Operator is the only role that increments it.
 
 ### 2. Rebase (Architect)
 When receiving a task for rebase:

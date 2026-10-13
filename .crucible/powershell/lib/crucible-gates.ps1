@@ -678,6 +678,16 @@ function Read-CrucibleHandoffContext {
         exit 1
     }
 
+    # The handoff is chosen by its filename, but everything after this routes, merges and
+    # logs by the task_id inside it, so the two must name the same task. Item 185.
+    $selectedTaskId = if ($Context.ContainsKey("TaskId")) { [string]$Context.TaskId } else { "" }
+    $handoffTaskId = if ($handoff.PSObject.Properties["task_id"]) { ([string]$handoff.task_id).Trim() } else { "" }
+    if (-not [string]::IsNullOrWhiteSpace($selectedTaskId) -and $handoffTaskId -ne $selectedTaskId.Trim()) {
+        Write-Host ("[STOP] Handoff $handoffFile was selected for task $selectedTaskId but its task_id is '" + $handoffTaskId + "'.") -ForegroundColor Red
+        Write-Host "       A handoff must be filed under its own task. Remove or move the file, then rerun." -ForegroundColor Red
+        exit 2
+    }
+
     # Compute $ceiling unconditionally so prompt assembly never shows "unknown" on re-runs (Fix 8)
     if ($handoff.psobject.Properties["budget_tier"] -and $handoff.budget_tier) {
         $tierKey = ([string]$handoff.budget_tier).Trim().ToLowerInvariant()
@@ -944,7 +954,18 @@ function Invoke-HandoffPreflightValidation {
     $pwshCmd = Get-PwshCommand
     $Context.NextCrucibleCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$($Context.RepoRoot)`" -Quiet"
 
-    if ($handoff.psobject.Properties["cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.cycle_id)) {
+    # The expected cycle comes from the task.md Crucible wrote for the source phase, not
+    # from the handoff being checked: taking it from the handoff let any handoff pass the
+    # session_cycle_id comparison by naming the same value twice. Item 186.
+    $sourceTaskMd = Join-Path $sessionDir ([string]$handoff.task_id + "/" + [string]$handoff.source_phase + "/task.md")
+    $issuedCycleId = ""
+    if (Test-Path -LiteralPath $sourceTaskMd) {
+        $cycleLine = @(Get-Content -LiteralPath $sourceTaskMd -Encoding UTF8 -TotalCount 10 | Where-Object { $_ -match '^Cycle ID:\s*(\S+)\s*$' } | Select-Object -First 1)
+        if ($cycleLine.Count -gt 0 -and $cycleLine[0] -match '^Cycle ID:\s*(\S+)\s*$') { $issuedCycleId = $matches[1] }
+    }
+    if (-not [string]::IsNullOrEmpty($issuedCycleId)) {
+        $env:CRUCIBLE_CYCLE_ID = $issuedCycleId
+    } elseif ($handoff.psobject.Properties["cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.cycle_id)) {
         $env:CRUCIBLE_CYCLE_ID = $handoff.cycle_id
     } elseif ($handoff.psobject.Properties["session_cycle_id"] -and -not [string]::IsNullOrEmpty($handoff.session_cycle_id)) {
         $env:CRUCIBLE_CYCLE_ID = $handoff.session_cycle_id
@@ -2889,15 +2910,25 @@ function Restore-BacklogTask {
             $matchingRow = "| [$TaskId]($relativeActive) | P2 | $ActiveStatus | $TaskId | Operator |"
         }
 
-        # 2. Remove bespoke sections like ## Production Items
+        # 2. Drop a bespoke ## Production Items section once this task's row has left it and
+        # it holds no other task's row. Other completed tasks may still be listed there, so
+        # the section is never removed while it has data rows. Item 181.
         for ($i = $lines.Count - 1; $i -ge 0; $i--) {
             if ($lines[$i] -match '^\s*##\s+Production\s+Items') {
                 $removeCount = 1
+                $tableLines = 0
+                $hasSeparator = $false
                 while (($i + $removeCount) -lt $lines.Count -and $lines[$i + $removeCount] -notmatch '^\s*##\s+') {
+                    $sectionLine = $lines[$i + $removeCount]
+                    if ($sectionLine -match '^\s*\|?\s*:?-{3,}') { $hasSeparator = $true }
+                    elseif ($sectionLine -match '^\s*\|') { $tableLines++ }
                     $removeCount++
                 }
-                for ($r = 0; $r -lt $removeCount; $r++) {
-                    $lines.RemoveAt($i)
+                $dataRows = if ($hasSeparator) { $tableLines - 1 } else { $tableLines }
+                if ($dataRows -le 0) {
+                    for ($r = 0; $r -lt $removeCount; $r++) {
+                        $lines.RemoveAt($i)
+                    }
                 }
             }
         }
@@ -3461,39 +3492,35 @@ function Invoke-HumanGateRejectAbandon {
                                 Set-BacklogSpecFrontmatterStatus -Path $archivedMatch.FullName -Status "Abandoned"
                             }
                             $relativeArchived = "$dir/archived/$($archivedMatch.Name)"
-                            $lines = [System.Collections.Generic.List[string]]::new()
-                            foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
-                                [void]$lines.Add($line)
-                            }
                             $archivedLink = $relativeArchived.Replace("\", "/")
-                            $rowIndex = -1
-                            for ($i = 0; $i -lt $lines.Count; $i++) {
-                                if ($lines[$i].Contains("]($archivedLink)")) {
-                                    $rowIndex = $i
-                                    break
-                                }
+                            if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+                                if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
                             }
-                            if ($rowIndex -ge 0) {
-                                $lineArray = [string[]]$lines.ToArray()
-                                if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
-                                    if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
+                            # Read, edit and write under one lock so a row another run changes
+                            # in between is not overwritten. Item 183.
+                            Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
+                                $lines = [System.Collections.Generic.List[string]]::new()
+                                foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
+                                    [void]$lines.Add($line)
                                 }
-                                if (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue) {
-                                    $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $rowIndex
-                                    if ($statusColumn -ge 0) {
-                                        $cells = [System.Collections.Generic.List[string]]::new()
-                                        foreach ($cell in $lines[$rowIndex].Trim().Trim("|").Split("|")) {
-                                            [void]$cells.Add($cell.Trim())
-                                        }
-                                        if ($statusColumn -lt $cells.Count) {
-                                            $cells[$statusColumn] = "Abandoned"
-                                            $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
-                                            Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
-                                                [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
-                                            }
-                                        }
+                                $rowIndex = -1
+                                for ($i = 0; $i -lt $lines.Count; $i++) {
+                                    if ($lines[$i].Contains("]($archivedLink)")) {
+                                        $rowIndex = $i
+                                        break
                                     }
                                 }
+                                if ($rowIndex -lt 0) { return }
+                                $statusColumn = Get-MarkdownTableStatusColumn -Lines ([string[]]$lines.ToArray()) -RowIndex $rowIndex
+                                if ($statusColumn -lt 0) { return }
+                                $cells = [System.Collections.Generic.List[string]]::new()
+                                foreach ($cell in $lines[$rowIndex].Trim().Trim("|").Split("|")) {
+                                    [void]$cells.Add($cell.Trim())
+                                }
+                                if ($statusColumn -ge $cells.Count) { return }
+                                $cells[$statusColumn] = "Abandoned"
+                                $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
+                                [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
                             }
                             break
                         }
@@ -3502,56 +3529,45 @@ function Invoke-HumanGateRejectAbandon {
             }
         }
 
-        $currentHead = (Invoke-GitChecked { git rev-parse HEAD }).Trim()
+        $currentHead = (Invoke-GitChecked { git rev-parse "refs/heads/$PrimaryBranch" }).Trim()
         $parents = (Invoke-GitChecked { git log --pretty=%P -n 1 $currentHead }).Trim()
         $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
 
-        # Only unwind a local merge if the gate actually advanced $PrimaryBranch
-        # beyond origin. In the review-before-merge flow the task branch is not
-        # merged until accept, so on reject/abandon there is typically nothing to
-        # unwind -- a blind reset would discard unrelated, already-pushed history
-        # (e.g. the previously-accepted task), resetting $PrimaryBranch to a stale
-        # reflog entry.
-        $primaryAhead = $false
-        $originRevRes = Invoke-Git rev-parse --verify --quiet "origin/$PrimaryBranch"
-        if ($originRevRes.ExitCode -eq 0) {
-            $aheadCount = (Invoke-GitChecked { git rev-list --count "origin/$PrimaryBranch..$PrimaryBranch" }).Trim()
-            if ($aheadCount -match '^\d+$' -and [int]$aheadCount -gt 0) { $primaryAhead = $true }
-        } elseif ($parentList.Count -ge 2) {
-            # No origin tracking ref to compare against: only unwind a genuine merge commit.
-            $primaryAhead = $true
+        # In the review-before-merge flow a rejected or abandoned task was never merged, so
+        # there is normally nothing to undo. Unwind only when git proves the primary branch's
+        # head is this task's merge: a merge commit whose second parent is the task branch
+        # tip, or, once that branch is gone, whose subject names it. A hand-made fast-forward
+        # leaves no merge commit, so it counts only when the branch's newest reflog entry is
+        # that fast-forward. Being ahead of origin proves nothing, because accepted merges
+        # stay local until the human pushes; using that as the test reset away other tasks'
+        # accepted work. Item 180.
+        $headIsTaskMerge = $false
+        $unwindTarget = $null
+        $lastMove = Invoke-Git reflog show --format=%gs -n 1 "refs/heads/$PrimaryBranch"
+        if ($parentList.Count -lt 2 -and $lastMove.ExitCode -eq 0 -and $lastMove.Raw.Trim() -eq "merge task/${TaskId}: Fast-forward") {
+            $priorRes = Invoke-Git rev-parse --verify --quiet "refs/heads/$PrimaryBranch@{1}"
+            if ($priorRes.ExitCode -eq 0) {
+                $headIsTaskMerge = $true
+                $unwindTarget = $priorRes.Raw.Trim()
+            }
+        }
+        if ($parentList.Count -ge 2) {
+            $taskTipRes = Invoke-Git rev-parse --verify --quiet "refs/heads/task/$TaskId"
+            if ($taskTipRes.ExitCode -eq 0) {
+                $headIsTaskMerge = ($taskTipRes.Raw.Trim() -eq $parentList[1])
+            } else {
+                $subject = (Invoke-GitChecked { git log --pretty=%s -n 1 $currentHead }).Trim()
+                $headIsTaskMerge = ($subject -eq "Merge branch 'task/$TaskId'")
+            }
+            $unwindTarget = $parentList[0]
         }
 
-        if ($primaryAhead) {
-            $resetTarget = "origin/$PrimaryBranch"
-
-            # Derive pre-merge tip using reflog as primary defense in depth (for both merge and FF)
-            $reflogRes = Invoke-Git rev-parse --verify --quiet "${primaryBranch}@{1}"
-            $reflogTip = $reflogRes.Raw.Trim()
-            if ($reflogRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($reflogTip)) {
-                # Verify that $reflogTip is indeed an ancestor of $currentHead
-                $isAncestorRes = Invoke-Git merge-base --is-ancestor $reflogTip $currentHead
-                if ($isAncestorRes.ExitCode -eq 0) {
-                    $resetTarget = $reflogTip
-                }
-            }
-
-            # If reflog check failed or wasn't ancestor, fall back to parent checking for merge commits
-            if ($resetTarget -eq "origin/$PrimaryBranch" -and $parentList.Count -ge 2) {
-                $resetTarget = $parentList[0]
-            }
-
-            if ($resetTarget -eq "origin/$PrimaryBranch") {
-                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $PrimaryBranch to origin/$PrimaryBranch..."
-            } else {
-                Write-Quiet "[HUMAN GATE] Unwinding local merge. Resetting $PrimaryBranch to pre-merge tip ($resetTarget)..."
-            }
-
-            Invoke-GitChecked { git checkout $PrimaryBranch }
-            Invoke-GitChecked { git reset --hard $resetTarget }
+        Invoke-GitChecked { git checkout $PrimaryBranch }
+        if ($headIsTaskMerge) {
+            Write-Quiet "[HUMAN GATE] Unwinding this task's local merge. Resetting $PrimaryBranch to its pre-merge tip ($unwindTarget)..."
+            Invoke-GitChecked { git reset --hard $unwindTarget }
         } else {
-            Write-Quiet "[HUMAN GATE] No local merge to unwind ($PrimaryBranch is not ahead of origin/$PrimaryBranch); leaving $PrimaryBranch untouched."
-            Invoke-GitChecked { git checkout $PrimaryBranch }
+            Write-Quiet "[HUMAN GATE] $PrimaryBranch does not end in a merge of task/$TaskId; leaving it untouched."
         }
 
         if ($Outcome -eq "rejected") {

@@ -1,4 +1,4 @@
-<!-- prompt_version: deployment_prompt-v35 -->
+<!-- prompt_version: deployment_prompt-v36 -->
 Deployment: {task_id}
 
 {prev_session_summary}
@@ -55,7 +55,8 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
       {{crucible_root}}/powershell/check-merge-conflicts.ps1 -TaskId {task_id} -ProjectRoot "{project_root}"
      ```
      (Note: No-Code Closures have no task branch; the simulation will automatically detect this and report a clean exit).
-   - **If it fails**:
+   - **Exit 2 is not a conflict.** The main checkout has uncommitted changes to tracked files, or the simulated merge could not be undone. Do not hand off for rebase: stop and escalate to the human with the output.
+   - **If it fails with exit 1 (a conflict)**:
      - Status: Set task status to `"Ready for Rebase"`.
      - Hand off to **implementation** with exactly this command. `-RebaseCount {next_rebase_count}` is one above the incoming handoff's count. Validation refuses deployment -> implementation without it, and the `recurring_merge_conflicts` breaker counts it.
        ```bash

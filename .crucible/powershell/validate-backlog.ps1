@@ -19,8 +19,7 @@ param(
 $ErrorActionPreference = "Stop"
 $errors = @()
 
-$backlogIoPath = Join-Path (Join-Path $PSScriptRoot "lib") "backlog-io.ps1"
-if (Test-Path -LiteralPath $backlogIoPath) { . $backlogIoPath }
+. (Join-Path (Join-Path $PSScriptRoot "lib") "backlog-io.ps1")
 
 function Write-Quiet {
     param(
@@ -463,7 +462,10 @@ try {
                     Write-Host "[WARN] Archived spec has no BACKLOG.md row: $relPath. Readers that resolve a task by its table row will treat it as nonexistent." -ForegroundColor Yellow
                 }
 
-                if ($frontmatter -and $frontmatterStr -match 'status:\s*"?([^"\r\n]+)"?') {
+                # Matched per line: $frontmatterStr joins the lines with spaces, so an
+                # unquoted status read on through every later line and never matched.
+                $statusLine = @($frontmatter | Where-Object { $_ -match '^\s*status:' } | Select-Object -First 1)
+                if ($statusLine.Count -gt 0 -and $statusLine[0] -match '^\s*status:\s*"?([^"]+)"?\s*$') {
                     $status = $matches[1].Trim()
                     if ($status -eq "Production" -or $status -eq "Resolved" -or $status -eq "Abandoned") {
                         continue
@@ -715,18 +717,25 @@ try {
         $oldText = ($content -join "`n")
         $newText = ($newContent -join "`n")
         if ($oldText -ne $newText) {
-            if (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue) {
-                Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
-                    [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
-                }
-            } else {
+            # The summary was computed from the file as first read. Write it only if the file
+            # is still that, checked under the lock, so a row another run added or archived
+            # meanwhile is never overwritten. Item 183.
+            $writeResult = Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
+                $current = @(Get-Content -LiteralPath $BacklogPath -Encoding UTF8) -join "`n"
+                if ($current -ne $oldText) { return "changed" }
                 [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
+                return "written"
             }
-            Write-Quiet "BACKLOG.md updated successfully."
+            if ($writeResult -eq "written") {
+                Write-Quiet "BACKLOG.md updated successfully."
+                $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
+            } else {
+                $errors += "BACKLOG.md changed while it was being validated, so the Priority Summary was not rewritten. Rerun validate-backlog.ps1 -FixSummary."
+            }
         } else {
             Write-Quiet "BACKLOG.md Priority Summary already current; no changes written."
+            $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
         }
-        $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
     }
 
     if ($errors.Count -gt 0) {

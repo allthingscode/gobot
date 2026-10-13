@@ -97,6 +97,64 @@ try {
         Assert-Result -Name "no report" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session/$taskId/conflict_report.json"))) -FailureMessage "clean merge wrote a conflict report"
     }
 
+    # Item 179: the simulation used to end with reset --hard, which erased an unstaged edit in a
+    # file the task never touched.
+    $results += Run-Test -Name "Merge simulation refuses a dirty checkout and leaves its edits alone" -Body {
+        $projectRoot = Join-Path $tempRoot "dirty"
+        $taskId = "C-MERGE-DIRTY"
+        Initialize-Repo -ProjectRoot $projectRoot
+        Push-Location $projectRoot
+        try {
+            git checkout -b "task/$taskId" --quiet
+            Set-Content -LiteralPath "feature.txt" -Value "task change" -Encoding UTF8
+            git add feature.txt
+            git commit -m "task change" --quiet
+            git checkout master --quiet
+            Set-Content -LiteralPath "app.txt" -Value "human work in progress" -Encoding UTF8
+        } finally {
+            Pop-Location
+        }
+
+        $res = Invoke-MergeCheck -ProjectRoot $projectRoot -TaskId $taskId
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "refused" -Condition ($res.ExitCode -eq 2 -and $output -match "uncommitted changes" -and $output -match "app\.txt") -FailureMessage "expected exit 2 naming app.txt, got $($res.ExitCode). Output:`n$output"
+        $kept = (Get-Content -LiteralPath (Join-Path $projectRoot "app.txt") -Raw).Trim()
+        Assert-Result -Name "edit kept" -Condition ($kept -eq "human work in progress") -FailureMessage "the unstaged edit was changed to '$kept'"
+    }
+
+    $results += Run-Test -Name "Clean merge simulation leaves no merge, task file or lost untracked file behind" -Body {
+        $projectRoot = Join-Path $tempRoot "clean-undo"
+        $taskId = "C-MERGE-UNDO"
+        Initialize-Repo -ProjectRoot $projectRoot
+        Push-Location $projectRoot
+        try {
+            git checkout -b "task/$taskId" --quiet
+            Set-Content -LiteralPath "feature.txt" -Value "task change" -Encoding UTF8
+            git add feature.txt
+            git commit -m "task change" --quiet
+            git checkout master --quiet
+            Set-Content -LiteralPath "notes.txt" -Value "untracked notes" -Encoding UTF8
+            $headBefore = (git rev-parse HEAD).Trim()
+        } finally {
+            Pop-Location
+        }
+
+        $res = Invoke-MergeCheck -ProjectRoot $projectRoot -TaskId $taskId
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+        Push-Location $projectRoot
+        try {
+            git rev-parse -q --verify MERGE_HEAD *> $null
+            Assert-Result -Name "no merge in progress" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "MERGE_HEAD is still set after the simulation"
+            Assert-Result -Name "head unchanged" -Condition ((git rev-parse HEAD).Trim() -eq $headBefore) -FailureMessage "HEAD moved"
+            Assert-Result -Name "tracked tree clean" -Condition (@(git status --porcelain --untracked-files=no).Count -eq 0) -FailureMessage ("tree not clean: " + ((git status --porcelain) -join "; "))
+        } finally {
+            Pop-Location
+        }
+        Assert-Result -Name "task file gone" -Condition (-not (Test-Path (Join-Path $projectRoot "feature.txt"))) -FailureMessage "the task's file was left in the checkout"
+        Assert-Result -Name "untracked file kept" -Condition (Test-Path (Join-Path $projectRoot "notes.txt")) -FailureMessage "the untracked file was removed"
+    }
+
     $results += Run-Test -Name "Merge simulation runs from different CWD using -ProjectRoot" -Body {
         $projectRoot = Join-Path $tempRoot "diff-cwd"
         $taskId = "C-MERGE-DIFF-CWD"

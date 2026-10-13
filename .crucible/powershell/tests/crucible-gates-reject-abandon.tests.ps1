@@ -356,6 +356,84 @@ try {
         Assert-Result -Name "D56 E2E Reject: task.md references implementation phase" -Condition ($taskContent -match "Phase: implementation") -FailureMessage ("expected task.md to reference Phase: implementation, got: " + $taskContent)
     }
 
+    # Item 180: accepted merges stay local until the human pushes. Rejecting task B then used to
+    # reset master because it was ahead of origin, dropping task A's accepted merge.
+    $results += Run-Test -Name "Rejecting an unmerged task keeps another task's accepted, unpushed merge" -Body {
+        $caseRoot = Join-Path $tempRoot "item180-reject-keeps-accepted"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $originRepo = Join-Path $caseRoot "origin.git"
+        $localRepo = Join-Path $caseRoot "local"
+        New-Item -ItemType Directory -Path $originRepo -Force | Out-Null
+        Invoke-GitChecked { git -C $originRepo init --bare --initial-branch master } | Out-Null
+        Invoke-GitChecked { git clone $originRepo $localRepo } | Out-Null
+        "init" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add README.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "init" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo push origin master } | Out-Null
+
+        $backlogDir = Join-Path $localRepo ".crucible/backlog"
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "features/active") -Force | Out-Null
+        "paths:`n  backlog: `".crucible/backlog`"`n" | Set-Content -LiteralPath (Join-Path $localRepo ".crucible/config.yaml") -Encoding UTF8
+        "---`nitem_id: `"F-998`"`ntype: `"Feature`"`nstatus: `"Ready for Deploy`"`npriority: `"P2`"`ntarget_phase: `"deployment`"`ncreated_at: `"2026-10-13`"`n---`n`n# Test Spec F-998`n" | Set-Content -LiteralPath (Join-Path $backlogDir "features/active/F-998_Test_Spec.md") -Encoding UTF8
+        "# Backlog`n`n## Active Items`n`n| ID | Status | Title | Target |`n|---|---|---|---|`n| [F-998](features/active/F-998_Test_Spec.md) | Ready for Deploy | Test Spec F-998 | Operator |`n" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+
+        # Task A: accepted and merged locally, branch deleted, nothing pushed.
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-997 } | Out-Null
+        "a" | Set-Content -LiteralPath (Join-Path $localRepo "a.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add a.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "task A" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+        Invoke-GitChecked { git -C $localRepo merge --no-ff --no-edit task/F-997 } | Out-Null
+        Invoke-GitChecked { git -C $localRepo branch -D task/F-997 } | Out-Null
+        $acceptedHead = (Invoke-GitChecked { git -C $localRepo rev-parse master }).Trim()
+
+        # Task B: reviewed but not merged.
+        Invoke-GitChecked { git -C $localRepo checkout -b task/F-998 } | Out-Null
+        "b" | Set-Content -LiteralPath (Join-Path $localRepo "b.md") -Encoding UTF8
+        Invoke-GitChecked { git -C $localRepo add b.md } | Out-Null
+        Invoke-GitChecked { git -C $localRepo commit -m "task B" } | Out-Null
+        Invoke-GitChecked { git -C $localRepo checkout master } | Out-Null
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+        $scriptPath = Join-Path $caseRoot "run-reject.ps1"
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
+    GateOutcome = 'rejected'
+    GateReason = 'needs more polish'
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$localRepo'
+    RepoRoot = '$localRepo'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-998'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        artifacts = @('b.md')
+        session_cycle_id = 'cycle-998'
+    }
+}
+Push-Location '$localRepo'
+try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        Assert-Result -Name "reject exit code" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got $exitCode. Output: " + ($output | Out-String))
+        $afterHead = (Invoke-GitChecked { git -C $localRepo rev-parse master }).Trim()
+        Assert-Result -Name "task A's accepted merge kept" -Condition ($afterHead -eq $acceptedHead) -FailureMessage ("master moved from $acceptedHead to $afterHead")
+        Assert-Result -Name "task A's file kept" -Condition (Test-Path (Join-Path $localRepo "a.md")) -FailureMessage "a.md was removed from the checkout"
+    }
+
     $results += Run-Test -Name "D56: human-gate trigger target_phase checks" -Body {
         $caseRoot = Join-Path $tempRoot "d56-gate-trigger-target"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
@@ -1311,6 +1389,35 @@ Spec content
         $valScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
         $valOutput = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $valScript -ProjectRoot $caseRoot 2>&1
         Assert-Result -Name "F12 validate-backlog passes post-recovery" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validate-backlog exit 0, got $LASTEXITCODE. Output: " + ($valOutput | Out-String))
+    }
+
+    # Item 181: restoring one task used to delete the whole Production Items section, sibling rows included.
+    $results += Run-Test -Name "Restore-BacklogTask keeps other tasks' rows in the Production Items section" -Body {
+        $caseRoot = Join-Path $tempRoot "item181-production-sibling"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+        "---`nitem_id: `"F-501`"`ntitle: Test Feature 501`ntype: feature`npriority: P1`nstatus: In Progress`n---`nSpec content`n" | Set-Content -LiteralPath (Join-Path $caseRoot "backlog/features/active/F-501_Spec.md") -Encoding UTF8
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        @"
+# Project Backlog
+
+## Features
+| ID | Title | Priority | Status | Spec |
+|---|---|---|---|---|
+
+## Production Items
+| ID | Title | Priority | Status | Spec |
+|---|---|---|---|---|
+| F-501 | Test Feature 501 | P1 | Production | [F-501_Spec.md](features/active/F-501_Spec.md) |
+| F-502 | Test Feature 502 | P1 | Production | [F-502_Spec.md](features/archived/F-502_Spec.md) |
+"@ | Set-Content -LiteralPath $backlogPath -Encoding UTF8
+
+        Restore-BacklogTask -TaskId "F-501" -ProjectRoot $caseRoot -ActiveStatus "In Progress"
+
+        $backlogText = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
+        Assert-Result -Name "sibling row kept" -Condition ($backlogText -match '\| F-502 \|') -FailureMessage ("F-502's row was removed: " + $backlogText)
+        Assert-Result -Name "section kept while it has rows" -Condition ($backlogText -match '## Production Items') -FailureMessage "the Production Items section was removed though F-502 is still in it"
+        Assert-Result -Name "restored row is in progress" -Condition ($backlogText -match 'F-501[^\r\n]*In Progress') -FailureMessage ("F-501 was not restored: " + $backlogText)
     }
 
     $results += Run-Test -Name "Restore-BacklogTask uses word boundaries when matching short task ids" -Body {

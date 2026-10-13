@@ -112,6 +112,59 @@ try {
         Assert-Result -Name "clean tree exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
     }
 
+    $results += Run-Test -Name "FixSummary keeps an edit made to BACKLOG.md while it waits for the lock" -Body {
+        $root = Join-Path $tempRoot "fix-summary-race"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Hello.md" -ItemId "C-001" -Priority "P2" -Title "Hello"
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 0 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-001](chores/active/C-001_Hello.md) | P2 | Ready | Hello | Architect |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        . (Join-Path $REPO_ROOT "powershell/lib/backlog-io.ps1")
+        $lockPath = Get-BacklogLockFilePath -BacklogPath $backlog
+        [System.IO.File]::WriteAllText($lockPath, "$PID;$(Get-Date -Format 'o')")
+        $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-PwshCommand))
+        foreach ($a in @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-BacklogPath", $backlog, "-FixSummary")) { $psi.ArgumentList.Add($a) }
+        $psi.RedirectStandardOutput = $true
+        $psi.UseShellExecute = $false
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $seen = @()
+        try {
+            while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
+                $seen += $line
+                if ($line -like "Auto-fixing Priority Summary*") { break }
+            }
+            Add-Content -LiteralPath $backlog -Value "| [C-002](chores/active/C-002_Added.md) | P2 | Ready | Added meanwhile | Architect |" -Encoding UTF8
+        } finally {
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        }
+        $rest = $proc.StandardOutput.ReadToEnd()
+        $proc.WaitForExit()
+        $output = (($seen -join "`n") + "`n" + $rest)
+
+        $after = Get-Content -LiteralPath $backlog -Raw -Encoding UTF8
+        Assert-Result -Name "concurrent row survives" -Condition ($after -match 'Added meanwhile') -FailureMessage ("the row added while FixSummary waited was overwritten. Output: " + $output)
+        Assert-Result -Name "stale read is reported" -Condition ($proc.ExitCode -eq 2 -and $output -match 'changed while it was being validated') -FailureMessage ("expected exit 2 naming the concurrent change, got " + $proc.ExitCode + ". Output: " + $output)
+    }
+
     # --- Test 2 (REGRESSION): missing-file link in `## Active Items` table must fail ---
     $results += Run-Test -Name "REGRESSION: missing-file link in Active Items table is caught" -Body {
         $root = Join-Path $tempRoot "drift"
@@ -383,6 +436,51 @@ target_phase: "done"
         $r = Invoke-Validator -BacklogPath $backlog
         Assert-Result -Name "missing status exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "missing status error" -Condition ($r.Output -match "missing status frontmatter") -FailureMessage ("expected missing status error. Output: " + $r.Output)
+    }
+
+    # Found while fixing item 182: the frontmatter was joined into one string, so an unquoted
+    # status read on through every later line and a correctly archived spec failed.
+    $results += Run-Test -Name "Archived spec with an unquoted terminal status passes" -Body {
+        $root = Join-Path $tempRoot "archived-unquoted-status"
+        New-MinimalBacklogTree -Root $root
+        $specPath = Join-Path $root "features/archived/F-102_Unquoted.md"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
+@"
+---
+item_id: F-102
+type: feature
+status: Production
+priority: P1
+---
+
+# Unquoted Status
+"@ | Set-Content -LiteralPath $specPath -Encoding UTF8
+        $backlog = Join-Path $root "BACKLOG.md"
+@"
+# Backlog
+
+## Priority Summary
+
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 0 | - |
+| **P3** | 0 | - |
+
+**Status Overview**: 0 active items.
+
+## Active Items
+
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [F-102](features/archived/F-102_Unquoted.md) | P1 | Production | Unquoted Status | Operator |
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+
+        $r = Invoke-Validator -BacklogPath $backlog
+        Assert-Result -Name "no archived status error" -Condition ($r.Output -notmatch "Archived file has (incorrect|missing) status") -FailureMessage ("an unquoted Production status was rejected. Output: " + $r.Output)
+        Assert-Result -Name "not rewritten as stale" -Condition ($r.Output -notmatch "Repaired archived spec status") -FailureMessage ("an unquoted Production status was treated as stale and rewritten. Output: " + $r.Output)
+        Assert-Result -Name "exit zero" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
     }
 
     # --- Test 9: mojibake detection in BACKLOG.md fails validation ---

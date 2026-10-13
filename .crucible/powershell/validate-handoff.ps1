@@ -60,124 +60,6 @@ function Test-RequiredField {
     return $true
 }
 
-function Get-MatchingContractClauses {
-    param(
-        [Parameter(Mandatory = $true)]$Schema,
-        [Parameter(Mandatory = $true)][string]$Source,
-        [Parameter(Mandatory = $true)][string]$Target
-    )
-
-    $matches = @()
-    if ($null -eq $Schema.PSObject.Properties["allOf"] -or $null -eq $Schema.allOf) {
-        return $matches
-    }
-
-    foreach ($clause in @($Schema.allOf)) {
-        if ($null -eq $clause.PSObject.Properties["if"] -or $null -eq $clause.PSObject.Properties["then"]) {
-            continue
-        }
-
-        $ifNode = $clause.if
-        $thenNode = $clause.then
-        $isMatch = $true
-
-        if ($ifNode.PSObject.Properties["properties"] -and $null -ne $ifNode.properties) {
-            $props = $ifNode.properties
-            if ($props.PSObject.Properties["source_phase"]) {
-                $spNode = $props.source_phase
-                if ($spNode.PSObject.Properties["const"]) {
-                    if ($Source -ne ([string]$spNode.const).Trim().ToLowerInvariant()) {
-                        $isMatch = $false
-                    }
-                } elseif ($spNode.PSObject.Properties["enum"]) {
-                    $enumList = @($spNode.enum | ForEach-Object { $_.Trim().ToLowerInvariant() })
-                    if ($enumList -notcontains $Source.Trim().ToLowerInvariant()) {
-                        $isMatch = $false
-                    }
-                }
-            }
-            if ($props.PSObject.Properties["target_phase"]) {
-                $tpNode = $props.target_phase
-                if ($tpNode.PSObject.Properties["const"]) {
-                    if ($Target -ne ([string]$tpNode.const).Trim().ToLowerInvariant()) {
-                        $isMatch = $false
-                    }
-                } elseif ($tpNode.PSObject.Properties["enum"]) {
-                    $enumList = @($tpNode.enum | ForEach-Object { $_.Trim().ToLowerInvariant() })
-                    if ($enumList -notcontains $Target.Trim().ToLowerInvariant()) {
-                        $isMatch = $false
-                    }
-                }
-            }
-        }
-
-        if ($isMatch) {
-            $matches += $thenNode
-        }
-    }
-
-    return $matches
-}
-
-function Assert-SchemaContract {
-    param(
-        [Parameter(Mandatory = $true)]$Handoff,
-        [Parameter(Mandatory = $true)]$Schema,
-        [Parameter(Mandatory = $true)][string]$HandoffFile,
-        [Parameter(Mandatory = $true)][string]$Source,
-        [Parameter(Mandatory = $true)][string]$Target
-    )
-
-    $matchedClauses = Get-MatchingContractClauses -Schema $Schema -Source $Source -Target $Target
-    foreach ($thenNode in @($matchedClauses)) {
-        if ($thenNode.PSObject.Properties["required"] -and $null -ne $thenNode.required) {
-            foreach ($field in @($thenNode.required)) {
-                if (-not (Test-RequiredField -Handoff $Handoff -FieldName ([string]$field))) {
-                    $reasonCode = "missing_required_field"
-                    if ([string]$field -eq "reviewer_checks_passed") {
-                        $reasonCode = "reviewer_contract_failed"
-                    }
-
-                    Write-ValidationResult -Ok $false `
-                        -ReasonCode $reasonCode `
-                        -Message ("Missing required field: " + $field) `
-                        -Details @{ field = $field; source_phase = $Source; target_phase = $Target; handoff_file = $HandoffFile }
-                }
-            }
-        }
-
-        if ($thenNode.PSObject.Properties["not"] -and $null -ne $thenNode.not) {
-            $notNode = $thenNode.not
-
-            if ($notNode.PSObject.Properties["required"] -and $null -ne $notNode.required) {
-                foreach ($field in @($notNode.required)) {
-                    if ($null -ne $Handoff.PSObject.Properties[[string]$field]) {
-                        Write-ValidationResult -Ok $false `
-                            -ReasonCode "invalid_field" `
-                            -Message ("Field is not allowed for this transition: " + $field) `
-                            -Details @{ field = $field; source_phase = $Source; target_phase = $Target; handoff_file = $HandoffFile }
-                    }
-                }
-            }
-
-            if ($notNode.PSObject.Properties["anyOf"] -and $null -ne $notNode.anyOf) {
-                foreach ($forbiddenRule in @($notNode.anyOf)) {
-                    if ($forbiddenRule.PSObject.Properties["required"] -and $null -ne $forbiddenRule.required) {
-                        foreach ($field in @($forbiddenRule.required)) {
-                            if ($null -ne $Handoff.PSObject.Properties[[string]$field]) {
-                                Write-ValidationResult -Ok $false `
-                                    -ReasonCode "invalid_field" `
-                                    -Message ("Field is not allowed for this transition: " + $field) `
-                                    -Details @{ field = $field; source_phase = $Source; target_phase = $Target; handoff_file = $HandoffFile }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 if (-not (Test-Path -LiteralPath $HandoffFile)) {
     Write-ValidationResult -Ok $false `
         -ReasonCode "invalid_json" `
@@ -357,8 +239,6 @@ elseif ($source -eq "deployment") {
     }
 }
 
-Assert-SchemaContract -Handoff $handoff -Schema $schema -HandoffFile $HandoffFile -Source $source -Target $target
-
 $taskId = ([string]$handoff.task_id).Trim()
 $handoffBudgetTier = ""
 if ($handoff.PSObject.Properties["budget_tier"] -and $null -ne $handoff.budget_tier) {
@@ -439,6 +319,41 @@ if ($handoff.PSObject.Properties["reviewer_checks_passed"] -and $null -ne $hando
                 -Details @{ field = "reviewer_checks_passed"; missing_checks = $missingChecks; handoff_file = $HandoffFile }
         }
     }
+}
+
+# The checks above give the common mistakes a specific reason; the schema itself is the
+# full contract (types, minimums, enums, per-transition rules). Item 184.
+if (-not (Test-Json -Json $handoffRaw -SchemaFile $SchemaPath -ErrorAction SilentlyContinue)) {
+    # Test-Json's messages include failures inside if, not and contains branches that
+    # passed overall, so they cannot be reported as they are. The schema without its
+    # transition rules has no such branches: each of its messages is a real violation.
+    # A transition rule that fails is named whole.
+    $baseSchema = $schemaRaw | ConvertFrom-Json -AsHashtable
+    $rules = @($baseSchema["allOf"])
+    $baseSchema.Remove("allOf")
+    $baseErrors = $null
+    $null = Test-Json -Json $handoffRaw -Schema ($baseSchema | ConvertTo-Json -Depth 32) -ErrorAction SilentlyContinue -ErrorVariable baseErrors
+    $violations = @($baseErrors | ForEach-Object { ([string]$_.Exception.Message) -replace '^The JSON is not valid with the schema: ', '' } | Select-Object -Unique)
+    if ($violations.Count -eq 0) {
+        foreach ($rule in $rules) {
+            $applies = $true
+            foreach ($key in @("source_phase", "target_phase")) {
+                $cond = $rule["if"]["properties"][$key]
+                $actual = if ($key -eq "source_phase") { $source } else { $target }
+                if ($null -ne $cond -and [string]$cond["const"] -ne $actual) { $applies = $false }
+            }
+            if (-not $applies) { continue }
+            $ruleJson = $rule["then"] | ConvertTo-Json -Depth 32 -Compress
+            if (-not (Test-Json -Json $handoffRaw -Schema $ruleJson -ErrorAction SilentlyContinue)) {
+                $violations += ("the " + $source + " -> " + $target + " rule " + $ruleJson)
+            }
+        }
+    }
+    if ($violations.Count -eq 0) { $violations = @("the handoff does not match the schema") }
+    Write-ValidationResult -Ok $false `
+        -ReasonCode "schema_violation" `
+        -Message ("Handoff does not match " + $SchemaPath + ": " + ($violations -join "; ")) `
+        -Details @{ violations = $violations; handoff_file = $HandoffFile }
 }
 
 Write-ValidationResult -Ok $true -Message "Preflight validation passed."

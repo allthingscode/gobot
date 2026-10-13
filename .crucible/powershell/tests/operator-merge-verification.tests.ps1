@@ -289,6 +289,38 @@ try {
         Assert-Result -Name "no verification failure" -Condition ($output -notmatch "artifact_verification_failed") -FailureMessage "unexpected verification failure. Output:`n$output"
     }
 
+    # Item 182: the Human Gate exits on every deployment path, so the integrity checks after it
+    # never ran and an accept went through without a dev log.
+    $results += Run-Test -Name "An accepted deployment without a dev log stops before the Human Gate acts" -Body {
+        $projectRoot = Join-Path $tempRoot "no-dev-log"
+        $taskId = "C-OP-NODEVLOG"
+        Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
+        Push-Location $projectRoot
+        try {
+            # Dropped before the task's base commit, so the framework-integrity breaker sees no
+            # .crucible change during the task and only the missing dev log is wrong.
+            git rm --quiet .crucible/dev-logs/UNPUBLISHED_LOGS.md
+            git commit -m "drop dev log" --quiet
+            $baseHash = (git rev-parse HEAD).Trim()
+            git checkout -b task/$taskId --quiet
+            Set-Content -LiteralPath "work.txt" -Value "task work" -Encoding UTF8
+            git add work.txt
+            git commit -m "task work" --quiet
+            git checkout master --quiet
+            git merge task/$taskId --no-ff -m "merge task work" --quiet
+            $mergedHash = (git rev-parse HEAD).Trim()
+        } finally {
+            Pop-Location
+        }
+        Write-OperatorHandoff -ProjectRoot $projectRoot -TaskId $taskId -CommitHash $mergedHash -BaseCommit $baseHash | Out-Null
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "stopped" -Condition ($res.ExitCode -eq 2 -and $output -match "DEV LOG\] VALIDATION FAILED") -FailureMessage "expected exit 2 from the dev log check, got $($res.ExitCode). Output:`n$output"
+        $gateDir = Join-Path $projectRoot ".crucible/session/global/gate_decisions"
+        $decisions = @(Get-ChildItem -Path $gateDir -Filter "${taskId}*.json" -ErrorAction SilentlyContinue)
+        Assert-Result -Name "no gate decision recorded" -Condition ($decisions.Count -eq 0) -FailureMessage ("a gate decision was recorded: " + (($decisions | ForEach-Object Name) -join ", "))
+    }
+
     $results += Run-Test -Name "Baseline commit_hash matching base_commit is rejected at merge verification" -Body {
         $projectRoot = Join-Path $tempRoot "baseline-rejected"
         $taskId = "C-OP-BASELINE"

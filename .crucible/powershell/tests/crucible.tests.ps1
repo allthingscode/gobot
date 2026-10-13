@@ -167,7 +167,7 @@ function Get-BaseHandoff {
         session_cycle_id         = "test-cycle"
         cycle_id                 = "test-cycle"
         artifacts                = @((Join-Path $tempRoot ".crucible/backlog/BACKLOG.md"))
-        file_affinity            = "powershell/tests/"
+        file_affinity            = @("powershell/tests/")
     }
 }
 

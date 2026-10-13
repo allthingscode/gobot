@@ -45,12 +45,17 @@ function New-AdopterProject {
     $srcDir = Join-Path $projectRoot "src"
     New-Item -ItemType Directory -Path $srcDir -Force | Out-Null
     Set-Content -Path (Join-Path $srcDir "feature.txt") -Value "work product"
+    # The Operator writes the dev log before the deployment -> done handoff, and the
+    # dev-log check runs ahead of the Human Gate.
+    $devLogsDir = Join-Path $projectRoot ".crucible/dev-logs"
+    New-Item -ItemType Directory -Path $devLogsDir -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $devLogsDir "UNPUBLISHED_LOGS.md"), "## $TaskId`nValid dev log entry.`n", [System.Text.UTF8Encoding]::new($false))
 
     Push-Location $projectRoot
     try {
         git config user.name "Test User"
         git config user.email "test@example.com"
-        git add src/feature.txt
+        git add src/feature.txt .crucible/dev-logs/UNPUBLISHED_LOGS.md
         git commit -m "add feature.txt" --quiet
     } finally {
         Pop-Location
@@ -365,6 +370,30 @@ try {
             Assert-Result -Name ("target phase scaffolded: " + $t.Target) -Condition (Test-Path -LiteralPath $targetPrompt) `
                 -FailureMessage ("expected " + $t.Target + "/prompt.md to be scaffolded for " + $label + ". Output: " + ($run.Output -join "`n"))
         }
+    }
+
+    $results += Run-Test -Name "A handoff that names a cycle other than the one task.md issued is refused" -Body {
+        # Item 186: the expected cycle used to be read from the incoming handoff itself, so
+        # setting cycle_id and session_cycle_id to the same stale value always passed.
+        $cycle = "cycle-e2e-issued"
+        $env:CRUCIBLE_CYCLE_ID = $cycle
+        $task = "F-701"
+        $projectRoot = New-AdopterProject -Root (Join-Path $tempRoot "t5") -TaskId $task -Title "Cycle Check" -Status "Ready" -StatusTarget "Groomer"
+        $artifacts = @("src/feature.txt")
+
+        Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source "grooming" -Target "implementation" -Cycle $cycle -Count 1 `
+            -Extra @{ artifacts = $artifacts; file_affinity = @("src/") } | Out-Null
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+        Assert-Result -Name "grooming -> implementation accepted" -Condition ($run.ExitCode -eq 0) `
+            -FailureMessage ("expected exit 0, got " + $run.ExitCode + ". Output: " + ($run.Output -join "`n"))
+
+        Complete-PhaseChecklist -ProjectRoot $projectRoot -TaskId $task -Phase "implementation"
+        Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source "implementation" -Target "verification" -Cycle "cycle-stale" -Count 2 `
+            -Extra @{ artifacts = $artifacts; cycle_id = "cycle-stale" } | Out-Null
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+        $text = $run.Output -join "`n"
+        Assert-Result -Name "forged cycle refused" -Condition ($run.ExitCode -eq 2 -and $text -match "session_cycle_id mismatch.*Expected: $cycle, Got: cycle-stale") `
+            -FailureMessage ("expected exit 2 naming the issued and the forged cycle, got " + $run.ExitCode + ". Output: " + $text)
     }
 }
 finally {

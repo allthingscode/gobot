@@ -241,6 +241,36 @@ Resolve-CrucibleInputHandoff -Context `$ctx
         Assert-Result -Name "ceiling mapped" -Condition ($ctx.Ceiling -eq 28) -FailureMessage "budget ceiling was not derived"
     }
 
+    $results += Run-Test -Name "Read-CrucibleHandoffContext refuses another task's handoff filed under the selected task" -Body {
+        $caseRoot = Join-Path $tempRoot "foreign-task-id"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-A01"
+        $handoffPath = Join-Path $ctx.HandoffDir "F-A01-20260526T120000Z.json"
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = "F-B01"; source_phase = "grooming"; target_phase = "implementation"
+            cumulative_handoff_count = 2; handoff_retry_count = 0; review_strike_count = 0; rebase_count = 0
+            budget_tier = "low"; reason = "valid payload, wrong file"; artifacts = @("a.md"); file_affinity = @("src/")
+            prompt_version = "1.0.0"; session_cycle_id = "cycle-x"
+        }
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    TaskId = 'F-A01'
+    RepoRoot = '$($caseRoot.Replace("'", "''"))'
+    LatestHandoff = (Get-Item -LiteralPath '$($handoffPath.Replace("'", "''"))')
+    LogFile = '$((Join-Path $caseRoot "session/pipeline.log.jsonl").Replace("'", "''"))'
+    BudgetCeilings = `$null
+}
+Read-CrucibleHandoffContext -Context `$ctx
+Write-Host 'READ_COMPLETED'
+"@ 2>&1
+        $code = $LASTEXITCODE
+        $text = $out -join "`n"
+        Assert-Result -Name "mismatch exits 2" -Condition ($code -eq 2 -and -not ($text -match 'READ_COMPLETED')) -FailureMessage ("expected exit 2 before the handoff is used, got " + $code + ". Output: " + $text)
+        Assert-Result -Name "mismatch named" -Condition ($text -match "selected for task F-A01 but its task_id is 'F-B01'") -FailureMessage ("expected both task ids named. Output: " + $text)
+    }
+
     $results += Run-Test -Name "Read-CrucibleHandoffContext maps extended budget ceiling" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "extended-budget") -TaskId "F-002X"
         $handoffPath = Join-Path $ctx.HandoffDir "F-002X-20260526T120000Z.json"

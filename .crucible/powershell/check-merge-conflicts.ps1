@@ -38,6 +38,17 @@ if ($LASTEXITCODE -ne 0) {
     exit 0
 }
 
+# The simulation merges into this checkout and then undoes the merge. Undoing a merge cannot
+# safely separate it from edits that were already there, so refuse to start over any. Untracked
+# files are untouched by both the merge and its abort. Exit 2 means "not run", never a
+# conflict, so the Operator does not send the task back for a rebase. Item 179.
+$dirty = @(git -C $REPO_ROOT status --porcelain --untracked-files=no)
+if ($dirty.Count -gt 0) {
+    Write-Host "Error: the checkout at $REPO_ROOT has uncommitted changes to tracked files. Commit or stash them, then rerun the merge simulation:" -ForegroundColor Red
+    $dirty | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Yellow }
+    exit 2
+}
+
 $currentBranch = git -C $REPO_ROOT rev-parse --abbrev-ref HEAD
 if ($currentBranch -ne $mainBranch) {
     Write-Host "Warning: Not on $mainBranch branch. Switching to $mainBranch..." -ForegroundColor Yellow
@@ -104,7 +115,14 @@ if ($gitExitCode -ne 0) {
     exit 1
 } else {
     Write-Host "CLEAN MERGE SIMULATED. No conflicts detected." -ForegroundColor Green
-    # For a clean merge with --no-commit, we use reset --hard to return to clean state
-    git -C $REPO_ROOT reset --hard HEAD --quiet
+    # An already-merged branch leaves no merge in progress, so there is nothing to abort.
+    git -C $REPO_ROOT rev-parse -q --verify MERGE_HEAD *> $null
+    if ($LASTEXITCODE -eq 0) {
+        git -C $REPO_ROOT merge --abort
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: could not abort the simulated merge; run 'git merge --abort' in $REPO_ROOT." -ForegroundColor Red
+            exit 2
+        }
+    }
     exit 0
 }

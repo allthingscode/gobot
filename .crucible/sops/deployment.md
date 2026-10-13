@@ -38,7 +38,9 @@ Before touching `master`, run the merge simulation:
 > [!NOTE]
 > No-Code Closures (research/grooming items with no code changes) have no task branch. `check-merge-conflicts.ps1` will automatically detect the missing branch, print a No-Code Closure message, and exit successfully with code 0. At `deployment -> done`, the Crucible gate also detects proven No-Code Closures (spec has `type: research` or `type: grooming` in frontmatter or task ID uses `R-*` prefix, AND no `refs/heads/task/{task_id}` branch exists, AND `commit_hash` is null/absent) and skips merge verification. You can proceed directly to the next step. `validate-handoff.ps1` decides the same exemption from the same evidence (`lib/no-code-closure.ps1`), so `new-handoff.ps1` writes this handoff with a null `commit_hash` rather than refusing it.
 
-**If simulation fails:**
+**Exit 2 is not a conflict.** The main checkout has uncommitted changes to tracked files, or the simulated merge could not be undone; the simulation refuses to run over uncommitted work. Do not hand off for rebase: stop and escalate to the human with the output.
+
+**If simulation fails with exit 1 (a conflict):**
 - Set task status to `"Ready for Rebase"`
 - Write handoff to **implementation** with reason: "Merge conflict detected during simulation. See conflict_report.json.", passing `-RebaseCount` one above the incoming handoff's `rebase_count`. Validation refuses deployment -> implementation at `rebase_count` 0. The rendered prompt gives the exact command.
 - Instruct implementation to rebase `task/{task_id}` onto `master`
