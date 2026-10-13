@@ -3,10 +3,16 @@ package consolidator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
@@ -550,4 +556,215 @@ func TestConsolidator_Setters(t *testing.T) {
 			t.Error("expected nil observability")
 		}
 	})
+}
+
+type lifecycleRunner struct {
+	run func(context.Context) (string, error)
+}
+
+func (r lifecycleRunner) RunText(ctx context.Context, _, _, _ string) (string, error) {
+	return r.run(ctx)
+}
+
+func awaitWorker(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker barrier timed out")
+	}
+}
+
+func TestShutdownAdmission(t *testing.T) {
+	t.Parallel()
+	for _, count := range []int{0, 1, 8} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			t.Parallel()
+			checkShutdownAdmission(t, count)
+		})
+	}
+}
+
+func checkShutdownAdmission(t *testing.T, count int) {
+	t.Helper()
+	started := make(chan struct{}, count)
+	var calls atomic.Int64
+	c := New(lifecycleRunner{run: func(ctx context.Context) (string, error) {
+		calls.Add(1)
+		started <- struct{}{}
+		<-ctx.Done()
+		return "", ctx.Err()
+	}}, newTestStore(t), nil, nil)
+	for i := 0; i < count; i++ {
+		c.ConsolidateAsync("session", strings.Repeat("x", 80))
+	}
+	for i := 0; i < count; i++ {
+		awaitWorker(t, started)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := c.Shutdown(ctx); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	c.ConsolidateAsync("closed", strings.Repeat("x", 80))
+	if got := calls.Load(); got != int64(count) {
+		t.Fatalf("launched %d workers, want %d", got, count)
+	}
+}
+
+func TestShutdownConcurrentSubmissions(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	c := New(lifecycleRunner{run: func(context.Context) (string, error) { calls.Add(1); return "[]", nil }}, newTestStore(t), nil, nil)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; c.ConsolidateAsync("session", strings.Repeat("x", 80)) }()
+	}
+	close(start)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	before := calls.Load()
+	c.ConsolidateAsync("late", strings.Repeat("x", 80))
+	if calls.Load() != before {
+		t.Fatal("submission after shutdown launched")
+	}
+}
+
+func TestOwnerCancellationAndActualJoin(t *testing.T) {
+	t.Parallel()
+	store := expiredLifecycleStore(t)
+	started, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	owner, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := New(lifecycleRunner{run: func(ctx context.Context) (string, error) {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		<-release
+		return `["must not index after cancellation"]`, nil
+	}}, store, nil, nil)
+	c.BindLifetime(owner)
+	c.SetTTL("1ns")
+	c.SetGlobalTTL("1ns")
+	c.ConsolidateAsync("session", strings.Repeat("x", 80))
+	awaitWorker(t, started)
+	cancel()
+	awaitWorker(t, cancelled)
+	c.ConsolidateAsync("cancelled", strings.Repeat("x", 80))
+	deadline, stop := context.WithCancel(context.Background())
+	stop()
+	err := c.Shutdown(deadline)
+	if !errors.Is(err, ErrDrainTimeout) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("missing wrapped timeout: %v", err)
+	}
+	once.Do(func() { close(release) })
+	ctx, finish := context.WithTimeout(context.Background(), 2*time.Second)
+	defer finish()
+	if err := c.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := c.store.Search(ctx, "must not index", "session", 10)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("cancelled extraction indexed: %v %v", rows, err)
+	}
+	for _, key := range []string{"session", "global"} {
+		rows, err := store.Search(ctx, "expired marker", key, 10)
+		if err != nil || len(rows) == 0 {
+			t.Fatalf("cancelled worker cleaned %s namespace: %v %v", key, rows, err)
+		}
+	}
+
+}
+
+func TestCancelledOwnerRejectsWork(t *testing.T) {
+	t.Parallel()
+	owner, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := New(lifecycleRunner{run: func(context.Context) (string, error) { t.Error("cancelled owner launched"); return "[]", nil }}, newTestStore(t), nil, nil)
+	c.BindLifetime(owner)
+	c.ConsolidateAsync("session", strings.Repeat("x", 80))
+	if err := c.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type blockedEmbedding struct{ started, cancelled, release chan struct{} }
+
+func (e blockedEmbedding) Embed(ctx context.Context, _ string) ([]float32, error) {
+	close(e.started)
+	<-ctx.Done()
+	close(e.cancelled)
+	<-e.release
+	return []float32{1, 0, 0}, nil
+}
+
+func TestShutdownJoinsInProgressIndexing(t *testing.T) {
+	t.Parallel()
+	started, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	vectorPath := filepath.Join(t.TempDir(), "vectors.gob")
+	vectors, err := vector.NewStore(vectorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(&mockTextRunner{response: `["unique indexed fact"]`}, newTestStore(t), vectors, blockedEmbedding{started, cancelled, release})
+	c.SetSemanticDedupThreshold(0)
+	c.ConsolidateAsync("session", strings.Repeat("reply ", 20))
+	awaitWorker(t, started)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := c.Shutdown(ctx); !errors.Is(err, ErrDrainTimeout) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("indexing was not counted: %v", err)
+	}
+	awaitWorker(t, cancelled)
+	once.Do(func() { close(release) })
+	join, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	if err := c.Shutdown(join); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(vectorPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled indexing saved vectors: %v", err)
+	}
+}
+
+func expiredLifecycleStore(t *testing.T) *memory.MemoryStore {
+	t.Helper()
+	root := t.TempDir()
+	store, err := memory.NewMemoryStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	for _, ns := range []string{"session:session", "global"} {
+		if err := store.Index(ns, "expired marker"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := sql.Open("sqlite", filepath.Join(root, "workspace", "memory.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(context.Background(), "UPDATE memory_fts SET timestamp = ?", "2000-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	return store
 }

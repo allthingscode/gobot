@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/dashboard"
 	"github.com/allthingscode/gobot/internal/doctor"
+	"github.com/allthingscode/gobot/internal/memory/consolidator"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/reporter"
 )
@@ -71,9 +73,41 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	return runWithStackCleanup(cleanup, func() error {
+		return runAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer, tmgr, startupStart)
+	})
+}
 
-	return runAgentLoop(ctx, cfg, stack, otelProvider, hub, tracer, tmgr, startupStart)
+// runWithStackCleanup retains resources if accepted consolidation still owns them.
+func runWithStackCleanup(cleanup func(), run func() error) error {
+	err := run()
+	if errors.Is(err, consolidator.ErrDrainTimeout) {
+		slog.Error("run: retaining memory and vector stores; consolidation workers still active", "err", err)
+	} else {
+		cleanup()
+	}
+	return err
+}
+
+// runOwnedConsolidation installs the join before any later runtime exits.
+func runOwnedConsolidation(owned *consolidator.Consolidator, cancel context.CancelFunc, timeout time.Duration, run func() error) (runErr error) {
+	defer func() {
+		cancel()
+		runErr = shutdownConsolidation(owned, runErr, timeout)
+	}()
+	return run()
+}
+
+func shutdownConsolidation(owned *consolidator.Consolidator, runErr error, timeout time.Duration) error {
+	if owned == nil {
+		return runErr
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := owned.Shutdown(ctx); err != nil {
+		return errors.Join(runErr, fmt.Errorf("run agent consolidation shutdown: %w", err))
+	}
+	return runErr
 }
 
 func validateRunPrerequisites(cfg *config.Config) error {
@@ -144,31 +178,33 @@ func runInitializedAgentLoop(ctx context.Context, cfg *config.Config, stack *Age
 	InitIdempotency(ctx, cfg, stack.Runner, store, &wg)
 
 	handler := &DispatchHandler{Mgr: mgr, Memory: stack.MemStore, Hitl: hitl}
-	SetupConsolidator(cfg, stack, mgr, handler, otelProvider, tracer)
+	owned := SetupConsolidator(ctx, cfg, stack, mgr, handler, otelProvider, tracer)
+	return runOwnedConsolidation(owned, cancel, 5*time.Second, func() error {
 
-	gateHandler := SetupGateHandler(store, handler)
-	ReconcileAuthorizedFromAllowFrom(cfg, store)
-	if cfg.Gateway.Enabled {
-		StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg, startErr, readiness)
-	}
-
-	if cfg.Gateway.WebAddr != "" && hub != nil {
-		StartDashboard(ctx, cfg.Gateway.WebAddr, cfg.Gateway.AuthToken, hub, &wg, startErr)
-	}
-
-	var b *bot.Bot
-	if cfg.Channels.Telegram.Enabled {
-		if api != nil {
-			b = StartTelegramBot(ctx, api, gateHandler, tracer, &wg)
+		gateHandler := SetupGateHandler(store, handler)
+		ReconcileAuthorizedFromAllowFrom(cfg, store)
+		if cfg.Gateway.Enabled {
+			StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg, startErr, readiness)
 		}
-	}
 
-	publishStartupReady(ctx, cfg, readiness, startupStart, api, os.Stdout, 2*time.Second)
+		if cfg.Gateway.WebAddr != "" && hub != nil {
+			StartDashboard(ctx, cfg.Gateway.WebAddr, cfg.Gateway.AuthToken, hub, &wg, startErr)
+		}
 
-	StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
-	StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
+		var b *bot.Bot
+		if cfg.Channels.Telegram.Enabled {
+			if api != nil {
+				b = StartTelegramBot(ctx, api, gateHandler, tracer, &wg)
+			}
+		}
 
-	return waitForShutdown(ctx, cancel, &wg, startErr, readiness)
+		publishStartupReady(ctx, cfg, readiness, startupStart, api, os.Stdout, 2*time.Second)
+
+		StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
+		StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
+
+		return waitForShutdown(ctx, cancel, &wg, startErr, readiness)
+	})
 }
 
 // runtimeCheckpointStore preserves optional checkpoint storage during startup.

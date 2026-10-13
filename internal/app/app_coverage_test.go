@@ -652,7 +652,7 @@ func TestBuildSystemPrompt_WithMemStore_SkipRAG(t *testing.T) {
 func TestSetupConsolidator_NilMemStore(t *testing.T) {
 	stack := &AgentStack{}
 	handler := &DispatchHandler{}
-	SetupConsolidator(&config.Config{}, stack, nil, handler, nil, nil)
+	SetupConsolidator(context.Background(), &config.Config{}, stack, nil, handler, nil, nil)
 	if handler.Consolidator != nil {
 		t.Error("expected nil consolidator when stack has no MemStore")
 	}
@@ -668,7 +668,7 @@ func TestSetupConsolidator_WithMemStore(t *testing.T) {
 	stack := &AgentStack{Runner: runner, MemStore: memStore}
 	mgr := agent.NewSessionManager(runner, nil, "test-model")
 	handler := &DispatchHandler{}
-	SetupConsolidator(cfg, stack, mgr, handler, nil, nil)
+	SetupConsolidator(context.Background(), cfg, stack, mgr, handler, nil, nil)
 	if handler.Consolidator == nil {
 		t.Error("expected non-nil consolidator when stack has MemStore")
 	}

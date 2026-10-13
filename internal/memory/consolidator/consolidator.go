@@ -3,10 +3,12 @@ package consolidator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -51,6 +53,12 @@ type TextRunner interface {
 // long-term memory store. All operations are best-effort — errors are logged
 // and never propagated to the caller.
 type Consolidator struct {
+	mu                     sync.Mutex
+	owner                  context.Context
+	cancel                 context.CancelFunc
+	closed                 bool
+	active                 int
+	done                   chan struct{}
 	runner                 TextRunner
 	store                  *memory.MemoryStore
 	vecStore               *vector.Store            // F-030: Semantic memory
@@ -67,7 +75,9 @@ type Consolidator struct {
 // New creates a Consolidator. Both runner and store must be non-nil.
 // vecStore and embedProv may be nil (semantic memory disabled).
 func New(runner TextRunner, store *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider) *Consolidator {
+	owner, cancel := context.WithCancel(context.Background())
 	return &Consolidator{
+		owner: owner, cancel: cancel, done: make(chan struct{}),
 		runner:                 runner,
 		store:                  store,
 		vecStore:               vecStore,
@@ -120,19 +130,72 @@ func (c *Consolidator) SetObservability(obs *observability.Provider) {
 	c.obs = obs
 }
 
-// ConsolidateAsync spawns a goroutine to consolidate reply for sessionKey.
-// Returns immediately; errors are logged. ctx is used only to derive a
-// background context with a fixed timeout — the goroutine is not cancelled
-// if the parent context is cancelled (to survive request completion).
+// ErrDrainTimeout means accepted workers still own their stores.
+var ErrDrainTimeout = errors.New("consolidation drain timed out")
+
+// BindLifetime binds the runtime owner before the consolidator is published.
+// Configuration setters and binding must finish before any submissions.
+func (c *Consolidator) BindLifetime(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cancel()
+	c.owner, c.cancel = context.WithCancel(ctx)
+}
+
+// Shutdown closes admission, cancels work and joins actual worker completion.
+// Concurrent and repeated callers share the same completion channel.
+func (c *Consolidator) Shutdown(ctx context.Context) error {
+	c.mu.Lock()
+	if !c.closed {
+		c.closed = true
+		c.cancel()
+		if c.active == 0 {
+			close(c.done)
+		}
+	}
+	c.mu.Unlock()
+	select {
+	case <-c.done:
+		return nil
+	default:
+	}
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("shutdown consolidation: %w: %w", ErrDrainTimeout, ctx.Err())
+	}
+}
+
+func (c *Consolidator) workerDone() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.active--
+	if c.closed && c.active == 0 {
+		close(c.done)
+	}
+}
+
+// ConsolidateAsync returns immediately. Workers survive request completion,
+// but use a thirty-second timeout derived from the runtime lifetime.
 func (c *Consolidator) ConsolidateAsync(sessionKey, reply string) {
 	if utf8.RuneCountInString(strings.TrimSpace(reply)) < minConsolidateLength {
 		return
 	}
-	if c.obs != nil {
-		c.obs.RecordConsolidationTriggered(context.Background())
+	c.mu.Lock()
+	if c.closed || c.owner.Err() != nil {
+		c.mu.Unlock()
+		return
 	}
+	c.active++
+	owner := c.owner
+	c.mu.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer c.workerDone()
+		ctx, cancel := context.WithTimeout(owner, 30*time.Second)
+		if c.obs != nil {
+			c.obs.RecordConsolidationTriggered(ctx)
+		}
 		defer cancel()
 		n, err := c.consolidate(ctx, sessionKey, reply)
 		if err != nil {
@@ -168,6 +231,9 @@ func (c *Consolidator) consolidateInner(ctx context.Context, sessionKey, reply s
 	if err != nil {
 		return 0, fmt.Errorf("extract facts: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("after extraction: %w", err)
+	}
 	if len(facts) == 0 {
 		return 0, nil
 	}
@@ -177,16 +243,27 @@ func (c *Consolidator) consolidateInner(ctx context.Context, sessionKey, reply s
 	}
 
 	indexed, skipped := c.indexFacts(ctx, sessionKey, facts)
+	if err := ctx.Err(); err != nil {
+		return indexed, fmt.Errorf("after indexing: %w", err)
+	}
 	c.recordIndexingMetrics(ctx, indexed, skipped)
 
-	if c.vecStore != nil && indexed > 0 {
+	c.saveVectors(ctx, indexed)
+
+	if err := ctx.Err(); err != nil {
+		return indexed, fmt.Errorf("before namespace cleanup: %w", err)
+	}
+	c.cleanupNamespacesContext(ctx, sessionKey)
+	return indexed, nil
+}
+
+func (c *Consolidator) saveVectors(ctx context.Context, indexed int) {
+	if ctx.Err() == nil && c.vecStore != nil && indexed > 0 {
 		if err := c.vecStore.Save(); err != nil {
 			slog.Warn("consolidator: failed to save vector db", logattr.Err(err))
 		}
 	}
 
-	c.cleanupNamespaces(sessionKey)
-	return indexed, nil
 }
 
 func (c *Consolidator) recordIndexingMetrics(ctx context.Context, indexed, skipped int) {
@@ -216,6 +293,9 @@ func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts 
 	indexed = 0
 	skipped = 0
 	for _, sf := range facts {
+		if ctx.Err() != nil {
+			break
+		}
 		fact := strings.TrimSpace(sf.Fact)
 		if fact == "" {
 			continue
@@ -226,6 +306,9 @@ func (c *Consolidator) indexFacts(ctx context.Context, sessionKey string, facts 
 			continue
 		}
 
+		if ctx.Err() != nil {
+			break
+		}
 		namespace := c.resolveNamespace(fact, sessionKey)
 		if err := c.store.IndexWithImportance(namespace, fact, sf.Importance); err != nil {
 			slog.Warn("consolidator: index failed", slog.String("fact", fact), logattr.Err(err))
@@ -304,7 +387,7 @@ func (c *Consolidator) resolveNamespace(fact, sessionKey string) string {
 }
 
 func (c *Consolidator) indexVectorFact(ctx context.Context, sessionKey, fact, namespace string, importance int) {
-	if c.vecStore == nil || c.embedProv == nil {
+	if ctx.Err() != nil || c.vecStore == nil || c.embedProv == nil {
 		return
 	}
 
@@ -327,7 +410,10 @@ func (c *Consolidator) indexVectorFact(ctx context.Context, sessionKey, fact, na
 	}
 }
 
-func (c *Consolidator) cleanupNamespaces(sessionKey string) {
+func (c *Consolidator) cleanupNamespacesContext(ctx context.Context, sessionKey string) {
+	if ctx.Err() != nil {
+		return
+	}
 	if c.ttl != "" {
 		if deleted, err := c.store.CleanupNamespace("session:"+sessionKey, c.ttl); err != nil {
 			slog.Warn("consolidator: session cleanup failed", logattr.Err(err))
@@ -335,7 +421,7 @@ func (c *Consolidator) cleanupNamespaces(sessionKey string) {
 			slog.Debug("consolidator: session cleanup completed", "deleted", deleted)
 		}
 	}
-	if c.globalTTL != "" {
+	if ctx.Err() == nil && c.globalTTL != "" {
 		if deleted, err := c.store.CleanupNamespace("global", c.globalTTL); err != nil {
 			slog.Warn("consolidator: global cleanup failed", logattr.Err(err))
 		} else if deleted > 0 {
