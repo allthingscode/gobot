@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$ProjectRoot,
     [Parameter(Mandatory=$false)][string]$ProjectName = "",
     [Parameter(Mandatory=$false)][string]$Description = "",
-    [Parameter(Mandatory=$false)][string]$DefaultBranch = "main",
+    [Parameter(Mandatory=$false)][string]$DefaultBranch = "",
     [Parameter(Mandatory=$false)][string]$BacklogDir = "",
     [Parameter(Mandatory=$false)][ValidateSet("go", "node", "python", "rust")][string]$Language = "",
     [Parameter(Mandatory=$false)][switch]$WithSampleTask,
@@ -268,6 +268,12 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
 $config = $config -replace '(?m)^  name: .+$', ('  name: ' + (ConvertTo-YamlScalar -Value $ProjectName))
 $config = $config -replace '(?m)^  description: .+$', ('  description: ' + (ConvertTo-YamlScalar -Value $Description))
+# Crucible merges into project.default_branch and stops when it does not exist, so the
+# default is the branch the project is on, not a guess. Item 189.
+if ([string]::IsNullOrWhiteSpace($DefaultBranch)) {
+    $currentBranch = (git -C $resolvedProjectRoot symbolic-ref --short -q HEAD 2>$null)
+    $DefaultBranch = if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentBranch)) { ([string]$currentBranch).Trim() } else { "main" }
+}
 $config = $config -replace '(?m)^  default_branch: .+$', ('  default_branch: ' + (ConvertTo-YamlScalar -Value $DefaultBranch))
 $config = $config -replace '(?m)^crucible_root: .+$', ('crucible_root: ' + (ConvertTo-YamlScalar -Value ".crucible"))
 

@@ -401,10 +401,8 @@ if ($isGitRepo) {
         $taskBranch = "task/$TaskId"
         git show-ref --verify --quiet "refs/heads/$taskBranch" 2>$null
         if ($LASTEXITCODE -ne 0) {
-            $primaryBranch = "master"
-            git show-ref --verify --quiet refs/heads/main 2>$null
-            if ($LASTEXITCODE -eq 0) { $primaryBranch = "main" }
-            
+            $primaryBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $REPO_ROOT
+
             $primaryHead = (git rev-parse $primaryBranch 2>$null)
             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($primaryHead)) {
                 $resolvedBaseCommit = $primaryHead.Trim()

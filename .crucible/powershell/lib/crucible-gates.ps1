@@ -401,16 +401,14 @@ function Resolve-CrucibleIntegrityBase {
         $branchRef = "task/$resolvedTaskId"
         $mergeBase = ""
         $mergeBaseExit = 1
-        # Resolved against $RepoRoot rather than through Get-PrimaryBranchName, which
-        # reads the process working directory. This gate is a function of the repo it
-        # was handed, not of wherever the caller happens to be standing.
+        # Resolved against $RepoRoot, not the process working directory: this gate is a
+        # function of the repo it was handed, not of wherever the caller is standing.
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         git -C $RepoRoot show-ref --verify --quiet ("refs/heads/" + $branchRef) 2>$null
         $hasBranch = ($LASTEXITCODE -eq 0)
         if ($hasBranch) {
-            git -C $RepoRoot show-ref --verify --quiet refs/heads/main 2>$null
-            $primaryBranch = if ($LASTEXITCODE -eq 0) { "main" } else { "master" }
+            $primaryBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $RepoRoot
             $mergeBase = (git -C $RepoRoot merge-base $primaryBranch $branchRef 2>$null)
             $mergeBaseExit = $LASTEXITCODE
         }
@@ -1341,14 +1339,6 @@ function Complete-CrucibleSourceSession {
     }
 }
 
-if (-not (Get-Command Get-PrimaryBranchName -ErrorAction SilentlyContinue)) {
-    function Get-PrimaryBranchName {
-        git show-ref --verify --quiet refs/heads/main
-        if ($LASTEXITCODE -eq 0) { return "main" }
-        return "master"
-    }
-}
-
 function Invoke-CrucibleRuntimeValidation {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -1586,6 +1576,7 @@ function Invoke-CrucibleScopeGates {
     # --- 2.1b Architect Scope Boundary Check ---
     if ($handoff.source_phase -eq "implementation" -and $handoff.target_phase -eq "verification") {
         $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id
+        Assert-CodeTaskWorktree -Context $Context -TaskId $handoff.task_id -WorktreePath $wtPath -Check "scope check"
         if (Test-Path $wtPath) {
             $declaredAffinity = @()
             if ($handoff.psobject.Properties["file_affinity"] -and $null -ne $handoff.file_affinity) {
@@ -1691,7 +1682,7 @@ function Test-CompletionArtifactGate {
                         $verificationPassed = $false
                         $errorMsg = "Architect worktree is not on mandatory task branch 'task/$($handoff.task_id)' (found '$branchCheck')."
                     } else {
-                        $mainBranch = Get-PrimaryBranchName
+                        $mainBranch = Get-ConfiguredPrimaryBranch
                         $commitsRes = Invoke-Git -Directory $wtPath log "$mainBranch..task/$($handoff.task_id)" --oneline
                         if ($commitsRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($commitsRes.Raw)) {
                             # Workaround for Crucible's own tasks (ignored files in .crucible/ cannot be committed easily)
@@ -1757,7 +1748,7 @@ function Test-CompletionArtifactGate {
                         $verificationPassed = $false
                         $errorMsg = "Incident handoff: commit hash $($handoff.commit_hash) does not exist."
                     } else {
-                        $mainBranch = Get-PrimaryBranchName
+                        $mainBranch = Get-ConfiguredPrimaryBranch
                         git merge-base --is-ancestor $($handoff.commit_hash) $mainBranch 2>$null
                         if ($LASTEXITCODE -ne 0) {
                             $verificationPassed = $false
@@ -1817,7 +1808,7 @@ function Test-CompletionArtifactGate {
                             $verificationPassed = $false
                             $errorMsg = "Commit hash $($handoff.commit_hash) specified in handoff does not exist."
                         } else {
-                            $mainBranch = Get-PrimaryBranchName
+                            $mainBranch = Get-ConfiguredPrimaryBranch
 
                             $gatePassed = $false
                             $gateDecisionUnreadable = $false
@@ -2437,6 +2428,7 @@ function Invoke-CircuitBreakerGates {
     if ($handoff.source_phase -eq "verification" -and $handoff.target_phase -eq "deployment") {
         $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id
         $isolatedChecksScript = "$FRAMEWORK_POWERSHELL/run-isolated-checks.ps1"
+        Assert-CodeTaskWorktree -Context $Context -TaskId $handoff.task_id -WorktreePath $wtPath -Check "independent verification"
         if (Test-Path $wtPath) {
             if (-not (Test-Path $isolatedChecksScript)) {
                 Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "missing_isolated_checks_script" `
@@ -2542,9 +2534,36 @@ function Invoke-CircuitBreakerGates {
             Write-EventLog -Event "verified" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "tests_passed" -Notes "Independent isolated verification passed before Operator handoff" `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         } else {
-            Write-Quiet "[VERIFY] WARN: Worktree not found at $wtPath - skipping independent test verification." -ForegroundColor Yellow
+            Write-Quiet "[VERIFY] No task/$($handoff.task_id) branch and no worktree: no code to verify independently." -ForegroundColor DarkGray
         }
     }
+}
+
+function Assert-CodeTaskWorktree {
+    # A task with a task/<id> branch is a code task, and its scope check and independent
+    # verification run in its implementation worktree. Skipping them because that
+    # directory is gone let a code task pass both unchecked. With no branch there is no
+    # code, and the checks have nothing to read. Item 187.
+    param(
+        [Parameter(Mandatory=$true)][hashtable]$Context,
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$WorktreePath,
+        [Parameter(Mandatory=$true)][string]$Check
+    )
+    $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { (Get-Location).Path }
+    git -C $repoRoot rev-parse --verify --quiet "refs/heads/task/$TaskId" *> $null
+    if ($LASTEXITCODE -ne 0) { return }
+    if (Test-Path -LiteralPath $WorktreePath) {
+        $wtBranch = (git -C $WorktreePath symbolic-ref --short -q HEAD 2>$null)
+        if ($LASTEXITCODE -eq 0 -and ([string]$wtBranch).Trim() -eq "task/$TaskId") { return }
+        Write-Host "[STOP] $WorktreePath does not have task/$TaskId checked out, so the $Check cannot run against this task's code." -ForegroundColor Red
+    } else {
+        Write-Host "[STOP] task/$TaskId exists but its worktree $WorktreePath is missing, so the $Check cannot run." -ForegroundColor Red
+    }
+    Write-Host "       Recreate it, then rerun crucible.ps1:" -ForegroundColor Red
+    Write-Host "         git worktree prune" -ForegroundColor Red
+    Write-Host "         git worktree add `"$WorktreePath`" task/$TaskId" -ForegroundColor Red
+    exit 2
 }
 
 function Invoke-HumanGateMerge {
@@ -3067,7 +3086,7 @@ function Invoke-HumanGateAction {
         [string]$SourcePhase = "deployment",
         [string]$GateReason = ""
     )
-    $primaryBranch = Get-PrimaryBranchName
+    $primaryBranch = Get-ConfiguredPrimaryBranch
     $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
         $ProjectRoot
     } else {
@@ -4060,7 +4079,7 @@ function Invoke-HumanGate {
                 exit 1
             }
             
-            $primaryBranch = Get-PrimaryBranchName
+            $primaryBranch = Get-ConfiguredPrimaryBranch
             $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
             $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
             $baseSha = $gateRange.BaseSha
@@ -4156,7 +4175,7 @@ function Invoke-HumanGate {
                             Write-Host "`n[HUMAN GATE] Action Required: Please complete the gate decision." -ForegroundColor Yellow
                             Write-Host ("File: " + $gateTemplatePath) -ForegroundColor White
                             
-                            $primaryBranch = Get-PrimaryBranchName
+                            $primaryBranch = Get-ConfiguredPrimaryBranch
                             $acceptDesc = Get-GateAcceptDescription -PrimaryBranch $primaryBranch -ProjectRoot $repoRoot
 
                             $baseSha = ""
@@ -4164,7 +4183,7 @@ function Invoke-HumanGate {
                             if ($gateData.PSObject.Properties["base_sha"]) { $baseSha = $gateData.base_sha }
                             if ($gateData.PSObject.Properties["branch_sha"]) { $branchSha = $gateData.branch_sha }
                             if ([string]::IsNullOrEmpty($baseSha) -or [string]::IsNullOrEmpty($branchSha)) {
-                                $primaryBranch = Get-PrimaryBranchName
+                                $primaryBranch = Get-ConfiguredPrimaryBranch
                                 $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
                                 $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
                                 $baseSha = $gateRange.BaseSha
@@ -4212,7 +4231,7 @@ function Invoke-HumanGate {
                     }
                 } else {
                     # Create template and exit
-                    $primaryBranch = Get-PrimaryBranchName
+                    $primaryBranch = Get-ConfiguredPrimaryBranch
                     $acceptDesc = Get-GateAcceptDescription -PrimaryBranch $primaryBranch -ProjectRoot $repoRoot
                     $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
                     $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit

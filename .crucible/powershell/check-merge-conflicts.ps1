@@ -27,9 +27,7 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 Write-Host "--- MERGE SIMULATION: $TaskId ---" -ForegroundColor Cyan
 
 # 1. Verify branches
-$mainBranch = "master"
-git -C $REPO_ROOT show-ref --verify --quiet refs/heads/main
-if ($LASTEXITCODE -eq 0) { $mainBranch = "main" }
+$mainBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $REPO_ROOT
 
 # 1b. Verify task branch exists
 git -C $REPO_ROOT show-ref --verify --quiet "refs/heads/task/$TaskId"

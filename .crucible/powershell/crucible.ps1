@@ -343,12 +343,6 @@ $crucibleContext = @{
     NextCrucibleCommand = $null
 }
 
-function Get-PrimaryBranchName {
-    git show-ref --verify --quiet refs/heads/main
-    if ($LASTEXITCODE -eq 0) { return "main" }
-    return "master"
-}
-
 if ($Health -or $Cleanup) {
     $healthScript = "$FRAMEWORK_POWERSHELL/crucible-health.ps1"
     if (-not (Test-Path -LiteralPath $healthScript)) {

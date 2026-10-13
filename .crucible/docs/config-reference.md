@@ -106,7 +106,7 @@ Identity and metadata for the target project.
 |-----|------|----------|-------------|
 | `name` | string | yes | Short display name. Appears in Crucible output and agent prompts. |
 | `description` | string | yes | One sentence describing what the project does. |
-| `default_branch` | string | yes | Branch the Operator merges to. Typically `main` or `master`. |
+| `default_branch` | string | yes | Branch tasks are cut from, rebased onto and merged into. `init-project.ps1` writes the branch the project is on unless `-DefaultBranch` is passed. Crucible stops, naming the setting, when it names a branch that does not exist. |
 
 ---
 

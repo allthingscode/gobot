@@ -372,6 +372,37 @@ try {
         }
     }
 
+    $results += Run-Test -Name "A code task whose worktree is gone is stopped, not passed unchecked" -Body {
+        # Item 187: with the task branch present but its worktree removed, the scope check
+        # and the independent verification used to skip with a warning.
+        $cycle = "cycle-e2e-wt"
+        $env:CRUCIBLE_CYCLE_ID = $cycle
+        $task = "F-702"
+        $projectRoot = New-AdopterProject -Root (Join-Path $tempRoot "t6") -TaskId $task -Title "Worktree Gone" -Status "Ready" -StatusTarget "Groomer"
+        $artifacts = @("src/feature.txt")
+
+        Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source "grooming" -Target "implementation" -Cycle $cycle -Count 1 `
+            -Extra @{ artifacts = $artifacts; file_affinity = @("src/") } | Out-Null
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+        Assert-Result -Name "grooming -> implementation accepted" -Condition ($run.ExitCode -eq 0) `
+            -FailureMessage ("expected exit 0, got " + $run.ExitCode + ". Output: " + ($run.Output -join "`n"))
+
+        git -C $projectRoot rev-parse --verify --quiet "refs/heads/task/$task" *> $null
+        Assert-Result -Name "task branch created" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "expected -Init to create task/$task"
+        $wt = @(git -C $projectRoot worktree list --porcelain | Where-Object { $_ -like "worktree *" } | ForEach-Object { $_.Substring(9) } | Where-Object { $_ -match [regex]::Escape($task) })
+        Assert-Result -Name "task worktree created" -Condition ($wt.Count -eq 1) -FailureMessage ("expected one worktree for " + $task + ", got: " + ($wt -join ", "))
+        Remove-Item -LiteralPath $wt[0] -Recurse -Force
+
+        Complete-PhaseChecklist -ProjectRoot $projectRoot -TaskId $task -Phase "implementation"
+        Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source "implementation" -Target "verification" -Cycle $cycle -Count 2 `
+            -Extra @{ artifacts = $artifacts } | Out-Null
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+        $text = $run.Output -join "`n"
+        Assert-Result -Name "missing worktree stops the handoff" -Condition ($run.ExitCode -eq 2 -and $text -match "task/$task exists but its worktree .* is missing") `
+            -FailureMessage ("expected exit 2 naming the missing worktree, got " + $run.ExitCode + ". Output: " + $text)
+        Assert-Result -Name "recovery is named" -Condition ($text -match "git worktree add") -FailureMessage ("expected the recreate command. Output: " + $text)
+    }
+
     $results += Run-Test -Name "A handoff that names a cycle other than the one task.md issued is refused" -Body {
         # Item 186: the expected cycle used to be read from the incoming handoff itself, so
         # setting cycle_id and session_cycle_id to the same stale value always passed.

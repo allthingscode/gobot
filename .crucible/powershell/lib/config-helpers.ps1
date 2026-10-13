@@ -320,6 +320,39 @@ function Resolve-ProjectHooksDirValue {
     return (Resolve-Path -LiteralPath $full).Path
 }
 
+# project.default_branch names the branch tasks are cut from, rebased onto and merged into.
+# Unset, it is main when that branch exists, else master. A configured branch that does
+# not exist throws instead of falling back: merging into a guessed branch is worse than
+# stopping. Item 189.
+function Get-ConfiguredPrimaryBranch {
+    param([string]$ProjectRoot = "")
+
+    $root = $ProjectRoot
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
+        $root = if ($null -ne $repoRootVar -and -not [string]::IsNullOrWhiteSpace($repoRootVar.Value)) { $repoRootVar.Value } else { (Get-Location).Path }
+    }
+
+    $configPath = Join-Path $root ".crucible/config.yaml"
+    if (Test-Path -LiteralPath $configPath) {
+        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $val = Get-ConfigBlockValue -Content $content -Path @("project", "default_branch") -Source $configPath
+        if (-not [string]::IsNullOrWhiteSpace($val)) {
+            $branch = $val.Trim()
+            git -C $root show-ref --verify --quiet "refs/heads/$branch" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                $current = (git -C $root symbolic-ref --short -q HEAD 2>$null)
+                throw ("project.default_branch in " + $configPath + " is '" + $branch + "', but " + $root + " has no such branch. Set it to the branch tasks merge into" + $(if ($current) { " (the checkout is on '" + ([string]$current).Trim() + "')" } else { "" }) + ".")
+            }
+            return $branch
+        }
+    }
+
+    git -C $root show-ref --verify --quiet refs/heads/main 2>$null
+    if ($LASTEXITCODE -eq 0) { return "main" }
+    return "master"
+}
+
 # orchestration.approval says whether the orchestrator asks for a "go" before every
 # dispatch (per-phase) or once per item and then runs each phase to the Human Gate
 # (to-gate). It is a personal preference, so the gitignored .crucible/config.local.yaml

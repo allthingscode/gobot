@@ -238,6 +238,26 @@ try {
         try { $null = Get-ConfiguredApprovalMode -ProjectRoot $proj } catch { $message = $_.Exception.Message }
         Assert-Result -Name "unknown value throws naming the allowed values" -Condition ($message -match "per-phase, to-gate" -and $message -match "'auto'") -FailureMessage ("got: " + $message)
     }
+
+    # Item 189: project.default_branch is honored, and a branch it names must exist.
+    $results += Run-Test -Name "Get-ConfiguredPrimaryBranch honors project.default_branch and refuses a missing one" -Body {
+        $proj = Join-Path $tempRoot "primary-branch"
+        New-Item -ItemType Directory -Path (Join-Path $proj ".crucible") -Force | Out-Null
+        git -C $proj init --quiet -b trunk
+        git -C $proj -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
+        git -C $proj branch main
+        $config = Join-Path $proj ".crucible/config.yaml"
+
+        Assert-Result -Name "unset prefers main" -Condition ((Get-ConfiguredPrimaryBranch -ProjectRoot $proj) -eq "main") -FailureMessage "with no setting, an existing main is the primary branch"
+
+        Set-Content -LiteralPath $config -Value "project:`n  default_branch: `"trunk`"`n" -Encoding UTF8
+        Assert-Result -Name "configured branch wins" -Condition ((Get-ConfiguredPrimaryBranch -ProjectRoot $proj) -eq "trunk") -FailureMessage "project.default_branch must be honored over the main/master guess"
+
+        Set-Content -LiteralPath $config -Value "project:`n  default_branch: develop`n" -Encoding UTF8
+        $message = ""
+        try { $null = Get-ConfiguredPrimaryBranch -ProjectRoot $proj } catch { $message = $_.Exception.Message }
+        Assert-Result -Name "missing configured branch throws" -Condition ($message -match "project.default_branch" -and $message -match "'develop'" -and $message -match "'trunk'") -FailureMessage ("expected the setting, its value and the current branch named. Got: " + $message)
+    }
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

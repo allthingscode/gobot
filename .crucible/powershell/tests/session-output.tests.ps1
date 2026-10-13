@@ -189,6 +189,22 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "handoff file absolute" -Condition ($handoffLine -eq ("Handoff " + $ctx.LatestHandoff.FullName)) -FailureMessage ("got: " + $handoffLine)
     }
 
+    $results += Run-Test -Name "A rebase prompt on a main-only repository names main, not master" -Body {
+        # Item 189.
+        $caseRoot = Join-Path $tempRoot "rebase-main"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-916" -TargetPhase "implementation"
+        $ctx.RepoRoot = $caseRoot
+        $ctx.Handoff | Add-Member -NotePropertyName rebase_count -NotePropertyValue 1 -Force
+        & git -C $caseRoot init --quiet -b main
+        & git -C $caseRoot -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
+        "<!-- prompt_version: 1 -->`n{rebase_section}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
+
+        $text = New-CruciblePromptText -Context $ctx
+
+        Assert-Result -Name "rebases onto main" -Condition ($text -match 'git rebase main task/F-916' -and $text -match 'git pull origin main') -FailureMessage ("prompt: " + $text)
+        Assert-Result -Name "no master" -Condition (-not ($text -match 'master')) -FailureMessage ("prompt still names master: " + $text)
+    }
+
     $results += Run-Test -Name "A no-code review-fix gets no worktree, no branch, and the project root as its workdir" -Body {
         $caseRoot = Join-Path $tempRoot "no-code-fix"
         $ctx = New-TestContext -TempRoot $caseRoot -TaskId "R-914" -TargetPhase "implementation"

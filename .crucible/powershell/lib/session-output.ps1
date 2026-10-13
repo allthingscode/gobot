@@ -190,12 +190,14 @@ function New-CruciblePromptText {
         # than asking the specialist to add one to a number it read. Item 127.
         $promptText = $promptText.Replace("{next_rebase_count}", ([int]$rebaseCount + 1))
 
-        # Conditional rebase section injection
+        # Conditional rebase section injection. The branch is the configured primary branch,
+        # not a hardcoded master, so a main-only repository gets commands that run. Item 189.
+        $rebaseOnto = if ($rebaseCount -gt 0) { Get-ConfiguredPrimaryBranch -ProjectRoot $repoRoot } else { "" }
         $architectRebaseContent = "`n## Rebase Workflow`n`n" +
             "If you are receiving this task for rebase (status: `"Ready for Rebase`"):`n`n" +
-            "1. **Checkout Master**: ``git checkout master`` `n" +
-            "2. **Update Master**: ``git pull origin master`` `n" +
-            "3. **Rebase Task Branch**: ``git rebase master task/$($handoff.task_id)`` `n" +
+            "1. **Check out ${rebaseOnto}**: ``git checkout $rebaseOnto`` `n" +
+            "2. **Update ${rebaseOnto}**: ``git pull origin $rebaseOnto`` `n" +
+            "3. **Rebase Task Branch**: ``git rebase $rebaseOnto task/$($handoff.task_id)`` `n" +
             "4. **Resolve Conflicts**:`n" +
             "   - Manually resolve any conflicts in the files listed in ``conflict_report.json``.`n" +
             "   - Use ``git add`` to mark resolved files.`n" +
@@ -204,7 +206,7 @@ function New-CruciblePromptText {
             "6. **Handoff**:`n" +
             "   - ``rebase_count`` carries forward on its own. Do not edit handoff JSON.`n" +
             "   - Status: `"Ready for Review`".`n" +
-            "   - Reason: `"Rebase onto master complete. Conflicts resolved.`"`n" +
+            "   - Reason: `"Rebase onto $rebaseOnto complete. Conflicts resolved.`"`n" +
             "   - Hand off to **Reviewer**."
             
         $reviewerRebaseContent = "`n## Post-Rebase Verification`n`n" +
@@ -499,7 +501,7 @@ function Initialize-CrucibleTargetSession {
 
             if (-not (Test-Path $wtPath)) {
                 Write-Quiet ("[INIT] Creating git worktree at " + $wtPath + "...") -ForegroundColor Yellow
-                $mainBranch = Get-PrimaryBranchName
+                $mainBranch = Get-ConfiguredPrimaryBranch
                 $taskBranch = "task/" + $handoff.task_id
                 git show-ref --verify --quiet ("refs/heads/" + $taskBranch)
                 # git worktree add prints "Preparing worktree" to stderr on success; under Windows
@@ -682,7 +684,7 @@ function Write-CrucibleCiStatusBanner {
     $ghAvailable = $null -ne (Get-Command gh -ErrorAction SilentlyContinue)
     if ($ghAvailable) {
         try {
-            $ciBranch = Get-PrimaryBranchName
+            $ciBranch = Get-ConfiguredPrimaryBranch
             $ghOutput = Invoke-NativeCommand -Command "gh" -Arguments "run", "list", "--branch=$ciBranch", "--limit", "1", "--json", "conclusion,status,url"
             $ciJson = $ghOutput | ConvertFrom-Json
             if ($ciJson -and $ciJson.Count -gt 0) {
