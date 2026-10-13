@@ -281,7 +281,7 @@ func TestSetupConsolidator_Coverage(t *testing.T) {
 	mgr := agent.NewSessionManager(stack.Runner, nil, "model")
 	handler := &app.DispatchHandler{}
 
-	app.SetupConsolidator(cfg, stack, mgr, handler, nil, nil)
+	app.SetupConsolidator(context.Background(), cfg, stack, mgr, handler, nil, nil)
 }
 
 type mockEmbeddingProvider struct{}

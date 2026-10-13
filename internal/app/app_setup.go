@@ -148,9 +148,9 @@ func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManag
 }
 
 // SetupConsolidator initializes the memory consolidation engine if a memory store is available.
-func SetupConsolidator(cfg *config.Config, stack *AgentStack, mgr *agent.SessionManager, handler *DispatchHandler, otelProvider *observability.Provider, tracer *observability.DispatchTracer) {
+func SetupConsolidator(ctx context.Context, cfg *config.Config, stack *AgentStack, mgr *agent.SessionManager, handler *DispatchHandler, otelProvider *observability.Provider, tracer *observability.DispatchTracer) *consolidator.Consolidator {
 	if stack.MemStore == nil {
-		return
+		return nil
 	}
 	h := consolidator.New(stack.Runner, stack.MemStore, stack.VecStore, stack.EmbedProv)
 	if tracer != nil {
@@ -165,9 +165,11 @@ func SetupConsolidator(cfg *config.Config, stack *AgentStack, mgr *agent.Session
 	if otelProvider != nil {
 		h.SetObservability(otelProvider)
 	}
+	h.BindLifetime(ctx)
 	handler.Consolidator = h
 	mgr.SetConsolidator(h)
 	slog.Info("run: memory consolidation enabled")
+	return h
 }
 
 // SetupGateHandler initializes the pairing handler for DM-based authentication.

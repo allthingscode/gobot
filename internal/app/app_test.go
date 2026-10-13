@@ -268,7 +268,7 @@ func TestSetupConsolidator(t *testing.T) {
 	mgr := &agent.SessionManager{}
 	handler := &DispatchHandler{}
 
-	SetupConsolidator(cfg, stack, mgr, handler, nil, nil)
+	SetupConsolidator(context.Background(), cfg, stack, mgr, handler, nil, nil)
 	if handler.Consolidator == nil {
 		t.Error("SetupConsolidator failed to set handler.Consolidator")
 	}
