@@ -115,6 +115,30 @@ func replaceHybridRagSearch(t *testing.T, fn func(context.Context, ragMemorySear
 	})
 }
 
+func TestRunner_BuildSystemPrompt_HybridFactIdentity(t *testing.T) { //nolint:paralleltest // Shares package-level hybrid search seam.
+	ctx := context.Background()
+	memStore, vecStore := newRAGTestStores(t)
+	embed := deterministicRAGEmbedder{}
+	facts := []string{"atlas first session fact", "atlas second session fact"}
+	for _, fact := range facts {
+		seedFTSFact(t, memStore, "identity", fact)
+		seedVectorFact(t, ctx, vecStore, embed, "identity", fact)
+	}
+	seedVectorFact(t, ctx, vecStore, embed, "identity", "atlas vector-only session fact")
+	seedFTSFact(t, memStore, "other", "atlas private other-session fact")
+	seedVectorFact(t, ctx, vecStore, embed, "other", "atlas private other-session fact")
+	runner := &AgentRunner{SystemPrompt: basePrompt, Cfg: vectorRAGConfig(), VecStore: vecStore, EmbedProv: embed}
+	prompt := runner.buildSystemPrompt(ctx, "identity", userMessages("atlas session fact"), memStore)
+	for _, fact := range append(facts, "atlas vector-only session fact") {
+		if got := strings.Count(prompt, fact); got != 1 {
+			t.Errorf("fact %q occurs %d times, want once; prompt: %s", fact, got, prompt)
+		}
+	}
+	if strings.Contains(prompt, "atlas private other-session fact") {
+		t.Error("private other-session fact leaked")
+	}
+}
+
 func newRAGTestStores(t *testing.T) (*memory.MemoryStore, *vector.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -140,7 +164,7 @@ func newRAGTestStores(t *testing.T) (*memory.MemoryStore, *vector.Store) {
 func seedVectorFact(t *testing.T, ctx context.Context, store *vector.Store, embedProv vector.EmbeddingProvider, sessionKey, content string) {
 	t.Helper()
 	doc := chromem.Document{
-		ID:      "vec-" + sessionKey,
+		ID:      "vec-" + sessionKey + ":" + content,
 		Content: content,
 		Metadata: map[string]string{
 			"namespace":  "session:" + sessionKey,

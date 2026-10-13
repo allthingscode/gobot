@@ -57,11 +57,11 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 
 	ftsResults := make([]FTSResult, 0, len(ftsResultsRaw))
 	for _, res := range ftsResultsRaw {
-		id, _ := res["namespace"].(string)
+		namespace, _ := res["namespace"].(string)
 		content, _ := res["content"].(string)
 		timestamp, _ := res["timestamp"].(string)
 		ftsResults = append(ftsResults, FTSResult{
-			ID:        id,
+			ID:        factKey(namespace, content),
 			Content:   content,
 			Timestamp: timestamp,
 		})
@@ -91,6 +91,9 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 
 	// Apply MMR to re-rank and downsample to limit*2
 	vecResults = applyMMR(vecResults, 0.7, limit*2)
+	for i := range vecResults {
+		vecResults[i].ID = factKey(vecResults[i].Metadata["namespace"], vecResults[i].Content)
+	}
 
 	// 3. Hybrid RRF Merge
 	merged := MergeResults(ftsResults, vecResults, 60)
@@ -101,6 +104,12 @@ func HybridSearch(ctx context.Context, fts memorySearcher, vec *Store, embedProv
 
 	span.SetAttributes(attribute.Int("memory.results_count", len(merged)))
 	return merged, nil
+}
+
+// factKey encodes the exact namespace/content pair without changing stored IDs.
+// The namespace byte length makes the boundary unambiguous even with separators.
+func factKey(namespace, content string) string {
+	return strconv.Itoa(len(namespace)) + ":" + namespace + content
 }
 
 // Importance blend constants. rrfBlendWeight + importanceBlendWeight must equal 1.0.
