@@ -12,7 +12,6 @@ import (
 
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/doctor"
-	"github.com/allthingscode/gobot/internal/infra"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/resilience"
 )
@@ -54,13 +53,6 @@ func LiveProbesList() *doctor.Probes {
 				if err != nil {
 					return fmt.Errorf("new genai client: %w", err)
 				}
-
-				// Register for cleanup
-				res := infra.NewClosableResource("doctor:gemini", func() error {
-					// genai.Client doesn't have Close, but we document the pattern
-					return nil
-				})
-				defer func() { _ = res.Close() }()
 
 				_, err = client.Models.GenerateContent(ctx, config.DefaultGeminiModel,
 					[]*genai.Content{{Parts: []*genai.Part{{Text: "ping"}}}},
