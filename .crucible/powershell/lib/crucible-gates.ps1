@@ -202,7 +202,7 @@ function Resolve-CrucibleInputHandoff {
         }
         if (-not $latestHandoff) {
             # Auto-bootstrap initial tasks
-            $specPath = Get-BacklogItemPathForTask -Task $TaskId
+            $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $(if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { "" })
             if (([string]::IsNullOrWhiteSpace($specPath) -or -not (Test-Path $specPath)) -and -not [string]::IsNullOrWhiteSpace($backlogDir)) {
                 $typeDir = if ($TaskId -match "^F-") {
                     "features"
@@ -219,17 +219,17 @@ function Resolve-CrucibleInputHandoff {
                     @($typeDir)
                 }
                 foreach ($dir in $typeDirs) {
-                    $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+                    $activeMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/active")) | Select-Object -First 1
                     if ($null -ne $activeMatch) {
                         $specPath = $activeMatch.FullName
                         break
                     }
-                    $rootMatch = Get-ChildItem -Path (Join-Path $backlogDir $dir) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+                    $rootMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir $dir) | Select-Object -First 1
                     if ($null -ne $rootMatch) {
                         $specPath = $rootMatch.FullName
                         break
                     }
-                    $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                    $archivedMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/archived")) -Recurse | Select-Object -First 1
                     if ($null -ne $archivedMatch) {
                         $specPath = $archivedMatch.FullName
                         break
@@ -302,7 +302,7 @@ function Resolve-CrucibleInputHandoff {
                             "  " + (Join-Path $backlogDir $sub)
                         }
                     })
-                    Write-Host ("Looked for " + $TaskId + "_*.md in:") -ForegroundColor Red
+                    Write-Host ("Looked for " + $TaskId + "_*.md or " + $TaskId + ".md in:") -ForegroundColor Red
                     $searched | ForEach-Object { Write-Host $_ -ForegroundColor Red }
                 }
                 Write-Host ("Write the spec there, then rerun crucible.ps1 -Init -TaskId " + $TaskId + "; it bootstraps the task from the spec.") -ForegroundColor Red
@@ -851,7 +851,7 @@ function Invoke-HandoffPreflightValidation {
 
     # D19: Cross-check file_affinity in handoff against spec's affected files section
     if ($handoff.psobject.Properties["file_affinity"] -and $handoff.file_affinity -ne $null -and @($handoff.file_affinity).Count -gt 0) {
-        $specFile = Get-BacklogItemPathForTask -Task $handoff.task_id
+        $specFile = Get-BacklogItemPathForTaskProjectRoot -Task $handoff.task_id -ProjectRoot $Context.RepoRoot
         if ($specFile -and (Test-Path $specFile)) {
             $specContent = Get-Content $specFile -Raw -Encoding UTF8
             # The frontmatter is the one record of scope, so it is checked first and at path
@@ -1618,7 +1618,7 @@ function Invoke-CrucibleScopeGates {
                     $normalizedPath = $filePath.Replace("\", "/")
                     
                     $isAllowed = $false
-                    foreach ($prefix in @(".crucible/research/", ".crucible/session/")) {
+                    foreach ($prefix in @(".crucible/research/", ((Get-RootRelativePath -Root $repoRoot -Path (Get-ConfiguredPath -Key "session" -ProjectRoot $repoRoot)).TrimEnd("/") + "/"))) {
                         if ($normalizedPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
                             $isAllowed = $true
                             break
@@ -1668,9 +1668,9 @@ function Test-CompletionArtifactGate {
         
         switch ($transition) {
             "grooming -> implementation" {
-                $specFile = Get-BacklogItemPathForTask -Task $handoff.task_id
+                $specFile = Get-BacklogItemPathForTaskProjectRoot -Task $handoff.task_id -ProjectRoot $Context.RepoRoot
                 if ([string]::IsNullOrEmpty($specFile) -or -not (Test-Path $specFile)) {
-                    $errorMsg = "Mandatory spec file for $($handoff.task_id) not found.`nExpected pattern: $($backlogDir)/{features,bugs,chores}/active/$($handoff.task_id)_*.md`nTip: filename must be {TASK_ID}_{slug}.md (underscore separator)."
+                    $errorMsg = "Mandatory spec file for $($handoff.task_id) not found.`nExpected patterns: $($backlogDir)/{features,bugs,chores}/active/$($handoff.task_id)_*.md or $($handoff.task_id).md`nTip: filename must be {TASK_ID}_{slug}.md (underscore separator) or {TASK_ID}.md."
                 }
             }
             "implementation -> verification" {
@@ -1948,9 +1948,10 @@ function Normalize-CrucibleInputState {
                     $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
                 }
             } else {
-                $wtRelPattern = "(\.crucible/)?\.agent-workspaces/implementation-[^/]+/(.+)"
+                $wtRelPrefix = Get-RootRelativePath -Root $resolvedRepoRoot -Path $resolvedWtPath
+                $wtRelPattern = "^(?:\./)?" + [regex]::Escape($wtRelPrefix.Replace("\", "/").TrimEnd("/")) + "/(.+)"
                 if ($relPath.Replace("\", "/") -match $wtRelPattern) {
-                    $relPath = $Matches[2]
+                    $relPath = $Matches[1]
                 }
             }
 
@@ -2258,7 +2259,7 @@ function Invoke-CircuitBreakerGates {
                             $hasBlockMatch = $true
                             $detectedFile = Get-RootRelativePath -Root $repoRoot -Path $sessionTaskMd
                             if ([string]::IsNullOrEmpty($detectedFile)) {
-                                $detectedFile = ".crucible/session/$($handoff.task_id)/research/task.md"
+                                $detectedFile = $sessionTaskMd
                             }
                             $detectedRule = $m.RuleId
                             break
@@ -2269,7 +2270,7 @@ function Invoke-CircuitBreakerGates {
                     $scanFailureKind = "research_input"
                     $scanFailedFile = Get-RootRelativePath -Root $repoRoot -Path $sessionTaskMd
                     if ([string]::IsNullOrEmpty($scanFailedFile)) {
-                        $scanFailedFile = ".crucible/session/$($handoff.task_id)/research/task.md"
+                        $scanFailedFile = $sessionTaskMd
                     }
                     $scanFailedError = $_.Exception.Message
                     $detectedFile = $scanFailedFile
@@ -2781,13 +2782,13 @@ function Get-TaskFinalizationDetails {
     # 1. Search spec paths first
     $typeDirs = @("features", "bugs", "chores")
     foreach ($dir in $typeDirs) {
-        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        $activeMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/active")) | Select-Object -First 1
         if ($null -ne $activeMatch) {
             $result.SpecExistsInActive = $true
             $result.SpecPathInActive = $activeMatch.FullName
         }
 
-        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        $archivedMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/archived")) | Select-Object -First 1
         if ($null -ne $archivedMatch) {
             $result.SpecExistsInArchived = $true
             $result.SpecPathInArchived = $archivedMatch.FullName
@@ -2865,14 +2866,14 @@ function Restore-BacklogTask {
     $type = ""
     $isArchived = $false
     foreach ($dir in $typeDirs) {
-        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        $archivedMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/archived")) | Select-Object -First 1
         if ($null -ne $archivedMatch) {
             $specPath = $archivedMatch.FullName
             $type = $dir
             $isArchived = $true
             break
         }
-        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+        $activeMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/active")) | Select-Object -First 1
         if ($null -ne $activeMatch) {
             $specPath = $activeMatch.FullName
             $type = $dir
@@ -3068,6 +3069,23 @@ function Test-GateReasonRefused {
     $normalized = (ConvertTo-AsciiSafeText -Text $Reason).Trim().ToLowerInvariant()
     if ($normalized -eq "") { return $true }
     return ((Get-LowSignalGateReasons) -contains $normalized)
+}
+
+function Assert-GateReason {
+    # TODO item 192: check both input paths before recording or acting on a decision.
+    # A refusal names where the reason came from, so a human who filled the pending file is
+    # not told to pass a CLI flag they never used.
+    param([string]$Reason, [string]$DecisionFile = "")
+    if (Test-GateReasonRefused -Reason $Reason) {
+        $stock = (Get-LowSignalGateReasons) -join ", "
+        if ([string]::IsNullOrWhiteSpace($DecisionFile)) {
+            Write-Host ("Error: -GateReason is required and cannot be only a stock phrase (" + $stock + ").") -ForegroundColor Red
+        } else {
+            Write-Host ("Error: the `"reason`" in " + $DecisionFile + " is required and cannot be only a stock phrase (" + $stock + ").") -ForegroundColor Red
+            Write-Host "       Write one concrete reason for the decision in that file, then rerun crucible.ps1. Nothing was recorded." -ForegroundColor Red
+        }
+        exit 1
+    }
 }
 
 function Invoke-HumanGateAction {
@@ -3425,7 +3443,8 @@ function Invoke-HumanGateAcceptRedirect {
         }
     }
 
-    $sessionDir = Join-Path $ProjectRoot ".crucible/session"
+    # Item 188: acceptance archives the same session used by the pipeline.
+    $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
     $timestamp = Get-UtcFileTimestamp
 
     # Move pipeline log to archived if it exists
@@ -3501,7 +3520,7 @@ function Invoke-HumanGateRejectAbandon {
                     # If it was already archived (legacy flow), set frontmatter and BACKLOG.md row to Abandoned
                     $typeDirs = @("features", "bugs", "chores")
                     foreach ($dir in $typeDirs) {
-                        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($TaskId + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
+                        $archivedMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/archived")) | Select-Object -First 1
                         if ($null -ne $archivedMatch) {
                             $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
                             if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
@@ -4074,10 +4093,7 @@ function Invoke-HumanGate {
             }
 
             $trimmedGateReason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "" } else { (ConvertTo-AsciiSafeText -Text $GateReason).Trim() }
-            if (Test-GateReasonRefused -Reason $GateReason) {
-                Write-Host ("Error: -GateReason is required and cannot be only a stock phrase (" + ((Get-LowSignalGateReasons) -join ", ") + ").") -ForegroundColor Red
-                exit 1
-            }
+            Assert-GateReason -Reason $GateReason
             
             $primaryBranch = Get-ConfiguredPrimaryBranch
             $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
@@ -4201,6 +4217,8 @@ function Invoke-HumanGate {
                             
                             exit 0
                         } else {
+                            $fileReason = if ($gateData.PSObject.Properties["reason"]) { [string]$gateData.reason } else { "" }
+                            Assert-GateReason -Reason $fileReason -DecisionFile $gateTemplatePath
                             # Execute push or reset based on manual decision
                             Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
@@ -4311,10 +4329,10 @@ function Invoke-RepositoryIntegrityGates {
             $statusCode = $line.Substring(0, 2)
             $path = $line.Substring(3).Trim()
             # Catch untracked (??) AND uncommitted modifications/additions/deletions in the main working tree.
-            # The worktree lives under .agent-workspaces/ and is excluded, so these are always main-repo changes.
+            # Item 188: configured runtime directories are excluded from main-repo cleanliness.
             $isStray = ($statusCode -match '\?') -or ($statusCode.Trim() -match '^[MADRCUT]')
             if ($isStray) {
-                $ignored = $path -match '^(\.crucible[/\\]|\.agent-workspaces[/\\]|\.gemini[/\\]|\.antigravitycli[/\\]|\.vscode[/\\]|vendor[/\\])'
+                $ignored = ($path -match '^(\.crucible[/\\]|\.gemini[/\\]|\.antigravitycli[/\\]|\.vscode[/\\]|vendor[/\\])') -or (Test-ConfiguredRuntimePath -Path $path.Trim('"') -ProjectRoot $repoRoot)
                 if (-not $ignored) { $strayFiles += "$statusCode $path" }
             }
         }
@@ -4367,7 +4385,10 @@ function Invoke-RepositoryIntegrityGates {
     # always has, so the fixture was the thing that was wrong.
     if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -ne "implementation" -and -not $isBootstrap) {
         Write-Quiet "`n[DEV LOG] Running Dev Log security validation..." -ForegroundColor Cyan
-        $devLogPath = Join-Path $sessionDir "../dev-logs/UNPUBLISHED_LOGS.md"
+        # Item 188: dev logs belong to the bundle, not to the session directory's parent.
+        $crucibleRoot = if ($Context.ContainsKey("CrucibleRoot")) { $Context.CrucibleRoot } else { ".crucible" }
+        $bundleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $repoRoot $crucibleRoot }
+        $devLogPath = Join-Path $bundleRoot "dev-logs/UNPUBLISHED_LOGS.md"
         if (-not (Test-Path $devLogPath)) {
             Write-Host "[DEV LOG] VALIDATION FAILED: $devLogPath does not exist." -ForegroundColor Red
             Write-Host "`n[STOP] [NEXT SESSION COMMAND]: YOU must create the Dev Log before proceeding." -ForegroundColor Red
@@ -4394,10 +4415,10 @@ function Invoke-RepositoryIntegrityGates {
             $statusCode = $line.Substring(0, 2)
             $path = $line.Substring(3).Trim()
             # Catch untracked (??) AND uncommitted modifications/additions/deletions in the main working tree.
-            # The worktree lives under .agent-workspaces/ and is excluded, so these are always main-repo changes.
+            # Item 188: configured runtime directories are excluded from main-repo cleanliness.
             $isStray = ($statusCode -match '\?') -or ($statusCode.Trim() -match '^[MADRCUT]')
             if ($isStray) {
-                $ignored = $path -match '^(\.crucible[/\\]|\.agent-workspaces[/\\]|\.gemini[/\\]|\.antigravitycli[/\\]|\.vscode[/\\]|vendor[/\\])'
+                $ignored = ($path -match '^(\.crucible[/\\]|\.gemini[/\\]|\.antigravitycli[/\\]|\.vscode[/\\]|vendor[/\\])') -or (Test-ConfiguredRuntimePath -Path $path.Trim('"') -ProjectRoot $repoRoot)
                 if (-not $ignored) { $strayFiles += "$statusCode $path" }
             }
         }

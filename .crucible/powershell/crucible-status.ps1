@@ -30,6 +30,7 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
 }
 . $helpersPath
 . (Join-Path $PSScriptRoot "lib/time.ps1")
+. (Join-Path $PSScriptRoot "lib/backlog-io.ps1")
 
 if ($Drift) {
     . (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
@@ -135,6 +136,8 @@ if (-not (Test-Path $STATE_FILE)) {
     exit 1
 }
 $sessionState = Get-Content $STATE_FILE | ConvertFrom-Json
+# TODO item 190: backlog-io enables strict mode; enumerate an empty tasks map safely.
+$taskIds = @($sessionState.tasks.PSObject.Properties | ForEach-Object { $_.Name })
 
 if (-not (Test-Path $BACKLOG_FILE)) {
     Write-Error "Backlog file not found: $BACKLOG_FILE"
@@ -185,7 +188,7 @@ foreach ($line in $backlogLines) {
 $allTasks = @()
 
 # Tasks from session_state (Real-time source)
-foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
+foreach ($taskId in $taskIds) {
     $taskState = $sessionState.tasks.$taskId
     $meta = $taskMeta[$taskId]
     
@@ -271,7 +274,7 @@ foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
     }
     
     $dependencies = ""
-    $featureFiles = @(Get-ChildItem -Path $backlogDir -Recurse -Filter ($taskId + "_*.md") -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "active" })
+    $featureFiles = @(Get-BacklogSpecFiles -Task $taskId -Directory $backlogDir -Recurse | Where-Object { $_.FullName -match "active" })
     if ($featureFiles.Count -gt 0) {
         $specContent = Get-Content $featureFiles[0].FullName
         $inDepends = $false
@@ -331,7 +334,7 @@ $ready = @($taskMeta.Values | Where-Object { $_.Status -eq "Ready" }).Count
 
 # Circuit Breakers (canonical history file + active/recent filtering)
 $blockedTaskIds = @(
-    $sessionState.tasks.PSObject.Properties.Name | Where-Object {
+    $taskIds | Where-Object {
         $task = $sessionState.tasks.$_
         $null -ne $task -and $task.PSObject.Properties["status"] -and $task.status -eq "blocked"
     }
@@ -347,7 +350,7 @@ if (Test-Path $GLOBAL_CB_HISTORY_FILE) {
     )
 }
 if ($cbEventsAll.Count -eq 0) {
-    foreach ($taskId in $sessionState.tasks.PSObject.Properties.Name) {
+    foreach ($taskId in $taskIds) {
         $taskLog = Join-Path $LOG_DIR ($taskId + "/pipeline.log.jsonl")
         if (-not (Test-Path $taskLog)) { continue }
         $taskEvents = @(

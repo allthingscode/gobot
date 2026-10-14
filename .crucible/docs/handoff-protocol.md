@@ -65,9 +65,10 @@ Run `{{crucible_root}}/powershell/crucible.ps1 -Init -TaskId {task_id} -ProjectR
 
 To prevent accidental state pollution and ensure proper review cycles, Git operations are strictly partitioned by phase:
 
-- **implementation / research / grooming**: YOU ARE STRICTLY FORBIDDEN FROM RUNNING `git commit` OR `git push`. You must implement changes and leave them in the working directory (uncommitted). Your turn ends with uncommitted modifications.
-- **verification**: You review the uncommitted changes in the working directory. Do not commit.
-- **deployment**: Only the deployment phase (or the human) is authorized to stage (`git add`), commit (`git commit`), and push (`git push`) code changes.
+- **implementation**: Follow the [Implementation SOP](../sops/implementation.md) for worktree commits and handoff boundaries.
+- **research / grooming**: YOU ARE STRICTLY FORBIDDEN FROM RUNNING `git commit` OR `git push`.
+- **verification**: Review the task branch changes. Do not commit.
+- **deployment**: Follow the [Deployment SOP](../sops/deployment.md) for merge and push ownership.
 
 ## Agent Execution Boundaries
 

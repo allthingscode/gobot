@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 # Retention for the per-run report written to session/update-bundle/. A normal update writes
 # two logs - the dry run and the apply - so twenty is roughly the last ten updates, which is
@@ -390,7 +391,8 @@ function Invoke-UpdateBundle {
         }
     }
 
-    $sessionDir = Join-Path $adopterCrucibleRoot "session"
+    # Item 188: update reports are adopter runtime state too.
+    $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $adopterRootResolved
     $logDir = Join-Path $sessionDir "update-bundle"
     if (-not (Test-Path -LiteralPath $logDir)) {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null

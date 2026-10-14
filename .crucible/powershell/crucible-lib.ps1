@@ -169,53 +169,14 @@ function Invoke-NativeCommand {
     return $output
 }
 
-function Get-BacklogItemPathForTask {
-    param([Parameter(Mandatory = $true)][string]$Task)
-
-    $typeDir = if ($Task -match "^F-") {
-        "features"
-    } elseif ($Task -match "^B-") {
-        "bugs"
-    } elseif ($Task -match "^C-") {
-        "chores"
-    } else {
-        ""
-    }
-
-    $typeDirs = if ([string]::IsNullOrWhiteSpace($typeDir)) {
-        @("features", "bugs", "chores")
-    } else {
-        @($typeDir)
-    }
-
-    $backlogDir = Get-ConfiguredPath -Key "backlog"
-    foreach ($dir in $typeDirs) {
-        $activeMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/active")) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $activeMatch) {
-            return $activeMatch.FullName
-        }
-
-        $rootMatch = Get-ChildItem -Path (Join-Path $backlogDir $dir) -Filter ($Task + "_*.md") -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $rootMatch) {
-            return $rootMatch.FullName
-        }
-
-        $archivedMatch = Get-ChildItem -Path (Join-Path $backlogDir ($dir + "/archived")) -Filter ($Task + "_*.md") -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $archivedMatch) {
-            return $archivedMatch.FullName
-        }
-    }
-
-    return ""
-}
-
 function Get-SpecBudgetTier {
     param(
         [Parameter(Mandatory = $true)][string]$Task,
-        [switch]$IncludePath
+        [switch]$IncludePath,
+        [string]$ProjectRoot = ""
     )
 
-    $specPath = Get-BacklogItemPathForTask -Task $Task
+    $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
     if ([string]::IsNullOrWhiteSpace($specPath) -or -not (Test-Path -LiteralPath $specPath)) {
         if ($IncludePath) {
             return @{ Tier = ""; Path = "" }

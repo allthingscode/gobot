@@ -86,6 +86,24 @@ function New-TestContext {
 $tempRoot = New-TestFixtureRoot -NameHint "session-output-test"
 
 try {
+
+    $results += Run-Test -Name "Generated handoff reference uses supplied custom session (item 188)" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "custom-handoff") -TaskId "F-188" -TargetPhase "verification"
+        [System.IO.File]::WriteAllText((Join-Path $ctx.PromptLib "verification_prompt.md"), "<!-- prompt_version: test-v1 -->`nHandoff {handoff_file}`n", [System.Text.UTF8Encoding]::new($false))
+        New-CruciblePromptText -Context $ctx | Out-Null
+        Assert-Result -Name "handoff reference matches actual file" -Condition ($ctx.RelativeHandoffPath -eq $ctx.LatestHandoff.FullName) -FailureMessage $ctx.RelativeHandoffPath
+    }
+
+    $results += Run-Test -Name "Verification checklist uses supplied custom worktree (item 188)" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "custom-checklist") -TaskId "F-188" -TargetPhase "verification"
+        $ctx.TypeDir = "features"
+        $env:CRUCIBLE_CYCLE_ID = "item188-checklist"
+        Initialize-CrucibleTargetSession -Context $ctx
+        $text = Get-Content (Join-Path $ctx.SessionDir "F-188/verification/task.md") -Raw
+        $wt = Join-Path $ctx.WorkspacesDir "implementation-F-188"
+        Assert-Result -Name "checklist worktree" -Condition ($text.Contains("Enter worktree $wt")) -FailureMessage $text
+    }
+
     $results += Run-Test -Name "Write-NextStep writes expected content with explicit SessionDir" -Body {
         $sessionDir = Join-Path $tempRoot "next-step/session"
         $command = "$((Get-PwshCommand)) -File crucible.ps1 -Init -TaskId F-901"
@@ -233,6 +251,13 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "no task branch created" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task/R-914 was created, which defeats the No-Code Closure"
         $taskText = Get-Content -LiteralPath (Join-Path $ctx.SessionDir "R-914/implementation/task.md") -Raw -Encoding UTF8
         Assert-Result -Name "task.md names the project root" -Condition ($taskText -match ('Worktree:\s+' + [regex]::Escape($caseRoot))) -FailureMessage ("task.md: " + $taskText)
+        # The generated checklist must follow the SOP instead of keeping another copy
+        # of its commit and handoff rules. TODO item 193.
+        $sopPath = (Join-Path $caseRoot '.crucible/sops/implementation.md').Replace('\', '/')
+        Assert-Result -Name "implementation checklist links the resolved SOP" -Condition ($taskText.Contains("[Phase 3: Self-Review](<${sopPath}#phase-3-self-review>)")) -FailureMessage "task.md does not link implementation self-review"
+        Assert-Result -Name "implementation checklist has no duplicate commit recipe" -Condition ($taskText -notmatch 'Commit all changes inside worktree|coverage >80%') -FailureMessage "task.md still repeats implementation workflow details"
+        Assert-Result -Name "implementation session end links the workflow" -Condition ($taskText.Contains("[Handoff workflow](<${sopPath}#phase-4-handoff-to-verification>)") -and $taskText -notmatch 'When your work is complete, run this command') -FailureMessage "task.md still duplicates the handoff workflow"
+        Assert-Result -Name "implementation checklist resolves its placeholders" -Condition ($taskText -notmatch '\{sop_path\}|\{worktree\}') -FailureMessage "task.md has unresolved implementation paths"
 
         "<!-- prompt_version: 1 -->`nWork in {worktree}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
         $text = New-CruciblePromptText -Context $ctx
@@ -286,12 +311,15 @@ Ceiling {budget_ceiling}
         }
     }
 
-    $results += Run-Test -Name "The implementation prompt says a pipeline dispatch carries plan approval (item 177)" -Body {
+    $results += Run-Test -Name "The implementation prompt links the SOP's pipeline approval rule (items 177, 193)" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "impl-approval") -TaskId "F-908" -TargetPhase "implementation"
         Copy-Item -LiteralPath (Join-Path $REPO_ROOT "prompts/implementation_prompt.md") -Destination (Join-Path $ctx.PromptLib "implementation_prompt.md")
         $text = New-CruciblePromptText -Context $ctx
-        Assert-Result -Name "dispatch is the approval" -Condition ($text -match 'This dispatch is your approval to implement') -FailureMessage ("prompt: " + $text)
-        Assert-Result -Name "a project pause rule does not apply" -Condition ($text -match 'pause for plan approval' -and $text -match 'does not apply here') -FailureMessage ("prompt: " + $text)
+        $sopPath = Join-Path $ctx.RepoRoot '.crucible'
+        Assert-Result -Name "prompt links session start" -Condition ($text.Contains("[Session Start](<${sopPath}/sops/implementation.md#session-start>)")) -FailureMessage ("prompt: " + $text)
+        $sop = Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/implementation.md") -Raw -Encoding UTF8
+        Assert-Result -Name "dispatch is the approval" -Condition ($sop -match 'This dispatch is your approval to implement') -FailureMessage ("SOP: " + $sop)
+        Assert-Result -Name "a project pause rule does not apply" -Condition ($sop -match 'pause for plan approval' -and $sop -match 'does not apply here') -FailureMessage ("SOP: " + $sop)
     }
 
     $results += Run-Test -Name "New-CruciblePromptText substitutes PowerShell host for non-Windows prompts" -Body {

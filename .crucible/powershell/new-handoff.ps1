@@ -167,7 +167,7 @@ function Write-ValidatedHandoff {
     }
 }
 
-$sessionDir = Get-ConfiguredPath -Key "session"
+$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $handoffDir = Join-Path $sessionDir "handoffs"
 if (-not (Test-Path -LiteralPath $handoffDir)) {
     New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
@@ -266,7 +266,7 @@ $sourceTaskPath = Join-Path $sessionDir "$TaskId/$Source/task.md"
 $sourcePromptPath = Join-Path $sessionDir "$TaskId/$Source/prompt.md"
 $taskCycleId = Get-CycleIdFromTaskFile -Path $sourceTaskPath
 $promptVersionFromPrompt = Get-PromptVersionFromPromptFile -Path $sourcePromptPath
-$specBudgetTier = Get-SpecBudgetTier -Task $TaskId
+$specBudgetTier = Get-SpecBudgetTier -Task $TaskId -ProjectRoot $REPO_ROOT
 
 $resolvedHandoffRetry = if ($HandoffRetryCount -ge 0) {
     $HandoffRetryCount
@@ -471,9 +471,10 @@ foreach ($art in $resolvedArtifacts) {
             $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
         }
     } else {
-        $wtRelPattern = "(\.crucible/)?\.agent-workspaces/implementation-[^/]+/(.+)"
+        $wtRelPrefix = Get-RootRelativePath -Root $resolvedRepoRoot -Path $resolvedWtPath
+        $wtRelPattern = "^(?:\./)?" + [regex]::Escape($wtRelPrefix.Replace("\", "/").TrimEnd("/")) + "/(.+)"
         if ($relPath.Replace("\", "/") -match $wtRelPattern) {
-            $relPath = $Matches[2]
+            $relPath = $Matches[1]
         }
     }
     $relPath = $relPath.Replace("\", "/").Trim()
@@ -525,7 +526,7 @@ if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
     $baseAffinity = @($latest.file_affinity)
 }
 
-$specPath = Get-BacklogItemPathForTask -Task $TaskId
+$specPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $REPO_ROOT
 $frontmatterAffinity = @()
 if ($specPath -and (Test-Path -LiteralPath $specPath)) {
     $specContent = Get-Content -LiteralPath $specPath -Raw -Encoding UTF8

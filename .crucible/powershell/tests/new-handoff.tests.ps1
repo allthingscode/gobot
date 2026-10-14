@@ -291,7 +291,7 @@ try {
 
     Invoke-Test -Name "budget tier defaults from spec when not provided" -Script {
         $taskId = New-TestTaskId "BUDGET-DEFAULT"
-        $specPath = ".crucible/backlog/chores/active/$($taskId)_Budget_Default.md"
+        $specPath = ".crucible/backlog/chores/active/$($taskId).md"
         New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
         @"
 ---
@@ -534,7 +534,7 @@ budget_tier: "low"
 
     Invoke-Test -Name "budget tier mismatch is rejected by validator" -Script {
         $taskId = New-TestTaskId "BUDGET-MISMATCH"
-        $specPath = ".crucible/backlog/chores/active/$($taskId)_Budget_Mismatch.md"
+        $specPath = ".crucible/backlog/chores/active/$($taskId).md"
         New-Item -ItemType Directory -Path (Split-Path -Parent $specPath) -Force | Out-Null
         @"
 ---

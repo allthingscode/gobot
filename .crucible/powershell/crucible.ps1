@@ -280,9 +280,9 @@ if ($NewHandoff) {
     exit $LASTEXITCODE
 }
 
-$sessionDir = Get-ConfiguredPath -Key "session"
+$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $backlogDir = Get-ConfiguredPath -Key "backlog"
-$workspacesDir = Get-ConfiguredPath -Key "workspaces"
+$workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $REPO_ROOT
 $HANDOFF_DIR = Join-Path $sessionDir "handoffs"
 $PROMPT_LIB = Get-ConfiguredPath -Key "prompts"
 $budgetCeilings = Get-BudgetCeilings

@@ -546,7 +546,7 @@ To optimize for both output quality and cost-efficiency, Crucible uses a tiered 
 **Handoff**: Write `.crucible/session/handoffs/{task_id}-{ts}.json`, then **execute** `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}"` via the Bash tool (using the PowerShell invocation in Session Protocol), present the Crucible output to the human: a brief summary of what was accomplished, the assembled next-phase prompt, and which model is recommended. Wait for human confirmation before continuing.
 
 ### Verification
-**Role**: Quality Gate. The Reviewer persona validates the Architect's uncommitted changes against the technical spec and project standards. They MUST approve before deployment.
+**Role**: Quality Gate. The Reviewer persona validates the Architect's task branch changes against the technical spec and project standards. They MUST approve before deployment.
 **State file:** `.crucible/session/global/session_state.json` -> `phases.verification`
 **Handoff**: Write `.crucible/session/handoffs/{task_id}-{ts}.json`, then **execute** `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}"` via the Bash tool (using the PowerShell invocation in Session Protocol), present the Crucible output to the human: a brief summary of what was accomplished, the assembled next-phase prompt, and which model is recommended. Wait for human confirmation before continuing.
 
@@ -554,7 +554,7 @@ To optimize for both output quality and cost-efficiency, Crucible uses a tiered 
 The Verification phase must verify in this order - a failure at any step blocks approval:
 
 1. **Isolated checks pass** - `pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full` exits 0.
-2. **Vet/Lint/Test/Doc parity preserved** - helper runs `go vet`, `golangci-lint` and `gotestsum` in the task worktree with isolated caches/tmp. In the framework repo it also runs `go run scripts/crucible_lint.go -framework-root . -backlog-dir <resolved>` (the backlog directory comes from `powershell/resolve-config-path.ps1 -Key backlog`, not from the linter re-reading `config.yaml`); that linter checks Crucible's own backlog and docs, does not ship in a bundle, and is not a step in an adopter's verification.
+2. **Vet/Lint/Test/Doc parity preserved** - helper runs `go vet`, `golangci-lint` and `gotestsum` in the task worktree with isolated caches/tmp. In the framework repo it also runs `go run scripts/crucible_lint.go -framework-root . -backlog-dir <resolved-backlog> -session-dir <resolved-session>` (the directories come from `powershell/resolve-config-path.ps1 -Key backlog` and `-Key session`, using the shared config parser); that linter checks Crucible's own backlog and docs, does not ship in a bundle, and is not a step in an adopter's verification.
 3. **Acceptance criteria met** - every checkbox in the spec's `Acceptance Criteria` section is checked off.
 4. **Scope is bounded** - changes are limited to files named in the spec and strictly match the declared `file_affinity` boundary. No unrequested modifications.
 5. **No regressions** - diff is reviewed for behavior changes outside the stated scope.

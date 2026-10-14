@@ -66,6 +66,34 @@ try {
     Initialize-Repo -ProjectRoot $projectRoot
     Add-ImplementationWorktree -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
 
+
+    $results += Run-Test -Name "Custom workspaces locates implementation checks (item 188)" -Body {
+        $customProject = Join-Path $tempRoot "custom-project"
+        Initialize-Repo -ProjectRoot $customProject
+        $cfg = Join-Path $customProject ".crucible/config.yaml"
+        [System.IO.File]::AppendAllText($cfg, "`npaths:`n  workspaces: custom worktrees`n", [System.Text.UTF8Encoding]::new($false))
+        $customWt = Join-Path $customProject "custom worktrees/implementation-T-188"
+        git -C $customProject worktree add -b task/T-188 $customWt --quiet
+        try {
+            $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-188 -Mode quick -ProjectRoot $customProject }
+            Assert-Result -Name "custom implementation checks pass" -Condition ($res.ExitCode -eq 0) -FailureMessage ($res.Output -join "`n")
+            Assert-Result -Name "no default workspaces" -Condition (-not (Test-Path (Join-Path $customProject ".crucible/.agent-workspaces"))) -FailureMessage "created default workspaces"
+        } finally {
+            Remove-WorktreeIfPresent -ProjectRoot $customProject -WorktreePath $customWt
+        }
+    }
+
+
+    $results += Run-Test -Name "Detached checks create only configured workspaces (item 188)" -Body {
+        $customProject = Join-Path $tempRoot "custom-detached"
+        Initialize-Repo -ProjectRoot $customProject
+        [System.IO.File]::AppendAllText((Join-Path $customProject ".crucible/config.yaml"), "`npaths:`n  workspaces: custom worktrees`n", [System.Text.UTF8Encoding]::new($false))
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId R-188 -Mode quick -Commit HEAD -ProjectRoot $customProject }
+        Assert-Result -Name "detached checks pass" -Condition ($res.ExitCode -eq 0) -FailureMessage ($res.Output -join "`n")
+        Assert-Result -Name "detached worktree uses configured root" -Condition (($res.Output -join "`n").Contains((Join-Path $customProject "custom worktrees"))) -FailureMessage ($res.Output -join "`n")
+        Assert-Result -Name "no default workspaces" -Condition (-not (Test-Path (Join-Path $customProject ".crucible/.agent-workspaces"))) -FailureMessage "default workspaces created"
+    }
+
     $results += Run-Test -Name "Executes configured quick check in worktree" -Body {
         Push-Location $projectRoot
         try {

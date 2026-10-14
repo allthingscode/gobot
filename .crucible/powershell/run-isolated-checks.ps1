@@ -14,6 +14,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 . (Join-Path $PSScriptRoot "lib/platform.ps1")
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = (Get-Location).Path
@@ -24,7 +25,8 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
 }
 
-$worktreeRoot = Join-Path $ProjectRoot ".crucible/.agent-workspaces"
+# Item 188: lookup and detached checks share the configured workspaces root.
+$worktreeRoot = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
 $commitWorktree = $null
 function Remove-CommitWorktree {
     if ($null -eq $commitWorktree) { return }

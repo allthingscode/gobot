@@ -102,8 +102,8 @@ try {
         $crucibleActiveDir = Join-Path $caseRoot ".crucible/backlog/features/active"
         New-Item -ItemType Directory -Path $crucibleActiveDir -Force | Out-Null
 
-        $specPath = Join-Path $activeDir "F-020_test.md"
-        $specPath2 = Join-Path $crucibleActiveDir "F-020_test.md"
+        $specPath = Join-Path $activeDir "F-020.md"
+        $specPath2 = Join-Path $crucibleActiveDir "F-020.md"
         $specContent = @"
 ---
 item_id: "F-020"

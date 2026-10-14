@@ -165,6 +165,11 @@ try {
         $silent = @()
         foreach ($promptFile in $promptFiles) {
             $lines = @(Get-Content -LiteralPath $promptFile.FullName -Encoding UTF8)
+            if ($promptFile.Name -eq "implementation_prompt.md") {
+                # Implementation keeps workflow in its SOP. TODO item 193.
+                Assert-Result -Name "implementation prompt links the quality bar" -Condition ($lines -contains '- [Quality Bar](<{{crucible_root}}/sops/implementation.md#quality-bar>) - required `task.md` checklist before handoff') -FailureMessage "implementation prompt omits the checklist rule link"
+                $lines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/implementation.md") -Encoding UTF8)
+            }
             if (@($lines | Where-Object { $_.Trim() -eq $canonical }).Count -eq 0) {
                 $silent += $promptFile.Name
             }
@@ -197,13 +202,17 @@ try {
     }
 
     # The C-383 Architect obeyed a prescribed "implement {task_id}" subject and committed a
-    # message that said neither what changed nor why. All three places that tell the Architect
-    # how to commit have to send it to the repo's own history instead. Item 120.
+    # message that said neither what changed nor why. Item 120. The recipe now lives in
+    # the SOP; task surfaces link to it to prevent conflicting copies. TODO item 193.
     $results += Run-Test -Name "Every Architect commit instruction defers to the repo's commit style" -Body {
         foreach ($relative in @("prompts/implementation_prompt.md", "sops/implementation.md", "powershell/lib/session-output.ps1")) {
             $text = [System.IO.File]::ReadAllText((Join-Path $REPO_ROOT $relative))
             Assert-Result -Name ($relative + " prescribes no fixed task-ID subject") -Condition (-not $text.Contains("implement {task_id}")) -FailureMessage ($relative + " still hands the Architect a commit subject that names only the task ID")
-            Assert-Result -Name ($relative + " points at the repo's recent commits") -Condition ($text.Contains("style of this repo's recent commits")) -FailureMessage ($relative + " does not tell the Architect to match the repo's recent commit messages")
+            if ($relative -eq "sops/implementation.md") {
+                Assert-Result -Name ($relative + " points at the repo's recent commits") -Condition ($text.Contains("style of this repo's recent commits")) -FailureMessage ($relative + " does not tell the Architect to match the repo's recent commit messages")
+            } else {
+                Assert-Result -Name ($relative + " links self-review") -Condition ($text.Contains('#phase-3-self-review')) -FailureMessage ($relative + " does not link the SOP's commit recipe")
+            }
         }
     }
 

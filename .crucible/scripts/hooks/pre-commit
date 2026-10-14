@@ -132,6 +132,8 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
     # interrupted build never leaves a half-written binary to run next time. Item 151.
     echo "Running crucible lint checks..."
     BACKLOG_DIR="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "$REPO_ROOT" | tr -d '\r')"
+    # Item 188: pass the configured session to runtime lints as well.
+    SESSION_DIR="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/resolve-config-path.ps1 -Key session -ProjectRoot "$REPO_ROOT" | tr -d '\r')"
     LINT_EXT=""
     case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*) LINT_EXT=".exe" ;;
@@ -145,7 +147,7 @@ if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
         go build -o "$LINT_TMP" scripts/crucible_lint.go
         mv -f "$LINT_TMP" "$LINT_BIN"
     fi
-    "$LINT_BIN" -framework-root "$FRAMEWORK_ROOT" -backlog-dir "$BACKLOG_DIR"
+    "$LINT_BIN" -framework-root "$FRAMEWORK_ROOT" -backlog-dir "$BACKLOG_DIR" -session-dir "$SESSION_DIR"
 
     # 7. Unresolved Merge Conflict check
     echo "Scanning staged files for unresolved merge conflict markers..."

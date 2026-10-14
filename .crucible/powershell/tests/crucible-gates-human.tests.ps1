@@ -2611,6 +2611,62 @@ review:
             -FailureMessage "a refused outcome still wrote to the event log or circuit-breaker history"
     }
 
+    # TODO item 192: drive both entry paths, since testing the predicate alone cannot
+    # catch a filled decision file bypassing it. The action marker catches dispatch
+    # even when there is no task branch or backlog for the action to change.
+    $refusedReasons = @($null, "", "   ") + @(Get-LowSignalGateReasons) + @(
+        Get-LowSignalGateReasons | ForEach-Object { "  " + $_.ToUpperInvariant() + "  " }
+    )
+    $reasonCase = 0
+    foreach ($entryPath in @("CLI", "file")) {
+        foreach ($reason in $refusedReasons) {
+            $reasonCase++
+            $results += Run-Test -Name "TODO 192: $entryPath refuses reason '$reason' ($reasonCase)" -Body {
+                $root = Join-Path $tempRoot "reason-$reasonCase"
+                $ctx = New-TestContext -TempRoot $root -TaskId "F-192"
+                $ctx.Handoff = [PSCustomObject]@{ task_id = "F-192"; source_phase = "deployment"; target_phase = "done" }
+                $ctx.GateOutcome = if ($entryPath -eq "CLI") { "accepted" } else { $null }
+                $ctx.GateReason = $reason
+                $gateDir = Join-Path $ctx.SessionDir "global/gate_decisions"
+                New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+                $pendingPath = Join-Path $gateDir "gate_decision_F-192_pending.json"
+                $pendingJson = @{ outcome = "accepted"; reason = $reason } | ConvertTo-Json
+                Set-Content -LiteralPath $pendingPath -Value $pendingJson -Encoding UTF8
+                $contextPath = Join-Path $root "context.json"
+                $ctx | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $contextPath -Encoding UTF8
+                $actionMarker = Join-Path $root "action.txt"
+                $scriptPath = Join-Path $root "run.ps1"
+                $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+                $scriptContent = @"
+`$ErrorActionPreference = 'Stop'
+`$Quiet = `$true
+. '$libPath'
+function Invoke-HumanGateAction { Set-Content -LiteralPath '$actionMarker' -Value 'called' }
+`$ctx = Get-Content -LiteralPath '$contextPath' -Raw | ConvertFrom-Json -AsHashtable
+Push-Location '$root'
+try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
+"@
+                Set-Content -LiteralPath $scriptPath -Value $scriptContent -Encoding UTF8
+                $run = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $scriptPath }
+                $text = $run.Output -join "`n"
+                $expectedMessage = "is required and cannot be only a stock phrase (" + ((Get-LowSignalGateReasons) -join ", ") + ")."
+                Assert-Result -Name "reason refused with exit 1" -Condition ($run.ExitCode -eq 1) `
+                    -FailureMessage ("expected exit 1, got " + $run.ExitCode + ". Output: " + $text)
+                Assert-Result -Name "same rule as CLI" -Condition ($text.Contains($expectedMessage)) -FailureMessage $text
+                $namesSource = if ($entryPath -eq "CLI") { $text -match '-GateReason is required' } else { $text -match '"reason" in .+ is required' -and $text -notmatch '-GateReason is required' }
+                Assert-Result -Name "names where the reason came from" -Condition $namesSource -FailureMessage $text
+                Assert-Result -Name "no gate action dispatched" -Condition (-not (Test-Path -LiteralPath $actionMarker)) `
+                    -FailureMessage "refused reason reached the merge/archive action"
+                Assert-Result -Name "pending decision preserved for correction" `
+                    -Condition ((Test-Path -LiteralPath $pendingPath) -and (Get-Content -LiteralPath $pendingPath -Raw).TrimEnd() -eq $pendingJson.TrimEnd()) `
+                    -FailureMessage "pending decision was removed or changed"
+                $decisions = @(Get-ChildItem -LiteralPath $gateDir -Filter "F-192-*.json")
+                Assert-Result -Name "no decision recorded" -Condition ($decisions.Count -eq 0 -and $text -notmatch "Decision recorded") `
+                    -FailureMessage "refused reason was recorded"
+            }
+        }
+    }
+
     $results += Run-Test -Name "Every outcome the CLI accepts reaches a dispatch arm" -Body {
         # The pairing the fix above depends on: -GateOutcome validates against
         # Get-HumanGateOutcomes, so any value on that list which the dispatcher does not

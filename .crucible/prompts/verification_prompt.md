@@ -1,4 +1,4 @@
-<!-- prompt_version: verification_prompt-v33 -->
+<!-- prompt_version: verification_prompt-v34 -->
 Verification: {task_id}
 
 {prev_session_summary}
@@ -45,7 +45,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
 
 ### Pattern A/B: Standard Code Implementation Review
 (Use this workflow if the incoming handoff is from the `implementation` phase or if an implementation worktree exists, unless a `## No-Code Re-Review` section below says otherwise.)
-1. **Setup**: Operate inside the assigned worktree: `.crucible/.agent-workspaces/implementation-{task_id}`. Do not run `git checkout task/{task_id}` from the main checkout.
+1. **Setup**: Operate inside the assigned worktree: `{worktree}`. Do not run `git checkout task/{task_id}` from the main checkout.
 2. **Scope Check**: Run `git diff master...task/{task_id} --name-only` and verify all modified files match the spec's `file_affinity`.
 3. **Automated Verification**: Run the canonical isolated checker before manual review:
    - `pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"`
@@ -57,7 +57,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
    **Cross-platform caveat:** the isolated checker runs on the orchestrator's host OS ONLY. If it prints a `[cross-platform]` advisory, the project's CI targets other OSes it did NOT exercise. A green local run is NOT proof of cross-platform correctness; origin CI (the gate's CI-watch) is the authoritative multi-OS signal. Scrutinize any changed test that asserts OS-divergent behavior (filesystem error text, path separators, line endings, case sensitivity) and require it to assert platform-independently.
 4. **Acceptance Criteria**: Review every item in the `Acceptance Criteria` section of the backlog spec for `{task_id}` and confirm implementation. In the review report, quote each criterion under `### Acceptance Criteria` with a `file:line` or test name for every clause (see `{{crucible_root}}/sops/verification.md` Step 4). A clause with no evidence is a BLOCKER.
 5. **Quality Check**: Review the diff for idiomatic quality, error handling, and security.
-6. **Documentation**: Write findings to `.crucible/session/{task_id}/verification/review_report.md`.
+6. **Documentation**: Write findings to `{session_dir}/verification/review_report.md`.
    - **MANDATORY**: The file MUST start with this exact YAML header (crucible.ps1 validates it):
      ```yaml
      ---
@@ -66,7 +66,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
      ---
      ```
      Use `review_decision: CHANGES_REQUESTED` and `acceptance_criteria_met: false` when sending back to implementation.
-7. **CHANGES_REQUESTED**: If code requires fixes, write a concise fix spec to `.crucible/session/{task_id}/implementation/task.md`.
+7. **CHANGES_REQUESTED**: If code requires fixes, write a concise fix spec to `{session_dir}/implementation/task.md`.
 8. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 ### Stub-Only Close-Out: Pure Data-Grooming Review (grooming -> verification Shortcut)
@@ -77,7 +77,7 @@ If you cannot answer all three, STOP. Re-read the files, then answer.
    ```
    Paste the validator output into your session response. If the exit code is non-zero, you MUST reject the handoff (set `review_decision: CHANGES_REQUESTED` and write a handoff to `implementation` so the grooming phase can repair the backlog structure).
 2. **Stub-Row and Spec Consistency**: Verify every new stub row in `BACKLOG.md` has a corresponding spec file in `backlog/{type}/active/` and matches the stub-row convention (refer to `{{crucible_root}}/sops/verification.md` Stub-Only Close-Out Checklist).
-3. **Documentation**: Write findings to `.crucible/session/{task_id}/verification/review_report.md` with the mandatory YAML header.
+3. **Documentation**: Write findings to `{session_dir}/verification/review_report.md` with the mandatory YAML header.
 4. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
 
 {rebase_section}

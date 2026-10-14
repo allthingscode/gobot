@@ -1,4 +1,4 @@
-<!-- prompt_version: architect-sop-v3 -->
+<!-- prompt_version: architect-sop-v4 -->
 # SOP: Implementation
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -23,9 +23,19 @@
 
 ## Session Start
 
+Read `.crucible/session/{task_id}/implementation/task.md` for resolved paths and instructions, the incoming handoff, and `{{crucible_root}}/docs/operating-manual.md`. If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first.
+
 Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1 implementation` to clear stale state safely. Do not edit `session_state.json` manually.
 
+For state updates, use `update-session-state.ps1 -Specialist implementation -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Implementation session files go to `.crucible/session/{task_id}/implementation/`.
+
+**This dispatch is your approval to implement.** The groomed spec is the approved plan. A project instruction to pause for plan approval (for example an AGENTS.md planning protocol) belongs to the manual workflow and does not apply here: write any Phase 1 design to `task.md`, then implement, commit and hand off in this session. Stop early only to escalate a genuine blocker through the SOP's escalation path.
+
 **Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a verification handoff - follow it directly. Do NOT redesign. Skip to Phase 2: Code.
+
+The backlog spec's pre-filled "Next Step" line is for post-deployment sequencing, not routing. Follow this SOP's Verification handoff.
+
+Before proceeding, echo the Cycle ID from `task.md`, the incoming handoff reason, the permitted successor from this SOP, and the worktree path from `task.md`'s Resolved Paths. If any answer is missing, stop and re-read the files.
 
 ---
 
@@ -90,7 +100,7 @@ Write table-driven tests as you go - not after. Run continuously:
 pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode quick -ProjectRoot "{project_root}"
 ```
 
-**STRICTLY FORBIDDEN**: `git push`. Your role ends with uncommitted changes staged in the worktree. Do not commit to `master`. Do not touch `BACKLOG.md`.
+**STRICTLY FORBIDDEN**: `git push`. Do not commit to `master`. Do not touch `BACKLOG.md`.
 
 ### Phase 3: Self-Review
 
@@ -101,6 +111,7 @@ Before marking ready for Verification:
    pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
    <project race/coverage test command>
    ```
+   Run task-specific required validation. In the framework repo, when prompt templates change, also run `go run {{crucible_root}}/scripts/crucible_lint.go -framework-root {{crucible_root}} -backlog-dir <path>`. Resolve `<path>` with `{{crucible_root}}/powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "{project_root}"`. This linter checks Crucible's own backlog and docs and is not part of a bundle.
 2. Coverage >80% for new code? If not, add tests.
 3. Commit inside the worktree with a message in the style of this repo's recent commits (read `git log -5` first): a subject that names the change and a body that says why.
    ```bash
@@ -109,32 +120,35 @@ Before marking ready for Verification:
    ```
 4. Review your own diff - would you approve this in a PR?
 5. Write completion summary to `.crucible/session/{task_id}/implementation/output.md`
+6. Map every acceptance criterion from the backlog spec to concrete changed file paths, tests and verification evidence.
+7. Confirm every changed file is inside the declared `file_affinity` boundary.
 
 **Note on trivial changes**: Even for <20-line changes, you MUST route to Verification. `implementation -> deployment` is not a valid pipeline transition - crucible.ps1 will hard-block it. For truly trivial changes the Verification session will simply be fast.
 
 ### Phase 4: Handoff to Verification
 
-1. Update backlog item status to `"Ready for Review"`
-2. Ensure `task.md` contains:
+1. Ensure `task.md` contains:
    - Implementation plan (what was designed)
    - Files modified
    - Test coverage percentage
    - Any deviations from the original plan
-3. Write deployment plan to `.crucible/session/{task_id}/implementation/deployment_plan.md`:
+2. Write deployment plan to `.crucible/session/{task_id}/implementation/deployment_plan.md`:
    - Files committed
    - Commit message (subject and body, as committed)
    - Ordered deployment steps
-4. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the handoff JSON file directly):
+3. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the handoff JSON file directly):
 ```bash
 pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source implementation -Target verification -Reason "Implementation complete - ready for review" -ProjectRoot "{project_root}"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
-5. Run Crucible and present output to human:
+4. Run Crucible and present output to human:
 ```bash
 pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
+5. Present a 2-3 sentence summary and the exact verbatim `[NEXT SESSION COMMAND]` block from the Crucible output in a code block. Do not fabricate, paraphrase or shorten the command. Include the `-Quiet` flag if present. You run Crucible via the shell tool; do not ask the human to run it.
+6. Stop and wait for human confirmation. Do not begin another backlog item or adopt the next phase persona.
 
 ---
 
@@ -147,4 +161,4 @@ Before writing handoff.json, confirm:
 - [ ] `BACKLOG.md` not edited (that's the Reviewer/Operator's job)
 - [ ] `session_cycle_id` included in handoff
 - [ ] `task_id` in handoff matches the task I was given
-- [ ] Every required `## Task List` item in `task.md` is `[x]`. An item that was genuinely skipped is marked `[-]` or moved under `## Optional Steps`; a `[ ]` or `[/]` left in that section fails the quality gate and exits the run with code 2.
+- [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2

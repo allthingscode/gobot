@@ -37,6 +37,7 @@ param(
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/time.ps1")
 . (Join-Path $PSScriptRoot "lib/project-root.ps1")
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 $ErrorActionPreference = "Stop"
 
@@ -69,7 +70,9 @@ if ($approvedList.Count -eq 0 -and $deferredList.Count -eq 0 -and $rejectedList.
 }
 
 $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) { $CrucibleRoot } else { Join-Path $REPO_ROOT $CrucibleRoot }
-$researchSessionDir = Join-Path $resolvedCrucibleRoot (Join-Path "session" (Join-Path $TaskId "research"))
+# Item 188: gate continuation and decision records follow paths.session.
+$sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
+$researchSessionDir = Join-Path $sessionRoot (Join-Path $TaskId "research")
 if (-not (Test-Path -LiteralPath $researchSessionDir)) {
     throw "No research session directory at $researchSessionDir. Run the research phase for $TaskId before recording its gate."
 }
@@ -84,7 +87,7 @@ if (Test-Path -LiteralPath $researchDir) {
 $timestamp = Get-UtcFileTimestamp
 
 # --- Structural decision record (auditability + a machine-detectable gate marker) ---
-$gateDir = Join-Path $resolvedCrucibleRoot (Join-Path "session" (Join-Path "global" "research_gate"))
+$gateDir = Join-Path $sessionRoot "global/research_gate"
 if (-not (Test-Path -LiteralPath $gateDir)) { New-Item -ItemType Directory -Path $gateDir -Force | Out-Null }
 $decision = [ordered]@{
     task_id     = $TaskId

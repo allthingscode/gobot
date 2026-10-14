@@ -5,6 +5,7 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
@@ -154,7 +155,7 @@ try {
         Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         Push-Location $projectRoot
         try {
-            $outputLines = @(go run $LINT_SCRIPT -framework-root $REPO_ROOT -backlog-dir $backlogDir 2>&1)
+            $outputLines = @(go run $LINT_SCRIPT -framework-root $REPO_ROOT -session-dir (Get-ConfiguredPath -Key "session" -ProjectRoot (Get-Location).Path) -backlog-dir $backlogDir 2>&1)
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
             Assert-Result -Name "crucible_lint exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got " + $exitCode + ". Output: " + $output)

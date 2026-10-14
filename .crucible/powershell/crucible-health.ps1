@@ -24,6 +24,8 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     }
     $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
 }
+# Item 188: health and cleanup inspect and archive the same configured session.
+$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 Push-Location $REPO_ROOT
 
 function Write-Quiet {
@@ -105,8 +107,8 @@ try {
         Write-Quiet 'Checking for stale handoff files over 24h...' -ForegroundColor Gray
         $cutoff = (Get-Date).AddHours(-24)
         $staleHandoffs = @()
-        if (Test-Path ".crucible/session/handoffs") {
-            $staleHandoffs = @(Get-ChildItem -Path ".crucible/session/handoffs" -Filter "*.json" | Where-Object { $_.LastWriteTime -lt $cutoff })
+        if (Test-Path (Join-Path $sessionDir "handoffs")) {
+            $staleHandoffs = @(Get-ChildItem -Path (Join-Path $sessionDir "handoffs") -Filter "*.json" | Where-Object { $_.LastWriteTime -lt $cutoff })
         }
         $shColor = "White"
         if ($staleHandoffs.Count -gt 0) { $shColor = "Yellow" }
@@ -130,15 +132,15 @@ try {
         
         # 4a. Legacy role-scoped paths
         foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher", "grooming", "implementation", "verification", "deployment", "research") {
-            $taskPath = ".crucible/session/" + $specialist + "/task.md"
+            $taskPath = Join-Path $sessionDir ($specialist + "/task.md")
             if (Test-Path $taskPath) {
                 $staleScratchpads += $taskPath
             }
         }
     
         # 4b. Task-scoped paths (flag if task is completed/resolved/blocked)
-        if (Test-Path ".crucible/session") {
-            $taskDirs = @(Get-ChildItem -Path ".crucible/session" -Directory | Where-Object { $_.Name -match '^[FBC]-[0-9]+$' })
+        if (Test-Path $sessionDir) {
+            $taskDirs = @(Get-ChildItem -Path $sessionDir -Directory | Where-Object { $_.Name -match '^[FBC]-[0-9]+$' })
             foreach ($td in $taskDirs) {
                 $taskId = $td.Name
                 $pattern = '\|\s*' + $taskId + '\s*\|.*\|\s*(Ready|In Progress|Planning|Draft|Ready for Review|Ready for Deploy)\s*\|'
@@ -229,10 +231,10 @@ try {
         Write-Quiet ' '
         Write-Quiet 'Checking for orphaned pending gate files...' -ForegroundColor Gray
         $orphanedGateFiles = @()
-        if (Test-Path ".crucible/session/global/gate_decisions") {
+        if (Test-Path (Join-Path $sessionDir "global/gate_decisions")) {
             # Check both new task-scoped and legacy template file
-            $pendingFiles = @(Get-ChildItem -Path ".crucible/session/global/gate_decisions" -Filter "gate_decision_*_pending.json")
-            $legacyTemplate = Join-Path ".crucible/session/global/gate_decisions" "gate_decision_template.json"
+            $pendingFiles = @(Get-ChildItem -Path (Join-Path $sessionDir "global/gate_decisions") -Filter "gate_decision_*_pending.json")
+            $legacyTemplate = Join-Path (Join-Path $sessionDir "global/gate_decisions") "gate_decision_template.json"
             if (Test-Path $legacyTemplate) { $pendingFiles += Get-Item $legacyTemplate }
     
             foreach ($pf in $pendingFiles) {
@@ -267,7 +269,7 @@ try {
         Write-Quiet ' '
         Write-Quiet 'Checking scratchpad sizes...' -ForegroundColor Gray
         $oversizedScratchpads = @()
-        $sessionRoot = ".crucible/session"
+        $sessionRoot = $sessionDir
         if (Test-Path $sessionRoot) {
             Get-ChildItem -Path $sessionRoot -Recurse -Filter "task.md" | ForEach-Object {
                 $lineCount = (Get-Content $_.FullName -Encoding UTF8 | Measure-Object -Line).Lines
@@ -298,8 +300,8 @@ try {
             Write-Quiet ' '
             Write-Quiet '--- Cleanup Operations ---' -ForegroundColor Cyan
             $archiveTs = Get-UtcFileTimestamp
-            $staleTaskArchiveRoot = ".crucible/session/archived/stale-task-sessions"
-            $handoffArchiveDir = ".crucible/session/handoffs/archived"
+            $staleTaskArchiveRoot = Join-Path $sessionDir "archived/stale-task-sessions"
+            $handoffArchiveDir = Join-Path $sessionDir "handoffs/archived"
             $blockedArchiveDir = Join-Path $backlogDir "blocked/archived"
             if ($Force) {
                 if (-not (Test-Path $staleTaskArchiveRoot)) { New-Item -ItemType Directory -Path $staleTaskArchiveRoot -Force | Out-Null }
@@ -357,7 +359,7 @@ try {
             
             # 3. Scratchpads (legacy)
             foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher", "grooming", "implementation", "verification", "deployment", "research") {
-                $taskPath = ".crucible/session/" + $specialist + "/task.md"
+                $taskPath = Join-Path $sessionDir ($specialist + "/task.md")
                 if (Test-Path $taskPath) {
                     if ($Force) {
                         Write-Quiet ("Removing legacy scratchpad: " + $taskPath) -ForegroundColor Yellow
@@ -385,7 +387,7 @@ try {
     
             # 4c. Role-scoped prompt.md (P-1)
             foreach ($specialist in "groomer", "architect", "reviewer", "operator", "researcher", "grooming", "implementation", "verification", "deployment", "research") {
-                $pPath = ".crucible/session/" + $specialist + "/prompt.md"
+                $pPath = Join-Path $sessionDir ($specialist + "/prompt.md")
                 if (Test-Path $pPath) {
                     if ($Force) {
                         Write-Quiet ("Removing role-scoped prompt: " + $pPath) -ForegroundColor Yellow

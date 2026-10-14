@@ -90,6 +90,10 @@ switch ($mode) {
         $phaseDir = Split-Path -Parent $outFile
         $phaseName = Split-Path -Leaf $phaseDir
         $taskDir = Split-Path -Parent $phaseDir
+        if ($env:CODEX_FAKE_PIPELINE_DIR) {
+            $taskDir = $env:CODEX_FAKE_PIPELINE_DIR
+            New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        }
         $taskName = Split-Path -Leaf $taskDir
         $ts = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
         $events = @('{"event":"session_end","task_id":"' + $taskName + '","phase":"' + $phaseName + '","timestamp":"' + $ts + '","outcome":"success","notes":"Handoff to deployment"}')
@@ -128,18 +132,21 @@ exec $hostCmd -NoProfile -ExecutionPolicy Bypass -File "`$(dirname "`$0")/codex-
 }
 
 function Invoke-Launcher {
-    param([string[]]$LauncherArgs, [string]$Mode, [string]$BinDir)
+    param([string[]]$LauncherArgs, [string]$Mode, [string]$BinDir, [string]$PipelineDir = "")
     $originalPath = $env:PATH
     $originalMode = $env:CODEX_FAKE_MODE
+    $originalPipelineDir = $env:CODEX_FAKE_PIPELINE_DIR
     try {
         $env:PATH = $BinDir + [System.IO.Path]::PathSeparator + $originalPath
         $env:CODEX_FAKE_MODE = $Mode
+        $env:CODEX_FAKE_PIPELINE_DIR = $PipelineDir
         return Invoke-ExternalCommand {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $LAUNCHER @LauncherArgs
         }
     } finally {
         $env:PATH = $originalPath
         $env:CODEX_FAKE_MODE = $originalMode
+        $env:CODEX_FAKE_PIPELINE_DIR = $originalPipelineDir
     }
 }
 
@@ -450,6 +457,9 @@ try {
         New-Item -ItemType Directory -Path $shipDir -Force | Out-Null
         $copied = Join-Path $shipDir "launch-codex-specialist.ps1"
         Copy-Item -LiteralPath $LAUNCHER -Destination $copied -Force
+        # Item 188: ship the config resolver alongside the launcher in this minimal bundle.
+        New-Item -ItemType Directory -Path (Join-Path $shipDir "lib") -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1") -Destination (Join-Path $shipDir "lib/config-helpers.ps1")
         $originalPath = $env:PATH
         $originalMode = $env:CODEX_FAKE_MODE
         try {
@@ -684,6 +694,65 @@ try {
         Assert-Result -Name "crucible line passes the project root" -Condition $rootResolves -FailureMessage "Crucible line must pass -ProjectRoot naming the adopter root. Transcript:`n$tx"
         $scriptRef = if ($tx -match 'pwsh -File "([^"]+)" -Init') { $Matches[1] } else { "" }
         Assert-Result -Name "crucible script path is absolute" -Condition ([System.IO.Path]::IsPathRooted($scriptRef)) -FailureMessage "crucible.ps1 path '$scriptRef' must be absolute. Transcript:`n$tx"
+    }
+
+
+    # Item 188: dispatch and completion detection must share the configured session root.
+    $results += Run-Test -Name "Custom session bootstrap prompt and task logs" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-custom-bootstrap"
+        $promptDir = Join-Path $projectRoot "runtime state/F-188/implementation"
+        New-Item -ItemType Directory -Path $promptDir, (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $projectRoot ".crucible/config.yaml"), "paths:`n  session: runtime state`n", [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Join-Path $promptDir "prompt.md"), "custom phase prompt", [System.Text.UTF8Encoding]::new($false))
+        $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "F-188", "-Phase", "implementation", "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "custom bootstrap succeeds" -Condition ($res.ExitCode -eq 0) -FailureMessage $res.Output
+        $tx = Get-Content -LiteralPath (Join-Path $promptDir "codex-transcript.txt") -Raw
+        Assert-Result -Name "bootstrap references configured prompt" -Condition ($tx.Contains((Join-Path $promptDir "prompt.md"))) -FailureMessage $tx
+        foreach ($name in @("codex-last-message.txt", "codex-launch-status.txt")) {
+            Assert-Result -Name $name -Condition (Test-Path -LiteralPath (Join-Path $promptDir $name)) -FailureMessage "missing $name under custom session"
+        }
+        Assert-Result -Name "no default session" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session"))) -FailureMessage "default session created"
+    }
+
+
+    $results += Run-Test -Name "Custom session inline task logs" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-custom-inline"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $projectRoot ".crucible/config.yaml"), "paths:`n  session: runtime state`n", [System.Text.UTF8Encoding]::new($false))
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "F-188", "-Phase", "implementation", "-PromptText", "IMPLEMENT", "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "inline dispatch succeeds" -Condition ($res.ExitCode -eq 0) -FailureMessage $res.Output
+        foreach ($name in @("codex-transcript.txt", "codex-last-message.txt", "codex-launch-status.txt")) {
+            Assert-Result -Name $name -Condition (Test-Path (Join-Path $projectRoot "runtime state/F-188/implementation/$name")) -FailureMessage "missing $name under configured session"
+        }
+        Assert-Result -Name "no default session" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session"))) -FailureMessage "default session created"
+    }
+
+    $results += Run-Test -Name "Custom session ad-hoc logs" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-custom-adhoc"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $projectRoot ".crucible/config.yaml"), "paths:`n  session: runtime state`n", [System.Text.UTF8Encoding]::new($false))
+        $prompt = Join-Path $tempRoot "custom-adhoc.md"
+        [System.IO.File]::WriteAllText($prompt, "custom ad-hoc prompt", [System.Text.UTF8Encoding]::new($false))
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-PromptFile", $prompt, "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "adhoc dispatch succeeds" -Condition ($res.ExitCode -eq 0) -FailureMessage $res.Output
+        $log = Join-Path $projectRoot "runtime state/adhoc/custom-adhoc/codex-transcript.txt"
+        Assert-Result -Name "adhoc transcript uses custom root" -Condition (Test-Path $log) -FailureMessage "missing $log"
+        Assert-Result -Name "no default session" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session"))) -FailureMessage "default session created"
+    }
+
+    $results += Run-Test -Name "Custom session pipeline log detects incomplete advance" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-custom-advance"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $projectRoot ".crucible/config.yaml"), "paths:`n  session: runtime state`n", [System.Text.UTF8Encoding]::new($false))
+        $res = Invoke-Launcher -Mode "halfadvance" -BinDir $binDir -PipelineDir (Join-Path $projectRoot "runtime state/F-188") -LauncherArgs @(
+            "-TaskId", "F-188", "-Phase", "verification", "-PromptText", "REVIEW", "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "reads configured pipeline log" -Condition ($res.ExitCode -eq 3 -and $res.Output -match 'STATUS=ADVANCE_INCOMPLETE') -FailureMessage $res.Output
+        $log = Join-Path $projectRoot "runtime state/F-188/pipeline.log.jsonl"
+        Assert-Result -Name "fake phase wrote configured pipeline log" -Condition (Test-Path $log) -FailureMessage "missing $log"
+        Assert-Result -Name "no default session" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session"))) -FailureMessage "default session created"
     }
 
     $results += Run-Test -Name "Bootstrap launch with no phase prompt under the root is refused before dispatch" -Body {

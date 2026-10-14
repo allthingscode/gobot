@@ -126,6 +126,20 @@ function Invoke-WithBacklogLock {
     }
 }
 
+# TODO item 190: keep both legal spec filename forms in one place; callers choose
+# directory order and whether archived subdirectories belong in their search.
+function Get-BacklogSpecFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$Task,
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [switch]$Recurse
+    )
+
+    foreach ($pattern in @(($Task + "_*.md"), ($Task + ".md"))) {
+        Get-ChildItem -LiteralPath $Directory -File -Filter $pattern -Recurse:$Recurse -ErrorAction SilentlyContinue
+    }
+}
+
 # Resolves a backlog item spec file from a task id, preferring active over loose over
 # archived. It lived in crucible-gates.ps1 until TODO item 14 step A, where it was not a
 # gate and had no relationship to the ones around it: archive-task.tests.ps1 had to
@@ -154,19 +168,13 @@ function Get-BacklogItemPathForTaskProjectRoot {
     }
 
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
-    # "<id>_<slug>.md" is the convention, but a bare "<id>.md" is legal and is what
-    # hand-written specs use. Matching only the first form makes those specs invisible
-    # to every caller that resolves a task by ID, which reads as "task does not exist".
-    $patterns = @(($Task + "_*.md"), ($Task + ".md"))
     foreach ($dir in $typeDirs) {
         foreach ($sub in @(($dir + "/active"), $dir, ($dir + "/archived"))) {
             $searchPath = Join-Path $backlogDir $sub
             $recurse = $sub.EndsWith("/archived")
-            foreach ($pattern in $patterns) {
-                $match = Get-ChildItem -Path $searchPath -Filter $pattern -Recurse:$recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($null -ne $match) {
-                    return $match.FullName
-                }
+            $match = Get-BacklogSpecFiles -Task $Task -Directory $searchPath -Recurse:$recurse | Select-Object -First 1
+            if ($null -ne $match) {
+                return $match.FullName
             }
         }
     }

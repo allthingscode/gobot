@@ -156,6 +156,9 @@ function Test-FrameworkDevOnlyFile {
         # Pins Crucible's own prompt text. An adopter may customize a prompt, and a shipped
         # copy would fail their run over wording that is theirs to choose. Item 142.
         "powershell/tests/phase-prompt-handoff-example.tests.ps1",
+        # Compares Crucible's Architect instructions with its gates and handoff API;
+        # adopter-customized workflow prose is not this repo's contract. TODO item 193.
+        "powershell/tests/implementation-instruction-contract.tests.ps1",
         # Pins Crucible's own grooming SOP text, for the same reason. Item 143.
         "powershell/tests/grooming-stub-deviation.tests.ps1",
         # Pins Crucible's own grooming and verification SOP text, for the same reason. Item 145.

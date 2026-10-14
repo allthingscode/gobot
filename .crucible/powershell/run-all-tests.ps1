@@ -14,9 +14,15 @@ param(
     [int]$ThrottleLimit = 0,
     [switch]$Force,
     [int]$IdleTimeoutSeconds = 300,
-    [switch]$NoTimeout
+    [switch]$NoTimeout,
+    [switch]$Changed,
+    [string]$Base = 'HEAD'
 )
 
+if ($PSBoundParameters.ContainsKey('Base')) { $Changed = $true }
+# The outer finally covers preflight exits as well as child failures, so a partial
+# run always leaves its full-suite reminder as the last line. TODO item 201.
+try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:CRUCIBLE_SKIP_PROVENANCE = 'true'
@@ -28,6 +34,24 @@ $env:CRUCIBLE_SKIP_PROVENANCE = 'true'
 
 $testsDir = Join-Path $PSScriptRoot "tests"
 $testFiles = Get-ChildItem -Path $testsDir -Filter '*test*.ps1' | Sort-Object Name
+
+if ($Changed) {
+    # Scratch runners used by existing tests carry an explicit lib list; load the
+    # selector only in this mode so those full-suite copies still work. Item 201.
+    . (Join-Path $PSScriptRoot 'lib/test-selection.ps1')
+    $selectionRoot = Split-Path -Parent $PSScriptRoot
+    $selected = @(Get-AffectedTestFiles -Root $selectionRoot -Base $Base)
+    foreach ($entry in $selected) {
+        Write-Host ("SELECT " + $entry.File.Name + " - " + ($entry.Reasons -join '; ')) -ForegroundColor Cyan
+    }
+    $testFiles = @($selected | ForEach-Object { $_.File })
+    if ($testFiles.Count -eq 0) {
+        $changedPaths = @(Get-TestSelectionChangedPaths -Root $selectionRoot -Base $Base)
+        $description = if ($changedPaths.Count -gt 0) { $changedPaths -join ', ' } else { '(none)' }
+        Write-Host "No affected test files selected. Changed files: $description"
+        exit 0
+    }
+}
 
 if (@($testFiles).Count -eq 0) {
     Write-Host "No test files discovered under $testsDir" -ForegroundColor Red
@@ -690,3 +714,19 @@ try {
     }
 }
 exit $exitCode
+} catch {
+    if ($Changed) {
+        Write-Host "Changed test run failed: $_" -ForegroundColor Red
+        exit 1
+    }
+    throw
+} finally {
+    if ($Changed) {
+        # Empty selections exit before the normal runner cleanup. Item 201.
+        $ownsRoot = Get-Variable -Name CRUCIBLE_TEST_ROOT_CREATED -ValueOnly -ErrorAction SilentlyContinue
+        if ($ownsRoot -and $env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
+            Remove-Item -LiteralPath $env:CRUCIBLE_TEST_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host 'Partial run: the full suite (no -Changed) is still required before committing.' -ForegroundColor Yellow
+    }
+}

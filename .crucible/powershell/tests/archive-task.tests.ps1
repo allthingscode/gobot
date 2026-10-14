@@ -162,7 +162,7 @@ try {
         Assert-Result -Name "chore backlog row resolved" -Condition ($backlogContent -match '\[C-101\]\(chores/archived/C-101_Close_The_Loop\.md\)\s*\|\s*P2\s*\|\s*Resolved') -FailureMessage ("expected archived Resolved BACKLOG row. Content: " + $backlogContent)
     }
 
-    $results += Run-Test -Name "Rollback restores active spec when BACKLOG row has no Status column" -Body {
+    $results += Run-Test -Name "Refusal preserves active spec contents when BACKLOG row has no Status column" -Body {
         $root = Join-Path $tempRoot "rollback-no-status"
         New-MinimalBacklogTree -Root $root
         $activeRel = "chores/active/C-150_No_Status_Column.md"
@@ -185,11 +185,90 @@ try {
 | [C-150]($activeRel) | P2 | No Status Column | Operator |
 "@ | Set-Content -LiteralPath $backlog -Encoding UTF8
 
-        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath (Join-Path $root $activeRel) -ShippedCode $false
+        $activePath = Join-Path $root $activeRel
+        $originalSpec = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($activePath))
+        $originalBacklog = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($backlog))
+        $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath $activePath -ShippedCode $false
         Assert-Result -Name "rollback exit non-zero" -Condition ($r.ExitCode -ne 0) -FailureMessage ("expected non-zero exit, got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "rollback active restored" -Condition (Test-Path -LiteralPath (Join-Path $root $activeRel)) -FailureMessage "active spec was not restored"
         Assert-Result -Name "rollback archived absent" -Condition (-not (Test-Path -LiteralPath (Join-Path $root $archivedRel))) -FailureMessage "archived spec remained after failure"
         Assert-Result -Name "rollback error mentions status column" -Condition ($r.Output -match "Unable to locate Status column") -FailureMessage ("expected status-column error. Output: " + $r.Output)
+        Assert-Result -Name "refusal spec byte-identical" -Condition ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes($activePath)) -ceq $originalSpec) -FailureMessage "refusal changed the active spec's contents"
+        Assert-Result -Name "refusal backlog byte-identical" -Condition ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes($backlog)) -ceq $originalBacklog) -FailureMessage "refusal changed BACKLOG.md"
+    }
+
+    # TODO item 191: a final path check misses a move followed by a rollback, and
+    # normalized text comparisons miss changes to line endings or the final newline.
+    foreach ($invalidRow in @("no-status", "missing-row", "short-row")) {
+        $results += Run-Test -Name "Invalid archive row '$invalidRow' is refused before any mutation" -Body {
+            $root = Join-Path $tempRoot $invalidRow
+            New-MinimalBacklogTree -Root $root
+            $activeRel = "chores/active/C-151_Invalid_Row.md"
+            New-SpecFile -Root $root -RelPath $activeRel -ItemId "C-151" -Type "Chore" -Priority "P2" -Title "Invalid Row"
+            $backlog = New-SingleItemBacklog -Root $root -ItemId "C-151" -Priority "P2" -RelPath $activeRel -Title "Invalid Row"
+            $content = [System.IO.File]::ReadAllText($backlog)
+            switch ($invalidRow) {
+                "no-status" { $content = $content.Replace("| Status |", "| State |") }
+                "missing-row" { $content = "# Backlog`n`n## Active Items`n" }
+                "short-row" { $content = "| ID | Title | Status |`n|---|---|---|`n| [C-151]($activeRel) | Invalid Row |`n" }
+            }
+            [System.IO.File]::WriteAllText($backlog, $content, [System.Text.UTF8Encoding]::new($false))
+            $activePath = Join-Path $root $activeRel
+            $originalSpec = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($activePath))
+            $originalBacklog = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($backlog))
+            $mutations = [System.Collections.Generic.List[string]]::new()
+            function Move-Item { [void]$mutations.Add("move"); throw "Unexpected move before validation" }
+            function Set-BacklogSpecFrontmatterStatus { [void]$mutations.Add("edit"); throw "Unexpected edit before validation" }
+            $message = ""
+            try {
+                Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath $activePath -Status Resolved | Out-Null
+            } catch { $message = $_.Exception.Message }
+
+            Assert-Result -Name "invalid row refused before move or edit" -Condition ($mutations.Count -eq 0) -FailureMessage ("mutations attempted: " + ($mutations -join ", "))
+            Assert-Result -Name "invalid row error names row and file" -Condition ($message.Contains($activeRel) -and $message.Contains($backlog)) -FailureMessage ("expected row and BACKLOG.md path in error: " + $message)
+            Assert-Result -Name "invalid row spec byte-identical" -Condition ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes($activePath)) -ceq $originalSpec) -FailureMessage "invalid row changed the spec"
+            Assert-Result -Name "invalid row backlog byte-identical" -Condition ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes($backlog)) -ceq $originalBacklog) -FailureMessage "invalid row changed BACKLOG.md"
+            Assert-Result -Name "invalid row archived absent" -Condition (-not (Test-Path -LiteralPath (Join-Path $root "chores/archived/C-151_Invalid_Row.md"))) -FailureMessage "invalid row left an archived spec"
+        }
+    }
+
+    foreach ($terminalStatus in @("Resolved", "Production")) {
+        $results += Run-Test -Name "Rollback restores both files byte for byte after $terminalStatus row update" -Body {
+            $root = Join-Path $tempRoot ("rollback-after-row-" + $terminalStatus)
+            New-MinimalBacklogTree -Root $root
+            $activeRel = "chores/active/C-152_Late_Failure.md"
+            $archivedRel = "chores/archived/C-152_Late_Failure.md"
+            New-SpecFile -Root $root -RelPath $activeRel -ItemId "C-152" -Type "Chore" -Priority "P2" -Title "Late Failure"
+            $activePath = Join-Path $root $activeRel
+            $backlog = New-SingleItemBacklog -Root $root -ItemId "C-152" -Priority "P2" -RelPath $activeRel -Title "Late Failure"
+            foreach ($path in @($activePath, $backlog)) {
+                $content = [System.IO.File]::ReadAllText($path).Replace("`r`n", "`n").TrimEnd("`r", "`n")
+                [System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
+            }
+            $originalSpec = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($activePath))
+            $originalBacklog = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($backlog))
+            $observed = @{}
+            $originalSummary = (Get-Command Update-BacklogPrioritySummary).ScriptBlock
+            function Update-BacklogPrioritySummary {
+                param([string]$BacklogPath, [string]$ItemId, [string]$Priority)
+                $observed.RowUpdated = [System.IO.File]::ReadAllText($BacklogPath).Contains("]($archivedRel)")
+                $observed.LockHeld = Test-Path -LiteralPath ($BacklogPath + ".lock")
+                & $originalSummary @PSBoundParameters
+                throw "Injected failure after row and summary update"
+            }
+            $message = ""
+            try {
+                Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath $activePath -Status $terminalStatus | Out-Null
+            } catch { $message = $_.Exception.Message }
+
+            Assert-Result -Name "late failure injected after row update" -Condition ($observed.RowUpdated -and $message -eq "Injected failure after row and summary update") -FailureMessage ("did not reach injected failure: " + $message)
+            Assert-Result -Name "late rollback active restored" -Condition (Test-Path -LiteralPath $activePath) -FailureMessage "active spec was not restored"
+            Assert-Result -Name "late rollback archived absent" -Condition (-not (Test-Path -LiteralPath (Join-Path $root $archivedRel))) -FailureMessage "archived spec remained after failure"
+            Assert-Result -Name "late rollback backlog byte-identical" -Condition ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes($backlog)) -ceq $originalBacklog) -FailureMessage "rollback left BACKLOG.md changed after row update"
+            Assert-Result -Name "late rollback spec byte-identical" -Condition ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes($activePath)) -ceq $originalSpec) -FailureMessage "rollback left spec contents changed"
+            Assert-Result -Name "late failure held backlog lock" -Condition $observed.LockHeld -FailureMessage "archive released the lock before summary update"
+            Assert-Result -Name "late rollback releases backlog lock" -Condition (-not (Test-Path -LiteralPath ($backlog + ".lock"))) -FailureMessage "rollback left the backlog lock held"
+        }
     }
 
     $results += Run-Test -Name "Archives feature with Production frontmatter and BACKLOG row" -Body {

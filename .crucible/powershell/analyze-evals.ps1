@@ -7,10 +7,13 @@ param([switch]$Json)
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$GateDir     = ".crucible/session/global/gate_decisions"
-$LogDir      = ".crucible/session/archived"
-$EvalDir     = ".crucible/session/eval"
-$HandoffDirs = @(".crucible/session/handoffs", ".crucible/session/handoffs/archived")
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+# Item 188: mine the configured session rather than silently reporting no history.
+$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot (Get-Location).Path
+$GateDir     = Join-Path $sessionDir "global/gate_decisions"
+$LogDir      = Join-Path $sessionDir "archived"
+$EvalDir     = Join-Path $sessionDir "eval"
+$HandoffDirs = @((Join-Path $sessionDir "handoffs"), (Join-Path $sessionDir "handoffs/archived"))
 
 $AutoReasonPattern = "Automated gate passage via CLI flag"
 

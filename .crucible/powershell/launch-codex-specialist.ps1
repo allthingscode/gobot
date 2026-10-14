@@ -73,6 +73,7 @@ param(
 )
 
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 $ErrorActionPreference = "Stop"
 
 # Infrastructure-failure markers. If any appears in Codex stdout/stderr, the run is a LAUNCH
@@ -432,6 +433,8 @@ if (-not [string]::IsNullOrWhiteSpace($PromptFile) -and [string]::IsNullOrWhiteS
 }
 
 $crucibleDir = Join-Path $REPO_ROOT $CrucibleRoot
+# Item 188: prompts, launch artifacts and completion detection use the same session root.
+$sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from script location" } else { "from -ProjectRoot" }
 
 # The bootstrap prompt names the phase prompt by absolute path: the specialist runs in
@@ -440,7 +443,7 @@ $rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from sc
 # session dir when the prompt is not under the resolved root - usually a missing -ProjectRoot.
 $bootstrapPromptPath = ""
 if ([string]::IsNullOrWhiteSpace($PromptText)) {
-    $bootstrapPromptPath = Join-Path $crucibleDir (Join-Path "session" (Join-Path $TaskId (Join-Path $Phase "prompt.md")))
+    $bootstrapPromptPath = Join-Path $sessionRoot (Join-Path $TaskId (Join-Path $Phase "prompt.md"))
     if (-not (Test-Path -LiteralPath $bootstrapPromptPath)) {
         Write-Host ("[CODEX] Error: phase prompt not found: " + $bootstrapPromptPath) -ForegroundColor Red
         Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
@@ -497,9 +500,9 @@ if ([string]::IsNullOrWhiteSpace($Role)) {
 # `F-001.md` or `implementation.md` would otherwise land in either line of fire; session/adhoc/
 # matches neither.
 if ($usingAdhocSession) {
-    $sessionDir = Join-Path $REPO_ROOT (Join-Path $CrucibleRoot (Join-Path "session" (Join-Path "adhoc" $adhocLabel)))
+    $sessionDir = Join-Path $sessionRoot (Join-Path "adhoc" $adhocLabel)
 } else {
-    $sessionDir = Join-Path $REPO_ROOT (Join-Path $CrucibleRoot (Join-Path "session" (Join-Path $TaskId $Phase)))
+    $sessionDir = Join-Path $sessionRoot (Join-Path $TaskId $Phase)
 }
 if (-not (Test-Path -LiteralPath $sessionDir)) {
     New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
@@ -618,7 +621,7 @@ if ($result.ExitCode -eq 127) {
 $advanceTarget = $null
 $noHandoff = $false
 if ([string]::IsNullOrWhiteSpace($failReason) -and -not $usingAdhocSession) {
-    $pipelineLog = Join-Path $crucibleDir (Join-Path "session" (Join-Path $TaskId "pipeline.log.jsonl"))
+    $pipelineLog = Join-Path $sessionRoot (Join-Path $TaskId "pipeline.log.jsonl")
     $advanceTarget = Get-IncompleteAdvanceTarget -LogPath $pipelineLog -TaskIdValue $TaskId -PhaseName $Phase -SinceUtc $launchStartUtc
     if ($null -eq $advanceTarget) {
         $noHandoff = Test-PhaseEndedWithoutHandoff -LogPath $pipelineLog -TaskIdValue $TaskId -PhaseName $Phase -SinceUtc $launchStartUtc

@@ -232,6 +232,21 @@ function Get-ConfiguredPath {
     return (Join-Path $root $defaults[$Key])
 }
 
+function Test-ConfiguredRuntimePath {
+    # Item 188: custom session/workspaces roots have the same runtime-data exemption.
+    param([string]$Path, [string]$ProjectRoot)
+    $fullPath = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $ProjectRoot $Path }
+    $normalizedPath = [System.IO.Path]::GetFullPath($fullPath).Replace("\", "/")
+    foreach ($key in @("session", "workspaces")) {
+        $root = [System.IO.Path]::GetFullPath((Get-ConfiguredPath -Key $key -ProjectRoot $ProjectRoot)).Replace("\", "/").TrimEnd("/")
+        if ($normalizedPath.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $normalizedPath.StartsWith($root + "/", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-ConfiguredReview {
     param(
         [Parameter(Mandatory = $true)]

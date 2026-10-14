@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_BACKLOG = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
@@ -114,7 +115,7 @@ Add a health endpoint.
             Push-Location $projectRoot
             try {
                 $crucibleLintCmd = Invoke-ExternalCommand {
-                    go run $CRUCIBLE_LINT -framework-root $REPO_ROOT -backlog-dir $backlogDir
+                    go run $CRUCIBLE_LINT -framework-root $REPO_ROOT -session-dir (Get-ConfiguredPath -Key "session" -ProjectRoot (Get-Location).Path) -backlog-dir $backlogDir
                 }
             } finally {
                 Pop-Location

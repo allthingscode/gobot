@@ -18,7 +18,7 @@ function New-GateProject {
     $researchSession = Join-Path $crucible "session/$TaskId/research"
     $researchDir = Join-Path $crucible "research"
     New-Item -ItemType Directory -Path $researchSession, $researchDir, (Join-Path $crucible "backlog") -Force | Out-Null
-    "paths:`n  backlog: `"backlog`"`n  session: `"session`"" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
+    "paths:`n  backlog: `".crucible/backlog`"`n  session: `".crucible/session`"" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
     "# findings" | Set-Content -LiteralPath (Join-Path $researchDir "$TaskId`_Quality_Audit_20260715.md") -Encoding UTF8
     return @{ Root = $Root; TaskId = $TaskId; GateFiling = (Join-Path $researchSession "gate-filing.md") }
 }
@@ -134,7 +134,7 @@ try {
         $root = Join-Path $tempRoot "nosession"
         $crucible = Join-Path $root ".crucible"
         New-Item -ItemType Directory -Path (Join-Path $crucible "backlog") -Force | Out-Null
-        "paths:`n  backlog: `"backlog`"`n  session: `"session`"" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
+        "paths:`n  backlog: `".crucible/backlog`"`n  session: `".crucible/session`"" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
         $threw = $false
         try { & $SCRIPT -TaskId "R-099" -Reason "x" -Approved "C-1" -ProjectRoot $root 2>$null } catch { $threw = $true }
         Assert-Result "throws without research session" $threw "expected an error when the research session dir is absent"

@@ -258,7 +258,7 @@ if (-not [string]::IsNullOrWhiteSpace($handoffBudgetTier) -and -not (Test-Budget
 }
 
 if (-not [string]::IsNullOrWhiteSpace($taskId) -and -not [string]::IsNullOrWhiteSpace($handoffBudgetTier)) {
-    $specBudget = Get-SpecBudgetTier -Task $taskId -IncludePath
+    $specBudget = Get-SpecBudgetTier -Task $taskId -ProjectRoot $resolvedProjectRoot -IncludePath
     $specBudgetTier = [string]$specBudget.Tier
     if (-not [string]::IsNullOrWhiteSpace($specBudgetTier) -and $specBudgetTier -ne $handoffBudgetTier) {
         Write-ValidationResult -Ok $false `

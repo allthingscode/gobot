@@ -82,6 +82,8 @@ $projectRoot = Join-Path $tempRoot "project"
 
 try {
     Write-StatusFixture -ProjectRoot $projectRoot
+    New-Item -ItemType Directory -Force -Path (Join-Path $projectRoot '.crucible/backlog/features/active') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $projectRoot '.crucible/backlog/features/active/F-001.md'), "---`ndepends_on: [F-002]`n---`n", [Text.UTF8Encoding]::new($false))
 
     $results += Run-Test -Name "ExportJSON emits parseable report" -Body {
         Push-Location $projectRoot
@@ -96,6 +98,7 @@ try {
         Assert-Result -Name "exit code" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
         $json = $output | ConvertFrom-Json
         Assert-Result -Name "task surfaced" -Condition ($json.tasks[0].Task -eq "F-001") -FailureMessage "expected F-001 in JSON output. Output:`n$output"
+        Assert-Result -Name "bare spec dependencies" -Condition ($json.tasks[0].Dependencies -eq "F-002") -FailureMessage "expected F-002 dependency from bare spec"
         Assert-Result -Name "stats present" -Condition ($json.stats.total -eq 4) -FailureMessage "expected total=4 in JSON output. Output:`n$output"
         Assert-Result -Name "F-004 is not in-flight" -Condition ($json.stats.in_flight -eq 1) -FailureMessage "expected in_flight=1 (only F-001), got $($json.stats.in_flight). Output:`n$output"
         $f004 = $json.tasks | Where-Object { $_.Task -eq "F-004" }

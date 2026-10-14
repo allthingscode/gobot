@@ -709,7 +709,7 @@ created_at: "2026-06-18"
 "@ | Set-Content -LiteralPath $backlogFile -Encoding UTF8
 
         # Setup mock dev-logs directory
-        $devLogsDir = Join-Path $caseRoot "dev-logs"
+        $devLogsDir = Join-Path $caseRoot ".crucible/dev-logs"
         New-Item -ItemType Directory -Path $devLogsDir -Force | Out-Null
         "## F-100`nSome valid dev log entry without secrets" | Set-Content -Path (Join-Path $devLogsDir "UNPUBLISHED_LOGS.md") -Encoding UTF8
 

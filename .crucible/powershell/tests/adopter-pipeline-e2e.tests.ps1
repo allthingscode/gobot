@@ -13,6 +13,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/time.ps1")
+. (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 $NEWHANDOFF_SCRIPT = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
@@ -135,7 +136,7 @@ function Write-PipelineHandoff {
         foreach ($k in $Extra.Keys) { $h[$k] = $Extra[$k] }
     }
 
-    $handoffDir = Join-Path $ProjectRoot ".crucible/session/handoffs"
+    $handoffDir = Join-Path (Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot) "handoffs"
     New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
     $ts = Get-UtcFileTimestampMs
     $path = Join-Path $handoffDir ($TaskId + "-" + $ts + ".json")
@@ -148,7 +149,7 @@ function Write-PipelineHandoff {
 # unchecked, so each phase must be "done" before it hands off.
 function Complete-PhaseChecklist {
     param([string]$ProjectRoot, [string]$TaskId, [string]$Phase)
-    $taskMd = Join-Path $ProjectRoot (".crucible/session/" + $TaskId + "/" + $Phase + "/task.md")
+    $taskMd = Join-Path (Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot) ($TaskId + "/" + $Phase + "/task.md")
     if (Test-Path -LiteralPath $taskMd) {
         $content = Get-Content -LiteralPath $taskMd -Raw -Encoding UTF8
         $content = $content -replace '(?m)^(\s*[-*]\s*)\[ \]', '${1}[x]'
@@ -326,6 +327,69 @@ try {
             -FailureMessage "expected unrelated F-901 handoff to remain active"
     }
 
+    $results += Run-Test -Name "TODO 192: refused reasons preserve the gate; a corrected file accepts" -Body {
+        # TODO item 192: a task branch and active spec make merge and archive observable.
+        # A correction must work on the same pending file without rebuilding the gate.
+        $cycle = "cycle-e2e-reason"
+        $env:CRUCIBLE_CYCLE_ID = $cycle
+        $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "reason") -Cycle $cycle
+        $baseSha = (git -C $projectRoot rev-parse HEAD).Trim()
+        git -C $projectRoot branch task/F-900
+        $gateDir = Join-Path $projectRoot ".crucible/session/global/gate_decisions"
+        New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
+        $pendingPath = Join-Path $gateDir "gate_decision_F-900_pending.json"
+        $activeSpec = Join-Path $projectRoot ".crucible/backlog/features/active/F-900_Ship_It.md"
+        $specBefore = Get-Content -LiteralPath $activeSpec -Raw
+        $backlogPath = Join-Path $projectRoot ".crucible/backlog/BACKLOG.md"
+        $backlogBefore = Get-Content -LiteralPath $backlogPath | Where-Object { $_ -match '\[F-900\]' }
+
+        foreach ($entryPath in @("CLI", "file")) {
+            foreach ($reason in @("", "ok")) {
+                $pendingJson = @{ task_id = "F-900"; outcome = "accepted"; reason = $reason } | ConvertTo-Json
+                Set-Content -LiteralPath $pendingPath -Value $pendingJson -Encoding UTF8
+                $gateArgs = if ($entryPath -eq "CLI") { @("-GateOutcome", "accepted", "-GateReason", $reason) } else { @() }
+                $run = Invoke-ExternalCommand {
+                    & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId "F-900" -ProjectRoot $projectRoot -Quiet @gateArgs
+                }
+                $text = $run.Output -join "`n"
+                $guidance = if ($entryPath -eq "CLI") { "-GateReason is required" } else { '"reason" in .+ is required' }
+                Assert-Result -Name "$entryPath refuses '$reason'" -Condition ($run.ExitCode -eq 1 -and $text -match $guidance) `
+                    -FailureMessage ("expected exit 1 with reason guidance, got " + $run.ExitCode + ". Output: " + $text)
+                Assert-Result -Name "$entryPath preserves pending JSON" `
+                    -Condition ((Test-Path -LiteralPath $pendingPath) -and (Get-Content -LiteralPath $pendingPath -Raw).TrimEnd() -eq $pendingJson.TrimEnd()) `
+                    -FailureMessage "pending decision changed"
+                $decisions = @(Get-ChildItem -LiteralPath $gateDir -Filter "F-900-*.json")
+                Assert-Result -Name "$entryPath records no decision" -Condition ($decisions.Count -eq 0) -FailureMessage "refused decision recorded"
+                Assert-Result -Name "$entryPath leaves spec and backlog intact" `
+                    -Condition ((Test-Path -LiteralPath $activeSpec) -and (Get-Content -LiteralPath $activeSpec -Raw) -eq $specBefore -and (Get-Content -LiteralPath $backlogPath | Where-Object { $_ -match '\[F-900\]' }) -eq $backlogBefore) `
+                    -FailureMessage "refused decision archived or finalized the task"
+                git -C $projectRoot show-ref --verify --quiet refs/heads/task/F-900
+                Assert-Result -Name "$entryPath leaves task branch intact" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch removed"
+                Assert-Result -Name "$entryPath leaves primary branch intact" `
+                    -Condition ((git -C $projectRoot rev-parse master).Trim() -eq $baseSha -and $text -notmatch '\[MERGE\]') `
+                    -FailureMessage "refused decision attempted a merge"
+            }
+        }
+
+        $validReason = "Looks good. I see nothing concerning."
+        @{ task_id = "F-900"; outcome = "accepted"; reason = $validReason } | ConvertTo-Json |
+            Set-Content -LiteralPath $pendingPath -Encoding UTF8
+        $run = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId "F-900" -ProjectRoot $projectRoot -Quiet
+        }
+        $text = $run.Output -join "`n"
+        Assert-Result -Name "corrected file accepts" -Condition ($run.ExitCode -eq 0 -and $text -match "Decision recorded: accepted") `
+            -FailureMessage ("expected exit 0 recording accepted, got " + $run.ExitCode + ". Output: " + $text)
+        $decisions = @(Get-ChildItem -LiteralPath $gateDir -Filter "F-900-*.json")
+        Assert-Result -Name "corrected decision archived once" -Condition ($decisions.Count -eq 1) -FailureMessage "expected one recorded decision"
+        $decision = Get-Content -LiteralPath $decisions[0].FullName -Raw | ConvertFrom-Json
+        Assert-Result -Name "valid reason and cycle recorded" -Condition ($decision.reason -eq $validReason -and $decision.session_cycle_id -eq $cycle) `
+            -FailureMessage "recorded reason or cycle changed"
+        Assert-Result -Name "accepted task archived and pending file removed" `
+            -Condition (-not (Test-Path -LiteralPath $activeSpec) -and -not (Test-Path -LiteralPath $pendingPath)) `
+            -FailureMessage "corrected decision failed to archive the task or clean up the pending file"
+    }
+
     $results += Run-Test -Name "Drives the front half: grooming -> implementation -> verification -> deployment" -Body {
         $cycle = "cycle-e2e-front"
         $env:CRUCIBLE_CYCLE_ID = $cycle
@@ -369,6 +433,92 @@ try {
             $targetPrompt = Join-Path $projectRoot (".crucible/session/" + $task + "/" + $t.Target + "/prompt.md")
             Assert-Result -Name ("target phase scaffolded: " + $t.Target) -Condition (Test-Path -LiteralPath $targetPrompt) `
                 -FailureMessage ("expected " + $t.Target + "/prompt.md to be scaffolded for " + $label + ". Output: " + ($run.Output -join "`n"))
+        }
+    }
+
+
+
+    $results += Run-Test -Name "Acceptance archives custom session logs and handoffs (item 188)" -Body {
+        $cycle = "cycle-custom-archive"
+        $env:CRUCIBLE_CYCLE_ID = $cycle
+        $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "custom-archive") -Cycle $cycle
+        $configPath = Join-Path $projectRoot ".crucible/config.yaml"
+        $cfg = (Get-Content $configPath -Raw) + "`npaths:`n  session: .crucible/custom session`n"
+        [System.IO.File]::WriteAllText($configPath, $cfg, [System.Text.UTF8Encoding]::new($false))
+        $session = Join-Path $projectRoot ".crucible/custom session"
+        Move-Item -LiteralPath (Join-Path $projectRoot ".crucible/session") -Destination $session
+        New-Item -ItemType Directory -Path (Join-Path $session "F-900") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $session "F-900/pipeline.log.jsonl"), "", [System.Text.UTF8Encoding]::new($false))
+        $run = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId F-900 -ProjectRoot $projectRoot -Quiet -GateOutcome accepted -GateReason "verified archival under configured session"
+        }
+        Assert-Result -Name "accept succeeds" -Condition ($run.ExitCode -eq 0) -FailureMessage ($run.Output -join "`n")
+        Assert-Result -Name "custom pipeline log archived" -Condition (@(Get-ChildItem (Join-Path $session "archived") -Filter 'pipeline-F-900-*.log.jsonl' -ErrorAction SilentlyContinue).Count -gt 0) -FailureMessage "pipeline log not archived"
+        Assert-Result -Name "custom handoff archived" -Condition (@(Get-ChildItem (Join-Path $session "handoffs/archived") -Filter 'F-900-*.json' -ErrorAction SilentlyContinue).Count -eq 1) -FailureMessage "handoff not archived"
+        Assert-Result -Name "no default session" -Condition (-not (Test-Path (Join-Path $projectRoot ".crucible/session"))) -FailureMessage "created default session"
+    }
+
+    $results += Run-Test -Name "Custom workspaces and session complete one task end to end (item 188)" -Body {
+        $cycle = "cycle-e2e-custom-paths"
+        $env:CRUCIBLE_CYCLE_ID = $cycle
+        $task = "F-188"
+        $projectRoot = New-AdopterProject -Root (Join-Path $tempRoot "custom-paths") -TaskId $task -Title "Custom Paths" -Status "Ready" -StatusTarget "Groomer"
+        $configPath = Join-Path $projectRoot ".crucible/config.yaml"
+        $cfg = Get-Content -LiteralPath $configPath -Raw
+        $cfg += "`npaths:`n  session: runtime state`n  workspaces: task worktrees`n"
+        [System.IO.File]::WriteAllText($configPath, $cfg, [System.Text.UTF8Encoding]::new($false))
+        $session = Join-Path $projectRoot "runtime state"
+        $worktree = Join-Path $projectRoot "task worktrees/implementation-$task"
+        # Runtime paths belong to the adopter; keep the custom paths out of its work product.
+        [System.IO.File]::AppendAllText((Join-Path $projectRoot ".gitignore"), "`n/runtime state/`n/task worktrees/`n", [System.Text.UTF8Encoding]::new($false))
+        git -C $projectRoot add .gitignore .crucible
+        git -C $projectRoot commit -m "configure runtime paths" --quiet
+        $artifacts = @("src/feature.txt")
+        $checks = @("tests_pass", "vet_pass", "acceptance_criteria_met", "scope_bounded", "no_regressions", "no_hard_mandates_violated")
+        $transitions = @(
+            @{ Source = "grooming"; Target = "implementation"; Extra = @{ artifacts = $artifacts; file_affinity = @("src/") } },
+            @{ Source = "implementation"; Target = "verification"; Extra = @{ artifacts = $artifacts } },
+            @{ Source = "verification"; Target = "deployment"; Extra = @{ artifacts = $artifacts; reviewer_checks_passed = $checks } }
+        )
+        $count = 0
+        foreach ($t in $transitions) {
+            $count++
+            Complete-PhaseChecklist -ProjectRoot $projectRoot -TaskId $task -Phase $t.Source
+            if ($t.Source -eq "verification") {
+                [System.IO.File]::WriteAllText((Join-Path $session "$task/verification/review_report.md"), "---`nreview_decision: APPROVED`nacceptance_criteria_met: true`n---`nApproved.`n", [System.Text.UTF8Encoding]::new($false))
+            }
+            Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source $t.Source -Target $t.Target -Cycle $cycle -Count $count -Extra $t.Extra | Out-Null
+            $run = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet
+            }
+            Assert-Result -Name ("custom transition " + $t.Target) -Condition ($run.ExitCode -eq 0) -FailureMessage ($run.Output -join "`n")
+            Assert-Result -Name "custom phase prompt" -Condition (Test-Path (Join-Path $session "$task/$($t.Target)/prompt.md")) -FailureMessage "phase prompt missing"
+            $taskText = Get-Content (Join-Path $session "$task/$($t.Target)/task.md") -Raw
+            Assert-Result -Name "resolved handoff uses custom session" -Condition ($taskText.Contains((Join-Path $session "handoffs"))) -FailureMessage $taskText
+            if ($t.Target -eq "implementation") {
+                Assert-Result -Name "Init created custom worktree" -Condition (Test-Path $worktree) -FailureMessage "worktree missing: $worktree"
+                $check = Invoke-ExternalCommand {
+                    & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT "powershell/run-isolated-checks.ps1") -TaskId $task -Mode full -ProjectRoot $projectRoot
+                }
+                Assert-Result -Name "isolated checks found custom worktree" -Condition ($check.ExitCode -eq 0) -FailureMessage ($check.Output -join "`n")
+            }
+            if ($t.Target -eq "verification") {
+                Assert-Result -Name "verification checklist uses assigned worktree" -Condition ($taskText.Contains("Enter worktree $worktree")) -FailureMessage $taskText
+                $promptText = Get-Content (Join-Path $session "$task/verification/prompt.md") -Raw
+                Assert-Result -Name "prompt has no default runtime roots" -Condition ($promptText -notmatch '\.crucible/(session|\.agent-workspaces)') -FailureMessage $promptText
+            }
+        }
+        Complete-PhaseChecklist -ProjectRoot $projectRoot -TaskId $task -Phase "deployment"
+        $head = (git -C $projectRoot rev-parse HEAD).Trim()
+        Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source "deployment" -Target "done" -Cycle $cycle -Count 4 -Extra @{ commit_hash = $head; artifacts = $artifacts } | Out-Null
+        $accept = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet -GateOutcome accepted -GateReason "checked custom paths and accepted work"
+        }
+        Assert-Result -Name "accept completes task" -Condition ($accept.ExitCode -eq 0) -FailureMessage ($accept.Output -join "`n")
+        Assert-Result -Name "pipeline log archived under custom session" -Condition (@(Get-ChildItem (Join-Path $session "archived") -Filter "pipeline-$task-*.log.jsonl" -ErrorAction SilentlyContinue).Count -gt 0) -FailureMessage "pipeline log not archived"
+        Assert-Result -Name "handoffs archived under custom session" -Condition (@(Get-ChildItem (Join-Path $session "handoffs/archived") -Filter "$task-*.json" -ErrorAction SilentlyContinue).Count -eq 4) -FailureMessage "handoffs not archived"
+        foreach ($default in @(".crucible/session", ".crucible/.agent-workspaces")) {
+            Assert-Result -Name ("no default " + $default) -Condition (-not (Test-Path (Join-Path $projectRoot $default))) -FailureMessage "created $default"
         }
     }
 
