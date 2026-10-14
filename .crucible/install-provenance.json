@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "403f732a54671cf824e10b7422f655e876c68dd1",
+  "source_commit": "15331861017ebb6fe3f2940ec5b845ddfdd7e66e",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -239,8 +239,8 @@
       "base_hash": "626cde3dcce599ca841514b4a0518241f0e4c33a3361ec58545cd056918dfdc8"
     },
     "powershell/lib/install-manifest.ps1": {
-      "hash": "14b9dbde5172914b1fdc6d938d15972ee1e6a0f01064769b7910073cb9ea7dee",
-      "base_hash": "14b9dbde5172914b1fdc6d938d15972ee1e6a0f01064769b7910073cb9ea7dee"
+      "hash": "f65f2a39cd1b92028eef58dd60f8f34cff48412b35a4039c9db35956beb360f6",
+      "base_hash": "f65f2a39cd1b92028eef58dd60f8f34cff48412b35a4039c9db35956beb360f6"
     },
     "powershell/lib/instruction-blocks.ps1": {
       "hash": "a27392699623de960293be3ec5f3dab80fff0b38f0805697fa59337c1382b622",
