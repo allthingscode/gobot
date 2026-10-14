@@ -1,25 +1,14 @@
-# Deliberately does NOT call Set-StrictMode. The mode is scoped to the session, not to
-# the file that sets it, so a dot-sourced library imposes it on every caller. This file
-# is dot-sourced into update-bundle.ps1, which was not written for strict mode and reads
-# absent properties off the provenance manifest by design ($provManifest.files.$path);
-# setting the mode here turned those reads into terminating errors and failed three
-# update-bundle test files. Strictness belongs to the entry point, and
-# update-classification.tests.ps1 does set it, so this function is still exercised under
-# strict mode where it can be checked without changing anyone else's semantics.
+# Do not set StrictMode here: dot-sourcing applies it to callers, and update-bundle.ps1
+# deliberately reads absent provenance properties. Strictness belongs to entry points;
+# update-classification.tests.ps1 exercises this function under strict mode. Item 23.
 
 # The classification lattice for a single (source path, adopter path) pair.
 #
-# This is deliberately a pure function over scalars: every git lookup, file read and
-# manifest predicate is resolved by the caller and passed in. The lattice is the most
-# intricate logic in update-bundle.ps1 and it used to be reachable only by installing a
-# whole framework into a throwaway git repo, which made most of its branches expensive
-# to reach and some of them untested. Keep it free of I/O so that
-# update-classification.tests.ps1 can exercise every branch in milliseconds.
+# Keep this pure over scalars: callers resolve git, files and manifest predicates,
+# allowing update-classification.tests.ps1 to exercise every branch cheaply. Item 23.
 #
-# Hashes are $null when the file does not exist at that revision or on disk, and they are
-# compared with -eq and $null -eq exactly as the inlined version did. Do not "simplify" a
-# null check into a truthiness check: that silently reclassifies a missing file as an
-# unmodified one.
+# Null hashes mean missing files. Compare explicitly with -eq and $null -eq;
+# truthiness checks can reclassify missing files as unmodified.
 #
 # Categories:
 #   skip           - not a candidate at all; the caller adds nothing and moves on

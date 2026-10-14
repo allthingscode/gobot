@@ -193,10 +193,8 @@ try {
         
         foreach ($wt in $implementationWtPaths) {
             $hooksPath = git -C $wt config core.hooksPath
-            # A worktree inherits the main checkout's relative hooksPath, which git
-            # resolves against the worktree root. It is misconfigured when that directory
-            # holds no pre-commit for git to run: the legacy scripts/hooks/architect
-            # override, or a bundle the worktree's branch does not track. Item 155.
+            # Git resolves inherited relative hooksPath against the worktree root.
+            # A directory without pre-commit leaves the worktree unprotected. Item 155.
             $ok = $false
             if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
                 $resolved = $hooksPath.Trim()

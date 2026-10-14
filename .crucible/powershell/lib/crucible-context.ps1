@@ -1,9 +1,5 @@
-# The required-key contract for the $Context hashtable that Crucible threads through
-# its gate functions. This exists as one function because it used to exist as fourteen
-# hand-rolled copies, and thirteen of them agreed while the fourteenth (Invoke-HumanGate)
-# quietly made LogFile optional - which is how event destinations came to be decided by
-# dynamic scope. A convention repeated in every function is not checkable; a declared
-# contract is.
+# Shared required-key contract for the $Context hashtable passed through gates.
+# A single checkable contract prevents inconsistent keys and ambient event destinations. Item 16.
 #
 # Two lists rather than one because the distinction is real: GateRedirectTarget and
 # GateReason are $null on every run that is not a redirect, so requiring them to be

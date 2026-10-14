@@ -27,8 +27,7 @@ $script:CRUCIBLE_PHASES = @("research", "grooming", "implementation", "verificat
 # implementation -> verification -> deployment -> done) and each CHANGES_REQUESTED review cycle
 # adds 2 (verification -> implementation -> verification). 'low' therefore allows ~2 review
 # cycles plus the terminal deployment->done handoff; higher tiers scale up for research and
-# more iteration. (Raised 2026-06-27: low 6->10/medium 10->16/high 24->28/extended 32->40 after
-# a clean, approved low-tier task tripped the breaker at deployment->done with a single review cycle.)
+# more iteration.
 $script:BUDGET_TIERS = @("low", "medium", "high", "extended")
 $script:BUDGET_CEILINGS = @{ low = 10; medium = 16; high = 28; extended = 40 }
 
@@ -217,8 +216,8 @@ function Invoke-FileLock {
             # another process from opening it until this owner disposes the handle. DeleteOnClose
             # removes the path on both normal exit and process death, so no waiter ever needs to
             # guess whether a slow holder is stale or remove a lock owned by somebody else.
-            # OpenOrCreate also recovers a pathname left by the old create-and-delete convention:
-            # an orphaned file has no open handle and is therefore immediately acquirable.
+            # OpenOrCreate makes an orphaned pathname immediately acquirable:
+            # a file without an open handle holds no lock.
             $fileStream = New-Object System.IO.FileStream(
                 $LockPath,
                 [System.IO.FileMode]::OpenOrCreate,

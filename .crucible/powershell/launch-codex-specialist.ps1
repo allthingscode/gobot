@@ -268,11 +268,10 @@ function Get-IncompleteAdvanceTarget {
     return $target
 }
 
-# A grooming, implementation or verification run must end its phase with a handoff, which
-# crucible.ps1 -Init logs as a successful session_end. The gobot B-036 Architect stopped to
-# ask for plan approval with no handoff, and the launcher reported SUCCESS. Research may end
-# at the Research Gate and deployment at the Human Gate, so neither is checked. A log with no
-# session_start for the phase is not a pipeline run this check can judge. Item 177.
+# Grooming, implementation and verification must end with a handoff, logged by
+# crucible.ps1 -Init as a successful session_end. Research may end at the Research
+# Gate and deployment at the Human Gate. Without a phase session_start, this check
+# cannot judge the run. Item 177.
 function Test-PhaseEndedWithoutHandoff {
     param([string]$LogPath, [string]$TaskIdValue, [string]$PhaseName, [datetime]$SinceUtc)
     if (@("grooming", "implementation", "verification") -notcontains $PhaseName) { return $false }
@@ -352,9 +351,8 @@ function Invoke-CodexExec {
 
 $REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot
 
-# -CrucibleRoot is Join-Path'd onto the repo root. An absolute value previously surfaced only
-# as an opaque "New-Item : The given path's format is not supported". Relativize an absolute
-# path that lives under the repo root; otherwise fail up front with a clear message.
+# -CrucibleRoot is joined onto the repo root, so relativize absolute paths within
+# that root and reject paths outside it before filesystem operations.
 if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
     $resolvedCrucibleRoot = $CrucibleRoot
     try { $resolvedCrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot -ErrorAction Stop).Path } catch { }
@@ -536,10 +534,9 @@ $transcriptPath = Join-Path $sessionDir "codex-transcript.txt"
 $statusPath = Join-Path $sessionDir "codex-launch-status.txt"
 if (Test-Path -LiteralPath $lastMsgPath) { Remove-Item -LiteralPath $lastMsgPath -Force }
 
-# The STATUS line goes to stdout, and a host shell can lose stdout: in the gobot C-387 run the
-# orchestrator's shell reported exit 255 with no output while this launcher and its codex child
-# ran on and finished. The status file is the durable copy. RUNNING names this process so an
-# orchestrator can tell a live launch from a dead one. Item 167.
+# A host shell can lose stdout while the launcher and child keep running, so the
+# status file is the durable STATUS copy. RUNNING names this process to distinguish
+# a live launch from a dead one. Item 167.
 function Write-LaunchStatus {
     param([string]$Status, [string[]]$Detail = @())
     $stamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)

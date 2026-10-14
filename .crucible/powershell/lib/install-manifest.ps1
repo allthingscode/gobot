@@ -85,24 +85,17 @@ function Test-FrameworkDevOnlyFile {
         # Drives the -Staged split of check-ascii.ps1 and check-culture-sensitive-time.ps1,
         # both dev-only, alongside check-mojibake.ps1. Item 151.
         "powershell/tests/staged-gate-scans.tests.ps1",
-        # Enforces that Crucible's own shipped files do not name the deprecated
-        # factory.ps1 shim's path as one to invoke, which would let the shim record
-        # deprecated_entrypoint events against itself and pollute item 52's deletion
-        # criterion. That is a statement about Crucible's own documents, not about an
-        # adopter's: an adopter's customized prompt naming the shim is a real signal
-        # item 52's query needs to read, not a defect a shipped gate should fail their
-        # commit over. Item 94.
+        # Check Crucible's own docs for deprecated shim invocations so self-generated
+        # events cannot pollute the deletion criterion. Adopter references remain valid
+        # usage signals and must not fail their commits. Item 94.
         "powershell/tests/deprecated-entrypoint-references.tests.ps1",
         # Reads the index of the repo it runs in against a prompts/ pathspec. An
         # adopter's prompts live under .crucible/prompts/, so shipping this would put a
         # gate in every bundle that matches nothing, invoked by nothing, and reports a
         # clean pass on a rule it never checked.
         "powershell/gates/check-prompt-version.ps1",
-        # Checks Crucible's own docs against Crucible's own constants. Its predecessor,
-        # check-policy-drift.ps1, was absent from this list and so shipped by default -
-        # runnable in an adopter bundle, invoked by nothing, checking the bundle against
-        # itself. That accident is what TODO item 15 asked about; being listed here is
-        # the answer stated rather than inferred.
+        # Checks Crucible's own docs against its constants; omit it from adopter bundles
+        # where a self-comparison would not enforce the framework contract. Item 15.
         "powershell/gates/check-generated-docs.ps1",
         # Rates Crucible and routes its recommendations to Crucible's own Human, Groomer
         # and Architect; its last category is competitive research against six named
@@ -127,11 +120,8 @@ function Test-FrameworkDevOnlyFile {
         # The named files themselves ship; this wrapper does not, because it uses
         # the framework checkout as the install source.
         "powershell/tests/shipped-tests-crucible-lint.tests.ps1",
-        # Compares Crucible's shipping documents to Crucible's install set and to
-        # Test-FrameworkDevOnlyFile files an adopter tree does not contain. From a
-        # bundle the basename scan has nothing to derive and the documents name
-        # files the install omitted. Item 114. The four named tests that failed
-        # for layout reasons stay in the bundle.
+        # Compares shipping docs to the framework install set and dev-only files;
+        # an adopter bundle omits the evidence this scan needs. Item 114.
         "powershell/tests/documented-paths-ship.tests.ps1",
         # Proves those four still exit 0 from a bundle, and that documented-paths-ship
         # is omitted. Item 114. Uses the framework checkout as the install source.
@@ -173,25 +163,17 @@ function Test-FrameworkDevOnlyFile {
         # every entry naming an excluded file would report itself stale and fail the adopter's run
         # for a rule that is about this repository's migration rather than about their tests.
         "powershell/tests/fixture-root-conformance.tests.ps1",
-        # Artifacts of building Crucible that sat under scripts/, which is a copied_dir, so
-        # they shipped by default until item 80's derived mirror made the bundle's contents
-        # visible. scripts/hooks/ is the opposite case and must keep shipping: core.hooksPath
-        # points at it and all four files have live adopter branches. The narrowing is per
-        # file for that reason.
+        # Exclude framework tooling per file; scripts/hooks/ must ship because
+        # core.hooksPath uses all four hooks in adopter bundles. Item 83.
         #
-        # Runs Crucible's own Linux verification leg and writes .private/linux-leg-stamp.json,
-        # which only check-linux-leg.ps1 reads - and that gate is already dev-only. An adopter
-        # received the producer without the consumer, invoked by nothing either way.
+        # Produces the framework's .private/linux-leg-stamp.json for the dev-only
+        # check-linux-leg.ps1 gate, so adopters need neither producer nor consumer.
         "scripts/test-linux.ps1",
-        # Provisions a WSL distro with the tools test-linux.ps1 needs, Go among them "for
-        # crucible_lint". Both of its reasons to exist are now dev-only.
+        # Provisions WSL tools for the dev-only Linux leg and Go linter.
         "scripts/wsl-bootstrap.sh",
-        # Lints Crucible's own backlog, docs and handoff schema. The pre-commit hook invokes
-        # it only under `[ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]`, which no adopter install can
-        # satisfy: the hook computes FRAMEWORK_ROOT two levels up from itself, so an adopter
-        # gets <root>/.crucible against a REPO_ROOT of <root>. It shipped, was unreachable,
-        # and docs/operating-manual.md told adopters to run it anyway. Shipped tests that
-        # still name this file skip the go-run when it is absent (item 108).
+        # Lints framework backlog, docs and schema. The hook invokes it only when
+        # REPO_ROOT equals FRAMEWORK_ROOT, which adopter bundle layouts cannot satisfy.
+        # Shipped tests skip the go-run when this file is absent. Item 108.
         "scripts/crucible_lint.go"
     )
     if ($devOnlyPaths -contains $normalized) {
@@ -219,10 +201,8 @@ function Test-FrameworkDevOnlyFile {
     return $false
 }
 
-# The framework paths an install reads from: the scaffold, the copied directories, and the
-# root files. Named once so the enumeration below and the mirror sync's "is canonical
-# staged?" question are asked over the same ground; the sync used to ask it over the six
-# directories of the old mirror list, which is a subset of what it went on to copy.
+# Name all install source paths once so enumeration and the mirror sync's staged
+# canonical check cover the same scaffold, copied directories and root files.
 function Get-InstallSourceRoot {
     param([Parameter(Mandatory=$true)]$Manifest)
 
@@ -436,13 +416,8 @@ function Get-ProvenanceManifestPath {
 # Every path an install materializes into a bundle, as the adopter-relative path paired with
 # the framework file it is copied from.
 #
-# One definition with two readings: at a commit, for the provenance manifest, and from the
-# working tree, for the examples/gobot mirror. The mirror used to source its scope from a
-# hand-kept Get-MirrorStructuralDirs - six of the manifest's eight copied_dirs, and none of
-# the scaffold or root files - so the example was missing README.md, .gitattributes,
-# agent-instructions/, standards/, scripts/, templates/, VERSION and install-manifest.json
-# while its own parity guard, scoped to the same six directories, reported no drift. A subset
-# cannot disagree with itself. Item 80.
+# Use the same install scope at a commit for provenance and in the working tree for
+# examples/gobot. A separate subset can hide missing bundle files from parity checks. Item 80.
 function Get-AdopterBundlePath {
     param(
         [Parameter(Mandatory=$true)][string]$FrameworkRoot,

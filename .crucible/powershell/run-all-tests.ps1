@@ -58,14 +58,11 @@ if (@($testFiles).Count -eq 0) {
     exit 1
 }
 
-# A file that measures its own timing or starts its own pwsh workers can miss a deadline
-# when it shares the pool with seven others, and pass alone; event-log.tests.ps1 did on an
-# 8-job Linux leg. Such a file declares, in its first 20 lines,
+# Timing-sensitive tests may miss deadlines when sharing the worker pool. Declare
 #   # crucible-test: serial - <why it cannot share the pool>
-# and runs alone after the pool. A marker with no reason, or any other crucible-test
-# value, fails the run before anything starts: a typo would otherwise put the file back
-# in the pool with nothing to say so, and a reason is what keeps the marker from becoming
-# a place to park a flaky test. Item 154.
+# in the first 20 lines to run alone after the pool. Invalid markers or missing
+# reasons fail before execution so typos cannot silently restore pooling and the
+# marker cannot become a parking place for flaky tests. Item 154.
 $serialReasons = @{}
 $markerErrors = @()
 foreach ($f in $testFiles) {
@@ -246,14 +243,10 @@ try {
         $p.StartInfo = $psi
         [void]$p.Start()
 
-        # A caller that streams reads both redirected streams itself, line by line, so
-        # no reads are started here. Parallel mode reads line by line too, but buffers
-        # what it reads rather than echoing it. Reading to end of stream instead would be
-        # simpler and is what this used to do, but it completes exactly once, at end of
-        # stream, so it can tell a finished child from an unfinished one and never a
-        # hung one from a slow one. A pending per-line read makes each line's arrival
-        # time observable, which is what an idle clock needs, while still printing
-        # nothing until the child exits.
+        # Streaming callers read both redirected streams themselves. Parallel mode
+        # buffers per-line reads without echoing them until the child exits. Each
+        # line's arrival resets the idle clock; read-to-end only exposes completion
+        # and cannot distinguish a hung child from a slow one.
         $outRead = if ($StreamStandardOutput) { $null } else { $p.StandardOutput.ReadLineAsync() }
         $errRead = if ($StreamStandardOutput) { $null } else { $p.StandardError.ReadLineAsync() }
 
@@ -399,12 +392,10 @@ try {
     } else {
         Write-Host "Running tests in parallel (ThrottleLimit = $ThrottleLimit)..." -ForegroundColor Cyan
 
-        # Scheduling weights: seconds per file on an 8-job Windows run, 2026-09-30. The
-        # pool starts the heaviest first so the longest file is not left running alone
-        # after the rest have drained; adopter-update-materialization was unweighted and
-        # started after 39 lighter files. Only order matters, so a stale number costs
-        # time, never correctness. A file under 20s, or a new one, weighs 0 and sorts
-        # by name.
+        # Scheduling weights are seconds per file on an 8-job Windows run. Start
+        # heaviest files first so the longest is not left alone after the pool drains.
+        # Only order matters: stale weights cost time, never correctness. Files under
+        # 20s and new files weigh 0 and sort by name.
         $weights = @{
             'adopter-update-materialization.tests.ps1' = 461
             'run-all-tests-runner.tests.ps1'         = 426

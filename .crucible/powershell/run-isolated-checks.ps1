@@ -40,10 +40,9 @@ function Remove-CommitWorktree {
 # rather than calling the function before it exists.
 trap { if ($null -ne $commitWorktree) { Remove-CommitWorktree }; break }
 if (-not [string]::IsNullOrWhiteSpace($Commit)) {
-    # A research task has no implementation worktree or task branch, so gobot R-040's
-    # Researcher built its own runner and one check passed vacuously. -Commit runs the
-    # configured checks in a throwaway detached worktree at that commit, so artifacts the
-    # commands write never touch the main checkout. Item 173.
+    # Research tasks have no implementation worktree or task branch. -Commit runs
+    # configured checks in a detached throwaway worktree so their artifacts never
+    # touch the main checkout. Item 173.
     $commitRes = Invoke-Git -Directory $ProjectRoot rev-parse --verify --quiet ($Commit + "^{commit}")
     if ($commitRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($commitRes.Raw)) {
         Write-Error ("-Commit '{0}' does not name a commit in {1}." -f $Commit, $ProjectRoot)
@@ -349,9 +348,8 @@ function Get-GitForWindowsRoot {
     return (Split-Path -Parent (Split-Path -Parent $git.Source))
 }
 
-# Git puts its own tool directories first on PATH when it runs a hook, so a hook may call
-# sed, awk or grep without them being on the user's PATH. Running Git's sh without them
-# failed gobot's pre-push hook on sed (exit 127). Item 176.
+# Git prepends its tool directories to PATH for hooks; include them when invoking
+# Git's sh so project hooks can find sed, awk and grep. Item 176.
 function Get-GitHookToolPath {
     param([Parameter(Mandatory = $true)][string]$Interpreter)
     $gitRoot = Get-GitForWindowsRoot
@@ -362,9 +360,8 @@ function Get-GitHookToolPath {
     return ((@($dirs) + @($env:PATH)) -join [System.IO.Path]::PathSeparator)
 }
 
-# The project's own pre-push hook, when hooks.project_dir names one, runs in full mode
-# against the task branch. Nothing else runs it before the Human Gate, so a check it
-# makes first failed at the push, after the work was accepted. Item 172.
+# Run the configured project pre-push hook in full mode against the task branch
+# before the Human Gate so acceptance includes its checks. Item 172.
 function Invoke-ProjectPrePushHook {
     . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
     $checkName = "Project pre-push hook"

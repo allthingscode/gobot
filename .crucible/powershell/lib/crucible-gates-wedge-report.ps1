@@ -1,13 +1,8 @@
 # The [STOP] report Crucible prints when a gate wedges a task: the recovery command and
 # the guard name for each breaker code, plus the formatting around them.
 #
-# First piece cut out of crucible-gates.ps1 (TODO item 14, step A) because it is the one
-# with nothing to get wrong: data tables and pure string building, no $Context, no event
-# log, no git, no filesystem. If the extraction mechanism is broken, it fails here where
-# the cause is unambiguous rather than 1600 lines later.
-#
-# Dot-sourced by crucible-gates.ps1. The $script: tables below resolve into the scope of
-# whichever script began the dot-source chain, exactly as they did before the move.
+# Keep recovery tables and formatting independent of gate side effects. Item 14.
+# Dot-sourcing places the $script: tables in the script that began the load chain.
 
 $script:WEDGE_RECOVERY_BY_CODE = @{
     human_escalation = "Review the flagged external source or handoff content, make a human allow/block decision, archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId {task_id} -ProjectRoot `"{project_root}`" -Recover"

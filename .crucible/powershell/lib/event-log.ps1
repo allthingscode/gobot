@@ -11,17 +11,10 @@ function Write-EventLog {
         [int]$HandoffCount = 0,
         [string]$CycleId = $env:CRUCIBLE_CYCLE_ID,
         [hashtable]$Metrics = $null,
-        # Mandatory, not defaulted to the ambient $LOG_FILE / $CB_HISTORY_FILE. A param
-        # default naming an unassigned variable is resolved at call time against the
-        # caller's dynamic scope chain, so an omitted argument used to pick up whichever
-        # log an ancestor frame happened to be holding. That is silent by construction:
-        # the wrong log path is still a valid log path, so nothing downstream can tell.
-        #
-        # CircuitBreakerHistoryFile is mandatory too, even though it is only read when
-        # $Event is "circuit_breaker". Which events are breaker events is decided by an
-        # argument value, not by the call site, so a caller that omits it is asserting
-        # something it cannot check - and the alternative, throwing at runtime only on
-        # the breaker path, moves the failure onto the rarest and most important branch.
+        # Require explicit destinations: ambient defaults resolve through the caller's
+        # dynamic scope and can silently select a different valid log. Item 16.
+        # Require CircuitBreakerHistoryFile for every call because Event decides whether
+        # it is needed; late validation would fail on the critical breaker path.
         [Parameter(Mandatory=$true)][string]$LogFile,
         [Parameter(Mandatory=$true)][string]$CircuitBreakerHistoryFile
     )
@@ -78,9 +71,8 @@ function Write-EventLog {
 
 function ConvertTo-CanonicalPhase {
     param($Phase)
-    # Crucible's own gate events were stamped phase "factory" before the rename.
-    # Archived logs are never rewritten, so readers canonicalise on the way in and
-    # both values stay accepted permanently, not for a migration window.
+    # Archived logs are never rewritten. Accept "factory" permanently and canonicalise
+    # on read so old and current gate events share one phase.
     if ($Phase -eq "factory") { return "crucible" }
     return $Phase
 }
@@ -122,18 +114,10 @@ function Get-LastEntry {
 }
 
 # Wall time from phase open to handoff is not worked time. The pipeline logs a start and
-# an end and nothing in between, so an overnight pause is indistinguishable from work:
-# grooming on the dogfood adopter's B-011 recorded 90552 seconds because the session began
-# on 2026-09-05 and was resumed on 2026-09-06. Past this limit the span stops being a
-# plausible single working session, so it is recorded under a name no consumer averages
-# instead of feeding the duration average as though a specialist had worked 25 hours.
-#
-# Two hours matches the staleness bound the concurrent-Groomer check already uses for the
-# same judgement - how long a phase can go untouched before it is no longer evidence of a
-# live session. Measured over the adopter's 473 archived session_end events, 30 exceed it,
-# the largest 44 hours. Treating intervening task events as activity marks and summing
-# only the short gaps was tried against that same data and reclassified nothing at this
-# limit, so the span alone decides and the marks scan is not worth its complexity.
+# an end and nothing in between, so an overnight pause is indistinguishable from work.
+# Spans over two hours are recorded separately from duration averages. Item 63.
+# This matches the concurrent-Groomer staleness bound; summing short gaps between
+# task events adds complexity without changing attribution at this limit.
 $script:PhaseWallAttributionLimitSeconds = 7200
 
 function Get-PhaseDurationMetrics {

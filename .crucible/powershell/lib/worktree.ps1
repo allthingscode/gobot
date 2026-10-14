@@ -134,15 +134,10 @@ function Resolve-ImplementationWorktreePath {
     return Join-Path $WorkspacesDir ("implementation-" + $TaskId)
 }
 
-# An implementation worktree runs the hooks the main checkout's core.hooksPath names.
-# That setting is relative (.crucible/scripts/hooks in an adopter, scripts/hooks in the
-# framework), and git resolves a relative hooksPath against the worktree's own root, so
-# the worktree runs the hooks committed on its branch. -Init used to override it per
-# worktree with a scripts/hooks/architect directory that, in an adopter, resolved to an
-# empty directory in the project tree, and held only a .ps1 git never runs anywhere: no
-# hook ran in any implementation worktree. This removes that override from a worktree
-# created before the fix. Without extensions.worktreeConfig, --worktree means the shared
-# config, so nothing is touched then: there can be no per-worktree override.
+# Relative core.hooksPath resolves against the worktree root, so run its branch's hooks.
+# Remove legacy per-worktree overrides that point at non-executable hook directories.
+# Without extensions.worktreeConfig, --worktree targets shared config; leave it alone
+# because no per-worktree override can exist. Item 155.
 #
 # On Unix it also marks the worktree's hooks executable. git skips a hook without the
 # bit, and a fresh worktree checks hooks out with the recorded mode, which is 100644 for

@@ -60,11 +60,8 @@ function Write-BlockedTaskRecord {
         } catch {}
     }
 
-    # The record above is the artifact the operator and tooling read; this is a follow-on
-    # side effect. It runs in-process and reads config, so under $ErrorActionPreference =
-    # "Stop" a failure here used to propagate out of the breaker path and replace a
-    # deliberate refusal with an unrelated error - losing the wedge and the exit code with
-    # it. A session-state update that cannot run is worth a warning, never the refusal.
+    # Session-state updates are secondary to the blocked record. Warn on failure so
+    # an in-process config error under "Stop" cannot replace the refusal or its exit code.
     $updateJson = @{ status = "blocked"; circuit_breaker = $CircuitBreaker } | ConvertTo-Json -Compress
     try {
         & "$FrameworkPowerShell/update-session-state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null

@@ -17,12 +17,8 @@ function Write-Result {
     }
 }
 
-# The validator reads the config through the same primitive the runtime uses. It used
-# to carry its own pinned regexes - `^\s{2}<key>:` and a bespoke `paths:` block matcher
-# - so the two could disagree about what one file said. Both directions were wrong: a
-# key the validator could not see was silently not validated (the whole review.ci_*
-# family was in that category), and an indent the runtime reads without trouble made
-# the validator report present fields as missing.
+# Use the runtime's config parser so supported formatting and visible keys agree
+# between validation and execution.
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
@@ -159,11 +155,8 @@ if ($null -ne $manifestNode) {
     }
 }
 
-# Every review key below is optional, so absence is legitimate and silent. A key the
-# adopter did write, however, is checked - including the CI family, which decides
-# whether a push is gated on green CI. The old validator looked only at diff_tool,
-# editor and auto_push, so `require_green_ci: yes` validated clean and then read as
-# false at runtime, turning the publish gate off in a file that says it is on.
+# Review keys are optional, but validate every present key, including CI settings,
+# so a malformed boolean cannot silently disable the publish gate.
 $reviewNode = Find-Node -Path @("review")
 if ($null -ne $reviewNode) {
     foreach ($field in @("diff_tool", "editor", "ci_staging_branch_prefix", "ci_required_checks")) {

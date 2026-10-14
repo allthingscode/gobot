@@ -112,9 +112,8 @@ function Write-Report {
 
 function Read-Confirmation {
     param([Parameter(Mandatory=$true)][string]$Prompt)
-    # Read-Host on an empty or closed stdin returns an empty array, not a string, and -match
-    # on that is an array that later broke a [bool] parameter after nothing had been applied.
-    # A redirected stdin with no answer is a caller that cannot answer, not a "no" (item 161).
+    # Empty or closed stdin makes Read-Host return an empty array; normalize before
+    # boolean matching. No answer means the caller cannot answer, not "no". Item 161.
     $answer = [string](Read-Host $Prompt)
     if ([Console]::IsInputRedirected -and [string]::IsNullOrWhiteSpace($answer)) {
         throw "Interactive mode got no answer on stdin (no terminal attached), so it stopped before this step. Rerun with -Mode auto-safe to apply safe updates without a prompt, or -DryRun to preview."
@@ -239,15 +238,11 @@ function Invoke-UpdateBundle {
     . (Join-Path $scriptRoot "lib/install-manifest.ps1")
     . (Join-Path $scriptRoot "lib/update-classification.ps1")
 
-    # Dev-only membership comes from the framework source at the target commit, not from
-    # this script's own lib. Run as docs/updating.md says, from the adopter's installed
-    # .crucible/powershell, that lib predates the update, so a test added and marked
-    # dev-only in the same range classified `add` and shipped; gobot's 9a91eaa update
-    # did exactly that. Only this one function is replaced: it is self-contained, and the
-    # rest of the installed lib is what the installed script was written against. The
-    # redefinition lands in this function's scope, where Get-FrameworkOwnedFiles looks
-    # it up. Item 149. A source with no manifest lib at all has no list of its own to
-    # disagree with this one, so only that case keeps the local copy.
+    # Load dev-only membership from the target source commit: the installed manifest
+    # predates the update and cannot classify newly dev-only files. Replace only this
+    # self-contained function in the scope where Get-FrameworkOwnedFiles resolves it;
+    # other helpers must match the installed script. Retain the local copy only when
+    # the source has no manifest lib and therefore no competing list. Item 149.
     $headManifestSpec = $frameworkHead + ":powershell/lib/install-manifest.ps1"
     $null = git -C $frameworkRoot cat-file -e $headManifestSpec 2>$null
     if ($LASTEXITCODE -eq 0) {
@@ -327,15 +322,9 @@ function Invoke-UpdateBundle {
 
             $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
 
-            # Every git lookup and manifest predicate is resolved here; the lattice
-            # itself is a pure function in lib/update-classification.ps1, so that
-            # update-classification.tests.ps1 can reach every branch in milliseconds
-            # instead of by installing a framework into a throwaway repo.
-            #
-            # The two predicates below were previously evaluated inside the branches that
-            # needed them. Both are cheap - a HashSet lookup and a manifest string match -
-            # and hoisting them still removed work per pair, because $hHeadBase was
-            # computed on this line and never read by any branch.
+            # Resolve git lookups and manifest predicates here; the classification
+            # lattice stays pure so tests can cover every branch without installing
+            # a framework into a throwaway repo.
             $verdict = Get-BundleFileClassification `
                 -HeadHash $hHead `
                 -AdopterHash $hAdopter `
@@ -398,10 +387,8 @@ function Invoke-UpdateBundle {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     }
 
-    # These logs used to land in the root of session/, alongside the per-task directories an
-    # operator lists to orient, and nothing pruned them - one adopter had accumulated 172.
-    # Move rather than delete, so the retention sweep below stays the only thing that ever
-    # removes a log and the newest survivors are chosen by one rule instead of two.
+    # Move root-level update logs into the log directory; only the retention sweep
+    # deletes logs, so one rule chooses the newest survivors.
     $migratedLogs = 0
     foreach ($legacy in @(Get-ChildItem -LiteralPath $sessionDir -Filter "update-bundle-*.log" -File -Force -ErrorAction SilentlyContinue)) {
         $destination = Join-Path $logDir ($legacy.Name -replace '^update-bundle-', '')
@@ -548,10 +535,8 @@ function Invoke-UpdateBundle {
     # Classification fixtures do not ship the installer; a live bundle does, and
     # a live apply copies powershell/ before this runs. Missing file: skip, do
     # not throw, and do not set core.hooksPath here.
-    # Apply/prune was item 109. A clone of a current bundle classifies all-no-op
-    # (restamp-only is that plus -Restamp); hooksPath is local config, so those
-    # runs must heal too. Preview still does not. A bundle with pending work
-    # that was not applied is not current; it is not this heal.
+    # Current no-op and restamp-only bundles must heal local hooksPath too. Preview
+    # and bundles with unapplied changes must not activate hooks. Item 109.
     $pendingWork = $results["safe-overwrite"].Count + $results["add"].Count + $results["needs-merge"].Count + $results["retired"].Count + $results["review-removal"].Count
     $isAllNoOp = ($pendingWork -eq 0)
     if (-not $effectiveDryRun -and ($shouldApply -or $shouldPrune -or $isAllNoOp)) {

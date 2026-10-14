@@ -221,11 +221,8 @@ if ($StampVersionOnly) {
 $detectedBacklogDir = ""
 $existingConfigPath = $configPath
 if (Test-Path -LiteralPath $existingConfigPath) {
-    # Read through the one config parser. This used to be its own pinned regex wrapped
-    # in an empty catch, so a paths.backlog it could not read - a trailing comment, a
-    # non-2-space block - was indistinguishable from no custom backlog at all. The
-    # config was then rewritten without the key, silently relocating the adopter's
-    # backlog to the default on the next -Force install.
+    # Use the shared config parser so -Force preserves custom backlog paths across
+    # supported indentation and trailing comments instead of silently relocating them.
     $existingContent = Get-Content -LiteralPath $existingConfigPath -Raw -Encoding UTF8
     $detected = Get-ConfigBlockValue -Content $existingContent -Path @("paths", "backlog") -Source $existingConfigPath
     if ($null -ne $detected) {

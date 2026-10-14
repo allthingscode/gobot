@@ -2,13 +2,11 @@
 #
 # This exists so non-PowerShell callers - the sh pre-commit hook and CI, which
 # must hand `crucible_lint` a backlog directory - can use the one config parser in
-# lib/config-helpers.ps1 instead of reimplementing the grammar. A second parser is
-# exactly what let a custom paths.backlog silently disable three lints.
+# lib/config-helpers.ps1 so supported config formatting cannot silently disable lints.
 #
 # Stdout carries the resolved absolute path and nothing else, so the caller can
 # capture it directly. Diagnostics go to stderr. An unreadable config exits 1
-# rather than printing a default, because a caller that acts on a guessed path is
-# the failure mode this script was written to remove.
+# rather than printing a default, so callers never act on a guessed path.
 param(
     [Parameter(Mandatory=$true)]
     [ValidateSet("backlog", "session", "workspaces", "prompts", "personas", "sops")]

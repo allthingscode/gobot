@@ -1,21 +1,14 @@
-# PositionalBinding = $false, with an explicit Position only on $Paths. Without it
-# $MessageFile is implicitly positional too, and a lone positional argument binds to it
-# instead of to $Paths - so `check-mojibake.ps1 README.md` would quietly take the
-# single-file message route while two or more arguments took the other. Caught by the
-# declined-extension case in check-mojibake.tests.ps1, which is the only case whose result
-# differs between the two routes.
+# Disable implicit positional binding so a lone path cannot bind to MessageFile
+# and silently select the message-only route.
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter(Mandatory = $false, Position = 0, ValueFromRemainingArguments = $true)]
     [string[]]$Paths = @(),
 
-    # One file to scan whatever its extension. The extension filter below exists so a
-    # directory walk does not read .go or .json, but it also silently skipped an explicit
-    # leaf path it did not recognise. A commit message file is the case that matters: it is
-    # neither .md nor .ps1, it lives outside every content root, and a BOM in it becomes the
-    # first character of a subject line that no later commit can correct once pushed. A
-    # single string rather than an array because powershell.exe -File binds only the first
-    # token of a named array parameter. Item 89.
+    # Explicit leaf paths bypass the directory extension filter, including temporary
+    # commit messages: a BOM becomes part of the subject and cannot be corrected
+    # after pushing. Use one string because native -File binds only the first token
+    # of a named array parameter. Item 89.
     [string]$MessageFile = "",
 
     # Scan only the staged files that fall inside the default scope below, which is what the
@@ -30,9 +23,8 @@ if ($Staged -and ($Paths.Count -gt 0 -or $MessageFile)) {
 }
 
 if ($Paths.Count -eq 0 -and -not $MessageFile) {
-    # ../.. because this script lives in <root>/powershell/gates. A single ".." landed on
-    # powershell/ itself, where none of the content paths below exist, so every default
-    # path was skipped as missing and a bare invocation scanned zero files and exited 0.
+    # This script lives in <root>/powershell/gates; resolve ../.. so default content
+    # paths target the repository rather than scanning zero files under powershell/.
     $contentRoot = (Resolve-Path -Path "$PSScriptRoot/../..").Path
     # docs/proposals/ is framework-development-only, so an adopter bundle never carries it.
     $isFramework = (Test-Path -LiteralPath (Join-Path $contentRoot "docs/proposals")) -and (Test-Path -LiteralPath (Join-Path $contentRoot "powershell/run-all-tests.ps1"))
@@ -115,8 +107,7 @@ foreach ($path in $Paths) {
         if ($path -match '\.(md|ps1)$') {
             $targetFiles += Get-Item -LiteralPath $path
         } else {
-            # Not skipped silently. A caller that names a file and is answered [PASS] has been
-            # told the file is clean when it was never opened. Item 89.
+            # Fail unreadable explicit paths: [PASS] must mean the file was checked. Item 89.
             $declined += $path
         }
     } else {
@@ -187,7 +178,6 @@ if ($hits.Count -gt 0 -or $declined.Count -gt 0) {
     exit 1
 }
 
-# The count is reported because a pass over zero files and a pass over the whole tree are
-# otherwise the same line, which is how a mis-resolved content root once read as green.
+# Report the count so a zero-file pass is distinguishable from a whole-tree scan.
 Write-Host ("[PASS] No mojibake markers or BOMs detected in " + $targetFiles.Count + " scoped file(s).") -ForegroundColor Green
 exit 0

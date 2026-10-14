@@ -126,9 +126,8 @@ function Get-RunList {
     $repoPrefix = "repos/$RepoSlug"
 
     # Step 1: Enumerate workflows for the repository.
-    # Enumerate workflows then query per-workflow runs: 'gh run list' returned 404 against
-    # private repos on 2026-08-17 (transient; 200 again on 2026-08-18). The two-step query
-    # worked through both, so it stays.
+    # Query per-workflow runs after enumeration to tolerate private-repo API failures
+    # that can affect 'gh run list'.
     $wfArgs = @("api")
     if (-not [string]::IsNullOrWhiteSpace($HostName) -and $HostName -ne "github.com") {
         $wfArgs += @("--hostname", $HostName)
@@ -316,9 +315,8 @@ if ([string]::IsNullOrWhiteSpace($Commit)) {
 # The head_sha= query matches full SHAs only.
 $requestedCommit = $Commit
 $Commit = Resolve-FullCommitSha -CommitSha $Commit -Root $CrucibleRoot
-# Item 171: a mistyped prefix used to reach the query unresolved, poll out the no-runs
-# grace window and report NO_RUNS, which reads as "no CI" and is advisory at the gate.
-# A full SHA passes through because the commit may exist only on the remote.
+# Resolve commit prefixes before polling so a typo cannot become advisory NO_RUNS.
+# Full SHAs pass through because the commit may exist only remotely. Item 171.
 if ($Commit -notmatch '^[0-9a-fA-F]{40}$') {
     Write-Host "[CI WATCH] STATUS=INVALID_COMMIT"
     if ([string]::IsNullOrWhiteSpace($requestedCommit)) {

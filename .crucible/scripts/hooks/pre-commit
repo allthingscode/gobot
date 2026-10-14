@@ -98,20 +98,15 @@ if [ -n "$FRAMEWORK_CONTEXT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 
-    # 1. Generated documentation check
-    # The budget tiers in docs/ are rendered from $script:BUDGET_CEILINGS and verified
-    # by byte comparison. This replaced check-policy-drift.ps1, whose tier comparison
-    # sourced its expectation from the policy table by regex, never matched, and so
-    # reported "synchronized" on every commit since the initial one. The remaining
-    # policy rules it carried now live in crucible_lint below.
+    # Render documentation budget tiers from $script:BUDGET_CEILINGS and compare
+    # bytes so Markdown formatting cannot silently skip a check. Other policy rules
+    # are checked by crucible_lint below.
     echo "Running generated documentation check..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-generated-docs.ps1
 
-    # 2-4. Mojibake, ASCII-only, and culture-sensitive timestamp checks, over the staged
-    # files only. The whole-tree scans took about 45 of this hook's 80 seconds and find
-    # nothing at commit that pre-push does not find before anything leaves the machine,
-    # so pre-push runs them in full. A staged file is still judged here, which is where
-    # its author can fix it. Item 151.
+    # 2-4. Scan staged files for mojibake, non-ASCII and culture-sensitive timestamps
+    # so authors can fix them at commit. Pre-push scans the whole tree, keeping
+    # commit latency low without reducing push coverage. Item 151.
     echo "Running mojibake check on staged files..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 -Staged
 
@@ -129,16 +124,11 @@ if [ -n "$FRAMEWORK_CONTEXT" ]; then
     echo "Running prompt version bump check..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-prompt-version.ps1
 
-    # 6. Go Crucible Lint check
-    # The backlog directory is resolved here, by the one config parser, and handed to
-    # the linter. crucible_lint used to re-derive it from config.yaml with a second
-    # parser that only matched a 2-space paths: block; anything else fell back to the
-    # default directory, which does not exist, and all three backlog lints passed
-    # without looking at anything. tr strips the CR that powershell.exe appends.
-    # The linter runs from a binary cached under the gitignored .cache/, rebuilt when
-    # scripts/crucible_lint.go is newer than it. `go run` recompiled it on every commit,
-    # about 35 seconds. It is built to a temporary name and moved into place so an
-    # interrupted build never leaves a half-written binary to run next time. Item 151.
+    # 6. Resolve backlog with the shared config parser so supported formatting cannot
+    # make lints inspect an empty default directory. tr strips native PowerShell CR.
+    # Cache the linter under gitignored .cache/ and rebuild when its source is newer
+    # to avoid recompiling every commit. Build to a temporary name then move it into
+    # place so interruption cannot leave a partial binary. Item 151.
     echo "Running crucible lint checks..."
     BACKLOG_DIR="$("$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/resolve-config-path.ps1 -Key backlog -ProjectRoot "$REPO_ROOT" | tr -d '\r')"
     # Item 188: pass the configured session to runtime lints as well.

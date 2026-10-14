@@ -140,11 +140,8 @@ function Get-BacklogSpecFiles {
     }
 }
 
-# Resolves a backlog item spec file from a task id, preferring active over loose over
-# archived. It lived in crucible-gates.ps1 until TODO item 14 step A, where it was not a
-# gate and had no relationship to the ones around it: archive-task.tests.ps1 had to
-# dot-source that 4600-line file purely to reach this function, which is the argument for
-# it living here instead.
+# Resolve a spec from a task id, preferring active over loose over archived.
+# Keep this shared lookup independent of gate orchestration. Item 14.
 function Get-BacklogItemPathForTaskProjectRoot {
     param(
         [Parameter(Mandatory = $true)][string]$Task,
@@ -212,10 +209,8 @@ function Get-BacklogTaskStatus {
         [string]$BacklogDir = ""
     )
 
-    # The single resolver for "does this task exist, and what is its status".
-    # The dependency check and the concurrent-Groomer exclusion each carried their own
-    # copy of the table parser below, and both treated a task with no BACKLOG.md row as
-    # nonexistent even when its spec was on disk and Resolved. Spec first, index second.
+    # Shared status resolver for dependency checks and concurrent-Groomer exclusions.
+    # Spec first, index second: archived specs can exist without a BACKLOG.md row. Item 54.
     $specStatus = Get-BacklogSpecStatus -Task $Task -ProjectRoot $ProjectRoot
     if ($null -ne $specStatus) {
         return @{ Found = $true; Status = $specStatus; Source = "its spec file"; Searched = @("its spec file") }

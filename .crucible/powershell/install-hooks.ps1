@@ -46,15 +46,9 @@ try {
     Pop-Location
 }
 
-# Setting core.hooksPath shadows the repo's own hooks directory rather than
-# emptying it, so a hook installed the old way stays on disk and stops running.
-# That is fine until the config is lost - a `git config --unset core.hooksPath`,
-# a tool that rewrites local config, a worktree that never inherited it - at
-# which point the stale file becomes live again, and the ones this project has
-# left behind reference gates that were since renamed or deleted. Report them by
-# name rather than removing them: in an adopter repo the contents of .git/hooks
-# may be the adopter's own, and deleting another project's hooks is not this
-# script's call to make.
+# core.hooksPath shadows .git/hooks without removing its files; losing that config
+# reactivates them, including hooks referencing obsolete gates. Report them by
+# name rather than deleting them because an adopter may own their contents.
 $prev = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 Push-Location $repoRoot

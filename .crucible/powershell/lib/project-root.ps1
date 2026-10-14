@@ -6,9 +6,8 @@
 # us. The canonical framework copy at <crucible>/powershell/ derives the framework root,
 # which is not itself an adopter, so that case falls through to the working directory.
 #
-# The working directory is accepted only when it really is a project. An omitted root is an
-# unanswered question, not permission to guess: the guess silently validated, and reported
-# on, a repository nobody had named.
+# Accept the working directory only when it is a project; guessing an unnamed root
+# can validate and report on the wrong repository.
 
 function Test-CrucibleProjectRoot {
     param([Parameter(Mandatory=$true)][AllowEmptyString()][string]$Path)

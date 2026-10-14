@@ -254,17 +254,9 @@ $versionSummary = $versionStats.GetEnumerator() | ForEach-Object {
 
 # Duplicate/Superseded Handoff Metrics
 #
-# Keyed by Get-HandoffDedupeKey, the same function Crucible uses to decide which
-# handoffs are duplicates of each other. This file used to build the key inline, and
-# the two drifted: the copy here neither trimmed nor lowercased, so a handoff whose
-# phase field differed only in case or whitespace counted as a distinct transition and
-# the report understated the duplicates Crucible had already superseded. The records
-# are grouped on the projected objects rather than the raw JSON so the legacy
-# specialist-to-phase mapping above still applies.
-#
-# An unkeyable record - no task_id, no source, no target - is discarded by dropping the
-# null-key group rather than by a filter of this file's own devising, so what counts as
-# unkeyable is defined in exactly one place too.
+# Use Crucible's Get-HandoffDedupeKey so normalization and unkeyable-record rules
+# stay identical to enforcement. Group projected records to preserve the legacy
+# specialist-to-phase mapping, and discard the null-key group. Item 37.
 $dedupeGroups = @($handoffRecords |
 	Group-Object -Property { Get-HandoffDedupeKey $_ } |
 	Where-Object { -not [string]::IsNullOrEmpty($_.Name) })

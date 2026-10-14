@@ -221,11 +221,8 @@ elseif ($source -eq "deployment") {
         Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment handoff requires artifacts." -Details @{ field = "artifacts"; handoff_file = $HandoffFile }
     }
     if ($target -eq "done" -and -not (Test-RequiredField -Handoff $handoff -FieldName "commit_hash")) {
-        # A No-Code Closure has no merge to name, and the merge-verification gate is built
-        # to accept exactly that shape. This refused it unconditionally, so the only way to
-        # produce the closure the gate waits for was to hand-author the JSON, which
-        # prompts/deployment_prompt.md forbids in the same breath. The exemption is decided
-        # by the same function the gate calls, on the same evidence, so the two cannot drift.
+        # A No-Code Closure has no merge commit. Use the merge-verification gate's
+        # shared predicate and evidence so both accept the same closure shape.
         $noCodeClosureTaskId = if ($handoff.PSObject.Properties["task_id"]) { ([string]$handoff.task_id).Trim() } else { "" }
         if (-not (Test-NoCodeClosure -TaskId $noCodeClosureTaskId -ProjectRoot $resolvedProjectRoot)) {
             Write-ValidationResult -Ok $false -ReasonCode "missing_required_field" -Message "Deployment completed handoff requires commit_hash unless the task is a No-Code Closure: a research or grooming spec with no task/<task_id> branch." -Details @{ field = "commit_hash"; handoff_file = $HandoffFile }

@@ -1,11 +1,5 @@
-# The one place that decides whether a deployment -> done closure has no code to merge.
-#
-# This lived inline in the merge-verification gate, and validate-handoff.ps1 had no notion
-# of it at all: the validator refused every deployment -> done handoff without a
-# commit_hash, so the closure the gate is built to accept could not be written by
-# new-handoff.ps1, which is the only writer the prompts allow. Two enforcement points
-# asking the same question have to ask it of the same evidence, or the pipeline documents
-# a path it cannot walk. Found by TODO item 72.
+# Shared deployment -> done no-code decision for the gate and handoff validator.
+# Both must use the same evidence so new-handoff.ps1 can write an accepted closure. Item 72.
 
 if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
     $noCodeClosurePlatformPath = Join-Path $PSScriptRoot "platform.ps1"

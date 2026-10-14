@@ -6,11 +6,8 @@ if (-not (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue)) {
 }
 
 function Get-BacklogTerminalStatus {
-    # docs/policy.md defines Production as merged to the main branch and Resolved as closed
-    # without a deploy. Neither is a property of the item's directory: a bug that ships a fix
-    # merges exactly as a feature does. This mapped features to Production and bugs and
-    # chores to Resolved, so B-011 was recorded Resolved after merging real code - the
-    # status said the opposite of what happened.
+    # Production means code merged to the main branch; Resolved means closed without
+    # a deploy. Use ShippedCode, since features, bugs and chores can all ship code. Item 62.
     param([Parameter(Mandatory=$true)][bool]$ShippedCode)
 
     if ($ShippedCode) { return "Production" }

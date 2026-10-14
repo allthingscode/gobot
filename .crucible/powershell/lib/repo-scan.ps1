@@ -1,20 +1,9 @@
 # One answer to "which files in this repository should a scan-based check read?", asked of
 # git rather than of the filesystem.
 #
-# The distinction is not academic. Agent tooling creates real git worktrees under
-# .claude/worktrees/<agent-id>/, and a worktree is a full second checkout, so a recursive
-# Get-ChildItem from the repository root returns two copies of every tracked file. A lint
-# that reports a file path then names one inside a directory that is deleted the moment the
-# agent exits: the failure reads as a real violation in a real file, the evidence is gone
-# before anyone can look, and the run gets written off as flake. Not hypothetical - a full
-# suite run went 96/97 this way, naming eighteen paths under a worktree. Item 87.
-#
-# Asking git makes .gitignore the single definition of what a scan skips, with git itself as
-# the implementation. The alternative this replaces was a list of directory prefixes copied
-# into each scanning test: native-stderr-idiom.tests.ps1 carried three - .private/,
-# .agent-workspaces/ and .crucible/ - each one restating a line of .gitignore, and none of
-# them .claude/worktrees/, because a hand-kept list only ever covers the hazards somebody
-# remembered.
+# Recursive filesystem scans descend into agent worktrees and duplicate tracked files;
+# reported evidence can disappear when the agent exits. Ask git so .gitignore owns
+# scan exclusions instead of separate directory lists in each caller. Item 87.
 #
 # Two independent git behaviours keep an agent worktree out, and they cover different shapes.
 # A real worktree holds a .git file, so git treats it as a separate repository and reports the
@@ -28,10 +17,8 @@
 # invisible, and a check that stops reading brand-new code is a worse trade than one that
 # reads a worktree. --exclude-standard is what applies .gitignore to those untracked files.
 #
-# Requires: Invoke-Git (powershell/lib/platform.ps1). Loaded here rather than left to the
-# caller, for the reason native-stderr-idiom.tests.ps1 pins for Invoke-GitChecked: dot-sourcing
-# flattens scope, so a file that relies on a sibling having loaded first works by accident of
-# load order until it is the first thing loaded.
+# Requires: Invoke-Git (powershell/lib/platform.ps1). Load it here because dot-sourcing
+# flattens scope; relying on a sibling's load order makes standalone use fail.
 . (Join-Path $PSScriptRoot "platform.ps1")
 
 function Get-RepoScannableFile {

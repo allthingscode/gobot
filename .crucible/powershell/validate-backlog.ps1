@@ -122,10 +122,8 @@ if (-not (Test-Path -LiteralPath $projectRootHelpersPath)) {
 . $projectRootHelpersPath
 
 if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
-    # No -BacklogPath means the backlog has to be derived, and deriving it from the working
-    # directory is how this came to validate a repository nobody had named, then report
-    # "Backlog file not found" against it. -BacklogPath answers the same question
-    # explicitly, so it still works on its own.
+    # Derive the backlog from an explicit or script-resolved project root, never cwd,
+    # to avoid validating an unintended repo. -BacklogPath remains sufficient alone.
     try {
         $ProjectRoot = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
     } catch {
@@ -439,17 +437,11 @@ try {
                 $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                 $relPath = $relPath -replace '\\', '/'
 
-                # Check A reports an active spec with no BACKLOG.md entry but stops at
-                # active, so an archived spec with no row passed silently. That row is a
-                # load-bearing index: measured 2026-09-05 on the dogfood adopter, R-029
-                # was archived "Resolved" with no row, and both the dependency check and
-                # the concurrent-Groomer exclusion read it as a task that does not exist.
-                # A warning rather than an error, matching the `type:` precedent, so an
-                # existing adopter backlog is not broken on upgrade.
-                # Matched on the row's link, not on the bare ID. Check A searches every
-                # line for the ID, so a task named only in prose counts as present - and
-                # gobot's BACKLOG.md does mention R-029 in a sentence while listing no row
-                # for it. Prose is not what a reader resolving a task by table row finds.
+                # Archived specs need index rows too: dependency and concurrent-Groomer
+                # readers rely on that index. Warn rather than error so upgrades do not
+                # break existing adopter backlogs, matching the `type:` precedent.
+                # Match the row's link rather than a bare ID; prose mentions do not
+                # provide a row for table-based readers.
                 $linkNeedle = "](" + $relPath + ")"
                 $hasBacklogRow = $false
                 foreach ($cLine in $content) {

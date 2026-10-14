@@ -385,9 +385,8 @@ while (-not [string]::IsNullOrEmpty($checkDir)) {
 }
 
 if ($isGitRepo) {
-    # Item 170: C-393's Architect passed an eight-character -CommitHash and it was written
-    # as given. Resolve a passed hash to the full SHA and refuse one that names no commit;
-    # inherited values were resolved when their own handoff was written.
+    # Resolve passed hashes to full SHAs and refuse values naming no commit;
+    # inherited hashes were resolved when their handoff was written. Item 170.
     foreach ($passed in @(@{ Name = "CommitHash"; Value = $CommitHash }, @{ Name = "BaseCommit"; Value = $BaseCommit })) {
         if ([string]::IsNullOrWhiteSpace($passed.Value)) { continue }
         $fullSha = (git -C $REPO_ROOT rev-parse --verify --quiet ($passed.Value.Trim() + "^{commit}") 2>$null)
@@ -410,13 +409,10 @@ if ($isGitRepo) {
         }
     }
 
-    # On deployment -> done the commit being deployed is the tip of the task branch, and git
-    # is the only thing that knows it. An inherited hash is stale by construction: it is
-    # whatever an earlier phase or deployment attempt recorded, before a rebase moved the
-    # branch or a recovery deleted it. No task branch means nothing was built, which is the
-    # No-Code Closure the merge-verification gate looks for, so write null and let the gate
-    # judge. Inheriting there named a deleted branch's commit, which defeated the closure
-    # and passed pre-gate verification because a dangling commit still exists (item 159).
+    # Deployment -> done must name the current task-branch tip; inherited hashes may
+    # be stale after a rebase or recovery. Without a task branch, write null for the
+    # merge-verification gate to judge as a No-Code Closure. A dangling inherited
+    # commit still exists and would defeat that closure. Item 159.
     if ($Source -eq "deployment" -and $Target -eq "done" -and [string]::IsNullOrWhiteSpace($CommitHash)) {
         $resolvedCommitHash = $null
         $deployBranch = "task/$TaskId"
@@ -488,16 +484,15 @@ foreach ($art in $resolvedArtifacts) {
 }
 $resolvedArtifacts = $normalizedArtifacts
 
-# Item 174: any -SuspiciousContent value trips the human_escalation breaker, so a "none
-# found" placeholder raised a false escalation in gobot R-040 twice. Refuse it here.
+# Any -SuspiciousContent value trips human_escalation; reject "none found"
+# placeholders to avoid false escalation. Item 174.
 if ($SuspiciousContent.Trim() -match '^(?i)(none|none found|n/?a|null|no|false|nothing|-)\.?$') {
     throw ("-SuspiciousContent '" + $SuspiciousContent + "' reads as 'nothing found', but any value is recorded as suspicious content and escalates to the human. Omit -SuspiciousContent when there is none; pass it only to describe content that is suspicious.")
 }
 
-# Item 169: C-390's Architect passed quoted paths through a native pwsh call, the quotes
-# arrived as characters, and only the next crucible.ps1 run caught the paths, with a
-# message that blamed the files. Refuse here, naming the exact value received. Inherited
-# artifacts were checked when their own handoff was written, so only passed ones are.
+# Reject passed artifact paths here with the exact received value: native pwsh calls
+# can preserve shell quotes as characters. Inherited artifacts were checked when
+# their handoff was written. Item 169.
 if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
     $quotedArtifacts = @($resolvedArtifacts | Where-Object { $_ -match "[`"']" })
     if ($quotedArtifacts.Count -gt 0) {
@@ -515,9 +510,8 @@ if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
 $baseAffinity = @()
 if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
     $baseAffinity = @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
-    # Quotes escaped for a nested shell arrive as characters, and B-012's Groomer wrote
-    # "\"internal/app/\"" into file_affinity that way. Refuse rather than strip: a mangled
-    # value should reach the caller, not a handoff that counts against the budget.
+    # Nested-shell quotes can arrive as path characters. Refuse rather than strip
+    # mangled values so the caller can fix them before a handoff consumes budget.
     $quotedAffinity = @($baseAffinity | Where-Object { $_ -match "[`"']" })
     if ($quotedAffinity.Count -gt 0) {
         throw ("-FileAffinity entry contains a quote character, which no path can: " + ($quotedAffinity -join ", ") + ". Pass the paths unquoted, as separate arguments or comma-joined.")

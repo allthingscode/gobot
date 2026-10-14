@@ -85,12 +85,8 @@ function Get-RunLockHolder {
 
 # True when a live process holds the lock.
 #
-# Decided by trying to take the file exclusively rather than by checking whether a
-# recorded process id is still alive. An OS file handle cannot outlive the process
-# that owns it, so a successful exclusive open proves nobody holds the lock no matter
-# what the record says. That removes two failure modes the pid check had: a reused pid
-# made an abandoned lock look live, and a run killed before it wrote its record left a
-# file that could not be attributed at all.
+# Try an exclusive open instead of testing the recorded pid: an OS handle cannot
+# outlive its owner, while pids can be reused and lock records can be incomplete. Item 24.
 function Test-RunLockHeld {
     param([Parameter(Mandatory=$true)][string]$LockPath)
 
@@ -163,8 +159,7 @@ function Enter-RunLock {
     }
 }
 
-# Takes the object Enter-RunLock returned rather than a bare path, because releasing
-# now means closing a handle and not only deleting a file.
+# Take the object from Enter-RunLock so releasing closes the held stream as well as the file.
 function Exit-RunLock {
     param([AllowNull()][object]$Lock)
 

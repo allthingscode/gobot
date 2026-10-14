@@ -2,13 +2,9 @@
 # continuation prompt (gate-filing.md) so a re-dispatched Researcher FILES the approved
 # backlog stubs instead of re-presenting the gate.
 #
-# Why this exists: the research-audit SOP tells the Researcher to "present findings and
-# wait" at the Research Gate. On a plain re-dispatch (even with an inline note appended to
-# the phase prompt) the SOP's present-and-wait step dominates, so the run re-presents the
-# same questions and files nothing -- a launcher STATUS=SUCCESS with zero deliverables
-# (caught only by verdict-not-label handoff inspection). This helper is the first-class
-# "resume the specialist after a human gate decision" path: it records the decision and
-# writes a forceful, self-contained continuation prompt that bypasses the audit framing.
+# A plain re-dispatch follows the audit SOP's present-and-wait step and can repeat
+# the gate without filing. Record the decision and generate a self-contained filing
+# prompt so the resumed Researcher proceeds with approved deliverables.
 #
 # Usage:
 #   record-research-gate.ps1 -TaskId R-021 -Reason "Gate approved" `
@@ -123,9 +119,8 @@ if ($approvedQuoted -ne '') { $handoffArgs += " -HumanApproved $approvedQuoted -
 if ($deferredQuoted -ne '') { $handoffArgs += " -HumanDeferred $deferredQuoted" }
 if ($rejectedQuoted -ne '') { $handoffArgs += " -HumanRejected $rejectedQuoted" }
 
-# The deployment gate refuses a task marked Production or Resolved before a human accepts it,
-# and the human gate finalizes it on acceptance. Telling the Researcher to set it here sent
-# R-031 through grooming and verification already terminal, for the Operator to revert.
+# Leave terminal status to human acceptance: the deployment gate refuses Production
+# or Resolved tasks before acceptance, and the Human Gate finalizes them.
 $statusRule = @(
     "Leave $TaskId's own status as it is. Do NOT set it to ``Production`` or ``Resolved``:",
     "the human gate finalizes it on acceptance, and the deployment gate refuses it as terminal",

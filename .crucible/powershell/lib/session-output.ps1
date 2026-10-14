@@ -70,10 +70,8 @@ if (-not (Get-Command Assert-CrucibleContextKeys -ErrorAction SilentlyContinue))
     . (Join-Path $PSScriptRoot "crucible-context.ps1")
 }
 
-# This file has always called Invoke-GitChecked across a file boundary; before TODO item 14
-# step A the boundary was crucible-gates.ps1, and it resolved because dot-sourcing flattens
-# scope, not because anything declared the dependency. Naming it makes the load order the
-# binder's problem rather than a reader's.
+# Declare Invoke-GitChecked's dependency explicitly; dot-sourcing flattens scope
+# but does not guarantee a sibling's load order. Item 14.
 if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot "git.ps1")
 }
@@ -82,11 +80,8 @@ if (-not (Get-Command Test-NoCodeClosure -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot "no-code-closure.ps1")
 }
 
-# A review-fix sent back from verification on a research item with no task branch has no
-# code to change: what the Reviewer asked for lives in the main root's gitignored backlog
-# and session files. A worktree holds no copy of those, so the Architect edited stand-ins
-# there, committed an ignored spec, and the branch it ran on defeated the No-Code Closure
-# at deployment. Such a fix runs in the project root with no branch. Item 158.
+# No-branch research review-fixes run in the project root without a branch: their
+# gitignored backlog and session files have no worktree copy. Item 158.
 function Test-NoCodeReviewFix {
     param(
         [Parameter(Mandatory=$true)]$Handoff,
@@ -99,10 +94,8 @@ function Test-NoCodeReviewFix {
     return (Test-NoCodeClosure -TaskId ([string]$Handoff.task_id) -ProjectRoot $RepoRoot)
 }
 
-# The re-review after such a fix comes from implementation, which the verification prompt
-# reads as a code review: the R-040 Reviewer ran run-isolated-checks.ps1, found no worktree,
-# and blocked on the checker it could not run. There is still no branch and no code, so
-# the review is the Stub-Only Close-Out. Item 175.
+# A no-branch re-review from implementation remains a Stub-Only Close-Out;
+# there is no code or worktree for isolated verification. Item 175.
 function Test-NoCodeReReview {
     param(
         [Parameter(Mandatory=$true)]$Handoff,
@@ -227,9 +220,7 @@ function New-CruciblePromptText {
             $promptText = $promptText.Replace("{rebase_section}", "")
         }
 
-        # Absolute, as is {session_dir} below: a specialist running in a worktree resolved the
-        # relative form against the worktree, which holds no copy of the gitignored session
-        # dir, and edited stand-ins there. Item 158.
+        # Use absolute paths: worktrees have no copy of the gitignored session files. Item 158.
         $absoluteHandoffPath = if ($null -ne $latestHandoff) { $latestHandoff.FullName } else { Join-Path $sessionDir "handoffs" }
         $promptText = $promptText.Replace("{handoff_file}", $absoluteHandoffPath)
 

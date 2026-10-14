@@ -369,19 +369,10 @@ function Get-CrucibleFrameworkOwnedRelativePath {
 }
 
 function Resolve-CrucibleIntegrityBase {
-    # The commit this task started from. Resolution order matches the merge path at
-    # :1687-1698 and :1776-1787 so the two agree about what "this task" spans: the
-    # handoff's base_commit first, then the task branch's merge-base with the primary
-    # branch.
-    #
-    # Returns $null when neither resolves, and that is deliberate rather than a
-    # concession. base_commit is optional and nullable in handoff.schema.json and is
-    # absent from the top-level required list, so an agent-written handoff on a task
-    # with no task/<id> branch is a legitimate shape, not a broken one - and this gate
-    # runs on every Crucible invocation, including the first bootstrap. Failing here
-    # would block valid pipelines, which is a worse defect than the one being fixed.
-    # The caller reports the missing baseline as an unverifiable gate instead, so the
-    # narrowing is counted rather than silent.
+    # Resolve the task baseline in merge-path order: handoff base_commit, then the
+    # task branch's merge-base with the primary branch, so both gates agree on scope.
+    # Return $null when neither resolves: base_commit is optional and bootstrap may
+    # have no task branch. The caller must report an unverifiable gate, not a clean pass.
     param(
         [Parameter(Mandatory=$true)][string]$RepoRoot,
         [Parameter(Mandatory=$false)]$Handoff = $null,
@@ -425,10 +416,8 @@ function Resolve-CrucibleIntegrityBase {
 function Get-CrucibleFrameworkStatusChanges {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
-    # Every failure below throws. An empty array means one thing only - the tree was
-    # read and no framework-owned file had changed. It used to also mean "the check
-    # could not run", which the caller cannot tell apart from clean, so the circuit
-    # breaker reported a passing integrity check on a tree it had never looked at.
+    # Throw on every read failure. An empty array means the tree was read and no
+    # framework-owned files changed; unreadable evidence cannot count as clean. Item 35.
     $repoRoot = $Context.RepoRoot
     $crucibleRoot = $Context.CrucibleRoot
     if ([string]::IsNullOrWhiteSpace($repoRoot)) {
@@ -464,14 +453,8 @@ function Get-CrucibleFrameworkStatusChanges {
         }
     }
 
-    # git writes to stderr when it fails, and under the $ErrorActionPreference = "Stop"
-    # that crucible.ps1 sets at :112 that becomes a terminating NativeCommandError. So
-    # the exit-code guard below never ran in production - a non-repository surfaced as
-    # a raw "fatal: not a git repository" crash rather than a gate verdict, and the
-    # intended empty-array return was reachable only where the preference was relaxed.
-    # Relaxing it here makes the exit code the signal, as the guard always intended.
-    # Still no 2>&1: merging native stderr into the success stream would corrupt the
-    # porcelain lines this function parses by column offset.
+    # Relax "Stop" so native stderr cannot throw before the exit-code guard runs.
+    # Keep stderr separate: 2>&1 would corrupt column-parsed porcelain output. Item 35.
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $statusLines = @(git -C $repoRoot status --porcelain -- $crucibleRoot 2>$null)
@@ -481,12 +464,9 @@ function Get-CrucibleFrameworkStatusChanges {
         throw ("Framework integrity check cannot run: 'git status' exited " + $statusExit + " in " + $repoRoot + ". The gate cannot confirm that framework-owned files are unmodified.")
     }
 
-    # The working tree is only half the question. A specialist that edits a vendored
-    # framework file and then commits it leaves a clean tree, and this gate saw nothing
-    # - while the remediation text below actively told them to commit. Diffing against
-    # the task baseline closes that, and asking "what changed during THIS task" ignores
-    # pre-existing adopter customization by construction, which is why the gate does not
-    # want a provenance check here: that would flag customization adopters are allowed.
+    # Diff against the task baseline as well as the working tree to catch committed
+    # bundle edits while allowing pre-existing adopter customization; provenance
+    # comparison would incorrectly flag that customization.
     $handoff = if ($Context.ContainsKey("Handoff")) { $Context.Handoff } else { $null }
     $contextTaskId = if ($Context.ContainsKey("TaskId")) { [string]$Context.TaskId } else { "" }
     $baseCommit = Resolve-CrucibleIntegrityBase -RepoRoot $repoRoot -Handoff $handoff -TaskId $contextTaskId
@@ -599,10 +579,8 @@ function Assert-CrucibleFrameworkIntegrity {
     foreach ($change in $changes) {
         Write-Host ("  - " + $change) -ForegroundColor Yellow
     }
-    # Committing is no longer an escape - the gate now diffs the task baseline, so a
-    # committed bundle edit is flagged too. A deliberate bundle update is therefore
-    # cleared by re-baselining the task onto it, which leaves the decision recorded in
-    # the handoff instead of hidden in a commit the old check could not see.
+    # Committed bundle edits are flagged too. Clear deliberate updates by re-baselining
+    # the task onto them so the handoff records the decision.
     Write-Host "`n[STOP] Revert the framework-owned edits above before continuing." -ForegroundColor Red
     Write-Host "       If this was a deliberate bundle update, commit it and re-baseline the task onto that commit:" -ForegroundColor Red
     Write-Host ("         pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/new-handoff.ps1`" -TaskId " + $handoff.task_id + " -Rebaseline -BaseCommit <commit-of-the-bundle-update> -ProjectRoot `"" + (Get-RecoveryProjectRoot -Context $Context) + "`"") -ForegroundColor Red
@@ -952,9 +930,8 @@ function Invoke-HandoffPreflightValidation {
     $pwshCmd = Get-PwshCommand
     $Context.NextCrucibleCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$($Context.RepoRoot)`" -Quiet"
 
-    # The expected cycle comes from the task.md Crucible wrote for the source phase, not
-    # from the handoff being checked: taking it from the handoff let any handoff pass the
-    # session_cycle_id comparison by naming the same value twice. Item 186.
+    # Read the expected cycle from the source task.md, not the handoff being checked,
+    # so a handoff cannot validate its own session_cycle_id. Item 186.
     $sourceTaskMd = Join-Path $sessionDir ([string]$handoff.task_id + "/" + [string]$handoff.source_phase + "/task.md")
     $issuedCycleId = ""
     if (Test-Path -LiteralPath $sourceTaskMd) {
@@ -1258,9 +1235,7 @@ function Complete-CrucibleSourceSession {
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-Host ("[STOP] Quality gate failed: " + $handoff.source_phase + " has required checklist issues (unchecked: " + $requiredUncheckedCount + ", malformed: " + $requiredMalformedCount + "). Complete required Task List items before handoff.") -ForegroundColor Red
 
-                # Name the lines, not just the count. All three specialists in TODO item
-                # 53's Pass 29 hit this gate, and each had to reopen task.md and diff it
-                # by eye: a count says how many boxes are unticked, never which ones.
+                # Name offending lines: a count alone cannot tell the specialist which boxes to fix. Item 59.
                 $checklistOffenders = @()
                 foreach ($uncheckedEntry in $checklistGate.RequiredUnchecked) {
                     $checklistOffenders += [pscustomobject]@{ line = $uncheckedEntry.line; kind = "unchecked"; text = $uncheckedEntry.text }
@@ -1269,9 +1244,7 @@ function Complete-CrucibleSourceSession {
                     $checklistOffenders += [pscustomobject]@{ line = $malformedEntry.line; kind = "malformed"; text = $malformedEntry.text }
                 }
                 $checklistOffenders = @($checklistOffenders | Sort-Object line)
-                # Bounded so a pathological task.md cannot bury the instruction that
-                # follows it. Nine was the worst real case, so the cap is not reached
-                # in practice and the list is normally complete.
+                # Bound the list so a pathological task.md cannot bury the following instruction.
                 $checklistListLimit = 20
                 foreach ($offender in @($checklistOffenders | Select-Object -First $checklistListLimit)) {
                     Write-Host ("  task.md:" + $offender.line + " (" + $offender.kind + ") " + $offender.text) -ForegroundColor Red
@@ -1782,12 +1755,9 @@ function Test-CompletionArtifactGate {
                 # Dependency-blocked shape: commit_hash absent -> no checks needed, pass through
             }
             "deployment -> done" {
-                # No-Code Closure: a research or grooming task with no task branch has no
-                # merge to prove. Decided by lib/no-code-closure.ps1 rather than here,
-                # because validate-handoff.ps1 has to reach the same verdict from the same
-                # evidence. While the detection was inline in this gate the validator had no
-                # notion of the exemption and refused every handoff that would have used it,
-                # so the shape the gate is built to accept could not be written.
+                # No-Code Closure: no task branch means no merge to prove for research or
+                # grooming. Share the decision with validate-handoff.ps1 so both use the
+                # same evidence and the accepted handoff can be written. Item 72.
                 $noCodeClosureRepoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
                 $noCodeClosureCommitHash = if ($handoff.psobject.Properties["commit_hash"]) { [string]$handoff.commit_hash } else { "" }
                 $isNoCodeClosure = Test-NoCodeClosure -TaskId ([string]$handoff.task_id) -CommitHash $noCodeClosureCommitHash -ProjectRoot $noCodeClosureRepoRoot
@@ -2192,14 +2162,9 @@ function Invoke-CircuitBreakerGates {
             }
         }
 
-        # The configured root determines which research artifacts this detector is
-        # allowed to scan. Falling back to .crucible after a read failure would
-        # silently leave the configured research directory outside the scan.
-        # Guarded like the artifact scan below: a block match already found in the handoff
-        # text is a real detection, and it outranks this. Without the guard an unreadable
-        # config overwrote that finding, so the refusal described a configuration problem
-        # instead of the injection it had actually caught - and took the config path's
-        # skipped blocked-task record with it.
+        # Scan the configured research root; fallback after a config read failure
+        # would leave its artifacts unchecked. Preserve any injection already found
+        # in the handoff: it outranks config failure and requires a blocked-task record.
         if ($configUnreadable -and -not $hasBlockMatch) {
             $scanFailed = $true
             $scanFailureKind = "config"
@@ -2542,10 +2507,8 @@ function Invoke-CircuitBreakerGates {
 }
 
 function Assert-CodeTaskWorktree {
-    # A task with a task/<id> branch is a code task, and its scope check and independent
-    # verification run in its implementation worktree. Skipping them because that
-    # directory is gone let a code task pass both unchecked. With no branch there is no
-    # code, and the checks have nothing to read. Item 187.
+    # A task/<id> branch requires scope checks and independent verification in its
+    # worktree; a missing directory must not bypass them. No branch means no code. Item 187.
     param(
         [Parameter(Mandatory=$true)][hashtable]$Context,
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -2582,10 +2545,8 @@ function Invoke-HumanGateMerge {
         [Parameter(Mandatory = $true)][string]$TaskId,
         [Parameter(Mandatory = $true)][string]$PrimaryBranch,
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
-        # Declared rather than inherited. This function is called from inside
-        # Invoke-HumanGateAction, so its event destination used to be two frames of
-        # dynamic scope away from anything that chose it - and the one event it writes
-        # is a circuit breaker, the record least tolerable to misfile.
+        # Declare the circuit-breaker destination explicitly; dynamic scope can
+        # silently misfile the operator's failure record. Item 16.
         [Parameter(Mandatory = $true)][string]$LogFile,
         [Parameter(Mandatory = $true)][string]$CircuitBreakerHistoryFile,
         $Handoff = $null,
@@ -3093,12 +3054,8 @@ function Invoke-HumanGateAction {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
         [Parameter(Mandatory=$true)][string]$Outcome,
-        # Declared rather than looked up with Get-Variable. The lookup walked the
-        # caller's scope chain, and its one caller - Invoke-HumanGate - only bound
-        # $LOG_FILE when the context happened to carry the key. When it did not, all
-        # five events below were skipped outright by an IsNullOrEmpty guard: a
-        # circuit_breaker and three CI-verification blocks silently unwritten, on the
-        # one path where the operator most needs the record.
+        # Require declared event destinations so caller scope cannot misroute or
+        # suppress circuit-breaker and CI-verification records. Item 16.
         [Parameter(Mandatory=$true)][string]$LogFile,
         [Parameter(Mandatory=$true)][string]$CircuitBreakerHistoryFile,
         [string]$ProjectRoot = "",
@@ -3121,25 +3078,17 @@ function Invoke-HumanGateAction {
         Invoke-HumanGateRejectAbandon -TaskId $TaskId -Outcome $Outcome -ProjectRoot $resolvedProjectRoot `
             -PrimaryBranch $primaryBranch -SourcePhase $SourcePhase -GateReason $GateReason
     } else {
-        # Without this arm the function returned, having done nothing, and its caller
-        # read that as the work being done: it archived the decision, deleted the
-        # pending template, printed "Decision recorded" in green and let the pipeline
-        # past the gate. A typo in the outcome field bought a pass. Nothing above this
-        # point has a side effect, so throwing here leaves the pending file in place
-        # for the operator to correct.
+        # Reject unknown outcomes before side effects so a typo cannot pass the gate;
+        # keep the pending file for the operator to correct. Item 38.
         throw ("Unrecognized gate outcome '" + $Outcome + "'. Expected one of: " + ((Get-HumanGateOutcomes) -join ", ") + ".")
     }
 }
 
 function Invoke-HumanGateAcceptRedirect {
-    # The accept/redirect arm, lifted verbatim out of Invoke-HumanGateAction. It
-    # finalizes work the human approved: backlog finalization, merge, CI
-    # verification, worktree and branch cleanup, archival, session-state pruning.
-    #
-    # LogFile and CircuitBreakerHistoryFile are mandatory here and absent from the
-    # reject/abandon arm because only this arm writes events. On the single function
-    # both were mandatory and the reject path was made to supply two values it never
-    # read; the split puts that in the signature where a caller can see it.
+    # Finalize human-approved work: backlog, merge, CI verification, worktree and
+    # branch cleanup, archival and session-state pruning.
+    # Event destinations are mandatory here because this arm writes events; the
+    # reject/abandon arm does not need them. Item 14.
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
         [Parameter(Mandatory=$true)][string]$Outcome,
@@ -3478,14 +3427,10 @@ function Invoke-HumanGateAcceptRedirect {
 }
 
 function Invoke-HumanGateRejectAbandon {
-    # The reject/abandon arm, lifted verbatim out of Invoke-HumanGateAction. It
-    # returns unaccepted work: backlog restore or Abandoned archival, then the
-    # rework handoff back to implementation.
-    #
-    # GateReason is mandatory to this arm in practice and unused by the other one:
-    # a rejection the operator gave no reason for is the thing the rework handoff
-    # has nothing to carry. It stays optional here only because the caller's own
-    # validation is what enforces it today.
+    # Return unaccepted work through backlog restore or Abandoned archival, then
+    # the rework handoff to implementation.
+    # The caller enforces GateReason for rejection so the rework handoff carries
+    # the human's reason; it remains optional in this helper's signature.
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
         [Parameter(Mandatory=$true)][string]$Outcome,
@@ -3577,9 +3522,8 @@ function Invoke-HumanGateRejectAbandon {
         # head is this task's merge: a merge commit whose second parent is the task branch
         # tip, or, once that branch is gone, whose subject names it. A hand-made fast-forward
         # leaves no merge commit, so it counts only when the branch's newest reflog entry is
-        # that fast-forward. Being ahead of origin proves nothing, because accepted merges
-        # stay local until the human pushes; using that as the test reset away other tasks'
-        # accepted work. Item 180.
+        # that fast-forward. Being ahead of origin proves nothing: accepted merges
+        # stay local until pushed, and resetting them would lose other tasks' work. Item 180.
         $headIsTaskMerge = $false
         $unwindTarget = $null
         $lastMove = Invoke-Git reflog show --format=%gs -n 1 "refs/heads/$PrimaryBranch"
@@ -3825,15 +3769,9 @@ function Get-GateAcceptDescription {
 }
 
 function Write-GatePendingSurface {
-    # The gate reaches this surface from two directions: a first firing, which creates
-    # the pending decision template, and a re-run against a template whose outcome is
-    # still unfilled. Both must show the operator the same thing, and for a long time
-    # both did so by carrying the same 87 lines twice - with only one copy under test.
-    #
-    # The review range is a parameter rather than something derived here. The two
-    # callers derive it differently on purpose: a re-run prefers the shas the gate
-    # actually fired on over a freshly computed range that has moved underneath the
-    # human. Deriving it here would silently pick one of those and discard the other.
+    # First firing and re-runs of an unfilled template must show the same review surface.
+    # Callers supply the range because re-runs prefer the original gate shas over a
+    # freshly computed range that may have moved beneath the human. Item 14.
     param(
         [Parameter(Mandatory=$true)][hashtable]$Context,
         [Parameter(Mandatory=$true)][string]$RepoRoot,
@@ -3865,16 +3803,9 @@ function Write-GatePendingSurface {
         }
         $helperScriptPath = Join-Path $taskSessionDir "review-diff.ps1"
         $resolvedDiffToolEscaped = $resolvedDiffTool -replace '"', '`"'
-        # GetTempPath() rather than $env:TEMP. TEMP is a Windows variable; off Windows it is unset,
-        # so Join-Path was handed an empty first argument and this helper died before copying either
-        # side - a difftool that opens nothing during human review, with no error naming a temp path.
-        # GetTempPath() reads TMP then TEMP on Windows and TMPDIR elsewhere, so it is the one spelling
-        # that resolves on all three platforms. Item 103.
-        #
-        # It is written bare, not backtick-escaped, because there is no $ to defer: the call has to
-        # run in the generated helper, on whatever platform the reviewer is on. Escaping $env:TEMP
-        # here and testing on Windows is exactly how this survived - the generator's own scope has a
-        # populated TEMP, so the emitted text looks correct to anyone reading it on this platform.
+        # GetTempPath() works across platforms: Windows uses TMP then TEMP, others TMPDIR.
+        # TEMP alone can be unset off Windows. Emit the call bare so it runs in the
+        # generated helper on the reviewer's platform; there is no $ to defer. Item 103.
         $scriptContent = @"
 `$left = `$args[0]
 `$right = `$args[1]
@@ -3952,12 +3883,8 @@ function Invoke-HumanGate {
     if ($null -eq $Context) {
         throw "CrucibleContext is null."
     }
-    # LogFile and CircuitBreakerHistoryFile are required here like everywhere else. They
-    # used to be picked up by a conditional below instead, and when it did not fire this
-    # frame never bound $LOG_FILE - so Invoke-HumanGateAction, called twice from here,
-    # resolved its destination out of crucible.ps1's script scope or dropped its events.
-    # The required-key check directly above that conditional was the file's own idiom for
-    # refusing exactly the context the conditional was written to tolerate.
+    # Require LogFile and CircuitBreakerHistoryFile in the context so downstream
+    # actions receive explicit destinations rather than caller scope or missing events. Item 16.
     Assert-CrucibleContextKeys -Context $Context `
         -RequiredKeys @("Handoff", "IsBootstrap", "SessionDir", "GateOutcome", "GateReason", "GateRedirectTarget", "CrucibleRoot", "Quiet") `
         -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")
@@ -4375,15 +4302,7 @@ function Invoke-RepositoryIntegrityGates {
 
     # --- 3c. Dev Log Integrity Gate ---
     # Run automatically when Operator hands off to ensure Dev Logs are clean before next cycle.
-    #
-    # This gate and 3d below carried a fourth clause until item 97: task_id -notmatch
-    # '^C-FACTORY-'. Nothing outside Crucible's own fixtures ever used that prefix, so it was
-    # a test accommodation living in production code - and because -notmatch is
-    # case-insensitive, c-factory-anything took it too. An adopter filing a chore called
-    # C-FACTORY-CLEANUP would have got a quietly weaker pipeline with nothing to tell them.
-    # It is gone rather than made case-sensitive or documented: the one test that depended on
-    # it did so only because its fixture had no dev log, which a real deployment handoff
-    # always has, so the fixture was the thing that was wrong.
+    # Apply to every task id; fixture-shaped prefixes must not bypass deployment integrity. Item 97.
     if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -ne "implementation" -and -not $isBootstrap) {
         Write-Quiet "`n[DEV LOG] Running Dev Log security validation..." -ForegroundColor Cyan
         # Item 188: dev logs belong to the bundle, not to the session directory's parent.
@@ -4406,7 +4325,7 @@ function Invoke-RepositoryIntegrityGates {
 
     # --- 3d. Workspace Cleanliness Gate ---
     # Block Operator handoff if untracked files exist outside of private/ignored dirs.
-    # Shared the '^C-FACTORY-' exemption with 3c above and lost it for the same reason. See item 97.
+    # Apply to every task id; fixture-shaped prefixes must not bypass cleanliness. Item 97.
     if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -ne "implementation" -and -not $isBootstrap) {
         $statusRes = Invoke-Git status --porcelain
         $rawStatus = $statusRes.Lines
@@ -4625,9 +4544,8 @@ function Resolve-CrucibleTransition {
                     $bDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $repoRootForStatus
                 }
 
-                # Same shared lookup the dependency check uses. This exclusion used to
-                # read the BACKLOG.md table only, so a finished task whose spec was
-                # archived without leaving a row was never excluded and warned forever.
+                # Use the shared status lookup so archived specs without backlog rows
+                # still exclude finished tasks. Item 54.
                 $otherInfo = Get-BacklogTaskStatus -Task $otherTaskId -ProjectRoot $repoRootForStatus -BacklogDir $bDir
                 if ($otherInfo.Found -and (Test-BacklogTaskTerminal $otherInfo.Status)) {
                     return $false
@@ -4635,18 +4553,10 @@ function Resolve-CrucibleTransition {
                 return $true
             })
         if ($otherGroomerSessions.Count -gt 0) {
-            # Presence of a task.md is not evidence of a running Groomer. Measured on the
-            # dogfood adopter 2026-09-05, the only session this warned about had last been
-            # written on 2026-08-03. Stale directories accumulate and live ones are rare,
-            # so an unqualified warning is most likely to fire when it is least likely to
-            # be true - and an operator who finds it spurious once learns to ignore it,
-            # which is the failure that matters when two Groomers really are running.
-            #
-            # task.md's own timestamp records when the session was scaffolded, so a long
-            # session would look old by it. The newest write anywhere in the phase
-            # directory is the better proxy: a live session keeps producing prompt,
-            # context, and transcript files. This is a heuristic, and the message says so
-            # rather than implying the check knows a process is alive.
+            # task.md presence alone cannot prove a Groomer is running; stale directories
+            # accumulate. Use the newest phase-directory write because task.md dates only
+            # scaffolding, while live sessions write prompts, context and transcripts.
+            # This remains a heuristic, which the warning must state. Item 55.
             $staleAfterMinutes = 120
             $nowUtc = (Get-Date).ToUniversalTime()
             $activeSessions = @()

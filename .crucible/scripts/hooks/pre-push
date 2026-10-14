@@ -40,8 +40,7 @@ fi
 # PowerShell 7+ (pwsh) is required. Do not look up powershell.exe: under WSL,
 # Windows PATH interop puts /mnt/c/.../powershell.exe on PATH and would hand a
 # Linux repository to Windows PowerShell 5.1. That host sees the work tree as
-# \\wsl.localhost\... and cannot read its index. Regression:
-# check-assertion-deletion.tests.ps1 drives a real hook on Linux.
+# \\wsl.localhost\... and cannot read its index.
 # uname still decides: a Windows pwsh.exe on a Linux PATH is the same trap.
 # Resolved here rather than in the framework branch because the adopter branch needs
 # it too when it chains to a project hook (item 150). A missing pwsh is only an error
@@ -130,8 +129,7 @@ if [ -n "$FRAMEWORK_CONTEXT" ]; then
     echo "Running mojibake check..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-mojibake.ps1 prompts personas sops docs powershell templates README.md ROADMAP.md CHANGELOG.md CONTRIBUTING.md TODO.md
 
-    # Every tracked file, because the three violations that sat outside the mojibake
-    # gate's .md/.ps1 walk were in a .json, a .go and an extensionless gitignore. Item 86.
+    # Scan every tracked file so other formats and extensionless files are covered. Item 86.
     echo "Running ASCII-only check..."
     "$PWSH" -NoProfile -ExecutionPolicy Bypass -File powershell/gates/check-ascii.ps1
 
@@ -262,19 +260,11 @@ if [ -n "$FRAMEWORK_CONTEXT" ]; then
     echo "--- Pre-push: all verification and integration tests passed!"
 else
     # ADOPTER REPO CONTEXT
-    # Nothing runs here, and that is a decision rather than an omission. Every step above is
-    # either a Crucible self-test - which is exactly what this branch exists to keep off an
-    # adopter tree - or a gate item 107 decided is framework-only. The one check that did cross
-    # over to adopters in 107, message encoding, crossed because a commit message is unfixable
-    # once pushed and is still editable at commit-msg time. At pre-push the message is already
-    # written, so the same check here could only refuse the push and demand a history rewrite:
-    # the shape 107 rejected when it explained why the assertion gate cannot live in pre-commit.
-    # An adopter is already covered where its content is still fixable, by the pre-commit and
-    # commit-msg legs that do run for it. So this branch reports, and claims nothing. The
-    # closing success line used to sit outside this if/else, which told a push that ran zero
-    # checks that all verification and integration tests had passed. Item 115.
-    # The project's own pre-push hook, when hooks.project_dir names one, gets the same
-    # arguments and the same captured refs git gave this hook. Item 150.
+    # Framework self-tests and authoring gates do not run on adopter trees. Message
+    # encoding is checked at commit-msg while editable; repeating it here would
+    # demand a history rewrite. Report the skip without claiming verification.
+    # The configured project pre-push hook receives git's arguments and captured refs.
+    # Item 115.
     cd "$REPO_ROOT"
     echo "Adopter: framework self-tests skipped (framework-only)."
     if [ -n "$PUSH_REFS_FILE" ]; then

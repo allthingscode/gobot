@@ -5,12 +5,8 @@
 # root pattern such as `AGENTS.md` matches at EVERY depth, so it also swallows
 # `.crucible/agent-instructions/AGENTS.md` with no warning anywhere.
 
-# Canonical commit-by-default list, bundle-relative, and the single source of truth for the
-# nine pages that restate it. The claim used to name three of them and nothing enforced it,
-# so adding standards/ here took seven hand edits and still left five pages disagreeing.
-# commit-by-default-parity.tests.ps1 now compares every one of the nine against this function
-# and fails on a tenth that nobody registered; that test owns the list of surfaces, so add a
-# new page there rather than here. Item 74.
+# Canonical bundle-relative commit-by-default list. Register prose surfaces in
+# commit-by-default-parity.tests.ps1 so every restatement is checked against it. Item 74.
 function Get-CommitByDefaultPath {
     return @(
         ".gitignore",
@@ -62,10 +58,8 @@ function Get-BundleCommittablePath {
         if ($rel.StartsWith(".git/")) { continue }
         $relative.Add($rel) | Out-Null
     }
-    # Comma operator: PowerShell unrolls a returned List, and a bundle with exactly one
-    # commit-by-default file would come back as a bare [string], whose .Count throws
-    # under the Set-StrictMode -Version Latest that crucible-lib.ps1 turns on. That
-    # crashed the doctor before it reached any later check.
+    # Return the List with the comma operator: PowerShell otherwise unrolls a single
+    # file to [string], whose .Count throws under Set-StrictMode -Version Latest.
     return ,$relative.ToArray()
 }
 

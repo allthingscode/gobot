@@ -138,22 +138,10 @@ function Get-CrucibleRoot {
 }
 # Framework powershell/ directory - used to resolve sibling scripts regardless of CWD.
 $FRAMEWORK_POWERSHELL = $PSScriptRoot
-# Anchor paths to the project root (where .crucible/ lives). -ProjectRoot overrides for
-# explicit invocation from elsewhere; otherwise the root derived from THIS script's location
-# is preferred over the caller's cwd. crucible.ps1 ships to adopters at
-# <root>/.crucible/powershell/ and lives in the framework repo at <root>/powershell/, so
-# $PSScriptRoot names the target repo unambiguously no matter where the orchestrator invoked
-# us from. Defaulting to cwd silently targeted the wrong repo when the gate ran from a
-# different checkout.
-#
-# This entrypoint kept its own copy of that resolution after item 60 moved the other three
-# callers onto the shared helper, because the copy ended in an unvalidated fall back to the
-# working directory and the helper refuses instead. The reason recorded for keeping it was
-# that the framework's own fixtures invoke this script from a directory that is not an
-# adopter - but every one of them passes -ProjectRoot today, so the fallback was serving
-# nobody and guessing for everybody. It is the most expensive place in the codebase to
-# guess: -Init against a guessed root boots a phase for a repository nobody named, and the
-# framework checkout is not itself an adopter, so the guess landed there.
+# Anchor paths to the project root containing .crucible/, with -ProjectRoot overriding
+# script-location resolution. The script ships at <root>/.crucible/powershell/ and
+# lives at <root>/powershell/ in the framework. Refuse an unresolved root rather than
+# guessing from cwd: -Init must never boot a phase in an unintended repository.
 try {
     $REPO_ROOT = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 } catch {
@@ -426,16 +414,12 @@ function Check-Dependencies {
 
     $unsatisfied = @()
     foreach ($dep in $dependsOn) {
-        # Resolved through the shared lookup: spec frontmatter first, then the indexes.
-        # Measured on the dogfood adopter 2026-09-05: R-029 was archived with status
-        # "Resolved" on disk but had no BACKLOG.md row, and the old table-only lookup
-        # called that dependency unsatisfied - which blocks the Operator phase - while
-        # validate-backlog.ps1 passed on the same run.
+        # Use the shared lookup, spec frontmatter first then indexes, so an archived
+        # dependency without an index row still has its recorded status.
         $depInfo = Get-BacklogTaskStatus -Task $dep -ProjectRoot $ProjectRoot -BacklogDir $backlogDir
 
         if (-not $depInfo.Found) {
-            # Name only what was actually searched. The old text named ARCHIVED.md
-            # unconditionally, so an adopter with no such file was told to look in it.
+            # Name only files actually searched; optional indexes may not exist.
             $unsatisfied += ("$dep (not found - searched " + ($depInfo.Searched -join ", ") + ")")
             continue
         }
@@ -497,9 +481,8 @@ $handoff = $crucibleContext.Handoff
 
 Invoke-CircuitBreakerGates -Context $crucibleContext
 
-# The integrity checks run before the Human Gate because the gate exits on every
-# deployment path: after it, they never ran, so a human could accept work they refuse.
-# Item 182.
+# Run integrity checks before the Human Gate, which exits on every deployment path,
+# so acceptance cannot bypass them. Item 182.
 Invoke-RepositoryIntegrityGates -Context $crucibleContext
 
 Invoke-HumanGate -Context $crucibleContext

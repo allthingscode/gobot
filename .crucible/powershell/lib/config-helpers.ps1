@@ -1,8 +1,6 @@
 # --- config.yaml reader -------------------------------------------------------
-# One parser backs every accessor below. It keeps three outcomes distinct, because
-# collapsing the third into the second is what let a valid config silently disable a
-# gate: every accessor used to pin the indent to exactly two spaces, so a 3- or
-# 4-space `review:` block read as absent and `require_green_ci` fell back to false.
+# One parser backs every accessor. Distinguish missing keys from unreadable keys
+# so malformed config cannot silently disable a gate through a default. Item 34.
 #   - key present and readable -> the value
 #   - key genuinely absent     -> $null, and the caller's default is legitimate
 #   - key present, unreadable  -> throw
@@ -56,8 +54,7 @@ function ConvertFrom-ConfigScalar {
     return $text.Trim()
 }
 
-# A key the caller asked for that appears in the block but is not a 'key: value' pair is
-# a malformed config, not an absent one. Saying so is the whole point of item 34.
+# A requested key present without a 'key: value' pair is malformed, not absent. Item 34.
 function Assert-ReadableConfigKey {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Entries,
