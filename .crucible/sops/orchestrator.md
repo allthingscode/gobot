@@ -79,6 +79,8 @@ Repeat until a Human Gate fires or the pipeline completes:
 
 ### Step 1 - Initialize the step
 
+On entry or resume, initialize below. If Step 6 already verified the next phase and inputs have not changed, continue at Step 2 without rerunning `-Init`.
+
 ```powershell
 pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
@@ -173,15 +175,21 @@ The Reviewer's approval is not the last chance to catch a miss before the Operat
 
 The Reviewer's newer handoff supersedes its approval: Crucible reads the latest handoff, and verification -> implementation needs no gate decision. The task then goes round normally. You never write the verdict, the fix spec, or the handoff yourself.
 
-### Step 6 - Run Crucible and check for gates
+### Step 6 - Verify Crucible output and next phase artifacts
 
-```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
-```
+After a normal completion, verify the specialist's reported Crucible output. The specialist
+already ran `crucible.ps1 -Init`; do not rerun it unconditionally. Confirm that the next
+`prompt.md` and `task.md` exist, are non-empty, and match the expected phase from the latest
+handoff, or that a gate signal was printed. Check `gate_pending.txt` before dispatching.
+
+Rerun `-Init` only when the specialist's `-Init` did not complete (including
+`STATUS=ADVANCE_INCOMPLETE` in Step 4), for a repair, or when inputs changed. Verify that
+run's output and artifacts using the same checks. Missing output or mismatched artifacts
+go to Failure Protocol; their absence alone does not authorize an unconditional rerun.
 
 - **Gate signal present** -> Gate Protocol (stop loop)
 - **Circuit breaker fired** -> Circuit Breaker Protocol (stop loop)
-- **Next specialist prompt assembled** -> return to Step 3
+- **Next specialist prompt and task verified** -> read the assembled prompt as in Step 2, then return to Step 3
 
 ---
 

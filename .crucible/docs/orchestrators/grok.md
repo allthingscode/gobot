@@ -140,14 +140,11 @@ pwsh -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -Task
 
 Keep `-ProjectRoot` absolute. Some code paths join a relative root against the current directory, so `.` is only safe while nothing changes directory. If the adopter root contains a space, it cannot go unquoted. Put the command in a `.cmd` wrapper in the adopter root, quote the root inside the wrapper, and run the wrapper.
 
-The orchestrator runs `crucible.ps1 -Init` at two points per specialist cycle:
-
-1. Before dispatch - to verify the previous handoff and assemble the next prompt
-2. After the specialist returns - to advance the pipeline and detect gates
+Initialize on entry or resume as in SOP Step 1. After normal specialist completion, follow Step 6 to verify Crucible output and next phase artifacts. Rerun `-Init` only for incomplete advancement, repair, or changed inputs as specified there.
 
 ## After Each Sub-Agent Returns
 
-Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (run Crucible and check for gates). A gate signal at `.crucible/session/{task_id}/gate_pending.txt` goes straight to the Gate Protocol before anything else.
+Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (verify Crucible output and next phase artifacts). A gate signal at `.crucible/session/{task_id}/gate_pending.txt` goes straight to the Gate Protocol before anything else.
 
 Point at Step 5; do not re-inline it.
 

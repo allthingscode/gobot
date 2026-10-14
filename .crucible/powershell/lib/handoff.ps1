@@ -1,3 +1,59 @@
+function Normalize-HandoffArtifactPaths {
+    # Keep generator and gate path handling identical (TODO item 198).
+    param(
+        [AllowNull()][AllowEmptyCollection()][string[]]$Artifacts,
+        [Parameter(Mandatory=$true)][string]$WorktreePath,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot
+    )
+
+    $resolvedWtPath = if (Test-Path $WorktreePath) { (Resolve-Path $WorktreePath).Path } else { $WorktreePath }
+    $resolvedRepoRoot = if (Test-Path $ProjectRoot) { (Resolve-Path $ProjectRoot).Path } else { $ProjectRoot }
+
+    $normalizedArtifacts = @()
+    foreach ($art in $Artifacts) {
+        if ([string]::IsNullOrWhiteSpace($art)) { continue }
+        $fullArtPath = $art
+        if (-not [System.IO.Path]::IsPathRooted($art)) {
+            $wtCheck = Join-Path $resolvedWtPath $art
+            if (Test-Path $wtCheck) {
+                $fullArtPath = (Resolve-Path $wtCheck).Path
+            } else {
+                $repoCheck = Join-Path $resolvedRepoRoot $art
+                if (Test-Path $repoCheck) {
+                    $fullArtPath = (Resolve-Path $repoCheck).Path
+                }
+            }
+        } else {
+            if (Test-Path $art) {
+                $fullArtPath = (Resolve-Path $art).Path
+            }
+        }
+        $relPath = $art
+        if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
+            if ($fullArtPath.StartsWith($resolvedWtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $relPath = $fullArtPath.Substring($resolvedWtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+            } elseif ($fullArtPath.StartsWith($resolvedRepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+            }
+        } else {
+            $wtRelPrefix = Get-RootRelativePath -Root $resolvedRepoRoot -Path $resolvedWtPath
+            $wtRelPattern = "^(?:\./)?" + [regex]::Escape($wtRelPrefix.Replace("\", "/").TrimEnd("/")) + "/(.+)"
+            if ($relPath.Replace("\", "/") -match $wtRelPattern) {
+                $relPath = $Matches[1]
+            }
+        }
+        $relPath = $relPath.Replace("\", "/").Trim()
+        while ($relPath.StartsWith("./")) {
+            $relPath = $relPath.Substring(2)
+        }
+        $relPath = $relPath.TrimStart("/")
+        if (-not [string]::IsNullOrWhiteSpace($relPath)) {
+            $normalizedArtifacts += $relPath
+        }
+    }
+    return $normalizedArtifacts
+}
+
 function Get-HandoffTextForSecurityScan {
     param($HandoffObj)
 

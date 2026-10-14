@@ -165,7 +165,7 @@ launch status.
    after that time, re-dispatch and the specialist can continue from it.
    If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line.
 
-Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, `crucible.ps1 -Init -ProjectRoot "{project_root}"`) is
+Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, Crucible output verification) is
 identical to a Claude specialist - see *After Each Sub-Agent Returns*.
 
 ### Researcher Dispatch
@@ -252,15 +252,13 @@ pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
 
-The orchestrator runs `crucible.ps1 -Init -ProjectRoot "{project_root}"` at two points per specialist cycle:
-1. **Before dispatch** - to verify the previous handoff and assemble the next prompt
-2. **After sub-agent returns** - to advance the pipeline and detect gates
+Initialize on entry or resume as in SOP Step 1. After normal specialist completion, follow Step 6 to verify Crucible output and next phase artifacts. Rerun `-Init` only for incomplete advancement, repair, or changed inputs as specified there.
 
 ---
 
 ## After Each Sub-Agent Returns
 
-Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (run Crucible and check for gates). A gate signal at `.crucible/session/{task_id}/gate_pending.txt` goes straight to the Gate Protocol before anything else.
+Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (verify Crucible output and next phase artifacts). A gate signal at `.crucible/session/{task_id}/gate_pending.txt` goes straight to the Gate Protocol before anything else.
 
 Step 5 carries checks worth knowing are there before you reach it: verdict-not-label and provenance for a non-Claude specialist, the `task.md` checkpoint and checklist checks, the handoff check, and the **budget ladder** that warns, then escalates and waits, then presents the ceiling as a Circuit Breaker Gate. Read its thresholds from the SOP; they are not repeated here, so they cannot go stale here.
 

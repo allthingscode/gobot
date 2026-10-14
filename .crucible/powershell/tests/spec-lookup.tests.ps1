@@ -137,7 +137,6 @@ try {
         Assert-Result "bootstrap tier" ($data.budget_tier -eq "high" -and $data.target_phase -eq "grooming") "expected high tier and grooming"
         $task = Get-Content (Join-Path $root ".crucible/session/F-190/grooming/task.md") -Raw
         Assert-Result "task.md names bare spec" ($task.Contains("F-190.md")) "expected bare spec path in task.md"
-        Assert-Result "Ready selection finds bare spec" ($output.Contains("Confirmed task: F-190 (Priority: P0)")) $output
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

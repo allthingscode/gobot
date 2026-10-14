@@ -1888,54 +1888,7 @@ function Normalize-CrucibleInputState {
         $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
         $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir
 
-        $resolvedWtPath = if (Test-Path $wtPath) { (Resolve-Path $wtPath).Path } else { $wtPath }
-        $resolvedRepoRoot = if (Test-Path $repoRoot) { (Resolve-Path $repoRoot).Path } else { $repoRoot }
-
-        $normalizedArtifacts = @()
-        foreach ($art in $handoff.artifacts) {
-            if ([string]::IsNullOrWhiteSpace($art)) { continue }
-            $fullArtPath = $art
-            if (-not [System.IO.Path]::IsPathRooted($art)) {
-                $wtCheck = Join-Path $resolvedWtPath $art
-                if (Test-Path $wtCheck) {
-                    $fullArtPath = (Resolve-Path $wtCheck).Path
-                } else {
-                    $repoCheck = Join-Path $resolvedRepoRoot $art
-                    if (Test-Path $repoCheck) {
-                        $fullArtPath = (Resolve-Path $repoCheck).Path
-                    }
-                }
-            } else {
-                if (Test-Path $art) {
-                    $fullArtPath = (Resolve-Path $art).Path
-                }
-            }
-
-            $relPath = $art
-            if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
-                if ($fullArtPath.StartsWith($resolvedWtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    $relPath = $fullArtPath.Substring($resolvedWtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
-                } elseif ($fullArtPath.StartsWith($resolvedRepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
-                }
-            } else {
-                $wtRelPrefix = Get-RootRelativePath -Root $resolvedRepoRoot -Path $resolvedWtPath
-                $wtRelPattern = "^(?:\./)?" + [regex]::Escape($wtRelPrefix.Replace("\", "/").TrimEnd("/")) + "/(.+)"
-                if ($relPath.Replace("\", "/") -match $wtRelPattern) {
-                    $relPath = $Matches[1]
-                }
-            }
-
-            $relPath = $relPath.Replace("\", "/").Trim()
-            while ($relPath.StartsWith("./")) {
-                $relPath = $relPath.Substring(2)
-            }
-            $relPath = $relPath.TrimStart("/")
-
-            if (-not [string]::IsNullOrWhiteSpace($relPath)) {
-                $normalizedArtifacts += $relPath
-            }
-        }
+        $normalizedArtifacts = @(Normalize-HandoffArtifactPaths -Artifacts $handoff.artifacts -WorktreePath $wtPath -ProjectRoot $repoRoot)
 
         $originalArtifacts = @($handoff.artifacts)
         $hasChanged = $false

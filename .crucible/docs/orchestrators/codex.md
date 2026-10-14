@@ -189,8 +189,8 @@ Use parallelism to reduce cycle time without weakening control:
 Treat session lifecycle as a hard requirement:
 
 - On session start, run `crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}"` and verify artifacts exist before specialist launch.
-- On specialist completion, validate handoff + checkpoints, then re-run or verify `crucible.ps1` output before routing.
-- On session end, ensure handoff is written, clear lock/process residue per SOP, run `crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}"`, and report the exact output to the human.
+- On specialist completion, validate handoff + checkpoints, then follow SOP Step 6 to verify Crucible output and next phase artifacts before routing.
+- On session end, ensure the specialist handoff is written, clear lock/process residue per SOP, and report the verified Crucible output to the human. Rerun `-Init` only under SOP Step 6 recovery, repair, or changed-input conditions.
 
 ## Gate and Failure Protocols
 

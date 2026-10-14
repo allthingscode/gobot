@@ -438,43 +438,8 @@ function Initialize-CrucibleTargetSession {
     $workspacesDir = $Context.WorkspacesDir
 
     if ($Init -and $handoff.target_phase -eq "grooming") {
-        Write-Quiet "[INIT] Identifying target task for Groomer..." -ForegroundColor Cyan
-        $backlogPath = Join-Path $backlogDir "BACKLOG.md"
-        if (Test-Path $backlogPath) {
-            $backlogContent = Get-Content $backlogPath -Raw -Encoding UTF8
-            $readyItems = $backlogContent -split "`n" | Where-Object { $_ -match "\|\s*Ready\s*\|" }
-            
-            $candidates = @()
-            foreach ($item in $readyItems) {
-                if ($item -match '\|\s*\[?([FBCR]-[0-9]+[a-z]?)') {
-                    $tid = $matches[1]
-                    $type = if ($tid -match "^[FR]-") { "features" } elseif ($tid -match "^B-") { "bugs" } else { "chores" } # R-* (research) specs are filed under features/ by convention.
-                    $specFiles = Get-BacklogSpecFiles -Task $tid -Directory (Join-Path $backlogDir "$type/active")
-                    if ($specFiles) {
-                        $specFile = $specFiles | Select-Object -First 1
-                        $fm = Get-Content $specFile.FullName -Head 10 -Encoding UTF8
-                        $priority = "P3"
-                        $createdAt = "9999-99-99"
-                        foreach ($fml in $fm) {
-                            if ($fml -match 'priority:\s*"(P[0-3])"') { $priority = $matches[1] }
-                            if ($fml -match 'created_at:\s*"(20[0-9]{2}-[0-9]{2}-[0-9]{2})"') { $createdAt = $matches[1] }
-                        }
-                        $candidates += [PSCustomObject]@{ TaskId = $tid; Priority = $priority; CreatedAt = $createdAt }
-                    }
-                }
-            }
-            
-            if ($candidates.Count -gt 0) {
-                $selected = $candidates | Sort-Object Priority, CreatedAt | Select-Object -First 1
-                if ($selected.TaskId -eq $handoff.task_id) {
-                    Write-Quiet "[INIT] Confirmed task: $($selected.TaskId) (Priority: $($selected.Priority))" -ForegroundColor Green
-                } else {
-                    Write-Quiet "[INIT] Next Ready task is $($selected.TaskId); keeping scoped handoff task $($handoff.task_id)." -ForegroundColor Yellow
-                }
-            } else {
-                Write-Quiet "[INIT] No 'Ready' tasks found in backlog." -ForegroundColor Yellow
-            }
-        }
+        # Task-scoped initialization keeps the named task; bootstrap selects next items. TODO item 200.
+        Write-Quiet "[INIT] Confirmed task: $($handoff.task_id)" -ForegroundColor Green
     }
 
     $noCodeReviewFix = ($handoff.target_phase -eq "implementation") -and (Test-NoCodeReviewFix -Handoff $handoff -RepoRoot $REPO_ROOT)

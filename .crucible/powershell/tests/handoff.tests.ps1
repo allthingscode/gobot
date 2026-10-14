@@ -38,6 +38,61 @@ $CB_HISTORY_FILE = Join-Path $tempRoot "logs/circuit_breakers.jsonl"
 New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 
 try {
+    $results += Run-Test -Name "Artifact normalization caller parity (TODO item 198)" -Body {
+        $project = Join-Path $tempRoot "project"
+        $worktree = Join-Path $project "workspaces/F-198"
+        $outside = Join-Path $tempRoot "outside.md"
+        New-Item -ItemType Directory -Path (Join-Path $worktree "docs"), (Join-Path $project "docs") -Force | Out-Null
+        foreach ($file in @((Join-Path $worktree "docs/worktree.md"), (Join-Path $project "docs/project.md"), $outside)) {
+            [IO.File]::WriteAllText($file, "fixture", [Text.UTF8Encoding]::new($false))
+        }
+
+        # Execute each caller's normalization section without unrelated handoff I/O.
+        $generatorText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/new-handoff.ps1") -Raw
+        $gatesText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/crucible-gates.ps1") -Raw
+        $start = $generatorText.IndexOf('$resolvedWtPath =')
+        $end = $generatorText.IndexOf('$resolvedArtifacts = $normalizedArtifacts', $start)
+        $generatorCode = [scriptblock]::Create($generatorText.Substring($start, $end - $start))
+        $start = $gatesText.IndexOf('$normalizedArtifacts =', $gatesText.IndexOf('function Normalize-CrucibleInputState'))
+        $end = $gatesText.IndexOf('$originalArtifacts =', $start)
+        $gateCode = [scriptblock]::Create($gatesText.Substring($start, $end - $start))
+        $cases = @(
+            @{ Input = "docs/worktree.md"; Expected = "docs/worktree.md" }
+            @{ Input = "docs/project.md"; Expected = "docs/project.md" }
+            @{ Input = (Join-Path $worktree "docs/worktree.md"); Expected = "docs/worktree.md" }
+            @{ Input = (Join-Path $project "docs/project.md"); Expected = "docs/project.md" }
+            @{ Input = 'docs\worktree.md'; Expected = "docs/worktree.md" }
+            @{ Input = "././docs/worktree.md"; Expected = "docs/worktree.md" }
+            @{ Input = "missing/"; Expected = "missing/" }
+            @{ Input = "docs/"; Expected = "docs/" }
+            @{ Input = $outside; Expected = $outside.Replace("\", "/").TrimStart("/") }
+            @{ Input = "./workspaces/F-198/missing.md"; Expected = "missing.md" }
+            @{ Input = 'workspaces\F-198\missing.md'; Expected = "missing.md" }
+            @{ Input = " "; Expected = $null }
+            @{ Input = "./"; Expected = $null }
+            @{ Input = "./absent.md"; Expected = "absent.md" }
+        )
+        foreach ($case in $cases) {
+            $generatorResult = @(& {
+                $REPO_ROOT = $project
+                $wtPath = $worktree
+                $resolvedArtifacts = @($case.Input)
+                . $generatorCode
+                $normalizedArtifacts
+            })
+            $gateResult = @(& {
+                $repoRoot = $project
+                $wtPath = $worktree
+                $handoff = [pscustomobject]@{ artifacts = @($case.Input) }
+                . $gateCode
+                $normalizedArtifacts
+            })
+            $expected = @($case.Expected | Where-Object { $null -ne $_ })
+            Assert-Result -Name ("caller parity: " + $case.Input) -Condition (($generatorResult -join "|") -ceq ($gateResult -join "|") -and $generatorResult.Count -eq $gateResult.Count) -FailureMessage "callers normalized differently"
+            Assert-Result -Name ("preserved output: " + $case.Input) -Condition (($generatorResult -join "|") -ceq ($expected -join "|") -and $generatorResult.Count -eq $expected.Count) -FailureMessage "normalization behavior changed"
+        }
+    }
+
     $results += Run-Test -Name "Get-HandoffTextForSecurityScan flattens scalar and array fields" -Body {
         $handoff = [PSCustomObject]@{
             reason = "Reason"
