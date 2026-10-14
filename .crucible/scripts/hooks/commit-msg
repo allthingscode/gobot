@@ -28,6 +28,15 @@ FRAMEWORK_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
+# Item 206: this gate is framework-only in Test-FrameworkDevOnlyFile, so installed
+# adopters lack it. An absolute hooksPath may belong to another checkout; run the
+# framework gates from the checkout whose index and files are being checked.
+FRAMEWORK_CONTEXT=""
+if [ -f "$REPO_ROOT/powershell/gates/check-ascii.ps1" ]; then
+    FRAMEWORK_CONTEXT=1
+    FRAMEWORK_ROOT="$REPO_ROOT"
+fi
+
 cd "$REPO_ROOT"
 
 # PowerShell 7+ (pwsh) is required. Do not look up powershell.exe: under WSL, Windows
@@ -113,7 +122,7 @@ echo "--- Crucible commit-msg verification started"
 echo "Running commit message encoding check..."
 "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$FRAMEWORK_ROOT/powershell/gates/check-mojibake.ps1" -MessageFile "$MSG_FILE"
 
-if [ "$REPO_ROOT" != "$FRAMEWORK_ROOT" ]; then
+if [ -z "$FRAMEWORK_CONTEXT" ]; then
     # ADOPTER REPO CONTEXT. Encoding has already run. The assertion gate guards this
     # project's own test suite, does not ship in a bundle, and pre-push already bypasses
     # it for adopters; running it here would judge an adopter's tests by Crucible's

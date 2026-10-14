@@ -16,6 +16,15 @@ FRAMEWORK_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
+# Item 206: this gate is framework-only in Test-FrameworkDevOnlyFile, so installed
+# adopters lack it. An absolute hooksPath may belong to another checkout; run the
+# framework gates from the checkout whose index and files are being checked.
+FRAMEWORK_CONTEXT=""
+if [ -f "$REPO_ROOT/powershell/gates/check-ascii.ps1" ]; then
+    FRAMEWORK_CONTEXT=1
+    FRAMEWORK_ROOT="$REPO_ROOT"
+fi
+
 # Git feeds the push refs to this hook on stdin exactly once. More than one step
 # consumes them, and a second `while read` would reach EOF and silently run nothing -
 # a step that reports success having checked no refs at all. Capture the refs to a
@@ -101,7 +110,7 @@ run_project_hook() {
 
 echo "--- Crucible pre-push verification started"
 
-if [ "$REPO_ROOT" = "$FRAMEWORK_ROOT" ]; then
+if [ -n "$FRAMEWORK_CONTEXT" ]; then
     # FRAMEWORK REPO CONTEXT
     cd "$REPO_ROOT"
 

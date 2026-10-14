@@ -218,7 +218,7 @@ foreach ($mode in @('parallel', 'serial', 'base', 'failure', 'marker', 'bad-mark
         if ($mode -eq 'marker') { Assert-Result -Name 'selected marker runs serially' -Condition ($r.Output -match 'SERIAL alpha.tests.ps1 - synthetic worker') -FailureMessage $r.Output }
         if ($mode -eq 'bad-marker') { Assert-Result -Name 'bad marker fails preflight' -Condition ($r.Output -match 'serial marker gives no reason') -FailureMessage $r.Output }
         Assert-Result -Name 'selection reason printed' -Condition ($r.Output -match 'SELECT alpha.tests.ps1.*Get-Alpha') -FailureMessage $r.Output
-        Assert-Result -Name 'last line requires full suite before commit' -Condition (($r.Output.Trim() -split "`r?`n")[-1] -match 'Partial run.*full suite.*before committing') -FailureMessage $r.Output
+        Assert-Result -Name 'last line requires full suite before push' -Condition (($r.Output.Trim() -split "`r?`n")[-1] -match 'Partial run.*full suite.*Linux leg.*before pushing') -FailureMessage $r.Output
     }
 }
 
@@ -231,7 +231,7 @@ foreach ($change in @($false, $true)) {
         Assert-Result -Name 'explains empty selection' -Condition ($r.Output -match 'No affected test files selected') -FailureMessage $r.Output
         if ($change) { Assert-Result -Name 'names changed file' -Condition ($r.Output -match 'unrelated.txt') -FailureMessage $r.Output }
         Assert-Result -Name 'no synthetic test runs' -Condition (@(Get-ChildItem (Join-Path $root 'powershell/tests') -Filter '*.ran').Count -eq 0) -FailureMessage $r.Output
-        Assert-Result -Name 'last line requires full suite before commit' -Condition (($r.Output.Trim() -split "`r?`n")[-1] -match 'Partial run.*full suite.*before committing') -FailureMessage $r.Output
+        Assert-Result -Name 'last line requires full suite before push' -Condition (($r.Output.Trim() -split "`r?`n")[-1] -match 'Partial run.*full suite.*Linux leg.*before pushing') -FailureMessage $r.Output
     }
 }
 
@@ -240,7 +240,7 @@ $results += Run-Test -Name 'Changed runner reports an invalid base and ends with
     $r = Invoke-SelectionRunner $root @('-Base', 'missing-ref')
     Assert-Result -Name 'invalid base fails' -Condition ($r.ExitCode -eq 1 -and $r.Output -match 'git diff') -FailureMessage $r.Output
     Assert-Result -Name 'no synthetic test runs' -Condition (@(Get-ChildItem (Join-Path $root 'powershell/tests') -Filter '*.ran').Count -eq 0) -FailureMessage $r.Output
-    Assert-Result -Name 'last line requires full suite before commit' -Condition (($r.Output.Trim() -split "`r?`n")[-1] -match 'Partial run.*full suite.*before committing') -FailureMessage $r.Output
+    Assert-Result -Name 'last line requires full suite before push' -Condition (($r.Output.Trim() -split "`r?`n")[-1] -match 'Partial run.*full suite.*Linux leg.*before pushing') -FailureMessage $r.Output
 }
 
 Write-TestFileSummary -Results $results

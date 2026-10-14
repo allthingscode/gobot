@@ -727,6 +727,6 @@ exit $exitCode
         if ($ownsRoot -and $env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
             Remove-Item -LiteralPath $env:CRUCIBLE_TEST_ROOT -Recurse -Force -ErrorAction SilentlyContinue
         }
-        Write-Host 'Partial run: the full suite (no -Changed) is still required before committing.' -ForegroundColor Yellow
+        Write-Host 'Partial run: the full suite (no -Changed) and the Linux leg are still required before pushing.' -ForegroundColor Yellow
     }
 }

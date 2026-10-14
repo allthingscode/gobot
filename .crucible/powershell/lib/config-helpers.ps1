@@ -176,7 +176,6 @@ function Get-ConfigBlockList {
 function Resolve-ConfigProjectRoot {
     param(
         [string]$ProjectRoot = "",
-        [switch]$IgnoreRepoRoot,
         [ValidateSet("Existing", "Always", "None")]
         [string]$PathResolution = "Existing"
     )
@@ -184,7 +183,7 @@ function Resolve-ConfigProjectRoot {
     $root = $ProjectRoot
     if ([string]::IsNullOrWhiteSpace($root)) {
         # Dynamic scope lookup also works when REPO_ROOT is unset under strict mode.
-        $repoRootVar = if (-not $IgnoreRepoRoot) { Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue } else { $null }
+        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
         $root = if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
     }
 
@@ -277,7 +276,7 @@ function Get-ConfiguredReview {
 function Get-ConfiguredProjectHooksDir {
     param([string]$ProjectRoot = "")
 
-    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -IgnoreRepoRoot -PathResolution Always
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -PathResolution Always
 
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath)) { return $null }
@@ -365,7 +364,7 @@ function Get-ConfigFileApprovalMode {
 function Get-ConfiguredApprovalMode {
     param([string]$ProjectRoot = "")
 
-    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -IgnoreRepoRoot -PathResolution None
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -PathResolution None
 
     foreach ($name in @("config.local.yaml", "config.yaml")) {
         $configPath = Join-Path $root (".crucible/" + $name)

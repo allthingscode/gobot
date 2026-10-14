@@ -1,4 +1,4 @@
-# TODO item 196: root precedence and the accessors' existing resolution policies.
+# TODO items 196 and 205: shared root precedence and accessor resolution policies.
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
@@ -29,6 +29,13 @@ hooks:
 orchestration:
   approval: to-gate
 "@
+    New-Item -ItemType Directory -Path (Join-Path $foreign ".crucible"), (Join-Path $foreign "foreign-hooks") -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $foreign ".crucible/config.yaml") -Encoding UTF8 -Value @"
+hooks:
+  project_dir: foreign-hooks
+orchestration:
+  approval: per-phase
+"@
     Push-Location $tempRoot
     try {
         $results += Run-Test -Name "Explicit root wins and existing relative paths resolve" -Body {
@@ -54,7 +61,6 @@ orchestration:
 
         $results += Run-Test -Name "Root policies preserve literal paths and missing-root errors" -Body {
             $REPO_ROOT = $foreign
-            Assert-Result "ignore repo root" ((Resolve-ConfigProjectRoot -IgnoreRepoRoot) -eq $tempRoot) "Ignoring REPO_ROOT must use the current directory."
             Assert-Result "no normalization" ((Resolve-ConfigProjectRoot -ProjectRoot "./project" -PathResolution None) -eq "./project") "None must retain the supplied path."
             Assert-Result "missing root retained" ((Resolve-ConfigProjectRoot -ProjectRoot "./missing") -eq "./missing") "Existing must retain a missing root."
             Assert-Result "always resolves" ((Resolve-ConfigProjectRoot -ProjectRoot "./project" -PathResolution Always) -eq $project) "Always must resolve an existing path."
@@ -72,14 +78,21 @@ orchestration:
             Assert-Result "configured model" ((Get-ConfiguredModel -Target claude -Tier strong) -eq "fixture-model") "Model lookup must retain REPO_ROOT fallback."
         }
 
-        $results += Run-Test -Name "Hooks and approval ignore REPO_ROOT and use the current directory" -Body {
+        $results += Run-Test -Name "Hooks use REPO_ROOT instead of the current directory" -Body {
             $REPO_ROOT = $project
             Push-Location $foreign
             try {
-                Assert-Result "hooks cwd" ($null -eq (Get-ConfiguredProjectHooksDir)) "Hooks must ignore REPO_ROOT."
-                Assert-Result "approval cwd" ((Get-ConfiguredApprovalMode) -eq "per-phase") "Approval must ignore REPO_ROOT."
-                Assert-Result "explicit hooks" ((Get-ConfiguredProjectHooksDir -ProjectRoot $project) -eq (Join-Path $project "hooks")) "Explicit hooks root must win."
-                Assert-Result "explicit approval" ((Get-ConfiguredApprovalMode -ProjectRoot $project) -eq "to-gate") "Explicit approval root must win."
+                Assert-Result "hooks repo root" ((Get-ConfiguredProjectHooksDir) -eq (Join-Path $project "hooks")) "Hooks must read REPO_ROOT's config instead of the current directory's."
+                Assert-Result "explicit hooks" ((Get-ConfiguredProjectHooksDir -ProjectRoot $foreign) -eq (Join-Path $foreign "foreign-hooks")) "Explicit hooks root must win."
+            } finally { Pop-Location }
+        }
+
+        $results += Run-Test -Name "Approval uses REPO_ROOT instead of the current directory" -Body {
+            $REPO_ROOT = $project
+            Push-Location $foreign
+            try {
+                Assert-Result "approval repo root" ((Get-ConfiguredApprovalMode) -eq "to-gate") "Approval must read REPO_ROOT's config instead of the current directory's."
+                Assert-Result "explicit approval" ((Get-ConfiguredApprovalMode -ProjectRoot $foreign) -eq "per-phase") "Explicit approval root must win."
             } finally { Pop-Location }
         }
 
