@@ -1,3 +1,9 @@
+# Declare the moved setup's wrapper dependency without relying on sibling load order. TODO item 197.
+# Requires: Get-ConfiguredPrimaryBranch and Write-Quiet (loaded by crucible-lib.ps1).
+if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "git.ps1")
+}
+
 function Normalize-RepoRelativePath {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
@@ -173,6 +179,90 @@ function Initialize-ImplementationWorktreeHooks {
     } finally {
         $ErrorActionPreference = $prevEAP
         $global:LASTEXITCODE = 0
+    }
+}
+
+function Initialize-ImplementationWorktree {
+    param(
+        [Parameter(Mandatory=$true)][string]$WorktreePath,
+        [Parameter(Mandatory=$true)][string]$TaskId
+    )
+
+    # Prune stale worktrees first
+    Invoke-GitChecked { git worktree prune }
+
+    if (-not (Test-Path $WorktreePath)) {
+        Write-Quiet ("[INIT] Creating git worktree at " + $WorktreePath + "...") -ForegroundColor Yellow
+        $mainBranch = Get-ConfiguredPrimaryBranch
+        $taskBranch = "task/" + $TaskId
+        git show-ref --verify --quiet ("refs/heads/" + $taskBranch)
+        # git worktree add prints "Preparing worktree" to stderr on success; under Windows
+        # PowerShell 5.1 with EAP=Stop that benign stderr becomes a terminating
+        # NativeCommandError and aborts -Init before task.md is written. Invoke-GitChecked
+        # localizes EAP, demotes exit-0 stderr to a notice, and preserves $LASTEXITCODE.
+        if ($LASTEXITCODE -eq 0) {
+            Invoke-GitChecked { git worktree add $WorktreePath $taskBranch }
+        } else {
+            Invoke-GitChecked { git worktree add $WorktreePath -b $taskBranch $mainBranch }
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ("Error: Failed to create implementation worktree at " + $WorktreePath) -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        Write-Quiet ("[INIT] Worktree already exists at $WorktreePath.") -ForegroundColor Cyan
+    }
+    Initialize-ImplementationWorktreeHooks -WorktreePath $WorktreePath
+}
+
+# Keep human-gate worktree side effects with worktree setup. TODO item 197.
+function Remove-ImplementationWorktree {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot
+    )
+
+    $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
+    $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+    if (Test-Path $wtPath) {
+        Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
+        Invoke-GitChecked { git worktree prune }
+        if (Test-Path $wtPath) {
+            try {
+                $null = git worktree remove --force $wtPath 2>$null
+                if (Test-Path $wtPath) {
+                    Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
+                }
+            } catch {
+                if (Test-Path $wtPath) {
+                    Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
+                }
+            }
+        }
+    }
+}
+
+function Restore-ImplementationWorktree {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot
+    )
+
+    # Auto-recreate the implementation worktree from the restored branch
+    $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
+    $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
+
+    # Prune stale worktrees first
+    Invoke-GitChecked { git worktree prune }
+
+    if (-not (Test-Path $wtPath)) {
+        Invoke-GitChecked { git worktree add $wtPath "task/$TaskId" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Warning: Failed to recreate implementation worktree at $wtPath" -ForegroundColor Yellow
+        } else {
+            Initialize-ImplementationWorktreeHooks -WorktreePath $wtPath
+            Write-Quiet "[HUMAN GATE] Recreated implementation worktree at $wtPath"
+        }
     }
 }
 

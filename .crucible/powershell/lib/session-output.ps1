@@ -453,31 +453,7 @@ function Initialize-CrucibleTargetSession {
 
         if ($Init) {
 
-            # Prune stale worktrees first
-            Invoke-GitChecked { git worktree prune }
-
-            if (-not (Test-Path $wtPath)) {
-                Write-Quiet ("[INIT] Creating git worktree at " + $wtPath + "...") -ForegroundColor Yellow
-                $mainBranch = Get-ConfiguredPrimaryBranch
-                $taskBranch = "task/" + $handoff.task_id
-                git show-ref --verify --quiet ("refs/heads/" + $taskBranch)
-                # git worktree add prints "Preparing worktree" to stderr on success; under Windows
-                # PowerShell 5.1 with EAP=Stop that benign stderr becomes a terminating
-                # NativeCommandError and aborts -Init before task.md is written. Invoke-GitChecked
-                # localizes EAP, demotes exit-0 stderr to a notice, and preserves $LASTEXITCODE.
-                if ($LASTEXITCODE -eq 0) {
-                    Invoke-GitChecked { git worktree add $wtPath $taskBranch }
-                } else {
-                    Invoke-GitChecked { git worktree add $wtPath -b $taskBranch $mainBranch }
-                }
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host ("Error: Failed to create implementation worktree at " + $wtPath) -ForegroundColor Red
-                    exit 1
-                }
-            } else {
-                Write-Quiet ("[INIT] Worktree already exists at $wtPath.") -ForegroundColor Cyan
-            }
-            Initialize-ImplementationWorktreeHooks -WorktreePath $wtPath
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId $handoff.task_id
 
             # Create task-scoped session directory
             $archSessionDir = if (-not [string]::IsNullOrEmpty($TaskId)) {

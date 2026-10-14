@@ -506,8 +506,10 @@ Spec body
         # Binds the call site cross-platform: the suite drives -Init via pwsh-7 child processes,
         # which do not reproduce the PS 5.1 NativeCommandError-on-stderr behavior, so a revert to a
         # bare `git worktree add` would silently pass the runtime test above. This static guard fails
-        # on any unwrapped worktree-add line in session-output.ps1.
-        $src = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/session-output.ps1")
+        # on any unwrapped worktree-add line, including setup moved for TODO item 197.
+        $src = foreach ($relativePath in @("powershell/lib/session-output.ps1", "powershell/lib/worktree.ps1")) {
+            Get-Content -LiteralPath (Join-Path $REPO_ROOT $relativePath)
+        }
         $bare = @($src | Where-Object { $_ -match 'git worktree add' -and $_ -notmatch 'Invoke-GitChecked' -and $_.TrimStart() -notmatch '^#' })
         Assert-Result -Name "no unwrapped worktree add" -Condition ($bare.Count -eq 0) -FailureMessage ("found bare git worktree add line(s): " + ($bare -join " | "))
     }

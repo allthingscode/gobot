@@ -17,7 +17,205 @@ $results = @()
 
 $tempRoot = New-TestFixtureRoot -NameHint "worktree-test"
 
+function New-ImplementationWorktreeTestRepo {
+    param([string]$Name)
+    $repoPath = Join-Path $tempRoot $Name
+    New-Item -ItemType Directory -Path $repoPath -Force | Out-Null
+    git -C $repoPath init -b main --quiet
+    git -C $repoPath config user.name "Test"
+    git -C $repoPath config user.email "test@test.com"
+    [System.IO.File]::WriteAllText((Join-Path $repoPath "README.md"), "fixture`n", [System.Text.UTF8Encoding]::new($false))
+    git -C $repoPath add README.md
+    git -C $repoPath commit -m "initial" --quiet
+    return $repoPath
+}
+
+function New-HumanGateWorktreeTestRepo {
+    param([string]$Name)
+    $repoPath = New-ImplementationWorktreeTestRepo -Name $Name
+    $configDir = Join-Path $repoPath ".crucible"
+    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $configDir "config.yaml"), "paths:`n  workspaces: workspaces`n", [System.Text.UTF8Encoding]::new($false))
+    return $repoPath
+}
+
 try {
+    # Exercise the moved human-gate operations against disposable repos. TODO item 197.
+    $results += Run-Test -Name "Remove-ImplementationWorktree removes an existing worktree" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "remove-repo"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-197-remove"
+        $oldQuiet = $script:Quiet
+        Push-Location $repoPath
+        try {
+            git worktree add $wtPath -b task/F-197-remove main 2>$null | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $wtPath "untracked.txt"), "force removal`n", [System.Text.UTF8Encoding]::new($false))
+            $script:Quiet = $false
+            $output = & { Remove-ImplementationWorktree -TaskId "F-197-remove" -ProjectRoot $repoPath } 6>&1 | Out-String
+            Assert-Result -Name "removal message" -Condition ($output.Trim() -eq "[HUMAN GATE] Removing implementation worktree at $wtPath...") -FailureMessage $output
+            Assert-Result -Name "worktree removed despite untracked file" -Condition (-not (Test-Path -LiteralPath $wtPath)) -FailureMessage "implementation worktree remains"
+            Assert-Result -Name "worktree registration removed" -Condition ((git worktree list --porcelain | Out-String) -notmatch 'implementation-F-197-remove') -FailureMessage "worktree is still registered"
+            git show-ref --verify --quiet refs/heads/task/F-197-remove
+            Assert-Result -Name "task branch retained for the gate" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "helper deleted the task branch"
+        } finally {
+            $script:Quiet = $oldQuiet
+            Pop-Location
+        }
+    }
+
+    $results += Run-Test -Name "Remove-ImplementationWorktree does nothing when absent" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "remove-absent-repo"
+        $oldQuiet = $script:Quiet
+        Push-Location $repoPath
+        try {
+            # A stale registration proves an absent target does not even prune.
+            $stalePath = Join-Path $repoPath "stale"
+            git worktree add $stalePath -b task/stale main 2>$null | Out-Null
+            Remove-Item -LiteralPath $stalePath -Recurse -Force
+            $script:Quiet = $false
+            $output = & { Remove-ImplementationWorktree -TaskId "F-197-absent" -ProjectRoot $repoPath } 6>&1 | Out-String
+            Assert-Result -Name "absent removal is silent" -Condition ([string]::IsNullOrWhiteSpace($output)) -FailureMessage $output
+            Assert-Result -Name "absent removal leaves stale registration" -Condition ((git worktree list --porcelain | Out-String) -match 'refs/heads/task/stale') -FailureMessage "absent removal pruned worktrees"
+        } finally {
+            $script:Quiet = $oldQuiet
+            Pop-Location
+        }
+    }
+
+    $results += Run-Test -Name "Remove-ImplementationWorktree warns when locked even in Quiet mode" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "remove-locked-repo"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-197-locked"
+        Push-Location $repoPath
+        try {
+            git worktree add $wtPath -b task/F-197-locked main 2>$null | Out-Null
+            git worktree lock $wtPath
+            $output = & { Remove-ImplementationWorktree -TaskId "F-197-locked" -ProjectRoot $repoPath } 6>&1 | Out-String
+            Assert-Result -Name "locked worktree retained" -Condition (Test-Path -LiteralPath $wtPath) -FailureMessage "locked worktree was removed"
+            Assert-Result -Name "locked warning" -Condition ($output.Trim() -eq "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it.") -FailureMessage $output
+        } finally {
+            git worktree unlock $wtPath
+            Pop-Location
+        }
+    }
+
+    $results += Run-Test -Name "Restore-ImplementationWorktree recreates an existing branch with hooks initialized" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "restore-repo"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-197-restore"
+        $oldQuiet = $script:Quiet
+        $initializeHooks = (Get-Command Initialize-ImplementationWorktreeHooks).ScriptBlock
+        $hookPaths = [System.Collections.Generic.List[string]]::new()
+        # Seed a legacy override at initialization so calling the real installer is observable.
+        function Initialize-ImplementationWorktreeHooks {
+            param($WorktreePath)
+            $hookPaths.Add($WorktreePath)
+            git -C $WorktreePath config --worktree core.hooksPath scripts/hooks/architect
+            & $initializeHooks -WorktreePath $WorktreePath
+        }
+        Push-Location $repoPath
+        try {
+            git branch task/F-197-restore main
+            git config extensions.worktreeConfig true
+            git config core.hooksPath scripts/hooks
+            $script:Quiet = $false
+            $output = & { Restore-ImplementationWorktree -TaskId "F-197-restore" -ProjectRoot $repoPath } 6>&1 | Out-String
+            Assert-Result -Name "restored branch checked out" -Condition ((git -C $wtPath branch --show-current) -eq "task/F-197-restore") -FailureMessage "wrong branch was recreated"
+            Assert-Result -Name "restored checkout exists" -Condition (Test-Path -LiteralPath (Join-Path $wtPath "README.md")) -FailureMessage "worktree was not checked out"
+            Assert-Result -Name "restored worktree hook installer called" -Condition ($hookPaths.Count -eq 1 -and $hookPaths[0] -eq $wtPath) -FailureMessage "hook installer was not called once for the recreated worktree"
+            Assert-Result -Name "restored worktree hooks initialized" -Condition ([string]::IsNullOrWhiteSpace((git -C $wtPath config --worktree --get core.hooksPath))) -FailureMessage "legacy hook override remains"
+            Assert-Result -Name "restored worktree uses shared hooks" -Condition ((git -C $wtPath config --get core.hooksPath) -eq "scripts/hooks") -FailureMessage "worktree does not use the shared hook path"
+            Assert-Result -Name "recreation message" -Condition ($output -match [regex]::Escape("[HUMAN GATE] Recreated implementation worktree at $wtPath")) -FailureMessage $output
+        } finally {
+            $script:Quiet = $oldQuiet
+            Pop-Location
+        }
+    }
+
+    $results += Run-Test -Name "Restore-ImplementationWorktree leaves an existing worktree alone" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "restore-existing-repo"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-197-existing"
+        $oldQuiet = $script:Quiet
+        Push-Location $repoPath
+        try {
+            git worktree add $wtPath -b task/F-197-existing main 2>$null | Out-Null
+            git config extensions.worktreeConfig true
+            git -C $wtPath config --worktree core.hooksPath scripts/hooks/architect
+            $script:Quiet = $false
+            $output = & { Restore-ImplementationWorktree -TaskId "F-197-existing" -ProjectRoot $repoPath } 6>&1 | Out-String
+            Assert-Result -Name "existing recreation is silent" -Condition ([string]::IsNullOrWhiteSpace($output)) -FailureMessage $output
+            Assert-Result -Name "existing recreation skips hook initialization" -Condition ((git -C $wtPath config --worktree --get core.hooksPath) -eq "scripts/hooks/architect") -FailureMessage "existing worktree hook override was changed"
+        } finally {
+            $script:Quiet = $oldQuiet
+            Pop-Location
+        }
+    }
+
+    $results += Run-Test -Name "Restore-ImplementationWorktree warns when branch is missing" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "restore-failure-repo"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-197-missing"
+        Push-Location $repoPath
+        try {
+            $output = & { Restore-ImplementationWorktree -TaskId "F-197-missing" -ProjectRoot $repoPath } 6>&1 | Out-String
+            Assert-Result -Name "failed recreation warns in Quiet mode" -Condition ($output -match [regex]::Escape("Warning: Failed to recreate implementation worktree at $wtPath")) -FailureMessage $output
+            Assert-Result -Name "failed recreation has no success message" -Condition ($output -notmatch 'Recreated implementation worktree') -FailureMessage $output
+            Assert-Result -Name "failed recreation leaves no worktree" -Condition (-not (Test-Path -LiteralPath $wtPath)) -FailureMessage "worktree unexpectedly exists"
+            Assert-Result -Name "failed recreation preserves exit code" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "failed git exit code was cleared"
+        } finally { Pop-Location }
+    }
+
+    # Exercise the moved setup directly, including both branch paths and reruns. TODO item 197.
+    $results += Run-Test -Name "Initialize-ImplementationWorktree creates a new task branch" -Body {
+        $repoPath = New-ImplementationWorktreeTestRepo -Name "new-task-repo"
+        $REPO_ROOT = $repoPath
+        $wtPath = Join-Path $tempRoot "implementation-F-197-new"
+        Push-Location $repoPath
+        try {
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-new" | Out-Null
+            Assert-Result -Name "new worktree exists" -Condition (Test-Path -LiteralPath (Join-Path $wtPath "README.md")) -FailureMessage "worktree was not checked out"
+            Assert-Result -Name "new task branch checked out" -Condition ((git -C $wtPath branch --show-current) -eq "task/F-197-new") -FailureMessage "wrong worktree branch"
+            Assert-Result -Name "new task branch starts at primary" -Condition ((git -C $wtPath rev-parse HEAD) -eq (git rev-parse main)) -FailureMessage "task branch did not start at main"
+        } finally { Pop-Location }
+    }
+
+    $results += Run-Test -Name "Initialize-ImplementationWorktree reuses an existing task branch" -Body {
+        $repoPath = New-ImplementationWorktreeTestRepo -Name "existing-task-repo"
+        $REPO_ROOT = $repoPath
+        $wtPath = Join-Path $tempRoot "implementation-F-197-reuse"
+        Push-Location $repoPath
+        try {
+            git checkout -b task/F-197-reuse --quiet
+            [System.IO.File]::WriteAllText((Join-Path $repoPath "task.txt"), "existing task work`n", [System.Text.UTF8Encoding]::new($false))
+            git add task.txt
+            git commit -m "task work" --quiet
+            $taskHead = git rev-parse HEAD
+            git checkout main --quiet
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-reuse" | Out-Null
+            Assert-Result -Name "existing task branch checked out" -Condition ((git -C $wtPath branch --show-current) -eq "task/F-197-reuse") -FailureMessage "wrong worktree branch"
+            Assert-Result -Name "existing task commit retained" -Condition ((git -C $wtPath rev-parse HEAD) -eq $taskHead -and (Test-Path -LiteralPath (Join-Path $wtPath "task.txt"))) -FailureMessage "existing task branch was reset"
+        } finally { Pop-Location }
+    }
+
+    $results += Run-Test -Name "Initialize-ImplementationWorktree reports an existing worktree" -Body {
+        $repoPath = New-ImplementationWorktreeTestRepo -Name "existing-worktree-repo"
+        $REPO_ROOT = $repoPath
+        $wtPath = Join-Path $tempRoot "implementation-F-197-exists"
+        $oldQuiet = $script:Quiet
+        Push-Location $repoPath
+        try {
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-exists" | Out-Null
+            git config extensions.worktreeConfig true
+            git -C $wtPath config --worktree core.hooksPath scripts/hooks/architect
+            $script:Quiet = $false
+            $output = & { Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-exists" } 6>&1 | Out-String
+            Assert-Result -Name "existing worktree message" -Condition ($output.Trim() -eq "[INIT] Worktree already exists at $wtPath.") -FailureMessage $output
+            Assert-Result -Name "existing worktree hooks initialized" -Condition ([string]::IsNullOrWhiteSpace((git -C $wtPath config --worktree --get core.hooksPath))) -FailureMessage "legacy hook override remains"
+            $script:Quiet = $true
+            $quietOutput = & { Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-exists" } 6>&1 | Out-String
+            Assert-Result -Name "existing worktree message respects Quiet" -Condition ([string]::IsNullOrWhiteSpace($quietOutput)) -FailureMessage $quietOutput
+        } finally {
+            $script:Quiet = $oldQuiet
+            Pop-Location
+        }
+    }
+
     $results += Run-Test -Name "Normalize-RepoRelativePath normalizes separators and prefixes" -Body {
         Assert-Result -Name "backslashes" -Condition ((Normalize-RepoRelativePath -Path ".\src\app.ps1") -eq "src/app.ps1") -FailureMessage "backslashes or leading ./ were not normalized"
         Assert-Result -Name "leading slash" -Condition ((Normalize-RepoRelativePath -Path "/tests/unit.ps1") -eq "tests/unit.ps1") -FailureMessage "leading slash was not stripped"

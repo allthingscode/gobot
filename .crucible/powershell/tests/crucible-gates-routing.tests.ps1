@@ -74,6 +74,66 @@ function New-TestContext {
 }
 $tempRoot = New-TestFixtureRoot -NameHint "crucible-gates-routing-test"
 try {
+    foreach ($case in @("accept", "abandon-active", "abandon-archived")) {
+        $results += Run-Test -Name ("Missing archive library: " + $case) -Body {
+            $root = Join-Path $tempRoot $case
+            $libDir = Join-Path $root "lib"
+            $state = if ($case -eq "abandon-archived") { "archived" } else { "active" }
+            $spec = Join-Path $root "backlog/features/$state/F-197.md"
+            $backlog = Join-Path $root "backlog/BACKLOG.md"
+            $utf8 = [System.Text.UTF8Encoding]::new($false)
+            New-Item -ItemType Directory -Path $libDir, (Split-Path -Parent $spec), (Join-Path $root ".crucible") -Force | Out-Null
+            # Copy the gate and its dependencies, omitting the missing library.
+            Get-ChildItem -LiteralPath (Join-Path $REPO_ROOT "powershell/lib") -Filter "*.ps1" |
+                Where-Object { $_.Name -ne "archive-task.ps1" } |
+                Copy-Item -Destination $libDir
+            [System.IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), "paths:`n  backlog: backlog`n", $utf8)
+            [System.IO.File]::WriteAllText($spec, "---`nitem_id: F-197`nstatus: Production`n---`n", $utf8)
+            [System.IO.File]::WriteAllText($backlog, "| ID | Status |`n| --- | --- |`n| [F-197](features/$state/F-197.md) | Production |`n", $utf8)
+            # The legacy repair can use already-loaded status helpers even if the file
+            # is gone. Load only those helpers, leaving both moved actions unavailable.
+            $archiveAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT "powershell/lib/archive-task.ps1"), [ref]$null, [ref]$null)
+            $helpers = $archiveAst.FindAll({ param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -in @("Set-BacklogSpecFrontmatterStatus", "Get-MarkdownTableStatusColumn")
+            }, $false)
+            [System.IO.File]::WriteAllText((Join-Path $libDir "status-helpers.ps1"), (($helpers | ForEach-Object { $_.Extent.Text }) -join "`n"), $utf8)
+            $child = Join-Path $root "check.ps1"
+            $childText = @'
+param($Root, $Case)
+$ErrorActionPreference = "Stop"
+. (Join-Path $Root "lib/crucible-gates.ps1")
+if ($Case -eq "abandon-archived") { . (Join-Path $Root "lib/status-helpers.ps1") }
+# Stop after the backlog step so no merge, push or session work is needed.
+function git { $global:LASTEXITCODE = 1 }
+function Invoke-GitChecked { throw "REACHED_AFTER_BACKLOG" }
+try {
+    if ($Case -eq "accept") {
+        Invoke-HumanGateAcceptRedirect -TaskId "F-197" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl")
+    } else {
+        Invoke-HumanGateRejectAbandon -TaskId "F-197" -Outcome "abandoned" -ProjectRoot $Root -PrimaryBranch "master"
+    }
+    throw "Gate unexpectedly completed"
+} catch {
+    $expected = if ($Case -eq "accept") { "archive-task helper not found at " + (Join-Path $Root "lib/archive-task.ps1") } else { "REACHED_AFTER_BACKLOG" }
+    if ($_.Exception.Message -ne $expected) { throw }
+    Write-Host "EXPECTED: $expected"
+}
+'@
+            [System.IO.File]::WriteAllText($child, $childText, $utf8)
+            $output = @(& $pwshCmd -NoProfile -File $child -Root $root -Case $case 2>&1)
+            Assert-Result "missing-library gate behavior preserved" ($LASTEXITCODE -eq 0) ($output -join "`n")
+            Assert-Result "spec stays in its original directory" (Test-Path -LiteralPath $spec) "expected no archival move"
+            if ($case -eq "abandon-archived") {
+                Assert-Result "missing-library legacy repair updates frontmatter" ((Get-Content -LiteralPath $spec -Raw) -match 'status: "Abandoned"') "expected Abandoned frontmatter"
+                Assert-Result "missing-library legacy repair updates row" ((Get-Content -LiteralPath $backlog -Raw) -match '\| Abandoned \|') "expected Abandoned row"
+            } else {
+                Assert-Result "missing-library active spec is untouched" ((Get-Content -LiteralPath $spec -Raw) -match 'status: Production') "expected unchanged frontmatter"
+                Assert-Result "missing-library active row is untouched" ((Get-Content -LiteralPath $backlog -Raw) -match '\| Production \|') "expected unchanged row"
+            }
+        }
+    }
+
     $results += Run-Test -Name "Resolve-CrucibleTransition handles valid and invalid transitions" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "routing-gates") -TaskId "F-006"
 
@@ -343,7 +403,7 @@ try {
         # The gate is the only finalizer, so a correct run must not report finalization as a
         # skipped step or a fallback. TODO item 132.
         Assert-Result -Name "D44: finalization is reported as the expected step" -Condition ($output -match '\[D44\] Finalizing task C-999 at the human gate' -and $output -notmatch '(?i)fallback|not explicitly finalized') -FailureMessage ("expected the D44 finalizing line without fallback wording. Output: " + $output)
-        $gateSource = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/crucible-gates.ps1") -Raw -Encoding UTF8
+        $gateSource = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/backlog-io.ps1") -Raw -Encoding UTF8
         Assert-Result -Name "D44: finalizing line is not in warning color" -Condition ($gateSource -match '\[D44\] Finalizing task [^\r\n]*-ForegroundColor Cyan') -FailureMessage "expected the D44 finalizing Write-Host to use -ForegroundColor Cyan"
 
         # Verify task is now finalized
