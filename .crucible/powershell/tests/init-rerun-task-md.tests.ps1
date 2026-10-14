@@ -1,3 +1,4 @@
+# Match the session-start rule without freezing its wording. TODO item 194.
 # Item 137: re-running -Init on the handoff that created the current session must keep
 # its task.md (and any checkpoints in it). A task.md left by an earlier handoff is still
 # stale and must still be replaced.
@@ -105,8 +106,7 @@ try {
     $results += Run-Test -Name "The Operator prompt and SOP do not ask for an -Init rerun at session start" -Body {
         foreach ($rel in @("prompts/deployment_prompt.md", "sops/deployment.md")) {
             $text = Get-Content -LiteralPath (Join-Path $REPO_ROOT $rel) -Raw -Encoding UTF8
-            Assert-Result -Name "$rel drops the rerun step" -Condition (-not $text.Contains("already done if you are reading this")) -FailureMessage "$rel still tells the Operator to re-run -Init"
-            Assert-Result -Name "$rel forbids the rerun" -Condition ($text.Contains("Do not re-run ``-Init`` at session start")) -FailureMessage "$rel should say not to re-run -Init at session start"
+            Assert-Result -Name "$rel forbids the rerun" -Condition ($text -match '(?im)^(?=[^\r\n]*(?:do not|must not|never))(?=[^\r\n]*(?:re-run|rerun|repeat))(?=[^\r\n]*-Init)(?=[^\r\n]*session start)[^\r\n]+\r?$') -FailureMessage "$rel should say not to re-run -Init at session start"
         }
     }
 

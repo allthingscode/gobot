@@ -1,3 +1,4 @@
+# Match generated prompt rules without freezing their wording. TODO item 194.
 # Unit tests for record-research-gate.ps1: the post-Research-Gate continuation helper that
 # records a human gate decision and generates a self-contained gate-filing.md so a
 # re-dispatched Researcher files the approved stubs instead of re-presenting the gate.
@@ -33,7 +34,7 @@ try {
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         Assert-Result "names approved C-350" ($body -match "C-350") "approved item C-350 not listed"
         Assert-Result "names approved C-351" ($body -match "C-351") "approved item C-351 not listed"
-        Assert-Result "forbids re-audit" ($body -match "Do NOT re-run the audit") "missing the do-not-re-audit directive"
+        Assert-Result "forbids re-audit" ($body -match '(?im)^(?=[^\r\n]*(?:do not|must not|never))(?=[^\r\n]*(?:re-run|repeat))(?=[^\r\n]*audit)[^\r\n]+\r?$') "missing the do-not-re-audit directive"
         Assert-Result "instructs handoff" ($body -match "new-handoff\.ps1") "missing the handoff instruction"
         Assert-Result "passes HumanApproved" ($body -match "-HumanApproved") "handoff command should record HumanApproved"
     }
@@ -80,10 +81,10 @@ try {
             $body = Get-Content -LiteralPath $p.GateFiling -Raw
             $sentences = @(($body -replace "\s+", " ") -split "(?<=[.:;])\s+")
             foreach ($status in $terminal) {
-                $offending = @($sentences | Where-Object { $_ -match "\b$status\b" -and $_ -notmatch "Do NOT" })
+                $offending = @($sentences | Where-Object { $_ -match "\b$status\b" -and $_ -notmatch '(?i)\b(?:do not|must not|never)\b' })
                 Assert-Result "$($case.Name): no instruction to set $status" ($offending.Count -eq 0) ("gate-filing tells the Researcher to set " + $status + ": " + ($offending -join " | "))
             }
-            Assert-Result "$($case.Name): says to leave the parent status" ($body -match "Leave $($p.TaskId)'s own status as it is") "gate-filing should tell the Researcher to leave the parent status alone"
+            Assert-Result "$($case.Name): says to leave the parent status" ($body -match ('(?im)^(?=[^\r\n]*' + [regex]::Escape($p.TaskId) + ')(?=[^\r\n]*status)(?=[^\r\n]*(?:leave|keep))(?=[^\r\n]*(?:as it is|unchanged|alone))[^\r\n]+\r?$')) "gate-filing should tell the Researcher to leave the parent status alone"
         }
     }
 

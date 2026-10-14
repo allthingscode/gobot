@@ -173,6 +173,29 @@ function Get-ConfigBlockList {
     return $items
 }
 
+function Resolve-ConfigProjectRoot {
+    param(
+        [string]$ProjectRoot = "",
+        [switch]$IgnoreRepoRoot,
+        [ValidateSet("Existing", "Always", "None")]
+        [string]$PathResolution = "Existing"
+    )
+
+    $root = $ProjectRoot
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        # Dynamic scope lookup also works when REPO_ROOT is unset under strict mode.
+        $repoRootVar = if (-not $IgnoreRepoRoot) { Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue } else { $null }
+        $root = if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
+    }
+
+    if ($PathResolution -eq "Existing" -and $root -and (Test-Path -LiteralPath $root)) {
+        $root = (Resolve-Path -LiteralPath $root).Path
+    }
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+    if ($PathResolution -eq "Always") { $root = (Resolve-Path -LiteralPath $root).Path }
+    return $root
+}
+
 function Get-ConfiguredPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -181,29 +204,7 @@ function Get-ConfiguredPath {
         [string]$ProjectRoot = ""
     )
 
-    # 1. Resolve Project Root
-    $root = ""
-    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        $root = $ProjectRoot
-    } else {
-        # Safely query variables under strict mode using dynamic scope search
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        if ($null -ne $repoRootVar) {
-            $root = $repoRootVar.Value
-        } else {
-            $root = (Get-Location).Path
-        }
-    }
-
-    if ($root -and (Test-Path -LiteralPath $root)) {
-        $root = (Resolve-Path -LiteralPath $root).Path
-    }
-
-    # If root is still empty, fall back to current location
-    if ([string]::IsNullOrWhiteSpace($root)) {
-        $root = (Get-Location).Path
-    }
-
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
     $configPath = Join-Path $root ".crucible/config.yaml"
     
     # Defaults
@@ -255,27 +256,7 @@ function Get-ConfiguredReview {
         [string]$ProjectRoot = ""
     )
 
-    # 1. Resolve Project Root
-    $root = ""
-    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        $root = $ProjectRoot
-    } else {
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        if ($null -ne $repoRootVar) {
-            $root = $repoRootVar.Value
-        } else {
-            $root = (Get-Location).Path
-        }
-    }
-
-    if ($root -and (Test-Path -LiteralPath $root)) {
-        $root = (Resolve-Path -LiteralPath $root).Path
-    }
-
-    if ([string]::IsNullOrWhiteSpace($root)) {
-        $root = (Get-Location).Path
-    }
-
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (Test-Path -LiteralPath $configPath) {
         $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
@@ -296,9 +277,7 @@ function Get-ConfiguredReview {
 function Get-ConfiguredProjectHooksDir {
     param([string]$ProjectRoot = "")
 
-    $root = $ProjectRoot
-    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
-    $root = (Resolve-Path -LiteralPath $root).Path
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -IgnoreRepoRoot -PathResolution Always
 
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath)) { return $null }
@@ -342,11 +321,7 @@ function Resolve-ProjectHooksDirValue {
 function Get-ConfiguredPrimaryBranch {
     param([string]$ProjectRoot = "")
 
-    $root = $ProjectRoot
-    if ([string]::IsNullOrWhiteSpace($root)) {
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        $root = if ($null -ne $repoRootVar -and -not [string]::IsNullOrWhiteSpace($repoRootVar.Value)) { $repoRootVar.Value } else { (Get-Location).Path }
-    }
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -PathResolution None
 
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (Test-Path -LiteralPath $configPath) {
@@ -390,8 +365,7 @@ function Get-ConfigFileApprovalMode {
 function Get-ConfiguredApprovalMode {
     param([string]$ProjectRoot = "")
 
-    $root = $ProjectRoot
-    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -IgnoreRepoRoot -PathResolution None
 
     foreach ($name in @("config.local.yaml", "config.yaml")) {
         $configPath = Join-Path $root (".crucible/" + $name)
@@ -407,26 +381,7 @@ function Get-ConfiguredManifestFiles {
         [string]$ProjectRoot = ""
     )
 
-    $root = ""
-    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        $root = $ProjectRoot
-    } else {
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        if ($null -ne $repoRootVar) {
-            $root = $repoRootVar.Value
-        } else {
-            $root = (Get-Location).Path
-        }
-    }
-
-    if ($root -and (Test-Path -LiteralPath $root)) {
-        $root = (Resolve-Path -LiteralPath $root).Path
-    }
-
-    if ([string]::IsNullOrWhiteSpace($root)) {
-        $root = (Get-Location).Path
-    }
-
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath)) {
         return @()
@@ -573,15 +528,7 @@ function Get-CodexLevel {
 function Get-ProjectConfigFile {
     param([string]$ProjectRoot = "")
 
-    $root = ""
-    if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        $root = $ProjectRoot
-    } else {
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        if ($null -ne $repoRootVar) { $root = $repoRootVar.Value } else { $root = (Get-Location).Path }
-    }
-    if ($root -and (Test-Path -LiteralPath $root)) { $root = (Resolve-Path -LiteralPath $root).Path }
-    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath)) { return "" }

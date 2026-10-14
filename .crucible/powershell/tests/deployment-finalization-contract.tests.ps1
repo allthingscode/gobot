@@ -1,3 +1,4 @@
+# Match rule terms without freezing editorial wording. TODO item 194.
 # Tests that the deployment instructions agree with what the gates actually enforce.
 #
 # The gates are a matched pair keyed on whether a human has decided (crucible-gates.ps1):
@@ -39,7 +40,7 @@ $operatorDocs = @(
     @{ Name = "docs/operating-manual.md";      Path = "docs/operating-manual.md" }
 )
 
-$prohibition = 'Do NOT run `archive-task.ps1`'
+$prohibition = '(?i)(?:do not|must not|never)\s+(?:run|invoke|execute)\s+`?archive-task\.ps1'
 
 foreach ($doc in $operatorDocs) {
     $docName = $doc.Name
@@ -51,7 +52,7 @@ foreach ($doc in $operatorDocs) {
     # Operator to finalize - would have passed both halves of it.
     $results += Run-Test -Name "$docName does not instruct the Operator to run archive-task.ps1" -Body {
         $offending = @(($docText -split "`n") | Where-Object {
-            $_ -match '\barchive-task\.ps1\b' -and $_ -notmatch [regex]::Escape($prohibition)
+            $_ -match '\barchive-task\.ps1\b' -and $_ -notmatch $prohibition
         })
         Assert-Result -Name "$docName leaves finalization to the gate" `
             -Condition ($offending.Count -eq 0) `
@@ -62,7 +63,7 @@ foreach ($doc in $operatorDocs) {
     # old SOP needs to be told to stop, not left without an instruction.
     $results += Run-Test -Name "$docName tells the Operator not to finalize" -Body {
         Assert-Result -Name "$docName states the prohibition" `
-            -Condition ($docText.Contains($prohibition)) `
+            -Condition ($docText -match $prohibition) `
             -FailureMessage "$docName should explicitly tell the Operator not to finalize"
     }.GetNewClosure()
 }

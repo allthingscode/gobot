@@ -26,6 +26,28 @@ switch ($mode) {
         [Console]::Error.WriteLine("orchestrator_helper_launch_failed: program not found")
         exit 1
     }
+    { $_ -in @("usagelimit", "usagelimitstraight") } {
+        $apos = if ($mode -eq "usagelimit") { [string][char]0x2019 } else { "'" }
+        Write-Output "fake codex working"
+        [Console]::Error.WriteLine("ERROR: You" + $apos + "ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 11:37 PM.")
+        exit 1
+    }
+    "usagelimitnotime" {
+        [Console]::Error.WriteLine("ERROR: You've hit your usage limit. Upgrade to Pro.")
+        exit 1
+    }
+    "usagelimitquoted" {
+        # The phrase appears early (agent tool output) but the run then fails for another reason.
+        Write-Output "grep hit: You've hit your usage limit. try again at 1:00 AM."
+        for ($n = 0; $n -lt 200; $n++) { Write-Output "padding line $n to push the quoted phrase out of the transcript tail" }
+        Write-Output "ERROR: something else went wrong"
+        exit 1
+    }
+    "genericfail" {
+        Write-Output "fake codex working"
+        [Console]::Error.WriteLine("ERROR: something else went wrong")
+        exit 1
+    }
     "empty" {
         Write-Output "fake codex ran CRUCIBLE_OK"
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, "", $enc) }
@@ -395,6 +417,51 @@ try {
         Assert-Result -Name "infrastructure reason" -Condition ($res.Output -match "infrastructure failure") -FailureMessage "expected infrastructure-failure reason. Output:`n$($res.Output)"
         Assert-Result -Name "not a verdict" -Condition ($res.Output -match "NOT a review verdict") -FailureMessage "expected explicit not-a-verdict guard. Output:`n$($res.Output)"
         Assert-Result -Name "exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode)."
+    }
+
+    $results += Run-Test -Name "A usage-limit stop reports USAGE_LIMIT with the reset time (item 203)" -Body {
+        # Regression: three parallel dispatches stopped on the account usage limit and the
+        # launcher reported LAUNCH_FAILED, sending the orchestrator to debug a healthy runtime.
+        $i = 0
+        foreach ($mode in @("usagelimit", "usagelimitstraight")) {
+            $i++
+            $projectRoot = Join-Path $tempRoot ("proj-usage-limit-" + $i)
+            New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+            $res = Invoke-Launcher -Mode $mode -BinDir $binDir -LauncherArgs @(
+                "-TaskId", "C-96$i", "-Phase", "implementation", "-Model", "gpt-6-sol",
+                "-PromptText", "IMPLEMENT", "-ProjectRoot", $projectRoot)
+            Assert-Result -Name "$mode status usage_limit" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=USAGE_LIMIT") -FailureMessage "expected USAGE_LIMIT. Output:`n$($res.Output)"
+            Assert-Result -Name "$mode not launch_failed" -Condition (-not ($res.Output -match "STATUS=LAUNCH_FAILED")) -FailureMessage "must not report LAUNCH_FAILED. Output:`n$($res.Output)"
+            Assert-Result -Name "$mode reset time shown" -Condition ($res.Output -match "resets: 11:37 PM(\r?\n|$)") -FailureMessage "expected the reset time. Output:`n$($res.Output)"
+            Assert-Result -Name "$mode exit 5" -Condition ($res.ExitCode -eq 5) -FailureMessage "expected exit 5, got $($res.ExitCode). Output:`n$($res.Output)"
+            Assert-Result -Name "$mode retry buffer shown" -Condition ($res.Output -match "retry_not_before: 11:38 PM(\r?\n|$)" -and $res.Output -match "do not relaunch or rerun before 11:38 PM") -FailureMessage "expected reset + 1 minute (11:38 PM). Output:`n$($res.Output)"
+            $statusText = [System.IO.File]::ReadAllText((Join-Path $projectRoot ".crucible/session/C-96$i/implementation/codex-launch-status.txt"))
+            Assert-Result -Name "$mode status file" -Condition ($statusText.StartsWith("STATUS=USAGE_LIMIT") -and $statusText -match "resets: 11:37 PM") -FailureMessage "expected USAGE_LIMIT and the reset time in the status file, saw: $statusText"
+            Assert-Result -Name "$mode status file retry buffer" -Condition ($statusText -match "retry_not_before: 11:38 PM") -FailureMessage "expected retry_not_before: 11:38 PM in the status file, saw: $statusText"
+        }
+    }
+
+    $results += Run-Test -Name "A usage-limit stop with no reset time still reports USAGE_LIMIT and a retry rule (item 203)" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-usage-limit-notime"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "usagelimitnotime" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-958", "-Phase", "implementation", "-Model", "gpt-6-sol",
+            "-PromptText", "IMPLEMENT", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "status usage_limit" -Condition ($res.Output -match "STATUS=USAGE_LIMIT" -and $res.ExitCode -eq 5) -FailureMessage "expected USAGE_LIMIT, exit 5. Output:`n$($res.Output)"
+        Assert-Result -Name "fallback retry rule" -Condition ($res.Output -match "retry_not_before: one minute after the stated reset") -FailureMessage "expected the one-minute fallback. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Other non-zero exits stay LAUNCH_FAILED, including a usage-limit phrase outside the tail (item 203)" -Body {
+        foreach ($mode in @("genericfail", "usagelimitquoted")) {
+            $projectRoot = Join-Path $tempRoot ("proj-not-usage-" + $mode)
+            New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+            $res = Invoke-Launcher -Mode $mode -BinDir $binDir -LauncherArgs @(
+                "-TaskId", "C-959", "-Phase", "implementation", "-Model", "gpt-6-sol",
+                "-PromptText", "IMPLEMENT", "-ProjectRoot", $projectRoot)
+            Assert-Result -Name "$mode launch_failed" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=LAUNCH_FAILED") -FailureMessage "expected LAUNCH_FAILED. Output:`n$($res.Output)"
+            Assert-Result -Name "$mode not usage_limit" -Condition (-not ($res.Output -match "USAGE_LIMIT")) -FailureMessage "must not report USAGE_LIMIT. Output:`n$($res.Output)"
+            Assert-Result -Name "$mode exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode)."
+        }
     }
 
     $results += Run-Test -Name "Phase launch SUCCESS despite infra-marker words in 0-exit agent output" -Body {

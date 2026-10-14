@@ -1,3 +1,4 @@
+# Match rule terms without freezing editorial wording. TODO item 194.
 # Tests that every page restating the commit-by-default bundle list agrees with
 # Get-CommitByDefaultPath, the function that declares it.
 #
@@ -110,7 +111,7 @@ $surfaces = @(
         Name  = "docs/git-policy.md"
         Path  = "docs/git-policy.md"
         Kind  = "bullet"
-        Start = '(?m)^## Commit By Default\s*$'
+        Start = '(?im)^## (?=[^\r\n]*commit)(?=[^\r\n]*default)[^\r\n]*\r?$'
         End   = '(?m)^## '
         Extra = @{}
     },
@@ -118,23 +119,23 @@ $surfaces = @(
         Name  = "docs/agent-instructions.md"
         Path  = "docs/agent-instructions.md"
         Kind  = "bullet"
-        Start = '(?m)^Commit durable Crucible files:\s*$'
-        End   = '(?m)^Do not commit runtime data:'
+        Start = '(?im)^(?=[^\r\n]*commit)(?=[^\r\n]*durable)(?=[^\r\n]*Crucible)[^\r\n]*:\s*$'
+        End   = '(?im)^(?=[^\r\n]*not)(?=[^\r\n]*commit)(?=[^\r\n]*runtime)[^\r\n]*:'
         Extra = @{}
     },
     @{
         Name  = "powershell/lib/instruction-blocks.ps1"
         Path  = "powershell/lib/instruction-blocks.ps1"
         Kind  = "bullet"
-        Start = '(?m)^Commit durable Crucible files:\s*$'
-        End   = '(?m)^Do not commit runtime data:'
+        Start = '(?im)^(?=[^\r\n]*commit)(?=[^\r\n]*durable)(?=[^\r\n]*Crucible)[^\r\n]*:\s*$'
+        End   = '(?im)^(?=[^\r\n]*not)(?=[^\r\n]*commit)(?=[^\r\n]*runtime)[^\r\n]*:'
         Extra = @{}
     },
     @{
         Name  = "templates/project/.crucible/README.md"
         Path  = "templates/project/.crucible/README.md"
         Kind  = "bullet"
-        Start = '(?m)^## Commit By Default\s*$'
+        Start = '(?im)^## (?=[^\r\n]*commit)(?=[^\r\n]*default)[^\r\n]*\r?$'
         End   = '(?m)^## '
         Extra = @{}
     },
@@ -150,7 +151,7 @@ $surfaces = @(
         Name  = "docs/bootstrap.md (What Gets Installed)"
         Path  = "docs/bootstrap.md"
         Kind  = "bullet"
-        Start = '(?m)^## What Gets Installed\s*$'
+        Start = '(?im)^## (?=[^\r\n]*install)[^\r\n]*\r?$'
         End   = '(?m)^## '
         Extra = @{
             "backlog" = "the section lists what a complete install contains, and backlog/ is installed; whether to commit it is git-policy.md subject matter, not this page's"
@@ -170,7 +171,7 @@ $surfaces = @(
         Name  = "docs/get-started.md (directory table)"
         Path  = "docs/get-started.md"
         Kind  = "table-row"
-        Start = '(?m)^## What each `\.crucible/` directory holds\s*$'
+        Start = '(?im)^## (?=[^\r\n]*`\.crucible/`)(?=[^\r\n]*director)[^\r\n]*\r?$'
         End   = '(?m)^---\s*$'
         Extra = @{
             "backlog"           = "the table carries a Commit? column and covers the not-committed directories too"
@@ -186,7 +187,7 @@ $surfaces = @(
         Name  = "docs/config-reference.md (commit table)"
         Path  = "docs/config-reference.md"
         Kind  = "table-row"
-        Start = '(?m)^## What to commit vs\. ignore\s*$'
+        Start = '(?im)^## (?=[^\r\n]*commit)(?=[^\r\n]*ignore)[^\r\n]*\r?$'
         End   = '(?m)^---\s*$'
         Extra = @{
             "backlog"           = "the table carries a Commit column and covers the not-committed directories too"
@@ -273,8 +274,8 @@ $results += Run-Test -Name "The declared-extra exemption is still carrying weigh
 # assumed: reading the wrong cell would compare a prose description against "Yes" and report
 # every row as wrong, or - worse, if the description happened to be the word - as right.
 $verdictTables = @(
-    @{ Name = "docs/get-started.md";    Path = "docs/get-started.md";    Start = '(?m)^## What each `\.crucible/` directory holds\s*$'; Column = 3 },
-    @{ Name = "docs/config-reference.md"; Path = "docs/config-reference.md"; Start = '(?m)^## What to commit vs\. ignore\s*$';        Column = 2 }
+    @{ Name = "docs/get-started.md";    Path = "docs/get-started.md";    Start = '(?im)^## (?=[^\r\n]*`\.crucible/`)(?=[^\r\n]*director)[^\r\n]*\r?$'; Column = 3 },
+    @{ Name = "docs/config-reference.md"; Path = "docs/config-reference.md"; Start = '(?im)^## (?=[^\r\n]*commit)(?=[^\r\n]*ignore)[^\r\n]*\r?$';        Column = 2 }
 )
 
 $results += Run-Test -Name "Both commit tables vote Yes on everything committed by default" -Body {

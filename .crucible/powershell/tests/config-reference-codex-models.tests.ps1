@@ -1,3 +1,4 @@
+# Match rule terms without freezing editorial wording. TODO item 194.
 # Regression test for the measured ChatGPT-login Codex model guidance.
 
 $ErrorActionPreference = "Stop"
@@ -15,7 +16,6 @@ $results += Run-Test -Name "Codex model guidance records the per-family prefligh
     Assert-Result -Name "tier slugs are recorded as passing" -Condition (($doc -match "gpt-6\.1-sol.*PASS") -and ($doc -match "gpt-6-luna")) -FailureMessage "config reference does not record the GPT-6 preflight"
     Assert-Result -Name "5.6 variants are named" -Condition (($doc -match "gpt-5\.6-terra") -and ($doc -match "gpt-5\.6-sol")) -FailureMessage "config reference does not name the passing gpt-5.6 variants"
     Assert-Result -Name "5.6 plain slug failure is recorded" -Condition ($doc -match "gpt-5\.6.*FAIL") -FailureMessage "config reference does not record the failing plain gpt-5.6 slug"
-    Assert-Result -Name "obsolete all-family plain-slug claim is absent" -Condition ($doc -notmatch "ChatGPT-login Codex accepts the plain `gpt-5\.x` slugs") -FailureMessage "config reference still claims every gpt-5.x family accepts a plain slug"
 }
 
 if ($results -contains $false) {

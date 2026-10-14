@@ -203,6 +203,30 @@ function Test-InfraFailure {
     return $null
 }
 
+# Returns $null, or an object whose ResetTime is the "try again at <time>" text (empty when the
+# message gives none) when the tail of a failed run's output is Codex's account usage-limit
+# error. That is a quota stop, not a runtime fault, and re-running -Preflight cannot clear it.
+# Only the tail is scanned: the agent's own tool output earlier in the transcript can quote the
+# phrase. The real message spells "You've" with a typographic apostrophe. Item 203.
+function Get-UsageLimitInfo {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    $tail = if ($Text.Length -gt 2000) { $Text.Substring($Text.Length - 2000) } else { $Text }
+    if ($tail -notmatch "You[$([char]0x2019)']ve hit your usage limit") { return $null }
+    $resetTime = ""
+    if ($tail -match "(?m)try again at (.+?)\.?\s*$") { $resetTime = $Matches[1].Trim() }
+    # Retries wait one full minute past the projected reset, so the limit has certainly lifted.
+    # Only a plain clock time is computed; any other shape leaves RetryNotBefore empty and the
+    # advice falls back to "one minute after the stated reset".
+    $retryNotBefore = ""
+    $parsed = [datetime]::MinValue
+    $clockFormats = [string[]]@("h:mm tt", "hh:mm tt", "h:mm:ss tt", "H:mm", "HH:mm")
+    if ($resetTime -ne "" -and [datetime]::TryParseExact($resetTime, $clockFormats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AllowWhiteSpaces, [ref]$parsed)) {
+        $retryNotBefore = $parsed.AddMinutes(1).ToString("h:mm tt", [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    return [PSCustomObject]@{ ResetTime = $resetTime; RetryNotBefore = $retryNotBefore }
+}
+
 # Returns the phase a handoff named when the specialist's crucible.ps1 -Init ended this phase
 # but never started that one, else $null. A Codex session that ends its turn while -Init is
 # still running kills it mid-advance: the session_end is logged, the next phase's prompt is not.
@@ -591,11 +615,15 @@ if (Test-Path -LiteralPath $lastMsgPath) {
 }
 
 $failReason = ""
+$usageLimit = $null
 if ($result.ExitCode -eq 127) {
     $failReason = "codex not found on PATH"
 } elseif ($result.ExitCode -ne 0) {
+    $usageLimit = Get-UsageLimitInfo -Text $result.Output
     $marker = Test-InfraFailure -Text $result.Output
-    if ($null -ne $marker) {
+    if ($null -ne $usageLimit) {
+        $failReason = "account usage limit"
+    } elseif ($null -ne $marker) {
         $failReason = "infrastructure failure (exit $($result.ExitCode), marker: $marker)"
     } else {
         $failReason = "non-zero exit code ($($result.ExitCode))"
@@ -629,7 +657,23 @@ if ([string]::IsNullOrWhiteSpace($failReason) -and -not $usingAdhocSession) {
 }
 
 Write-Host ""
-if ($null -ne $advanceTarget) {
+if ($null -ne $usageLimit) {
+    $resetText = if ([string]::IsNullOrWhiteSpace($usageLimit.ResetTime)) { "not stated in the message (see the transcript)" } else { $usageLimit.ResetTime }
+    $retryText = if ([string]::IsNullOrWhiteSpace($usageLimit.RetryNotBefore)) { "one minute after the stated reset" } else { $usageLimit.RetryNotBefore }
+    Write-LaunchStatus -Status "USAGE_LIMIT" -Detail @("exit code: " + $result.ExitCode, "resets: " + $resetText, "retry_not_before: " + $retryText)
+    Write-Host "[CODEX SPECIALIST] STATUS=USAGE_LIMIT" -ForegroundColor Yellow
+    Write-Host ("  resets: " + $resetText)
+    Write-Host ("  retry_not_before: " + $retryText)
+    Write-Host ("  exit code: " + $result.ExitCode)
+    Write-Host ("  transcript: " + $transcriptPath)
+    Write-Host ""
+    Write-Host "  The Codex account hit its usage limit. This is NOT a runtime fault and NOT a review"
+    Write-Host "  verdict; -Preflight and a runtime fix will not help. Stop, tell the human the reset time,"
+    Write-Host ("  and do not relaunch or rerun before " + $retryText + " (at least one full minute past the reset).")
+    Write-Host "  After that, re-dispatch this phase: any uncommitted work the run left in the working"
+    Write-Host "  tree is kept and can be continued."
+    exit 5
+} elseif ($null -ne $advanceTarget) {
     Write-LaunchStatus -Status "ADVANCE_INCOMPLETE" -Detail @("exit code: " + $result.ExitCode, "next phase never started: " + $advanceTarget)
     Write-Host "[CODEX SPECIALIST] STATUS=ADVANCE_INCOMPLETE" -ForegroundColor Yellow
     Write-Host ("  exit code: " + $result.ExitCode)

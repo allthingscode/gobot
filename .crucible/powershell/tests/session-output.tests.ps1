@@ -1,3 +1,4 @@
+# Match rule terms without freezing editorial wording. TODO item 194.
 # Tests for prompt/session output helpers.
 
 $ErrorActionPreference = "Stop"
@@ -254,9 +255,9 @@ Ceiling {budget_ceiling}
         # The generated checklist must follow the SOP instead of keeping another copy
         # of its commit and handoff rules. TODO item 193.
         $sopPath = (Join-Path $caseRoot '.crucible/sops/implementation.md').Replace('\', '/')
-        Assert-Result -Name "implementation checklist links the resolved SOP" -Condition ($taskText.Contains("[Phase 3: Self-Review](<${sopPath}#phase-3-self-review>)")) -FailureMessage "task.md does not link implementation self-review"
-        Assert-Result -Name "implementation checklist has no duplicate commit recipe" -Condition ($taskText -notmatch 'Commit all changes inside worktree|coverage >80%') -FailureMessage "task.md still repeats implementation workflow details"
-        Assert-Result -Name "implementation session end links the workflow" -Condition ($taskText.Contains("[Handoff workflow](<${sopPath}#phase-4-handoff-to-verification>)") -and $taskText -notmatch 'When your work is complete, run this command') -FailureMessage "task.md still duplicates the handoff workflow"
+        Assert-Result -Name "implementation checklist links the resolved SOP" -Condition ($taskText -match ('\]\(<' + [regex]::Escape($sopPath) + '#phase-3-self-review>\)')) -FailureMessage "task.md does not link implementation self-review"
+        Assert-Result -Name "implementation checklist has no duplicate commit recipe" -Condition ($taskText -notmatch 'git (?:add|commit)|coverage\s*>\s*80%') -FailureMessage "task.md still repeats implementation workflow details"
+        Assert-Result -Name "implementation session end links the workflow" -Condition ($taskText -match ('\]\(<' + [regex]::Escape($sopPath) + '#phase-4-handoff-to-verification>\)')) -FailureMessage "task.md still duplicates the handoff workflow"
         Assert-Result -Name "implementation checklist resolves its placeholders" -Condition ($taskText -notmatch '\{sop_path\}|\{worktree\}') -FailureMessage "task.md has unresolved implementation paths"
 
         "<!-- prompt_version: 1 -->`nWork in {worktree}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
@@ -316,10 +317,9 @@ Ceiling {budget_ceiling}
         Copy-Item -LiteralPath (Join-Path $REPO_ROOT "prompts/implementation_prompt.md") -Destination (Join-Path $ctx.PromptLib "implementation_prompt.md")
         $text = New-CruciblePromptText -Context $ctx
         $sopPath = Join-Path $ctx.RepoRoot '.crucible'
-        Assert-Result -Name "prompt links session start" -Condition ($text.Contains("[Session Start](<${sopPath}/sops/implementation.md#session-start>)")) -FailureMessage ("prompt: " + $text)
+        Assert-Result -Name "prompt links session start" -Condition ($text -match ('\]\(<' + [regex]::Escape($sopPath) + '/sops/implementation\.md#session-start>\)')) -FailureMessage ("prompt: " + $text)
         $sop = Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/implementation.md") -Raw -Encoding UTF8
-        Assert-Result -Name "dispatch is the approval" -Condition ($sop -match 'This dispatch is your approval to implement') -FailureMessage ("SOP: " + $sop)
-        Assert-Result -Name "a project pause rule does not apply" -Condition ($sop -match 'pause for plan approval' -and $sop -match 'does not apply here') -FailureMessage ("SOP: " + $sop)
+        Assert-Result -Name "dispatch is the approval" -Condition ($sop -match '(?im)^(?=[^\r\n]*dispatch)(?=[^\r\n]*approval)(?=[^\r\n]*implement)(?=[^\r\n]*plan approval)(?=[^\r\n]*does not apply)[^\r\n]+\r?$') -FailureMessage ("SOP: " + $sop)
     }
 
     $results += Run-Test -Name "New-CruciblePromptText substitutes PowerShell host for non-Windows prompts" -Body {

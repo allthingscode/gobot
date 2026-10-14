@@ -1,3 +1,4 @@
+# Match rule terms without freezing editorial wording. TODO item 194.
 # Tests for the pipeline transition DAG helpers.
 
 $ErrorActionPreference = "Stop"
@@ -216,7 +217,7 @@ try {
         $inSection = $false
         $documented = @{}
         foreach ($line in (Get-Content -LiteralPath (Join-Path $REPO_ROOT "docs/policy.md"))) {
-            if ($line -match '^## 1\. FSM Phase Sequence') { $inSection = $true; continue }
+            if ($line -match '(?i)^## (?=.*phase)(?=.*sequence)') { $inSection = $true; continue }
             if ($inSection -and $line -match '^## ') { break }
             if (-not $inSection) { continue }
             if ($line -notmatch '^- \*\*([a-z]+)\*\*') { continue }
@@ -244,9 +245,9 @@ try {
         $promptLines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "prompts/deployment_prompt.md"))
         $sopLines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/deployment.md"))
         $routingLines = @(
-            @{ Name = "prompt readiness question"; Lines = @($promptLines | Where-Object { $_ -match '^3\. .*successor' }) },
-            @{ Name = "prompt final check"; Lines = @($promptLines | Where-Object { $_ -match '^- \[ \] I am routing to' }) },
-            @{ Name = "SOP final check"; Lines = @($sopLines | Where-Object { $_ -match '^- \[ \] Routing to' }) }
+            @{ Name = "prompt readiness question"; Lines = @($promptLines | Where-Object { $_ -match '(?i)^\d+\. .*successor' }) },
+            @{ Name = "prompt final check"; Lines = @($promptLines | Where-Object { $_ -match '(?i)^- \[ \] .*rout' }) },
+            @{ Name = "SOP final check"; Lines = @($sopLines | Where-Object { $_ -match '(?i)^- \[ \] .*rout' }) }
         )
         foreach ($routing in $routingLines) {
             Assert-Result -Name ($routing.Name + " found") -Condition ($routing.Lines.Count -eq 1) -FailureMessage ("expected exactly one " + $routing.Name + " line but found " + $routing.Lines.Count)
@@ -267,7 +268,7 @@ try {
         $inFence = $false
         $documented = @{}
         foreach ($line in (Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/orchestrator.md"))) {
-            if ($line -match '^### FSM Phase Routing DAG') { $inSection = $true; continue }
+            if ($line -match '(?i)^### (?=.*rout)(?=.*DAG)') { $inSection = $true; continue }
             if (-not $inSection) { continue }
             if ($line -match '^```') {
                 if ($inFence) { break }

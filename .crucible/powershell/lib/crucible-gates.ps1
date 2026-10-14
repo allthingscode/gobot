@@ -1670,7 +1670,8 @@ function Test-CompletionArtifactGate {
             "grooming -> implementation" {
                 $specFile = Get-BacklogItemPathForTaskProjectRoot -Task $handoff.task_id -ProjectRoot $Context.RepoRoot
                 if ([string]::IsNullOrEmpty($specFile) -or -not (Test-Path $specFile)) {
-                    $errorMsg = "Mandatory spec file for $($handoff.task_id) not found.`nExpected patterns: $($backlogDir)/{features,bugs,chores}/active/$($handoff.task_id)_*.md or $($handoff.task_id).md`nTip: filename must be {TASK_ID}_{slug}.md (underscore separator) or {TASK_ID}.md."
+                    $verificationPassed = $false
+                    $errorMsg = "Mandatory spec file for $($handoff.task_id) not found.`nExpected paths: $($backlogDir)/{features,bugs,chores}/active/$($handoff.task_id)_<slug>.md or $($backlogDir)/{features,bugs,chores}/active/$($handoff.task_id).md`nFix: create or rename the spec to one of these paths before retrying the handoff."
                 }
             }
             "implementation -> verification" {

@@ -134,7 +134,11 @@ via a Crucible launcher rather than a native sub-agent. The launcher reports an 
 `crucible.ps1 -Init` was cut off before the next phase started (run the `-Init` it prints, then
 continue), or `STATUS=NO_HANDOFF` (exit 4) when a grooming, implementation or verification run
 ended without completing its phase: read its last message, which says whether it stopped to ask,
-escalated, or quit, and bring that to the human. See the tool-specific doc for the launch command and preflight. If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line. The verdict-not-label rule in Step 5 applies.
+escalated, or quit, and bring that to the human; or `STATUS=USAGE_LIMIT` (exit 5) when the Codex
+account hit its usage limit: this is not a runtime fault, so stop, tell the human the reset time the
+launcher prints, and do not relaunch or rerun until at least one full minute after it (the launcher
+prints that time as `retry_not_before`; uncommitted work the run left in the working tree is kept and
+can be continued then). See the tool-specific doc for the launch command and preflight. If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line. The verdict-not-label rule in Step 5 applies.
 
 ### Step 5 - Verify specialist output and track budget
 

@@ -158,6 +158,11 @@ launch status.
    `STATUS=NO_HANDOFF` (exit 4) means a grooming, implementation or verification run ended without
    completing its phase: no handoff was processed. Read its last message (it may have stopped to ask a
    question, escalated, or quit early) and bring it to the human; it is not a verdict.
+   `STATUS=USAGE_LIMIT` (exit 5) means the Codex account hit its usage limit; it is not a runtime
+   fault, so do not run the preflight or fix anything. Stop, tell the human the reset time the
+   launcher prints, and do not relaunch or rerun until at least one full minute after it (the launcher
+   prints that time as `retry_not_before`). Uncommitted work the run left in the working tree is kept;
+   after that time, re-dispatch and the specialist can continue from it.
    If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line.
 
 Everything after the launch (gate signal, `task.md` checkpoints, handoff glob, `crucible.ps1 -Init -ProjectRoot "{project_root}"`) is

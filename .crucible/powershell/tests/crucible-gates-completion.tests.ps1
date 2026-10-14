@@ -74,8 +74,61 @@ function New-TestContext {
 }
 $tempRoot = New-TestFixtureRoot -NameHint "crucible-gates-completion-test"
 try {
+    # TODO item 202: exercise the exit in a child process; item 190 permits both spec names.
+    foreach ($specName in @("", "F-202_test.md", "F-202.md")) {
+        $caseName = if ($specName) { $specName } else { "missing spec" }
+        $results += Run-Test -Name "Test-CompletionArtifactGate grooming to implementation: $caseName" -Body {
+            $caseRoot = Join-Path $tempRoot ("grooming-" + $caseName.Replace(" ", "-"))
+            $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-202"
+            $ctx.BacklogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ctx.RepoRoot
+            if ($specName) {
+                $activeDir = Join-Path $ctx.BacklogDir "features/active"
+                New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
+                "Spec details" | Set-Content -LiteralPath (Join-Path $activeDir $specName) -Encoding UTF8
+            }
+
+            $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+            $outputLines = @(& $pwshCmd -NoProfile -Command @"
+`$ErrorActionPreference = 'Stop'
+`$Quiet = `$true
+. '$libPath'
+Set-Location '$($caseRoot.Replace("'", "''"))'
+`$ctx = @{
+    RepoRoot = '$($caseRoot.Replace("'", "''"))'
+    BacklogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
+    SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'
+    WorkspacesDir = '$($ctx.WorkspacesDir.Replace("'", "''"))'
+    LogFile = '$($ctx.LogFile.Replace("'", "''"))'
+    CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-202'
+        source_phase = 'grooming'
+        target_phase = 'implementation'
+        cumulative_handoff_count = 1
+    }
+}
+Test-CompletionArtifactGate -Context `$ctx
+Write-Host 'HANDOFF_PASSED'
+"@ 2>&1)
+            $exitCode = $LASTEXITCODE
+            $output = $outputLines -join "`n"
+
+            if ($specName) {
+                Assert-Result -Name "present spec passes" -Condition ($exitCode -eq 0 -and $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 0, got $exitCode. Output: $output"
+            } else {
+                Assert-Result -Name "missing spec refuses handoff" -Condition ($exitCode -eq 1 -and -not $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 1, got $exitCode. Output: $output"
+                Assert-Result -Name "missing spec reports artifact failure" -Condition ($output.Contains("Completion artifact verification failed for transition grooming -> implementation")) -FailureMessage $output
+                $expectedDir = "$($ctx.BacklogDir)/{features,bugs,chores}/active"
+                Assert-Result -Name "missing spec names slug path" -Condition ($output.Contains("$expectedDir/F-202_<slug>.md")) -FailureMessage $output
+                Assert-Result -Name "missing spec names bare ID path" -Condition ($output.Contains("$expectedDir/F-202.md")) -FailureMessage $output
+                Assert-Result -Name "missing spec explains remedy" -Condition ($output.Contains("create or rename the spec")) -FailureMessage $output
+            }
+        }
+    }
+
     $results += Run-Test -Name "Test-CompletionArtifactGate validates transitions successfully" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "completion-gates") -TaskId "F-004"
+        $ctx.BacklogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ctx.RepoRoot
 
         # 1. Grooming to Implementation
         $activeDir = Join-Path $ctx.BacklogDir "features/active"

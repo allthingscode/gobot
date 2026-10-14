@@ -27,7 +27,10 @@ and transcript, and reports `STATUS=SUCCESS` or `STATUS=LAUNCH_FAILED` so an inf
 never mistaken for a review verdict. `STATUS=ADVANCE_INCOMPLETE` means the handoff was written but the
 specialist's `crucible.ps1 -Init` was cut off before the next phase started; run the `-Init` command it
 prints. `STATUS=NO_HANDOFF` (exit 4) means a grooming, implementation or verification run ended
-without completing its phase; read its last message. The launcher also writes the STATUS line to `codex-launch-status.txt` in the session directory,
+without completing its phase; read its last message. `STATUS=USAGE_LIMIT` (exit 5) means the Codex
+account hit its usage limit, not that the runtime is broken: stop, tell the human the reset time it
+prints, and do not relaunch or rerun until at least one full minute after it (the launcher prints that
+time as `retry_not_before`); uncommitted work the run left in the working tree is kept. The launcher also writes the STATUS line to `codex-launch-status.txt` in the session directory,
 with `STATUS=RUNNING` and its process ID while the run is in progress, so a lost stdout does not lose the
 result. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
 
