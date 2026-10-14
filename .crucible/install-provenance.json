@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "0451f738bc070d8e5eee6b8572e7746ebb935f8f",
+  "source_commit": "403f732a54671cf824e10b7422f655e876c68dd1",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -295,8 +295,8 @@
       "base_hash": "508b85df1c12bf311b8e47ba8b41346c0ca57f772c7907d4f8bb3b95bcefab63"
     },
     "powershell/lib/test-selection.ps1": {
-      "hash": "bde130f7cb5bf1568077a15e6b62ae3a6a7af49a4b5fc99293123e6b2f130a65",
-      "base_hash": "bde130f7cb5bf1568077a15e6b62ae3a6a7af49a4b5fc99293123e6b2f130a65"
+      "hash": "5ff91733ccd0f9397540670bca975e047fbef45389df613ac5f94aa6ac07466e",
+      "base_hash": "5ff91733ccd0f9397540670bca975e047fbef45389df613ac5f94aa6ac07466e"
     },
     "powershell/lib/time.ps1": {
       "hash": "e8da15d58591e5eaa03e8c87a09c13f0bcefb7743790d533acb24e89e22b1b2a",
@@ -683,8 +683,8 @@
       "base_hash": "8464ae72863dd4e78d9d7714a1a1c9c091f29ce4a83f1bde70c4552a4da73c7a"
     },
     "powershell/tests/test-selection.tests.ps1": {
-      "hash": "56d8beb447cf045aff6830542add42007ba7e98c7a212a7bc8ef2ff608b2ff89",
-      "base_hash": "56d8beb447cf045aff6830542add42007ba7e98c7a212a7bc8ef2ff608b2ff89"
+      "hash": "7949a37bb3a707103443fcae9bdc1d1b45a9a082a4842f7a6501ce94dfa9a090",
+      "base_hash": "7949a37bb3a707103443fcae9bdc1d1b45a9a082a4842f7a6501ce94dfa9a090"
     },
     "powershell/tests/update-classification.tests.ps1": {
       "hash": "9e2054e8b8a8f7a0f932842ea8c8d9489d10446e1c505777a9af1805345eba11",

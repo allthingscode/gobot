@@ -243,4 +243,122 @@ $results += Run-Test -Name 'Changed runner reports an invalid base and ends with
     Assert-Result -Name 'last line requires full suite before push' -Condition (($r.Output.Trim() -split "`r?`n")[-1] -match 'Partial run.*full suite.*Linux leg.*before pushing') -FailureMessage $r.Output
 }
 
+# Directory readers must participate even when no leaf name is mentioned. TODO item 201.
+foreach ($reader in @(
+    'Get-ChildItem -Path (Join-Path $REPO_ROOT "prompts") -Filter "*_prompt.md" -File',
+    'Get-ChildItem -LiteralPath (Join-Path $REPO_ROOT "prompts") -Include "*_prompt.md" -Recurse',
+    'Get-Content (Join-Path $REPO_ROOT "prompts/*_prompt.md")'
+)) {
+    $results += Run-Test -Name ("Literal directory pattern selects matching changes: $reader") -Body {
+        $root = New-SelectionFixture
+        Write-SelectionFile $root 'powershell/tests/glob.tests.ps1' $reader
+        $null = Invoke-SelectionGit $root @('add', '-A')
+        $null = Invoke-SelectionGit $root @('commit', '--quiet', '-m', 'reader')
+        Write-SelectionFile $root 'prompts/new_prompt.md' 'changed'
+        $selected = @(Get-AffectedTestFiles -Root $root)
+        Assert-Selection $selected @('glob.tests.ps1')
+        Assert-Result -Name 'reason names directory and pattern' -Condition (($selected[0].Reasons -join '; ') -like '*reads directory prompts pattern *_prompt.md*') -FailureMessage ($selected[0].Reasons -join '; ')
+        Remove-Item -LiteralPath (Join-Path $root 'prompts/new_prompt.md')
+        Write-SelectionFile $root 'prompts/notes.txt' 'changed'
+        Write-SelectionFile $root 'other/new_prompt.md' 'changed'
+        Assert-Selection @(Get-AffectedTestFiles -Root $root) @()
+    }
+}
+
+foreach ($reader in @(
+    'Get-ChildItem (Join-Path $REPO_ROOT "prompts") -File',
+    'Get-ChildItem (Join-Path $REPO_ROOT "prompts") -Filter $computed',
+    'gci -Path "prompts"',
+    'ls "prompts"',
+    'dir -LiteralPath:"prompts"',
+    '[IO.Directory]::GetFiles("prompts")',
+    '[System.IO.Directory]::EnumerateFiles("prompts")',
+    '[IO.Directory]::GetDirectories((Join-Path $REPO_ROOT "prompts"))'
+)) {
+    $results += Run-Test -Name ("Directory without a literal pattern conservatively selects descendants: $reader") -Body {
+        $root = New-SelectionFixture
+        Write-SelectionFile $root 'powershell/tests/glob.tests.ps1' $reader
+        $null = Invoke-SelectionGit $root @('add', '-A')
+        $null = Invoke-SelectionGit $root @('commit', '--quiet', '-m', 'reader')
+        Write-SelectionFile $root 'prompts/nested/notes.txt' 'changed'
+        Assert-Selection @(Get-AffectedTestFiles -Root $root) @('glob.tests.ps1')
+    }
+}
+
+$results += Run-Test -Name 'A wildcard joined to the test script directory selects its reader' -Body {
+    $root = New-SelectionFixture
+    Write-SelectionFile $root 'powershell/tests/glob.tests.ps1' 'Get-Content (Join-Path $PSScriptRoot "*.txt")'
+    $null = Invoke-SelectionGit $root @('add', '-A')
+    $null = Invoke-SelectionGit $root @('commit', '--quiet', '-m', 'reader')
+    Write-SelectionFile $root 'powershell/tests/notes.txt' 'changed'
+    Assert-Selection @(Get-AffectedTestFiles -Root $root) @('glob.tests.ps1')
+}
+
+$results += Run-Test -Name 'Deleting the last file in a globbed directory still selects its reader' -Body {
+    $root = New-SelectionFixture
+    Write-SelectionFile $root 'readers/old.txt' 'original'
+    Write-SelectionFile $root 'powershell/tests/glob.tests.ps1' 'Get-Content (Join-Path $REPO_ROOT "readers/*.txt")'
+    $null = Invoke-SelectionGit $root @('add', '-A')
+    $null = Invoke-SelectionGit $root @('commit', '--quiet', '-m', 'reader')
+    Remove-Item -LiteralPath (Join-Path $root 'readers/old.txt')
+    Remove-Item -LiteralPath (Join-Path $root 'readers')
+    Assert-Selection @(Get-AffectedTestFiles -Root $root) @('glob.tests.ps1')
+}
+
+$results += Run-Test -Name 'Real pipeline DAG reader is selected for an implementation prompt change' -Body {
+    function Get-TestSelectionChangedPaths { param($Root, $Base) 'prompts/implementation' + '_prompt.md' }
+    $selected = @(Get-AffectedTestFiles -Root $REPO_ROOT)
+    $dag = @($selected | Where-Object { $_.File.Name -eq 'pipeline-dag.tests.ps1' })
+    Assert-Result -Name 'real glob reader selected' -Condition ($dag.Count -eq 1) -FailureMessage 'pipeline-dag.tests.ps1 missing'
+    Assert-Result -Name 'real glob reason retained' -Condition (($dag.Reasons -join '; ') -like '*reads directory prompts pattern *_prompt.md*') -FailureMessage ($dag.Reasons -join '; ')
+}
+
+$results += Run-Test -Name 'Runner prints the directory pattern selection reason' -Body {
+    $root = Stage-SelectionRunner
+    Write-SelectionFile $root 'prompts/original.md' 'original'
+    Write-SelectionFile $root 'powershell/tests/alpha.tests.ps1' 'Get-ChildItem (Join-Path $PSScriptRoot "../../prompts") -Filter "*.md" | Out-Null; Write-Host "PASSED"'
+    $null = Invoke-SelectionGit $root @('add', '-A')
+    $null = Invoke-SelectionGit $root @('commit', '--quiet', '-m', 'reader')
+    Write-SelectionFile $root 'prompts/new.md' 'changed'
+    $r = Invoke-SelectionRunner $root @('-Changed')
+    Assert-Result -Name 'directory reader succeeds' -Condition ($r.ExitCode -eq 0) -FailureMessage $r.Output
+    Assert-Result -Name 'directory reason printed' -Condition ($r.Output -match 'SELECT alpha.tests.ps1.*reads directory prompts pattern \*.md') -FailureMessage $r.Output
+}
+
+$results += Run-Test -Name 'Root joins and plain directories used to build files are not readers' -Body {
+    $root = New-SelectionFixture
+    Write-SelectionFile $root 'powershell/tests/nonreader.tests.ps1' 'Join-Path $PSScriptRoot ".."; Join-Path "powershell/lib" "unrelated.ps1"'
+    $null = Invoke-SelectionGit $root @('add', '-A')
+    $null = Invoke-SelectionGit $root @('commit', '--quiet', '-m', 'nonreader')
+    Write-SelectionFile $root 'powershell/lib/changed.ps1' '# changed'
+    Assert-Selection @(Get-AffectedTestFiles -Root $root) @()
+}
+
+foreach ($reader in @(
+    '$dir = Join-Path $REPO_ROOT "prompts"; Get-ChildItem $dir',
+    'Get-ChildItem -Filter "prompts" -Path $dir',
+    '[IO.File]::ReadAllText("prompts")',
+    'Get-Item "prompts"; Resolve-Path "prompts"; Test-Path "prompts"; Get-Content "prompts"'
+)) {
+    $results += Run-Test -Name ("Non-reader or indirect directory does not select changes: $reader") -Body {
+        $patterns = @(Get-TestSelectionDirectoryPatterns -Root $REPO_ROOT -Text $reader)
+        Assert-Result -Name 'no indirect or non-reader directory patterns' -Condition ($patterns.Count -eq 0) -FailureMessage ($patterns | Out-String)
+    }
+}
+
+foreach ($reader in @(
+    '$pattern = "prompts/*_prompt.md"',
+    'Get-Item "prompts/*_prompt.md"',
+    'Resolve-Path "prompts/*_prompt.md"',
+    'Test-Path "prompts/*_prompt.md"',
+    'Get-Content (Join-Path "prompts" "*_prompt.md")',
+    '[IO.Directory]::GetFiles("prompts", "*_prompt.md")',
+    '[IO.Directory]::EnumerateFiles((Join-Path $REPO_ROOT "prompts"), "*_prompt.md")'
+)) {
+    $results += Run-Test -Name ("Wildcard directory pattern is retained: $reader") -Body {
+        $patterns = @(Get-TestSelectionDirectoryPatterns -Root $REPO_ROOT -Text $reader)
+        Assert-Result -Name 'matching wildcard directory pair' -Condition ($patterns.Count -eq 1 -and $patterns[0].Directory -eq 'prompts' -and $patterns[0].Pattern -eq '*_prompt.md') -FailureMessage ($patterns | Out-String)
+    }
+}
+
 Write-TestFileSummary -Results $results
