@@ -1,11 +1,9 @@
 package app
 
 import (
-	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
@@ -74,18 +72,4 @@ func TruncateToolResult(result string, maxBytes int) string {
 	}
 	const truncationNotice = "\n\n[... truncated: result exceeded %d bytes ...]"
 	return result[:idx] + fmt.Sprintf(truncationNotice, maxBytes)
-}
-
-// GenerateIdempotencyKey creates a random UUID-like string for tracking tool side effects.
-func GenerateIdempotencyKey() string {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to timestamp-based key if random fails.
-		return fmt.Sprintf("idem-%d", time.Now().UnixNano())
-	}
-	// Set version (4) and variant bits.
-	bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
-	bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
-	return fmt.Sprintf("%x-%x-%x-%x-%x",
-		bytes[0:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:])
 }
