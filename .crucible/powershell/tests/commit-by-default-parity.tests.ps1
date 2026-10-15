@@ -145,7 +145,9 @@ $surfaces = @(
         Kind  = "console-bullet"
         Start = '(?m)^\s*Write-Info\s+"Committed by default'
         End   = '(?m)^\s*Write-Info\s+""'
-        Extra = @{}
+        Extra = @{
+            ".claude/agents/crucible-*.md" = "generated Claude agent definitions (item 213). They are committed by default so every clone dispatches the same pinned levels, but they live at the project root, outside the .crucible/ bundle this function lists"
+        }
     },
     @{
         Name  = "docs/bootstrap.md (What Gets Installed)"

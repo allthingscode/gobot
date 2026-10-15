@@ -492,6 +492,29 @@ if (-not $codexCmd) {
         -Details ("Found codex at " + $codexCmd.Source + "; verify the runtime with 'launch-codex-specialist.ps1 -Preflight -Model <codex-model>' before dispatching.")
 }
 
+# Check (adopter, advisory): the generated Claude agent definitions match the configured
+# Claude levels. A stale or missing one makes a dispatch by subagent_type run the wrong
+# model or fail outright, but nothing else stops, so this never blocks readiness. Item 213.
+if ($adopterMode) {
+    try {
+        . (Join-Path $PSScriptRoot "lib/claude-agents.ps1")
+        $agentDrift = @(Get-ClaudeAgentDrift -ProjectRoot $REPO_ROOT)
+        if ($agentDrift.Count -eq 0) {
+            Add-DoctorResult -Check "claude.agents" -Status "pass" -Severity "advisory" `
+                -Details "The .claude/agents/crucible-*.md definitions match the configured Claude levels."
+        } else {
+            $driftText = ($agentDrift | ForEach-Object { $_.Name + " (" + $_.Status + ")" }) -join ", "
+            Add-DoctorResult -Check "claude.agents" -Status "warn" -Severity "advisory" `
+                -Details ("Claude agent definitions drifted from config.yaml: " + $driftText + ".") `
+                -Remediation ("Run: pwsh -File " + $script:CLAUDE_AGENT_REGENERATE)
+        }
+    } catch {
+        Add-DoctorResult -Check "claude.agents" -Status "warn" -Severity "advisory" `
+            -Details ("Could not check the Claude agent definitions: " + $_.Exception.Message) `
+            -Remediation "Fix the models.targets.claude levels in .crucible/config.yaml, then run sync-claude-agents.ps1."
+    }
+}
+
 # Check (always): required scripts present in the bundle.
 $requiredScripts = @(
     "crucible.ps1",

@@ -436,6 +436,13 @@ if (Test-Path -LiteralPath (Join-Path $resolvedProjectRoot ".git")) {
     & $hookInstaller -Quiet:$Quiet
 }
 
+# Item 213: generate the Claude agent definitions a Claude dispatch names. Written from the
+# installed copy so the bundle ships what it runs; only crucible-*.md in .claude/agents/.
+$agentSync = Join-Path $targetCrucible "powershell/sync-claude-agents.ps1"
+if (Test-Path -LiteralPath $agentSync -PathType Leaf) {
+    if ($Quiet) { $null = & $agentSync -ProjectRoot $resolvedProjectRoot 6>$null } else { $null = & $agentSync -ProjectRoot $resolvedProjectRoot }
+}
+
 Write-Info ""
 Write-Info "[CRUCIBLE] Project scaffold installed" -ForegroundColor Green
 Write-Info ("Project root: " + $resolvedProjectRoot)
@@ -448,6 +455,7 @@ Write-Info "  - .crucible/README.md"
 Write-Info "  - .crucible/config.yaml"
 Write-Info "  - .crucible/agent-instructions/ (copy-ready root instruction snippets)"
 Write-Info "  - .crucible/docs/, personas/, sops/, prompts/, schemas/, standards/, powershell/"
+Write-Info "  - .claude/agents/crucible-*.md (generated Claude agent definitions; regenerate with .crucible/powershell/sync-claude-agents.ps1)"
 Write-Info ""
 $backlogDirForRel = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
 $relativeBacklogPath = $backlogDirForRel

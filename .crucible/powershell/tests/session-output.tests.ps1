@@ -131,6 +131,54 @@ try {
         Assert-Result -Name "claude with no level prints no level" -Condition (-not ($claudeLines -match '\[RECOMMENDED LEVEL\]')) -FailureMessage ("got: " + ($claudeLines -join " | "))
     }
 
+    # Item 213: a Claude dispatch names the generated agent definition and passes neither model nor effort.
+    $results += Run-Test -Name "Write-NextStep prints the recommended agent and warns when its definition is stale" -Body {
+        $sessionDir = Join-Path $tempRoot "agent-line/session"
+        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-921" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 | ForEach-Object { "$_" })
+        $agent = @($lines | Where-Object { $_ -match '\[RECOMMENDED AGENT\]' })
+        Assert-Result -Name "agent line names the subagent_type and omits model and effort" -Condition ($agent.Count -eq 1 -and $agent[0] -match '\[RECOMMENDED AGENT\] crucible-default - dispatch with subagent_type crucible-default and omit model and effort') -FailureMessage ("got: " + ($lines -join " | "))
+        Assert-Result -Name "no warning when the definition matches" -Condition (-not ($lines -match '\[WARN\]')) -FailureMessage ($lines -join " | ")
+
+        $warned = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-922" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" -RecommendedAgentIssue "Agent definition crucible-default is stale for the configured level. Run: sync" 6>&1 | ForEach-Object { "$_" })
+        Assert-Result -Name "stale warning is printed" -Condition (@($warned | Where-Object { $_ -match '^\[WARN\] Agent definition crucible-default is stale' }).Count -eq 1) -FailureMessage ($warned -join " | ")
+
+        $codex = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-923" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 | ForEach-Object { "$_" })
+        Assert-Result -Name "a Codex target prints no agent line" -Condition (-not ($codex -match '\[RECOMMENDED AGENT\]')) -FailureMessage ($codex -join " | ")
+    }
+
+    $results += Run-Test -Name "Init banner recommends the tier agent, the researcher agent for research, and warns when the file is missing" -Body {
+        $cases = @(
+            @{ Phase = "verification"; Budget = "low"; Want = "crucible-default" },
+            @{ Phase = "research"; Budget = "low"; Want = "crucible-researcher" },
+            @{ Phase = "deployment"; Budget = "low"; Want = "crucible-light" }
+        )
+        $n = 0
+        foreach ($case in $cases) {
+            $n++
+            $ctx = New-TestContext -TempRoot (Join-Path $tempRoot ("agent-banner-" + $n)) -TaskId "F-924" -TargetPhase $case.Phase
+            $ctx.PromptFilePath = Join-Path $ctx.SessionDir ("F-924/" + $case.Phase + "/prompt.md")
+            New-Item -ItemType Directory -Path (Split-Path -Parent $ctx.PromptFilePath) -Force | Out-Null
+            $oldPath = $env:PATH
+            try {
+                $env:PATH = ""
+                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+            } finally {
+                $env:PATH = $oldPath
+            }
+            $agentLine = @(($output -split "`r?`n") | Where-Object { $_ -match '\[RECOMMENDED AGENT\]' })
+            Assert-Result -Name ($case.Phase + " names " + $case.Want) -Condition ($agentLine.Count -eq 1 -and $agentLine[0] -match ('\] ' + $case.Want + ' - dispatch with subagent_type')) -FailureMessage $output
+            Assert-Result -Name ($case.Phase + " warns with the sync command when the file is missing") -Condition ($output -match ('\[WARN\] Agent definition ' + $case.Want + ' is missing') -and $output -match 'sync-claude-agents\.ps1 -ProjectRoot \.') -FailureMessage $output
+
+            & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $ctx.RepoRoot 6>&1 | Out-Null
+            try {
+                $env:PATH = ""
+                $synced = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+            } finally {
+                $env:PATH = $oldPath
+            }
+            Assert-Result -Name ($case.Phase + " has no warning once synced") -Condition ($synced -match ('\] ' + $case.Want + ' - dispatch') -and $synced -notmatch '\[WARN\] Agent definition') -FailureMessage $synced
+        }
+    }
     # Item 163: a Codex level is a model and an effort together, so it is printed as one pair.
     $results += Run-Test -Name "Write-NextStep prints a Codex level as one model and effort pair" -Body {
         $sessionDir = Join-Path $tempRoot "level-line/session"

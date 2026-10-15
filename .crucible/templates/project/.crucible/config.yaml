@@ -42,7 +42,7 @@ roles:
 # medium, high, xhigh, max. Luna is most effective at high, so the light level is Luna at
 # high rather than a stronger model at a lower effort.
 # A Claude tier is a level too (Item 212). Effort is one of low, medium, high, xhigh, max;
-# the orchestrator passes it as the Agent tool's effort parameter beside the model family.
+# sync-claude-agents.ps1 writes each pair into .claude/agents/crucible-<tier>.md; re-run it after editing a Claude level (Item 213).
 models:
   default_target: claude
   targets:

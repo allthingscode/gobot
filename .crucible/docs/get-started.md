@@ -29,13 +29,13 @@ cd crucible
 ```powershell
 ./powershell/init-project.ps1 -ProjectRoot <your-project-path> -Language <go|node|python|rust> -WithSampleTask -AppendInstructions
 ```
-This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md. Copy `.crucible/agent-instructions/GROK.md` to a root `GROK.md` if you orchestrate from Grok TUI.
+This scaffolds `.crucible/` into your project, configures verification commands for your language, adds a sample `F-001_Hello_World` task, and appends Crucible instructions to your AGENTS.md/CLAUDE.md/GEMINI.md. Copy `.crucible/agent-instructions/GROK.md` to a root `GROK.md` if you orchestrate from Grok TUI. It also writes the four Claude Code agent definitions `.claude/agents/crucible-strong.md`, `.claude/agents/crucible-default.md`, `.claude/agents/crucible-light.md` and `.claude/agents/crucible-researcher.md`, the Claude Code agent definitions a Claude dispatch names as its `subagent_type`; commit them with the scaffold. After you change `models.targets.claude` in `config.yaml`, regenerate them with `pwsh -File .crucible/powershell/sync-claude-agents.ps1 -ProjectRoot .` (`-Check` reports drift without writing; `update-bundle.ps1` regenerates them too).
 
 ### Run the sample task
 Commit the scaffold first so Crucible does not flag the new instruction files as untracked:
 
 ```powershell
-git add .crucible AGENTS.md CLAUDE.md GEMINI.md
+git add .crucible .claude/agents AGENTS.md CLAUDE.md GEMINI.md
 git commit -m "Add Crucible scaffold"
 ```
 
@@ -55,8 +55,9 @@ Expected output excerpt:
 
 agent "Groomer: F-001 - read and follow all instructions in <abs path>/.crucible/session/F-001/grooming/prompt.md"
 [RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
-[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - dispatch the specialist sub-agent with this model.
-[RECOMMENDED EFFORT] medium - pass as the Agent tool's effort parameter, together with model claude-sonnet-5-5 (family alias; see docs/orchestrators/claude.md).
+[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - pinned by the crucible-default agent definition; do not pass it as the Agent tool's model.
+[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at medium effort.
+[RECOMMENDED EFFORT] medium - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -220,8 +221,9 @@ Expected output excerpt:
 
 agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/grooming/prompt.md"
 [RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
-[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - dispatch the specialist sub-agent with this model.
-[RECOMMENDED EFFORT] medium - pass as the Agent tool's effort parameter, together with model claude-sonnet-5-5 (family alias; see docs/orchestrators/claude.md).
+[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - pinned by the crucible-default agent definition; do not pass it as the Agent tool's model.
+[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at medium effort.
+[RECOMMENDED EFFORT] medium - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -256,8 +258,9 @@ You'll see something like:
 [NEXT SESSION COMMAND]
 agent "Architect: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/implementation/prompt.md"
 [RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
-[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - dispatch the specialist sub-agent with this model.
-[RECOMMENDED EFFORT] medium - pass as the Agent tool's effort parameter, together with model claude-sonnet-5-5 (family alias; see docs/orchestrators/claude.md).
+[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - pinned by the crucible-default agent definition; do not pass it as the Agent tool's model.
+[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at medium effort.
+[RECOMMENDED EFFORT] medium - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
 ```
 
 Confirm with "go" (or "go" in a new session if you prefer a fresh context).

@@ -57,4 +57,4 @@ Use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist research`
 | `task.md` for this task | Existing research files | `vendor/` |
 
 > [!NOTE]
-> The Researcher is read-only for codebase and backlog files. Writing files outside of the designated `.crucible/research/` or `.crucible/session/` paths is detected as a scope violation at the `research -> grooming` gate and surfaces a security warning for human review (though the primary boundary control remains the orchestrator's `Explore` dispatch configuration).
+> The Researcher is read-only for codebase and backlog files. Writing files outside of the designated `.crucible/research/` or `.crucible/session/` paths is detected as a scope violation at the `research -> grooming` gate and surfaces a security warning for human review (though the primary boundary control remains the read-only toolset of the orchestrator's `crucible-researcher` dispatch).

@@ -197,6 +197,7 @@ try {
         $expectedStatic = @(
             "bundle.root",
             "bundle.staleness",
+            "claude.agents",
             "codex.cli",
             "config.parse",
             "crucible.required-scripts",
@@ -416,6 +417,21 @@ try {
     Push-Location $gitProbe
     try { git init -b main --quiet 2>$null; if ($LASTEXITCODE -ne 0) { $gitSupportsInitB = $false } } finally { Pop-Location }
 
+    # Item 213: drift in the generated Claude agent definitions is advisory and names the fix.
+    $results += Run-Test -Name "Doctor reports Claude agent definition drift as advisory, never blocks READY" -Body {
+        $projectRoot = Join-Path $tempRoot "claude-agents-probe-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "missing definitions are reported" -Condition ($output -match "\[claude\.agents\]" -and $output -match "crucible-strong \(missing\)" -and $output -match "sync-claude-agents\.ps1") -FailureMessage "Output:`n$output"
+        Assert-Result -Name "drift does not block" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "Output:`n$output"
+
+        & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $projectRoot 6>&1 | Out-Null
+        $cleanRes = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
+        $clean = $cleanRes.Output -join "`n"
+        Assert-Result -Name "synced definitions pass" -Condition ($clean -notmatch "crucible-strong \(") -FailureMessage "Output:`n$clean"
+    }
     $results += Run-Test -Name "Doctor reports Codex CLI as advisory, never blocks READY" -Body {
         $projectRoot = Join-Path $tempRoot "codex-probe-project"
         Write-DoctorFixture -ProjectRoot $projectRoot

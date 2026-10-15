@@ -547,6 +547,21 @@ function Invoke-UpdateBundle {
         }
     }
 
+    # Regenerate the Claude agent definitions from the (possibly updated) levels, through
+    # the adopter copy for the same reason as the hook installer. Only crucible-*.md in
+    # .claude/agents/ is written. Item 213.
+    if (-not $effectiveDryRun -and ($shouldApply -or $shouldPrune -or $isAllNoOp)) {
+        $agentSync = Join-Path $adopterCrucibleRoot "powershell/sync-claude-agents.ps1"
+        if ((Test-Path -LiteralPath (Join-Path $adopterCrucibleRoot "config.yaml")) -and
+            (Test-Path -LiteralPath $agentSync -PathType Leaf)) {
+            try {
+                $null = & $agentSync -ProjectRoot $adopterRootResolved
+            } catch {
+                Write-Warning ("Could not regenerate .claude/agents/crucible-*.md: " + $_.Exception.Message)
+            }
+        }
+    }
+
     if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0) {
         $isGitRepo = $false
         $checkDir = $adopterRootResolved

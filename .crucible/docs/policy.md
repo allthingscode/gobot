@@ -105,7 +105,7 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 | `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.8 Flash (High) | Gemini 3.8 Flash (Medium) |
 | `grok` | inherit | inherit | inherit |
 
-For Codex and Claude a tier is a **level**: a model and a reasoning effort taken together, resolved as one pair by `Get-ModelLevel` (`Get-CodexLevel`, `Get-ClaudeLevel`) and printed as `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`. A level is changed as a pair under `models.targets.<target>.<tier>` (`model:` and `effort:`), never one half alone. A Claude orchestrator passes the effort as the `Agent` tool's `effort` parameter. Other targets have no effort setting, so their tiers are a model alone.
+For Codex and Claude a tier is a **level**: a model and a reasoning effort taken together, resolved as one pair by `Get-ModelLevel` (`Get-CodexLevel`, `Get-ClaudeLevel`) and printed as `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`. A level is changed as a pair under `models.targets.<target>.<tier>` (`model:` and `effort:`), never one half alone. A Claude orchestrator dispatches the generated `crucible-<tier>` agent definition, which pins the model ID and effort (Item 213). Other targets have no effort setting, so their tiers are a model alone.
 
 `design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming->implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by Crucible.
 

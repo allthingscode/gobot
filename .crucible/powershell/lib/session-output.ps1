@@ -9,6 +9,8 @@ function Write-NextStep {
         [string]$RecommendedTarget = $null,
         [string]$RecommendedEffort = $null,
         [string]$RecommendedLevel = $null,
+        [string]$RecommendedAgent = $null,
+        [string]$RecommendedAgentIssue = $null,
         [string]$ApprovalMode = $null,
         [switch]$ShouldAutoAdvance
     )
@@ -44,16 +46,28 @@ function Write-NextStep {
             }
             if ($RecommendedModel -eq "inherit") {
                 Write-Host ("[RECOMMENDED MODEL] inherit" + $targetLabel + " - omit model. The specialist inherits this session. Do not pass a Claude or Codex slug.") -ForegroundColor Cyan
+            } elseif ($levelTarget -eq "claude" -and -not [string]::IsNullOrEmpty($RecommendedAgent)) {
+                Write-Host ("[RECOMMENDED MODEL] " + $RecommendedModel + $targetLabel + " - pinned by the " + $RecommendedAgent + " agent definition; do not pass it as the Agent tool's model.") -ForegroundColor Cyan
             } else {
                 Write-Host ("[RECOMMENDED MODEL] " + $RecommendedModel + $targetLabel + " - dispatch the specialist sub-agent with this model.") -ForegroundColor Cyan
             }
         }
         if (-not [string]::IsNullOrEmpty($RecommendedEffort)) {
-            if ($levelTarget -eq "claude") {
+            if ($levelTarget -eq "claude" -and -not [string]::IsNullOrEmpty($RecommendedAgent)) {
+                Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - already pinned by the " + $RecommendedAgent + " agent definition; do not pass the Agent tool's effort parameter.") -ForegroundColor Cyan
+            } elseif ($levelTarget -eq "claude") {
                 # Item 212: the Agent tool takes `effort` beside `model`; the level is the pair.
                 Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass as the Agent tool's effort parameter, together with model " + $RecommendedModel + " (the Agent tool takes its family alias; see docs/orchestrators/claude.md).") -ForegroundColor Cyan
             } else {
                 Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort, with -Model " + $RecommendedModel + " (Codex only).") -ForegroundColor Cyan
+            }
+        }
+        if (-not [string]::IsNullOrEmpty($RecommendedAgent) -and $levelTarget -eq "claude") {
+            # Item 213: the Agent tool takes only a family alias for `model`, so the pinned
+            # model and effort ride in the agent definition and the dispatch passes neither.
+            Write-Host ("[RECOMMENDED AGENT] " + $RecommendedAgent + " - dispatch with subagent_type " + $RecommendedAgent + " and omit model and effort; the agent definition pins " + $RecommendedModel + " at " + $RecommendedEffort + " effort.") -ForegroundColor Cyan
+            if (-not [string]::IsNullOrEmpty($RecommendedAgentIssue)) {
+                Write-Host ("[WARN] " + $RecommendedAgentIssue) -ForegroundColor Yellow
             }
         }
         if ($ApprovalMode -eq "to-gate") {
@@ -80,6 +94,10 @@ if (-not (Get-Command Assert-CrucibleContextKeys -ErrorAction SilentlyContinue))
 # but does not guarantee a sibling's load order. Item 14.
 if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot "git.ps1")
+}
+
+if (-not (Get-Command Get-ClaudeAgentDrift -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "claude-agents.ps1")
 }
 
 if (-not (Get-Command Test-NoCodeClosure -ErrorAction SilentlyContinue)) {
@@ -697,7 +715,18 @@ function Write-CrucibleCiStatusBanner {
     $approvalRoot = if ($Context.ContainsKey("RepoRoot") -and -not [string]::IsNullOrWhiteSpace([string]$Context.RepoRoot)) { [string]$Context.RepoRoot } else { "" }
     $approvalMode = if ($isGateTransition) { "per-phase" } else { Get-ConfiguredApprovalMode -ProjectRoot $approvalRoot }
 
-    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedTarget $recommendedTarget -RecommendedEffort $recommendedEffort -RecommendedLevel $recommendedLevel -ApprovalMode $approvalMode -ShouldAutoAdvance:$shouldAutoAdvance
+    $recommendedAgent = ""
+    $recommendedAgentIssue = ""
+    if ($recommendedTarget -eq "claude" -and $null -ne $tierLevel) {
+        $recommendedAgent = Get-ClaudeAgentName -TargetPhase ([string]$handoff.target_phase) -Tier $tierLevel.Tier
+        $agentRoot = if ($Context.ContainsKey("RepoRoot") -and -not [string]::IsNullOrWhiteSpace([string]$Context.RepoRoot)) { [string]$Context.RepoRoot } else { "" }
+        $agentDrift = @(Get-ClaudeAgentDrift -ProjectRoot $agentRoot | Where-Object { $_.Name -eq $recommendedAgent })
+        if ($agentDrift.Count -gt 0) {
+            $recommendedAgentIssue = ("Agent definition " + $recommendedAgent + " is " + $agentDrift[0].Status + " for the configured level. Run: pwsh -File " + $script:CLAUDE_AGENT_REGENERATE)
+        }
+    }
+
+    Write-NextStep -SessionDir $Context.SessionDir -Command $nextCrucibleCmd -TaskId $handoff.task_id -Specialist $handoff.target_phase -ActionCmd $actionCmd -RecommendedModel $recommendedModel -RecommendedTarget $recommendedTarget -RecommendedEffort $recommendedEffort -RecommendedLevel $recommendedLevel -RecommendedAgent $recommendedAgent -RecommendedAgentIssue $recommendedAgentIssue -ApprovalMode $approvalMode -ShouldAutoAdvance:$shouldAutoAdvance
 
     $Context.ActionCmd = $actionCmd
     $Context.ShouldAutoAdvance = $shouldAutoAdvance

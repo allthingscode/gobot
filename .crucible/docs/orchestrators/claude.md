@@ -12,7 +12,7 @@ When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in 
 
 ## Sub-Agent Invocation
 
-Claude Code's `Agent` tool is the sub-agent mechanism. Most specialists are dispatched as `general-purpose` sub-agents. The Researcher uses `Explore` (read-only search tools, enforces the trust boundary at the toolset level). Sub-agents share the same working directory and git state - they are not sandboxed. Do not pass orchestrator session history to sub-agents. Because of that shared state, run `git status` before every dispatch and confirm the tree matches expectation; never build on, or commit alongside, uncommitted changes you did not author -- establish their provenance first (see `sops/orchestrator.md` Step 4).
+Claude Code's `Agent` tool is the sub-agent mechanism. Specialists are dispatched by the Crucible-generated agent definitions in `.claude/agents/` (see *Specialist Model Selection*): `crucible-strong`, `crucible-default` or `crucible-light` for the Groomer, Architect, Reviewer and Operator, and `crucible-researcher` for the Researcher (read-only tools, which enforces the trust boundary at the toolset level). The Groomer bootstrap below has no level yet and stays `general-purpose`. Sub-agents share the same working directory and git state - they are not sandboxed. Do not pass orchestrator session history to sub-agents. Because of that shared state, run `git status` before every dispatch and confirm the tree matches expectation; never build on, or commit alongside, uncommitted changes you did not author -- establish their provenance first (see `sops/orchestrator.md` Step 4).
 
 ### Default Specialist Target: Codex
 
@@ -26,15 +26,24 @@ Do **not** hard-code a per-role model. Crucible computes the level from the acti
 line, then `[RECOMMENDED MODEL]` and `[RECOMMENDED EFFORT]`. A Claude tier is a level, a model and an effort
 together: the built-in levels are strong = `claude-opus-5-5` at `high`, default = `claude-sonnet-5-5` at
 `medium`, light = `claude-haiku-5-5` at `high`, unless `config.yaml` sets the pair under
-`models.targets.claude.<tier>`. Dispatch the sub-agent with both halves: the model as `model` and the effort as the
-`Agent` tool's `effort` parameter (low, medium, high, xhigh, max). The canonical policy and the
-default/escalation table live in [`docs/policy.md`](../policy.md) section 2.3.
+`models.targets.claude.<tier>`. Dispatch with the agent definition `-Init` names on its `[RECOMMENDED AGENT] crucible-<tier>` line
+(`crucible-researcher` for the research phase) as the `Agent` tool's `subagent_type`, and pass **neither `model`
+nor `effort`**. The `Agent` tool's `model` parameter accepts only a family alias (`opus`, `sonnet`, `haiku`,
+`fable`), but an agent definition takes a full model ID and an `effort` in its frontmatter, and a dispatch that
+passes neither runs exactly that pair. A per-invocation `model` wins over the definition, so passing one (even
+the right family) would discard the pinned ID. Crucible generates the definitions from
+`models.targets.claude` with `powershell/sync-claude-agents.ps1` (`init-project.ps1` and `update-bundle.ps1` run
+it; `-Check` lists files that are missing or stale). `-Init` warns, and `crucible-doctor.ps1` reports, when a
+definition no longer matches the configured level; re-run the sync command it prints before dispatching.
 
-The `Agent` tool's `model` parameter accepts only the family aliases (`opus`, `sonnet`, `haiku`), not a full
-model ID. Pass the family of the pinned ID (`claude-opus-5-5` -> `opus`, `claude-sonnet-5-5` -> `sonnet`,
-`claude-haiku-5-5` -> `haiku`), and first check that your environment resolves that alias to the pinned ID.
-If it does not, stop and tell the human rather than dispatching on a different model. `claude --model` takes
-the full ID directly.
+Three things override the definition, and each defeats the pin:
+
+- A per-invocation `model` on the `Agent` call wins over the definition's `model`. Never pass one.
+- `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (with `CLAUDE_CODE_SUBAGENT_MODEL`) ignores the definition's `model`.
+- `CLAUDE_CODE_EFFORT_LEVEL` overrides the definition's `effort` for every subagent.
+
+If either environment variable is set in your environment, the printed level is not what runs; clear it or tell the human.
+`claude --model` takes a full ID directly for the orchestrator session itself.
 
 Quick reference: Sonnet is the default; Opus is reserved for Research (always), design-heavy
 or `high`/`extended`-tier Architect work (`design_required`), and `high`/`extended`-tier
@@ -44,9 +53,7 @@ Grooming/Review; the Operator runs on the light tier whatever the budget, becaus
 
 ```
 Agent({
-  subagent_type: "general-purpose",
-  model: "{family alias of the [RECOMMENDED MODEL] ID}",
-  effort: "{effort from the [RECOMMENDED EFFORT] line Crucible printed}",
+  subagent_type: "{agent from the [RECOMMENDED AGENT] line: crucible-strong, crucible-default or crucible-light}",
   description: "{Phase} session for {task_id}",
   prompt: `{Role}: {task_id} - read and follow all instructions in
 .crucible/session/{task_id}/{phase}/prompt.md
@@ -107,8 +114,8 @@ launch status.
    `gpt-6.1-sol` at `low`, light = `gpt-6-luna` at `high`, unless `config.yaml` sets the pair under
    `models.targets.codex.<tier>`. Always pass both halves, `-Model` and `-Effort`; the launcher forwards
    the effort as `-c model_reasoning_effort` and warns when `-Effort` is missing. A Claude target prints
-   the same lines; its effort goes to the `Agent` tool's `effort` parameter instead (see *Specialist
-   Model Selection*).
+   the same lines; it is dispatched through the generated `crucible-<tier>` agent definition instead (see
+   *Specialist Model Selection*).
 
    **Keep the dispatch prompt a one-line file pointer.** The launcher auto-generates the specialist
    prompt: a single "read and follow `.crucible/session/{task_id}/{phase}/prompt.md`" instruction plus
@@ -182,13 +189,11 @@ identical to a Claude specialist - see *After Each Sub-Agent Returns*.
 
 ### Researcher Dispatch
 
-Use `Explore` (not `general-purpose`) to enforce read-only tool access and the trust boundary at the toolset level.
+Use `crucible-researcher` (not a `crucible-<tier>` agent) to enforce read-only tool access and the trust boundary at the toolset level. It disallows the file-editing tools, so the Researcher writes only through the Crucible scripts its prompt names, and it runs at the strong level. Pass no `model` or `effort`.
 
 ```
 Agent({
-  subagent_type: "Explore",
-  model: "opus",
-  effort: "{effort from the [RECOMMENDED EFFORT] line Crucible printed}",
+  subagent_type: "crucible-researcher",
   description: "Research session for {task_id}",
   prompt: `Researcher: {task_id} - read and follow all instructions in
 .crucible/session/{task_id}/research/prompt.md

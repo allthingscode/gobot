@@ -56,7 +56,9 @@ function New-AdopterProject {
     try {
         git config user.name "Test User"
         git config user.email "test@example.com"
-        git add src/feature.txt .crucible/dev-logs/UNPUBLISHED_LOGS.md
+        # init-project generates .claude/agents/crucible-*.md at the project root (item 213),
+        # which an adopter commits with the scaffold; the cleanliness gate flags it otherwise.
+        git add src/feature.txt .crucible/dev-logs/UNPUBLISHED_LOGS.md .claude/agents
         git commit -m "add feature.txt" --quiet
     } finally {
         Pop-Location
