@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "825a3ce4d3604ae561e2ab35eb79a3358879fc59",
+  "source_commit": "07307f6cef983340374c94161dc9f6bef5494a36",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -111,8 +111,8 @@
       "base_hash": "cb8501ecaa40b27a82a4edc2dad0751aa909c480b824cb96b8574ce50e51c915"
     },
     "personas/operator.md": {
-      "hash": "6f26d0b3fe4e42e6f257416ab36bdf95c349989b37e1da6c60b0480dc9eb4a0f",
-      "base_hash": "6f26d0b3fe4e42e6f257416ab36bdf95c349989b37e1da6c60b0480dc9eb4a0f"
+      "hash": "208c8f8578d494bc39f40bb882c9f92bea5e75b7edf37e322325b0ee7a643d85",
+      "base_hash": "208c8f8578d494bc39f40bb882c9f92bea5e75b7edf37e322325b0ee7a643d85"
     },
     "personas/README.md": {
       "hash": "f1aeefa0a424d359bf2c2d7764b12b9381488af40e0371227897fd31efa248f5",
@@ -287,8 +287,8 @@
       "base_hash": "e06e2ff0dba51c9b6c5dcdacb85dd0c51d36f1ad399fe4ff2f3dec71cb58fb0e"
     },
     "powershell/lib/session-output.ps1": {
-      "hash": "fd53b49d38017e28111605868034e5110ec42cc83e316c926dda51cc8b5557e4",
-      "base_hash": "fd53b49d38017e28111605868034e5110ec42cc83e316c926dda51cc8b5557e4"
+      "hash": "31e63414efbba3fa538669fd8833dd61efc9cabb10cd869e8a2d834b8f712403",
+      "base_hash": "31e63414efbba3fa538669fd8833dd61efc9cabb10cd869e8a2d834b8f712403"
     },
     "powershell/lib/task-checklist.ps1": {
       "hash": "7f2da42a7a4403639a311612a642ad989c602d8201ee4dcda5d7be410f0a8b52",
@@ -489,6 +489,10 @@
     "powershell/tests/culture-timestamps.tests.ps1": {
       "hash": "1263ddccae81b8cb22528bf09f538fb48ac2b231dad1510935cfedf16867c9d4",
       "base_hash": "1263ddccae81b8cb22528bf09f538fb48ac2b231dad1510935cfedf16867c9d4"
+    },
+    "powershell/tests/deployment-approval-contract.tests.ps1": {
+      "hash": "d4b0eb79e6eb6289b9f42a8f6d58f50b964040c5f992e8c1e173e7d7d134a35e",
+      "base_hash": "d4b0eb79e6eb6289b9f42a8f6d58f50b964040c5f992e8c1e173e7d7d134a35e"
     },
     "powershell/tests/deployment-finalization-contract.tests.ps1": {
       "hash": "206de590cec547a6a98170c010931a2348ed17ca182d37b853275886c0e459a0",
@@ -819,8 +823,8 @@
       "base_hash": "150b9a845dc92f7ed9c765a935bb5d5b08875696d87213830b3d3425d6793f89"
     },
     "sops/deployment.md": {
-      "hash": "cf1aebec65ec6d106d8cdff6f6ce651518d9cecea9e2cd1662ff42bf2df4f5ab",
-      "base_hash": "cf1aebec65ec6d106d8cdff6f6ce651518d9cecea9e2cd1662ff42bf2df4f5ab"
+      "hash": "210ccc22e21481fd3b06416dcb166dce51d44d2d04d8f8c6b0730461c4b2fae6",
+      "base_hash": "210ccc22e21481fd3b06416dcb166dce51d44d2d04d8f8c6b0730461c4b2fae6"
     },
     "sops/grooming.md": {
       "hash": "39ce81b92522b1b5ccf4330ce9324177a9cdb3ff87e86cf62d246219c582bfbb",

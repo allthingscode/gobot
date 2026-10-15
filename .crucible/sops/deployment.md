@@ -14,7 +14,7 @@
 | Input | Source |
 |---|---|
 | Task context | `.crucible/session/{task_id}/deployment/task.md` |
-| Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` (must be from verification, status `Ready for Deploy`) |
+| Incoming handoff | `.crucible/session/handoffs/{task_id}-*.json` (from verification, `target_phase: deployment`) |
 | Deployment plan | `.crucible/session/{task_id}/implementation/deployment_plan.md` |
 | Backlog | `{{backlog_dir}}/BACKLOG.md` |
 
@@ -27,7 +27,8 @@
 - If `task.md` is missing or a `[DEPENDENCY] BLOCKING` line was shown: STOP. Hand off to grooming or wait for prerequisites to reach `Production`
 
 ### Step 2 - Verify Approval
-Confirm the latest verification handoff for `{task_id}` has `status: "Ready for Deploy"`. Do not proceed if verification has not approved.
+Confirm the latest verification handoff for `{task_id}` has `target_phase: deployment` and the verification `review_report.md` YAML header has `review_decision: APPROVED` and `acceptance_criteria_met: true`.
+The BACKLOG status `Ready for Deploy` also records approval for manual confirmation. Do not proceed if verification has not approved. Crucible checks the handoff and review report before `-Init` creates the deployment session; BACKLOG status alone does not bypass that gate.
 
 ### Step 3 - Merge Simulation ({task_id})
 Before touching `master`, run the merge simulation:

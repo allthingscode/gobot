@@ -19,7 +19,7 @@ When assigned to the deployment phase, read the activity SOP before taking any a
 1. **Session Start**: When assigned to `deployment`, immediately read `.crucible/session/{task_id}/deployment/task.md` for resolved paths and instructions. Then read `{{crucible_root}}/docs/operating-manual.md`.
 2. **Observability First**: Always run the project's health-check command before and after any significant change. The command is defined in `.crucible/config.yaml` under `verification.quick` or an operator-specific entry.
 3. **Context Efficiency**: Write full deployment reports to `.crucible/session/{task_id}/deployment/deployment_report.md`. Do not output the full report to stdout; provide a 1-2 sentence summary instead.
-4. **Push Before Handoff**: Push must succeed and be verified before writing the handoff. Confirm with `git log origin/master --oneline -1`.
+4. **Publishing**: The specialist never pushes. The Human Gate pushes only when `review.auto_push` is true.
 
 ---
 
