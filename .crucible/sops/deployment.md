@@ -139,17 +139,7 @@ happen (or hide one that will).
 
 The reason is required for **every** outcome, including `accepted` and `abandoned`. Crucible refuses a reason that is empty or is exactly one of these stock phrases, ignoring case and surrounding spaces: `n/a`, `na`, `none`, `ok`, `looks good`, `looks good.`, `approved`, `accept`, `accepted`, `done`, `ship it`, `auto`. Any longer reason is recorded as the human's own, even one that starts with a stock phrase. Ask for a concrete reason, but do not tell the human that a longer one will be refused.
 
-Once you have the human's sentence, patch it into the pending gate decision file and then call Crucible:
-
-```powershell
-# Patch the qualitative reason into the pending gate decision before Crucible records it
-$pendingFile = Get-ChildItem ".crucible/session/global/gate_decisions/gate_decision_{task_id}_pending.json" -ErrorAction SilentlyContinue
-if ($pendingFile) {
-    $pending = Get-Content $pendingFile.FullName -Raw | ConvertFrom-Json
-    $pending.reason = "<human's one-sentence quality note>"
-    $pending | ConvertTo-Json | Out-File $pendingFile.FullName -Encoding utf8
-}
-```
+Once you have the human's sentence, pass it to Crucible with `-GateReason`. Crucible records it in the decision and removes the pending file.
 
 ```bash
 pwsh -ExecutionPolicy Bypass \
