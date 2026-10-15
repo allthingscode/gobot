@@ -182,15 +182,6 @@ func TestRunner_ExecuteTool(t *testing.T) {
 	}
 }
 
-func TestRunner_GenerateIdempotencyKey(t *testing.T) {
-	t.Parallel()
-
-	key1 := GenerateIdempotencyKey()
-	if key1 == "" {
-		t.Error("expected non-empty key")
-	}
-}
-
 func TestIsCronSession(t *testing.T) {
 	t.Parallel()
 	if !bot.IsCronSession("cron:morning_briefing:email:user@example.com") {

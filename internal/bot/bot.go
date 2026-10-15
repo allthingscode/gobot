@@ -144,9 +144,6 @@ func (b *Bot) SetTracer(t *observability.DispatchTracer) {
 //
 // Group chats use a per-user key so each sender has an isolated context.
 // Cron sessions use the SessionPrefixCron prefix and are unaffected.
-//
-// Mirrors DetectThreadMetadata in internal/telegram and session_key_override
-// in strategery/patches/telegram.py.
 func SessionKey(chatID, threadID, senderID int64) string {
 	if chatID < 0 {
 		// Group or supergroup: isolate per sender.

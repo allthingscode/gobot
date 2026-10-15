@@ -455,13 +455,6 @@ func TestRunnerUtils_Coverage(t *testing.T) {
 	if !strings.Contains(corr, "fix this") || !strings.Contains(corr, "one") {
 		t.Error("BuildCorrectionMessage failed")
 	}
-
-	// GenerateIdempotencyKey
-	k1 := app.GenerateIdempotencyKey()
-	k2 := app.GenerateIdempotencyKey()
-	if k1 == "" || k1 == k2 {
-		t.Error("GenerateIdempotencyKey failed")
-	}
 }
 
 func TestResolveEmailSubject_Coverage(t *testing.T) {

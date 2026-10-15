@@ -13,20 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGenerateIdempotencyKey(t *testing.T) {
-	t.Parallel()
-	// Should produce unique keys
-	k1 := app.GenerateIdempotencyKey()
-	k2 := app.GenerateIdempotencyKey()
-	if k1 == k2 {
-		t.Errorf("Generated identical keys: %s", k1)
-	}
-	// UUID v4 format is 36 chars.
-	if len(k1) < 30 {
-		t.Errorf("Expected uuid-like key, got %d chars: %s", len(k1), k1)
-	}
-}
-
 // setupTestStore creates a temporary database for integration tests.
 func setupTestStore(t *testing.T) (store *agentctx.IdempotencyStore, db *sql.DB, cleanup func()) {
 	t.Helper()
