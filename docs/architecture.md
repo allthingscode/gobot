@@ -11,13 +11,13 @@ This document provides a deep dive into gobot's architecture, covering data flow
        │
        ▼
 ┌──────────────┐
-│  Bot Handler │  (Pairing gate, HITL checks, message normalization)
+│  Bot Handler │  (bot: allow-list/pairing gate and routing; app: TgAPI transport)
 └──────┬───────┘
        │
        ▼
 ┌──────────────────────────┐
-│  Agent Session Manager   │  (Session lifecycle, tool dispatch, compaction,
-│                          │   memory window management, pruning)
+│  Agent Session Manager   │  (agent: session lifecycle, compaction, hooks;
+│                          │   app DispatchHandler glues bot, agent and memory)
 └──────┬───────────────────┘
        │
        ▼
@@ -28,7 +28,7 @@ This document provides a deep dive into gobot's architecture, covering data flow
        │
        ▼
 ┌────────────────────────────────────────────────┐
-│              Tool Dispatch Loop                 │
+│       Tool Dispatch Loop (app.AgentRunner)      │
 │                                                 │
 │  ┌──────────┐  ┌───────────┐  ┌──────────────┐ │
 │  │  Spawn   │  │   Shell   │  │   Google     │ │
@@ -51,13 +51,16 @@ This document provides a deep dive into gobot's architecture, covering data flow
 │  └──────────────────────────┘  │
 │                                 │
 │  ┌──────────────────────────┐  │
-│  │  Long-Term Memory        │  │  (SQLite FTS5: semantic search index)
+│  │  Long-Term Memory        │  │  (SQLite FTS5: lexical search index)
 │  │  (memory.db)             │  │
 │  └──────────────────────────┘  │
+│  ┌ - - - - - - - - - - - - -┐  │
+│  │  Vector Store (optional) │  │  (embedding retrieval; falls back to FTS5)
+│  └ - - - - - - - - - - - - -┘  │
 │                                 │
 │  ┌──────────────────────────┐  │
-│  │  Cron Scheduler          │  │  (Ephemeral sessions for recurring jobs)
-│  │  (jobs.json + SQLite)    │  │
+│  │  Cron Scheduler          │  │  (cron: scheduling; app: dispatch, ephemeral
+│  │  (jobs.json + SQLite)    │  │   sessions for recurring jobs)
 │  └──────────────────────────┘  │
 └────────────────────────────────┘
 ```
@@ -66,18 +69,19 @@ This document provides a deep dive into gobot's architecture, covering data flow
 
 | Package | Path | Primary Responsibility | Key Files |
 |---------|------|----------------------|-----------|
-| `agent` | `internal/agent` | Core agent loop: LLM turns, tool dispatch, compaction, session management | `agent.go`, `compaction.go`, `handoff.go`, `hooks.go` |
+| `app` | `internal/app` | Composition layer behind `gobot run`: wiring, startup/shutdown, `AgentRunner` LLM/tool loop and tool execution, `DispatchHandler`, `TgAPI` telego transport, cron channel dispatch | `app.go`, `bootstrap.go`, `app_setup.go`, `app_servers.go`, `runner.go`, `runner_tools.go`, `handler.go`, `telegram.go`, `cron.go` |
+| `agent` | `internal/agent` | Contracts and session management: `Runner` interface, `SessionManager`, compaction, hooks, policy and HITL | `agent.go`, `session_history.go`, `compaction.go`, `hooks.go`, `policy.go`, `hitl.go` |
 | `audit` | `internal/audit` | Markdown audit report generation (immutable audit trail) | `audit.go`, `ledger.go`, `redact.go` |
-| `bot` | `internal/bot` | Telegram bot client, message routing, pairing gate | `bot.go`, `pairing_handler.go` |
+| `bot` | `internal/bot` | Transport-agnostic polling runtime: `API` and `Handler` interfaces, message routing, pairing gate (no Telegram SDK) | `bot.go`, `pairing_handler.go` |
 | `browser` | `internal/browser` | Pure-Go headless browser automation via chromedp | `browser.go`, `tools.go` |
 | `config` | `internal/config` | Configuration loading from JSON, validation, typed accessors | `config.go`, `validator.go` |
 | `context` | `internal/context` | Durable checkpointing and session state persistence (SQLite) | `manager.go`, `db.go`, `pairing.go` |
-| `cron` | `internal/cron` | Autonomous background job scheduler | `scheduler.go`, `cron.go`, `batch.go` |
+| `cron` | `internal/cron` | Job scheduling and reconciliation; hands due jobs to a `Dispatcher` (implemented by `app.CronDispatcher`) | `scheduler.go`, `cron.go`, `batch.go` |
 | `doctor` | `internal/doctor` | Pre-flight diagnostics and health checks | `doctor.go` |
 | `gateway` | `internal/gateway` | HTTP gateway for external REST chat clients and future web dashboard | `gateway.go` |
 | `google` | `internal/integrations/google` | Google Workspace integrations (Auth, Gmail, Calendar, Tasks) | `auth.go`, `gmail.go`, `calendar.go`, `tasks.go`, `search.go` |
-| `infra` | `internal/infra` | Infrastructure wiring (DB init, lifecycle management) | `infra.go`, `resource_registry.go` |
-| `memory` | `internal/memory` | SQLite-backed long-term memory with FTS5 search | `memory.go`, `sqlite_store.go`, `consolidator/` |
+| `infra` | `internal/infra` | Filesystem helpers (media path resolution, directory listing, log reading) | `infra.go` |
+| `memory` | `internal/memory` | SQLite-backed long-term memory with FTS5 lexical search; optional vector retrieval in `vector/`; async fact extraction in `consolidator/` | `memory.go`, `sqlite_store.go`, `vector/hybrid.go`, `vector/store.go`, `consolidator/consolidator.go` |
 | `observability` | `internal/observability` | OpenTelemetry traces and metrics export | `otel.go`, `middleware.go` |
 | `provider` | `internal/provider` | LLM provider abstraction (Gemini, Anthropic, OpenAI) | `factory.go` |
 | `reflection` | `internal/reflection` | Pure-function reflection/planning loop utilities | `reflection.go` |
@@ -87,9 +91,30 @@ This document provides a deep dive into gobot's architecture, covering data flow
 | `secrets` | `internal/secrets` | Encrypted secrets storage (cross-platform) | `secrets.go` |
 | `shell` | `internal/shell` | Shell command execution tool | `redirect.go`, `clixml.go` |
 | `state` | `internal/state` | Durable agent state with atomic writes and file locking | `manager.go` |
-| `telegram` | `internal/telegram` | Telegram API client and formatting utilities | `telegram.go` |
+| `telegram` | `internal/telegram` | Pure Markdown-to-Telegram-HTML formatting (no client; the client is `app.TgAPI`) | `formatter.go` |
 | `testutil` | `internal/testutil` | Shared test helpers (table-driven test utilities) | `faulty_server.go` |
-| `cmd/gobot` | `cmd/gobot` | Main binary entrypoint and CLI commands | `main.go`, `runner.go`, `tool_*.go` |
+| `cmd/gobot` | `cmd/gobot` | Main binary entrypoint and CLI commands; `cmdRun` calls `app.RunAgent` | `main.go`, `cli_*.go` |
+
+## Source Navigator
+
+Entry points per flow. Each row is a starting point, not a universal call stack; branches marked "if" depend on configuration.
+
+| Flow | Where to start | Notes |
+|------|----------------|-------|
+| Startup | `cmd/gobot/main.go` `cmdRun` -> `internal/app/app.go` `RunAgent` -> `BuildAgentStack` (`bootstrap.go`) -> `runInitializedAgentLoop` | `app_setup.go` (`SetupHooks`, `SetupConsolidator`, `SetupGateHandler`) and `app_servers.go` (gateway, dashboard, `StartTelegramBot`, `StartCron`, `StartHeartbeat`) start subsystems; each is conditional on config. |
+| Incoming message and reply | `internal/app/telegram.go` `TgAPI.Updates` -> `internal/bot/bot.go` `Bot` -> `bot.NewPairingHandler` (`pairing_handler.go`) -> `app.DispatchHandler.Handle` (`handler.go`) -> `agent.SessionManager.Dispatch` (`agent.go`) -> `app.AgentRunner.Run` (`runner.go`) | `bot` depends only on the `API` and `Handler` interfaces; `TgAPI.Send` delivers the reply and `internal/telegram/formatter.go` `ToHTML` formats it. Admin commands short-circuit in `maybeHandleAdminCommand`. |
+| Tool execution | `internal/app/runner_tools.go` `processToolCalls` -> `executeSingleToolCall` -> `executeToolCall` -> `executeToolInner` | Tools are `app` types (`tool_*.go`, `spawn_tool.go`, `tools.go`). Policy and HITL run as `agent.Hooks` registered by `SetupHooks`. |
+| Scheduled jobs | `internal/cron/scheduler.go` `Scheduler.Run` -> `cron.Dispatcher` -> `internal/app/cron.go` `CronDispatcher.Dispatch` | `StartCron` (`app_servers.go`) runs only if cron is enabled and passes a `nil` checkpoint store, so cron sessions are ephemeral. Telegram delivery is in `cron_telegram.go`. |
+| Memory write | Synchronous: `DispatchHandler.indexMemory` -> `memory.MemoryStore.Index` (`sqlite_store.go`). Asynchronous: `Consolidator.ConsolidateAsync` (`consolidator/consolidator.go`) | Transcript indexing runs in the request path if a memory store exists and the message is not skipped by `memory.ShouldSkipRAG`. Fact extraction (LLM call, dedup, optional vector indexing) runs in a background worker after the reply is produced. |
+| Memory recall | `internal/app/runner_rag.go` `getRagBlock` | If vector search is enabled and a vector store and embedding provider exist: `hybridRagSearch` (`vector/hybrid.go` `HybridSearch`), falling back to `ftsSearch` (`MemoryStore.Search`, FTS5) on error. Otherwise FTS5 only. Vector search is optional. |
+| Shutdown | `internal/app/app.go` `waitForShutdownTrigger`, `runOwnedConsolidation`, `runWithStackCleanup` | See "Shutdown Order" below. |
+
+### Shutdown Order
+
+1. On signal, context cancellation or a critical subsystem start failure, `waitForShutdownTrigger` marks readiness off, then calls `cancel()` so workers can begin cleanup, then `DrainGoroutines` waits on the shared `WaitGroup` for up to 5 seconds. A timeout is logged and shutdown proceeds.
+2. `runOwnedConsolidation` then cancels again and calls `shutdownConsolidation`, which runs `Consolidator.Shutdown` with a 5 second join. Shutdown closes admission and waits for accepted consolidation workers; each worker is also bound to the runtime lifetime (`BindLifetime`) and has its own 30 second timeout.
+3. `runWithStackCleanup` runs the stack cleanup (closing the stores) afterwards. Exception: if the join returned `consolidator.ErrDrainTimeout`, accepted workers still own the memory and vector stores, so cleanup is skipped, the retention is logged, and the process exits.
+4. The OpenTelemetry provider shuts down last (deferred in `RunAgent`) with its own 5 second bound.
 
 ## Key Design Decisions
 
@@ -145,7 +170,7 @@ documented in [Verification](verification.md).
 
 **Implementation:**
 - `internal/context/manager.go` serializes checkpoint writes via mutex
-- `internal/memory/memory.go` serializes index writes via mutex
+- `internal/memory/sqlite_store.go` serializes index writes via mutex
 - Cron scheduler runs in its own goroutine but uses the same session manager
 
 **Impact:** No database lock contention, but writes are serialized (acceptable for single-user workload).
@@ -164,7 +189,7 @@ documented in [Verification](verification.md).
 - Supports dynamic authorization/de-authorization at runtime
 
 **Implementation:**
-- `internal/bot/bot.go` implements `PairingHandler` that checks the pairing store
+- `internal/bot/pairing_handler.go` implements the pairing handler (`bot.NewPairingHandler`) that checks the pairing store
 - Authorization is granted via `gobot authorize <pairing-code>` or direct chat ID
 - HITL (Human-in-the-Loop) approval gate for sensitive tools (shell_exec, send_email)
 
@@ -200,7 +225,7 @@ documented in [Verification](verification.md).
 - Simplifies rollback (delete cron job, no checkpoint pollution)
 
 **Implementation:**
-- `cronDispatcher` creates a new `SessionManager` with `store=nil` in `cmd/gobot/main.go`
+- `StartCron` in `internal/app/app_servers.go` creates a new `SessionManager` with a `nil` checkpoint store and hands it to `NewCronDispatcher`
 - Cron jobs run in isolation, no checkpoint saved to disk
 
 **Impact:** Cron jobs can't accidentally corrupt user sessions, and user sessions don't contain cron-generated noise.
