@@ -384,6 +384,11 @@ Complete-CrucibleSourceSession -Context `$ctx
         # The trailing blank line is deliberate: a log that ends in a stray newline is clean
         # history, not unreadable history, and must not reach the fail-closed branch.
         [System.IO.File]::AppendAllText($ctx.LogFile, $cleanHistoryEvent + "`n`n")
+        # Item 209: valid retry history may omit optional outcome and notes fields.
+        $optionalHistory = '{"event":"session_end","task_id":"F-042","phase":"implementation"}' + "`n" +
+            '{"event":"quality_gate_retry","task_id":"F-042","phase":"implementation"}' + "`n"
+        [System.IO.File]::AppendAllText($ctx.LogFile, $optionalHistory)
+
 
         # First occurrence: should exit 2 with quality_gate_retry logged (not circuit_breaker)
         $exitCode = 0
@@ -537,6 +542,11 @@ verification:
         $cleanHistoryEvent = @{ event = "session_start"; task_id = "F-038"; phase = "verification"; handoff_count = 1 } | ConvertTo-Json -Compress
         # Trailing blank line: see the matching note in the D26 case.
         [System.IO.File]::AppendAllText($logFile, $cleanHistoryEvent + "`n`n")
+        # Item 209: valid retry history may omit optional outcome and notes fields.
+        $optionalHistory = '{"event":"session_end","task_id":"F-038","phase":"verification"}' + "`n" +
+            '{"event":"quality_gate_retry","task_id":"F-038","phase":"verification"}' + "`n"
+        [System.IO.File]::AppendAllText($logFile, $optionalHistory)
+
 
         $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'

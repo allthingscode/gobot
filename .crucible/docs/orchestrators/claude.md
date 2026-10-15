@@ -119,7 +119,8 @@ launch status.
    ```
 
    It records the decision and writes `session/{task_id}/research/gate-filing.md`, then prints the
-   dispatch pointer. Re-dispatch with `-PromptFile <path to gate-filing.md>` (or a trivial one-line `-PromptText`). The specialist
+   dispatch command and writes its one-line pointer to `session/{task_id}/research/gate-filing-pointer.md`.
+   Re-dispatch with `-TaskId {task_id} -Phase research -PromptFile <path to gate-filing-pointer.md>`. The specialist
    then files the approved stubs and hands off without re-auditing.
 
    For work that is **not a backlog task at all** - Crucible's own `TODO.md` items, or any one-off

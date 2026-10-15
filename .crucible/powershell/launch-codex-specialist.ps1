@@ -251,14 +251,18 @@ function Get-IncompleteAdvanceTarget {
         if ($ts -lt $SinceUtc) { continue }
         $events += $entry
     }
+    # Item 209: a terminal event has no handoff target and older logs omit outcome.
+    if ($events.Count -gt 0 -and $events[-1].event -eq "session_end" -and
+        $events[-1].PSObject.Properties["notes"] -and $events[-1].notes -eq "Pipeline complete") { return $null }
     $endIndex = -1
     for ($i = $events.Count - 1; $i -ge 0; $i--) {
-        if ($events[$i].event -eq "session_end" -and $events[$i].phase -eq $PhaseName -and $events[$i].outcome -eq "success") {
+        if ($events[$i].event -eq "session_end" -and $events[$i].phase -eq $PhaseName -and $events[$i].PSObject.Properties["outcome"] -and $events[$i].outcome -eq "success") {
             $endIndex = $i
             break
         }
     }
     if ($endIndex -lt 0) { return $null }
+    if (-not $events[$endIndex].PSObject.Properties["notes"]) { return $null }
     if ([string]$events[$endIndex].notes -notmatch "^Handoff to (\S+)") { return $null }
     $target = $Matches[1]
     if ($phases -notcontains $target) { return $null }
@@ -282,9 +286,12 @@ function Test-PhaseEndedWithoutHandoff {
         try { $entry = $line | ConvertFrom-Json } catch { continue }
         if ($null -eq $entry -or [string]$entry.task_id -ne $TaskIdValue) { continue }
         $entryPhase = if ($entry.PSObject.Properties["phase"]) { [string]$entry.phase } else { [string]$entry.specialist }
-        if ($entryPhase -ne $PhaseName) { continue }
+        # Item 209: pipeline completion also ends the phase when logged under crucible.
+        $pipelineComplete = $entry.event -eq "session_end" -and $entry.PSObject.Properties["notes"] -and $entry.notes -eq "Pipeline complete"
+        if ($entryPhase -ne $PhaseName -and -not $pipelineComplete) { continue }
         if ($entry.event -eq "session_start") { $started = $true; continue }
-        if ($entry.event -ne "session_end" -or $entry.outcome -ne "success") { continue }
+        if ($entry.event -ne "session_end" -or (-not $pipelineComplete -and
+            (-not $entry.PSObject.Properties["outcome"] -or $entry.outcome -ne "success"))) { continue }
         $stamp = $entry.timestamp
         if ($stamp -is [datetime]) {
             $ts = $stamp.ToUniversalTime()

@@ -106,6 +106,21 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, '{"verdict":"APPROVED","summary":"ok","findings":[]}', $enc) }
         exit 0
     }
+    { $_ -in @("complete", "completecrucible", "endwithoutnotes") } {
+        # Item 209: old pipeline logs omit outcome on the terminal session_end.
+        $phaseDir = Split-Path -Parent $outFile
+        $phaseName = Split-Path -Leaf $phaseDir
+        $taskDir = Split-Path -Parent $phaseDir
+        $taskName = Split-Path -Leaf $taskDir
+        $ts = [datetime]::UtcNow.ToString("o")
+        $events = @('{"event":"session_start","task_id":"' + $taskName + '","phase":"' + $phaseName + '","timestamp":"' + $ts + '"}')
+        $endPhase = if ($mode -eq "completecrucible") { "crucible" } else { $phaseName }
+        $fields = if ($mode -eq "endwithoutnotes") { ',"outcome":"success"' } else { ',"notes":"Pipeline complete"' }
+        $events += '{"event":"session_end","task_id":"' + $taskName + '","phase":"' + $endPhase + '","timestamp":"' + $ts + '"' + $fields + '}'
+        [System.IO.File]::AppendAllText((Join-Path $taskDir "pipeline.log.jsonl"), (($events -join "`n") + "`n"), $enc)
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, "Pipeline complete", $enc) }
+        exit 0
+    }
     { $_ -in @("halfadvance", "fulladvance") } {
         # Mimic the specialist's crucible.ps1 -Init in the task's pipeline log. halfadvance is
         # the run Codex killed mid-advance: the phase ended, the next one never started.
@@ -852,6 +867,25 @@ try {
         Assert-Result -Name "exit 3" -Condition ($res.ExitCode -eq 3) -FailureMessage "expected exit 3, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "names the missing phase" -Condition ($res.Output -match "never started deployment") -FailureMessage "expected the missing phase named. Output:`n$($res.Output)"
         Assert-Result -Name "gives the recovery command" -Condition ($res.Output -match "-Init -TaskId C-977 -ProjectRoot") -FailureMessage "expected the -Init recovery command. Output:`n$($res.Output)"
+    }
+
+    foreach ($case in @(
+        @{ Mode = "complete"; Phase = "grooming" },
+        @{ Mode = "complete"; Phase = "research" },
+        @{ Mode = "completecrucible"; Phase = "verification" },
+        @{ Mode = "endwithoutnotes"; Phase = "verification" }
+    )) {
+        $results += Run-Test -Name ("Optional pipeline log fields: " + $case.Mode + " / " + $case.Phase + " (item 209)") -Body {
+            $projectRoot = Join-Path $tempRoot ("proj-209-" + $case.Mode + "-" + $case.Phase)
+            New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+            $res = Invoke-Launcher -Mode $case.Mode -BinDir $binDir -LauncherArgs @(
+                "-TaskId", "R-209", "-Phase", $case.Phase, "-Model", "gpt-6-sol",
+                "-PromptText", "FINISH", "-ProjectRoot", $projectRoot)
+            Assert-Result -Name "terminal status success" -Condition ($res.Output -match "STATUS=SUCCESS") -FailureMessage $res.Output
+            Assert-Result -Name "terminal exit zero" -Condition ($res.ExitCode -eq 0) -FailureMessage $res.Output
+            $statusPath = Join-Path $projectRoot (".crucible/session/R-209/" + $case.Phase + "/codex-launch-status.txt")
+            Assert-Result -Name "persisted success" -Condition ([IO.File]::ReadAllText($statusPath).StartsWith("STATUS=SUCCESS")) -FailureMessage "missing persisted SUCCESS"
+        }
     }
 
     $results += Run-Test -Name "A completed advance and an older half-advance both stay SUCCESS" -Body {

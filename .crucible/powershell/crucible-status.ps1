@@ -375,7 +375,7 @@ $cbEvents = @(
 
 # Merge Conflicts (Last 7 Days)
 $cutoff = (Get-Date).ToUniversalTime().AddDays(-7)
-$conflictEvents = @($cbEvents | Where-Object { $_.outcome -match "conflict" -and (ConvertFrom-IsoTimestamp -Value $_.timestamp).UtcDateTime -gt $cutoff })
+$conflictEvents = @($cbEvents | Where-Object { $_.PSObject.Properties["outcome"] -and $_.outcome -match "conflict" -and (ConvertFrom-IsoTimestamp -Value $_.timestamp).UtcDateTime -gt $cutoff })
 $conflictRate = 0
 if ($totalManaged -gt 0) {
     $conflictRate = ($conflictEvents.Count / $totalManaged) * 100
@@ -427,7 +427,10 @@ if (-not $Tasks -or $Summary) {
     } else {
         $cbEvents | Select-Object -Last 5 | ForEach-Object {
             $ts = (ConvertFrom-IsoTimestamp -Value $_.timestamp).UtcDateTime.ToString("MM-dd HH:mm", [System.Globalization.CultureInfo]::InvariantCulture)
-            Write-Host "[$ts] $($_.task_id): $($_.outcome) - $($_.notes)" -ForegroundColor Yellow
+            # Item 209: event log fields are optional, including on older logs.
+            $outcome = if ($_.PSObject.Properties["outcome"]) { $_.outcome } else { "" }
+            $notes = if ($_.PSObject.Properties["notes"]) { $_.notes } else { "" }
+            Write-Host "[$ts] $($_.task_id): $outcome - $notes" -ForegroundColor Yellow
         }
     }
 }

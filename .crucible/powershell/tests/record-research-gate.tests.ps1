@@ -39,6 +39,25 @@ try {
         Assert-Result "passes HumanApproved" ($body -match "-HumanApproved") "handoff command should record HumanApproved"
     }
 
+    # TODO item 208: background pwsh launches re-split multi-word -PromptText values.
+    $results += Run-Test -Name "printed Codex dispatch uses a file-sourced one-line pointer" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "dispatch with spaces")
+        $output = (& $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root 6>&1 | Out-String)
+        $codex = @($output -split "`r?`n" | Where-Object { $_ -match '^    Codex:' })
+        Assert-Result "one Codex command" ($codex.Count -eq 1) "expected one printed Codex command"
+        Assert-Result "no PromptText" ($codex[0] -notmatch '-PromptText') "printed Codex command must not use -PromptText"
+        $pointerPath = Join-Path (Split-Path $p.GateFiling) "gate-filing-pointer.md"
+        Assert-Result "quoted PromptFile path" ($codex[0].Contains('-PromptFile "' + $pointerPath + '"')) "expected quoted pointer file path"
+        Assert-Result "task-scoped dispatch" ($codex[0] -match '-TaskId R-021 -Phase research') "expected TaskId and Phase"
+        Assert-Result "pointer written" (Test-Path -LiteralPath $pointerPath) "missing pointer file"
+        $pointer = [IO.File]::ReadAllText($pointerPath)
+        $expected = "Researcher: $($p.TaskId) - read and follow all instructions in $($p.GateFiling)"
+        Assert-Result "one-line pointer content" ($pointer.TrimEnd("`r", "`n") -eq $expected) "pointer must direct the Researcher to gate-filing.md"
+        $bytes = [IO.File]::ReadAllBytes($pointerPath)
+        Assert-Result "pointer ASCII without BOM" (@($bytes | Where-Object { $_ -gt 127 }).Count -eq 0) "pointer must be ASCII and BOM-free"
+        Assert-Result "Claude pointer unchanged" ($output.Contains('Claude: Agent tool, prompt = "' + $expected + '"')) "expected Claude inline pointer"
+    }
+
     $results += Run-Test -Name "writes a structural decision record with the approved list" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "record")
         & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -Deferred "C-352" -Rejected "C-999" -ProjectRoot $p.Root | Out-Null

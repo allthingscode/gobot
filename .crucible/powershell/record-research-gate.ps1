@@ -10,8 +10,9 @@
 #   record-research-gate.ps1 -TaskId R-021 -Reason "Gate approved" `
 #     -Approved "C-350","C-351" -Deferred "C-352" -Rejected ""
 # Then dispatch the Researcher with a ONE-LINE pointer to the generated gate-filing.md
-# (Codex: launch-codex-specialist.ps1 -PromptText "Researcher: <id> - read and follow all
-# instructions in <path>"; or the Claude Agent tool with the same one-line prompt).
+# (Codex: launch-codex-specialist.ps1 -TaskId <id> -Phase research
+# -PromptFile <path to gate-filing-pointer.md>; or the Claude Agent tool with the same
+# one-line prompt).
 
 param(
     [Parameter(Mandatory = $true)]
@@ -211,6 +212,9 @@ $gateFilingPath = Join-Path $researchSessionDir "gate-filing.md"
 
 # --- Orchestrator guidance ---
 $pointer = "Researcher: $TaskId - read and follow all instructions in $gateFilingPath"
+# TODO item 208: file-sourced prompts survive background pwsh -File argument parsing.
+$pointerPath = Join-Path $researchSessionDir "gate-filing-pointer.md"
+[System.IO.File]::WriteAllText($pointerPath, ($pointer + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Write-Host ""
 Write-Host "[RESEARCH GATE RECORDED] $TaskId" -ForegroundColor Green
 Write-Host ("  outcome: " + $decision.outcome + "  |  approved: " + $approvedList.Count + "  deferred: " + $deferredList.Count + "  rejected: " + $rejectedList.Count)
@@ -218,7 +222,7 @@ Write-Host ("  decision record: " + $decisionPath)
 Write-Host ("  continuation prompt: " + $gateFilingPath)
 Write-Host ""
 Write-Host "  Re-dispatch the Researcher with a ONE-LINE pointer to the continuation prompt:" -ForegroundColor Cyan
-Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -ProjectRoot `"$REPO_ROOT`" -PromptText `"$pointer`"")
+Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -ProjectRoot `"$REPO_ROOT`" -PromptFile `"$pointerPath`"")
 Write-Host ("    Claude: Agent tool, prompt = `"$pointer`"")
 Write-Host ""
 Write-Host "  The gate is CLOSED; the specialist will file the approved stubs and hand off without re-presenting."

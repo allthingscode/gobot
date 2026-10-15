@@ -145,7 +145,7 @@ The Research Gate fires before the handoff. Present findings and questions to th
 record-research-gate.ps1 -TaskId <id> -Reason "<gate reason>" -Approved "C-350","C-351" [-Deferred ...] [-Rejected ...]
 ```
 
-That writes a structural decision record and generates a self-contained `session/<id>/research/gate-filing.md`, then prints a one-line dispatch pointer. The orchestrator re-dispatches the Researcher with ONLY that one-line pointer (Codex `launch-codex-specialist.ps1 -PromptText`, or the Claude `Agent` tool). When your prompt IS a `gate-filing.md`, the gate is already CLOSED: file the approved stubs and write the handoff immediately - do NOT re-run the audit and do NOT re-present the gate.
+That writes a structural decision record and generates a self-contained `session/<id>/research/gate-filing.md`, writes its one-line pointer to `session/<id>/research/gate-filing-pointer.md`, then prints the dispatch command. The orchestrator re-dispatches the Researcher with ONLY that one-line pointer (Codex `launch-codex-specialist.ps1 -TaskId <id> -Phase research -PromptFile <path to gate-filing-pointer.md>`, or the Claude `Agent` tool). When your prompt IS a `gate-filing.md`, the gate is already CLOSED: file the approved stubs and write the handoff immediately - do NOT re-run the audit and do NOT re-present the gate.
 
 Do not try to drive filing by appending a decision note to the normal research `prompt.md`; the present-and-wait step above will win and the run will re-present with zero deliverables. Use the generated `gate-filing.md` path.
 

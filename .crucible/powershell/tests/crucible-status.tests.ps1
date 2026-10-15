@@ -106,6 +106,25 @@ try {
         Assert-Result -Name "F-004 duration is empty" -Condition ($f004.Duration -eq "-") -FailureMessage "expected F-004 duration '-', got '$($f004.Duration)'"
     }
 
+    $results += Run-Test -Name "Circuit breaker log fields are optional (item 209)" -Body {
+        $taskDir = Join-Path $projectRoot ".crucible/session/F-001"
+        New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        $logPath = Join-Path $taskDir "pipeline.log.jsonl"
+        $stamp = [datetime]::UtcNow.ToString("o")
+        $entry = '{"event":"circuit_breaker","task_id":"F-001","phase":"implementation","timestamp":"' + $stamp + '"}'
+        [IO.File]::WriteAllText($logPath, $entry + "`n", [Text.UTF8Encoding]::new($false))
+        Push-Location $projectRoot
+        try {
+            $res = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $STATUS_SCRIPT -Summary
+            }
+            Assert-Result -Name "optional fields displayed" -Condition ($res.ExitCode -eq 0 -and $res.Output -match 'F-001:  - ') -FailureMessage $res.Output
+        } finally {
+            Pop-Location
+            Remove-Item -LiteralPath $logPath
+        }
+    }
+
     $results += Run-Test -Name "Summary emits pipeline health" -Body {
         Push-Location $projectRoot
         try {

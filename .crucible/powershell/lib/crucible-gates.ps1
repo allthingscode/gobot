@@ -1454,10 +1454,10 @@ function Invoke-CrucibleRuntimeValidation {
                         if ($entry.task_id -eq $handoff.task_id -and $logPhase -ne $handoff.source_phase) {
                             break
                         }
-                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "session_end" -and $entry.outcome -eq "success") {
+                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "session_end" -and $entry.PSObject.Properties["outcome"] -and $entry.outcome -eq "success") {
                             break
                         }
-                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "quality_gate_retry" -and $entry.notes -like "*artifact*") {
+                        if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "quality_gate_retry" -and $entry.PSObject.Properties["notes"] -and $entry.notes -like "*artifact*") {
                             $hasPriorRetry = $true
                             break
                         }
@@ -2395,13 +2395,13 @@ function Invoke-CircuitBreakerGates {
                              if ($entry.task_id -eq $handoff.task_id -and $logPhase -ne $handoff.source_phase) {
                                 break
                             }
-                            if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "session_end" -and $entry.outcome -eq "success") {
+                            if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "session_end" -and $entry.PSObject.Properties["outcome"] -and $entry.outcome -eq "success") {
                                 $entryHandoffCount = if ($entry.PSObject.Properties["handoff_count"]) { $entry.handoff_count } else { 0 }
                                 if ($entryHandoffCount -lt $handoff.cumulative_handoff_count) {
                                     break
                                 }
                             }
-                            if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "quality_gate_retry" -and $entry.notes -like "*verification*check*") {
+                            if ($entry.task_id -eq $handoff.task_id -and $logPhase -eq $handoff.source_phase -and $entry.event -eq "quality_gate_retry" -and $entry.PSObject.Properties["notes"] -and $entry.notes -like "*verification*check*") {
                                 $hasPriorRetry = $true
                                 break
                             }
