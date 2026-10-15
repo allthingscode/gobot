@@ -49,8 +49,11 @@ _current_task.md
 # Backlog lives in .crucible/backlog/ (gitignored as data) - root copy must never exist
 /BACKLOG.md
 
-# Claude local settings
-.claude/
+# Claude local settings; Crucible's generated agent definitions are committed
+.claude/*
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/crucible-*.md
 .claudeignore.txt
 
 # Dev-only scripts (live locally, not published)
