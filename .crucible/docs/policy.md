@@ -100,12 +100,12 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 
 | Target | `strong` | `default` | `light` |
 |---|---|---|---|
-| `claude` (and `agent`) | opus | sonnet | haiku |
+| `claude` (and `agent`) | claude-opus-5-5 at high | claude-sonnet-5-5 at medium | claude-haiku-5-5 at high |
 | `codex` | gpt-6.1-sol at high | gpt-6.1-sol at low | gpt-6-luna at high |
 | `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.8 Flash (High) | Gemini 3.8 Flash (Medium) |
 | `grok` | inherit | inherit | inherit |
 
-For Codex a tier is a **level**: a model and a reasoning effort taken together, resolved as one pair by `Get-CodexLevel` and printed as `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`. A level is changed as a pair under `models.targets.codex.<tier>` (`model:` and `effort:`), never one half alone. Other targets have no effort setting, so their tiers are a model alone.
+For Codex and Claude a tier is a **level**: a model and a reasoning effort taken together, resolved as one pair by `Get-ModelLevel` (`Get-CodexLevel`, `Get-ClaudeLevel`) and printed as `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`. A level is changed as a pair under `models.targets.<target>.<tier>` (`model:` and `effort:`), never one half alone. A Claude orchestrator passes the effort as the `Agent` tool's `effort` parameter. Other targets have no effort setting, so their tiers are a model alone.
 
 `design_required` is the one bit that captures design-vs-execution: the Groomer sets it on the grooming->implementation handoff (`new-handoff.ps1 -DesignRequired`) when the Architect must produce the design, and omits it when the spec already carries a complete design. Specialists never pick their own model; like `budget_tier`, the signal is set upstream and enforced by Crucible.
 

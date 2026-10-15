@@ -43,9 +43,15 @@ models:
   default_target: claude
   targets:
     claude:
-      strong: opus
-      default: sonnet
-      light: haiku
+      strong:
+        model: claude-opus-5-5
+        effort: high
+      default:
+        model: claude-sonnet-5-5
+        effort: medium
+      light:
+        model: claude-haiku-5-5
+        effort: high
     codex:
       strong:
         model: gpt-6.1-sol
@@ -107,4 +113,4 @@ review:
   auto_push: false
   require_green_ci: true
 crucible_version: "0.5.0"
-crucible_install_commit: "54102b3e744f849dc0f436df418ee0b9799f824c"
+crucible_install_commit: "a071da5940c77804076240e766f318b94e2113aa"

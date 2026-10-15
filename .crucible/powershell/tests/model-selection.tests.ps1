@@ -61,15 +61,15 @@ $results += Run-Test "done has no tier; blank/dirty tier defaults safely" {
 
 $noCfgRoot = New-TestFixtureRoot -NameHint "modelsel-nocfg"
 
-$results += Run-Test "Default map: claude tiers -> opus/sonnet/haiku" {
-    Assert-Result "claude strong" ((Get-ConfiguredModel -Target 'claude' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'opus') "expected opus"
-    Assert-Result "claude default" ((Get-ConfiguredModel -Target 'claude' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'sonnet') "expected sonnet"
-    Assert-Result "claude light" ((Get-ConfiguredModel -Target 'claude' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'haiku') "expected haiku"
+$results += Run-Test "Default map: claude tiers -> pinned full model IDs" {
+    Assert-Result "claude strong" ((Get-ConfiguredModel -Target 'claude' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'claude-opus-5-5') "expected claude-opus-5-5"
+    Assert-Result "claude default" ((Get-ConfiguredModel -Target 'claude' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'claude-sonnet-5-5') "expected claude-sonnet-5-5"
+    Assert-Result "claude light" ((Get-ConfiguredModel -Target 'claude' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'claude-haiku-5-5') "expected claude-haiku-5-5"
 }
 
 $results += Run-Test "Default map: 'agent' resolves to the claude row" {
-    Assert-Result "agent strong" ((Get-ConfiguredModel -Target 'agent' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'opus') "expected opus"
-    Assert-Result "empty target -> claude" ((Get-ConfiguredModel -Target '' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'haiku') "expected haiku"
+    Assert-Result "agent strong" ((Get-ConfiguredModel -Target 'agent' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'claude-opus-5-5') "expected claude-opus-5-5"
+    Assert-Result "empty target -> claude" ((Get-ConfiguredModel -Target '' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'claude-haiku-5-5') "expected claude-haiku-5-5"
 }
 
 $results += Run-Test "Default map: codex tiers -> gpt-6.1-sol/gpt-6.1-sol/gpt-6-luna" {
@@ -128,7 +128,7 @@ $results += Run-Test "config.yaml models: block overrides the default map" {
 }
 
 $results += Run-Test "Tiers absent from config fall back to the default map" {
-    Assert-Result "claude default (not in cfg) -> sonnet" ((Get-ConfiguredModel -Target 'claude' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'sonnet') "expected sonnet"
+    Assert-Result "claude default (not in cfg) -> claude-sonnet-5-5" ((Get-ConfiguredModel -Target 'claude' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'claude-sonnet-5-5') "expected claude-sonnet-5-5"
     Assert-Result "codex default (not in cfg) -> gpt-6.1-sol" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'gpt-6.1-sol') "expected gpt-6.1-sol"
     Assert-Result "codex light (not in cfg) -> gpt-6-luna" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $cfgRoot) -eq 'gpt-6-luna') "expected gpt-6-luna"
     Assert-Result "grok default (not in cfg) -> inherit" ((Get-ConfiguredModel -Target 'grok' -Tier 'default' -ProjectRoot $cfgRoot) -eq 'inherit') "expected inherit"
@@ -267,6 +267,70 @@ $results += Run-Test "End-to-end: deployment on codex resolves to the gpt-6-luna
     Assert-Result "light level" ((Get-LevelPair $tier $noCfgRoot) -eq 'gpt-6-luna/high') "expected gpt-6-luna/high"
 }
 
+# --- Stage 2c (Item 212): a Claude tier is a level too ---
+
+function Get-ClaudePair {
+    param([string]$Tier, [string]$Root)
+    $level = Get-ClaudeLevel -Tier $Tier -ProjectRoot $Root
+    if ($null -eq $level) { return "" }
+    return ($level.Model + "/" + $level.Effort)
+}
+
+$results += Run-Test "Built-in Claude levels: strong opus/high, default sonnet/medium, light haiku/high" {
+    Assert-Result "strong" ((Get-ClaudePair 'strong' $noCfgRoot) -eq 'claude-opus-5-5/high') "expected claude-opus-5-5/high"
+    Assert-Result "default" ((Get-ClaudePair 'default' $noCfgRoot) -eq 'claude-sonnet-5-5/medium') "expected claude-sonnet-5-5/medium"
+    Assert-Result "light" ((Get-ClaudePair 'light' $noCfgRoot) -eq 'claude-haiku-5-5/high') "expected claude-haiku-5-5/high"
+    Assert-Result "empty tier has no level" ($null -eq (Get-ClaudeLevel -Tier '' -ProjectRoot $noCfgRoot)) "expected no level"
+}
+
+$claudePairRoot = New-LevelConfigRoot -Name "modelsel-claude-pair" -Models @"
+models:
+  targets:
+    claude:
+      strong:
+        model: claude-opus-5-5
+        effort: XHigh
+      light:
+        model: claude-haiku-5-5
+        effort: low
+"@
+
+$results += Run-Test "config.yaml sets a Claude level as one model and effort pair" {
+    $warnings = $null
+    $strong = Get-ClaudeLevel -Tier 'strong' -ProjectRoot $claudePairRoot -WarningVariable warnings
+    Assert-Result "strong pair" (($strong.Model + "/" + $strong.Effort) -eq 'claude-opus-5-5/xhigh') "expected claude-opus-5-5/xhigh"
+    Assert-Result "light pair" ((Get-ClaudePair 'light' $claudePairRoot) -eq 'claude-haiku-5-5/low') "expected claude-haiku-5-5/low"
+    Assert-Result "unset level keeps its built-in pair" ((Get-ClaudePair 'default' $claudePairRoot) -eq 'claude-sonnet-5-5/medium') "expected claude-sonnet-5-5/medium"
+    Assert-Result "pair form is silent" (@($warnings).Count -eq 0) ("expected no warning, got: " + (@($warnings) -join "`n"))
+    Assert-Result "claude model resolution reads the pair" ((Get-ConfiguredModel -Target 'claude' -Tier 'light' -ProjectRoot $claudePairRoot) -eq 'claude-haiku-5-5') "expected claude-haiku-5-5"
+    Assert-Result "agent model resolution reads the pair" ((Get-ConfiguredModel -Target 'agent' -Tier 'strong' -ProjectRoot $claudePairRoot) -eq 'claude-opus-5-5') "expected claude-opus-5-5"
+}
+
+$results += Run-Test "A bare Claude alias still reads at the built-in effort, and warns it changes the model" {
+    $bareRoot = New-LevelConfigRoot -Name "modelsel-claude-bare" -Models "models:`n  targets:`n    claude:`n      strong: opus`n      default: claude-sonnet-5-5`n"
+    $warnings = $null
+    $strong = Get-ClaudeLevel -Tier 'strong' -ProjectRoot $bareRoot -WarningVariable warnings -WarningAction SilentlyContinue
+    Assert-Result "alias at built-in effort" (($strong.Model + "/" + $strong.Effort) -eq 'opus/high') "expected opus/high"
+    Assert-Result "alias warns" ((@($warnings) -join "`n") -match "changes the strong level's model to 'opus' but not its effort") ("expected a half-change warning, got: " + (@($warnings) -join "`n"))
+    Assert-Result "model string is the bare value" ((Get-ConfiguredModel -Target 'claude' -Tier 'strong' -ProjectRoot $bareRoot) -eq 'opus') "expected opus"
+    $warnings = $null
+    Get-ClaudeLevel -Tier 'default' -ProjectRoot $bareRoot -WarningVariable warnings | Out-Null
+    Assert-Result "bare built-in model is silent" (@($warnings).Count -eq 0) ("expected no warning, got: " + (@($warnings) -join "`n"))
+    Remove-Item -Recurse -Force -LiteralPath $bareRoot -ErrorAction SilentlyContinue
+}
+
+$results += Run-Test "A Claude level with an invalid effort or a missing half is unreadable" {
+    $badRoot = New-LevelConfigRoot -Name "modelsel-claude-bad" -Models "models:`n  targets:`n    claude:`n      strong:`n        model: claude-opus-5-5`n        effort: none`n      light:`n        model: claude-haiku-5-5`n"
+    $badError = ""
+    try { Get-ClaudeLevel -Tier 'strong' -ProjectRoot $badRoot | Out-Null } catch { $badError = $_.Exception.Message }
+    Assert-Result "none is not a Claude effort" ($badError -match "models\.targets\.claude\.strong\.effort' is 'none'") ("expected an unknown-effort error, got: " + $badError)
+    $halfError = ""
+    try { Get-ClaudeLevel -Tier 'light' -ProjectRoot $badRoot | Out-Null } catch { $halfError = $_.Exception.Message }
+    Assert-Result "half a pair throws" ($halfError -match "claude\.light' is a Claude level, so it needs both") ("expected a both-halves error, got: " + $halfError)
+    Remove-Item -Recurse -Force -LiteralPath $badRoot -ErrorAction SilentlyContinue
+}
+
+Remove-Item -Recurse -Force -LiteralPath $claudePairRoot -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -LiteralPath $noCfgRoot -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -LiteralPath $effortRoot -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -LiteralPath $pairRoot -ErrorAction SilentlyContinue

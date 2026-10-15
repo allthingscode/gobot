@@ -54,7 +54,9 @@ Expected output excerpt:
 [NEXT SESSION COMMAND] Run the following command:
 
 agent "Groomer: F-001 - read and follow all instructions in <abs path>/.crucible/session/F-001/grooming/prompt.md"
-[RECOMMENDED MODEL] sonnet (target claude) - dispatch the specialist sub-agent with this model.
+[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
+[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - dispatch the specialist sub-agent with this model.
+[RECOMMENDED EFFORT] medium - pass as the Agent tool's effort parameter, together with model claude-sonnet-5-5 (family alias; see docs/orchestrators/claude.md).
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -217,7 +219,9 @@ Expected output excerpt:
 [NEXT SESSION COMMAND] Run the following command:
 
 agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/grooming/prompt.md"
-[RECOMMENDED MODEL] sonnet (target claude) - dispatch the specialist sub-agent with this model.
+[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
+[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - dispatch the specialist sub-agent with this model.
+[RECOMMENDED EFFORT] medium - pass as the Agent tool's effort parameter, together with model claude-sonnet-5-5 (family alias; see docs/orchestrators/claude.md).
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -251,7 +255,9 @@ You'll see something like:
 
 [NEXT SESSION COMMAND]
 agent "Architect: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/implementation/prompt.md"
-[RECOMMENDED MODEL] sonnet (target claude) - dispatch the specialist sub-agent with this model.
+[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
+[RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - dispatch the specialist sub-agent with this model.
+[RECOMMENDED EFFORT] medium - pass as the Agent tool's effort parameter, together with model claude-sonnet-5-5 (family alias; see docs/orchestrators/claude.md).
 ```
 
 Confirm with "go" (or "go" in a new session if you prefer a fresh context).

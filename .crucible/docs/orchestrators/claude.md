@@ -20,11 +20,21 @@ In this operating configuration, **Claude is the orchestrator and Codex runs all
 
 ### Specialist Model Selection
 
-Do **not** hard-code a per-role model. Crucible computes the model from the activity
-(`target_phase`, `budget_tier`, `design_required`) and prints a `[RECOMMENDED MODEL] <x>`
-line next to the dispatch command after each `crucible.ps1 -Init -ProjectRoot "{project_root}"`. Dispatch the sub-agent
-with that model. The canonical policy and the default/escalation table live in
-[`docs/policy.md`](../policy.md) section 2.3.
+Do **not** hard-code a per-role model. Crucible computes the level from the activity
+(`target_phase`, `budget_tier`, `design_required`) and prints, next to the dispatch command after each
+`crucible.ps1 -Init -ProjectRoot "{project_root}"`, a `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort (target claude)`
+line, then `[RECOMMENDED MODEL]` and `[RECOMMENDED EFFORT]`. A Claude tier is a level, a model and an effort
+together: the built-in levels are strong = `claude-opus-5-5` at `high`, default = `claude-sonnet-5-5` at
+`medium`, light = `claude-haiku-5-5` at `high`, unless `config.yaml` sets the pair under
+`models.targets.claude.<tier>`. Dispatch the sub-agent with both halves: the model as `model` and the effort as the
+`Agent` tool's `effort` parameter (low, medium, high, xhigh, max). The canonical policy and the
+default/escalation table live in [`docs/policy.md`](../policy.md) section 2.3.
+
+The `Agent` tool's `model` parameter accepts only the family aliases (`opus`, `sonnet`, `haiku`), not a full
+model ID. Pass the family of the pinned ID (`claude-opus-5-5` -> `opus`, `claude-sonnet-5-5` -> `sonnet`,
+`claude-haiku-5-5` -> `haiku`), and first check that your environment resolves that alias to the pinned ID.
+If it does not, stop and tell the human rather than dispatching on a different model. `claude --model` takes
+the full ID directly.
 
 Quick reference: Sonnet is the default; Opus is reserved for Research (always), design-heavy
 or `high`/`extended`-tier Architect work (`design_required`), and `high`/`extended`-tier
@@ -35,7 +45,8 @@ Grooming/Review; the Operator runs on the light tier whatever the budget, becaus
 ```
 Agent({
   subagent_type: "general-purpose",
-  model: "{model from the [RECOMMENDED MODEL] line Crucible printed}",
+  model: "{family alias of the [RECOMMENDED MODEL] ID}",
+  effort: "{effort from the [RECOMMENDED EFFORT] line Crucible printed}",
   description: "{Phase} session for {task_id}",
   prompt: `{Role}: {task_id} - read and follow all instructions in
 .crucible/session/{task_id}/{phase}/prompt.md
@@ -95,9 +106,9 @@ launch status.
    `[RECOMMENDED EFFORT]`. The built-in levels are strong = `gpt-6.1-sol` at `high`, default =
    `gpt-6.1-sol` at `low`, light = `gpt-6-luna` at `high`, unless `config.yaml` sets the pair under
    `models.targets.codex.<tier>`. Always pass both halves, `-Model` and `-Effort`; the launcher forwards
-   the effort as `-c model_reasoning_effort` and warns when `-Effort` is missing. Effort is a
-   Codex-only lever -- Claude's `Agent` dispatch has no effort knob (its effort is encoded in the model
-   tier), so no effort line is printed for a Claude target.
+   the effort as `-c model_reasoning_effort` and warns when `-Effort` is missing. A Claude target prints
+   the same lines; its effort goes to the `Agent` tool's `effort` parameter instead (see *Specialist
+   Model Selection*).
 
    **Keep the dispatch prompt a one-line file pointer.** The launcher auto-generates the specialist
    prompt: a single "read and follow `.crucible/session/{task_id}/{phase}/prompt.md`" instruction plus
@@ -177,6 +188,7 @@ Use `Explore` (not `general-purpose`) to enforce read-only tool access and the t
 Agent({
   subagent_type: "Explore",
   model: "opus",
+  effort: "{effort from the [RECOMMENDED EFFORT] line Crucible printed}",
   description: "Research session for {task_id}",
   prompt: `Researcher: {task_id} - read and follow all instructions in
 .crucible/session/{task_id}/research/prompt.md

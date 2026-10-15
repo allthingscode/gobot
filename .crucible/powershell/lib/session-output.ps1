@@ -33,8 +33,9 @@ function Write-NextStep {
         }
         Write-Host ""
         Write-Host $ActionCmd
+        $levelTarget = if ([string]::IsNullOrWhiteSpace($RecommendedTarget)) { "codex" } else { $RecommendedTarget }
         if (-not [string]::IsNullOrEmpty($RecommendedLevel)) {
-            Write-Host ("[RECOMMENDED LEVEL] " + $RecommendedLevel + " = " + $RecommendedModel + " at " + $RecommendedEffort + " effort (target codex) - a level is the model and effort together; pass both.") -ForegroundColor Cyan
+            Write-Host ("[RECOMMENDED LEVEL] " + $RecommendedLevel + " = " + $RecommendedModel + " at " + $RecommendedEffort + " effort (target " + $levelTarget + ") - a level is the model and effort together; pass both.") -ForegroundColor Cyan
         }
         if (-not [string]::IsNullOrEmpty($RecommendedModel)) {
             $targetLabel = ""
@@ -48,7 +49,12 @@ function Write-NextStep {
             }
         }
         if (-not [string]::IsNullOrEmpty($RecommendedEffort)) {
-            Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort, with -Model " + $RecommendedModel + " (Codex only).") -ForegroundColor Cyan
+            if ($levelTarget -eq "claude") {
+                # Item 212: the Agent tool takes `effort` beside `model`; the level is the pair.
+                Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass as the Agent tool's effort parameter, together with model " + $RecommendedModel + " (the Agent tool takes its family alias; see docs/orchestrators/claude.md).") -ForegroundColor Cyan
+            } else {
+                Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort, with -Model " + $RecommendedModel + " (Codex only).") -ForegroundColor Cyan
+            }
         }
         if ($ApprovalMode -eq "to-gate") {
             Write-Host '[APPROVAL MODE] to-gate - the human''s "go" for this item covers this dispatch. Still stop at a gate, an escalation, a launcher status other than SUCCESS, or a surprise.' -ForegroundColor Cyan
@@ -672,11 +678,11 @@ function Write-CrucibleCiStatusBanner {
     $recommendedModel = ""
     $recommendedEffort = ""
     $recommendedLevel = ""
-    $codexLevel = if ($recommendedTarget -eq "codex") { Get-CodexLevel -Tier $capabilityTier } else { $null }
-    if ($null -ne $codexLevel) {
-        $recommendedModel = $codexLevel.Model
-        $recommendedEffort = $codexLevel.Effort
-        $recommendedLevel = $codexLevel.Tier
+    $tierLevel = if ($recommendedTarget -eq "codex" -or $recommendedTarget -eq "claude") { Get-ModelLevel -Target $recommendedTarget -Tier $capabilityTier } else { $null }
+    if ($null -ne $tierLevel) {
+        $recommendedModel = $tierLevel.Model
+        $recommendedEffort = $tierLevel.Effort
+        $recommendedLevel = $tierLevel.Tier
     } else {
         $recommendedModel = Get-ConfiguredModel -Target $Target -Tier $capabilityTier
     }

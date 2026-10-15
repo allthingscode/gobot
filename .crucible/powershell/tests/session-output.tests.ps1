@@ -125,10 +125,10 @@ try {
         Assert-Result -Name "grok line omits model" -Condition ($grokLine.Count -eq 1 -and $grokLine[0] -match 'inherit \(target grok\) - omit model') -FailureMessage ("got: " + ($grokLine -join " | "))
         Assert-Result -Name "grok line does not name a Claude slug" -Condition ($grokLine[0] -notmatch 'sonnet|opus|haiku') -FailureMessage ("got: " + $grokLine[0])
 
-        $claudeLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "sonnet" -RecommendedTarget "claude" 6>&1 | ForEach-Object { "$_" })
+        $claudeLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" 6>&1 | ForEach-Object { "$_" })
         $claudeLine = @($claudeLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
-        Assert-Result -Name "claude line names its target" -Condition ($claudeLine.Count -eq 1 -and $claudeLine[0] -match 'sonnet \(target claude\) - dispatch the specialist') -FailureMessage ("got: " + ($claudeLine -join " | "))
-        Assert-Result -Name "claude prints no level" -Condition (-not ($claudeLines -match '\[RECOMMENDED LEVEL\]')) -FailureMessage ("got: " + ($claudeLines -join " | "))
+        Assert-Result -Name "claude line names its target" -Condition ($claudeLine.Count -eq 1 -and $claudeLine[0] -match 'claude-sonnet-5-5 \(target claude\) - dispatch the specialist') -FailureMessage ("got: " + ($claudeLine -join " | "))
+        Assert-Result -Name "claude with no level prints no level" -Condition (-not ($claudeLines -match '\[RECOMMENDED LEVEL\]')) -FailureMessage ("got: " + ($claudeLines -join " | "))
     }
 
     # Item 163: a Codex level is a model and an effort together, so it is printed as one pair.
@@ -141,6 +141,15 @@ try {
         Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match 'low - .*-Model gpt-6\.1-sol') -FailureMessage ("got: " + ($effort -join " | "))
     }
 
+    # Item 212: a Claude tier is a level too; the effort goes to the Agent tool's effort parameter.
+    $results += Run-Test -Name "Write-NextStep prints a Claude level as a pair and points the effort at the Agent tool" -Body {
+        $sessionDir = Join-Path $tempRoot "claude-level-line/session"
+        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-916" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" 6>&1 | ForEach-Object { "$_" })
+        $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
+        Assert-Result -Name "claude level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = claude-sonnet-5-5 at medium effort \(target claude\)') -FailureMessage ("got: " + ($lines -join " | "))
+        $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
+        Assert-Result -Name "claude effort line names the Agent tool" -Condition ($effort.Count -eq 1 -and $effort[0] -match "medium - pass as the Agent tool's effort parameter" -and $effort[0] -notmatch 'launch-codex-specialist|Codex only') -FailureMessage ("got: " + ($effort -join " | "))
+    }
     # Item 178: -Init prints the approval mode in effect, and a dispatch after a gate always waits.
     $results += Run-Test -Name "Write-CrucibleCiStatusBanner prints the approval mode, per-phase after a gate" -Body {
         $cases = @(
@@ -396,9 +405,9 @@ New-CruciblePromptText -Context `$ctx
     # Item 140: the Operator's tier follows deployment trouble read from the handoff, not the budget.
     $results += Run-Test -Name "Operator recommendation escalates on handoff rebase or retry counters, not budget" -Body {
         $cases = @(
-            @{ Name = "clean high-budget deployment"; Budget = "high"; Rebase = 0; Retry = 0; Want = "haiku" },
-            @{ Name = "rebase re-entry"; Budget = "low"; Rebase = 1; Retry = 0; Want = "sonnet" },
-            @{ Name = "retried handoff"; Budget = "low"; Rebase = 0; Retry = 1; Want = "sonnet" }
+            @{ Name = "clean high-budget deployment"; Budget = "high"; Rebase = 0; Retry = 0; Want = "claude-haiku-5-5"; WantLevel = "light = claude-haiku-5-5 at high" },
+            @{ Name = "rebase re-entry"; Budget = "low"; Rebase = 1; Retry = 0; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at medium" },
+            @{ Name = "retried handoff"; Budget = "low"; Rebase = 0; Retry = 1; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at medium" }
         )
         $n = 0
         foreach ($case in $cases) {
@@ -418,6 +427,9 @@ New-CruciblePromptText -Context `$ctx
             }
             $line = @(($output -split "`r?`n") | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
             Assert-Result -Name ($case.Name + " -> " + $case.Want) -Condition ($line.Count -eq 1 -and $line[0] -match ('\] ' + $case.Want + ' \(target claude\)')) -FailureMessage ("got: " + ($line -join " | "))
+            $levelLine = @(($output -split "`r?`n") | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
+            Assert-Result -Name ($case.Name + " prints the Claude level") -Condition ($levelLine.Count -eq 1 -and $levelLine[0].Contains($case.WantLevel + " effort (target claude)")) -FailureMessage ("got: " + ($levelLine -join " | "))
+            Assert-Result -Name ($case.Name + " prints the Agent effort line") -Condition (@(($output -split "`r?`n") | Where-Object { $_ -match "\[RECOMMENDED EFFORT\].*Agent tool's effort" }).Count -eq 1) -FailureMessage $output
         }
     }
 

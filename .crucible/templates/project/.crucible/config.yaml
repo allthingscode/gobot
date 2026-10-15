@@ -41,13 +41,21 @@ roles:
 # the other. Change a level by changing its pair. Effort is one of none, minimal, low,
 # medium, high, xhigh, max. Luna is most effective at high, so the light level is Luna at
 # high rather than a stronger model at a lower effort.
+# A Claude tier is a level too (Item 212). Effort is one of low, medium, high, xhigh, max;
+# the orchestrator passes it as the Agent tool's effort parameter beside the model family.
 models:
   default_target: claude
   targets:
     claude:
-      strong: opus
-      default: sonnet
-      light: haiku
+      strong:
+        model: claude-opus-5-5
+        effort: high
+      default:
+        model: claude-sonnet-5-5
+        effort: medium
+      light:
+        model: claude-haiku-5-5
+        effort: high
     codex:
       strong:
         model: gpt-6.1-sol

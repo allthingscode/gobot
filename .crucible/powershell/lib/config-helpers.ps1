@@ -401,8 +401,8 @@ function Get-ConfiguredManifestFiles {
 # knob: the default for every tier is 'inherit', which tells the orchestrator to omit
 # model. A config.yaml value still wins, so an adopter can pin a slug later. An empty
 # tier (the 'done' phase) has no model. A codex tier is a level, a model and an effort
-# together, so its model comes from Get-CodexLevel. Keep the default maps in sync with
-# templates/project/.crucible/config.yaml.
+# together, and so is a claude tier (Item 212), so their models come from Get-ModelLevel.
+# Keep the default maps in sync with templates/project/.crucible/config.yaml.
 function Get-ConfiguredModel {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Target,
@@ -416,14 +416,13 @@ function Get-ConfiguredModel {
     if ([string]::IsNullOrWhiteSpace($target) -or $target -eq "agent") { $target = "claude" }
     $tier = $Tier.Trim().ToLowerInvariant()
 
-    if ($target -eq "codex") {
-        $level = Get-CodexLevel -Tier $tier -ProjectRoot $ProjectRoot -WarningAction SilentlyContinue
+    if ($target -eq "codex" -or $target -eq "claude") {
+        $level = Get-ModelLevel -Target $target -Tier $tier -ProjectRoot $ProjectRoot -WarningAction SilentlyContinue
         if ($null -ne $level) { return $level.Model }
         return $tier
     }
 
     $defaults = @{
-        claude      = @{ strong = "opus";                   default = "sonnet";                  light = "haiku" }
         antigravity = @{ strong = "Gemini 3.1 Pro (High)";   default = "Gemini 3.8 Flash (High)";  light = "Gemini 3.8 Flash (Medium)" }
         grok        = @{ strong = "inherit";                 default = "inherit";                  light = "inherit" }
     }
@@ -450,26 +449,42 @@ function Get-ModelFromConfig {
     return Get-ModelsBlockValue -Path @("models", "targets", $Target, $Tier) -ProjectRoot $ProjectRoot
 }
 
-# A Codex level is a model and an effort taken together, and one is never set without the
-# other: strong is gpt-6.1-sol at high, default is gpt-6.1-sol at low, light is gpt-6-luna
-# at high. Luna is most effective at high, so the cheapest level is Luna at high rather
-# than a stronger model at a lower effort. config.yaml sets a level as one pair:
-#   models: > targets: > codex: > <tier>: > model: / effort:
-# The older split form, a bare model at models.targets.codex.<tier> plus an optional
-# models.effort.codex.<tier>, still reads, and warns wherever it changes one half of a
-# level without the other. Returns $null for an empty or unknown tier (the 'done' phase).
-function Get-CodexLevel {
+# A level is a model and an effort taken together, and one is never set without the
+# other. Codex: strong is gpt-6.1-sol at high, default is gpt-6.1-sol at low, light is
+# gpt-6-luna at high. Luna is most effective at high, so the cheapest level is Luna at high
+# rather than a stronger model at a lower effort. Claude (Item 212): strong is
+# claude-opus-5-5 at high, default is claude-sonnet-5-5 at medium, light is claude-haiku-5-5
+# at high; the Agent tool takes the effort as its `effort` parameter. config.yaml sets a
+# level as one pair:
+#   models: > targets: > <target>: > <tier>: > model: / effort:
+# A bare model at models.targets.<target>.<tier> still reads, at the built-in effort, and
+# warns when it changes the model without the effort. Only Codex also has the older split
+# form, models.effort.codex.<tier>, which still reads and warns wherever it splits a level.
+# Returns $null for an empty or unknown tier (the 'done' phase).
+function Get-ModelLevel {
     param(
+        [Parameter(Mandatory = $true)][ValidateSet("codex", "claude")][string]$Target,
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Tier,
         [string]$ProjectRoot = ""
     )
 
-    $levels = @{
-        strong  = @{ Model = "gpt-6.1-sol"; Effort = "high" }
-        default = @{ Model = "gpt-6.1-sol"; Effort = "low" }
-        light   = @{ Model = "gpt-6-luna";  Effort = "high" }
+    if ($Target -eq "codex") {
+        $label = "Codex"
+        $levels = @{
+            strong  = @{ Model = "gpt-6.1-sol"; Effort = "high" }
+            default = @{ Model = "gpt-6.1-sol"; Effort = "low" }
+            light   = @{ Model = "gpt-6-luna";  Effort = "high" }
+        }
+        $efforts = @("none", "minimal", "low", "medium", "high", "xhigh", "max")
+    } else {
+        $label = "Claude"
+        $levels = @{
+            strong  = @{ Model = "claude-opus-5-5";   Effort = "high" }
+            default = @{ Model = "claude-sonnet-5-5"; Effort = "medium" }
+            light   = @{ Model = "claude-haiku-5-5";  Effort = "high" }
+        }
+        $efforts = @("low", "medium", "high", "xhigh", "max")
     }
-    $efforts = @("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
     $t = if ($null -ne $Tier) { $Tier.Trim().ToLowerInvariant() } else { "" }
     if (-not $levels.ContainsKey($t)) { return $null }
@@ -481,17 +496,17 @@ function Get-CodexLevel {
     $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
     $entries = @(Get-ConfigEntries -Content $content)
 
-    $levelPath = @("models", "targets", "codex", $t)
+    $levelPath = @("models", "targets", $Target, $t)
     $levelKey = $levelPath -join "."
     $splitKey = "models.effort.codex." + $t
-    $splitEffort = Get-ConfigBlockValue -Content $content -Path @("models", "effort", "codex", $t) -Source $configPath
+    $splitEffort = if ($Target -eq "codex") { Get-ConfigBlockValue -Content $content -Path @("models", "effort", "codex", $t) -Source $configPath } else { $null }
     $node = Find-ConfigNode -Entries $entries -Path $levelPath -Source $configPath
 
     if ($null -ne $node -and [string]::IsNullOrWhiteSpace($entries[$node.Index].Value)) {
         $model = Get-ConfigBlockValue -Content $content -Path ($levelPath + "model") -Source $configPath
         $effort = Get-ConfigBlockValue -Content $content -Path ($levelPath + "effort") -Source $configPath
         if ($null -eq $model -or $null -eq $effort) {
-            throw ("Unreadable " + $configPath + ": '" + $levelKey + "' is a Codex level, so it needs both a model and an effort.")
+            throw ("Unreadable " + $configPath + ": '" + $levelKey + "' is a " + $label + " level, so it needs both a model and an effort.")
         }
         $effort = $effort.Trim().ToLowerInvariant()
         if ($efforts -notcontains $effort) {
@@ -518,6 +533,22 @@ function Get-CodexLevel {
         Write-Warning ("config.yaml " + $levelKey + " changes the " + $t + " level's model to '" + $level.Model + "' but not its effort, so it runs at the built-in '" + $builtIn.Effort + "'. Write the level as one pair, a model and an effort under " + $levelKey + ".")
     }
     return $level
+}
+
+function Get-CodexLevel {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Tier,
+        [string]$ProjectRoot = ""
+    )
+    return Get-ModelLevel -Target codex -Tier $Tier -ProjectRoot $ProjectRoot
+}
+
+function Get-ClaudeLevel {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Tier,
+        [string]$ProjectRoot = ""
+    )
+    return Get-ModelLevel -Target claude -Tier $Tier -ProjectRoot $ProjectRoot
 }
 
 # The project's .crucible/config.yaml, or "" when there is none.
