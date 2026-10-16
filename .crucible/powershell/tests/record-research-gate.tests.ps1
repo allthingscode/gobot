@@ -48,6 +48,8 @@ try {
         Assert-Result "no PromptText" ($codex[0] -notmatch '-PromptText') "printed Codex command must not use -PromptText"
         $pointerPath = Join-Path (Split-Path $p.GateFiling) "gate-filing-pointer.md"
         Assert-Result "quoted PromptFile path" ($codex[0].Contains('-PromptFile "' + $pointerPath + '"')) "expected quoted pointer file path"
+        # Item 219: a Codex level includes both model and effort.
+        Assert-Result "model and effort in dispatch" ($codex[0] -match '-Model <model> -Effort <effort>') "expected both halves of the Codex level"
         Assert-Result "task-scoped dispatch" ($codex[0] -match '-TaskId R-021 -Phase research') "expected TaskId and Phase"
         Assert-Result "pointer written" (Test-Path -LiteralPath $pointerPath) "missing pointer file"
         $pointer = [IO.File]::ReadAllText($pointerPath)

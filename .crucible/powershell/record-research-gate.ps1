@@ -222,7 +222,7 @@ Write-Host ("  decision record: " + $decisionPath)
 Write-Host ("  continuation prompt: " + $gateFilingPath)
 Write-Host ""
 Write-Host "  Re-dispatch the Researcher with a ONE-LINE pointer to the continuation prompt:" -ForegroundColor Cyan
-Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -ProjectRoot `"$REPO_ROOT`" -PromptFile `"$pointerPath`"")
+Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -Effort <effort> -ProjectRoot `"$REPO_ROOT`" -PromptFile `"$pointerPath`"")
 Write-Host ("    Claude: Agent tool, prompt = `"$pointer`"")
 Write-Host ""
 Write-Host "  The gate is CLOSED; the specialist will file the approved stubs and hand off without re-presenting."

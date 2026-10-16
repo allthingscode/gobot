@@ -1,6 +1,6 @@
 # Crucible Orchestrator Script
 # Validates handoff.json, routes pipeline in code, assembles next prompt from template.
-# Usage: .\.crucible\\crucible.ps1 [-Target agent|claude|codex|antigravity|grok] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>] [-ProjectRoot <path>]
+# Usage: .\.crucible\powershell\crucible.ps1 [-Target agent|claude|codex|antigravity|grok] [-Init|-Health|-Cleanup|-Doctor] [-AutoAdvance] [-TaskId <id>] [-ProjectRoot <path>]
 #
 # Dual-use note: -Init serves two purposes depending on call site:
 #   Session START: validates incoming handoff, scaffolds worktree + task.md, logs session_start event.
@@ -372,9 +372,10 @@ if ($Rewind) {
 # --- 0a. Require -TaskId for all pipeline operations ---
 if ([string]::IsNullOrEmpty($TaskId)) {
     Write-Host "`n[ERROR] -TaskId is required." -ForegroundColor Red
-    Write-Host "Usage: .\.crucible\\crucible.ps1 -Init -TaskId {task_id} -ProjectRoot `"{project_root}`"" -ForegroundColor Yellow
-    Write-Host "       .\.crucible\\crucible.ps1 -Health  (no -TaskId needed for health checks)" -ForegroundColor DarkGray
-    Write-Host "       .\.crucible\\crucible.ps1 -Doctor  (no -TaskId needed for readiness checks)" -ForegroundColor DarkGray
+    Write-Host "Usage: .\.crucible\powershell\crucible.ps1 -Init -TaskId {task_id} -ProjectRoot `"{project_root}`"" -ForegroundColor Yellow
+    Write-Host "       .\.crucible\powershell\crucible.ps1 -Health  (no -TaskId needed for health checks)" -ForegroundColor DarkGray
+    Write-Host "       .\.crucible\powershell\crucible.ps1 -Doctor  (no -TaskId needed for readiness checks)" -ForegroundColor DarkGray
+    Write-Host "No task ID? Start orchestration in bootstrap mode: a Groomer selects the next item (sops/orchestrator.md, Session Start, step 5)." -ForegroundColor Yellow
     exit 1
 }
 
