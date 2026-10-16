@@ -607,7 +607,7 @@ func runRetryFlowCase(tc struct {
 			if err != nil {
 				return "", err
 			}
-			return "ok", nil
+			return "", nil
 		},
 		guardHook: func(_, _ string) error {
 			return lookupAttemptErr(tc.guardErrs, dispatchCalls-1)

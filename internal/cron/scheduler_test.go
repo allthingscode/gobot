@@ -986,3 +986,38 @@ func TestAlreadyNotifiedError_ErrorAndUnwrap(t *testing.T) {
 	assert.True(t, errors.As(wrapped, &target))
 	assert.Same(t, e, target)
 }
+
+func TestSchedulerDeliveryAccounting(t *testing.T) {
+	t.Parallel()
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "jobs.json")
+			interval := int64(1000)
+			store := Store{Jobs: []Job{{ID: "delivery", Name: "delivery", Enabled: true, Schedule: Schedule{Kind: KindEvery, EveryMS: &interval}, Payload: Payload{Channel: "telegram", To: "telegram:123"}, State: JobState{NextRunAtMS: 500}}}}
+			data, err := store.EncodeJSON()
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, data, 0o600))
+			dispatcher := &mockDispatcher{failFirst: failed, failErr: fmt.Errorf("send cron telegram response: %w", errors.New("transport unavailable"))}
+			s := NewScheduler(path, "", dispatcher).WithClock(NewFakeClock(time.UnixMilli(1000)))
+			require.NoError(t, s.poll(context.Background()))
+			require.Len(t, dispatcher.payloads, 1)
+			persisted := &Store{}
+			data, err = os.ReadFile(path)
+			require.NoError(t, err)
+			require.NoError(t, persisted.DecodeJSON(data))
+			state := persisted.Jobs[0].State
+			assert.Equal(t, 1, state.RunCount)
+			if failed {
+				assert.Equal(t, 1, state.FailureCount)
+				assert.Zero(t, state.SuccessCount)
+			} else {
+				assert.Equal(t, 1, state.SuccessCount)
+				assert.Zero(t, state.FailureCount)
+			}
+			assert.Equal(t, int64(2000), state.NextRunAtMS)
+			require.NoError(t, s.poll(context.Background()))
+			require.Len(t, dispatcher.payloads, 1)
+		})
+	}
+}

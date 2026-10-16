@@ -629,9 +629,15 @@ func TestCronResponseBranchesWithoutRecipients(t *testing.T) {
 	t.Parallel()
 
 	cd := &CronDispatcher{}
-	cd.sendSpecialistResponse(context.Background(), cron.Payload{}, chanEmail, "", "response")
-	cd.sendSpecialistResponse(context.Background(), cron.Payload{}, "unknown", "", "response")
-	cd.sendTelegramResponse(context.Background(), "not-a-session-key", "response")
+	if err := cd.sendSpecialistResponse(context.Background(), cron.Payload{}, chanEmail, "", "response"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cd.sendSpecialistResponse(context.Background(), cron.Payload{}, "unknown", "", "response"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cd.sendTelegramResponse(context.Background(), "not-a-session-key", "response"); err == nil {
+		t.Fatal("expected target parse error")
+	}
 }
 
 func TestDispatchSilentBranches(t *testing.T) {

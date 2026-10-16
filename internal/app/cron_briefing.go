@@ -108,8 +108,13 @@ func (cd *CronDispatcher) retryMorningBriefing(shutdown <-chan struct{}, p cron.
 			continue
 		}
 		if response != "" {
-			slog.Info("cron: morning briefing retry succeeded, delivering email", "attempt", i+1)
-			cd.sendEmailResponse(ctx, p, recipient, response)
+			if err := cd.sendEmailResponse(ctx, p, recipient, response); err != nil {
+				cancel()
+				slog.Error("cron: morning briefing retry delivery failed", "attempt", i+1, "err", err)
+				cd.sendRetryFailureEmail(p, recipient, retryKey, err)
+				return
+			}
+			slog.Info("cron: morning briefing retry email delivered", "attempt", i+1)
 		}
 		cancel()
 		return
