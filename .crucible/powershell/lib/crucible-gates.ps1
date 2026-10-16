@@ -1697,12 +1697,9 @@ function Test-CompletionArtifactGate {
                                  $errorMsg = "Review report YAML must have 'acceptance_criteria_met: true'."
                             }
                         } else {
-                            # Plain-text APPROVED without YAML frontmatter: warn but accept.
-                            # "APPROVED" presence was already confirmed above; don't hard-block on formatting.
-                            Write-Host "[WARN] Review report has no YAML frontmatter (review_decision: APPROVED). Accepted on plain-text APPROVED - Reviewer MUST use YAML format going forward." -ForegroundColor Yellow
-                            Write-EventLog -Event "degraded" -TaskId $handoff.task_id -Specialist "crucible" `
-                                -Outcome "warned" -Kind "review_report_format" -Notes "Review report missing YAML header - accepted plain-text APPROVED" `
-                                -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                            # Item 216: prose approval cannot establish the required review fields.
+                            $verificationPassed = $false
+                            $errorMsg = "Review report is missing the required YAML header. Add YAML frontmatter delimited by '---' with 'review_decision: APPROVED' and 'acceptance_criteria_met: true' to review_report.md, then retry the handoff."
                         }
                     }
                 }

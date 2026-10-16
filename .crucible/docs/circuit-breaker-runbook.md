@@ -87,7 +87,6 @@ Is the spec clearly written with unambiguous acceptance criteria?
 | `file_affinity_scope` | `warned` | The scope gate ran and found handoff paths the spec did not mention. Confirm whether the spec should expand or the out-of-scope changes should be removed. |
 | `task_checklist` | `warned` | Review `task.md` checklist formatting and optional items before the next handoff. |
 | `session_cycle_id_mismatch` | `warned` | Confirm the active specialist read the current `task.md` before continuing. |
-| `review_report_format` | `warned` | Ask the Reviewer to use the structured review report format on the next pass. |
 | `unknown` | `warned` | Legacy archived event without `kind`; use the event notes and surrounding log context. It is not an unverifiable gate. |
 
 Duplicate handoffs are not DEGRADED. They are reported by `analyze-evals.ps1` under handoff quality.
