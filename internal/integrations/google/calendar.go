@@ -118,14 +118,41 @@ func listUpcomingEventsWithClient(ctx context.Context, secretsRoot string, maxRe
 		}
 	}
 
-	// Sort merged results by start time, then trim to maxResults.
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].Start < all[j].Start
-	})
+	sortCalendarEvents(all)
 	if len(all) > maxResults {
 		all = all[:maxResults]
 	}
 	return all, nil
+}
+
+// sortCalendarEvents orders merged events by instant while preserving ties.
+func sortCalendarEvents(all []CalendarEvent) {
+	// All-day dates use midnight UTC only for ordering. Parse each start once
+	// and preserve the original event fields for callers and display formatting.
+	type sortRecord struct {
+		event CalendarEvent
+		start time.Time
+		valid bool
+	}
+	records := make([]sortRecord, len(all))
+	for i, event := range all {
+		layout := time.RFC3339
+		if event.AllDay {
+			layout = "2006-01-02"
+		}
+		start, err := time.Parse(layout, event.Start)
+		records[i] = sortRecord{event: event, start: start, valid: err == nil}
+	}
+	// Invalid starts follow valid keys. Ties retain merge order, before limiting.
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].valid != records[j].valid {
+			return records[i].valid
+		}
+		return records[i].valid && records[i].start.Before(records[j].start)
+	})
+	for i, record := range records {
+		all[i] = record.event
+	}
 }
 
 // CreateEvent creates a new event in the specified Google Calendar and returns

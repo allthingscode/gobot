@@ -4,6 +4,7 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -402,5 +403,88 @@ func TestFormatEventsMarkdown_ShowsCalendarName(t *testing.T) {
 	out := FormatEventsMarkdown(events)
 	if !strings.Contains(out, "[Work]") {
 		t.Errorf("expected '[Work]' calendar label in output:\n%s", out)
+	}
+}
+
+func TestListUpcomingEventsWithClient_Ordering(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		starts []string
+		allDay []bool
+		want   []int
+	}{
+		{name: "mixed offsets", starts: []string{"2026-04-01T09:00:00-05:00", "2026-04-01T09:30:00+02:00"}, want: []int{1, 0}},
+		{name: "same offset reversed", starts: []string{"2026-04-01T19:00:00Z", "2026-04-01T09:00:00Z"}, want: []int{1, 0}},
+		{name: "equivalent instants stable", starts: []string{"2026-04-01T09:00:00-05:00", "2026-04-01T14:00:00Z", "2026-04-01T16:00:00+02:00"}, want: []int{0, 1, 2}},
+		{name: "fractional seconds", starts: []string{"2026-04-01T09:00:00.9Z", "2026-04-01T09:00:00Z", "2026-04-01T09:00:00.12Z"}, want: []int{1, 2, 0}},
+		{name: "day boundaries", starts: []string{"2026-04-02T00:30:00+02:00", "2026-04-01T23:00:00Z", "2026-04-01T23:30:00-05:00"}, want: []int{0, 1, 2}},
+		{name: "all day midnight ties", starts: []string{"2026-04-02", "2026-04-01T23:59:00Z", "2026-04-02T00:00:00Z", "2026-04-02"}, allDay: []bool{true, false, false, true}, want: []int{1, 0, 2, 3}},
+		{name: "invalid starts stable after valid", starts: []string{"bad", "2026-04-02T00:00:00Z", "", "2026-02-30", "2026-04-01", "also-bad"}, allDay: []bool{false, false, true, true, true, false}, want: []int{4, 1, 0, 2, 3, 5}},
+		{name: "all invalid stable", starts: []string{"z-invalid", "", "a-invalid"}, allDay: []bool{false, true, false}, want: []int{0, 1, 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			originals, items := calendarOrderingFixture(tt.starts, tt.allDay)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/users/me/calendarList":
+					_ = json.NewEncoder(w).Encode(map[string]any{"items": []calendarListEntry{{ID: "c0", Summary: "Calendar 0"}, {ID: "c1", Summary: "Calendar 1"}}})
+				case "/calendars/c0/events":
+					_ = json.NewEncoder(w).Encode(map[string]any{"items": items[0]})
+				case "/calendars/c1/events":
+					_ = json.NewEncoder(w).Encode(map[string]any{"items": items[1]})
+				default:
+					t.Errorf("unexpected path: %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			dir := setupTestToken(t)
+			client := redirectClient(calendarBaseURL, srv.URL)
+			checkCalendarOrdering(t, dir, client, originals, tt.want)
+		})
+	}
+}
+
+func calendarOrderingFixture(starts []string, allDays []bool) (originals []CalendarEvent, items [2][]map[string]any) {
+	originals = make([]CalendarEvent, len(starts))
+	// Split consecutive input across two calendars so merge order is explicit.
+	split := (len(starts) + 1) / 2
+	for i, start := range starts {
+		cal := 0
+		if i >= split {
+			cal = 1
+		}
+		allDay := len(allDays) > 0 && allDays[i]
+		key := "dateTime"
+		if allDay {
+			key = "date"
+		}
+		ev := CalendarEvent{ID: fmt.Sprintf("e%d", i), Summary: "Event", Start: start, End: start, Location: "Room", AllDay: allDay, CalendarName: fmt.Sprintf("Calendar %d", cal)}
+		originals[i] = ev
+		items[cal] = append(items[cal], map[string]any{"id": ev.ID, "summary": ev.Summary, "location": ev.Location, "start": map[string]string{key: start}, "end": map[string]string{key: start}})
+	}
+
+	return originals, items
+}
+
+func checkCalendarOrdering(t *testing.T, dir string, client *http.Client, originals []CalendarEvent, wantOrder []int) {
+	t.Helper()
+	for limit := 0; limit <= len(wantOrder)+1; limit++ {
+		events, err := listUpcomingEventsWithClient(context.Background(), dir, limit, client)
+		if err != nil {
+			t.Fatalf("limit %d: %v", limit, err)
+		}
+		count := min(limit, len(wantOrder))
+		if len(events) != count {
+			t.Fatalf("limit %d: got %d events, want %d", limit, len(events), count)
+		}
+		for i, event := range events {
+			if want := originals[wantOrder[i]]; event != want {
+				t.Errorf("limit %d event %d: got %+v, want %+v", limit, i, event, want)
+			}
+		}
 	}
 }
