@@ -112,6 +112,8 @@ pwsh -ExecutionPolicy Bypass \
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification, and correctly formats fields like `file_affinity`.)
 
+For a file the task will create, append ` (new)` to its spec `file_affinity` entry, for example `"internal/app/foo_test.go (new)"`, in either flow or block YAML style; handoffs use the bare path. Validation suppresses the missing-path warning for marked entries and warns if the path already exists.
+
 **The spec's frontmatter `file_affinity` is the record of scope.** If grooming widens the scope, for example from named files to their packages, update the frontmatter first. For an implementation handoff, `new-handoff.ps1` refuses any `-FileAffinity` path the frontmatter does not cover and names the paths to add.
 
 Keep the paths an approved stub already names. Named files are a complete affinity: the scope gate matches a file path exactly, so tasks stay isolated at file granularity without widening to packages. Widen only when the work needs paths the stub does not name, and record why under `## Grooming Deviations`. Use package or directory paths when the spec starts without a file list.

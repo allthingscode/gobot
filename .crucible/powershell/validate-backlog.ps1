@@ -326,7 +326,9 @@ try {
                                     if ([string]::IsNullOrWhiteSpace($entry)) { continue }
                                     
                                     # Normalize entry path
-                                    $normalizedEntry = $entry.Replace("\", "/").Trim()
+                                    # Planned files are missing by design; warn on collisions instead. Item 220.
+                                    $isNew = $entry -cmatch '\s+\(new\)$'
+                                    $normalizedEntry = ($entry -creplace '\s+\(new\)$', '').Replace("\", "/").Trim()
                                     while ($normalizedEntry.StartsWith("./")) {
                                         $normalizedEntry = $normalizedEntry.Substring(2)
                                     }
@@ -345,9 +347,13 @@ try {
                                         $exists = Test-Path -LiteralPath $resolvedPath
                                     }
                                     
-                                    if (-not $exists) {
+                                    if (($isNew -and $exists) -or (-not $isNew -and -not $exists)) {
                                         $relSpecPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                                         $relSpecPath = $relSpecPath -replace '\\', '/'
+                                        if ($isNew) {
+                                            Write-Host "[WARN] File affinity path marked new already exists: spec '$relSpecPath' lists '$entry' but a matching file or directory was found under project root '$resolvedProjectRoot'." -ForegroundColor Yellow
+                                            continue
+                                        }
                                         Write-Host "[WARN] File affinity path does not exist: spec '$relSpecPath' lists '$entry' but no matching file or directory was found under project root '$resolvedProjectRoot'." -ForegroundColor Yellow
                                     }
                                 }

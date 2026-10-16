@@ -273,6 +273,14 @@ try {
         $block = @(Get-SpecFrontmatterAffinity -SpecContent "---`r`nfile_affinity:`r`n  - `"internal/agent/`"`r`n`r`n  # note`r`n  - internal/app/`r`ncreated_at: `"2026-10-05`"`r`n---`r`n")
         Assert-Result -Name "block list" -Condition ($block.Count -eq 2 -and $block[0] -eq "internal/agent/" -and $block[1] -eq "internal/app/") -FailureMessage ("block list parsed as: " + ($block -join ", "))
 
+        # All spec consumers receive bare paths, including handoff scope checks. Item 220.
+        foreach ($yaml in @('file_affinity: ["src/new.go (new)", src/known.go]', "file_affinity:`n  - 'src/new.go (new)'`n  - src/known.go")) {
+            $paths = @(Get-SpecFrontmatterAffinity -SpecContent ("---`n" + $yaml + "`n---`n"))
+            Assert-Result -Name "new marker stripped" -Condition (($paths -join "|") -eq "src/new.go|src/known.go") -FailureMessage ($paths -join ", ")
+            $widened = @(Get-AffinityWidening -Affinity @("src/new.go") -Declared $paths)
+            Assert-Result -Name "bare handoff matches new spec" -Condition ($widened.Count -eq 0) -FailureMessage ($widened -join ", ")
+        }
+
         $absent = @(Get-SpecFrontmatterAffinity -SpecContent "## Affected Files`n- ``cmd/```n")
         Assert-Result -Name "no frontmatter" -Condition ($absent.Count -eq 0) -FailureMessage "a spec without frontmatter declares no affinity"
     }

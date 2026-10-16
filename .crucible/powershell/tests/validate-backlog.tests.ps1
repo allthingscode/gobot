@@ -560,6 +560,28 @@ priority: P1
         $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
         Assert-Result -Name "good affinity passes" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ". Output: " + $r.Output)
 
+        # Planned files must distinguish missing paths from stale markers. Item 220.
+        foreach ($style in @("block", "flow")) {
+            foreach ($case in @(
+                @{ Entry = "planned.go (new)"; Warning = "" },
+                @{ Entry = "root_script.ps1 (new)"; Warning = "File affinity path marked new already exists" },
+                @{ Entry = "missing.go"; Warning = "File affinity path does not exist" }
+            )) {
+                New-SpecFile -Root $root -RelPath "chores/active/C-001_Good_Affinity.md" -ItemId "C-001" -Priority "P2" -Title "Good Affinity" -FileAffinity @($case.Entry)
+                if ($style -eq "flow") {
+                    $specPath = Join-Path $root "chores/active/C-001_Good_Affinity.md"
+                    $content = Get-Content -LiteralPath $specPath -Raw
+                    $content = $content.Replace("file_affinity:`n  - " + $case.Entry, 'file_affinity: ["' + $case.Entry + '"]')
+                    [IO.File]::WriteAllText($specPath, $content, [Text.UTF8Encoding]::new($false))
+                }
+                $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+                Assert-Result -Name "$style $($case.Entry) remains advisory" -Condition ($r.ExitCode -eq 0) -FailureMessage $r.Output
+                $warnings = @($r.Output -split "`n" | Where-Object { $_ -match '\[WARN\] File affinity' })
+                Assert-Result -Name "$style $($case.Entry) warning" -Condition (($case.Warning -eq "" -and $warnings.Count -eq 0) -or ($case.Warning -ne "" -and $warnings.Count -eq 1 -and $warnings[0].Contains($case.Warning))) -FailureMessage $r.Output
+            }
+        }
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Good_Affinity.md" -ItemId "C-001" -Priority "P2" -Title "Good Affinity" -FileAffinity @("root_script.ps1")
+
         # Case B: Spec with a nonexistent literal path
         New-SpecFile -Root $root -RelPath "chores/active/C-002_Bad_Affinity.md" -ItemId "C-002" -Priority "P2" -Title "Bad Affinity" -FileAffinity @(
             "internal/doctor",

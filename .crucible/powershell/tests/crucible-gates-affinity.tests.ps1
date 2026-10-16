@@ -578,7 +578,7 @@ try {
 item_id: "F-046"
 status: "Ready"
 file_affinity:
-  - cmd/
+  - cmd/ (new)
 ---
 ## Title
 No affected prose heading here.

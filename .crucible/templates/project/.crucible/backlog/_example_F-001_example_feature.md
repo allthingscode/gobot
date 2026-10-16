@@ -8,6 +8,9 @@ priority: "P1"
 target_specialist: "Groomer"
 # budget_tier: The token budget category (low, medium, high)
 budget_tier: "low"
+# For planned files, append " (new)" in flow or block file_affinity lists; handoffs use bare paths.
+# Missing marked paths do not warn; marked paths that already exist do.
+# file_affinity: ["src/health.ts (new)"]
 ---
 
 ## Summary

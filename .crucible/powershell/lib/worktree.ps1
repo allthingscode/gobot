@@ -80,7 +80,8 @@ function Get-SpecFrontmatterAffinity {
                 foreach ($item in ($Matches[1] -split ',')) {
                     $clean = $item.Trim().Trim('"' + "'")
                     if (-not [string]::IsNullOrWhiteSpace($clean)) {
-                        $affinity += $clean
+                        # Keep creation metadata out of every scope consumer. Item 220.
+                        $affinity += ($clean -creplace '\s+\(new\)$', '').TrimEnd()
                     }
                 }
                 $inAffinityBlock = $false
@@ -93,7 +94,7 @@ function Get-SpecFrontmatterAffinity {
             if ($line -match '^\s*-\s*(.*)$') {
                 $item = $Matches[1].Trim().Trim('"' + "'")
                 if (-not [string]::IsNullOrWhiteSpace($item)) {
-                    $affinity += $item
+                    $affinity += ($item -creplace '\s+\(new\)$', '').TrimEnd()
                 }
             } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
                 continue
