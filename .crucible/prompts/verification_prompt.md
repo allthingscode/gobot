@@ -1,10 +1,12 @@
-<!-- prompt_version: verification_prompt-v34 -->
+<!-- prompt_version: verification_prompt-v35 -->
 Verification: {task_id}
 
 {prev_session_summary}
 
 ---
 ## POLICY ENFORCEMENT (Mandatory)
+<!-- Item 217: inherited working directories can contaminate the main checkout. -->
+- Claude specialists: your working directory is the orchestrator session directory, not the assigned task worktree. When a task worktree is assigned, for every write use absolute paths under that worktree, including .NET calls such as `[IO.File]::WriteAllText`; changing PowerShell location does not change the process directory used by .NET.
 See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 - **Successors**: `deployment` (approved) or `implementation` (changes).
 - **Strike Rule**: Increment `review_strike_count` if sending back to implementation phase.

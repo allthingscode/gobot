@@ -1,10 +1,12 @@
-<!-- prompt_version: grooming_prompt-v29 -->
+<!-- prompt_version: grooming_prompt-v30 -->
 Grooming: {task_id}
 
 {prev_session_summary}
 
 ---
 ## POLICY ENFORCEMENT (Mandatory)
+<!-- Item 217: inherited working directories can contaminate the main checkout. -->
+- Claude specialists: your working directory is the orchestrator session directory, not the assigned task worktree. When a task worktree is assigned, for every write use absolute paths under that worktree, including .NET calls such as `[IO.File]::WriteAllText`; changing PowerShell location does not change the process directory used by .NET.
 See **`{{crucible_root}}/docs/policy.md`** for full definitions.
 - **Successors**: `implementation`, `research`, `verification` (Stub-Only Close-Out), or `done` (closure path).
 - **Routing to Research**: Hand the Researcher an open question. DO NOT perform the investigation or write a pre-baked conclusion/closure recommendation in the spec.

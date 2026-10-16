@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "d84f34f891d90088bc0f86b15ef17e2532a3b80d",
+  "source_commit": "690766af8cbef60a7d739e77d99d644dce980dcc",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -199,8 +199,8 @@
       "base_hash": "9216c299fae2c209760d50c1f40e411084bf7b19e990d00ed0f6acb522fe5921"
     },
     "powershell/lib/claude-agents.ps1": {
-      "hash": "e41a32b61622a73ab8f5de4b03778cd43ab363dd6095cee87d04ff669ce73a28",
-      "base_hash": "e41a32b61622a73ab8f5de4b03778cd43ab363dd6095cee87d04ff669ce73a28"
+      "hash": "ba8e926ff0cc2f6df40a2577430c1976aa6e401e01d52f73f9dac30434071bbd",
+      "base_hash": "ba8e926ff0cc2f6df40a2577430c1976aa6e401e01d52f73f9dac30434071bbd"
     },
     "powershell/lib/codex-review-verdict.schema.json": {
       "hash": "fc3388e38c5114833a4b2859578aa93741117545685ab30d838abc41c75903e0",
@@ -683,8 +683,8 @@
       "base_hash": "b091cc4872322a53445462ae2936f8f4b28d20872d0cc40b4b8f6e4058c0430e"
     },
     "powershell/tests/sync-claude-agents.tests.ps1": {
-      "hash": "f0d808457af8d811f3932e2ec5546c610400ca83cf1d1a1b36059645de9e00e1",
-      "base_hash": "f0d808457af8d811f3932e2ec5546c610400ca83cf1d1a1b36059645de9e00e1"
+      "hash": "2b79e84d4e2eedcdee91f2ce3b5ac0f1da6ade77044b640733c1919a6e31ea6f",
+      "base_hash": "2b79e84d4e2eedcdee91f2ce3b5ac0f1da6ade77044b640733c1919a6e31ea6f"
     },
     "powershell/tests/task-checklist.tests.ps1": {
       "hash": "fe7b8d25058195487925507a1fbc7231a4a4349ce91e08ff1645508f23a460aa",
@@ -767,32 +767,32 @@
       "base_hash": "c5a3bdda400c9e7da23eb6e6f5a115f111df8a3955a89a683e365ba0c265bccf"
     },
     "prompts/deployment_prompt.md": {
-      "hash": "59307f94f648bc706a0e86b4f58e267f5a2f74c975bf22efe1afae0d33425a48",
-      "base_hash": "59307f94f648bc706a0e86b4f58e267f5a2f74c975bf22efe1afae0d33425a48"
+      "hash": "bda52c4e9db8a0568ff23c7af581b8b2efe4a02a434045e135085bef927f14a3",
+      "base_hash": "bda52c4e9db8a0568ff23c7af581b8b2efe4a02a434045e135085bef927f14a3"
     },
     "prompts/grooming_prompt.md": {
-      "hash": "e7435904e9706702e6e9a18c62fc9f8b888fcf3a0277db20d7016cf9c67f0b9e",
-      "base_hash": "e7435904e9706702e6e9a18c62fc9f8b888fcf3a0277db20d7016cf9c67f0b9e"
+      "hash": "c23897b14e14b75c7b43fafdc95593295528072846790071caa95a362cb9c678",
+      "base_hash": "c23897b14e14b75c7b43fafdc95593295528072846790071caa95a362cb9c678"
     },
     "prompts/health_check.md": {
       "hash": "2ab84ca4f5008d370bab26477af097f8b10cec981428b64a6b56823191b1ac58",
       "base_hash": "2ab84ca4f5008d370bab26477af097f8b10cec981428b64a6b56823191b1ac58"
     },
     "prompts/implementation_prompt.md": {
-      "hash": "bc1bb4bf280429e7b67c198a2d0fb3fd5abe82c458fcb57e94e76a5736f0ffaa",
-      "base_hash": "bc1bb4bf280429e7b67c198a2d0fb3fd5abe82c458fcb57e94e76a5736f0ffaa"
+      "hash": "062a158452d934e4939d7e1fbcfe7d7f04958f2c802b966813e7804650b18e3b",
+      "base_hash": "062a158452d934e4939d7e1fbcfe7d7f04958f2c802b966813e7804650b18e3b"
     },
     "prompts/README.md": {
       "hash": "91c57f625d60afb318a6a96d1c9725d2cc4891b5d87b6bd18773799be752a618",
       "base_hash": "91c57f625d60afb318a6a96d1c9725d2cc4891b5d87b6bd18773799be752a618"
     },
     "prompts/research_prompt.md": {
-      "hash": "1697140677beb3be57a8b60a54152293a29499b75f506e03effd26d48f18dd23",
-      "base_hash": "1697140677beb3be57a8b60a54152293a29499b75f506e03effd26d48f18dd23"
+      "hash": "1e77bafdc17ff7d79fa875580d4e80e1af18593ce57c9163cc6fe37976d2ea48",
+      "base_hash": "1e77bafdc17ff7d79fa875580d4e80e1af18593ce57c9163cc6fe37976d2ea48"
     },
     "prompts/verification_prompt.md": {
-      "hash": "018e41c5acf0d75e5fd488de6fefe914ba8413e66ce5c59cf5df0db239d4dba8",
-      "base_hash": "018e41c5acf0d75e5fd488de6fefe914ba8413e66ce5c59cf5df0db239d4dba8"
+      "hash": "cdd38f875e498b3fc762f6e8dd145d56602d9447cf6fbdddc781ef0cd68618fb",
+      "base_hash": "cdd38f875e498b3fc762f6e8dd145d56602d9447cf6fbdddc781ef0cd68618fb"
     },
     "schemas/config.schema.json": {
       "hash": "132f27bd4621040fadd92074bfa276f1b727a64769ee843a30eaa5b7056b6ac5",

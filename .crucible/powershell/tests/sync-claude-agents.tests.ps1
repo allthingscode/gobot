@@ -63,6 +63,17 @@ models:
     Assert-Result "tier agents do not restrict tools" ($strong -notmatch '(?m)^(disallowedTools|tools):') $strong
 }
 
+# Item 217: relative writes otherwise land in the orchestrator checkout.
+$results += Run-Test "Claude specialists require absolute worktree paths for every write" {
+    $root = New-AgentRoot -Name "agents-write-paths"
+    Invoke-Sync -Root $root | Out-Null
+    foreach ($n in @("crucible-strong", "crucible-default", "crucible-light")) {
+        $body = Read-Agent $root $n
+        Assert-Result ($n + " explains inherited directory") ($body -match 'working directory.*orchestrator.*not.*worktree') $body
+        Assert-Result ($n + " requires absolute write paths including .NET") ($body -match 'every write.*absolute paths.*worktree' -and $body.Contains('[IO.File]::WriteAllText')) $body
+    }
+}
+
 $results += Run-Test "Generated agent files are ASCII, BOM-free, LF, and byte-identical when regenerated" {
     $root = New-AgentRoot -Name "agents-bytes"
     Invoke-Sync -Root $root | Out-Null

@@ -1,10 +1,12 @@
-<!-- prompt_version: implementation_prompt-v40 -->
+<!-- prompt_version: implementation_prompt-v41 -->
 Implementation: {task_id}
 
 {prev_session_summary}
 
 ---
 ## POLICY ENFORCEMENT (Mandatory)
+<!-- Item 217: inherited working directories can contaminate the main checkout. -->
+- Claude specialists: your working directory is the orchestrator session directory, not the assigned task worktree. When a task worktree is assigned, for every write use absolute paths under that worktree, including .NET calls such as `[IO.File]::WriteAllText`; changing PowerShell location does not change the process directory used by .NET.
 See [pipeline policy]({{crucible_root}}/docs/policy.md) and the [implementation SOP](<{{crucible_root}}/sops/implementation.md>) for routing and worktree boundaries.
 - **Successor**: Only `verification`.
 - **Budget**: {handoff_count}/{budget_ceiling} handoffs used ({budget_remaining} remaining).
