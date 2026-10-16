@@ -58,11 +58,10 @@ func (cd *CronDispatcher) dispatchSpecialist(ctx context.Context, p cron.Payload
 		return nil
 	}
 
-	cd.sendSpecialistResponse(ctx, p, channel, to, response)
-	return nil
+	return cd.sendSpecialistResponse(ctx, p, channel, to, response)
 }
 
-func (cd *CronDispatcher) sendSpecialistResponse(ctx context.Context, p cron.Payload, channel, to, response string) {
+func (cd *CronDispatcher) sendSpecialistResponse(ctx context.Context, p cron.Payload, channel, to, response string) error {
 	switch channel {
 	case chanEmail:
 		recipient := to
@@ -70,13 +69,14 @@ func (cd *CronDispatcher) sendSpecialistResponse(ctx context.Context, p cron.Pay
 			recipient = cd.userEmail
 		}
 		if recipient != "" {
-			cd.sendEmailResponse(ctx, p, recipient, response)
+			return cd.sendEmailResponse(ctx, p, recipient, response)
 		}
 	case chanTelegram:
 		if to != "" {
-			cd.sendTelegramResponse(ctx, to, response)
+			return cd.sendTelegramResponse(ctx, to, response)
 		}
 	}
+	return nil
 }
 
 func (cd *CronDispatcher) dispatchSilent(ctx context.Context, p cron.Payload, to string) error {

@@ -53,7 +53,7 @@ func (cd *CronDispatcher) dispatchEmail(ctx context.Context, p cron.Payload, to 
 	}
 
 	if response != "" {
-		cd.sendEmailResponse(ctx, p, recipient, response)
+		return cd.sendEmailResponse(ctx, p, recipient, response)
 	}
 	return nil
 }
@@ -88,17 +88,17 @@ func buildCronFailureEmailBody(p cron.Payload, sessionKey string, dispatchErr er
 	)
 }
 
-func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, recipient, response string) {
+func (cd *CronDispatcher) sendEmailResponse(ctx context.Context, p cron.Payload, recipient, response string) error {
 	svc, err := cd.newEmailService(ctx)
 	if err != nil {
-		slog.Error("failed to initialize gmail service for cron", "err", err)
-		return
+		return fmt.Errorf("initialize cron email delivery: %w", err)
 	}
 	subject := resolveEmailSubject(p)
 	content := buildEmailContent(cd.tmgr, subject, response)
 	if err := svc.Send(ctx, recipient, content); err != nil {
-		slog.Error("failed to send cron response via email", "err", err, "to", recipient)
+		return fmt.Errorf("send cron email response: %w", err)
 	}
+	return nil
 }
 
 func resolveFailureEmailSubject(p cron.Payload) string {

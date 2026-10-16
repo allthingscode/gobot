@@ -18,16 +18,16 @@ func (cd *CronDispatcher) dispatchTelegram(ctx context.Context, p cron.Payload, 
 	}
 
 	if response != "" {
-		cd.sendTelegramResponse(ctx, to, response)
+		return cd.sendTelegramResponse(ctx, to, response)
 	}
 	return nil
 }
 
-func (cd *CronDispatcher) sendTelegramResponse(ctx context.Context, to, response string) {
+func (cd *CronDispatcher) sendTelegramResponse(ctx context.Context, to, response string) error {
 	chatID, threadID, err := parseSessionKey(to)
 	if err != nil {
 		slog.Error("failed to parse session key for reply", "session", to, "err", err)
-		return
+		return fmt.Errorf("parse cron telegram target: %w", err)
 	}
 	out := bot.OutboundMessage{
 		ChatID:   chatID,
@@ -35,6 +35,7 @@ func (cd *CronDispatcher) sendTelegramResponse(ctx context.Context, to, response
 		Text:     response,
 	}
 	if err := cd.b.Send(ctx, out); err != nil {
-		slog.Error("failed to send cron response", "err", err, "session", to)
+		return fmt.Errorf("send cron telegram response: %w", err)
 	}
+	return nil
 }

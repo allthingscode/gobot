@@ -29,8 +29,7 @@ func (cd *CronDispatcher) Alert(ctx context.Context, p cron.Payload) error {
 		if alertPayload.Subject == "" {
 			alertPayload.Subject = "Gobot Alert"
 		}
-		cd.sendEmailResponse(ctx, alertPayload, recipient, p.Message)
-		return nil
+		return cd.sendEmailResponse(ctx, alertPayload, recipient, p.Message)
 	}
 	if to == "" {
 		slog.Warn("CronDispatcher.Alert: unroutable payload, dropping", "channel", p.Channel)

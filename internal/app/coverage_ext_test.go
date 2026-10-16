@@ -153,8 +153,8 @@ func TestCronDispatcher_MoreBranches_Part2(t *testing.T) {
 		Channel: "email",
 		To:      testEmail,
 	}
-	if err := cd.Alert(ctx, pAlertEmail); err != nil {
-		t.Errorf("Alert email failed: %v", err)
+	if err := cd.Alert(ctx, pAlertEmail); err == nil {
+		t.Error("expected email alert initialization failure")
 	}
 }
 

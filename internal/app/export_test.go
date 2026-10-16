@@ -23,8 +23,8 @@ func (cd *CronDispatcher) HandleSystemJob(ctx context.Context, p cron.Payload) b
 	return cd.handleSystemJob(ctx, p)
 }
 
-func (cd *CronDispatcher) SendSpecialistResponse(ctx context.Context, p cron.Payload, channel, to, reply string) {
-	cd.sendSpecialistResponse(ctx, p, channel, to, reply)
+func (cd *CronDispatcher) SendSpecialistResponse(ctx context.Context, p cron.Payload, channel, to, reply string) error {
+	return cd.sendSpecialistResponse(ctx, p, channel, to, reply)
 }
 
 func (hb *HeartbeatRunner) HeartbeatCheck(ctx context.Context) {
