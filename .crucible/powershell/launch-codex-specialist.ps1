@@ -328,6 +328,7 @@ function Invoke-CodexExec {
     }
     $allArgs = @("exec") + $CodexArgs
     $previous = $ErrorActionPreference
+    $previousOutputEncoding = [Console]::OutputEncoding
     $ErrorActionPreference = "Continue"
     try {
         # Feed the prompt on STDIN, never as a positional argument. Windows PowerShell 5.1's
@@ -337,9 +338,12 @@ function Invoke-CodexExec {
         # command-line ceiling. codex exec reads its prompt from stdin when no positional PROMPT is
         # given. Piping the string hands codex the full prompt followed by an immediate EOF, so it
         # neither mis-parses the prompt nor hangs on "Reading additional input from stdin...".
+        # Item 211: hidden Windows hosts can default to OEM decoding; Codex emits UTF-8.
+        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
         $output = $Prompt | & codex @allArgs 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
     } finally {
+        [Console]::OutputEncoding = $previousOutputEncoding
         $ErrorActionPreference = $previous
     }
     if (-not [string]::IsNullOrWhiteSpace($TranscriptPath)) {

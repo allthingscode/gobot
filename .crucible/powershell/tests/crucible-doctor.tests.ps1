@@ -198,6 +198,7 @@ try {
             "bundle.root",
             "bundle.staleness",
             "claude.agents",
+            "claude.agents.ignored",
             "codex.cli",
             "config.parse",
             "crucible.required-scripts",
@@ -428,6 +429,11 @@ try {
         Assert-Result -Name "drift does not block" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "Output:`n$output"
 
         & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $projectRoot 6>&1 | Out-Null
+        git -C $projectRoot init --quiet
+        [IO.File]::WriteAllText((Join-Path $projectRoot ".gitignore"), ".claude/`n")
+        $ignoredRes = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
+        $ignored = $ignoredRes.Output -join "`n"
+        Assert-Result "Item 214 ignored agents warning and fix" ($ignored.Contains('git-ignored') -and $ignored.Contains('.claude/*') -and $ignored.Contains('!.claude/agents/')) $ignored
         $cleanRes = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
         $clean = $cleanRes.Output -join "`n"
         Assert-Result -Name "synced definitions pass" -Condition ($clean -notmatch "crucible-strong \(") -FailureMessage "Output:`n$clean"

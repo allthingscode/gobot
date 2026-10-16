@@ -12,6 +12,8 @@ When the human says `"Orchestrate {TASK_ID}"` or `"Orchestrate the next task in 
 
 ## Sub-Agent Invocation
 
+Run the orchestrator from the adopter root. Claude Code loads project definitions from that session's `.claude/agents/` at session start. After init or update first writes or changes these files, restart the session (or reload agents) before dispatching. If the recommended `subagent_type` is not offered, stop and report the missing agent definition and session setup to the human. Do not fall back to an alias or `general-purpose` dispatch; restore the generated definitions and restart or reload agents first. The `[RECOMMENDED AGENT]` line names the intended definition, not proof that the session loaded it.
+
 Claude Code's `Agent` tool is the sub-agent mechanism. Specialists are dispatched by the Crucible-generated agent definitions in `.claude/agents/` (see *Specialist Model Selection*): `crucible-strong`, `crucible-default` or `crucible-light` for the Groomer, Architect, Reviewer and Operator, and `crucible-researcher` for the Researcher (read-only tools, which enforces the trust boundary at the toolset level). The Groomer bootstrap below has no level yet and stays `general-purpose`. Sub-agents share the same working directory and git state - they are not sandboxed. Do not pass orchestrator session history to sub-agents. Because of that shared state, run `git status` before every dispatch and confirm the tree matches expectation; never build on, or commit alongside, uncommitted changes you did not author -- establish their provenance first (see `sops/orchestrator.md` Step 4).
 
 ### Default Specialist Target: Codex

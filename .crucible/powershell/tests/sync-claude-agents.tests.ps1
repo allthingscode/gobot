@@ -133,6 +133,23 @@ $results += Run-Test "Sync touches only crucible-*.md in .claude/agents" {
     Assert-Result "only the four generated files were added" (($written -join ",") -eq "crucible-default.md,crucible-light.md,crucible-researcher.md,crucible-strong.md,crucible.md,reviewer.md") ($written -join ",")
 }
 
+$results += Run-Test "Item 214: ignored agents warn with an actionable directory exception" {
+    $root = New-AgentRoot -Name "agents-ignored"
+    git -C $root init --quiet
+    [IO.File]::WriteAllText((Join-Path $root ".gitignore"), ".claude/`n")
+    $run = Invoke-Sync -Root $root
+    Assert-Result "ignored warning" ($run.Output -match 'git-ignored') $run.Output
+    Assert-Result "fix names both rules" ($run.Output.Contains('.claude/*') -and $run.Output.Contains('!.claude/agents/')) $run.Output
+    [IO.File]::WriteAllText((Join-Path $root ".gitignore"), ".claude/*`n!.claude/agents/`n")
+    Assert-Result "exception removes warning" ((Invoke-Sync -Root $root).Output -notmatch 'git-ignored') "still ignored"
+}
+
+$results += Run-Test "Item 214: unloaded definitions stop dispatch and report session setup" {
+    $doc = [IO.File]::ReadAllText((Join-Path $REPO_ROOT "docs/orchestrators/claude.md"))
+    Assert-Result "root and reload" ($doc.Contains('from the adopter root') -and $doc.Contains('restart') -and $doc.Contains('reload agents')) $doc
+    Assert-Result "missing type stops and reports" ($doc -match 'not offered.*stop and report' -and $doc.Contains('Do not fall back to an alias')) $doc
+}
+
 if ($results -contains $false) {
     Write-Host "`nSOME TESTS FAILED" -ForegroundColor Red
     exit 1

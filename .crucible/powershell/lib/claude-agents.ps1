@@ -130,3 +130,12 @@ function Write-ClaudeAgentDefinitions {
     }
     return $written.ToArray()
 }
+# Item 214: ignored definitions cannot travel with a clone, even when generation succeeds.
+function Get-ClaudeAgentIgnoreWarning {
+    param([string]$ProjectRoot)
+    $paths = @(Get-ClaudeAgentDefinitions -ProjectRoot $ProjectRoot | ForEach-Object { ".claude/agents/" + $_.FileName })
+    $ignored = @(& git -C $ProjectRoot check-ignore -- @paths 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $ignored.Count -gt 0) {
+        return ("Claude agent definitions are git-ignored: " + ($ignored -join ", ") + ". Replace a .claude/ ignore rule with .claude/* and !.claude/agents/ (and remove any other rule ignoring these files), then git add .claude/agents.")
+    }
+}

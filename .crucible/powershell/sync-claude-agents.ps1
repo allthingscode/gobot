@@ -27,6 +27,8 @@ if ($Check) {
     exit 1
 }
 
+$warning = Get-ClaudeAgentIgnoreWarning -ProjectRoot $root
+if ($warning) { Write-Warning $warning }
 $written = @(Write-ClaudeAgentDefinitions -ProjectRoot $root)
 foreach ($path in $written) {
     Write-Host ("[CLAUDE AGENTS] wrote " + $path)

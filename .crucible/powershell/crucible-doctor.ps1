@@ -498,6 +498,11 @@ if (-not $codexCmd) {
 if ($adopterMode) {
     try {
         . (Join-Path $PSScriptRoot "lib/claude-agents.ps1")
+        $ignoreWarning = Get-ClaudeAgentIgnoreWarning -ProjectRoot $REPO_ROOT
+        if ($ignoreWarning) {
+            Add-DoctorResult -Check "claude.agents.ignored" -Status "warn" -Severity "advisory" `
+                -Details $ignoreWarning -Remediation "Fix the ignore rules, then git add .claude/agents."
+        }
         $agentDrift = @(Get-ClaudeAgentDrift -ProjectRoot $REPO_ROOT)
         if ($agentDrift.Count -eq 0) {
             Add-DoctorResult -Check "claude.agents" -Status "pass" -Severity "advisory" `

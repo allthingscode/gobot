@@ -29,7 +29,10 @@ switch ($mode) {
     { $_ -in @("usagelimit", "usagelimitstraight") } {
         $apos = if ($mode -eq "usagelimit") { [string][char]0x2019 } else { "'" }
         Write-Output "fake codex working"
-        [Console]::Error.WriteLine("ERROR: You" + $apos + "ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 11:37 PM.")
+        $bytes = $enc.GetBytes("ERROR: You" + $apos + "ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 11:37 PM.`n")
+        $stream = [Console]::OpenStandardError()
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush()
         exit 1
     }
     "usagelimitnotime" {
@@ -178,7 +181,10 @@ function Invoke-Launcher {
         $env:CODEX_FAKE_MODE = $Mode
         $env:CODEX_FAKE_PIPELINE_DIR = $PipelineDir
         return Invoke-ExternalCommand {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $LAUNCHER @LauncherArgs
+            # Item 211: reproduce the OEM console encoding of a hidden Windows host.
+            $wrapper = Join-Path $BinDir "launch-oem.ps1"
+            [IO.File]::WriteAllText($wrapper, ('[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437)' + "`n& '" + $LAUNCHER.Replace("'", "''") + "' @args`nexit `$LASTEXITCODE`n"))
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $wrapper @LauncherArgs
         }
     } finally {
         $env:PATH = $originalPath
@@ -453,6 +459,9 @@ try {
             $statusText = [System.IO.File]::ReadAllText((Join-Path $projectRoot ".crucible/session/C-96$i/implementation/codex-launch-status.txt"))
             Assert-Result -Name "$mode status file" -Condition ($statusText.StartsWith("STATUS=USAGE_LIMIT") -and $statusText -match "resets: 11:37 PM") -FailureMessage "expected USAGE_LIMIT and the reset time in the status file, saw: $statusText"
             Assert-Result -Name "$mode status file retry buffer" -Condition ($statusText -match "retry_not_before: 11:38 PM") -FailureMessage "expected retry_not_before: 11:38 PM in the status file, saw: $statusText"
+            $transcript = [IO.File]::ReadAllText((Join-Path $projectRoot ".crucible/session/C-96$i/implementation/codex-transcript.txt"))
+            $apostrophe = if ($mode -eq 'usagelimit') { [string][char]0x2019 } else { "'" }
+            Assert-Result "Item 211: UTF-8 transcript under OEM console" ($transcript.Contains("You" + $apostrophe + "ve hit your usage limit")) $transcript
         }
     }
 

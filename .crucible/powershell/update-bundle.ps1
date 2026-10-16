@@ -547,6 +547,7 @@ function Invoke-UpdateBundle {
         }
     }
 
+    $agentsChanged = $false
     # Regenerate the Claude agent definitions from the (possibly updated) levels, through
     # the adopter copy for the same reason as the hook installer. Only crucible-*.md in
     # .claude/agents/ is written. Item 213.
@@ -555,6 +556,8 @@ function Invoke-UpdateBundle {
         if ((Test-Path -LiteralPath (Join-Path $adopterCrucibleRoot "config.yaml")) -and
             (Test-Path -LiteralPath $agentSync -PathType Leaf)) {
             try {
+                . (Join-Path $adopterCrucibleRoot "powershell/lib/claude-agents.ps1")
+                $agentsChanged = @(Get-ClaudeAgentDrift -ProjectRoot $adopterRootResolved).Count -gt 0
                 $null = & $agentSync -ProjectRoot $adopterRootResolved
             } catch {
                 Write-Warning ("Could not regenerate .claude/agents/crucible-*.md: " + $_.Exception.Message)
@@ -562,7 +565,7 @@ function Invoke-UpdateBundle {
         }
     }
 
-    if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0) {
+    if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0 -or $agentsChanged) {
         $isGitRepo = $false
         $checkDir = $adopterRootResolved
         while (-not [string]::IsNullOrEmpty($checkDir)) {
@@ -579,6 +582,7 @@ function Invoke-UpdateBundle {
             $new7 = if ($frameworkHead -and $frameworkHead.Length -ge 7) { $frameworkHead.Substring(0, 7) } else { "new" }
             Write-Host "NEXT STEP (required): commit this bundle update in the adopter repo before running crucible.ps1."
             Write-Host "  git add .crucible"
+            if ($agentsChanged) { Write-Host "  git add .claude/agents" }
             Write-Host ("  git commit -m `"chore(crucible): update adopter bundle " + $old7 + " -> " + $new7 + "`"")
             Write-Host "The framework-integrity circuit breaker treats uncommitted .crucible/ changes as a"
             Write-Host "specialist modifying framework-owned files and will hard-stop crucible.ps1 -Init with exit 2."
