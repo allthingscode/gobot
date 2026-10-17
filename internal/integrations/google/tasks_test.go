@@ -4,8 +4,11 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -96,5 +99,106 @@ func TestUpdateTask_TitleOnly(t *testing.T) {
 	}
 	if _, ok := gotBody["notes"]; ok {
 		t.Error("notes field must not be present when not provided")
+	}
+}
+
+//nolint:gocognit,cyclop,funlen // Table-driven integration matrix keeps request and result assertions together.
+func TestListTasksWithClient_Pagination(t *testing.T) {
+	t.Parallel()
+	const opaque = "next +/&=?#% token"
+	var firstPage []map[string]string
+	var wantMany []Task
+	for i := 1; i <= 21; i++ {
+		task := Task{ID: fmt.Sprintf("id-%d", i), Title: fmt.Sprintf("Task %d", i),
+			Notes: "notes", Status: "needsAction", Due: "2026-10-17T00:00:00Z"}
+		wantMany = append(wantMany, task)
+		if i <= 20 {
+			firstPage = append(firstPage, map[string]string{"id": task.ID, "title": task.Title,
+				"notes": task.Notes, "status": task.Status, "due": task.Due})
+		}
+	}
+	firstPage = append(firstPage, map[string]string{"id": "completed", "status": "completed"})
+	firstJSON, err := json.Marshal(map[string]any{"items": firstPage, "nextPageToken": opaque})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := wantMany[20]
+	lastJSON, err := json.Marshal(map[string]any{"items": []map[string]string{{"id": last.ID,
+		"title": last.Title, "notes": last.Notes, "status": last.Status, "due": last.Due}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := Task{ID: "one", Title: "One", Status: "needsAction"}
+	const oneJSON = `{"items":[{"id":"one","title":"One","status":"needsAction"}]}`
+	for _, tc := range []struct {
+		name    string
+		list    string
+		pages   []string
+		tokens  []string
+		want    []Task
+		failure int
+		cancel  bool
+	}{
+		{name: "twenty one tasks and opaque token", list: "custom-list", pages: []string{string(firstJSON), string(lastJSON)}, tokens: []string{"", opaque}, want: wantMany},
+		{name: "empty first and intermediate", pages: []string{`{"nextPageToken":"a"}`, `{"items":[],"nextPageToken":"b"}`, oneJSON}, tokens: []string{"", "a", "b"}, want: []Task{one}},
+		{name: "filtered intermediate and omitted final fields", pages: []string{`{"items":[{"id":"one","title":"One","status":"needsAction"}],"nextPageToken":"a"}`, `{"items":[{"status":"completed"}],"nextPageToken":"b"}`, `{}`}, tokens: []string{"", "a", "b"}, want: []Task{one}},
+		{name: "single page", list: "@default", pages: []string{oneJSON}, tokens: []string{""}, want: []Task{one}},
+		{name: "empty result", pages: []string{`{}`}, tokens: []string{""}, want: []Task{}},
+		{name: "second page HTTP error", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{}`}, tokens: []string{"", "a"}, failure: http.StatusInternalServerError},
+		{name: "second page malformed JSON", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{`}, tokens: []string{"", "a"}, failure: http.StatusOK},
+		{name: "second page cancellation", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{}`}, tokens: []string{"", "a"}, cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			requests := 0
+			list := tc.list
+			if list == "" {
+				list = "@default" //nolint:goconst // Google API default task list identifier
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				index := requests
+				requests++
+				if index >= len(tc.pages) {
+					t.Error("unexpected extra request")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				q := r.URL.Query()
+				if r.Method != http.MethodGet || r.URL.Path != "/lists/"+list+"/tasks" ||
+					q.Get("showCompleted") != "false" || q.Get("showHidden") != "false" ||
+					q.Get("pageToken") != tc.tokens[index] || r.Header.Get("Authorization") != "Bearer fake" {
+					t.Errorf("unexpected request: %s %s, auth %q", r.Method, r.URL, r.Header.Get("Authorization"))
+				}
+				if index == 0 && q.Has("pageToken") {
+					t.Error("first request must omit pageToken")
+				}
+				if index == 1 && tc.cancel {
+					cancel()
+					<-r.Context().Done()
+					return
+				}
+				if index == 1 && tc.failure != 0 {
+					w.WriteHeader(tc.failure)
+				}
+				_, _ = w.Write([]byte(tc.pages[index]))
+			}))
+			defer srv.Close()
+			got, err := listTasksWithClient(ctx, setupTestToken(t), tc.list, redirectClient(tasksBaseURL, srv.URL))
+			if tc.failure != 0 || tc.cancel {
+				if err == nil || !strings.Contains(err.Error(), "tasks list:") || got != nil {
+					t.Fatalf("want contextual error and nil tasks, got %v, %v", got, err)
+				}
+				if tc.cancel && !errors.Is(err, context.Canceled) {
+					t.Errorf("want context.Canceled, got %v", err)
+				}
+			} else if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("tasks = %#v, error = %v; want %#v", got, err, tc.want)
+			}
+			if requests != len(tc.pages) {
+				t.Errorf("requests = %d, want %d", requests, len(tc.pages))
+			}
+		})
 	}
 }
