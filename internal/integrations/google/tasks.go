@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -38,6 +39,7 @@ func listTasksWithClient(ctx context.Context, secretsRoot, tasklistID string, cl
 	apiURL := fmt.Sprintf("%s/lists/%s/tasks", tasksBaseURL, tasklistID)
 	query := url.Values{"showCompleted": {"false"}, "showHidden": {"false"}}
 	tasks := make([]Task, 0)
+	seenTokens := make(map[string]struct{})
 	for {
 		var resp struct {
 			NextPageToken string `json:"nextPageToken"`
@@ -64,6 +66,11 @@ func listTasksWithClient(ctx context.Context, secretsRoot, tasklistID string, cl
 		if resp.NextPageToken == "" {
 			break
 		}
+		if _, seen := seenTokens[resp.NextPageToken]; seen {
+			err := errors.New("repeated pagination token prevents progress")
+			return nil, fmt.Errorf("tasks list: %w", err)
+		}
+		seenTokens[resp.NextPageToken] = struct{}{}
 		query.Set("pageToken", resp.NextPageToken)
 	}
 	return tasks, nil
