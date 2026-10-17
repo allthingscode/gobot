@@ -35,14 +35,22 @@ type calendarListEntry struct {
 
 // listCalendarsWithClient returns all calendars the user has reader access to.
 func listCalendarsWithClient(ctx context.Context, token string, client *http.Client) ([]calendarListEntry, error) {
-	apiURL := calendarBaseURL + "/users/me/calendarList?minAccessRole=reader"
-	var resp struct {
-		Items []calendarListEntry `json:"items"`
+	params := url.Values{"minAccessRole": {"reader"}}
+	var all []calendarListEntry
+	for {
+		var resp struct {
+			Items         []calendarListEntry `json:"items"`
+			NextPageToken string              `json:"nextPageToken"`
+		}
+		if err := apiGet(ctx, token, calendarBaseURL+"/users/me/calendarList?"+params.Encode(), client, &resp); err != nil {
+			return nil, fmt.Errorf("calendar list: %w", err)
+		}
+		all = append(all, resp.Items...)
+		if resp.NextPageToken == "" {
+			return all, nil
+		}
+		params.Set("pageToken", resp.NextPageToken)
 	}
-	if err := apiGet(ctx, token, apiURL, client, &resp); err != nil {
-		return nil, fmt.Errorf("calendar list: %w", err)
-	}
-	return resp.Items, nil
 }
 
 // ListUpcomingEvents returns up to maxResults upcoming events from the
@@ -70,15 +78,40 @@ func listUpcomingEventsWithClient(ctx context.Context, secretsRoot string, maxRe
 		"singleEvents": {"true"},
 		"orderBy":      {"startTime"},
 	}
-	paramStr := perCalParams.Encode()
-
 	var all []CalendarEvent
 	for _, cal := range calendars {
-		apiURL := fmt.Sprintf("%s/calendars/%s/events?%s",
-			calendarBaseURL, url.PathEscape(cal.ID), paramStr)
+		if ctx.Err() != nil {
+			break
+		}
+		events, err := listCalendarEventsWithClient(ctx, token, cal, perCalParams, maxResults, client)
+		if err != nil {
+			// A shared calendar failure must not block other calendars or leak partial pages.
+			slog.Warn("calendar: skipping calendar due to fetch error",
+				slog.String("calendar", cal.Summary), logattr.Err(err))
+			continue
+		}
+		all = append(all, events...)
+	}
 
+	sortCalendarEvents(all)
+	if len(all) > maxResults {
+		all = all[:maxResults]
+	}
+	return all, nil
+}
+
+// listCalendarEventsWithClient collects enough ordered events before publishing a calendar.
+func listCalendarEventsWithClient(ctx context.Context, token string, cal calendarListEntry, filters url.Values, maxResults int, client *http.Client) ([]CalendarEvent, error) {
+	params := url.Values{}
+	for key, values := range filters {
+		params[key] = append([]string(nil), values...)
+	}
+	var events []CalendarEvent
+	for {
+		apiURL := fmt.Sprintf("%s/calendars/%s/events?%s", calendarBaseURL, url.PathEscape(cal.ID), params.Encode())
 		var resp struct {
-			Items []struct {
+			NextPageToken string `json:"nextPageToken"`
+			Items         []struct {
 				ID       string `json:"id"`
 				Summary  string `json:"summary"`
 				Location string `json:"location"`
@@ -93,11 +126,7 @@ func listUpcomingEventsWithClient(ctx context.Context, secretsRoot string, maxRe
 			} `json:"items"`
 		}
 		if err := apiGet(ctx, token, apiURL, client, &resp); err != nil {
-			// Log and skip — a shared calendar with expired permissions should
-			// not block everything else.
-			slog.Warn("calendar: skipping calendar due to fetch error",
-				slog.String("calendar", cal.Summary), logattr.Err(err))
-			continue
+			return nil, fmt.Errorf("calendar events: %w", err)
 		}
 		for _, item := range resp.Items {
 			ev := CalendarEvent{
@@ -114,15 +143,13 @@ func listUpcomingEventsWithClient(ctx context.Context, secretsRoot string, maxRe
 				ev.End = item.End.Date
 				ev.AllDay = true
 			}
-			all = append(all, ev)
+			events = append(events, ev)
 		}
+		if resp.NextPageToken == "" || len(events) >= maxResults {
+			return events, nil
+		}
+		params.Set("pageToken", resp.NextPageToken)
 	}
-
-	sortCalendarEvents(all)
-	if len(all) > maxResults {
-		all = all[:maxResults]
-	}
-	return all, nil
 }
 
 // sortCalendarEvents orders merged events by instant while preserving ties.

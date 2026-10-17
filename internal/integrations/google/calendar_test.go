@@ -429,7 +429,7 @@ func TestListUpcomingEventsWithClient_Ordering(t *testing.T) {
 			originals, items := calendarOrderingFixture(tt.starts, tt.allDay)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/users/me/calendarList":
+				case calendarListTestPath:
 					_ = json.NewEncoder(w).Encode(map[string]any{"items": []calendarListEntry{{ID: "c0", Summary: "Calendar 0"}, {ID: "c1", Summary: "Calendar 1"}}})
 				case "/calendars/c0/events":
 					_ = json.NewEncoder(w).Encode(map[string]any{"items": items[0]})
@@ -485,6 +485,227 @@ func checkCalendarOrdering(t *testing.T, dir string, client *http.Client, origin
 			if want := originals[wantOrder[i]]; event != want {
 				t.Errorf("limit %d event %d: got %+v, want %+v", limit, i, event, want)
 			}
+		}
+	}
+}
+
+const (
+	calendarListTestPath = "/users/me/calendarList"
+	calendarTestDate     = "2026-04-01"
+	calendarTestCancel   = "cancel"
+)
+
+//nolint:gocognit,cyclop // Offline pagination matrix keeps request invariants beside response assertions.
+func TestCalendarPagination(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		pages []string
+		limit int
+		want  []string
+	}{
+		{"empty and short pages", []string{`{"nextPageToken":"TOKEN"}`, `{"items":[{"id":"a","start":{"date":"2026-04-01"}}],"nextPageToken":"last"}`, `{"items":[{"id":"b","start":{"dateTime":"2026-04-02T00:00:00Z"}}]}`}, 3, []string{"a", "b"}},
+		{"stop at count", []string{`{"items":[{"id":"a","start":{"date":"2026-04-01"}}],"nextPageToken":"TOKEN"}`}, 1, []string{"a"}},
+		{"stable ties and cap", []string{`{"items":[{"id":"a","start":{"date":"2026-04-01"}}],"nextPageToken":"TOKEN"}`, `{"items":[{"id":"b","start":{"dateTime":"2026-04-01T00:00:00Z"}},{"id":"c","start":{"date":"2026-04-01"}}]}`}, 2, []string{"a", "b"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			const opaque = "+ /?=&%"
+			calls := 0
+			timeMin := ""
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == calendarListTestPath {
+					if r.URL.Query().Get("minAccessRole") != "reader" {
+						t.Error("missing reader filter")
+					}
+					_, _ = fmt.Fprint(w, `{"items":[{"id":"a/b+@","summary":"Work"}]}`)
+					return
+				}
+				if r.URL.EscapedPath() != "/calendars/a%2Fb+@/events" {
+					t.Errorf("path: %s", r.URL.EscapedPath())
+				}
+				q := r.URL.Query()
+				if r.Header.Get("Authorization") != "Bearer fake" || q.Get("maxResults") != fmt.Sprint(tc.limit) || q.Get("singleEvents") != "true" || q.Get("orderBy") != "startTime" {
+					t.Errorf("filters/auth: %v", q)
+				}
+				if calls == 0 {
+					timeMin = q.Get("timeMin")
+					if _, err := time.Parse(time.RFC3339, timeMin); err != nil {
+						t.Error(err)
+					}
+				}
+				if timeMin != q.Get("timeMin") {
+					t.Error("timeMin changed")
+				}
+				expected := ""
+				if calls == 1 {
+					expected = opaque
+				}
+				if calls == 2 {
+					expected = "last"
+				}
+				if q.Get("pageToken") != expected {
+					t.Errorf("token: %q want %q", q.Get("pageToken"), expected)
+				}
+				if calls >= len(tc.pages) {
+					t.Error("extra request")
+					http.Error(w, "extra", 500)
+					return
+				}
+				page := tc.pages[calls]
+				calls++
+				_, _ = fmt.Fprint(w, strings.ReplaceAll(page, "TOKEN", opaque))
+			}))
+			defer srv.Close()
+			events, err := listUpcomingEventsWithClient(context.Background(), setupTestToken(t), tc.limit, redirectClient(calendarBaseURL, srv.URL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != len(tc.pages) || len(events) != len(tc.want) {
+				t.Fatalf("calls %d, events %+v", calls, events)
+			}
+			for i, id := range tc.want {
+				if events[i].ID != id || events[i].CalendarName != "Work" {
+					t.Errorf("event: %+v", events[i])
+				}
+			}
+			if len(events) > 0 && (!events[0].AllDay || events[0].Start != calendarTestDate) {
+				t.Errorf("all day fields: %+v", events[0])
+			}
+		})
+	}
+}
+
+//nolint:gocognit,cyclop // Offline enumeration matrix checks request sequence and global selection together.
+func TestCalendarListPagination(t *testing.T) {
+	t.Parallel()
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprint(empty), func(t *testing.T) {
+			t.Parallel()
+			listCalls, eventCalls := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == calendarListTestPath {
+					q := r.URL.Query()
+					if q.Get("minAccessRole") != "reader" {
+						t.Error("reader filter lost")
+					}
+					listCalls++
+					switch listCalls {
+					case 1:
+						if q.Get("pageToken") != "" {
+							t.Error("initial token")
+						}
+						items := `[{"id":"late"}]`
+						if empty {
+							items = `[]`
+						}
+						_, _ = fmt.Fprintf(w, `{"items":%s,"nextPageToken":"+ /?=&%%"}`, items)
+					case 2:
+						if q.Get("pageToken") != "+ /?=&%" {
+							t.Errorf("token %q", q.Get("pageToken"))
+						}
+						_, _ = fmt.Fprint(w, `{"items":[{"id":"early"}]}`)
+					default:
+						t.Error("extra list request")
+						http.Error(w, "extra", 500)
+					}
+					return
+				}
+				eventCalls++
+				if r.URL.Query().Get("pageToken") != "" {
+					t.Error("token leaked between calendars")
+				}
+				date := "2026-04-02"
+				if strings.Contains(r.URL.Path, "early") {
+					date = calendarTestDate
+				}
+				_, _ = fmt.Fprintf(w, `{"items":[{"id":%q,"start":{"date":%q}}]}`, date, date)
+			}))
+			defer srv.Close()
+			events, err := listUpcomingEventsWithClient(context.Background(), setupTestToken(t), 1, redirectClient(calendarBaseURL, srv.URL))
+			if err != nil || len(events) != 1 || events[0].ID != calendarTestDate {
+				t.Fatalf("events %+v err %v", events, err)
+			}
+			wantCalls := 2
+			if empty {
+				wantCalls = 1
+			}
+			if listCalls != 2 || eventCalls != wantCalls {
+				t.Errorf("calls list=%d events=%d", listCalls, eventCalls)
+			}
+		})
+	}
+}
+
+//nolint:gocognit,cyclop // Failure matrix verifies transport sequencing and partial-result policy together.
+func TestCalendarLaterPageFailures(t *testing.T) {
+	t.Parallel()
+	for _, endpoint := range []string{"list", "events"} {
+		for _, failure := range []string{"http", "json", calendarTestCancel} {
+			t.Run(endpoint+"/"+failure, func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				failedCalls := 0
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					isList := r.URL.Path == calendarListTestPath
+					if isList && endpoint == "events" {
+						_, _ = fmt.Fprint(w, `{"items":[{"id":"healthy"},{"id":"broken"},{"id":"after"}]}`)
+						return
+					}
+					if !isList && !strings.Contains(r.URL.Path, "broken") {
+						if strings.Contains(r.URL.Path, "after") && failure == calendarTestCancel {
+							t.Error("request after cancellation")
+						}
+						_, _ = fmt.Fprint(w, `{"items":[{"id":"healthy","start":{"date":"2026-04-01"}}]}`)
+						return
+					}
+					failedCalls++
+					if failedCalls == 1 {
+						items := `[{"id":"broken"}]`
+						if !isList {
+							items = `[{"id":"partial","start":{"date":"2026-04-01"}}]`
+						}
+						_, _ = fmt.Fprintf(w, `{"items":%s,"nextPageToken":"next"}`, items)
+						return
+					}
+					if failedCalls > 2 {
+						t.Error("extra failure request")
+					}
+					switch failure {
+					case "http":
+						http.Error(w, "failed", http.StatusForbidden)
+					case "json":
+						_, _ = fmt.Fprint(w, `{`)
+					case calendarTestCancel:
+						cancel()
+						<-r.Context().Done()
+					}
+				}))
+				defer srv.Close()
+				events, err := listUpcomingEventsWithClient(ctx, setupTestToken(t), 3, redirectClient(calendarBaseURL, srv.URL))
+				if failedCalls != 2 {
+					t.Errorf("failed calls %d", failedCalls)
+				}
+				if endpoint == "list" {
+					if err == nil || !strings.Contains(err.Error(), "calendar list") || events != nil {
+						t.Fatalf("events %+v err %v", events, err)
+					}
+				} else {
+					want := 2
+					if failure == calendarTestCancel {
+						want = 1
+					}
+					if err != nil || len(events) != want {
+						t.Fatalf("events %+v err %v", events, err)
+					}
+					for _, ev := range events {
+						if ev.ID != "healthy" {
+							t.Errorf("partial event leaked: %+v", ev)
+						}
+					}
+				}
+			})
 		}
 	}
 }
