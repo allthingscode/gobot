@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -34,35 +35,36 @@ func listTasksWithClient(ctx context.Context, secretsRoot, tasklistID string, cl
 		tasklistID = "@default" //nolint:goconst // Google API default task list identifier
 	}
 
-	apiURL := fmt.Sprintf("%s/lists/%s/tasks?showCompleted=false&showHidden=false",
-		tasksBaseURL, tasklistID)
-
-	var resp struct {
-		Items []struct {
-			ID     string `json:"id"`
-			Title  string `json:"title"`
-			Notes  string `json:"notes"`
-			Status string `json:"status"`
-			Due    string `json:"due"`
-		} `json:"items"`
-	}
-
-	if err := apiGet(ctx, token, apiURL, client, &resp); err != nil {
-		return nil, fmt.Errorf("tasks list: %w", err)
-	}
-
-	tasks := make([]Task, 0, len(resp.Items))
-	for _, item := range resp.Items {
-		if item.Status == "completed" {
-			continue
+	apiURL := fmt.Sprintf("%s/lists/%s/tasks", tasksBaseURL, tasklistID)
+	query := url.Values{"showCompleted": {"false"}, "showHidden": {"false"}}
+	tasks := make([]Task, 0)
+	for {
+		var resp struct {
+			NextPageToken string `json:"nextPageToken"`
+			Items         []struct {
+				ID     string `json:"id"`
+				Title  string `json:"title"`
+				Notes  string `json:"notes"`
+				Status string `json:"status"`
+				Due    string `json:"due"`
+			} `json:"items"`
 		}
-		tasks = append(tasks, Task{
-			ID:     item.ID,
-			Title:  item.Title,
-			Notes:  item.Notes,
-			Status: item.Status,
-			Due:    item.Due,
-		})
+		if err := apiGet(ctx, token, apiURL+"?"+query.Encode(), client, &resp); err != nil {
+			return nil, fmt.Errorf("tasks list: %w", err)
+		}
+		for _, item := range resp.Items {
+			if item.Status == "completed" {
+				continue
+			}
+			tasks = append(tasks, Task{
+				ID: item.ID, Title: item.Title, Notes: item.Notes,
+				Status: item.Status, Due: item.Due,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		query.Set("pageToken", resp.NextPageToken)
 	}
 	return tasks, nil
 }
