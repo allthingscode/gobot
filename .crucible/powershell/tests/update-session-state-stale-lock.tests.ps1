@@ -110,6 +110,32 @@ try {
     $r3 = Invoke-ScriptUnderTest
     Assert-True -Name "exit code 0 with no contention" -Cond ($r3.ExitCode -eq 0) -Detail ("got " + $r3.ExitCode + " :: " + $r3.Output)
     Assert-True -Name "no warning when lock absent" -Cond ($r3.Output -notmatch "\[WARN\] Stale lock") -Detail $r3.Output
+
+    # Item 234: the first write to a missing state file used to report success and store
+    # nothing, so the affinity check could not see the task it should conflict with.
+    foreach ($seed in @("missing", "existing")) {
+        Write-Host "`nTest 4 ($seed state file): registrations survive and conflict" -ForegroundColor Cyan
+        $root = New-TestFixtureRoot -NameHint "state-first-write-$seed"
+        $state = Join-Path $root ".crucible/session/global/session_state.json"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $state) -Force | Out-Null
+        if ($seed -eq "existing") { [IO.File]::WriteAllText($state, '{"tasks":{}}', [Text.UTF8Encoding]::new($false)) }
+        $shell = Get-PwshCommand
+        $register = {
+            param($Id)
+            & $shell -NoProfile -ExecutionPolicy Bypass -File $scriptUnderTest -Specialist implementation -TaskId $Id -UpdateJson '{"status":"active","file_affinity":["internal/app/"]}' -ProjectRoot $root 2>&1 | Out-Null
+            return $LASTEXITCODE
+        }
+        $e1 = & $register "F-901"
+        $afterFirst = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
+        Assert-True -Name "$seed : first write exits 0" -Cond ($e1 -eq 0) -Detail ("got " + $e1)
+        Assert-True -Name "$seed : first write is stored" -Cond ($null -ne $afterFirst.tasks.PSObject.Properties["F-901"] -and $afterFirst.tasks."F-901".phases.implementation.status -eq "active") -Detail (Get-Content -LiteralPath $state -Raw)
+        $conflict = & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path (Split-Path -Parent $scriptUnderTest) "check-file-affinity.ps1") -TaskId "F-902" -Affinity "internal/app/" -ProjectRoot $root 2>&1
+        Assert-True -Name "$seed : overlapping task is refused" -Cond ($LASTEXITCODE -eq 1) -Detail ("got " + $LASTEXITCODE + " :: " + ($conflict -join " "))
+        $e2 = & $register "F-902"
+        $afterSecond = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
+        Assert-True -Name "$seed : second task keeps the first" -Cond ($e2 -eq 0 -and $null -ne $afterSecond.tasks.PSObject.Properties["F-901"] -and $null -ne $afterSecond.tasks.PSObject.Properties["F-902"]) -Detail (Get-Content -LiteralPath $state -Raw)
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 finally {
     Restore-State

@@ -134,6 +134,36 @@ try {
         }
     }
 
+    # Item 222: Production means merged, so a merge that routes to rework must leave the spec active.
+    foreach ($mergeCase in @(@{ Result = "rework"; Exit = 3 }, @{ Result = "breaker"; Exit = 2 }, @{ Result = "failed"; Exit = 1 })) {
+        $results += Run-Test -Name ("Accept leaves the spec active when the merge returns " + $mergeCase.Result) -Body {
+            $root = Join-Path $tempRoot ("merge-" + $mergeCase.Result)
+            $spec = Join-Path $root "backlog/features/active/F-222.md"
+            $backlog = Join-Path $root "backlog/BACKLOG.md"
+            $utf8 = [System.Text.UTF8Encoding]::new($false)
+            New-Item -ItemType Directory -Path (Split-Path -Parent $spec), (Join-Path $root ".crucible") -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), "paths:`n  backlog: backlog`n", $utf8)
+            [System.IO.File]::WriteAllText($spec, "---`nitem_id: F-222`nstatus: In Progress`n---`n", $utf8)
+            [System.IO.File]::WriteAllText($backlog, "| ID | Status |`n| --- | --- |`n| [F-222](features/active/F-222.md) | In Progress |`n", $utf8)
+            $child = Join-Path $root "check.ps1"
+            $childText = @'
+param($Root, $Lib, $MergeResult)
+$ErrorActionPreference = "Stop"
+. (Join-Path $Lib "crucible-gates.ps1")
+# The task branch exists; the merge reports the case under test.
+function git { $global:LASTEXITCODE = 0 }
+function Invoke-HumanGateMerge { return $MergeResult }
+Invoke-HumanGateAcceptRedirect -TaskId "F-222" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl")
+Write-Host "GATE_COMPLETED"
+'@
+            [System.IO.File]::WriteAllText($child, $childText, $utf8)
+            $output = @(& $pwshCmd -NoProfile -File $child -Root $root -Lib (Join-Path $REPO_ROOT "powershell/lib") -MergeResult $mergeCase.Result 2>&1) -join "`n"
+            Assert-Result "gate exits with the merge outcome" ($LASTEXITCODE -eq $mergeCase.Exit -and -not $output.Contains("GATE_COMPLETED")) ("expected exit " + $mergeCase.Exit + ", got " + $LASTEXITCODE + ". Output: " + $output)
+            Assert-Result "spec stays active" (Test-Path -LiteralPath $spec) ("the spec was archived although the merge returned " + $mergeCase.Result)
+            Assert-Result "row is not Production" ((Get-Content -LiteralPath $backlog -Raw) -match '\| In Progress \|') (Get-Content -LiteralPath $backlog -Raw)
+        }
+    }
+
     $results += Run-Test -Name "Resolve-CrucibleTransition handles valid and invalid transitions" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "routing-gates") -TaskId "F-006"
 

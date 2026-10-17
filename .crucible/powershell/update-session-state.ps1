@@ -90,7 +90,10 @@ if (-not $Acquired) {
 # --- 2. Update State ---
 try {
     if (-not (Test-Path $StateFile)) {
-        $state = [ordered]@{ tasks = @{} }
+        # The same shape ConvertFrom-Json gives an existing file. A hashtable here took the
+        # Add-Member calls below as note properties that ConvertTo-Json drops, so the first
+        # write to a fresh install was lost. Item 234.
+        $state = [PSCustomObject]@{ tasks = [PSCustomObject]@{} }
     } else {
         $raw = Get-Content $StateFile -Raw -Encoding UTF8
         $state = $raw | ConvertFrom-Json

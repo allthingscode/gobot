@@ -582,6 +582,17 @@ priority: P1
         }
         New-SpecFile -Root $root -RelPath "chores/active/C-001_Good_Affinity.md" -ItemId "C-001" -Priority "P2" -Title "Good Affinity" -FileAffinity @("root_script.ps1")
 
+        # Item 231: the validator shares the scope reader, which reads the whole frontmatter.
+        # Its old copy stopped at line 50, so an entry after that was never checked.
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Good_Affinity.md" -ItemId "C-001" -Priority "P2" -Title "Good Affinity" -FileAffinity @("missing_late.go")
+        $longSpec = Join-Path $root "chores/active/C-001_Good_Affinity.md"
+        $filler = ((1..55) | ForEach-Object { "note_" + $_ + ": filler" }) -join "`n"
+        $longText = (Get-Content -LiteralPath $longSpec -Raw).Replace("file_affinity:", $filler + "`nfile_affinity:")
+        [IO.File]::WriteAllText($longSpec, $longText, [Text.UTF8Encoding]::new($false))
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result -Name "affinity after line 50 is checked" -Condition ($r.Output -match "File affinity path does not exist: .*missing_late\.go") -FailureMessage $r.Output
+        New-SpecFile -Root $root -RelPath "chores/active/C-001_Good_Affinity.md" -ItemId "C-001" -Priority "P2" -Title "Good Affinity" -FileAffinity @("root_script.ps1")
+
         # Case B: Spec with a nonexistent literal path
         New-SpecFile -Root $root -RelPath "chores/active/C-002_Bad_Affinity.md" -ItemId "C-002" -Priority "P2" -Title "Bad Affinity" -FileAffinity @(
             "internal/doctor",

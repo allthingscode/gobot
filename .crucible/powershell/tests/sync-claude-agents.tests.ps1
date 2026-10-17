@@ -60,6 +60,10 @@ models:
     $researcher = Read-Agent $root "crucible-researcher"
     Assert-Result "researcher is strong level" ($researcher.Contains("`nmodel: claude-opus-5-5`neffort: xhigh`n")) $researcher
     Assert-Result "researcher has no editing tools" ($researcher -match '(?m)^disallowedTools: .*Write.*Edit') $researcher
+    # Item 230: the brief names the outputs the Researcher must write, so it can finish without breaking a rule.
+    Assert-Result "researcher may write its report and checkpoints" ($researcher.Contains(".crucible/research/") -and $researcher.Contains("task.md")) $researcher
+    Assert-Result "researcher files only approved stubs" ($researcher.Contains("human-approved backlog stubs")) $researcher
+    Assert-Result "no scripts-only write rule" (-not $researcher.Contains("Write nothing except through")) $researcher
     Assert-Result "tier agents do not restrict tools" ($strong -notmatch '(?m)^(disallowedTools|tools):') $strong
 }
 

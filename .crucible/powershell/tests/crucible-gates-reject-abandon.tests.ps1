@@ -157,9 +157,11 @@ Invoke-HumanGate -Context `$ctx
         Assert-Result -Name "D55: stale-cycle accepted decision does NOT bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected stale-cycle accept to re-prompt (pending file created), but the gate was bypassed using a prior-cycle acceptance"
     }
 
-    $results += Run-Test -Name "D55: end-to-end reject -> rework re-entry" -Body {
+    # Item 226: the first pending-file rejection must authorize the real handoff writer.
+    foreach ($decisionInput in @("CLI", "pending")) {
+    $results += Run-Test -Name "D55: end-to-end reject -> rework re-entry ($decisionInput)" -Body {
         # Stand up local + bare-origin repos
-        $caseRoot = Join-Path $tempRoot "d55-e2e-reject-rework"
+        $caseRoot = Join-Path $tempRoot "d55-e2e-reject-rework-$decisionInput"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
 
         $originRepo = Join-Path $caseRoot "origin.git"
@@ -244,6 +246,13 @@ created_at: "2026-06-04"
         $wtPath = Join-Path $localRepo ".crucible/.agent-workspaces/implementation-F-999"
         if (Test-Path $wtPath) { Remove-Item $wtPath -Recurse -Force }
 
+        $outcomeExpression = "'rejected'"
+        if ($decisionInput -eq "pending") {
+            $outcomeExpression = '$null'
+            '{"task_id":"F-999","outcome":"rejected","reason":"needs more polish","rework_requested":false}' |
+                Set-Content -LiteralPath (Join-Path $gateDir "gate_decision_F-999_pending.json") -Encoding UTF8
+        }
+
         $scriptPath = Join-Path $caseRoot "run-reject.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
 
@@ -258,7 +267,7 @@ created_at: "2026-06-04"
     SessionDir = '$sessionDir'
     LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
     CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
-    GateOutcome = 'rejected'
+    GateOutcome = $outcomeExpression
     GateReason = 'needs more polish'
     GateRedirectTarget = `$null
     CrucibleRoot = '$localRepo'
@@ -271,6 +280,7 @@ created_at: "2026-06-04"
         cumulative_handoff_count = 1
         artifacts = @('feature.md')
         session_cycle_id = 'cycle-999'
+        rebase_count = 0
     }
 }
 
@@ -354,6 +364,8 @@ try {
 
         $taskContent = Get-Content $taskFile -Raw -Encoding UTF8
         Assert-Result -Name "D56 E2E Reject: task.md references implementation phase" -Condition ($taskContent -match "Phase: implementation") -FailureMessage ("expected task.md to reference Phase: implementation, got: " + $taskContent)
+    }
+
     }
 
     # Item 180: accepted merges stay local until the human pushes. Rejecting task B then used to

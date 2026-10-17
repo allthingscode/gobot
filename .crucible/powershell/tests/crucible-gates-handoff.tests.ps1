@@ -271,6 +271,53 @@ Write-Host 'READ_COMPLETED'
         Assert-Result -Name "mismatch named" -Condition ($text -match "selected for task F-A01 but its task_id is 'F-B01'") -FailureMessage ("expected both task ids named. Output: " + $text)
     }
 
+    # Item 223: a recovered misplaced handoff gets the same task binding check as any other.
+    foreach ($payloadTask in @("F-B01", "F-A01")) {
+        $results += Run-Test -Name "A recovered misplaced handoff naming $payloadTask is read under the selected task F-A01" -Body {
+            $caseRoot = Join-Path $tempRoot "misplaced-$payloadTask"
+            $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-A01"
+            $values = @{
+                source_phase = "grooming"; target_phase = "implementation"
+                cumulative_handoff_count = 2; handoff_retry_count = 0; review_strike_count = 0; rebase_count = 0
+                budget_tier = "low"; reason = "payload"; artifacts = @("a.md"); file_affinity = @("src/")
+                prompt_version = "1.0.0"; session_cycle_id = "cycle-x"
+            }
+            $selectedPath = Join-Path $ctx.HandoffDir "F-A01-20260526T120000Z.json"
+            Write-TestHandoff -Path $selectedPath -Values ($values + @{ task_id = "F-A01" })
+            (Get-Item -LiteralPath $selectedPath).LastWriteTime = (Get-Date).AddMinutes(-10)
+            $misplaced = Join-Path $ctx.SessionDir "F-A01/handoff.json"
+            New-Item -ItemType Directory -Path (Split-Path -Parent $misplaced) -Force | Out-Null
+            Write-TestHandoff -Path $misplaced -Values ($values + @{ task_id = $payloadTask })
+            $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+            $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    TaskId = 'F-A01'
+    RepoRoot = '$($caseRoot.Replace("'", "''"))'
+    SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'
+    HandoffDir = '$($ctx.HandoffDir.Replace("'", "''"))'
+    LatestHandoff = (Get-Item -LiteralPath '$($selectedPath.Replace("'", "''"))')
+    LogFile = '$((Join-Path $caseRoot "session/pipeline.log.jsonl").Replace("'", "''"))'
+    BudgetCeilings = `$null
+}
+Restore-MisplacedHandoff -Context `$ctx
+Read-CrucibleHandoffContext -Context `$ctx
+Write-Host ('READ_COMPLETED ' + `$ctx.Handoff.task_id + ' ' + `$ctx.LatestHandoff.Name)
+"@ 2>&1
+            $code = $LASTEXITCODE
+            $text = $out -join "`n"
+            Assert-Result -Name "misplaced file moved" -Condition (-not (Test-Path -LiteralPath $misplaced)) -FailureMessage "the misplaced handoff was not recovered"
+            if ($payloadTask -eq "F-B01") {
+                Assert-Result -Name "recovered mismatch exits 2" -Condition ($code -eq 2 -and -not ($text -match 'READ_COMPLETED')) -FailureMessage ("expected exit 2, got " + $code + ". Output: " + $text)
+                Assert-Result -Name "recovered mismatch named" -Condition ($text -match "selected for task F-A01 but its task_id is 'F-B01'") -FailureMessage $text
+            } else {
+                Assert-Result -Name "recovered match is selected" -Condition ($code -eq 0 -and $text -match 'READ_COMPLETED F-A01 F-A01-\d{8}T\d{6}Z\.json') -FailureMessage ("expected the recovered file to be read. Output: " + $text)
+                Assert-Result -Name "recovered file is not the older selection" -Condition (-not ($text -match 'F-A01-20260526T120000Z')) -FailureMessage $text
+            }
+        }
+    }
+
     $results += Run-Test -Name "Read-CrucibleHandoffContext maps extended budget ceiling" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "extended-budget") -TaskId "F-002X"
         $handoffPath = Join-Path $ctx.HandoffDir "F-002X-20260526T120000Z.json"

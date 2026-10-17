@@ -530,8 +530,10 @@ verification:
             git config commit.gpgSign false
             git checkout -b task/F-038 --quiet
             Set-Content -Path "README.md" -Value "# Temp"
-            git add README.md
+            git add -A
             git commit -m "init" --quiet
+            # The encoding baseline needs the primary branch a real task branch forks from. Item 225.
+            git branch main
         } finally {
             Pop-Location
         }
@@ -615,8 +617,10 @@ verification:
             git config commit.gpgSign false
             git checkout -b task/F-038 --quiet
             Set-Content -Path "README.md" -Value "# Temp"
-            git add README.md
+            git add -A
             git commit -m "init" --quiet
+            # The encoding baseline needs the primary branch a real task branch forks from. Item 225.
+            git branch main
         } finally {
             Pop-Location
         }
@@ -709,8 +713,10 @@ verification:
             git config commit.gpgSign false
             git checkout -b task/F-038 --quiet
             Set-Content -Path "README.md" -Value "# Temp"
-            git add README.md
+            git add -A
             git commit -m "init" --quiet
+            # The encoding baseline needs the primary branch a real task branch forks from. Item 225.
+            git branch main
         } finally {
             Pop-Location
         }
@@ -746,6 +752,78 @@ verification:
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D38 success exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
+    }
+
+    # Item 221: the checks run on the worktree's files but the merge ships only commits.
+    $results += Run-Test -Name "An uncommitted edit in the task worktree blocks independent verification before the checks run" -Body {
+        $caseRoot = Join-Path $tempRoot "item221-uncommitted"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $marker = Join-Path $caseRoot "checks-ran.txt"
+        $crucibleDir = Join-Path $caseRoot ".crucible"
+        New-Item -ItemType Directory -Path $crucibleDir -Force | Out-Null
+        $configContent = @"
+project_name: "Item 221 App"
+verification:
+  full:
+    - name: marker
+      command: $pwshCmd -NoProfile -Command "Set-Content -LiteralPath '$marker' -Value ran"
+"@
+        [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+        $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-221"
+        New-Item -ItemType Directory -Path (Join-Path $wtPath ".crucible") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $wtPath ".crucible/config.yaml"), $configContent)
+        Push-Location $wtPath
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            git checkout -b task/F-221 --quiet
+            Set-Content -Path "README.md" -Value "# committed A"
+            git add -A
+            git commit -m "init" --quiet
+            # The encoding baseline needs the primary branch a real task branch forks from. Item 225.
+            git branch main
+            Set-Content -Path "README.md" -Value "# uncommitted B"
+        } finally {
+            Pop-Location
+        }
+
+        $logFile = Join-Path $caseRoot "session/F-221/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-221'
+                    source_phase = 'verification'
+                    target_phase = 'deployment'
+                    cumulative_handoff_count = 1
+                    budget_tier = 'low'
+                    reason = 'test'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+
+        Assert-Result -Name "uncommitted worktree exits 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
+        Assert-Result -Name "checks did not run" -Condition (-not (Test-Path -LiteralPath $marker)) -FailureMessage "the configured check ran on the uncommitted edit"
+        Assert-Result -Name "the uncommitted file is named" -Condition ($output.Contains("README.md") -and $output.Contains("uncommitted_task_worktree")) -FailureMessage $output
+        $cbText = if (Test-Path -LiteralPath $cbHistoryFile) { Get-Content -LiteralPath $cbHistoryFile -Raw } else { "" }
+        Assert-Result -Name "breaker recorded" -Condition ($cbText -match 'uncommitted_task_worktree') -FailureMessage ("circuit breaker history: " + $cbText)
     }
 
     $results += Run-Test -Name "D38: No-Code Closure no worktree passes without checks" -Body {
@@ -1186,8 +1264,10 @@ verification:
             git config commit.gpgSign false
             git checkout -b task/F-040V --quiet
             Set-Content -Path "README.md" -Value "# Temp"
-            git add README.md
+            git add -A
             git commit -m "init" --quiet
+            # The encoding baseline needs the primary branch a real task branch forks from. Item 225.
+            git branch main
         } finally {
             Pop-Location
         }

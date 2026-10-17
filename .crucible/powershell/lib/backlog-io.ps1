@@ -36,8 +36,7 @@ function Invoke-WithBacklogLock {
     param(
         [Parameter(Mandatory=$true)][string]$BacklogPath,
         [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock,
-        [int]$TimeoutSeconds = 10,
-        [int]$StaleLockAgeSeconds = 30
+        [int]$TimeoutSeconds = 10
     )
 
     if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
@@ -60,74 +59,35 @@ function Invoke-WithBacklogLock {
         }
     }
 
+    # The open handle is the lock, held for the whole write, as in Invoke-FileLock. A dead
+    # holder's handle is closed by the OS and DeleteOnClose frees the path, so no waiter
+    # judges a lock stale and deletes it; that guess let two waiters both enter. Item 224.
     $startTime = [System.DateTime]::UtcNow
-    $acquired = $false
-
-    while (([System.DateTime]::UtcNow - $startTime).TotalSeconds -lt $TimeoutSeconds) {
+    $fileStream = $null
+    while ($null -eq $fileStream) {
         try {
-            # Try atomic file creation with FileAccess ReadWrite, FileShare None
-            $fs = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
-            $info = "$PID;$(Get-Date -Format 'o')"
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes($info)
-            $fs.Write($bytes, 0, $bytes.Length)
-            $fs.Close()
-            $fs.Dispose()
-            $acquired = $true
-            break
+            $fileStream = New-Object System.IO.FileStream(
+                $lockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None,
+                1,
+                [System.IO.FileOptions]::DeleteOnClose
+            )
         } catch [System.IO.IOException] {
-            # Lock file exists or is opened exclusively by another process. Check if stale.
-            if (Test-Path -LiteralPath $lockPath) {
-                $isStale = $false
-                try {
-                    $item = Get-Item -LiteralPath $lockPath -ErrorAction SilentlyContinue
-                    if ($null -ne $item) {
-                        $age = ([System.DateTime]::UtcNow - $item.LastWriteTimeUtc).TotalSeconds
-                        if ($age -ge $StaleLockAgeSeconds) {
-                            $isStale = $true
-                        } else {
-                            $content = [System.IO.File]::ReadAllText($lockPath)
-                            if (-not [string]::IsNullOrWhiteSpace($content)) {
-                                $parts = $content.Split(";")
-                                $lockPid = 0
-                                if ([int]::TryParse($parts[0], [ref]$lockPid)) {
-                                    $proc = Get-Process -Id $lockPid -ErrorAction SilentlyContinue
-                                    if ($null -eq $proc) {
-                                        $isStale = $true
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch {
-                    # Ignore read failures if locked during active write
-                }
-
-                if ($isStale) {
-                    try {
-                        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-                    } catch {}
-                    continue
-                }
+            if (([System.DateTime]::UtcNow - $startTime).TotalSeconds -ge $TimeoutSeconds) {
+                throw "Timed out waiting to acquire BACKLOG.md lock at $lockPath (timeout ${TimeoutSeconds}s)"
             }
             Start-Sleep -Milliseconds 100
         }
     }
 
-    if (-not $acquired) {
-        throw "Timed out waiting to acquire BACKLOG.md lock at $lockPath (timeout ${TimeoutSeconds}s)"
-    }
-
     $script:HeldBacklogLocks[$normLockPath] = 1
-
     try {
         return & $ScriptBlock
     } finally {
         $script:HeldBacklogLocks.Remove($normLockPath)
-        if (Test-Path -LiteralPath $lockPath) {
-            try {
-                Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-            } catch {}
-        }
+        $fileStream.Dispose()
     }
 }
 
@@ -551,12 +511,13 @@ function Get-TaskFinalizationDetails {
         }
     }
 
+    # Item 227: match only the complete ID cell, not prefix IDs or other columns.
     # 2. Parse BACKLOG.md to find status of TaskId (ignoring Priority Summary table rows)
     $lines = [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)
     $taskRowIndex = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
-        if ($line -match '^\s*\|' -and $line -notmatch '^\s*\|\s*(\*\*P[0-3]\*\*|Priority)\s*\|' -and $line -match [regex]::Escape($TaskId)) {
+        if ($line -match '^\s*\|' -and $line -notmatch '^\s*\|\s*(\*\*P[0-3]\*\*|Priority)\s*\|' -and $line -match ('^\s*\|\s*(?:' + [regex]::Escape($TaskId) + '|\[' + [regex]::Escape($TaskId) + '\]\([^|]*\))\s*\|')) {
             $taskRowIndex = $i
             break
         }
@@ -648,8 +609,7 @@ function Invoke-HumanGateBacklogFinalization {
                             $archiveParams["Status"] = "Resolved"
                         } else {
                             # No branch means nothing was built, so the task is closed without
-                            # a deploy. A branch means the merge below is about to run, and a
-                            # merge that fails stops the gate before anything is pushed.
+                            # a deploy. A branch means the gate merged it before calling this.
                             $archiveParams["ShippedCode"] = $hasTaskBranch
                         }
                         $archiveResult = Invoke-BacklogTaskArchive @archiveParams

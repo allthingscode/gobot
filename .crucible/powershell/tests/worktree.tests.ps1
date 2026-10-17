@@ -48,14 +48,37 @@ try {
         Push-Location $repoPath
         try {
             git worktree add $wtPath -b task/F-197-remove main 2>$null | Out-Null
-            [System.IO.File]::WriteAllText((Join-Path $wtPath "untracked.txt"), "force removal`n", [System.Text.UTF8Encoding]::new($false))
             $script:Quiet = $false
-            $output = & { Remove-ImplementationWorktree -TaskId "F-197-remove" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-197-remove" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $removed = $script:removedResult
             Assert-Result -Name "removal message" -Condition ($output.Trim() -eq "[HUMAN GATE] Removing implementation worktree at $wtPath...") -FailureMessage $output
-            Assert-Result -Name "worktree removed despite untracked file" -Condition (-not (Test-Path -LiteralPath $wtPath)) -FailureMessage "implementation worktree remains"
+            Assert-Result -Name "removal reports success" -Condition ($removed -eq $true) -FailureMessage ("returned " + $removed)
+            Assert-Result -Name "clean worktree removed" -Condition (-not (Test-Path -LiteralPath $wtPath)) -FailureMessage "implementation worktree remains"
             Assert-Result -Name "worktree registration removed" -Condition ((git worktree list --porcelain | Out-String) -notmatch 'implementation-F-197-remove') -FailureMessage "worktree is still registered"
             git show-ref --verify --quiet refs/heads/task/F-197-remove
             Assert-Result -Name "task branch retained for the gate" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "helper deleted the task branch"
+        } finally {
+            $script:Quiet = $oldQuiet
+            Pop-Location
+        }
+    }
+
+    # Item 221: the merge ships only commits, so uncommitted work must survive cleanup.
+    $results += Run-Test -Name "Remove-ImplementationWorktree keeps a worktree with uncommitted changes" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "remove-dirty-repo"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-221-dirty"
+        $oldQuiet = $script:Quiet
+        Push-Location $repoPath
+        try {
+            git worktree add $wtPath -b task/F-221-dirty main 2>$null | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $wtPath "README.md"), "tracked edit after the last commit`n", [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::WriteAllText((Join-Path $wtPath "untracked.txt"), "new work`n", [System.Text.UTF8Encoding]::new($false))
+            $script:Quiet = $false
+            $output = & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-221-dirty" -ProjectRoot $repoPath } *>&1 | Out-String
+            Assert-Result -Name "dirty removal reports failure" -Condition ($script:removedResult -eq $false) -FailureMessage ("returned " + $script:removedResult)
+            Assert-Result -Name "tracked edit survives" -Condition ((Get-Content -LiteralPath (Join-Path $wtPath "README.md") -Raw) -match 'tracked edit') -FailureMessage "the tracked edit was deleted"
+            Assert-Result -Name "untracked file survives" -Condition (Test-Path -LiteralPath (Join-Path $wtPath "untracked.txt")) -FailureMessage "the untracked file was deleted"
+            Assert-Result -Name "both paths named" -Condition ($output.Contains("README.md") -and $output.Contains("untracked.txt")) -FailureMessage $output
         } finally {
             $script:Quiet = $oldQuiet
             Pop-Location
@@ -72,7 +95,7 @@ try {
             git worktree add $stalePath -b task/stale main 2>$null | Out-Null
             Remove-Item -LiteralPath $stalePath -Recurse -Force
             $script:Quiet = $false
-            $output = & { Remove-ImplementationWorktree -TaskId "F-197-absent" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = & { $null = Remove-ImplementationWorktree -TaskId "F-197-absent" -ProjectRoot $repoPath } 6>&1 | Out-String
             Assert-Result -Name "absent removal is silent" -Condition ([string]::IsNullOrWhiteSpace($output)) -FailureMessage $output
             Assert-Result -Name "absent removal leaves stale registration" -Condition ((git worktree list --porcelain | Out-String) -match 'refs/heads/task/stale') -FailureMessage "absent removal pruned worktrees"
         } finally {
@@ -88,9 +111,10 @@ try {
         try {
             git worktree add $wtPath -b task/F-197-locked main 2>$null | Out-Null
             git worktree lock $wtPath
-            $output = & { Remove-ImplementationWorktree -TaskId "F-197-locked" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-197-locked" -ProjectRoot $repoPath } 6>&1 | Out-String
             Assert-Result -Name "locked worktree retained" -Condition (Test-Path -LiteralPath $wtPath) -FailureMessage "locked worktree was removed"
-            Assert-Result -Name "locked warning" -Condition ($output.Trim() -eq "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it.") -FailureMessage $output
+            Assert-Result -Name "locked removal reports failure" -Condition ($script:removedResult -eq $false) -FailureMessage ("returned " + $script:removedResult)
+            Assert-Result -Name "locked warning" -Condition ($output.Contains("[HUMAN GATE] Worktree at $wtPath is locked") -and $output.Contains("task/F-197-locked")) -FailureMessage $output
         } finally {
             git worktree unlock $wtPath
             Pop-Location
@@ -283,6 +307,33 @@ try {
 
         $absent = @(Get-SpecFrontmatterAffinity -SpecContent "## Affected Files`n- ``cmd/```n")
         Assert-Result -Name "no frontmatter" -Condition ($absent.Count -eq 0) -FailureMessage "a spec without frontmatter declares no affinity"
+    }
+
+    # Configured primary branches must cover committed changes in clean worktrees. Item 225.
+    $results += Run-Test -Name "Configured release branch detects committed scope violations" -Body {
+        $repoPath = New-ImplementationWorktreeTestRepo -Name "release-scope"
+        git -C $repoPath branch -m release
+        New-Item -ItemType Directory -Path (Join-Path $repoPath ".crucible") | Out-Null
+        [IO.File]::WriteAllText((Join-Path $repoPath ".crucible/config.yaml"), "project:`n  default_branch: release`n", [Text.UTF8Encoding]::new($false))
+        git -C $repoPath add .
+        git -C $repoPath commit -m "configure release" --quiet
+        git -C $repoPath checkout -b task/F-225 --quiet
+        [IO.File]::WriteAllText((Join-Path $repoPath "unrelated.txt"), "changed`n", [Text.UTF8Encoding]::new($false))
+        git -C $repoPath add .
+        git -C $repoPath commit -m "out of scope" --quiet
+        Assert-Result -Name "fixture is clean" -Condition (-not (git -C $repoPath status --porcelain)) -FailureMessage "fixture has uncommitted changes"
+        $outside = @(Get-OutOfScopeImplementationFiles -WorktreePath $repoPath -TaskId F-225 -FileAffinity @("powershell/"))
+        Assert-Result -Name "release commit violates scope" -Condition ($outside.Count -eq 1 -and $outside[0] -eq "unrelated.txt") -FailureMessage ($outside -join ", ")
+    }
+
+    $results += Run-Test -Name "Unreadable committed scope diff throws" -Body {
+        $repoPath = New-ImplementationWorktreeTestRepo -Name "unrelated-scope"
+        git -C $repoPath checkout --orphan task/F-225-unrelated --quiet
+        git -C $repoPath commit -m "unrelated root" --quiet
+        $message = ""
+        try { Get-ImplementationChangedFiles -WorktreePath $repoPath -TaskId F-225-unrelated | Out-Null }
+        catch { $message = $_.Exception.Message }
+        Assert-Result -Name "unreadable diff fails closed" -Condition ($message -match "committed diff") -FailureMessage "expected committed diff error, got: $message"
     }
 
     $results += Run-Test -Name "Get-OutOfScopeImplementationFiles is mirror-aware (issue #4)" -Body {

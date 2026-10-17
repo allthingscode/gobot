@@ -9,6 +9,8 @@
 # Usage:
 #   record-research-gate.ps1 -TaskId R-021 -Reason "Gate approved" `
 #     -Approved "C-350","C-351" -Deferred "C-352" -Rejected ""
+# A recommendation to fix the installed Crucible bundle upstream has no backlog ID here;
+# record its approval with -ApprovedUpstream "<reference>: <one-line summary>".
 # Then dispatch the Researcher with a ONE-LINE pointer to the generated gate-filing.md
 # (Codex: launch-codex-specialist.ps1 -TaskId <id> -Phase research
 # -PromptFile <path to gate-filing-pointer.md>; or the Claude Agent tool with the same
@@ -24,6 +26,9 @@ param(
     [string[]]$Approved = @(),
     [string[]]$Deferred = @(),
     [string[]]$Rejected = @(),
+
+    # Upstream referrals: free text, one entry per referral, never filed as a stub. Item 235.
+    [string[]]$ApprovedUpstream = @(),
 
     [string]$CrucibleRoot = ".crucible",
 
@@ -61,9 +66,10 @@ function Split-ItemList {
 $approvedList = Split-ItemList -Items $Approved
 $deferredList = Split-ItemList -Items $Deferred
 $rejectedList = Split-ItemList -Items $Rejected
+$upstreamList = @(@($ApprovedUpstream) | Where-Object { $null -ne $_ } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 
-if ($approvedList.Count -eq 0 -and $deferredList.Count -eq 0 -and $rejectedList.Count -eq 0) {
-    throw "At least one of -Approved / -Deferred / -Rejected must be provided; a Research Gate decision cannot be empty."
+if ($approvedList.Count -eq 0 -and $deferredList.Count -eq 0 -and $rejectedList.Count -eq 0 -and $upstreamList.Count -eq 0) {
+    throw "At least one of -Approved / -Deferred / -Rejected / -ApprovedUpstream must be provided; a Research Gate decision cannot be empty."
 }
 
 $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) { $CrucibleRoot } else { Join-Path $REPO_ROOT $CrucibleRoot }
@@ -93,6 +99,7 @@ $decision = [ordered]@{
     approved    = @($approvedList)
     deferred    = @($deferredList)
     rejected    = @($rejectedList)
+    approved_upstream = @($upstreamList)
     recorded_at = $timestamp
     recorded_by = "record-research-gate.ps1"
 }
@@ -110,6 +117,7 @@ function Format-List {
 $approvedMd = Format-List -Items $approvedList
 $deferredMd = Format-List -Items $deferredList
 $rejectedMd = Format-List -Items $rejectedList
+$upstreamMd = Format-List -Items $upstreamList
 
 $approvedQuoted = if ($approvedList.Count -gt 0) { ($approvedList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
 $deferredQuoted = if ($deferredList.Count -gt 0) { ($deferredList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
@@ -128,12 +136,15 @@ $statusRule = @(
     "before then."
 ) -join "`n"
 
+# Item 229: stub filing must follow the adopter's backlog directory.
+$backlogRoot = Get-ConfiguredPath -Key "backlog" -ProjectRoot $REPO_ROOT
+
 $fileStep = if ($approvedList.Count -gt 0) {
 @"
 ## Step 1 - File the APPROVED backlog stubs
 
 For each APPROVED item above, create a stub under the correct backlog directory
-(``$CrucibleRoot/backlog/{bugs,chores,features}/active/`` by ID prefix B-/C-/F-). Each
+(``$backlogRoot/{bugs,chores,features}/active/`` by ID prefix B-/C-/F-). Each
 stub MUST have valid YAML frontmatter (item_id, title, type, status: "Stub", priority,
 target_specialist, budget_tier, parent_task: "$TaskId", depends_on, file_affinity,
 created_at), a ``## Summary``, a concrete testable ``## Acceptance Criteria`` checklist, and a
@@ -187,6 +198,9 @@ $deferredMd
 REJECTED (do NOT file; recorded only):
 $rejectedMd
 
+APPROVED UPSTREAM REFERRALS (do NOT file; the orchestrator routes these to the framework project):
+$upstreamMd
+
 $fileStep
 
 ## Step 3 - Write the research -> grooming handoff (do NOT hand-edit JSON)
@@ -217,7 +231,11 @@ $pointerPath = Join-Path $researchSessionDir "gate-filing-pointer.md"
 [System.IO.File]::WriteAllText($pointerPath, ($pointer + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Write-Host ""
 Write-Host "[RESEARCH GATE RECORDED] $TaskId" -ForegroundColor Green
-Write-Host ("  outcome: " + $decision.outcome + "  |  approved: " + $approvedList.Count + "  deferred: " + $deferredList.Count + "  rejected: " + $rejectedList.Count)
+Write-Host ("  outcome: " + $decision.outcome + "  |  approved: " + $approvedList.Count + "  deferred: " + $deferredList.Count + "  rejected: " + $rejectedList.Count + "  upstream: " + $upstreamList.Count)
+if ($upstreamList.Count -gt 0) {
+    Write-Host "  Upstream referrals are recorded, not filed. Route each to the framework project:" -ForegroundColor Cyan
+    foreach ($ref in $upstreamList) { Write-Host ("    - " + $ref) }
+}
 Write-Host ("  decision record: " + $decisionPath)
 Write-Host ("  continuation prompt: " + $gateFilingPath)
 Write-Host ""

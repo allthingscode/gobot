@@ -265,6 +265,39 @@ Write-Host 'HANDOFF_PASSED'
         Assert-Result -Name "plain-text approval refuses handoff" -Condition ($exitCode -eq 1 -and -not $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 1, got $exitCode. Output: $output"
         Assert-Result -Name "plain-text refusal names required header and remedy" -Condition ($output.Contains("review_decision: APPROVED") -and $output.Contains("acceptance_criteria_met: true") -and $output.Contains("Add YAML frontmatter delimited by '---'")) -FailureMessage $output
     }
+    # Item 228: body examples cannot supply fields missing from the first header.
+    foreach ($reviewCase in @(
+        @{ Name = "body approval example"; Text = "Review prose with an example:`n---`nreview_decision: APPROVED`nacceptance_criteria_met: true`n---`n" },
+        @{ Name = "fields after first closing delimiter"; Text = "---`nsummary: pending`n---`nExample:`n---`nreview_decision: APPROVED`nacceptance_criteria_met: true`n---`n" }
+    )) {
+        $results += Run-Test -Name "Test-CompletionArtifactGate refuses $($reviewCase.Name)" -Body {
+            $caseRoot = Join-Path $tempRoot $reviewCase.Name.Replace(" ", "-")
+            $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-228"
+            $ctx.Handoff = [PSCustomObject]@{
+                task_id = "F-228"
+                source_phase = "verification"
+                target_phase = "deployment"
+                cumulative_handoff_count = 1
+            }
+            $verifyDir = Join-Path $ctx.SessionDir "F-228/verification"
+            New-Item -ItemType Directory -Path $verifyDir -Force | Out-Null
+            $reviewCase.Text | Set-Content -LiteralPath (Join-Path $verifyDir "review_report.md") -Encoding UTF8
+            $contextPath = Join-Path $caseRoot "context.xml"
+            $ctx | Export-Clixml -LiteralPath $contextPath
+            $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+            $outputLines = @(& $pwshCmd -NoProfile -Command @"
+`$ErrorActionPreference = 'Stop'
+`$Quiet = `$true
+. '$libPath'
+`$ctx = Import-Clixml -LiteralPath '$($contextPath.Replace("'", "''"))'
+Test-CompletionArtifactGate -Context `$ctx
+Write-Host 'HANDOFF_PASSED'
+"@ 2>&1)
+            $exitCode = $LASTEXITCODE
+            $output = $outputLines -join "`n"
+            Assert-Result -Name "body example refuses handoff" -Condition ($exitCode -eq 1 -and -not $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 1, got $exitCode. Output: $output"
+        }
+    }
     $results += Run-Test -Name "Test-CompletionArtifactGate D21 regression: YAML parsing and quote relaxation" -Body {
         $caseRoot = Join-Path $tempRoot "d21-regression"
         $scriptPath = Join-Path $caseRoot "run-d21.ps1"

@@ -72,6 +72,33 @@ function New-SingleItemBacklog {
 $tempRoot = New-TestFixtureRoot -NameHint "backlog-io-test"
 
 try {
+    # Item 227: prefix IDs and mentions outside the ID cell must not select a row.
+    foreach ($linked in @($false, $true)) {
+        foreach ($present in @($true, $false)) {
+            $results += Run-Test -Name "Finalization exact ID linked=$linked present=$present" -Body {
+                $root = Join-Path $tempRoot "exact-id-$linked-$present"
+                New-MinimalBacklogTree -Root $root
+                New-Item -ItemType Directory -Path (Join-Path $root ".crucible") -Force | Out-Null
+                [System.IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), "paths:`n  backlog: .`n", [System.Text.UTF8Encoding]::new($false))
+                $idCell = if ($linked) { "[F-1](features/active/F-1_Test.md)" } else { "F-1" }
+                $lines = @(
+                    "| ID | Status | Title |",
+                    "|---|---|---|",
+                    "| [F-10](features/active/F-10_Test.md) | Production | F-1 mention |",
+                    "| F-2 | Production | F-1 |"
+                )
+                if ($present) { $lines += "| $idCell | Ready | Target |" }
+                Set-Content -LiteralPath (Join-Path $root "BACKLOG.md") -Value $lines -Encoding UTF8
+                $details = Get-TaskFinalizationDetails -TaskId "F-1" -ProjectRoot $root
+                if ($present) {
+                    Assert-Result "exact row status" ($details.BacklogStatus -eq "Ready" -and $details.Error -eq "") "selected another task's status"
+                } else {
+                    Assert-Result "missing exact row refused" ($details.BacklogStatus -eq "" -and $details.Error -match 'not found') "accepted another task's row"
+                }
+            }
+        }
+    }
+
     # TODO item 197: exercise the moved actions with only their library loaded.
     foreach ($case in @(
         @{ Name = "shipped"; Branch = $true; Phase = "deployment"; Status = "Production" },

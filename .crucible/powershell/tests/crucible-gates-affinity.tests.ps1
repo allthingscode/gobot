@@ -548,6 +548,21 @@ try {
         Assert-Result -Name "Backlog modified: exit code is 0" -Condition ($exitCodeBacklog -eq 0) -FailureMessage "expected backlog modified research gate to run with exit code 0 (WARN-only)"
         Assert-Result -Name "Backlog modified: warning emitted" -Condition ($outputBacklog -match "Research phase modified files outside the read-only boundary") -FailureMessage ("expected warning for modified backlog file, got: " + $outputBacklog)
         Assert-Result -Name "Backlog modified: lists backlog file" -Condition ($outputBacklog -match "\.crucible/backlog/features/active/R-123_Spec\.md") -FailureMessage ("expected warning to list backlog file, got: " + $outputBacklog)
+
+        # --- Test case 4: filing pass after a recorded Research Gate (item 230) ---
+        # The approved stub, the index and the task's own spec are the gate's outcome; a stub
+        # the human did not approve is still outside the boundary.
+        $researchGateDir = Join-Path $sessionDir "global/research_gate"
+        New-Item -ItemType Directory -Path $researchGateDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $researchGateDir "R-123-20261016T000000Z.json") -Value '{"task_id":"R-123","outcome":"approved","approved":["C-900"],"deferred":[],"rejected":[]}'
+        New-Item -ItemType Directory -Path (Join-Path $backlogDir "chores/active") -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $backlogDir "chores/active/C-900_Approved.md") -Value "approved stub"
+        Set-Content -LiteralPath (Join-Path $backlogDir "chores/active/C-901_Unapproved.md") -Value "unapproved stub"
+        $outputFiling = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        Assert-Result -Name "Filing pass: exit code is 0" -Condition ($LASTEXITCODE -eq 0) -FailureMessage $outputFiling
+        Assert-Result -Name "Filing pass: unapproved stub listed" -Condition ($outputFiling -match "C-901_Unapproved\.md") -FailureMessage $outputFiling
+        Assert-Result -Name "Filing pass: approved stub not listed" -Condition ($outputFiling -notmatch "C-900_Approved\.md") -FailureMessage $outputFiling
+        Assert-Result -Name "Filing pass: own spec not listed" -Condition ($outputFiling -notmatch "R-123_Spec\.md") -FailureMessage $outputFiling
     }
 
     # D23: Frontmatter fallback test cases

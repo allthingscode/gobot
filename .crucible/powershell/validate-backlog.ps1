@@ -39,70 +39,8 @@ function Normalize-ItemList {
     return @($trimmed -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" } | Sort-Object -Unique)
 }
 
-function Get-SpecFileAffinity {
-    param([string]$FilePath)
-    if (-not (Test-Path -LiteralPath $FilePath)) { return @() }
-    
-    # Read first 50 lines which is plenty for any spec frontmatter
-    $lines = @(Get-Content -LiteralPath $FilePath -Head 50 -Encoding UTF8)
-    if ($lines.Count -lt 2 -or $lines[0].Trim() -ne "---") { return @() }
-    
-    $frontmatterLines = @()
-    $foundEnd = $false
-    for ($i = 1; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].Trim() -eq "---") {
-            $foundEnd = $true
-            break
-        }
-        $frontmatterLines += $lines[$i]
-    }
-    
-    if (-not $foundEnd) { return @() }
-    
-    $affinity = @()
-    $inAffinityBlock = $false
-    
-    for ($i = 0; $i -lt $frontmatterLines.Count; $i++) {
-        $line = $frontmatterLines[$i]
-        
-        # Check if this line starts the file_affinity field
-        if ($line -match '^\s*file_affinity:\s*(.*)$') {
-            $rest = $Matches[1].Trim()
-            if ($rest -match '^\[(.*)\]$') {
-                # Flow style: file_affinity: [a, b]
-                $items = $Matches[1] -split ','
-                foreach ($item in $items) {
-                    $clean = $item.Trim().Trim('"' + "'")
-                    if (-not [string]::IsNullOrWhiteSpace($clean)) {
-                        $affinity += $clean
-                    }
-                }
-                $inAffinityBlock = $false
-            } else {
-                # Block style: entries will be on subsequent lines
-                $inAffinityBlock = $true
-            }
-            continue
-        }
-        
-        # If we are in the block and see a list item
-        if ($inAffinityBlock) {
-            if ($line -match '^\s*-\s*(.*)$') {
-                $item = $Matches[1].Trim().Trim('"' + "'")
-                if (-not [string]::IsNullOrWhiteSpace($item)) {
-                    $affinity += $item
-                }
-            } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
-                # Skip empty lines and comments, keep inAffinityBlock = true
-                continue
-            } else {
-                $inAffinityBlock = $false
-            }
-        }
-    }
-    
-    return $affinity
-}
+# file_affinity has one reader, shared with the scope checks. Item 231.
+. (Join-Path (Join-Path $PSScriptRoot "lib") "worktree.ps1")
 
 # Dot-source config helpers
 $helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
@@ -320,7 +258,7 @@ try {
                             }
 
                             # Validate file_affinity paths exist (D46)
-                            $specAffinity = @(Get-SpecFileAffinity -FilePath $file.FullName)
+                            $specAffinity = @(Get-SpecFrontmatterAffinity -SpecContent (Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8) -KeepNewMarker)
                             if ($specAffinity.Count -gt 0) {
                                 foreach ($entry in $specAffinity) {
                                     if ([string]::IsNullOrWhiteSpace($entry)) { continue }

@@ -234,18 +234,13 @@ function Invoke-Check {
 # vet, doc-lint) do not catch; without this the corruption survives to human review and
 # costs a review strike. Scan only the files this task changed, so the gate stays fast
 # and never flags pre-existing debt. Determine the branch fork point to diff against.
-$defaultBranch = $null
-foreach ($candidate in @("main", "master")) {
-    $candRes = Invoke-Git -Directory $worktree rev-parse --verify --quiet ("refs/heads/" + $candidate)
-    if ($candRes.ExitCode -eq 0) { $defaultBranch = $candidate; break }
+# Keep the encoding baseline aligned with the scope check. Item 225.
+$defaultBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $worktree
+$mergeBaseRes = Invoke-Git -Directory $worktree merge-base HEAD $defaultBranch
+if ($mergeBaseRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($mergeBaseRes.Raw)) {
+    throw "Could not determine encoding baseline against '$defaultBranch'."
 }
-$base = $null
-if ($defaultBranch) {
-    $mergeBaseRes = Invoke-Git -Directory $worktree merge-base HEAD $defaultBranch
-    if ($mergeBaseRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($mergeBaseRes.Raw)) {
-        $base = $mergeBaseRes.Raw.Trim()
-    }
-}
+$base = $mergeBaseRes.Raw.Trim()
 
 $changedRel = New-Object System.Collections.Generic.List[string]
 if ($base) {

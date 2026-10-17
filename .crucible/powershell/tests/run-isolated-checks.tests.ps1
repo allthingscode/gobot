@@ -67,6 +67,38 @@ try {
     Add-ImplementationWorktree -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
 
 
+    $results += Run-Test -Name "Unreadable encoding baseline fails closed (item 225)" -Body {
+        $orphanProject = Join-Path $tempRoot "orphan-project"
+        Initialize-Repo -ProjectRoot $orphanProject
+        git -C $orphanProject branch -m main
+        git -C $orphanProject checkout --orphan orphan-225 --quiet
+        git -C $orphanProject commit -m "unrelated root" --quiet
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-225 -Mode quick -Commit HEAD -ProjectRoot $orphanProject }
+        Assert-Result -Name "unreadable encoding baseline fails" -Condition ($res.ExitCode -ne 0 -and ($res.Output -join "`n") -match "Could not determine encoding baseline") -FailureMessage ($res.Output -join "`n")
+    }
+
+    # A committed BOM must be scanned against the configured primary. Item 225.
+    $results += Run-Test -Name "Release baseline catches committed encoding corruption" -Body {
+        $releaseProject = Join-Path $tempRoot "release-project"
+        Initialize-Repo -ProjectRoot $releaseProject
+        git -C $releaseProject branch -m release
+        $releaseConfig = Join-Path $releaseProject ".crucible/config.yaml"
+        $config = [IO.File]::ReadAllText($releaseConfig).Replace("project: RunIsolatedChecksTest", "project:`n  default_branch: release")
+        [IO.File]::WriteAllText($releaseConfig, $config, [Text.UTF8Encoding]::new($false))
+        git -C $releaseProject add .
+        git -C $releaseProject commit -m "configure release" --quiet
+        $releaseWt = Add-ImplementationWorktree -ProjectRoot $releaseProject -TaskId T-225
+        try {
+            [IO.File]::WriteAllText((Join-Path $releaseWt "bad.md"), "bad encoding`n", [Text.UTF8Encoding]::new($true))
+            git -C $releaseWt add bad.md
+            git -C $releaseWt commit -m "committed BOM" --quiet
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-225 -Mode quick -ProjectRoot $releaseProject }
+            Assert-Result -Name "release encoding guard rejects BOM" -Condition ($res.ExitCode -ne 0 -and ($res.Output -join "`n") -match "Check failed: Encoding guard") -FailureMessage ($res.Output -join "`n")
+        } finally {
+            Remove-WorktreeIfPresent -ProjectRoot $releaseProject -WorktreePath $releaseWt
+        }
+    }
+
     $results += Run-Test -Name "Custom workspaces locates implementation checks (item 188)" -Body {
         $customProject = Join-Path $tempRoot "custom-project"
         Initialize-Repo -ProjectRoot $customProject

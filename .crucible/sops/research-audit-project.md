@@ -142,8 +142,10 @@ The Research Gate fires before the handoff. Present findings and questions to th
 **Post-gate continuation (do not re-present).** After the human decides, the orchestrator records the decision and resumes the specialist via `powershell/record-research-gate.ps1`:
 
 ```
-record-research-gate.ps1 -TaskId <id> -Reason "<gate reason>" -Approved "C-350","C-351" [-Deferred ...] [-Rejected ...]
+record-research-gate.ps1 -TaskId <id> -Reason "<gate reason>" -Approved "C-350","C-351" [-Deferred ...] [-Rejected ...] [-ApprovedUpstream "<reference>: <summary>"]
 ```
+
+A finding in the installed Crucible bundle is fixed upstream, not in this project. Record an approved referral with `-ApprovedUpstream`; it is kept in the decision record and is never filed as a stub here.
 
 That writes a structural decision record and generates a self-contained `session/<id>/research/gate-filing.md`, writes its one-line pointer to `session/<id>/research/gate-filing-pointer.md`, then prints the dispatch command. The orchestrator re-dispatches the Researcher with ONLY that one-line pointer (Codex `launch-codex-specialist.ps1 -TaskId <id> -Phase research -PromptFile <path to gate-filing-pointer.md>`, or the Claude `Agent` tool). When your prompt IS a `gate-filing.md`, the gate is already CLOSED: file the approved stubs and write the handoff immediately - do NOT re-run the audit and do NOT re-present the gate.
 

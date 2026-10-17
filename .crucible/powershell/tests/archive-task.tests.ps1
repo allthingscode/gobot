@@ -102,6 +102,34 @@ function Invoke-ArchiveTask {
 $tempRoot = New-TestFixtureRoot -NameHint "archive-task-test"
 
 try {
+    # Item 227: exercise both ID fallbacks without an exact spec-path link.
+    foreach ($linked in @($false, $true)) {
+        foreach ($present in @($true, $false)) {
+            foreach ($itemId in @("F-1", "")) {
+                $results += Run-Test -Name "Archive exact ID linked=$linked present=$present itemId=$itemId" -Body {
+                    $idCell = if ($linked) { "[F-1](features/active/old-name.md)" } else { "F-1" }
+                    $lines = @(
+                        "| ID | Status | Title |",
+                        "|---|---|---|",
+                        "| [F-10](features/active/F-10_Test.md) | Ready | F-1 mention |",
+                        "| F-2 | Ready | F-1 |"
+                    )
+                    if ($present) { $lines += "| $idCell | Ready | Target |" }
+                    $row = $null
+                    $message = ""
+                    try {
+                        $row = Get-BacklogArchiveRow -Lines $lines -BacklogPath (Join-Path $tempRoot "BACKLOG.md") -ActiveRelPath "features/active/F-1_Test.md" -ItemId $itemId
+                    } catch { $message = $_.Exception.Message }
+                    if ($present) {
+                        Assert-Result "archive selects exact ID" ($null -ne $row -and $row.RowIndex -eq 4) "selected another task's row: $message"
+                    } else {
+                        Assert-Result "archive missing exact ID refused" ($null -eq $row -and $message -match 'does not contain active spec row') "accepted another task's row"
+                    }
+                }
+            }
+        }
+    }
+
     $results += Run-Test -Name "Status-column resolver handles non-first rows and table boundaries" -Body {
         $lines = @(
             "# Backlog",

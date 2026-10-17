@@ -149,6 +149,9 @@ function Test-FrameworkDevOnlyFile {
         # Compares Crucible's Architect instructions with its gates and handoff API;
         # adopter-customized workflow prose is not this repo's contract. TODO item 193.
         "powershell/tests/implementation-instruction-contract.tests.ps1",
+        # Pins Crucible's own Operator wording against the approval and publishing rules, for the
+        # same reason. Item 232.
+        "powershell/tests/deployment-approval-contract.tests.ps1",
         # Pins Crucible's own grooming SOP text, for the same reason. Item 143.
         "powershell/tests/grooming-stub-deviation.tests.ps1",
         # Pins Crucible's own grooming and verification SOP text, for the same reason. Item 145.

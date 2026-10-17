@@ -39,6 +39,43 @@ try {
         Assert-Result "passes HumanApproved" ($body -match "-HumanApproved") "handoff command should record HumanApproved"
     }
 
+    # Item 235: an approved upstream referral has no backlog ID; it is recorded, never filed.
+    $results += Run-Test -Name "records an approved upstream referral without asking to file it" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "upstream")
+        $ref = "U-044-01: preserve the first session-state write"
+        & $SCRIPT -TaskId $p.TaskId -Reason "I approve both" -Approved "B-043" -ApprovedUpstream $ref -ProjectRoot $p.Root | Out-Null
+        $record = Get-ChildItem -LiteralPath (Join-Path $p.Root ".crucible/session/global/research_gate") -Filter "$($p.TaskId)-*.json" | Select-Object -First 1
+        $decision = Get-Content -LiteralPath $record.FullName -Raw | ConvertFrom-Json
+        Assert-Result "referral recorded" (@($decision.approved_upstream) -contains $ref) (Get-Content -LiteralPath $record.FullName -Raw)
+        Assert-Result "referral is not a filing ID" (-not (@($decision.approved) -contains $ref) -and (@($decision.approved) -contains "B-043")) (Get-Content -LiteralPath $record.FullName -Raw)
+        $body = Get-Content -LiteralPath $p.GateFiling -Raw
+        Assert-Result "referral listed as not filed" ($body -match '(?s)UPSTREAM REFERRALS \(do NOT file[^\n]*\n  - U-044-01') "the continuation must list the referral under a do-not-file heading"
+        Assert-Result "referral not in handoff IDs" (-not ($body -match '-HumanApproved[^\n]*U-044-01')) "the referral must not be passed as a backlog ID"
+
+        $p2 = New-GateProject -Root (Join-Path $tempRoot "upstream-only")
+        & $SCRIPT -TaskId $p2.TaskId -Reason "route upstream" -ApprovedUpstream $ref -ProjectRoot $p2.Root | Out-Null
+        $body2 = Get-Content -LiteralPath $p2.GateFiling -Raw
+        Assert-Result "upstream-only decision files no stubs" ($body2 -match 'No stubs to file') "an upstream-only decision must not ask for stubs"
+    }
+
+    $results += Run-Test -Name "a non-ID in -Approved is still refused" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "non-id")
+        $refused = $false
+        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -Approved "U-044-01" -ProjectRoot $p.Root | Out-Null } catch { $refused = $_.Exception.Message -match 'is not a backlog item ID' }
+        Assert-Result "non-ID refused" $refused "U-044-01 must not be accepted as a backlog ID"
+    }
+
+    # Item 229: filing instructions must follow the adopter's backlog path.
+    $results += Run-Test -Name "approved stub instructions use the configured backlog directory" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "custom-backlog")
+        "paths:`n  backlog: tickets`n  session: .crucible/session`n" | Set-Content -LiteralPath (Join-Path $p.Root ".crucible/config.yaml") -Encoding UTF8
+        & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        $body = Get-Content -LiteralPath $p.GateFiling -Raw
+        $backlog = Join-Path $p.Root "tickets"
+        Assert-Result "configured stub directory" ($body.Contains($backlog + '/{bugs,chores,features}/active/')) "filing instructions must name the resolved tickets directory"
+        Assert-Result "no hard-coded backlog directory" (-not $body.Contains('.crucible/backlog/')) "filing instructions must not send stubs to the default backlog"
+        Assert-Result "approved stub listed" ($body.Contains('  - C-350')) "expected the single approved stub"
+    }
     # TODO item 208: background pwsh launches re-split multi-word -PromptText values.
     $results += Run-Test -Name "printed Codex dispatch uses a file-sourced one-line pointer" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "dispatch with spaces")
@@ -131,7 +168,7 @@ try {
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         Assert-Result "no dollar sign" ($body -notmatch '\$') ("gate-filing.md holds an unexpanded variable: " + $body)
         Assert-Result "names the findings artifact" ($body -match '`\.crucible/research/R-021_Quality_Audit_20260715\.md`') "gate-filing.md should name the findings artifact in backticks"
-        Assert-Result "names the backlog path" ($body -match '`\.crucible/backlog/\{bugs,chores,features\}/active/`') "gate-filing.md should name the backlog directory in backticks"
+        Assert-Result "names the backlog path" ($body.Contains('`' + (Join-Path $p.Root '.crucible/backlog') + '/{bugs,chores,features}/active/`')) "gate-filing.md should name the backlog directory in backticks"
         Assert-Result "handoff IDs singly quoted" ($body -match '-HumanApproved "C-350","C-351"') "handoff command should quote each ID once"
         Assert-Result "no suspicious-content sentinel" ($body -notmatch 'SuspiciousContent') "the handoff command must not pass -SuspiciousContent"
         Assert-Result "stubs filed as Stub" ($body -match 'status: "Stub"' -and $body -notmatch 'status: "Ready"') "stubs must be filed with status Stub for the Stub-Only Close-Out"

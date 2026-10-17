@@ -448,6 +448,7 @@ function Check-Dependencies {
 }
 
 Resolve-CrucibleInputHandoff -Context $crucibleContext
+Restore-MisplacedHandoff -Context $crucibleContext
 $latestHandoff = $crucibleContext.LatestHandoff
 $isBootstrap = $crucibleContext.IsBootstrap
 

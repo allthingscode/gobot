@@ -589,6 +589,40 @@ function Assert-CrucibleFrameworkIntegrity {
     exit 2
 }
 
+function Restore-MisplacedHandoff {
+    # Agents sometimes write handoff.json to local session paths instead of the handoff
+    # directory. Move a misplaced file that is newer than the selected handoff into place and
+    # select it. This runs before Read-CrucibleHandoffContext so the recovered file gets the
+    # same task binding check, counts and ceiling as any other selection. Item 223.
+    param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    Assert-CrucibleContextKeys -Context $Context -RequiredKeys @("TaskId", "SessionDir", "HandoffDir") `
+        -NonNullKeys @("LatestHandoff")
+
+    $TaskId = $Context.TaskId
+    if ([string]::IsNullOrEmpty($TaskId)) { return }
+    $sessionDir = $Context.SessionDir
+    $misplacedPaths = @(
+        (Join-Path $sessionDir "$TaskId/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/architect/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/reviewer/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/operator/handoff.json"),
+        (Join-Path $sessionDir "$TaskId/groomer/handoff.json")
+    )
+    foreach ($mp in $misplacedPaths) {
+        if (Test-Path $mp) {
+            $mpItem = Get-Item $mp
+            if ($mpItem.LastWriteTime -gt $Context.LatestHandoff.LastWriteTime) {
+                Write-Host "[WARN] Misplaced handoff at $mp (newer than active handoff) - agent wrote to wrong location. Auto-recovering by moving to handoffs directory." -ForegroundColor Yellow
+                $timestamp = Get-UtcFileTimestamp
+                $newPath = Join-Path $Context.HandoffDir "$TaskId-$timestamp.json"
+                Move-Item -Path $mp -Destination $newPath -Force
+                $Context.LatestHandoff = Get-Item $newPath
+            }
+        }
+    }
+}
+
 function Read-CrucibleHandoffContext {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -722,7 +756,6 @@ function Invoke-HandoffPreflightValidation {
         -RequiredKeys @("TaskId", "SessionDir", "HandoffDir", "CrucibleRoot", "Init", "Quiet", "LatestHandoff") `
         -NonNullKeys @("FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile")
 
-    $TaskId = $Context.TaskId
     $sessionDir = $Context.SessionDir
     $HANDOFF_DIR = $Context.HandoffDir
     $FRAMEWORK_POWERSHELL = $Context.FrameworkPowerShell
@@ -737,37 +770,6 @@ function Invoke-HandoffPreflightValidation {
 
     Assert-CrucibleFrameworkIntegrity -Context $Context
 
-    # Agents sometimes write handoff.json to local session paths instead of $HANDOFF_DIR.
-    # Scan known misplaced locations and warn if any are newer than the handoff we found.
-    if (-not [string]::IsNullOrEmpty($TaskId)) {
-        $misplacedPaths = @(
-            (Join-Path $sessionDir "$TaskId/handoff.json"),
-            (Join-Path $sessionDir "$TaskId/architect/handoff.json"),
-            (Join-Path $sessionDir "$TaskId/reviewer/handoff.json"),
-            (Join-Path $sessionDir "$TaskId/operator/handoff.json"),
-            (Join-Path $sessionDir "$TaskId/groomer/handoff.json")
-        )
-        foreach ($mp in $misplacedPaths) {
-            if (Test-Path $mp) {
-                $mpItem = Get-Item $mp
-                if ($mpItem.LastWriteTime -gt $latestHandoff.LastWriteTime) {
-                    Write-Host "[WARN] Misplaced handoff at $mp (newer than active handoff) - agent wrote to wrong location. Auto-recovering by moving to handoffs directory." -ForegroundColor Yellow
-                    $timestamp = Get-UtcFileTimestamp
-                    $newPath = Join-Path $HANDOFF_DIR "$TaskId-$timestamp.json"
-                    Move-Item -Path $mp -Destination $newPath -Force
-                    $latestHandoff = Get-Item $newPath
-                    $handoffFile = $latestHandoff.FullName
-                    $handoffRaw = Get-Content $handoffFile -Raw -Encoding UTF8
-                    $handoff = $handoffRaw | ConvertFrom-Json
-                    $Context.LatestHandoff = $latestHandoff
-                    $Context.Handoff = $handoff
-                    $resolvedRoot = (Resolve-Path -LiteralPath $Context.RepoRoot).Path.TrimEnd("\", "/")
-                    $resolvedPath = (Resolve-Path -LiteralPath $handoffFile).Path
-                    $Context.RelativeHandoffPath = Get-RootRelativePath -Root $resolvedRoot -Path $resolvedPath
-                }
-            }
-        }
-    }
 
     $preflightScript = "$FRAMEWORK_POWERSHELL/validate-handoff.ps1"
     if (-not (Test-Path $preflightScript)) {
@@ -1581,7 +1583,9 @@ function Invoke-CrucibleScopeGates {
     if ($handoff.source_phase -eq "research" -and $handoff.target_phase -eq "grooming") {
         $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { (Get-Location).Path }
         try {
-            $statusLines = @(git -C $repoRoot status --porcelain 2>$null)
+            # Files, not collapsed directories, so a new stub is judged by its own name.
+            $statusLines = @(git -C $repoRoot status --porcelain --untracked-files=all 2>$null)
+            $filingScope = Get-ResearchGateFilingScope -TaskId $handoff.task_id -RepoRoot $repoRoot
             $modifiedFiles = @()
             foreach ($line in $statusLines) {
                 if ($line -match '^.{2}\s+(.*)$') {
@@ -1599,6 +1603,10 @@ function Invoke-CrucibleScopeGates {
                         }
                     }
                     
+                    if (-not $isAllowed -and $null -ne $filingScope) {
+                        $isAllowed = Test-ResearchGateFilingPath -Scope $filingScope -RelativePath $normalizedPath
+                    }
+
                     if (-not $isAllowed) {
                         $modifiedFiles += $normalizedPath
                     }
@@ -1620,6 +1628,42 @@ function Invoke-CrucibleScopeGates {
             # Skip silently, never throw from the gate
         }
     }
+}
+
+# After a recorded Research Gate the filing pass writes each approved stub, their BACKLOG.md
+# rows and the task's own status. The orchestrator writes the gate record, so it, not the
+# specialist's handoff, says which stubs those are. Returns $null when no gate was recorded.
+# Item 230.
+function Get-ResearchGateFilingScope {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$RepoRoot
+    )
+    $gateDir = Join-Path (Get-ConfiguredPath -Key "session" -ProjectRoot $RepoRoot) "global/research_gate"
+    if (-not (Test-Path -LiteralPath $gateDir)) { return $null }
+    $record = Get-ChildItem -LiteralPath $gateDir -Filter ($TaskId + "-*.json") -File |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if ($null -eq $record) { return $null }
+    $decision = Get-Content -LiteralPath $record.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+    $approved = @()
+    if ($decision.PSObject.Properties["approved"]) { $approved = @($decision.approved | ForEach-Object { [string]$_ }) }
+    $backlogRel = (Get-RootRelativePath -Root $RepoRoot -Path (Get-ConfiguredPath -Key "backlog" -ProjectRoot $RepoRoot)).TrimEnd("/") + "/"
+    return [pscustomobject]@{ BacklogPrefix = $backlogRel; Ids = @($approved + $TaskId) }
+}
+
+function Test-ResearchGateFilingPath {
+    param(
+        [Parameter(Mandatory=$true)]$Scope,
+        [Parameter(Mandatory=$true)][string]$RelativePath
+    )
+    if (-not $RelativePath.StartsWith($Scope.BacklogPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $inBacklog = $RelativePath.Substring($Scope.BacklogPrefix.Length)
+    if ($inBacklog -ieq "BACKLOG.md") { return $true }
+    $leaf = Split-Path -Leaf $inBacklog
+    foreach ($id in $Scope.Ids) {
+        if ($leaf -ieq ($id + ".md") -or $leaf.StartsWith($id + "_", [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
 }
 
 function Test-CompletionArtifactGate {
@@ -1681,8 +1725,8 @@ function Test-CompletionArtifactGate {
                         $verificationPassed = $false
                         $errorMsg = "Review report must contain 'APPROVED' for transition to Operator."
                     } else {
-                        # Regex uses [\r\n]+ to handle both Windows (\r\n) and Unix (\n) line endings.
-                        if ($content -match "(?sm)^\s*---\s*[\r\n]+(.*)[\r\n]+\s*---") {
+                        # Item 228: only the first frontmatter block can establish review approval.
+                        if ($content -match "(?sm)\A---[ \t]*\r?\n(.*?)^---[ \t]*\r?$") {
                             $yaml = $matches[1]
                             $decision = ""
                             if ($yaml -match '(?m)^\s*review_decision:\s*["'']?(APPROVED|CHANGES_REQUESTED|BLOCKED)["'']?\s*$') { $decision = $matches[1] }
@@ -2353,6 +2397,22 @@ function Invoke-CircuitBreakerGates {
                     -Why ("Missing isolated checks script: " + $isolatedChecksScript)
                 exit 2
             }
+            # The checks run on the worktree's files but the merge ships only its commits, so
+            # an uncommitted edit would be tested and then never merged. Item 221.
+            $uncommitted = @()
+            try {
+                $uncommitted = @(Get-WorktreeUncommittedPaths -WorktreePath $wtPath)
+            } catch {
+                $uncommitted = @("(unreadable: " + $_.Exception.Message + ")")
+            }
+            if ($uncommitted.Count -gt 0) {
+                $joined = ($uncommitted -join "; ")
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "uncommitted_task_worktree" -Notes ("Uncommitted changes in task worktree: " + $joined) `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "uncommitted_task_worktree" `
+                    -Why ("The task worktree " + $wtPath + " has uncommitted changes: " + $joined + ". The independent checks would test them, but the merge ships only commits on task/" + $handoff.task_id + ". Commit them there or discard them, then rerun crucible.ps1 -Init.")
+                exit 2
+            }
             Write-Quiet "`n[VERIFY] Running independent isolated full verification in worktree before accepting APPROVED..." -ForegroundColor Cyan
             $previousPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
@@ -2778,7 +2838,7 @@ function Invoke-HumanGateAcceptRedirect {
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
     $backlogPath = Join-Path $backlogDir "BACKLOG.md"
 
-    # Read once, above the archival, and used twice. The merge below already decides whether
+    # Read once, above the merge and archival, and used twice. The merge already decides whether
     # this task shipped code by asking whether it has a branch to merge; the archival needs
     # the same fact to record Production rather than Resolved, and reading it in two places
     # is how the two answers come to disagree.
@@ -2786,21 +2846,6 @@ function Invoke-HumanGateAcceptRedirect {
     git show-ref --quiet "refs/heads/task/$TaskId"
     if ($LASTEXITCODE -eq 0) {
         $hasTaskBranch = $true
-    }
-
-    # TODO item 197: keep the refusal decision here; archival returns its result.
-    $finalizationOk = Invoke-HumanGateBacklogFinalization -TaskId $TaskId -ProjectRoot $ProjectRoot `
-        -BacklogPath $backlogPath -HasTaskBranch $hasTaskBranch -SourcePhase $SourcePhase
-
-    if (-not $finalizationOk) {
-        try {
-            Write-EventLog -Event "quality_gate_retry" -TaskId $TaskId -Phase "deployment" `
-                -Outcome "retry_required" -Notes "Auto-finalization failed at human gate; push withheld" `
-                -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
-        } catch {
-            Write-Host "[D44] WARNING: Failed to write quality_gate_retry event: $_" -ForegroundColor Yellow
-        }
-        exit 2
     }
 
     if ($SourcePhase -ne "grooming") {
@@ -2822,7 +2867,26 @@ function Invoke-HumanGateAcceptRedirect {
                 exit 1
             }
         }
+    }
 
+    # Archive only after the merge succeeded and before any push: Production means merged, and
+    # a merge that routes to rework must leave the spec active. Item 222.
+    # TODO item 197: keep the refusal decision here; archival returns its result.
+    $finalizationOk = Invoke-HumanGateBacklogFinalization -TaskId $TaskId -ProjectRoot $ProjectRoot `
+        -BacklogPath $backlogPath -HasTaskBranch $hasTaskBranch -SourcePhase $SourcePhase
+
+    if (-not $finalizationOk) {
+        try {
+            Write-EventLog -Event "quality_gate_retry" -TaskId $TaskId -Phase "deployment" `
+                -Outcome "retry_required" -Notes "Auto-finalization failed at human gate; push withheld" `
+                -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+        } catch {
+            Write-Host "[D44] WARNING: Failed to write quality_gate_retry event: $_" -ForegroundColor Yellow
+        }
+        exit 2
+    }
+
+    if ($SourcePhase -ne "grooming") {
         $autoPushVal = Get-ConfiguredReview -Key "auto_push" -ProjectRoot $ProjectRoot
         $autoPush = $false
         if ($autoPushVal -eq "true") {
@@ -2985,8 +3049,8 @@ function Invoke-HumanGateAcceptRedirect {
             }
         }
 
-        Remove-ImplementationWorktree -TaskId $TaskId -ProjectRoot $ProjectRoot
-        if ($hasTaskBranch) {
+        $worktreeRemoved = Remove-ImplementationWorktree -TaskId $TaskId -ProjectRoot $ProjectRoot
+        if ($hasTaskBranch -and $worktreeRemoved) {
             Write-Quiet "[HUMAN GATE] Deleting task branch task/$TaskId..."
             Invoke-GitChecked { git branch -d "task/$TaskId" }
         }
@@ -3665,17 +3729,25 @@ function Invoke-HumanGate {
                         } else {
                             $fileReason = if ($gateData.PSObject.Properties["reason"]) { [string]$gateData.reason } else { "" }
                             Assert-GateReason -Reason $fileReason -DecisionFile $gateTemplatePath
+                            $timestamp = Get-UtcFileTimestamp
+                            $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
+                            $gateData | Add-Member -NotePropertyName "session_cycle_id" -NotePropertyValue $currentGateCycle -Force
+                            # Item 226: the handoff writer needs the saved rejection to
+                            # authorize the first deployment -> implementation re-entry.
+                            if ($gateData.outcome -eq "rejected") {
+                                $gateData | Add-Member -NotePropertyName "rework_requested" -NotePropertyValue $true -Force
+                                $gateData | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
+                            }
+
                             # Execute push or reset based on manual decision
                             Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
 
-                            # Archive the decision, stamping the firing cycle so a
-                            # same-cycle re-run is recognized as already-passed while a
-                            # later cycle is not (see gateAlreadyPassed scoping above).
-                            $timestamp = Get-UtcFileTimestamp
-                            $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
-                            $gateData | Add-Member -NotePropertyName "session_cycle_id" -NotePropertyValue $currentGateCycle -Force
-                            $gateData | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
+                            # Archive other outcomes after the action, stamping the firing
+                            # cycle so only a same-cycle re-run is already-passed.
+                            if ($gateData.outcome -ne "rejected") {
+                                $gateData | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
+                            }
                             Remove-Item -Path $gateTemplatePath -Force
                             Write-Host ("`n[HUMAN GATE] Decision recorded: " + $gateData.outcome) -ForegroundColor Green
                             

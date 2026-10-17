@@ -53,8 +53,13 @@ function Test-PathMatchesAffinity {
     return ($changed -eq $scopePrefix -or $changed.StartsWith($scopePrefix + "/", [System.StringComparison]::OrdinalIgnoreCase))
 }
 
+# The one reader of a spec's file_affinity. Scope consumers get bare paths; backlog
+# validation passes -KeepNewMarker to see which entries are planned files. Item 231.
 function Get-SpecFrontmatterAffinity {
-    param([AllowEmptyString()][string]$SpecContent)
+    param(
+        [AllowEmptyString()][string]$SpecContent,
+        [switch]$KeepNewMarker
+    )
 
     $affinity = @()
     if ([string]::IsNullOrEmpty($SpecContent)) { return $affinity }
@@ -81,7 +86,7 @@ function Get-SpecFrontmatterAffinity {
                     $clean = $item.Trim().Trim('"' + "'")
                     if (-not [string]::IsNullOrWhiteSpace($clean)) {
                         # Keep creation metadata out of every scope consumer. Item 220.
-                        $affinity += ($clean -creplace '\s+\(new\)$', '').TrimEnd()
+                        $affinity += $(if ($KeepNewMarker) { $clean } else { ($clean -creplace '\s+\(new\)$', '').TrimEnd() })
                     }
                 }
                 $inAffinityBlock = $false
@@ -94,7 +99,7 @@ function Get-SpecFrontmatterAffinity {
             if ($line -match '^\s*-\s*(.*)$') {
                 $item = $Matches[1].Trim().Trim('"' + "'")
                 if (-not [string]::IsNullOrWhiteSpace($item)) {
-                    $affinity += ($item -creplace '\s+\(new\)$', '').TrimEnd()
+                    $affinity += $(if ($KeepNewMarker) { $item } else { ($item -creplace '\s+\(new\)$', '').TrimEnd() })
                 }
             } elseif ($line.Trim() -eq "" -or $line -match '^\s*#') {
                 continue
@@ -216,7 +221,19 @@ function Initialize-ImplementationWorktree {
     Initialize-ImplementationWorktreeHooks -WorktreePath $WorktreePath
 }
 
+# Tracked edits and untracked files that are not ignored. The merge ships only commits, so
+# these are work the checks may have tested but nothing will merge. Item 221.
+function Get-WorktreeUncommittedPaths {
+    param([Parameter(Mandatory=$true)][string]$WorktreePath)
+    $lines = @(git -C $WorktreePath status --porcelain 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        throw ("git status failed in " + $WorktreePath)
+    }
+    return @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
 # Keep human-gate worktree side effects with worktree setup. TODO item 197.
+# Returns $true when the worktree is gone, so the caller deletes the task branch only then.
 function Remove-ImplementationWorktree {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -225,22 +242,33 @@ function Remove-ImplementationWorktree {
 
     $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
     $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
-    if (Test-Path $wtPath) {
-        Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
-        Invoke-GitChecked { git worktree prune }
-        if (Test-Path $wtPath) {
-            try {
-                $null = git worktree remove --force $wtPath 2>$null
-                if (Test-Path $wtPath) {
-                    Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
-                }
-            } catch {
-                if (Test-Path $wtPath) {
-                    Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left in place. Run 'git worktree prune' later to reclaim it." -ForegroundColor Yellow
-                }
-            }
-        }
+    if (-not (Test-Path $wtPath)) { return $true }
+
+    Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
+    Invoke-GitChecked { git worktree prune }
+    if (-not (Test-Path $wtPath)) { return $true }
+
+    # Never --force: uncommitted work was not merged, and deleting it is unrecoverable. Item 221.
+    $uncommitted = @()
+    try {
+        $uncommitted = @(Get-WorktreeUncommittedPaths -WorktreePath $wtPath)
+    } catch {
+        Write-Host "[HUMAN GATE] Could not read the state of $wtPath ($($_.Exception.Message)); left it and task/$TaskId in place." -ForegroundColor Yellow
+        return $false
     }
+    if ($uncommitted.Count -gt 0) {
+        Write-Host "[HUMAN GATE] Worktree at $wtPath has uncommitted changes that were not merged; left it and task/$TaskId in place:" -ForegroundColor Yellow
+        foreach ($line in $uncommitted) { Write-Host "  $line" -ForegroundColor Yellow }
+        Write-Host "  Keep them by committing them for a new task, or discard them, then run: git worktree remove `"$wtPath`"; git branch -d task/$TaskId" -ForegroundColor Yellow
+        return $false
+    }
+
+    $null = git worktree remove $wtPath 2>$null
+    if (Test-Path $wtPath) {
+        Write-Host "[HUMAN GATE] Worktree at $wtPath is locked (likely a gopls/test handle); left it and task/$TaskId in place. Run 'git worktree remove `"$wtPath`"' and 'git branch -d task/$TaskId' later to reclaim them." -ForegroundColor Yellow
+        return $false
+    }
+    return $true
 }
 
 function Restore-ImplementationWorktree {
@@ -273,24 +301,13 @@ function Get-ImplementationChangedFiles {
         [Parameter(Mandatory=$true)][string]$TaskId
     )
 
-    $candidateBaseRefs = @("main", "master", "origin/main", "origin/master")
-    $baseRef = $null
-    foreach ($candidate in $candidateBaseRefs) {
-        $null = git -C $WorktreePath rev-parse --verify --quiet $candidate 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $baseRef = $candidate
-            break
-        }
+    # Use the configured primary and fail closed if its committed diff is unreadable. Item 225.
+    $baseRef = Get-ConfiguredPrimaryBranch -ProjectRoot $WorktreePath
+    $committed = @(git -C $WorktreePath diff --name-only "$baseRef...HEAD" 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not read committed diff against '$baseRef' in '$WorktreePath'."
     }
-
-    $changed = @()
-    if ($null -ne $baseRef) {
-        $committed = @(git -C $WorktreePath diff --name-only "$baseRef...HEAD" 2>$null)
-        if ($LASTEXITCODE -ne 0 -or @($committed).Count -eq 0) {
-            $committed = @(git -C $WorktreePath diff --name-only "$baseRef..task/$TaskId" 2>$null)
-        }
-        $changed += $committed
-    }
+    $changed = @($committed)
 
     $changed += @(git -C $WorktreePath diff --name-only --cached 2>$null)
     $changed += @(git -C $WorktreePath diff --name-only 2>$null)

@@ -114,9 +114,10 @@ function Get-BacklogArchiveRow {
             break
         }
     }
+    # Item 227: both ID fallbacks must match the complete first cell.
     if ($rowIndex -lt 0 -and -not [string]::IsNullOrEmpty($ItemId)) {
         for ($i = 0; $i -lt $Lines.Count; $i++) {
-            if ($Lines[$i] -match '^\s*\|' -and $Lines[$i] -match [regex]::Escape($ItemId)) {
+            if ($Lines[$i] -match ('^\s*\|\s*(?:' + [regex]::Escape($ItemId) + '|\[' + [regex]::Escape($ItemId) + '\]\([^|]*\))\s*\|')) {
                 $rowIndex = $i
                 break
             }
@@ -126,7 +127,7 @@ function Get-BacklogArchiveRow {
         $fileName = Split-Path -Leaf $ActiveRelPath
         $taskIdFromFile = ($fileName -replace '_.*$', '') -replace '\.md$', ''
         for ($i = 0; $i -lt $Lines.Count; $i++) {
-            if ($Lines[$i] -match '^\s*\|' -and $Lines[$i] -match [regex]::Escape($taskIdFromFile)) {
+            if ($Lines[$i] -match ('^\s*\|\s*(?:' + [regex]::Escape($taskIdFromFile) + '|\[' + [regex]::Escape($taskIdFromFile) + '\]\([^|]*\))\s*\|')) {
                 $rowIndex = $i
                 break
             }
