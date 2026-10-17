@@ -138,12 +138,17 @@ func TestListTasksWithClient_Pagination(t *testing.T) {
 		want    []Task
 		failure int
 		cancel  bool
+		cycle   bool
 	}{
 		{name: "twenty one tasks and opaque token", list: "custom-list", pages: []string{string(firstJSON), string(lastJSON)}, tokens: []string{"", opaque}, want: wantMany},
 		{name: "empty first and intermediate", pages: []string{`{"nextPageToken":"a"}`, `{"items":[],"nextPageToken":"b"}`, oneJSON}, tokens: []string{"", "a", "b"}, want: []Task{one}},
 		{name: "filtered intermediate and omitted final fields", pages: []string{`{"items":[{"id":"one","title":"One","status":"needsAction"}],"nextPageToken":"a"}`, `{"items":[{"status":"completed"}],"nextPageToken":"b"}`, `{}`}, tokens: []string{"", "a", "b"}, want: []Task{one}},
 		{name: "single page", list: "@default", pages: []string{oneJSON}, tokens: []string{""}, want: []Task{one}},
 		{name: "empty result", pages: []string{`{}`}, tokens: []string{""}, want: []Task{}},
+		{name: "single token cycle", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"same"}`, `{"nextPageToken":"same"}`}, tokens: []string{"", "same"}, cycle: true},
+		{name: "alternating cycle", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{"nextPageToken":"b"}`, `{"nextPageToken":"a"}`}, tokens: []string{"", "a", "b"}, cycle: true},
+		{name: "cycle after unique prefix", pages: []string{`{"nextPageToken":"prefix"}`, `{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{"nextPageToken":"b"}`, `{"nextPageToken":"a"}`}, tokens: []string{"", "prefix", "a", "b"}, cycle: true},
+		{name: "several unique tokens", pages: []string{`{"items":[{"id":"1"}],"nextPageToken":"a"}`, `{"items":[{"id":"2"}],"nextPageToken":"b"}`, `{"items":[{"id":"3"}],"nextPageToken":"c"}`, `{"items":[{"id":"4"}],"nextPageToken":"d"}`, `{"items":[{"id":"5"}]}`}, tokens: []string{"", "a", "b", "c", "d"}, want: []Task{{ID: "1"}, {ID: "2"}, {ID: "3"}, {ID: "4"}, {ID: "5"}}},
 		{name: "second page HTTP error", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{}`}, tokens: []string{"", "a"}, failure: http.StatusInternalServerError},
 		{name: "second page malformed JSON", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{`}, tokens: []string{"", "a"}, failure: http.StatusOK},
 		{name: "second page cancellation", pages: []string{`{"items":[{"id":"partial"}],"nextPageToken":"a"}`, `{}`}, tokens: []string{"", "a"}, cancel: true},
@@ -186,18 +191,28 @@ func TestListTasksWithClient_Pagination(t *testing.T) {
 			}))
 			defer srv.Close()
 			got, err := listTasksWithClient(ctx, setupTestToken(t), tc.list, redirectClient(tasksBaseURL, srv.URL))
-			if tc.failure != 0 || tc.cancel {
+			if tc.failure != 0 || tc.cancel || tc.cycle {
 				if err == nil || !strings.Contains(err.Error(), "tasks list:") || got != nil {
 					t.Fatalf("want contextual error and nil tasks, got %v, %v", got, err)
 				}
 				if tc.cancel && !errors.Is(err, context.Canceled) {
 					t.Errorf("want context.Canceled, got %v", err)
 				}
+				if tc.cycle && (errors.Unwrap(err) == nil || !strings.Contains(err.Error(), "repeated pagination token")) {
+					t.Errorf("want wrapped repeated-token cause, got %v", err)
+				}
 			} else if err != nil || !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("tasks = %#v, error = %v; want %#v", got, err, tc.want)
 			}
 			if requests != len(tc.pages) {
 				t.Errorf("requests = %d, want %d", requests, len(tc.pages))
+			}
+			if tc.failure == 0 && !tc.cancel && !tc.cycle {
+				requests = 0
+				got, err = listTasksWithClient(ctx, setupTestToken(t), tc.list, redirectClient(tasksBaseURL, srv.URL))
+				if err != nil || !reflect.DeepEqual(got, tc.want) || requests != len(tc.pages) {
+					t.Errorf("repeat invocation: tasks = %#v, error = %v, requests = %d", got, err, requests)
+				}
 			}
 		})
 	}
