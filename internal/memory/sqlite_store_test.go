@@ -4,11 +4,15 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *MemoryStore {
@@ -543,5 +547,164 @@ func TestCleanupExpired(t *testing.T) {
 				t.Errorf("deleted count should not be negative: %d", deleted)
 			}
 		})
+	}
+}
+
+func TestSearchContract(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []searchContractCase{
+		{name: "match", query: "hello", limit: 5, count: 1},
+		{name: "no match", query: "absent", limit: 5},
+		{name: "empty", limit: 5},
+		{name: "sanitized empty", query: "()*", limit: 5},
+		{name: "zero limit", query: "hello"},
+		{name: "negative limit", query: "hello", limit: -1},
+		{name: "punctuation", query: "(hello)*", limit: 5, count: 1},
+		{name: "parser", query: "hello OR", limit: 5},
+		{name: "closed", query: "hello OR", limit: 5, fault: "closed"},
+		{name: "schema", query: "hello OR", limit: 5, fault: "schema"},
+		{name: "canceled", query: "hello", limit: 5, wantErr: context.Canceled},
+		{name: "deadline", query: "hello", limit: 5, wantErr: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			checkSearchContract(t, tc)
+		})
+	}
+}
+
+// A connector avoids global driver registration and keeps each fault fixture isolated.
+type searchFaultConnector struct{ rows *searchFaultRows }
+
+func (c searchFaultConnector) Connect(context.Context) (driver.Conn, error) {
+	return searchFaultConn(c), nil
+}
+func (c searchFaultConnector) Driver() driver.Driver { return searchFaultDriver{} }
+
+type searchFaultDriver struct{}
+
+func (searchFaultDriver) Open(string) (driver.Conn, error) { return nil, errors.New("use connector") }
+
+type searchFaultConn struct{ rows *searchFaultRows }
+
+func (c searchFaultConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("unsupported prepare")
+}
+func (c searchFaultConn) Close() error { return nil }
+func (c searchFaultConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("unsupported transaction")
+}
+func (c searchFaultConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	return c.rows, nil
+}
+
+type searchFaultRows struct {
+	validRows, next   int
+	scanFault, closed bool
+	err               error
+}
+
+func (*searchFaultRows) Columns() []string { return []string{"namespace", "content", "timestamp"} }
+func (r *searchFaultRows) Close() error    { r.closed = true; return nil }
+func (r *searchFaultRows) Next(dest []driver.Value) error {
+	if r.next < r.validRows {
+		r.next++
+		dest[0], dest[1], dest[2] = "global", "hello", "timestamp"
+		return nil
+	}
+	if r.scanFault {
+		dest[0], dest[1], dest[2] = "global", nil, "timestamp"
+		return nil
+	}
+	if r.err != nil {
+		return r.err
+	}
+	return io.EOF
+}
+
+func TestSearchRowFailures(t *testing.T) {
+	t.Parallel()
+	fault := errors.New("iteration sentinel")
+	for _, scan := range []bool{false, true} {
+		for _, validRows := range []int{0, 1} {
+			t.Run(fmt.Sprintf("scan=%t/valid=%d", scan, validRows), func(t *testing.T) {
+				t.Parallel()
+				checkSearchRowFailure(t, scan, validRows, fault)
+			})
+		}
+	}
+}
+
+type searchContractCase struct {
+	name, query, fault string
+	limit, count       int
+	wantErr            error
+}
+
+func checkSearchContract(t *testing.T, tc searchContractCase) {
+	t.Helper()
+	store := newTestStore(t)
+	if err := store.Index("session:s", "hello world"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if errors.Is(tc.wantErr, context.Canceled) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		cancel()
+	}
+	if errors.Is(tc.wantErr, context.DeadlineExceeded) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, time.Unix(1, 0))
+		defer cancel()
+	}
+	if tc.fault == "closed" {
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tc.fault == "schema" {
+		if _, err := store.db.ExecContext(ctx, "DROP TABLE memory_fts"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.Search(ctx, tc.query, "s", tc.limit)
+	checkSearchContractResult(t, tc, got, err)
+}
+
+func checkSearchRowFailure(t *testing.T, scan bool, validRows int, fault error) {
+	t.Helper()
+	rows := &searchFaultRows{validRows: validRows, scanFault: scan, err: fault}
+	db := sql.OpenDB(searchFaultConnector{rows})
+	t.Cleanup(func() { _ = db.Close() })
+	store := &MemoryStore{db: db}
+	got, err := store.Search(context.Background(), "hello", "s", 5)
+	if err == nil || got != nil || !strings.Contains(err.Error(), "memory: search scan:") {
+		t.Fatalf("Search = %v, %v", got, err)
+	}
+	if !scan && !errors.Is(err, fault) {
+		t.Fatalf("lost sentinel: %v", err)
+	}
+	if scan && errors.Unwrap(err) == nil {
+		t.Fatalf("scan error not wrapped: %v", err)
+	}
+	if !rows.closed {
+		t.Fatal("rows not closed")
+	}
+}
+
+func checkSearchContractResult(t *testing.T, tc searchContractCase, got []map[string]any, err error) {
+	t.Helper()
+	if tc.fault != "" || tc.wantErr != nil {
+		if err == nil || got != nil || !strings.Contains(err.Error(), "memory: search query:") {
+			t.Fatalf("Search = %v, %v", got, err)
+		}
+		if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+			t.Fatalf("error identity: %v", err)
+		}
+		return
+	}
+	if err != nil || len(got) != tc.count {
+		t.Fatalf("Search = %v, %v; want %d results", got, err, tc.count)
 	}
 }

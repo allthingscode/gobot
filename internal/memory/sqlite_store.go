@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	_ "modernc.org/sqlite" // register "sqlite" driver
+	"modernc.org/sqlite"
 )
 
 const memoryDBFileName = "memory.db"
@@ -203,8 +203,8 @@ func (m *MemoryStore) Index(namespace, content string) error {
 // It searches both the provided session namespace and the "global" namespace.
 // Compatible with FilterRAGResults and FormatRAGBlock.
 //
-// Returns nil (not an error) when the query is empty, no results match,
-// or FTS5 rejects the query syntax.
+// Returns empty success for empty queries, nonpositive limits, no matches, and known
+// FTS5 parser errors. Operational and row errors return nil results with an error.
 func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error) {
 	ctx, span := otel.Tracer("gobot-memory").Start(ctx, "MemoryStore.Search",
 		trace.WithAttributes(attribute.Int("memory.limit", limit)),
@@ -226,9 +226,13 @@ func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limi
 		safe, sessionNamespace, limit,
 	)
 	if err != nil {
-		// FTS5 returns an error on bad query syntax — treat as empty result set.
-		slog.Debug("memory: search query rejected (returning empty)", logattr.Err(err))
-		return nil, nil
+		if isFTSQuerySyntaxError(err) {
+			slog.Debug("memory: search query rejected (returning empty)", slog.String("reason", "fts_syntax"))
+			return nil, nil
+		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, fmt.Errorf("memory: search query: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -237,7 +241,9 @@ func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limi
 	for rows.Next() {
 		var namespace, content, timestamp string
 		if err := rows.Scan(&namespace, &content, &timestamp); err != nil {
-			continue
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return nil, fmt.Errorf("memory: search scan: %w", err)
 		}
 		// Basic deduplication by content
 		if seen[content] {
@@ -254,7 +260,7 @@ func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limi
 	if err := rows.Err(); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return results, fmt.Errorf("memory: search scan: %w", err)
+		return nil, fmt.Errorf("memory: search scan: %w", err)
 	}
 	span.SetAttributes(attribute.Int("memory.results_count", len(results)))
 	return results, nil
@@ -375,4 +381,15 @@ func sanitizeFTSQuery(q string) string {
 	)
 	cleaned := strings.Join(strings.Fields(r.Replace(q)), " ")
 	return cleaned
+}
+
+// isFTSQuerySyntaxError deliberately excludes schema and other SQL errors.
+func isFTSQuerySyntaxError(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) || sqliteErr.Code() != 1 {
+		return false
+	}
+	message := sqliteErr.Error()
+	return strings.Contains(message, "fts5: syntax error near") ||
+		strings.Contains(message, "unterminated string")
 }

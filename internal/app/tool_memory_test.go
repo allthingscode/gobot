@@ -4,8 +4,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/allthingscode/gobot/internal/memory"
+	"github.com/allthingscode/gobot/internal/observability"
 )
 
 // mockMemoryStore is a test double for MemoryStore.
@@ -93,5 +98,68 @@ func TestMemoryTool_Execute_EmptyQuery(t *testing.T) {
 	_, err := tool.Execute(context.Background(), "sess", "", map[string]any{"query": ""})
 	if err == nil {
 		t.Error("expected error for empty query, got nil")
+	}
+}
+
+func TestMemoryToolRealStoreErrors(t *testing.T) {
+	t.Parallel()
+	for _, traced := range []bool{false, true} {
+		for _, state := range []string{"empty", "closed", "canceled"} {
+			t.Run(fmt.Sprintf("traced=%t/%s", traced, state), func(t *testing.T) {
+				t.Parallel()
+				checkMemoryToolRealStore(t, traced, state)
+			})
+		}
+	}
+}
+
+func checkMemoryToolRealStore(t *testing.T, traced bool, state string) {
+	t.Helper()
+	store, err := memory.NewMemoryStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	if state == "closed" {
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state == "canceled" {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		cancel()
+	}
+	var tracer *observability.DispatchTracer
+	if traced {
+		provider, err := observability.NewProvider(observability.Config{ServiceName: "memory-test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+		tracer = observability.NewDispatchTracer(provider)
+	}
+	got, err := NewSearchMemoryTool(store, tracer).Execute(ctx, "s", "", map[string]any{"query": "hello"})
+	checkMemoryToolResult(t, traced, state, got, err)
+}
+
+func checkMemoryToolResult(t *testing.T, traced bool, state, got string, err error) {
+	t.Helper()
+	if state == "empty" {
+		if err != nil || got != "No relevant memories found." {
+			t.Fatalf("Execute = %q, %v", got, err)
+		}
+		return
+	}
+	prefix := "memory: fts search: memory: search query:"
+	if traced {
+		prefix = "memory: memory search (fts): fts search: memory: search query:"
+	}
+	if err == nil || got != "" || !strings.Contains(err.Error(), prefix) {
+		t.Fatalf("Execute = %q, %v", got, err)
+	}
+	if state == "canceled" && !errors.Is(err, context.Canceled) {
+		t.Fatalf("lost cancellation: %v", err)
 	}
 }
