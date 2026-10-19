@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,8 +15,10 @@ import (
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
+	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/cron"
 	"github.com/allthingscode/gobot/internal/dashboard"
+	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
 )
@@ -40,19 +43,24 @@ func (m *mockLogHub) Unsubscribe(_ chan *dashboard.LogEntry) {}
 
 // mockMemoryStats implements MemoryProvider.
 type mockMemoryStats struct {
-	count     int
-	err       error
-	lastLimit int
-	results   []map[string]any
+	count      int
+	err        error
+	lastLimit  int
+	searchErr  error
+	statsCalls int
+	lastScope  string
+	results    []map[string]any
 }
 
 func (m *mockMemoryStats) Stats() (int, error) {
+	m.statsCalls++
 	return m.count, m.err
 }
 
 func (m *mockMemoryStats) Search(ctx context.Context, query, sessionKey string, limit int) ([]map[string]any, error) {
 	m.lastLimit = limit
-	return m.results, nil
+	m.lastScope = sessionKey
+	return m.results, m.searchErr
 }
 
 func TestDashboardHandlers(t *testing.T) {
@@ -760,5 +768,228 @@ func TestLogsTailPartial(t *testing.T) {
 	}
 	if !strings.Contains(body, "line-210") {
 		t.Fatalf("expected latest line in tail output")
+	}
+}
+
+func dashboardBody(t *testing.T, h *Handler, path string) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, http.NoBody))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	return w.Body.String()
+}
+
+func TestMemoryStatsAvailability(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		provider *mockMemoryStats
+		want     string
+		offline  bool
+	}{
+		{"zero", &mockMemoryStats{}, ">0</p>", false},
+		{"positive", &mockMemoryStats{count: 42}, ">42</p>", false},
+		{"error zero", &mockMemoryStats{err: fmt.Errorf("private-storage-token /private/db")}, "Offline", true},
+		{"error nonzero", &mockMemoryStats{count: 987, err: fmt.Errorf("private-storage-token /private/db")}, "Offline", true},
+		{"missing", nil, "Offline", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, path := range []string{"/dash/memory", "/dash/memory/search?q=alpha"} {
+				var provider MemoryProvider
+				if tc.provider != nil {
+					provider = tc.provider
+				}
+				body := dashboardBody(t, NewHandler(Resources{Memory: provider}), path)
+				assertContainsAll(t, body, []string{tc.want})
+				assertContainsNone(t, body, []string{"private-storage-token", "/private/db", ">987</p>", "executing"})
+				if strings.Contains(body, "Memory statistics unavailable.") != tc.offline {
+					t.Errorf("unexpected stats availability: %s", body)
+				}
+			}
+		})
+	}
+}
+
+type searchFixture struct {
+	name                   string
+	results                []map[string]any
+	failed, missing, empty bool
+}
+
+func TestMemorySearchAvailability(t *testing.T) {
+	t.Parallel()
+	rows := []map[string]any{{"content": "<private-result>", "score": 0.9, "timestamp": "today", "namespace": "facts"}}
+	for _, tc := range []searchFixture{
+		{name: "results", results: rows}, {name: "no matches"},
+		{name: "error", failed: true}, {name: "rows and error", results: rows, failed: true},
+		{name: "missing", missing: true}, {name: "empty query", empty: true},
+		{name: "empty query missing", empty: true, missing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, partial := range []bool{false, true} {
+				runSearchFixture(t, tc, partial)
+			}
+		})
+	}
+}
+
+func TestMemoryStatsAndSearchIndependent(t *testing.T) {
+	t.Parallel()
+	for _, statsFail := range []bool{false, true} {
+		provider := &mockMemoryStats{count: 42, results: []map[string]any{{"content": "healthy-result", "score": 1.0}}}
+		if statsFail {
+			provider.err = fmt.Errorf("private-storage-token")
+		} else {
+			provider.searchErr = fmt.Errorf("private-storage-token")
+		}
+		body := dashboardBody(t, NewHandler(Resources{Memory: provider}), "/dash/memory/search?q=alpha")
+		if statsFail {
+			assertContainsAll(t, body, []string{"Offline", "healthy-result"})
+			assertContainsNone(t, body, []string{"Memory search unavailable"})
+		} else {
+			assertContainsAll(t, body, []string{">42</p>", "Memory search unavailable"})
+			assertContainsNone(t, body, []string{"healthy-result", "Offline"})
+		}
+	}
+}
+
+type mockSessionLister struct {
+	rows []agentctx.ResumableThread
+	err  error
+}
+
+func (m mockSessionLister) ListResumable(context.Context) ([]agentctx.ResumableThread, error) {
+	return m.rows, m.err
+}
+
+func TestSessionsAvailability(t *testing.T) {
+	t.Parallel()
+	rows := []agentctx.ResumableThread{{ThreadID: "thread-alpha", Model: "model-beta", LatestIteration: 7, UpdatedAt: "2026-10-19"}}
+	for _, tc := range []struct {
+		name                   string
+		lister                 sessionLister
+		unavailable, populated bool
+	}{
+		{"populated", mockSessionLister{rows: rows}, false, true},
+		{"empty", mockSessionLister{}, false, false}, {"missing", nil, true, false},
+		{"error", mockSessionLister{err: fmt.Errorf("private-storage-token /private/db")}, true, false},
+		{"rows and error", mockSessionLister{rows: rows, err: fmt.Errorf("private-storage-token /private/db")}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := NewHandler(Resources{})
+			if h.sessions != nil {
+				t.Fatal("nil checkpoint became nonnil interface")
+			}
+			h.sessions = tc.lister
+			body := dashboardBody(t, h, "/dash/sessions")
+			if strings.Contains(body, "Sessions unavailable. Try again later or check gobot doctor.") != tc.unavailable {
+				t.Error("wrong availability")
+			}
+			if strings.Contains(body, "No active sessions found.") != (!tc.unavailable && !tc.populated) {
+				t.Error("wrong empty state")
+			}
+			assertContainsNone(t, body, []string{"private-storage-token", "/private/db"})
+			if tc.populated {
+				assertContainsAll(t, body, []string{"thread-alpha", "model-beta", ">7</td>", "2026-10-19"})
+			} else {
+				assertContainsNone(t, body, []string{"thread-alpha", "model-beta"})
+			}
+		})
+	}
+}
+
+func TestClosedMemoryStoreUnavailable(t *testing.T) {
+	t.Parallel()
+	store, err := memory.NewMemoryStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Search(context.Background(), "alpha", "all", 10); err == nil {
+		t.Fatal("closed store must return B-053 operational error")
+	}
+	h := NewHandler(Resources{Memory: store})
+	for _, suffix := range []string{"", "&partial=true"} {
+		body := dashboardBody(t, h, "/dash/memory/search?q=alpha"+suffix)
+		assertContainsAll(t, body, []string{"Memory search unavailable. Try again later or check gobot doctor."})
+		assertContainsNone(t, body, []string{"No matches found", "database is closed"})
+	}
+}
+
+func assertSearchAvailability(t *testing.T, body string, empty, failed, hasResults, partial bool) {
+	t.Helper()
+	unavailable := !empty && failed
+	if strings.Contains(body, "Memory search unavailable. Try again later or check gobot doctor.") != unavailable {
+		t.Errorf("wrong search availability: %s", body)
+	}
+	noMatches := !empty && !unavailable && !hasResults
+	if strings.Contains(body, "No matches found") != noMatches {
+		t.Errorf("wrong empty state: %s", body)
+	}
+	assertContainsNone(t, body, []string{"private-storage-token", "/private/db", "<private-result>", "<script>", "executing"})
+	if unavailable {
+		assertContainsNone(t, body, []string{"private-result"})
+	}
+	if !empty && !unavailable && hasResults {
+		assertContainsAll(t, body, []string{"&lt;private-result&gt;"})
+	}
+	assertSearchPageMarkup(t, body, empty, partial)
+}
+
+func runSearchFixture(t *testing.T, tc searchFixture, partial bool) {
+	t.Helper()
+	provider := &mockMemoryStats{count: 42, results: tc.results}
+	if tc.failed {
+		provider.searchErr = fmt.Errorf("private-storage-token /private/db")
+	}
+	var mp MemoryProvider = provider
+	if tc.missing {
+		mp = nil
+	}
+	query := "<script>alert(1)</script>"
+	if tc.empty {
+		query = ""
+	}
+	path := "/dash/memory/search?q=" + url.QueryEscape(query)
+	if partial {
+		path += "&partial=true"
+	}
+	body := dashboardBody(t, NewHandler(Resources{Memory: mp}), path)
+	assertSearchAvailability(t, body, tc.empty, tc.failed || tc.missing, len(tc.results) > 0, partial)
+	assertSearchCalls(t, provider, tc, partial)
+}
+
+func assertSearchPageMarkup(t *testing.T, body string, empty, partial bool) {
+	t.Helper()
+	if !partial {
+		assertContainsAll(t, body, []string{"Strategic Memory"})
+	}
+	if !empty && !partial {
+		assertContainsAll(t, body, []string{"&lt;script&gt;"})
+	}
+	if partial {
+		assertContainsNone(t, body, []string{"Strategic Memory", "Total Indexed Facts"})
+	}
+}
+
+func assertSearchCalls(t *testing.T, provider *mockMemoryStats, tc searchFixture, partial bool) {
+	t.Helper()
+	if partial && provider.statsCalls != 0 {
+		t.Error("partial fetched stats")
+	}
+
+	if tc.empty {
+		if provider.lastLimit != 0 {
+			t.Error("empty query searched")
+		}
+	} else if !tc.missing && (provider.lastLimit != 10 || provider.lastScope != "all") {
+		t.Error("search scope/limit changed")
 	}
 }

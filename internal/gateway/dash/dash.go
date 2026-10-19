@@ -51,10 +51,15 @@ type LogHub interface {
 	Unsubscribe(sub chan *dashboard.LogEntry)
 }
 
+type sessionLister interface {
+	ListResumable(context.Context) ([]agentctx.ResumableThread, error)
+}
+
 // Handler serves the dashboard pages and partials.
 type Handler struct {
-	res   Resources
-	pages map[string]*template.Template
+	sessions sessionLister
+	res      Resources
+	pages    map[string]*template.Template
 }
 
 // NewHandler creates a new dashboard handler.
@@ -91,9 +96,15 @@ func NewHandler(res Resources) *Handler {
 		}
 	}
 
+	var sessions sessionLister
+	if res.Checkpoints != nil {
+		sessions = res.Checkpoints
+	}
+
 	return &Handler{
-		res:   res,
-		pages: pages,
+		sessions: sessions,
+		res:      res,
+		pages:    pages,
 	}
 }
 
