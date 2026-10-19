@@ -273,34 +273,48 @@ func (m *MemoryStore) Search(ctx context.Context, query, sessionKey string, limi
 //
 // Returns the count of files successfully indexed.
 func (m *MemoryStore) Rebuild(sessionDir string) (int, error) {
-	count := 0
-	errLimit := fmt.Errorf("memory: Rebuild truncated at maxFiles limit")
-	err := filepath.WalkDir(sessionDir, func(path string, d fs.DirEntry, walkErr error) error {
-		if count >= maxRebuildFiles {
-			slog.Warn("memory: Rebuild truncated at maxFiles limit", "limit", maxRebuildFiles)
-			return errLimit
+	return m.rebuildWithReader(sessionDir, os.ReadFile)
+}
+
+func (m *MemoryStore) rebuildWithReader(sessionDir string, readFile func(string) ([]byte, error)) (int, error) {
+	count, skipped := 0, 0
+	var failures []error
+	recordFailure := func(err error) {
+		skipped++
+		if len(failures) < 10 {
+			failures = append(failures, err)
 		}
-		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
-			return walkErr
+	}
+	walkErr := filepath.WalkDir(sessionDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("walk %s: %w", path, walkErr)
 		}
-		data, err := os.ReadFile(path) //nolint:gosec // G122: path comes from WalkDir callback which is already root-scoped
-		if err != nil {
-			slog.Warn("memory rebuild: skipping unreadable file", slog.String("path", path), logattr.Err(err))
+		if d.IsDir() || !strings.HasSuffix(path, ".md") {
 			return nil
 		}
-		sessionKey := strings.TrimSuffix(filepath.Base(path), ".md")
-		namespace := "session:" + sessionKey
+		if count >= maxRebuildFiles {
+			return fmt.Errorf("truncated at %d successfully indexed files: next source %s", maxRebuildFiles, path)
+		}
+		data, err := readFile(path)
+		if err != nil {
+			recordFailure(fmt.Errorf("read %s: %w", path, err))
+			return nil
+		}
+		namespace := "session:" + strings.TrimSuffix(filepath.Base(path), ".md")
 		if err := m.Index(namespace, string(data)); err != nil {
-			slog.Warn("memory rebuild: index failed", slog.String("path", path), logattr.Err(err))
+			recordFailure(fmt.Errorf("index %s: %w", path, err))
 			return nil
 		}
 		count++
 		return nil
 	})
-	if errors.Is(err, errLimit) {
-		err = nil
+	if walkErr != nil {
+		failures = append(failures, walkErr)
 	}
-	return count, err
+	if len(failures) > 0 {
+		return count, fmt.Errorf("memory: Rebuild %s: indexed %d, skipped %d: %w", sessionDir, count, skipped, errors.Join(failures...))
+	}
+	return count, nil
 }
 
 // CleanupNamespace removes entries in the specified namespace older than the TTL.

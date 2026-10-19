@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/allthingscode/gobot/internal/logattr"
 	"github.com/philippgille/chromem-go"
 )
 
@@ -19,7 +18,7 @@ import (
 func IndexWorkspaceMarkdown(ctx context.Context, store *Store, workspaceDir string, embeddingFunc chromem.EmbeddingFunc) error {
 	allDocs, err := collectMarkdownDocs(workspaceDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("collect workspace markdown: %w", err)
 	}
 
 	if len(allDocs) > 0 {
@@ -36,6 +35,10 @@ func IndexWorkspaceMarkdown(ctx context.Context, store *Store, workspaceDir stri
 }
 
 func collectMarkdownDocs(workspaceDir string) ([]chromem.Document, error) {
+	return collectMarkdownDocsWithReader(workspaceDir, os.ReadFile)
+}
+
+func collectMarkdownDocsWithReader(workspaceDir string, readFile func(string) ([]byte, error)) ([]chromem.Document, error) {
 	var allDocs []chromem.Document
 	err := filepath.WalkDir(workspaceDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -48,7 +51,10 @@ func collectMarkdownDocs(workspaceDir string) ([]chromem.Document, error) {
 			return nil
 		}
 
-		docs := processMarkdownFile(path, workspaceDir)
+		docs, err := processMarkdownFile(path, workspaceDir, readFile)
+		if err != nil {
+			return err
+		}
 		allDocs = append(allDocs, docs...)
 		return nil
 	})
@@ -66,11 +72,10 @@ func shouldSkip(d fs.DirEntry) bool {
 	return strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules"
 }
 
-func processMarkdownFile(path, workspaceDir string) []chromem.Document {
-	data, err := os.ReadFile(path)
+func processMarkdownFile(path, workspaceDir string, readFile func(string) ([]byte, error)) ([]chromem.Document, error) {
+	data, err := readFile(path)
 	if err != nil {
-		slog.Warn("vector indexer: unreadable file", slog.String("path", path), logattr.Err(err))
-		return nil
+		return nil, fmt.Errorf("read markdown %s: %w", path, err)
 	}
 
 	rel, err := filepath.Rel(workspaceDir, path)
@@ -90,7 +95,7 @@ func processMarkdownFile(path, workspaceDir string) []chromem.Document {
 			},
 		})
 	}
-	return docs
+	return docs, nil
 }
 
 // chunkMarkdown splits markdown text into paragraph-level chunks of ~targetSize characters.

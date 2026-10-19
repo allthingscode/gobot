@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 
@@ -86,8 +87,8 @@ func (cd *CronDispatcher) Run(ctx context.Context) {
 func (cd *CronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 	p.Message = resolvePlaceholders(p.Message)
 
-	if cd.handleSystemJob(ctx, p) {
-		return nil
+	if handled, err := cd.handleSystemJob(ctx, p); handled {
+		return err
 	}
 
 	channel, to, silent := cron.ResolveRoutableChannel(p, cd.storageRoot)
@@ -114,23 +115,21 @@ func (cd *CronDispatcher) Dispatch(ctx context.Context, p cron.Payload) error {
 	return nil
 }
 
-func (cd *CronDispatcher) handleSystemJob(ctx context.Context, p cron.Payload) bool {
+func (cd *CronDispatcher) handleSystemJob(ctx context.Context, p cron.Payload) (bool, error) {
 	if p.Message != "[SYSTEM] INDEX_WORKSPACE" {
-		return false
+		return false, nil
 	}
-
-	if cd.vecStore != nil && cd.embedProv != nil && cd.workspaceDir != "" {
-		slog.Info("cron: starting workspace vector indexing")
-		err := vector.IndexWorkspaceMarkdown(ctx, cd.vecStore, cd.workspaceDir, func(c context.Context, text string) ([]float32, error) {
-			return cd.embedProv.Embed(c, text)
-		})
-		if err != nil {
-			slog.Error("cron: vector index error", "err", err)
-		} else {
-			slog.Info("cron: workspace vector indexing complete")
-		}
-	} else {
-		slog.Warn("cron: vector store not initialized, skipping INDEX_WORKSPACE")
+	if cd.vecStore == nil || cd.embedProv == nil || cd.workspaceDir == "" {
+		return true, fmt.Errorf("cron: INDEX_WORKSPACE requires vector store, embedder and workspace directory")
 	}
-	return true
+	slog.Info("cron: starting workspace vector indexing")
+	err := vector.IndexWorkspaceMarkdown(ctx, cd.vecStore, cd.workspaceDir, func(c context.Context, text string) ([]float32, error) {
+		return cd.embedProv.Embed(c, text)
+	})
+	if err != nil {
+		slog.Error("cron: vector index error", "err", err)
+		return true, fmt.Errorf("cron: INDEX_WORKSPACE: %w", err)
+	}
+	slog.Info("cron: workspace vector indexing complete")
+	return true, nil
 }
