@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "b7f55ea3e90116b655d449614e53fd686187f456",
+  "source_commit": "c61054ef083f0fa39ce2ac50ad5b565c37d4c01b",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -183,8 +183,8 @@
       "base_hash": "0f46616070cb7ae855da511a6ccb3216b38187046ce81305014fa21273ccd75b"
     },
     "powershell/launch-codex-specialist.ps1": {
-      "hash": "f16d8d97dea657d63f1de5e9f9af88d4760f89b82223dd773e4f174591476c78",
-      "base_hash": "f16d8d97dea657d63f1de5e9f9af88d4760f89b82223dd773e4f174591476c78"
+      "hash": "48d7a4b258cf3c125b295bc7b77a5922583182b46a3a55f44052f2dac4338c3b",
+      "base_hash": "48d7a4b258cf3c125b295bc7b77a5922583182b46a3a55f44052f2dac4338c3b"
     },
     "powershell/lib/archive-task.ps1": {
       "hash": "89bf80c394d10a39f0379130aa0edd73297ccc6420b4ee02362736fe4fa7d74c",
@@ -563,8 +563,8 @@
       "base_hash": "53b5127837a18025e17ec0511630e63d776d9cc6807bd907bed7959035620c6e"
     },
     "powershell/tests/launch-codex-specialist.tests.ps1": {
-      "hash": "af4fc54631a33d0b27276f074e8a2c78aff37871be715c2c9899fa58c41e31ee",
-      "base_hash": "af4fc54631a33d0b27276f074e8a2c78aff37871be715c2c9899fa58c41e31ee"
+      "hash": "631fcc278c86eccc0acc76df0b2664930331b040fcad484cf3ae696798932fc1",
+      "base_hash": "631fcc278c86eccc0acc76df0b2664930331b040fcad484cf3ae696798932fc1"
     },
     "powershell/tests/line-ending-conformance.tests.ps1": {
       "hash": "ada0a3eff02d9b39f324ef8cb3c7d51547cf5a854950094317744fa81c24372c",
@@ -835,12 +835,12 @@
       "base_hash": "666c62db9a374b383da6a9b1481eb7c57c55c31f1e0cbf437a9ae7213eea45a3"
     },
     "sops/implementation.md": {
-      "hash": "2705d286dbe532fac96c8a3898dbe381bfa70b0e9253d168bbf406de64c60ce0",
-      "base_hash": "2705d286dbe532fac96c8a3898dbe381bfa70b0e9253d168bbf406de64c60ce0"
+      "hash": "0aac361af8a62edace21d0d11c732bbe531121d05f0accba4a4cb9368a2488fb",
+      "base_hash": "0aac361af8a62edace21d0d11c732bbe531121d05f0accba4a4cb9368a2488fb"
     },
     "sops/orchestrator.md": {
-      "hash": "ca9a43c196ac130a481edb3ee995baa347a73f886c5d9e95b8bbd37fb3a65c21",
-      "base_hash": "ca9a43c196ac130a481edb3ee995baa347a73f886c5d9e95b8bbd37fb3a65c21"
+      "hash": "a1af910af93cf455e7a5583ea2852851ebb708f2c0ebfed484f8ef2bca7a9af2",
+      "base_hash": "a1af910af93cf455e7a5583ea2852851ebb708f2c0ebfed484f8ef2bca7a9af2"
     },
     "sops/README.md": {
       "hash": "480e853535199c05ca05ff988e9f73577164dd8b792677ebdd0869e560d53c4a",

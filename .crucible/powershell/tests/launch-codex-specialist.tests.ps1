@@ -16,8 +16,10 @@ function Write-FakeCodex {
 $mode = $env:CODEX_FAKE_MODE
 if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "success" }
 $outFile = ""
+$workDir = ""
 for ($i = 0; $i -lt $args.Count; $i++) {
     if ($args[$i] -eq "--output-last-message" -and ($i + 1) -lt $args.Count) { $outFile = $args[$i + 1] }
+    if ($args[$i] -eq "-C" -and ($i + 1) -lt $args.Count) { $workDir = $args[$i + 1] }
 }
 $enc = New-Object System.Text.UTF8Encoding($false)
 Write-Output ("ARGS: " + ($args -join " "))
@@ -45,6 +47,12 @@ switch ($mode) {
         for ($n = 0; $n -lt 200; $n++) { Write-Output "padding line $n to push the quoted phrase out of the transcript tail" }
         Write-Output "ERROR: something else went wrong"
         exit 1
+    }
+    "leavework" {
+        # Item 237: a specialist that stops before handing off leaves its work uncommitted.
+        [System.IO.File]::WriteAllText((Join-Path $workDir "work.txt"), "specialist work`n", $enc)
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, "Stopped to escalate a blocker.", $enc) }
+        exit 0
     }
     "genericfail" {
         Write-Output "fake codex working"
@@ -338,6 +346,9 @@ try {
         Assert-Result -Name "running names the level" -Condition ($during.Contains("level: gpt-6-sol at low effort")) -FailureMessage "RUNNING does not name the level: $during"
         $final = [System.IO.File]::ReadAllText($statusFile)
         Assert-Result -Name "final status success" -Condition ($final.StartsWith("STATUS=SUCCESS") -and $final.Contains("exit code: 0")) -FailureMessage "expected STATUS=SUCCESS and exit code 0 after the run, saw: $final"
+        # Item 238: each field is its own line.
+        $finalLines = @($final -split "`n")
+        Assert-Result -Name "final status fields on their own lines" -Condition (($finalLines[0] -eq "STATUS=SUCCESS") -and ($finalLines -match "^launcher_pid: \d+$").Count -eq 1 -and ($finalLines -contains "exit code: 0")) -FailureMessage "expected one field per line, saw: $final"
         Assert-Result -Name "exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
     }
 
@@ -349,6 +360,8 @@ try {
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
         $final = [System.IO.File]::ReadAllText((Join-Path $projectRoot ".crucible/session/C-975/verification/codex-launch-status.txt"))
         Assert-Result -Name "final status launch_failed" -Condition ($final.StartsWith("STATUS=LAUNCH_FAILED") -and $final.Contains("reason: infrastructure failure")) -FailureMessage "expected STATUS=LAUNCH_FAILED with its reason, saw: $final"
+        $finalLines = @($final -split "`n")
+        Assert-Result -Name "failure detail on its own lines" -Condition (($finalLines[0] -eq "STATUS=LAUNCH_FAILED") -and ($finalLines -contains "exit code: 1") -and ($finalLines -match "^reason: infrastructure failure").Count -eq 1) -FailureMessage "expected one field per line, saw: $final"
         Assert-Result -Name "exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode)."
     }
 
@@ -378,6 +391,50 @@ try {
             "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot, "-AllowDirtyTree")
         Assert-Result -Name "override status line" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS with override. Output:`n$($res.Output)"
         Assert-Result -Name "override exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+    }
+
+    # Item 237: adopters gitignore .crucible/session/, so the launcher's own files never dirty the tree.
+    function New-ResumeTestProject {
+        param([string]$Root)
+        New-TestGitProject -Root $Root
+        [System.IO.File]::WriteAllText((Join-Path $Root ".gitignore"), ".crucible/session/`n", (New-Object System.Text.UTF8Encoding($false)))
+        Invoke-TestGit -Directory $Root -GitArgs @("add", ".gitignore") | Out-Null
+        Invoke-TestGit -Directory $Root -GitArgs @("commit", "-m", "ignore sessions") | Out-Null
+    }
+
+    $results += Run-Test -Name "Re-dispatch continues the uncommitted work its own session left" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-resume-own"
+        New-ResumeTestProject -Root $projectRoot
+        $launch = @("-TaskId", "C-974", "-Phase", "implementation", "-Model", "gpt-6-sol", "-PromptText", "BUILD", "-ProjectRoot", $projectRoot)
+        $first = Invoke-Launcher -Mode "leavework" -BinDir $binDir -LauncherArgs $launch
+        Assert-Result -Name "first run exit 0" -Condition ($first.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($first.ExitCode). Output:`n$($first.Output)"
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs $launch
+        Assert-Result -Name "resume exit 0" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected exit 0, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "resume notice" -Condition ($res.Output -match "continuing the uncommitted work the previous run in this session left") -FailureMessage "expected resume notice. Output:`n$($res.Output)"
+        Assert-Result -Name "resume dispatched" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=SUCCESS") -FailureMessage "expected SUCCESS. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Re-dispatch blocks when the tree changed after its session left it" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-resume-changed"
+        New-ResumeTestProject -Root $projectRoot
+        $launch = @("-TaskId", "C-973", "-Phase", "implementation", "-Model", "gpt-6-sol", "-PromptText", "BUILD", "-ProjectRoot", $projectRoot)
+        $null = Invoke-Launcher -Mode "leavework" -BinDir $binDir -LauncherArgs $launch
+        [System.IO.File]::AppendAllText((Join-Path $projectRoot "work.txt"), "edited by someone else`n")
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs $launch
+        Assert-Result -Name "changed exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "changed reason" -Condition ($res.Output -match "differ from what the previous run in this session left") -FailureMessage "expected changed-tree reason. Output:`n$($res.Output)"
+        Assert-Result -Name "changed not dispatched" -Condition (-not ($res.Output -match "\[CODEX SPECIALIST\] STATUS=")) -FailureMessage "guard must block before dispatch. Output:`n$($res.Output)"
+    }
+
+    $results += Run-Test -Name "Another session's uncommitted work still blocks dispatch" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-resume-other"
+        New-ResumeTestProject -Root $projectRoot
+        $null = Invoke-Launcher -Mode "leavework" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-972", "-Phase", "implementation", "-Model", "gpt-6-sol", "-PromptText", "BUILD", "-ProjectRoot", $projectRoot)
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-972", "-Phase", "verification", "-Model", "gpt-6-sol", "-PromptText", "REVIEW", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "other exit 2" -Condition ($res.ExitCode -eq 2) -FailureMessage "expected exit 2, got $($res.ExitCode). Output:`n$($res.Output)"
+        Assert-Result -Name "other reason" -Condition ($res.Output -match "no earlier specialist run in this session left") -FailureMessage "expected no-record reason. Output:`n$($res.Output)"
     }
 
     $results += Run-Test -Name "Clean git tree dispatches normally" -Body {

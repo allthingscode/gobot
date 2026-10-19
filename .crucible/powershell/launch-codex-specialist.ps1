@@ -317,6 +317,44 @@ function Get-GitPorcelainStatus {
     return [PSCustomObject]@{ ExitCode = $res.ExitCode; Output = $res.Raw }
 }
 
+# Names HEAD plus the exact content of every tracked and unignored file, staged or not,
+# without touching the real index. Item 237.
+function Get-TreeFingerprint {
+    param([string]$Directory)
+    $index = Join-Path ([System.IO.Path]::GetTempPath()) ("crucible-tree-" + [guid]::NewGuid().ToString("N"))
+    $prevIndex = $env:GIT_INDEX_FILE
+    try {
+        $head = Invoke-Git -Directory $Directory rev-parse --verify HEAD
+        $headSha = if ($head.ExitCode -eq 0) { $head.Raw.Trim() } else { "none" }
+        # Starting from a copy of the real index keeps its stat cache, so unchanged files are not rehashed.
+        $realIndex = Invoke-Git -Directory $Directory rev-parse --path-format=absolute --git-path index
+        $env:GIT_INDEX_FILE = $index
+        if ($realIndex.ExitCode -eq 0 -and (Test-Path -LiteralPath $realIndex.Raw.Trim())) {
+            Copy-Item -LiteralPath $realIndex.Raw.Trim() -Destination $index -Force
+        } else {
+            $read = if ($head.ExitCode -eq 0) { Invoke-Git -Directory $Directory read-tree HEAD } else { Invoke-Git -Directory $Directory read-tree --empty }
+            if ($read.ExitCode -ne 0) { return $null }
+        }
+        if ((Invoke-Git -Directory $Directory add --all).ExitCode -ne 0) { return $null }
+        $tree = Invoke-Git -Directory $Directory write-tree
+        if ($tree.ExitCode -ne 0) { return $null }
+        return ("head " + $headSha + " tree " + $tree.Raw.Trim())
+    } finally {
+        if ($null -eq $prevIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue } else { $env:GIT_INDEX_FILE = $prevIndex }
+        Remove-Item -LiteralPath $index -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Read-TreeRecord {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $record = @{}
+    foreach ($line in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
+        if ($line -match '^([a-z_]+): (.*)$') { $record[$Matches[1]] = $Matches[2] }
+    }
+    return $record
+}
+
 function Invoke-CodexExec {
     param(
         [string[]]$CodexArgs,
@@ -502,26 +540,6 @@ if ($Phase -eq "deployment") {
     $WorkingDir = $REPO_ROOT
 }
 
-if ($AllowDirtyTree) {
-    Write-Host "[CODEX] Notice: pre-dispatch tree check overridden by -AllowDirtyTree." -ForegroundColor Yellow
-} elseif (-not (Test-GitWorkTree -Directory $WorkingDir)) {
-    Write-Host "[CODEX] Note: WorkingDir is not a git work tree; skipping pre-dispatch tree check."
-} else {
-    $gitStatus = Get-GitPorcelainStatus -Directory $WorkingDir
-    if ($gitStatus.ExitCode -ne 0) {
-        Write-Host "[CODEX] Note: WorkingDir is not a git work tree; skipping pre-dispatch tree check."
-    } elseif (-not [string]::IsNullOrWhiteSpace($gitStatus.Output)) {
-        Write-Host ("[CODEX] Error: pre-dispatch tree check failed. The working tree at " + $WorkingDir + " holds uncommitted changes the specialist did not author.") -ForegroundColor Red
-        foreach ($line in ($gitStatus.Output -split "`n")) {
-            if (-not [string]::IsNullOrWhiteSpace($line)) {
-                Write-Host ("  " + $line)
-            }
-        }
-        Write-Host "Establish provenance first: commit or stash the changes, or pass -AllowDirtyTree to dispatch onto this tree deliberately (you then own its provenance)." -ForegroundColor Yellow
-        exit 2
-    }
-}
-
 if ([string]::IsNullOrWhiteSpace($Role)) {
     $Role = Get-RoleForPhase -PhaseName $Phase
 }
@@ -537,6 +555,43 @@ if ($usingAdhocSession) {
 } else {
     $sessionDir = Join-Path $sessionRoot (Join-Path $TaskId $Phase)
 }
+$treeRecordPath = Join-Path $sessionDir "codex-tree-state.txt"
+
+# A specialist that stops to escalate or hits a usage limit leaves its own work uncommitted.
+# Each run records the tree it left, so a re-dispatch of the same session continues that
+# work while any other uncommitted change still blocks. Item 237.
+if ($AllowDirtyTree) {
+    Write-Host "[CODEX] Notice: pre-dispatch tree check overridden by -AllowDirtyTree." -ForegroundColor Yellow
+} elseif (-not (Test-GitWorkTree -Directory $WorkingDir)) {
+    Write-Host "[CODEX] Note: WorkingDir is not a git work tree; skipping pre-dispatch tree check."
+} else {
+    $gitStatus = Get-GitPorcelainStatus -Directory $WorkingDir
+    if ($gitStatus.ExitCode -ne 0) {
+        Write-Host "[CODEX] Note: WorkingDir is not a git work tree; skipping pre-dispatch tree check."
+    } elseif (-not [string]::IsNullOrWhiteSpace($gitStatus.Output)) {
+        $treeRecord = Read-TreeRecord -Path $treeRecordPath
+        $fingerprint = Get-TreeFingerprint -Directory $WorkingDir
+        $recordMatches = ($null -ne $treeRecord) -and ($null -ne $fingerprint) -and
+            ($treeRecord["working_dir"] -eq $WorkingDir) -and ($treeRecord["fingerprint"] -eq $fingerprint)
+        if ($recordMatches) {
+            Write-Host ("[CODEX] Notice: continuing the uncommitted work the previous run in this session left (recorded " + $treeRecord["recorded"] + ").") -ForegroundColor Yellow
+        } else {
+            if ($null -eq $treeRecord) {
+                $why = "holds uncommitted changes that no earlier specialist run in this session left."
+            } else {
+                $why = "holds uncommitted changes that differ from what the previous run in this session left (recorded " + $treeRecord["recorded"] + "), so something else changed the tree since."
+            }
+            Write-Host ("[CODEX] Error: pre-dispatch tree check failed. The working tree at " + $WorkingDir + " " + $why) -ForegroundColor Red
+            foreach ($line in ($gitStatus.Output -split "`n")) {
+                if (-not [string]::IsNullOrWhiteSpace($line)) {
+                    Write-Host ("  " + $line)
+                }
+            }
+            Write-Host "Establish provenance first: commit or stash the changes, or pass -AllowDirtyTree to dispatch onto this tree deliberately (you then own its provenance)." -ForegroundColor Yellow
+            exit 2
+        }
+    }
+}
 if (-not (Test-Path -LiteralPath $sessionDir)) {
     New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
 }
@@ -551,7 +606,7 @@ if (Test-Path -LiteralPath $lastMsgPath) { Remove-Item -LiteralPath $lastMsgPath
 function Write-LaunchStatus {
     param([string]$Status, [string[]]$Detail = @())
     $stamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
-    $lines = @("STATUS=" + $Status, "launcher_pid: " + $PID, "updated: " + $stamp) + $Detail
+    $lines = @(("STATUS=" + $Status), ("launcher_pid: " + $PID), ("updated: " + $stamp)) + $Detail
     try {
         if (-not (Test-Path -LiteralPath $sessionDir)) { New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null }
         [System.IO.File]::WriteAllText($statusPath, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
@@ -607,6 +662,19 @@ $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -Transcript
 
 if (-not (Test-Path -LiteralPath $sessionDir)) {
     New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+}
+
+if (Test-GitWorkTree -Directory $WorkingDir) {
+    $leftFingerprint = Get-TreeFingerprint -Directory $WorkingDir
+    if ($null -ne $leftFingerprint) {
+        $recordStamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+        $recordLines = @(("working_dir: " + $WorkingDir), ("fingerprint: " + $leftFingerprint), ("recorded: " + $recordStamp))
+        try {
+            [System.IO.File]::WriteAllText($treeRecordPath, (($recordLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        } catch {
+            Write-Warning ("Could not record the tree this run left at " + $treeRecordPath + ": " + $_.Exception.Message)
+        }
+    }
 }
 
 # --- Classification: SUCCESS vs LAUNCH_FAILED ---
@@ -668,7 +736,7 @@ Write-Host ""
 if ($null -ne $usageLimit) {
     $resetText = if ([string]::IsNullOrWhiteSpace($usageLimit.ResetTime)) { "not stated in the message (see the transcript)" } else { $usageLimit.ResetTime }
     $retryText = if ([string]::IsNullOrWhiteSpace($usageLimit.RetryNotBefore)) { "one minute after the stated reset" } else { $usageLimit.RetryNotBefore }
-    Write-LaunchStatus -Status "USAGE_LIMIT" -Detail @("exit code: " + $result.ExitCode, "resets: " + $resetText, "retry_not_before: " + $retryText)
+    Write-LaunchStatus -Status "USAGE_LIMIT" -Detail @(("exit code: " + $result.ExitCode), ("resets: " + $resetText), ("retry_not_before: " + $retryText))
     Write-Host "[CODEX SPECIALIST] STATUS=USAGE_LIMIT" -ForegroundColor Yellow
     Write-Host ("  resets: " + $resetText)
     Write-Host ("  retry_not_before: " + $retryText)
@@ -682,7 +750,7 @@ if ($null -ne $usageLimit) {
     Write-Host "  tree is kept and can be continued."
     exit 5
 } elseif ($null -ne $advanceTarget) {
-    Write-LaunchStatus -Status "ADVANCE_INCOMPLETE" -Detail @("exit code: " + $result.ExitCode, "next phase never started: " + $advanceTarget)
+    Write-LaunchStatus -Status "ADVANCE_INCOMPLETE" -Detail @(("exit code: " + $result.ExitCode), ("next phase never started: " + $advanceTarget))
     Write-Host "[CODEX SPECIALIST] STATUS=ADVANCE_INCOMPLETE" -ForegroundColor Yellow
     Write-Host ("  exit code: " + $result.ExitCode)
     Write-Host ("  last message: " + $lastMsgPath)
@@ -694,7 +762,7 @@ if ($null -ne $usageLimit) {
     Write-Host ("    pwsh -File `"" + (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) + "`" -Init -TaskId " + $TaskId + " -ProjectRoot `"" + $REPO_ROOT + "`"")
     exit 3
 } elseif ($noHandoff) {
-    Write-LaunchStatus -Status "NO_HANDOFF" -Detail @("exit code: " + $result.ExitCode, "phase ended without a handoff: " + $Phase)
+    Write-LaunchStatus -Status "NO_HANDOFF" -Detail @(("exit code: " + $result.ExitCode), ("phase ended without a handoff: " + $Phase))
     Write-Host "[CODEX SPECIALIST] STATUS=NO_HANDOFF" -ForegroundColor Yellow
     Write-Host ("  exit code: " + $result.ExitCode)
     Write-Host ("  last message: " + $lastMsgPath)
@@ -703,6 +771,8 @@ if ($null -ne $usageLimit) {
     Write-Host ("  The run ended but Crucible logged no completed " + $Phase + " phase: no handoff was")
     Write-Host "  processed. Read the last message: the specialist may have stopped to ask a question,"
     Write-Host "  escalated to the human (see backlog/blocked/), or quit early. This is not a verdict."
+    Write-Host "  After the human decides, re-dispatch this phase on the same working directory: the"
+    Write-Host "  uncommitted work this run left is recognised and continued."
     exit 4
 } elseif ([string]::IsNullOrWhiteSpace($failReason)) {
     Write-LaunchStatus -Status "SUCCESS" -Detail @("exit code: " + $result.ExitCode)
@@ -715,7 +785,7 @@ if ($null -ne $usageLimit) {
     Write-Host "  per the orchestrator SOP before trusting any verdict."
     exit 0
 } else {
-    Write-LaunchStatus -Status "LAUNCH_FAILED" -Detail @("exit code: " + $result.ExitCode, "reason: " + $failReason)
+    Write-LaunchStatus -Status "LAUNCH_FAILED" -Detail @(("exit code: " + $result.ExitCode), ("reason: " + $failReason))
     Write-Host "[CODEX SPECIALIST] STATUS=LAUNCH_FAILED" -ForegroundColor Red
     Write-Host ("  reason: " + $failReason)
     Write-Host ("  exit code: " + $result.ExitCode)

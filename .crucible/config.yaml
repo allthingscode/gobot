@@ -113,4 +113,4 @@ review:
   auto_push: false
   require_green_ci: true
 crucible_version: "0.5.0"
-crucible_install_commit: "b7f55ea3e90116b655d449614e53fd686187f456"
+crucible_install_commit: "c61054ef083f0fa39ce2ac50ad5b565c37d4c01b"

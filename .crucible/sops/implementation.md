@@ -1,4 +1,4 @@
-<!-- prompt_version: architect-sop-v4 -->
+<!-- prompt_version: architect-sop-v5 -->
 # SOP: Implementation
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -29,7 +29,7 @@ Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1
 
 For state updates, use `update-session-state.ps1 -Specialist implementation -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Implementation session files go to `.crucible/session/{task_id}/implementation/`.
 
-**This dispatch is your approval to implement.** The groomed spec is the approved plan. A project instruction to pause for plan approval (for example an AGENTS.md planning protocol) belongs to the manual workflow and does not apply here: write any Phase 1 design to `task.md`, then implement, commit and hand off in this session. Stop early only to escalate a genuine blocker through the SOP's escalation path.
+**This dispatch is your approval to implement.** The groomed spec is the approved plan. A project instruction to pause for plan approval (for example an AGENTS.md planning protocol) belongs to the manual workflow and does not apply here: write any Phase 1 design to `task.md`, then implement, commit and hand off in this session. Stop early only to escalate a genuine blocker, as [Escalating a Blocker](#escalating-a-blocker) describes.
 
 **Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a verification handoff - follow it directly. Do NOT redesign. Skip to Phase 2: Code.
 
@@ -102,6 +102,15 @@ pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-che
 
 **STRICTLY FORBIDDEN**: `git push`. Do not commit to `master`. Do not touch `BACKLOG.md`.
 
+### Escalating a Blocker
+
+Escalate only when the approved spec cannot be met as written: a needed change falls outside `file_affinity`, the spec contradicts the code or itself, or a decision belongs to the human. Do not escalate for something you can resolve inside the spec.
+
+1. Leave your work uncommitted in the worktree. Do not commit failing or out-of-scope work, and do not stash or discard it.
+2. Write `### ESCALATION` to `task.md` with the blocker, the evidence (file and line, failing test output), the exact decision you need, and your recommendation.
+3. Do not write a handoff or run `crucible.ps1 -Init`. End the session with the question as your final message.
+
+The orchestrator brings the question to the human and records the answer under `### ESCALATION` as `Decision:` (and in the spec when it changes scope). It then re-dispatches this phase on the same worktree; the launcher recognises the work you left and lets the new session continue it. On a re-dispatch, read the `Decision:` line first and carry on from your last checkpoint.
 ### Phase 3: Self-Review
 
 Before marking ready for Verification:

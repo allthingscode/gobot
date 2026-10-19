@@ -1,4 +1,4 @@
-<!-- prompt_version: orchestrator-sop-v6 -->
+<!-- prompt_version: orchestrator-sop-v7 -->
 # SOP: Orchestrator
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -118,7 +118,7 @@ The mode only removes the wait between phases. It never decides a gate, picks a 
 
 ### Step 4 - Spawn the specialist
 
-**Pre-spawn tree check.** Run `git status` before spawning. The working tree must match what you expect. If it holds changes you did not author or authorize, STOP: do not dispatch onto an unknown tree, and do not later commit that work as if it were the specialist's. Establish provenance first (ask the human; inspect diffs and mtimes), because unexpected changes may embed decisions that are the human's to make.
+**Pre-spawn tree check.** Run `git status` before spawning. The working tree must match what you expect. If it holds changes you did not author or authorize, STOP: do not dispatch onto an unknown tree, and do not later commit that work as if it were the specialist's. Establish provenance first (ask the human; inspect diffs and mtimes), because unexpected changes may embed decisions that are the human's to make. The one expected dirty tree is a phase's own unfinished work: a specialist that escalated or hit a usage limit leaves it uncommitted. Re-dispatch that same phase on the same working directory and the launcher continues it, provided the tree still matches what that run left; any other change still blocks.
 
 Use the sub-agent invocation mechanic for your environment (see tool-specific doc). The sub-agent receives:
 1. The content of `prompt.md`
@@ -136,7 +136,7 @@ via a Crucible launcher rather than a native sub-agent. The launcher reports an 
 `crucible.ps1 -Init` was cut off before the next phase started (run the `-Init` it prints, then
 continue), or `STATUS=NO_HANDOFF` (exit 4) when a grooming, implementation or verification run
 ended without completing its phase: read its last message, which says whether it stopped to ask,
-escalated, or quit, and bring that to the human; or `STATUS=USAGE_LIMIT` (exit 5) when the Codex
+escalated, or quit, and bring that to the human (after the human decides an escalation, record the answer as `Decision:` under `### ESCALATION` in the phase's `task.md`, update the spec if scope changed, then re-dispatch the same phase); or `STATUS=USAGE_LIMIT` (exit 5) when the Codex
 account hit its usage limit: this is not a runtime fault, so stop, tell the human the reset time the
 launcher prints, and do not relaunch or rerun until at least one full minute after it (the launcher
 prints that time as `retry_not_before`; uncommitted work the run left in the working tree is kept and
