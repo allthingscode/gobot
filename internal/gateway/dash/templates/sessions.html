@@ -4,6 +4,9 @@
 </div>
 
 <div class="card p-4">
+    {{if .Unavailable}}
+    <div role="status">Sessions unavailable. Try again later or check gobot doctor.</div>
+    {{else}}
     <div class="table-responsive">
         <table class="table table-hover">
             <thead>
@@ -32,5 +35,6 @@
             </tbody>
         </table>
     </div>
+    {{end}}
 </div>
 {{end}}

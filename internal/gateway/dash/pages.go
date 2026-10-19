@@ -55,74 +55,69 @@ func (h *Handler) handleDoctor(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	var sessions []agentctx.ResumableThread
-	var err error
-
-	if h.res.Checkpoints != nil {
-		sessions, err = h.res.Checkpoints.ListResumable(r.Context())
+	unavailable := h.sessions == nil
+	if h.sessions != nil {
+		var err error
+		sessions, err = h.sessions.ListResumable(r.Context())
 		if err != nil {
 			slog.Error("dash: failed to list sessions", "err", err)
+			unavailable = true
+			sessions = nil
 		}
 	}
-
 	data := struct {
-		ActiveNav string
-		Sessions  []agentctx.ResumableThread
-	}{
-		ActiveNav: "sessions",
-		Sessions:  sessions,
-	}
-
+		ActiveNav   string
+		Sessions    []agentctx.ResumableThread
+		Unavailable bool
+	}{ActiveNav: "sessions", Sessions: sessions, Unavailable: unavailable}
 	h.render(w, "layout.html", "sessions.html", data)
 }
 
-func (h *Handler) handleMemory(w http.ResponseWriter, _ *http.Request) {
-	count := -1
-	var err error
+type memoryPageView struct {
+	ActiveNav         string
+	Count             int
+	Query             string
+	Results           []map[string]any
+	SearchUnavailable bool
+}
 
+func (h *Handler) memoryPage() memoryPageView {
+	data := memoryPageView{ActiveNav: "memory", Count: -1}
 	if h.res.Memory != nil {
-		count, err = h.res.Memory.Stats()
+		count, err := h.res.Memory.Stats()
 		if err != nil {
 			slog.Error("dash: failed to get memory stats", "err", err)
+		} else {
+			data.Count = count
 		}
 	}
+	return data
+}
 
-	data := struct {
-		ActiveNav string
-		Count     int
-		Query     string
-		Results   []map[string]any
-	}{
-		ActiveNav: "memory",
-		Count:     count,
-		Query:     "",
-	}
-
-	h.render(w, "layout.html", "memory.html", data)
+func (h *Handler) handleMemory(w http.ResponseWriter, _ *http.Request) {
+	h.render(w, "layout.html", "memory.html", h.memoryPage())
 }
 
 func (h *Handler) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
-	var results []map[string]any
-	var err error
-
-	if h.res.Memory != nil && query != "" {
-		results, err = h.res.Memory.Search(r.Context(), query, "all", 10)
-		if err != nil {
-			slog.Error("dash: memory search failed", "err", err)
+	partial := r.URL.Query().Get("partial") == partialQueryValue
+	data := memoryPageView{ActiveNav: "memory", Count: -1}
+	if !partial {
+		data = h.memoryPage()
+	}
+	data.Query = r.URL.Query().Get("q")
+	if data.Query != "" {
+		data.SearchUnavailable = h.res.Memory == nil
+		if h.res.Memory != nil {
+			results, err := h.res.Memory.Search(r.Context(), data.Query, "all", 10)
+			if err != nil {
+				slog.Error("dash: memory search failed", "err", err)
+				data.SearchUnavailable = true
+			} else {
+				data.Results = results
+			}
 		}
 	}
-
-	data := struct {
-		ActiveNav string
-		Query     string
-		Results   []map[string]any
-	}{
-		ActiveNav: "memory",
-		Query:     query,
-		Results:   results,
-	}
-
-	if r.URL.Query().Get("partial") == partialQueryValue {
+	if partial {
 		t, ok := h.pages["memory.html"]
 		if !ok {
 			http.Error(w, "Template not found", http.StatusInternalServerError)
@@ -134,7 +129,6 @@ func (h *Handler) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-
 	h.render(w, "layout.html", "memory.html", data)
 }
 
