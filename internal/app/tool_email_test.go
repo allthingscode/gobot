@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -321,7 +323,7 @@ func TestSearchGmailTool_Execute_EmptyResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got != "No messages found matching the query." {
+	if got != noGmailMessages {
 		t.Errorf("output = %q, want empty-results message", got)
 	}
 }
@@ -428,5 +430,49 @@ func TestReadGmailTool_Execute_GetMessageFailure(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q missing %q", err.Error(), want)
 		}
+	}
+}
+
+func TestSearchGmailToolLimitNormalization(t *testing.T) {
+	t.Parallel()
+	upper := math.Ldexp(1, strconv.IntSize-1)
+	for _, tt := range []struct {
+		name  string
+		value any
+		want  int
+	}{
+		{"omitted", nil, 5}, {"zero", float64(0), 5}, {"negative", float64(-1), 5}, {"fraction", 1.5, 5}, {"string", "7", 5}, {"int", 7, 5}, {"nan", math.NaN(), 5}, {"infinity", math.Inf(1), 5}, {"negative infinity", math.Inf(-1), 5}, {"upper boundary", upper, 5}, {"out of range", upper * 2, 5}, {"seven", float64(7), 7}, {"large", float64(501), 501}, {"largest float below bound", math.Nextafter(upper, 0), int(math.Nextafter(upper, 0))},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeGmailService{}
+			tool := newSearchGmailTool("", nil)
+			tool.serviceFactory = fakeGmailServiceFactory(t, fake)
+			args := map[string]any{"query": "is:unread"}
+			if tt.value != nil {
+				args["max_results"] = tt.value
+			}
+			got, err := tool.Execute(context.Background(), "", "", args)
+			_, limit := fake.observedSearch()
+			if err != nil || limit != tt.want || got != noGmailMessages {
+				t.Fatalf("cap=%d want=%d output=%q err=%v", limit, tt.want, got, err)
+			}
+		})
+	}
+}
+
+func TestSearchGmailToolFailureHasNoSuccessOutput(t *testing.T) {
+	t.Parallel()
+	for _, failure := range []error{errors.New("later page failed"), context.Canceled, context.DeadlineExceeded} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeGmailService{searchErr: failure}
+			tool := newSearchGmailTool("", nil)
+			tool.serviceFactory = fakeGmailServiceFactory(t, fake)
+			got, err := tool.Execute(context.Background(), "", "", map[string]any{"query": "q"})
+			if got != "" || !errors.Is(err, failure) || fake.observedMessageID() != "" {
+				t.Fatalf("output=%q err=%v detail=%q", got, err, fake.observedMessageID())
+			}
+		})
 	}
 }

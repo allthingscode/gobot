@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -361,6 +365,194 @@ func TestExtractBodyFromParts(t *testing.T) {
 			got := (&Message{Payload: tt.payload}).ExtractBody()
 			if !strings.Contains(got, tt.wantBody) {
 				t.Errorf("got %q, want %q", got, tt.wantBody)
+			}
+		})
+	}
+}
+
+type gmailPageTransport func(*http.Request) (*http.Response, error)
+
+func (f gmailPageTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type gmailPageBody struct {
+	io.Reader
+	closed *bool
+}
+
+func (b gmailPageBody) Close() error { *b.closed = true; return nil }
+
+//nolint:gocognit,cyclop // Table fixtures assert the complete request/response contract.
+func TestSearchMessagesPagination(t *testing.T) {
+	t.Parallel()
+	fullPage := `{"messages":[` + strings.TrimSuffix(strings.Repeat(`{"id":"bulk"},`, 500), ",") + `],"nextPageToken":"last"}`
+	bulkIDs := make([]string, 500, 501)
+	for i := range bulkIDs {
+		bulkIDs[i] = "bulk"
+	}
+	tests := []struct {
+		name    string
+		cap     int
+		pages   []string
+		tokens  []string
+		counts  []string
+		ids     []string
+		wantErr string
+	}{
+		{"empty and short", 5, []string{`{"nextPageToken":"a +/&?="}`, `{"messages":[{"id":"1"}],"nextPageToken":"b"}`, `{"messages":[{"id":"2"}]}`}, []string{"", "a +/&?=", "b"}, []string{"5", "5", "4"}, []string{"1", "2"}, ""},
+		{"cap", 2, []string{`{"messages":[{"id":"1"}],"nextPageToken":"a"}`, `{"messages":[{"id":"2"}],"nextPageToken":"unused"}`}, []string{"", "a"}, []string{"2", "1"}, []string{"1", "2"}, ""},
+		{"oversized", 1, []string{`{"messages":[{"id":"1"},{"id":"2"}],"nextPageToken":"unused"}`}, []string{""}, []string{"1"}, []string{"1"}, ""},
+		{"full API page", 501, []string{fullPage, `{"messages":[{"id":"last"}],"nextPageToken":"unused"}`}, []string{"", "last"}, []string{"500", "1"}, append(bulkIDs, "last"), ""},
+		{"large cap", 501, []string{`{"messages":[{"id":"1"}],"nextPageToken":"a"}`, `{}`}, []string{"", "a"}, []string{"500", "500"}, []string{"1"}, ""},
+		{"zero default", 0, []string{`{}`}, []string{""}, []string{"5"}, nil, ""},
+		{"negative default", -1, []string{`{}`}, []string{""}, []string{"5"}, nil, ""},
+		{"repeat", 5, []string{`{"nextPageToken":"a"}`, `{"nextPageToken":"a"}`}, []string{"", "a"}, []string{"5", "5"}, nil, "repeated"},
+		{"alternating", 5, []string{`{"nextPageToken":"a"}`, `{"nextPageToken":"b"}`, `{"nextPageToken":"a"}`}, []string{"", "a", "b"}, []string{"5", "5", "5"}, nil, "repeated"},
+		{"prefix cycle", 5, []string{`{"nextPageToken":"prefix"}`, `{"nextPageToken":"a"}`, `{"nextPageToken":"b"}`, `{"nextPageToken":"a"}`}, []string{"", "prefix", "a", "b"}, []string{"5", "5", "5", "5"}, nil, "repeated"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			closed := true
+			svc := &Service{baseURL: "https://example.test", httpClient: &http.Client{Transport: gmailPageTransport(func(r *http.Request) (*http.Response, error) {
+				if !closed {
+					t.Error("previous response still open")
+				}
+				closed = false
+				i := calls
+				calls++
+				if i >= len(tt.pages) {
+					return nil, fmt.Errorf("unexpected request")
+				}
+				q := r.URL.Query()
+				if q.Get("q") != "from:a+b subject:hello &?=" || q.Get("pageToken") != tt.tokens[i] || q.Get("maxResults") != tt.counts[i] {
+					t.Errorf("unexpected query: %v", q)
+				}
+				if i == 0 && q.Has("pageToken") {
+					t.Error("initial pageToken present")
+				}
+				return &http.Response{StatusCode: 200, Body: gmailPageBody{strings.NewReader(tt.pages[i]), &closed}, Header: make(http.Header)}, nil
+			})}}
+			got, err := svc.SearchMessages(context.Background(), "from:a+b subject:hello &?=", tt.cap)
+			if calls != len(tt.pages) || !closed {
+				t.Errorf("calls=%d closed=%v", calls, closed)
+			}
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || got != nil {
+					t.Fatalf("got %v, %v", got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, m := range got {
+				ids = append(ids, m.ID)
+			}
+			if !reflect.DeepEqual(ids, tt.ids) {
+				t.Errorf("ids=%v want=%v", ids, tt.ids)
+			}
+		})
+	}
+}
+
+//nolint:gocognit,cyclop // Fault-injection table keeps request state and failure assertions together.
+func TestSearchMessagesLaterFailures(t *testing.T) {
+	t.Parallel()
+	const deadlineCase = "deadline"
+	const distinctCase = "distinct cancellation"
+	for _, kind := range []string{"http", "decode", "cancel", deadlineCase, distinctCase, "retry fresh state"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			closed := true
+			svc := &Service{baseURL: "https://example.test", httpClient: &http.Client{Transport: gmailPageTransport(func(r *http.Request) (*http.Response, error) {
+				if !closed {
+					t.Error("previous body open")
+				}
+				closed = false
+				calls++
+				body := `{"messages":[{"id":"first"}],"nextPageToken":"a"}`
+				status := 200
+				if calls > 1 {
+					switch kind {
+					case "http":
+						status = 400
+						body = "bad request"
+					case "decode":
+						body = `{"messages":false}`
+					case "cancel":
+						closed = true
+						cancel()
+						return nil, ctx.Err()
+					case deadlineCase:
+						closed = true
+						return nil, context.DeadlineExceeded
+					case distinctCase:
+						body = fmt.Sprintf(`{"nextPageToken":"token%d"}`, calls)
+						if calls == 4 {
+							cancel()
+						}
+					case "retry fresh state":
+						if calls == 2 {
+							body = `{"messages":[{"id":"stale"}],"nextPageToken":"stale",`
+						} else {
+							body = `{}`
+						}
+					}
+				}
+				return &http.Response{StatusCode: status, Body: gmailPageBody{strings.NewReader(body), &closed}, Header: make(http.Header)}, nil
+			})}}
+			got, err := svc.SearchMessages(ctx, "query", 5)
+			if !closed {
+				t.Error("body left open")
+			}
+			if kind == "retry fresh state" {
+				if err != nil || len(got) != 1 || got[0].ID != "first" || calls != 3 {
+					t.Fatalf("got %v err=%v calls=%d", got, err, calls)
+				}
+				return
+			}
+			if err == nil || got != nil || !strings.Contains(err.Error(), "search messages") {
+				t.Fatalf("got=%v err=%v", got, err)
+			}
+			if (kind == "cancel" || kind == distinctCase) && !errors.Is(err, context.Canceled) {
+				t.Errorf("lost cancellation: %v", err)
+			}
+			if kind == deadlineCase && !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("lost deadline: %v", err)
+			}
+			wantCalls := 2
+			if kind == distinctCase {
+				wantCalls = 4
+			}
+			if kind == deadlineCase {
+				wantCalls = 4
+			}
+			if calls != wantCalls {
+				t.Errorf("calls=%d want=%d", calls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestSearchMessagesErrorPrivacy(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{0, http.StatusBadRequest} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			t.Parallel()
+			svc := &Service{baseURL: "https://example.test", httpClient: &http.Client{Transport: gmailPageTransport(func(r *http.Request) (*http.Response, error) {
+				if status == 0 {
+					return nil, fmt.Errorf("transport unavailable")
+				}
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("private query and token")), Header: make(http.Header)}, nil
+			})}}
+			got, err := svc.SearchMessages(context.Background(), "private query and token", 5)
+			if err == nil || got != nil || strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "pageToken") {
+				t.Fatalf("got=%v err=%v", got, err)
 			}
 		})
 	}
