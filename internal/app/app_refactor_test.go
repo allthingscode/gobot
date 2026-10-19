@@ -107,8 +107,8 @@ func TestCronDispatcher_Dispatch_App(t *testing.T) {
 		Message: "[SYSTEM] INDEX_WORKSPACE",
 	}
 	err := cd.Dispatch(ctx, sysPayload)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "requires vector store, embedder and workspace directory") {
+		t.Errorf("expected indexing prerequisite error, got: %v", err)
 	}
 
 	cfg.Runtime.StorageRoot = t.TempDir()

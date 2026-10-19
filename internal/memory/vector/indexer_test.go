@@ -1,12 +1,14 @@
-package vector_test
+//nolint:testpackage // exercises deterministic private collection reader
+package vector
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/philippgille/chromem-go"
 )
 
@@ -23,14 +25,14 @@ func TestIndexWorkspaceMarkdown(t *testing.T) {
 	wsDir := setupMockWorkspace(t, tempDir)
 
 	dbPath := filepath.Join(tempDir, "vector.db")
-	store, err := vector.NewStore(dbPath)
+	store, err := NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 
 	var embedFunc chromem.EmbeddingFunc = noopEmbedder
 
-	if err := vector.IndexWorkspaceMarkdown(ctx, store, wsDir, embedFunc); err != nil {
+	if err := IndexWorkspaceMarkdown(ctx, store, wsDir, embedFunc); err != nil {
 		t.Fatalf("IndexWorkspaceMarkdown: %v", err)
 	}
 
@@ -61,7 +63,7 @@ func setupMockWorkspace(t *testing.T, tempDir string) string {
 	return wsDir
 }
 
-func verifyIndexedContent(t *testing.T, ctx context.Context, store *vector.Store, embedFunc chromem.EmbeddingFunc) {
+func verifyIndexedContent(t *testing.T, ctx context.Context, store *Store, embedFunc chromem.EmbeddingFunc) {
 	t.Helper()
 	results, err := store.Search(ctx, "workspace_docs", "Readme", 10, nil, embedFunc)
 	if err != nil {
@@ -95,9 +97,88 @@ func TestIndexWorkspaceMarkdown_EmptyDir(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(tempDir, "vector.db")
-	store, _ := vector.NewStore(dbPath)
+	store, _ := NewStore(dbPath)
 
-	if err := vector.IndexWorkspaceMarkdown(ctx, store, wsDir, noopEmbedder); err != nil {
+	if err := IndexWorkspaceMarkdown(ctx, store, wsDir, noopEmbedder); err != nil {
 		t.Errorf("expected no error for empty dir, got %v", err)
+	}
+}
+
+func TestMarkdownCollectionReadFailure(t *testing.T) {
+	t.Parallel()
+	root := setupMockWorkspace(t, t.TempDir())
+	docs, err := collectMarkdownDocsWithReader(root, func(path string) ([]byte, error) {
+		if filepath.Base(path) == "setup.md" {
+			return nil, os.ErrNotExist
+		}
+		return os.ReadFile(path)
+	})
+	if docs != nil || !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "setup.md") {
+		t.Fatalf("docs=%v err=%v", docs, err)
+	}
+	_, err = processMarkdownFile(filepath.Join(root, "gone.md"), root, os.ReadFile)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lost read error: %v", err)
+	}
+}
+
+func TestIndexWorkspaceFailures(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"missing", "embedding", "save"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			fixture := setupIndexFailure(t, kind)
+			err := IndexWorkspaceMarkdown(context.Background(), fixture.store, fixture.root, fixture.embed)
+			if err == nil || !strings.Contains(err.Error(), fixture.want) {
+				t.Fatalf("want %s: %v", fixture.want, err)
+			}
+			if kind == "embedding" && !errors.Is(err, fixture.cause) {
+				t.Fatalf("lost cause: %v", err)
+			}
+			assertCollectionNotSaved(t, kind, fixture.dbPath)
+		})
+	}
+}
+
+type indexFailureFixture struct {
+	root, dbPath, want string
+	store              *Store
+	embed              chromem.EmbeddingFunc
+	cause              error
+}
+
+func setupIndexFailure(t *testing.T, kind string) indexFailureFixture {
+	t.Helper()
+	root := setupMockWorkspace(t, t.TempDir())
+	dbPath := filepath.Join(t.TempDir(), "vectors.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	embed := chromem.EmbeddingFunc(noopEmbedder)
+	cause := errors.New("offline embedding failure")
+	want := "walk workspace"
+	switch kind {
+	case "missing":
+		root = filepath.Join(root, "missing")
+	case "embedding":
+		want = "add documents"
+		embed = func(context.Context, string) ([]float32, error) { return nil, cause }
+	case "save":
+		want = "save vector db"
+		if err := os.Mkdir(dbPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return indexFailureFixture{root: root, dbPath: dbPath, store: store, embed: embed, cause: cause, want: want}
+}
+
+func assertCollectionNotSaved(t *testing.T, kind, dbPath string) {
+	t.Helper()
+	if kind != "missing" {
+		return
+	}
+	if _, err := os.Stat(dbPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("collection failure saved database: %v", err)
 	}
 }

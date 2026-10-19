@@ -20,7 +20,8 @@ func (h *DispatchHandler) MaybeHandleAdminCommand(sessionKey, text string) (stri
 }
 
 func (cd *CronDispatcher) HandleSystemJob(ctx context.Context, p cron.Payload) bool {
-	return cd.handleSystemJob(ctx, p)
+	handled, _ := cd.handleSystemJob(ctx, p)
+	return handled
 }
 
 func (cd *CronDispatcher) SendSpecialistResponse(ctx context.Context, p cron.Payload, channel, to, reply string) error {

@@ -318,27 +318,126 @@ func TestRebuild_NonexistentDir(t *testing.T) {
 func TestMemoryStore_Rebuild_Limit(t *testing.T) {
 	t.Parallel()
 	store := newTestStore(t)
-
-	sessionDir := t.TempDir()
-
-	// Create maxRebuildFiles + 100 mock files
-	for i := 0; i < maxRebuildFiles+100; i++ {
-		name := filepath.Join(sessionDir, fmt.Sprintf("session-%d.md", i))
-		if err := writeFile(name, "Summary: mock"); err != nil {
-			t.Fatalf("setup: %v", err)
-		}
+	root := t.TempDir()
+	setupRebuildLimit(t, root)
+	n, err := store.Rebuild(root)
+	if n != maxRebuildFiles || err != nil {
+		t.Fatalf("exact cap: count=%d err=%v", n, err)
 	}
-
-	n, err := store.Rebuild(sessionDir)
-	if err != nil {
-		t.Fatalf("Rebuild: %v", err)
+	if err := writeFile(filepath.Join(root, "z-extra.md"), "extra"); err != nil {
+		t.Fatal(err)
 	}
-	if n != maxRebuildFiles {
-		t.Errorf("Rebuild indexed %d files, want %d", n, maxRebuildFiles)
+	n, err = store.Rebuild(root)
+	if n != maxRebuildFiles || err == nil || !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("over cap: count=%d err=%v", n, err)
 	}
 }
 
-// ── sanitizeFTSQuery ───────────────────────────────────────────────────────────
+func TestRebuildTruncationPreservesEarlierFailure(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	root := t.TempDir()
+	setupRebuildLimit(t, root)
+	for _, name := range []string{"a-failed.md", "z-extra.md"} {
+		if err := writeFile(filepath.Join(root, name), "summary"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := store.rebuildWithReader(root, func(path string) ([]byte, error) {
+		if filepath.Base(path) == "a-failed.md" {
+			return nil, os.ErrNotExist
+		}
+		return os.ReadFile(path)
+	})
+	if n != maxRebuildFiles || !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "truncated") || !strings.Contains(err.Error(), "skipped 1") {
+		t.Fatalf("lost partial/truncation status: count=%d err=%v", n, err)
+	}
+}
+
+func TestRebuildBoundsFailureDetails(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	root := t.TempDir()
+	for i := 0; i < 20; i++ {
+		if err := writeFile(filepath.Join(root, fmt.Sprintf("%02d.md", i)), "summary"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := store.rebuildWithReader(root, func(string) ([]byte, error) { return nil, os.ErrPermission })
+	if n != 0 || !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), "skipped 20") || strings.Count(err.Error(), os.ErrPermission.Error()) != 10 {
+		t.Fatalf("unbounded or missing error details: count=%d err=%v", n, err)
+	}
+}
+
+func setupRebuildLimit(t *testing.T, root string) {
+	t.Helper()
+	for i := 0; i < maxRebuildFiles; i++ {
+		if err := writeFile(filepath.Join(root, fmt.Sprintf("session-%05d.md", i)), "Summary: mock"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writeFile(filepath.Join(root, "z.txt"), "irrelevant"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "z-dir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebuildFailures(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"closed", "missing", "read", "index"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			store, root, reader, wantCount := setupRebuildFailure(t, kind)
+			n, err := store.rebuildWithReader(root, reader)
+			if n != wantCount || err == nil || !strings.Contains(err.Error(), root) {
+				t.Fatalf("count=%d want=%d err=%v", n, wantCount, err)
+			}
+			if (kind == "read" || kind == "missing") && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("lost cause: %v", err)
+			}
+		})
+	}
+}
+
+func setupRebuildFailure(t *testing.T, kind string) (store *MemoryStore, root string, reader func(string) ([]byte, error), wantCount int) {
+	t.Helper()
+	store = newTestStore(t)
+	root = t.TempDir()
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := writeFile(filepath.Join(root, name), "summary"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader = os.ReadFile
+	wantCount = 0
+	switch kind {
+	case "closed":
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	case "missing":
+		root = filepath.Join(root, "missing")
+	case "read":
+		wantCount = 1
+		reader = func(path string) ([]byte, error) {
+			if filepath.Base(path) == "a.md" {
+				return nil, os.ErrNotExist
+			}
+			return os.ReadFile(path)
+		}
+	case "index":
+		wantCount = 1
+		reader = func(path string) ([]byte, error) {
+			if filepath.Base(path) == "b.md" {
+				_ = store.Close()
+			}
+			return os.ReadFile(path)
+		}
+	}
+	return store, root, reader, wantCount
+}
 
 func TestSanitizeFTSQuery(t *testing.T) {
 	t.Parallel()

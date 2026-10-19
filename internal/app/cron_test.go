@@ -4,7 +4,9 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"github.com/allthingscode/gobot/internal/memory/vector"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -677,4 +679,65 @@ func TestShouldRetryMorningBriefingAfterError(t *testing.T) {
 			}
 		})
 	}
+}
+
+type indexingEmbedder struct{ err error }
+
+func (e indexingEmbedder) Embed(context.Context, string) ([]float32, error) {
+	return []float32{1, 0}, e.err
+}
+
+func TestDispatchIndexWorkspace(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{deliverySuccess, "missing", "embedding", "save", "no store", "no embedder", "no workspace"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			cd, cause := setupDispatchIndex(t, kind)
+			var err error
+			// Specialist routing would fail on nil dependencies if system dispatch fell through.
+			err = cd.Dispatch(context.Background(), cron.Payload{Message: "[SYSTEM] INDEX_WORKSPACE", Agent: "must-not-run"})
+			if (err != nil) != (kind != deliverySuccess) {
+				t.Fatalf("unexpected dispatch error: %v", err)
+			}
+			if kind == "embedding" && !errors.Is(err, cause) {
+				t.Fatalf("lost cause: %v", err)
+			}
+			handled, err := cd.handleSystemJob(context.Background(), cron.Payload{Message: "ordinary"})
+			if handled || err != nil {
+				t.Fatalf("ordinary message handled=%v err=%v", handled, err)
+			}
+		})
+	}
+}
+
+func setupDispatchIndex(t *testing.T, kind string) (*CronDispatcher, error) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "doc.md"), []byte("document"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "vectors.db")
+	store, err := vector.NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("offline embed failure")
+	cd := &CronDispatcher{vecStore: store, embedProv: indexingEmbedder{}, workspaceDir: root}
+	switch kind {
+	case "missing":
+		cd.workspaceDir = filepath.Join(root, "missing")
+	case "embedding":
+		cd.embedProv = indexingEmbedder{err: cause}
+	case "save":
+		if err := os.Mkdir(dbPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	case "no store":
+		cd.vecStore = nil
+	case "no embedder":
+		cd.embedProv = nil
+	case "no workspace":
+		cd.workspaceDir = ""
+	}
+	return cd, cause
 }
