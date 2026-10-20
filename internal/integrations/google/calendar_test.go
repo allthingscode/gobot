@@ -291,8 +291,12 @@ func TestListUpcomingEventsWithClient_PartialFailure(t *testing.T) {
 	client := redirectClient(calendarBaseURL, srv.URL)
 
 	events, err := listUpcomingEventsWithClient(context.Background(), dir, 10, client)
-	if err != nil {
-		t.Fatalf("expected nil error on partial failure, got: %v", err)
+	var incomplete *CalendarIncompleteError
+	if !errors.As(err, &incomplete) {
+		t.Fatalf("expected *CalendarIncompleteError on partial failure, got: %v", err)
+	}
+	if len(incomplete.Failed) != 1 || incomplete.Failed[0] != "Fail" || !strings.Contains(err.Error(), "500") {
+		t.Errorf("incomplete error = %+v (%v), want Failed [Fail] with the 500 cause", incomplete, err)
 	}
 	if len(events) != 1 {
 		t.Errorf("got %d events, want 1 (from the ok calendar)", len(events))
@@ -690,17 +694,21 @@ func TestCalendarLaterPageFailures(t *testing.T) {
 				if failedCalls != 2 {
 					t.Errorf("failed calls %d", failedCalls)
 				}
-				if endpoint == "list" {
+				switch {
+				case endpoint == "list":
 					if err == nil || !strings.Contains(err.Error(), "calendar list") || events != nil {
 						t.Fatalf("events %+v err %v", events, err)
 					}
-				} else {
-					want := 2
-					if failure == calendarTestCancel {
-						want = 1
+				case failure == calendarTestCancel:
+					// Events gathered before cancellation must not be presented as a result.
+					var incomplete *CalendarIncompleteError
+					if !errors.Is(err, context.Canceled) || errors.As(err, &incomplete) || events != nil {
+						t.Fatalf("events %+v err %v, want nil events and cancellation", events, err)
 					}
-					if err != nil || len(events) != want {
-						t.Fatalf("events %+v err %v", events, err)
+				default:
+					var incomplete *CalendarIncompleteError
+					if !errors.As(err, &incomplete) || len(incomplete.Failed) != 1 || incomplete.Failed[0] != "broken" || len(events) != 2 {
+						t.Fatalf("events %+v err %v, want 2 healthy events and broken reported", events, err)
 					}
 					for _, ev := range events {
 						if ev.ID != "healthy" {
@@ -788,5 +796,139 @@ func TestCalendarRepeatedContinuationToken(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// calendarFaultTransport simulates a per-request client timeout while the caller's ctx stays live.
+type calendarFaultTransport struct{ next http.RoundTripper }
+
+func (f calendarFaultTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.Contains(r.URL.Path, "/timeout") {
+		return nil, fmt.Errorf("client timeout: %w", context.DeadlineExceeded)
+	}
+	return f.next.RoundTrip(r)
+}
+
+// completenessServer serves one calendar per behavior; calendar i is named behavior+i
+// and its single event starts later for lower i, so merge order must be restored by sorting.
+func completenessServer(t *testing.T, behaviors []string, cancel context.CancelFunc) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == calendarListTestPath {
+			items := make([]calendarListEntry, len(behaviors))
+			for i, b := range behaviors {
+				items[i] = calendarListEntry{ID: fmt.Sprintf("%s%d", b, i), Summary: fmt.Sprintf("%s%d", b, i)}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+			return
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/calendars/"), "/events")
+		behavior := strings.TrimRight(id, "0123456789")
+		var n int
+		_, _ = fmt.Sscan(id[len(behavior):], &n)
+		items := []map[string]any{{"id": "ev-" + id, "start": map[string]string{"date": fmt.Sprintf("2026-04-%02d", 20-n)}}}
+		switch behavior {
+		case "ok":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		case "blank":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
+		case "fail":
+			http.Error(w, "backend failure", http.StatusInternalServerError)
+		case "repeat":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "nextPageToken": "A"})
+		case "abort":
+			cancel()
+			<-r.Context().Done()
+		case "okabort":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+			cancel()
+		default:
+			t.Errorf("unexpected request for %s", id)
+			http.Error(w, "unexpected", http.StatusTeapot)
+		}
+	}))
+}
+
+//nolint:gocognit,cyclop // One matrix keeps the whole completeness contract side by side.
+func TestCalendarCompleteness(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		behaviors  []string
+		max        int
+		expired    bool
+		wantIDs    []string
+		wantCause  error    // errors.Is target for a non-partial error
+		wantFailed []string // non-nil: want *CalendarIncompleteError naming these calendars
+		wantAll    bool     // want the all-calendars-failed error
+	}{
+		{name: "all healthy", behaviors: []string{"ok", "ok"}, wantIDs: []string{"ev-ok1", "ev-ok0"}},
+		{name: "healthy empty", behaviors: []string{"blank", "blank"}},
+		{name: "no calendars", behaviors: nil},
+		{name: "mixed success", behaviors: []string{"ok", "fail", "ok"}, wantIDs: []string{"ev-ok2", "ev-ok0"}, wantFailed: []string{"fail1"}},
+		{name: "mixed success capped", behaviors: []string{"ok", "fail", "ok"}, max: 1, wantIDs: []string{"ev-ok2"}, wantFailed: []string{"fail1"}},
+		{name: "partial with no healthy events", behaviors: []string{"blank", "fail"}, wantFailed: []string{"fail1"}},
+		{name: "repeated token counts as failure", behaviors: []string{"repeat", "ok"}, wantIDs: []string{"ev-ok1"}, wantFailed: []string{"repeat0"}, wantCause: errCalendarRepeatedPageToken},
+		{name: "client timeout is a calendar failure", behaviors: []string{"timeout", "ok"}, wantIDs: []string{"ev-ok1"}, wantFailed: []string{"timeout0"}, wantCause: context.DeadlineExceeded},
+		{name: "all calendars failed", behaviors: []string{"fail", "fail"}, wantAll: true},
+		{name: "all failed mixed causes", behaviors: []string{"fail", "repeat"}, wantAll: true},
+		{name: "canceled mid fetch drops gathered events", behaviors: []string{"ok", "abort", "never"}, wantCause: context.Canceled},
+		{name: "canceled after last fetch", behaviors: []string{"ok", "okabort"}, wantCause: context.Canceled},
+		{name: "deadline before start", behaviors: []string{"never"}, expired: true, wantCause: context.DeadlineExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.expired {
+				var stop context.CancelFunc
+				ctx, stop = context.WithDeadline(ctx, time.Unix(0, 0))
+				defer stop()
+			}
+			srv := completenessServer(t, tc.behaviors, cancel)
+			defer srv.Close()
+			client := &http.Client{Transport: calendarFaultTransport{next: redirectClient(calendarBaseURL, srv.URL).Transport}}
+			limit := tc.max
+			if limit == 0 {
+				limit = 10
+			}
+			events, err := listUpcomingEventsWithClient(ctx, setupTestToken(t), limit, client)
+
+			var incomplete *CalendarIncompleteError
+			isPartial := errors.As(err, &incomplete)
+			switch {
+			case tc.wantFailed != nil:
+				if !isPartial || fmt.Sprint(incomplete.Failed) != fmt.Sprint(tc.wantFailed) {
+					t.Fatalf("err %v, want incomplete for %v", err, tc.wantFailed)
+				}
+				if tc.wantCause != nil && !errors.Is(err, tc.wantCause) {
+					t.Errorf("err %v lost cause %v", err, tc.wantCause)
+				}
+			case tc.wantAll:
+				if err == nil || isPartial || !strings.Contains(err.Error(), "all 2 calendars failed") {
+					t.Fatalf("err %v, want all-failed error", err)
+				}
+			case tc.wantCause != nil:
+				if !errors.Is(err, tc.wantCause) || isPartial {
+					t.Fatalf("err %v, want %v", err, tc.wantCause)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+			if (tc.wantAll || (tc.wantFailed == nil && tc.wantCause != nil)) && events != nil {
+				t.Errorf("failed result returned events %+v", events)
+			}
+			if len(events) != len(tc.wantIDs) {
+				t.Fatalf("events %+v, want %v", events, tc.wantIDs)
+			}
+			for i, id := range tc.wantIDs {
+				if events[i].ID != id {
+					t.Errorf("event %d = %q, want %q", i, events[i].ID, id)
+				}
+			}
+		})
 	}
 }

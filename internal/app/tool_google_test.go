@@ -2,16 +2,20 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
@@ -382,5 +386,131 @@ func TestGoogleSearchRunnerCancellation(t *testing.T) {
 				t.Fatalf("cancellation became tool result: result=%q err=%v calls=%d", result, err, len(prov.requests))
 			}
 		})
+	}
+}
+
+type calendarFixtureTransport func(*http.Request) (*http.Response, error)
+
+func (f calendarFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// installCalendarFixture swaps google.TimeoutClient for an offline Calendar API
+// with one calendar per behavior (named behavior+index) and returns a secrets
+// root holding a synthetic token. Callers must not run in parallel.
+func installCalendarFixture(t *testing.T, behaviors []string, cancel context.CancelFunc) string {
+	t.Helper()
+	dir := t.TempDir()
+	tok, err := json.Marshal(map[string]any{"token": "synthetic", "expiry": time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(google.GoogleTokenPath(dir), tok, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := google.TimeoutClient
+	google.TimeoutClient = &http.Client{Transport: calendarFixtureTransport(func(r *http.Request) (*http.Response, error) {
+		return calendarFixtureResponse(r, behaviors, cancel)
+	})}
+	t.Cleanup(func() { google.TimeoutClient = old })
+	return dir
+}
+
+func calendarFixtureResponse(r *http.Request, behaviors []string, cancel context.CancelFunc) (*http.Response, error) {
+	reply := func(code int, body any) (*http.Response, error) {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: code, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header), Request: r}, nil
+	}
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/calendar/v3/") {
+		return reply(http.StatusOK, map[string]any{"items": []any{}})
+	}
+	if strings.HasSuffix(path, "/calendarList") {
+		items := make([]map[string]string, len(behaviors))
+		for i, b := range behaviors {
+			name := fmt.Sprintf("%s%d", b, i)
+			items[i] = map[string]string{"id": name, "summary": name}
+		}
+		return reply(http.StatusOK, map[string]any{"items": items})
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(path, "/calendar/v3/calendars/"), "/events")
+	switch strings.TrimRight(id, "0123456789") {
+	case "ok":
+		item := map[string]any{"id": id, "summary": "Event-" + id, "start": map[string]string{"dateTime": "2026-04-01T10:00:00Z"}}
+		return reply(http.StatusOK, map[string]any{"items": []any{item}})
+	case "blank":
+		return reply(http.StatusOK, map[string]any{"items": []any{}})
+	case "abort":
+		cancel()
+		return nil, r.Context().Err()
+	default:
+		return reply(http.StatusInternalServerError, map[string]any{"error": map[string]string{"message": "backend failure"}})
+	}
+}
+
+// assertCalendarText checks a rendered schedule against required and forbidden fragments.
+func assertCalendarText(t *testing.T, got, exact string, want, reject []string) {
+	t.Helper()
+	if exact != "" && got != exact {
+		t.Fatalf("got %q, want %q", got, exact)
+	}
+	for _, s := range want {
+		if !strings.Contains(got, s) {
+			t.Errorf("output %q missing %q", got, s)
+		}
+	}
+	for _, s := range reject {
+		if strings.Contains(got, s) {
+			t.Errorf("output %q must not contain %q", got, s)
+		}
+	}
+}
+
+//nolint:paralleltest,gocognit,cyclop // swaps google.TimeoutClient; matrix checks both tracing paths against every completeness outcome.
+func TestListCalendarToolCompleteness(t *testing.T) {
+	const complete = "No upcoming calendar events found."
+	cases := []struct {
+		name      string
+		behaviors []string
+		want      []string
+		reject    []string
+		exact     string
+		wantErr   string
+		wantCause error
+	}{
+		{name: "healthy", behaviors: []string{"ok", "ok"}, want: []string{"Event-ok0", "Event-ok1"}, reject: []string{"WARNING", complete}},
+		{name: "healthy empty", behaviors: []string{"blank", "blank"}, exact: complete},
+		{name: "mixed success", behaviors: []string{"ok", "fail"}, want: []string{"Event-ok0", "WARNING: incomplete schedule", "fail1", "not the complete schedule"}, reject: []string{complete}},
+		{name: "partial with no healthy events", behaviors: []string{"blank", "fail"}, want: []string{"calendars that loaded", "WARNING: incomplete schedule", "fail1"}, reject: []string{complete}},
+		{name: "all calendars failed", behaviors: []string{"fail", "fail"}, wantErr: "all 2 calendars failed"},
+		{name: "canceled", behaviors: []string{"ok", "abort", "ok"}, wantErr: "list_calendar_events:", wantCause: context.Canceled},
+	}
+	for _, traced := range []bool{false, true} {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("traced=%v/%s", traced, tc.name), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				dir := installCalendarFixture(t, tc.behaviors, cancel)
+				var tracer *observability.DispatchTracer
+				if traced {
+					tracer = observability.NewDispatchTracer(nil)
+				}
+				got, err := newListCalendarTool(dir, tracer).Execute(ctx, "", "", map[string]any{})
+				if tc.wantErr == "" {
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					assertCalendarText(t, got, tc.exact, tc.want, tc.reject)
+					return
+				}
+				if err == nil || got != "" || !strings.Contains(err.Error(), "list_calendar_events:") || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("got %q err %v, want error containing %q", got, err, tc.wantErr)
+				}
+				if tc.wantCause != nil && !errors.Is(err, tc.wantCause) {
+					t.Fatalf("err %v lost cause %v", err, tc.wantCause)
+				}
+			})
+		}
 	}
 }

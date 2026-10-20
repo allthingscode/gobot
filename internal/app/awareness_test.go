@@ -3,6 +3,9 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 )
 
 func TestBuildAwarenessContent(t *testing.T) {
@@ -222,5 +226,62 @@ func TestLoadScheduleContext(t *testing.T) {
 	got := loadScheduleContext("")
 	if got != "" {
 		t.Errorf("expected empty context for empty secrets root, got %q", got)
+	}
+}
+
+//nolint:paralleltest // swaps google.TimeoutClient
+func TestLoadScheduleContextCalendarCompleteness(t *testing.T) {
+	cases := []struct {
+		name      string
+		behaviors []string
+		want      []string
+		reject    []string
+	}{
+		{name: "healthy", behaviors: []string{"ok"}, want: []string{"TODAY'S CONTEXT", "Event-ok0"}, reject: []string{"WARNING", "Calendar unavailable"}},
+		{name: "mixed success keeps events with warning", behaviors: []string{"ok", "fail"}, want: []string{"Event-ok0", "WARNING: incomplete schedule", "fail1"}, reject: []string{"Calendar unavailable"}},
+		{name: "all calendars failed", behaviors: []string{"fail", "fail"}, want: []string{"TODAY'S CONTEXT", "Calendar unavailable"}, reject: []string{"WARNING"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := installCalendarFixture(t, tc.behaviors, func() {})
+			assertCalendarText(t, loadScheduleContext(dir), "", tc.want, tc.reject)
+		})
+	}
+
+	t.Run("healthy empty injects nothing", func(t *testing.T) {
+		if got := loadScheduleContext(installCalendarFixture(t, []string{"blank"}, func() {})); got != "" {
+			t.Fatalf("schedule %q, want empty for a healthy empty calendar and no tasks", got)
+		}
+	})
+}
+
+func TestCalendarScheduleSection(t *testing.T) {
+	t.Parallel()
+	events := []google.CalendarEvent{{Summary: "Standup", Start: "2026-04-01T10:00:00Z"}}
+	partial := &google.CalendarIncompleteError{Failed: []string{"Family"}, Err: errors.New("google API 500")}
+	cases := []struct {
+		name   string
+		events []google.CalendarEvent
+		err    error
+		want   []string
+		empty  bool
+	}{
+		{name: "complete", events: events, want: []string{"Standup"}},
+		{name: "complete empty", empty: true},
+		{name: "partial", events: events, err: fmt.Errorf("wrapped: %w", partial), want: []string{"Standup", "WARNING: incomplete schedule", "Family"}},
+		{name: "partial empty", err: partial, want: []string{"calendars that loaded", "Family"}},
+		{name: "failed", err: errors.New("calendar events: all 2 calendars failed"), want: []string{"Calendar unavailable"}},
+		{name: "canceled", err: fmt.Errorf("calendar events: %w", context.Canceled), want: []string{"Calendar unavailable"}},
+		{name: "deadline", err: fmt.Errorf("calendar events: %w", context.DeadlineExceeded), want: []string{"Calendar unavailable"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := calendarScheduleSection(tc.events, tc.err)
+			if tc.empty != (got == "") {
+				t.Fatalf("section %q, want empty=%v", got, tc.empty)
+			}
+			assertCalendarText(t, got, "", tc.want, nil)
+		})
 	}
 }
