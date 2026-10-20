@@ -476,3 +476,70 @@ func TestSearchGmailToolFailureHasNoSuccessOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestReadGmailBodyOutcomes(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ name, payload, body, kind string }{
+		{"padded", `{"mimeType":"text/plain","body":{"data":"aGk="}}`, "hi", ""},
+		{"raw", `{"mimeType":"text/plain","body":{"data":"aGk"}}`, "hi", ""},
+		{"nested", `{"mimeType":"multipart/related","parts":[{"mimeType":"text/plain","body":{"data":"aGk"}}]}`, "hi", ""},
+		{"empty", `{"mimeType":"text/plain","body":{}}`, "(empty body)", ""},
+		{"corrupt", `{"body":{"data":"aGVsbG8=!!!!"}}`, "", "decode"},
+		{"unavailable", `{"mimeType":"text/html","body":{"data":"aGk="}}`, "", "unavailable"},
+		{"missing body", `{}`, "", "unavailable"},
+		{"attachment", `{"mimeType":"text/plain","body":{"attachmentId":"private-id"}}`, "", "unavailable"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assertReadGmailBody(t, tt.payload, tt.body, tt.kind)
+		})
+	}
+}
+
+func TestReadGmailAuthFailure(t *testing.T) {
+	t.Parallel()
+	tool := newReadGmailTool("", nil)
+	tool.serviceFactory = func(context.Context, string) (gmailService, error) { return nil, google.ErrNeedsReauth }
+	got, err := tool.Execute(context.Background(), "", "", map[string]any{"message_id": "id"})
+	if got != "" || !errors.Is(err, google.ErrNeedsReauth) || err.Error() != "read_gmail: auth: "+google.ErrNeedsReauth.Error() {
+		t.Fatalf("output=%q error=%v", got, err)
+	}
+}
+
+func assertReadGmailBody(t *testing.T, payloadJSON, body, kind string) {
+	t.Helper()
+
+	msg := gmailTestMessage("id", "from", "to", "date", "subject", "", "")
+	var payload google.Payload
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.Headers = msg.Payload.Headers
+	msg.Payload = &payload
+	tool := newReadGmailTool("", nil)
+	tool.serviceFactory = fakeGmailServiceFactory(t, &fakeGmailService{messages: map[string]*google.Message{"id": msg}})
+	got, err := tool.Execute(context.Background(), "", "", map[string]any{"message_id": "id"})
+	if kind != "" {
+		assertReadGmailBodyError(t, got, err, kind)
+		return
+	}
+	want := "### Email Details (ID: id)\n\n**From**: from\n**To**: to\n**Date**: date\n**Subject**: subject\n\n---\n\n" + body + "\n\n---"
+	if err != nil || got != want {
+		t.Fatalf("got %q, %v; want %q", got, err, want)
+	}
+}
+
+func assertReadGmailBodyError(t *testing.T, got string, err error, kind string) {
+	t.Helper()
+
+	var corrupt base64.CorruptInputError
+	if got != "" || err == nil || !strings.HasPrefix(err.Error(), "read_gmail: body: ") {
+		t.Fatalf("output=%q error=%v", got, err)
+	}
+	if kind == "decode" && !errors.As(err, &corrupt) {
+		t.Fatalf("lost decoder cause: %v", err)
+	}
+	if kind == "unavailable" && !errors.Is(err, google.ErrPlainTextUnavailable) {
+		t.Fatalf("lost unavailable cause: %v", err)
+	}
+}

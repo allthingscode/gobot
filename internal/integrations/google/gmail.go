@@ -52,9 +52,10 @@ type Message struct {
 }
 
 type Payload struct {
-	Headers []Header `json:"headers"`
-	Body    *Body    `json:"body"`
-	Parts   []Part   `json:"parts"`
+	MimeType string   `json:"mimeType"`
+	Headers  []Header `json:"headers"`
+	Body     *Body    `json:"body"`
+	Parts    []Part   `json:"parts"`
 }
 
 type Header struct {
@@ -63,8 +64,9 @@ type Header struct {
 }
 
 type Body struct {
-	Size int    `json:"size"`
-	Data string `json:"data"` // Base64 encoded
+	AttachmentID string `json:"attachmentId"`
+	Size         int    `json:"size"`
+	Data         string `json:"data"` // Base64 encoded
 }
 
 type Part struct {
@@ -285,59 +287,93 @@ func (m *Message) GetHeader(name string) string {
 	return ""
 }
 
-// ExtractBody attempts to find and decode the plain text body of the message.
+// ErrPlainTextUnavailable indicates that no inline plain-text body can be read.
+var ErrPlainTextUnavailable = errors.New("plain-text body unavailable")
+
+// ExtractPlainText returns the first readable nonempty inline plain-text body.
+// Decode errors and unavailable candidates take precedence over empty candidates.
+func (m *Message) ExtractPlainText() (string, error) {
+	if m == nil || m.Payload == nil {
+		return "", fmt.Errorf("extract plain text: %w", ErrPlainTextUnavailable)
+	}
+	result := plainTextResult{}
+	p := m.Payload
+	mediaType := p.MimeType
+	if mediaType == "" {
+		mediaType = plainTextMIME
+		if len(p.Parts) != 0 {
+			mediaType = "multipart/mixed"
+		}
+	}
+	if text, ok := result.visit(mediaType, "", p.Body, p.Parts); ok {
+		return text, nil
+	}
+	if result.decodeErr != nil {
+		return "", result.decodeErr
+	}
+	if result.unavailable || !result.empty {
+		return "", fmt.Errorf("extract plain text: %w", ErrPlainTextUnavailable)
+	}
+	return "", nil
+}
+
+// ExtractBody preserves the string-only interface for existing callers.
 func (m *Message) ExtractBody() string {
-	if m.Payload == nil {
-		return ""
-	}
-	return extractBodyFromParts(m.Payload.Parts, m.Payload.Body)
-}
-
-func extractBodyFromParts(parts []Part, body *Body) string {
-	if b := decodeBody(body); b != "" {
-		return b
-	}
-
-	if b := findPlainTextField(parts); b != "" {
-		return b
-	}
-
-	return findInSubParts(parts)
-}
-
-func decodeBody(body *Body) string {
-	if body == nil || body.Data == "" {
-		return ""
-	}
-	data, err := base64.URLEncoding.DecodeString(body.Data)
+	text, err := m.ExtractPlainText()
 	if err != nil {
 		return ""
 	}
-	return string(data)
+	return text
 }
 
-func findPlainTextField(parts []Part) string {
-	for _, p := range parts {
-		if p.MimeType == "text/plain" {
-			if b := decodeBody(p.Body); b != "" {
-				return b
+const plainTextMIME = "text/plain"
+
+type plainTextResult struct {
+	decodeErr   error
+	unavailable bool
+	empty       bool
+}
+
+func (r *plainTextResult) visit(mediaType, filename string, body *Body, parts []Part) (string, bool) {
+	if filename != "" {
+		return "", false
+	}
+	mediaType, _, err := mime.ParseMediaType(mediaType)
+	if err != nil {
+		return "", false
+	}
+	if strings.HasPrefix(mediaType, "multipart/") {
+		for _, part := range parts {
+			if text, ok := r.visit(part.MimeType, part.Filename, part.Body, part.Parts); ok {
+				return text, true
 			}
 		}
+		return "", false
 	}
-	return ""
+	if mediaType != plainTextMIME || len(parts) != 0 {
+		return "", false
+	}
+	return r.decode(body)
 }
 
-func findInSubParts(parts []Part) string {
-	for _, p := range parts {
-		if isMultipart(p.MimeType) {
-			if b := extractBodyFromParts(p.Parts, p.Body); b != "" {
-				return b
-			}
+func (r *plainTextResult) decode(body *Body) (string, bool) {
+	if body == nil || body.AttachmentID != "" || (body.Data == "" && body.Size != 0) {
+		r.unavailable = true
+		return "", false
+	}
+	data, err := base64.URLEncoding.DecodeString(body.Data)
+	if err != nil && !strings.Contains(body.Data, "=") {
+		data, err = base64.RawURLEncoding.DecodeString(body.Data)
+	}
+	if err != nil {
+		if r.decodeErr == nil {
+			r.decodeErr = fmt.Errorf("decode plain-text body: %w", err)
 		}
+		return "", false
 	}
-	return ""
-}
-
-func isMultipart(mimeType string) bool {
-	return mimeType == "multipart/alternative" || mimeType == "multipart/mixed"
+	if len(data) == 0 {
+		r.empty = true
+		return "", false
+	}
+	return string(data), true
 }

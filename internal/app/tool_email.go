@@ -338,6 +338,14 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[strin
 		return "", fmt.Errorf("read_gmail: %w", err)
 	}
 
+	body, err := msg.ExtractPlainText()
+	if err != nil {
+		return "", fmt.Errorf("read_gmail: body: %w", err)
+	}
+	if body == "" {
+		body = "(empty body)"
+	}
+
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "### Email Details (ID: %s)\n\n", msg.ID)
 	fmt.Fprintf(&sb, "**From**: %s\n", msg.GetHeader("From"))
@@ -345,7 +353,7 @@ func (s *ReadGmailTool) Execute(ctx context.Context, _, _ string, args map[strin
 	fmt.Fprintf(&sb, "**Date**: %s\n", msg.GetHeader("Date"))
 	fmt.Fprintf(&sb, "**Subject**: %s\n\n", msg.GetHeader("Subject"))
 	sb.WriteString("---\n\n")
-	sb.WriteString(msg.ExtractBody())
+	sb.WriteString(body)
 	sb.WriteString("\n\n---")
 
 	return sb.String(), nil

@@ -557,3 +557,85 @@ func TestSearchMessagesErrorPrivacy(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractPlainText(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ name, payload, want, kind string }{
+		{"padded", `{"body":{"data":"aGk="}}`, "hi", ""},
+		{"raw", `{"mimeType":"text/plain","body":{"data":"aGk"}}`, "hi", ""},
+		{"url alphabet padded", `{"body":{"data":"-_8="}}`, "\xfb\xff", ""},
+		{"url alphabet raw", `{"body":{"data":"-_8"}}`, "\xfb\xff", ""},
+		{"empty", `{"mimeType":"text/plain","body":{"size":0}}`, "", ""},
+		{"nil payload", `null`, "", "unavailable"},
+		{"missing body", `{}`, "", "unavailable"},
+		{"missing data", `{"body":{"size":3}}`, "", "unavailable"},
+		{"attachment", `{"mimeType":"text/plain","body":{"attachmentId":"secret-id","data":"aGk="}}`, "", "unavailable"},
+		{"html root", `{"mimeType":"text/html","body":{"data":"aGk="}}`, "", "unavailable"},
+		{"nontext", `{"mimeType":"application/pdf","body":{"data":"aGk="}}`, "", "unavailable"},
+		{"malformed mime", `{"mimeType":"text/plain; broken","body":{"data":"aGk="}}`, "", "unavailable"},
+		{"alphabet", `{"body":{"data":"!!!!"}}`, "", "decode"},
+		{"padding", `{"body":{"data":"aGk=="}}`, "", "decode"},
+		{"partial", `{"body":{"data":"aGVsbG8=!!!!"}}`, "", "decode"},
+		{"standard alphabet", `{"body":{"data":"+/8="}}`, "", "decode"},
+		{"nested", `{"mimeType":"Multipart/Mixed; boundary=x","parts":[{"mimeType":"text/plain","filename":"a.txt","body":{"data":"YmFk"}},{"mimeType":"multipart/related","parts":[{"mimeType":"multipart/alternative","parts":[{"mimeType":"text/html","body":{"data":"YmFk"}},{"mimeType":"Text/Plain; charset=UTF-8","body":{"data":"aGk"}}]}]}]}`, "hi", ""},
+		{"html nested", `{"parts":[{"mimeType":"text/html","body":{"data":"aGk="}}]}`, "", "unavailable"},
+		{"filename only", `{"parts":[{"mimeType":"text/plain","filename":"a.txt","body":{"data":"aGk="}}]}`, "", "unavailable"},
+		{"corrupt then valid", `{"parts":[{"mimeType":"text/plain","body":{"data":"!"}},{"mimeType":"text/plain","body":{"data":"aGk="}}]}`, "hi", ""},
+		{"unavailable then valid", `{"parts":[{"mimeType":"text/plain"},{"mimeType":"text/plain","body":{"data":"aGk="}}]}`, "hi", ""},
+		{"empty plus corrupt", `{"parts":[{"mimeType":"text/plain","body":{}},{"mimeType":"text/plain","body":{"data":"!"}}]}`, "", "decode"},
+		{"empty plus unavailable", `{"parts":[{"mimeType":"text/plain","body":{}},{"mimeType":"text/plain"}]}`, "", "unavailable"},
+		{"decode beats unavailable", `{"parts":[{"mimeType":"text/plain"},{"mimeType":"text/plain","body":{"data":"!"}}]}`, "", "decode"},
+		{"empty plus alternatives", `{"parts":[{"mimeType":"text/plain","body":{}},{"mimeType":"text/html"},{"mimeType":"text/plain","filename":"a.txt"}]}`, "", ""},
+		{"stable source order", `{"parts":[{"mimeType":"multipart/related","parts":[{"mimeType":"text/plain","body":{"data":"aGk="}}]},{"mimeType":"text/plain","body":{"data":"YmFk"}}]}`, "hi", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assertPlainText(t, tt.payload, tt.want, tt.kind)
+		})
+	}
+	var msg *Message
+	if got, err := msg.ExtractPlainText(); got != "" || !errors.Is(err, ErrPlainTextUnavailable) || msg.ExtractBody() != "" {
+		t.Fatalf("nil message: %q %v", got, err)
+	}
+}
+
+func assertPlainText(t *testing.T, payloadJSON, want, kind string) {
+	t.Helper()
+
+	var payload *Payload
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	msg := &Message{Payload: payload}
+	got, err := msg.ExtractPlainText()
+	if got != want {
+		t.Fatalf("got %q; want %q", got, want)
+	}
+	assertPlainTextError(t, err, kind)
+
+	if msg.ExtractBody() != want {
+		t.Fatal("compatibility wrapper mismatch")
+	}
+	if err != nil && (strings.Contains(err.Error(), "secret-id") || strings.Contains(err.Error(), "aGVsbG8")) {
+		t.Fatal("error leaks content")
+	}
+}
+
+func assertPlainTextError(t *testing.T, err error, kind string) {
+	t.Helper()
+	var corrupt base64.CorruptInputError
+	switch kind {
+	case "":
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case "unavailable":
+		if !errors.Is(err, ErrPlainTextUnavailable) {
+			t.Fatalf("want unavailable: %v", err)
+		}
+	case "decode":
+		if !errors.As(err, &corrupt) {
+			t.Fatalf("want decoder cause: %v", err)
+		}
+	}
+}
