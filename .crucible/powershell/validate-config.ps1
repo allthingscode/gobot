@@ -245,6 +245,21 @@ if ($content -match "replace-with-project-") {
     $errors += "Verification commands still contain scaffold placeholder values."
 }
 
+# Host-gated checks use the small string schema consumed by run-isolated-checks.ps1.
+# Keep accepted condition forms and option names closed so typos cannot silently skip work.
+$hostGateMatches = [regex]::Matches($content, '(?m)^\s{6}host_gate:\s*(.*?)\s*$')
+foreach ($match in $hostGateMatches) {
+    $condition = (ConvertFrom-ConfigScalar $match.Groups[1].Value)
+    if ($condition -notmatch '^(cgo|os=(windows|linux|macos)|command=[A-Za-z0-9_.+-]+|env=[A-Za-z_][A-Za-z0-9_]*)$') {
+        $errors += "verification host_gate must be cgo, os=windows|linux|macos, command=<name>, or env=<name> (got '$condition')."
+    }
+}
+$altMatches = [regex]::Matches($content, '(?m)^\s{6}alternative_runner:\s*(.*?)\s*$')
+foreach ($match in $altMatches) {
+    $runner = ConvertFrom-ConfigScalar $match.Groups[1].Value
+    if ([string]::IsNullOrWhiteSpace($runner)) { $errors += "verification alternative_runner must be a non-empty command." }
+}
+
 if ($content -match "Replace with project-specific engineering rules") {
     $warnings += "TODO before first task: edit project_mandates in .crucible/config.yaml to add project-specific rules (currently using scaffold placeholder)."
 }

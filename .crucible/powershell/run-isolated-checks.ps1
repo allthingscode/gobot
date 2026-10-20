@@ -86,6 +86,9 @@ $inConfigCheck = $false
 $currentName = ""
 $configCheckName = ""
 $configCheckCommand = ""
+$currentHostGate = ""
+$currentAlternativeRunner = ""
+$currentCommand = $null
 
 # Map "test" mode to "quick" if the framework calls it with "test" for backward compatibility
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
@@ -168,19 +171,26 @@ for ($idx = 0; $idx -lt $lines.Count; $idx++) {
     }
     if ($inMode) {
         if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
+            if ($null -ne $currentCommand) {
+                $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
+            }
             $currentName = $Matches[1].Trim("`"' ")
+            $currentHostGate = ""
+            $currentAlternativeRunner = ""
+            $currentCommand = $null
         }
+        if ($line -match "^\s{6}host_gate:\s*(.*?)\s*$") { $currentHostGate = $Matches[1].Trim("`"' ") }
+        if ($line -match "^\s{6}alternative_runner:\s*(.*?)\s*$") { $currentAlternativeRunner = $Matches[1].Trim("`"' ") }
         if ($line -match "^(\s{6})command:\s*(.+?)\s*$") {
             $keyIndent = $Matches[1].Length
             $rawVal = $Matches[2].Trim()
             if ($rawVal -match "^[|>][+-]?\d*$") {
                 $bs = Read-BlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
-                $commands += @{ Name = $currentName; Command = $bs.Value }
+                $currentCommand = $bs.Value
                 $idx = $bs.NextIndex - 1
             } else {
-                $commands += @{ Name = $currentName; Command = $rawVal.Trim("`"' ") }
+                $currentCommand = $rawVal.Trim("`"' ")
             }
-            $currentName = ""
         }
     }
     if ($inConfigCheck) {
@@ -199,6 +209,10 @@ for ($idx = 0; $idx -lt $lines.Count; $idx++) {
             }
         }
     }
+}
+
+if ($null -ne $currentCommand) {
+    $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
 }
 
 if ($targetMode -eq "full" -and $configCheckName -and $configCheckCommand) {
@@ -226,6 +240,35 @@ function Invoke-Check {
         Write-Host ("Check failed: {0}" -f $Name)
         throw ("Check failed: {0}" -f $Name)
     }
+}
+
+function Get-HostGateReason {
+    param([string]$Condition)
+    if ([string]::IsNullOrWhiteSpace($Condition)) { return $null }
+    if ($Condition -match '^os=(windows|linux|macos)$') {
+        $actual = if (Test-PlatformIsWindows) { "windows" } elseif ($IsMacOS) { "macos" } else { "linux" }
+        if ($actual -ne $Matches[1]) { return "requires OS $($Matches[1]); host is $actual" }
+        return $null
+    }
+    if ($Condition -match '^command=([A-Za-z0-9_.+-]+)$') {
+        if ($null -eq (Get-Command $Matches[1] -CommandType Application -ErrorAction SilentlyContinue)) { return "requires command '$($Matches[1])' on PATH" }
+        return $null
+    }
+    if ($Condition -match '^env=([A-Za-z_][A-Za-z0-9_]*)$') {
+        $envName = $Matches[1]
+        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($envName))) { return "requires environment variable '$envName'" }
+        return $null
+    }
+    if ($Condition -eq 'cgo') {
+        $go = Get-Command go -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $go) {
+            $cgoEnabled = (& $go.Source env CGO_ENABLED 2>$null | Select-Object -First 1)
+            $compiler = (& $go.Source env CC 2>$null | Select-Object -First 1)
+            if ($LASTEXITCODE -eq 0 -and $cgoEnabled -eq '1' -and $null -ne (Get-Command $compiler -CommandType Application -ErrorAction SilentlyContinue)) { return $null }
+        }
+        return "requires cgo (CGO_ENABLED=1 and Go on PATH)"
+    }
+    throw "Invalid verification host_gate '$Condition'. Use cgo, os=windows|linux|macos, command=<name>, or env=<name>."
 }
 
 # Encoding guard (runs in every mode, before config commands and regardless of whether
@@ -413,8 +456,22 @@ if ($commands.Count -eq 0) {
 
 Push-Location $worktree
 try {
+    $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
+    $notRunFile = Join-Path $sessionRoot "$TaskId/verification/checks-not-run.txt"
+    if (Test-Path -LiteralPath $notRunFile) { Remove-Item -LiteralPath $notRunFile -Force }
     foreach ($cmd in $commands) {
-        Invoke-Check -Name $cmd.Name -CommandString $cmd.Command
+        $reason = Get-HostGateReason -Condition $cmd.HostGate
+        if ($null -ne $reason -and -not [string]::IsNullOrWhiteSpace($cmd.AlternativeRunner)) {
+            Write-Host ("==> {0} (alternative runner: {1})" -f $cmd.Name, $cmd.AlternativeRunner)
+            Invoke-Check -Name $cmd.Name -CommandString $cmd.AlternativeRunner
+        } elseif ($null -ne $reason) {
+            Write-Host ("NOT RUN: {0} - {1}" -f $cmd.Name, $reason) -ForegroundColor Yellow
+            $notRunDir = Split-Path -Parent $notRunFile
+            New-Item -ItemType Directory -Path $notRunDir -Force | Out-Null
+            [System.IO.File]::AppendAllText($notRunFile, ("{0}: {1}`n" -f $cmd.Name, $reason), [System.Text.UTF8Encoding]::new($false))
+        } else {
+            Invoke-Check -Name $cmd.Name -CommandString $cmd.Command
+        }
     }
 } finally {
     Pop-Location

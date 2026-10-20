@@ -446,6 +446,28 @@ try {
         $none = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-001 -Mode quick -ProjectRoot $commitRoot }
         Assert-Result -Name "no worktree points at -Commit" -Condition ($none.ExitCode -ne 0 -and (($none.Output -join "`n") -match "passes -Commit")) -FailureMessage ("Output:`n" + ($none.Output -join "`n"))
     }
+    $results += Run-Test -Name "host-gated checks are NOT RUN with a reason and alternative runners execute (item 239)" -Body {
+        $cfgPath = Join-Path $projectRoot ".crucible/config.yaml"
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: unavailable check",
+            "      command: $pwshCmd -NoProfile -Command exit 0",
+            "      host_gate: env=CRUCIBLE_ITEM239_MISSING",
+            "    - name: alternate check",
+            "      command: $pwshCmd -NoProfile -Command exit 9",
+            "      alternative_runner: $pwshCmd -NoProfile -Command exit 0",
+            "      host_gate: env=CRUCIBLE_ITEM239_MISSING"
+        ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Remove-Item Env:\CRUCIBLE_ITEM239_MISSING -ErrorAction SilentlyContinue
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+        $out = $res.Output -join "`n"
+        $record = Join-Path $projectRoot ".crucible/session/$taskId/verification/checks-not-run.txt"
+        Assert-Result -Name "host-gated check does not pass silently" -Condition ($res.ExitCode -eq 0 -and $out -match 'NOT RUN: unavailable check - requires environment variable' -and $out -notmatch '==> unavailable check\r?\n\s+exit code: 0') -FailureMessage $out
+        Assert-Result -Name "not-run reason is persisted" -Condition ((Get-Content -LiteralPath $record -Raw) -match 'unavailable check: requires environment variable') -FailureMessage (Get-Content -LiteralPath $record -Raw)
+        Assert-Result -Name "alternative runner runs instead of configured host command" -Condition ($out -match 'alternative runner:' -and $out -match '==> alternate check' -and $out -match 'exit code: 0' -and $out -notmatch 'exit code: 9') -FailureMessage $out
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath

@@ -349,6 +349,19 @@ The project hook gets the same arguments git passed to Crucible's hook and, for 
 
 `run-isolated-checks.ps1 -Mode full` also runs the project's `pre-push` hook, the task branch's copy, in the implementation worktree, and fails as a named check when the hook fails. Crucible runs full mode itself before it accepts a verification approval, so a check the hook makes fails before the Human Gate instead of at the push after it. That run passes the arguments `origin` and the origin URL, gives no refs on stdin, and sets `CRUCIBLE_PRE_PUSH_PREFLIGHT=1`. A hook can test that variable to skip a step that only makes sense at a real push. When the interpreter is Git for Windows' own `sh`, the run puts Git's `usr/bin`, `mingw64/bin` and `bin` first on PATH, as Git does when it runs a hook, so tools such as `sed` are found.
 
+Each `verification.quick` or `verification.full` check may optionally set `host_gate` to one condition: `cgo`, `os=windows|linux|macos`, `command=<name>` (a command on `PATH`), or `env=<NAME>` (a non-empty environment variable). When that condition is unmet, the check is reported as `NOT RUN` with its reason. An optional `alternative_runner` command runs the check on another host or container; its exit status determines the check result. These are the only host-gate fields. Example:
+
+```yaml
+verification:
+  full:
+    - name: race tests
+      host_gate: cgo
+      alternative_runner: wsl go test -race ./...
+      command: go test -race ./...
+```
+
+`validate-config.ps1` rejects unsupported or empty host conditions and empty alternative commands. Checks not run are written to `.crucible/session/{task_id}/verification/checks-not-run.txt` for the Reviewer handoff and Human Gate.
+
 A task with no implementation worktree, such as research, runs the configured checks with `run-isolated-checks.ps1 -Commit <rev>`. The commands run in a temporary detached worktree at that commit under `.crucible/.agent-workspaces/`, which is removed afterwards whether the checks pass or fail, so files they write never reach the main checkout. Each command's exit code is printed. The pre-push hook does not run in this mode.
 
 `install-hooks.ps1` warns when the project tracks a directory holding a `pre-commit`, `commit-msg`, or `pre-push` file that `project_dir` does not name.

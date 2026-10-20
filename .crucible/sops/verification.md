@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v7 -->
+<!-- prompt_version: reviewer-sop-v8 -->
 # SOP: Verification
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -39,7 +39,7 @@ Verify every modified file falls within the declared package paths. Any file out
 Staying inside `file_affinity` does not prove nothing else depends on what changed. When the diff renames or relocates a path, file, config key, or exported identifier, search the task branch for remaining uses of the old name (for example `git grep -n "memory/vectors.db" task/{task_id}`). Each hit that the diff leaves unchanged and the spec does not list under `## Out of Scope` is a **BLOCKER**: the consumer still uses the old name.
 
 ### Step 3 - Automated Verification
-Run the canonical isolated checks. Every check MUST pass before proceeding to manual review:
+Run the canonical isolated checks. Every check that runs MUST pass before proceeding to manual review. Checks printed as `NOT RUN` are not passes; inspect `.crucible/session/{task_id}/verification/checks-not-run.txt` and record every entry in the review report and deployment handoff. Consider an available `alternative_runner` first; if a check remains unrun, the Human Gate will display the gap for an explicit acceptance decision.
 ```powershell
 pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full -ProjectRoot "{project_root}"
 ```
@@ -54,6 +54,8 @@ Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod
 Read every checkbox in the spec's `Acceptance Criteria` section. Confirm each is implemented. Mark `acceptance_criteria_met: true` only when every item is checked off.
 
 A summary of the whole list is not a review. For **each criterion**, add one entry under `### Acceptance Criteria` in the review report that quotes the criterion and cites the evidence that it holds: a `file:line` or a test name. A criterion with several clauses (for example "including in its detail text and per-store warning evaluation") needs evidence for every clause. A criterion or clause with no evidence is a **BLOCKER** and `acceptance_criteria_met` is `false`.
+
+Include `### Checks Not Run` in `review_report.md`, listing every line from `checks-not-run.txt`, or state `None`. Include the same complete list in the verification-to-deployment handoff reason and add `checks-not-run.txt` to `-Artifacts` when it exists. Do not describe an unrun check as passed. The Human Gate output repeats the list so accepting without those checks is visible.
 
 ### Step 5 - Quality Review
 Review the diff for:
@@ -109,7 +111,7 @@ Format findings as:
 3. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
 ```bash
 pwsh -ExecutionPolicy Bypass \
-  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Review approved - no blockers" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths> -ProjectRoot "{project_root}"
+  -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source verification -Target deployment -Reason "Review approved; checks not run: <complete list or None>" -ReviewerChecksPassed "tests_pass,vet_pass,acceptance_criteria_met,scope_bounded,no_regressions,no_hard_mandates_violated" -Artifacts <comma-separated-repo-relative-paths-including-checks-not-run.txt> -ProjectRoot "{project_root}"
 ```
 4. Run Crucible and present output to human
 

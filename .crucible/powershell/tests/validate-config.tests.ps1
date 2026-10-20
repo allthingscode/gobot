@@ -468,6 +468,23 @@ review:
         $newPatternString = '"pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(^|[\\\\/])\\.\\.($|[\\\\/])).+"'
         Assert-Result -Name "new pattern present" -Condition ($schemaContent.Contains($newPatternString)) -FailureMessage "config.schema.json does not contain the new pattern string"
     }
+
+    $results += Run-Test -Name "Verification host_gate and alternative_runner values are validated" -Body {
+        $base = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $hostGateConfig = [regex]::Replace($base, '(?m)(^\s{6}command:.*$)', '$1' + [Environment]::NewLine + '      host_gate: gpu', 1)
+        $hostGatePath = Join-Path $projectRoot ".crucible/config-bad-host-gate.yaml"
+        [System.IO.File]::WriteAllText($hostGatePath, $hostGateConfig, (New-Object System.Text.UTF8Encoding($false)))
+        $hostGate = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $hostGatePath }
+        Assert-Result -Name "unsupported host_gate exit" -Condition ($hostGate.ExitCode -eq 2) -FailureMessage ("expected exit 2, got " + $hostGate.ExitCode + ". Output: " + $hostGate.Output)
+        Assert-Result -Name "unsupported host_gate message" -Condition ($hostGate.Output -match 'verification host_gate must be cgo, os=windows\|linux\|macos, command=<name>, or env=<name> \(got ''gpu''\)\.') -FailureMessage $hostGate.Output
+
+        $runnerConfig = [regex]::Replace($base, '(?m)(^\s{6}command:.*$)', '$1' + [Environment]::NewLine + '      alternative_runner: ""', 1)
+        $runnerPath = Join-Path $projectRoot ".crucible/config-empty-alternative-runner.yaml"
+        [System.IO.File]::WriteAllText($runnerPath, $runnerConfig, (New-Object System.Text.UTF8Encoding($false)))
+        $runner = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $runnerPath }
+        Assert-Result -Name "empty alternative_runner exit" -Condition ($runner.ExitCode -eq 2) -FailureMessage ("expected exit 2, got " + $runner.ExitCode + ". Output: " + $runner.Output)
+        Assert-Result -Name "empty alternative_runner message" -Condition ($runner.Output -match 'verification alternative_runner must be a non-empty command\.') -FailureMessage $runner.Output
+    }
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {

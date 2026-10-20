@@ -2667,6 +2667,32 @@ try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
         }
     }
 
+    $results += Run-Test -Name "Human Gate prints every not-run check before visual review options" -Body {
+        $caseRoot = Join-Path $tempRoot "gate-not-run-checks"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-ITEM239"
+        $configDir = Join-Path $caseRoot ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        @(
+            'project:',
+            '  name: "Human Gate test"',
+            'review:'
+        ) | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+        $verificationDir = Join-Path $ctx.SessionDir "$($ctx.TaskId)/verification"
+        New-Item -ItemType Directory -Path $verificationDir -Force | Out-Null
+        @(
+            "windows check: requires OS windows; host is linux",
+            "gpu check: requires command 'gpu-tool' on PATH"
+        ) | Set-Content -LiteralPath (Join-Path $verificationDir "checks-not-run.txt") -Encoding UTF8
+
+        $pendingPath = Join-Path $ctx.SessionDir "$($ctx.TaskId)/pending.json"
+        $output = (& { Write-GatePendingSurface -Context $ctx -RepoRoot $caseRoot -SessionDir $ctx.SessionDir -TaskId $ctx.TaskId -PendingFilePath $pendingPath -TaskBranchExists $false -NoCodeReviewHint "No code changes" -AcceptDesc "accept the work" } 6>&1 | Out-String)
+        $blockIndex = $output.IndexOf("[CHECKS NOT RUN]")
+        $headerIndex = $output.IndexOf("[HUMAN GATE] Visual review options:")
+        Assert-Result -Name "not-run block precedes visual review heading" -Condition ($blockIndex -ge 0 -and $headerIndex -gt $blockIndex) -FailureMessage $output
+        Assert-Result -Name "first checks-not-run entry is printed" -Condition ($output -match '  - windows check: requires OS windows; host is linux') -FailureMessage $output
+        Assert-Result -Name "second checks-not-run entry is printed" -Condition ($output -match '  - gpu check: requires command ''gpu-tool'' on PATH') -FailureMessage $output
+    }
+
     $results += Run-Test -Name "Every outcome the CLI accepts reaches a dispatch arm" -Body {
         # The pairing the fix above depends on: -GateOutcome validates against
         # Get-HumanGateOutcomes, so any value on that list which the dispatcher does not
