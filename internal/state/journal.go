@@ -63,6 +63,8 @@ func (j *Journal) Close() error {
 }
 
 // Replay reads all journal entries and returns them in order.
+// Any malformed record, including a torn final append, fails without partial entries.
+// A valid final record does not require a trailing newline.
 func Replay(journalPath string) ([]JournalEntry, error) {
 	file, err := os.Open(journalPath)
 	if err != nil {
@@ -75,10 +77,12 @@ func Replay(journalPath string) ([]JournalEntry, error) {
 
 	var entries []JournalEntry
 	scanner := bufio.NewScanner(file)
+	line := 0
 	for scanner.Scan() {
+		line++
 		var entry JournalEntry
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue // Skip corrupted entries
+			return nil, fmt.Errorf("decoding journal %q line %d: %w", journalPath, line, err)
 		}
 		entries = append(entries, entry)
 	}

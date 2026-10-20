@@ -3,6 +3,7 @@ package state
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -261,8 +262,8 @@ func TestStaleLockRecovery(t *testing.T) {
 	}
 }
 
-// TestJournalCorruption_SkipsBadEntries verifies corrupted entries are skipped.
-func TestJournalCorruption_SkipsBadEntries(t *testing.T) {
+// TestJournalCorruption_ReportsBadEntries verifies corruption fails replay without partial entries.
+func TestJournalCorruption_ReportsBadEntries(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 
@@ -292,14 +293,14 @@ func TestJournalCorruption_SkipsBadEntries(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	// Replay should skip invalid entry.
+	// Replay must report corruption and discard the decoded prefix.
 	entries, err := Replay(journalPath)
-	if err != nil {
-		t.Fatalf("Replay failed: %v", err)
+	var syntax *json.SyntaxError
+	if !stderrors.As(err, &syntax) {
+		t.Fatalf("expected wrapped syntax error, got %v", err)
 	}
-
-	if len(entries) != 2 {
-		t.Errorf("Expected 2 valid entries, got %d", len(entries))
+	if entries != nil {
+		t.Fatalf("expected nil entries, got %v", entries)
 	}
 }
 
