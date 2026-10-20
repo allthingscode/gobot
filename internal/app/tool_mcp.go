@@ -283,18 +283,50 @@ func sanitizeMCPToolName(name string) string {
 }
 
 func enumerateMCPTools(ctx context.Context, srv mcpCaller) ([]*mcpProxyTool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("tools/list canceled before start: %w", err)
+	}
 	if err := srv.start(ctx); err != nil {
 		return nil, fmt.Errorf("failed to start server: %w", err)
 	}
 
-	respStr, err := srv.Call(ctx, "tools/list", nil)
+	var proxies []*mcpProxyTool
+	seen := make(map[string]bool)
+	var params any
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("tools/list canceled before request: %w", err)
+		}
+		page, nextCursor, err := enumerateMCPToolsPage(ctx, srv, params)
+		if err != nil {
+			return nil, err
+		}
+		proxies = append(proxies, page...)
+		if nextCursor == "" {
+			return proxies, nil
+		}
+		if seen[nextCursor] {
+			return nil, fmt.Errorf("tools/list repeated continuation cursor %q", nextCursor)
+		}
+		seen[nextCursor] = true
+		params = map[string]any{"cursor": nextCursor}
+	}
+}
+
+func enumerateMCPToolsPage(ctx context.Context, srv mcpCaller, params any) ([]*mcpProxyTool, string, error) {
+	respStr, err := srv.Call(ctx, "tools/list", params)
 	if err != nil {
-		return nil, fmt.Errorf("tools/list call failed: %w", err)
+		return nil, "", fmt.Errorf("tools/list call failed: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, "", fmt.Errorf("tools/list canceled after response: %w", err)
 	}
 
 	var resp struct {
 		Result struct {
-			Tools []struct {
+			NextCursor string `json:"nextCursor"`
+			Tools      []struct {
 				Name        string         `json:"name"`
 				Description string         `json:"description"`
 				InputSchema map[string]any `json:"inputSchema"`
@@ -306,11 +338,11 @@ func enumerateMCPTools(ctx context.Context, srv mcpCaller) ([]*mcpProxyTool, err
 		} `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(respStr), &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse tools/list response: %w", err)
+		return nil, "", fmt.Errorf("failed to parse tools/list response: %w", err)
 	}
 
 	if resp.Error != nil {
-		return nil, fmt.Errorf("tools/list returned error: code %d, message %s", resp.Error.Code, resp.Error.Message)
+		return nil, "", fmt.Errorf("tools/list returned error: code %d, message %s", resp.Error.Code, resp.Error.Message)
 	}
 
 	var proxies []*mcpProxyTool
@@ -325,5 +357,5 @@ func enumerateMCPTools(ctx context.Context, srv mcpCaller) ([]*mcpProxyTool, err
 			},
 		})
 	}
-	return proxies, nil
+	return proxies, resp.Result.NextCursor, nil
 }
