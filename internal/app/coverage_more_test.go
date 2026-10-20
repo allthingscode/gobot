@@ -3,13 +3,13 @@ package app
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,18 +24,14 @@ import (
 	"github.com/allthingscode/gobot/internal/reporter"
 )
 
-type nopWriteCloser struct {
-	bytes.Buffer
-}
-
 const (
 	coverageEmailBody    = "body"
 	coverageRecipient    = "user@example.com"
 	coverageFakeProvider = "fake-build"
 	coverageStoredResult = "stored-result"
+	coverageFakeModel    = "fake-model"
+	coverageToolsList    = "tools/list"
 )
-
-func (n *nopWriteCloser) Close() error { return nil }
 
 func TestBuildEmailContentPlainAndHTML(t *testing.T) {
 	t.Parallel()
@@ -315,12 +311,39 @@ func TestMCPServerErrorBranches(t *testing.T) {
 		t.Fatalf("stop without process: %v", err)
 	}
 
-	srv.stdin = &nopWriteCloser{}
-	srv.stdout = io.NopCloser(strings.NewReader(`{"id":2}` + "\n"))
-	if _, err := srv.callLocked(context.Background(), 1, map[string]any{"id": 1}); err == nil || !strings.Contains(err.Error(), "EOF before response id 1") {
+	stdoutR, stdoutW := io.Pipe()
+	sw := &signalWriter{wrote: make(chan struct{}, 8)}
+	srv.attach(nil, sw, stdoutR)
+	t.Cleanup(func() { _ = srv.stop() })
+
+	errc := make(chan error, 1)
+	go func() {
+		_, err := srv.Call(context.Background(), "x", nil)
+		errc <- err
+	}()
+	<-sw.wrote
+	if _, err := io.WriteString(stdoutW, `{"id":2}`+"\n"); err != nil {
+		t.Fatalf("write unmatched line: %v", err)
+	}
+	_ = stdoutW.Close()
+	if err := <-errc; err == nil || !strings.Contains(err.Error(), "EOF before response id 1") {
 		t.Fatalf("expected EOF before matching response, got %v", err)
 	}
 }
+
+type signalWriter struct {
+	wrote chan struct{}
+}
+
+func (w *signalWriter) Write(p []byte) (int, error) {
+	select {
+	case w.wrote <- struct{}{}:
+	default:
+	}
+	return len(p), nil
+}
+
+func (w *signalWriter) Close() error { return nil }
 
 //nolint:cyclop,paralleltest // Single test owns the fake MCP process lifecycle.
 func TestMCPServerStartCallAndStop(t *testing.T) {
@@ -356,23 +379,46 @@ func TestMCPServerStartCallAndStop(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest // Helper process test is gated by GO_WANT_HELPER_PROCESS.
+//nolint:paralleltest,gocognit,cyclop // Helper process test is gated by GO_WANT_MCP_HELPER; one switch over fixture modes.
 func TestMCPServerHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_MCP_HELPER") != "1" {
 		return
 	}
+	// GO_MCP_BEHAVIOR selects a fixture mode: "" (normal), "silent_init" (never
+	// answers), "silent_list" (ignores tools/list), "stall_after_init" (stops
+	// reading stdin after the handshake), "notify" (emits a notification before
+	// each response). Requests may carry params.delay_ms and params.tag.
+	behavior := os.Getenv("GO_MCP_BEHAVIOR")
+	var outMu sync.Mutex
+	emit := func(v any) {
+		outMu.Lock()
+		defer outMu.Unlock()
+		_ = json.NewEncoder(os.Stdout).Encode(v)
+	}
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		var req struct {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
+			Params struct {
+				DelayMS int    `json:"delay_ms"`
+				Tag     string `json:"tag"`
+			} `json:"params"`
 		}
-		if err := json.Unmarshal([]byte(line), &req); err != nil || req.ID == 0 {
+		if err := json.Unmarshal([]byte(line), &req); err != nil {
+			continue
+		}
+		if req.Method == "notifications/initialized" && behavior == "stall_after_init" {
+			time.Sleep(time.Minute)
+			os.Exit(0)
+		}
+		if req.ID == 0 || behavior == "silent_init" || (behavior == "silent_list" && req.Method == coverageToolsList) {
 			continue
 		}
 		resp := map[string]any{"jsonrpc": "2.0", "id": req.ID}
-		if req.Method == "tools/list" {
+		if req.Method == coverageToolsList {
 			resp["result"] = map[string]any{
 				"tools": []map[string]any{{
 					"name":        "helper_tool",
@@ -381,9 +427,23 @@ func TestMCPServerHelperProcess(t *testing.T) {
 				}},
 			}
 		} else {
-			resp["result"] = map[string]any{"ok": true}
+			resp["result"] = map[string]any{"ok": true, "tag": req.Params.Tag}
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(resp)
+		send := func() {
+			if behavior == "notify" {
+				emit(map[string]any{"jsonrpc": "2.0", "method": "notifications/progress", "params": map[string]any{}})
+			}
+			emit(resp)
+		}
+		if req.Params.DelayMS > 0 {
+			delay := time.Duration(req.Params.DelayMS) * time.Millisecond
+			go func() {
+				time.Sleep(delay)
+				send()
+			}()
+			continue
+		}
+		send()
 	}
 	os.Exit(0)
 }
@@ -422,7 +482,7 @@ func (fakeBuildProvider) Chat(context.Context, provider.ChatRequest) (*provider.
 }
 
 func (fakeBuildProvider) Models() []provider.ModelInfo {
-	return []provider.ModelInfo{{ID: "fake-model"}}
+	return []provider.ModelInfo{{ID: coverageFakeModel}}
 }
 
 type fakeTool struct {
@@ -516,14 +576,14 @@ func TestBuildAgentStackWithRegisteredFakeProvider(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runtime.StorageRoot = t.TempDir()
 	cfg.Agents.Defaults.Provider = coverageFakeProvider
-	cfg.Agents.Defaults.Model = "fake-model"
+	cfg.Agents.Defaults.Model = coverageFakeModel
 
 	stack, cleanup, err := buildAgentStack(context.Background(), cfg, nil, nil, registry)
 	if err != nil {
 		t.Fatalf("BuildAgentStack: %v", err)
 	}
 	defer cleanup()
-	if stack == nil || stack.Runner == nil || stack.Prov.Name() != coverageFakeProvider || stack.Model != "fake-model" {
+	if stack == nil || stack.Runner == nil || stack.Prov.Name() != coverageFakeProvider || stack.Model != coverageFakeModel {
 		t.Fatalf("unexpected stack: %#v", stack)
 	}
 }
@@ -649,7 +709,7 @@ func TestDispatchSilentBranches(t *testing.T) {
 	}
 
 	runner := &fakeSpawnRunner{runResp: "ignored"}
-	cd.mgr = agent.NewSessionManager(runner, nil, "fake-model")
+	cd.mgr = agent.NewSessionManager(runner, nil, coverageFakeModel)
 	if err := cd.dispatchSilent(context.Background(), cron.Payload{Message: "work"}, "telegram:123"); err != nil {
 		t.Fatalf("dispatchSilent: %v", err)
 	}
@@ -660,7 +720,7 @@ func TestDispatchTelegramSendsResponse(t *testing.T) {
 
 	api := &appMockAPI{msgChan: make(chan bot.InboundMessage)}
 	cd := &CronDispatcher{
-		mgr: agent.NewSessionManager(&fakeSpawnRunner{runResp: "telegram response"}, nil, "fake-model"),
+		mgr: agent.NewSessionManager(&fakeSpawnRunner{runResp: "telegram response"}, nil, coverageFakeModel),
 		b:   bot.New(api, &appMockHandler{}),
 	}
 	if err := cd.dispatchTelegram(context.Background(), cron.Payload{Message: "hello"}, "telegram:123"); err != nil {

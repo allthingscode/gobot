@@ -2,12 +2,18 @@
 package app
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/provider"
@@ -166,7 +172,7 @@ func TestAppendMCPTools_FallbackAndCollision(t *testing.T) {
 	}
 
 	// We want to make sure the iteration is predictable or that we check the results irrespective of order
-	tools := appendMCPtools(cfg, []Tool{})
+	tools, _ := appendMCPtools(context.Background(), cfg, []Tool{})
 
 	// Tools should include:
 	// 1. fallback for server-a (server_a)
@@ -388,7 +394,7 @@ func TestAppendMCPTools_PaginatedEnumeration(t *testing.T) {
 			}
 			enumerateMCPToolsFunc = func(ctx context.Context, _ mcpCaller) ([]*mcpProxyTool, error) { return enumerateMCPTools(ctx, caller) }
 			cfg := &config.Config{Tools: config.ToolsConfig{MCPServers: map[string]config.MCPServerConfig{"script-server": {}}}}
-			tools := appendMCPtools(cfg, nil)
+			tools, _ := appendMCPtools(context.Background(), cfg, nil)
 			if len(caller.params) != 2 {
 				t.Fatalf("page requests=%d", len(caller.params))
 			}
@@ -428,5 +434,525 @@ func TestEnumerateMCPTools_EmptyTerminalPage(t *testing.T) {
 				t.Fatalf("proxies=%#v calls=%d error=%v", proxies, len(caller.params), err)
 			}
 		})
+	}
+}
+
+const mcpTestBound = 10 * time.Second
+
+func helperMCPServerConfig() config.MCPServerConfig {
+	return config.MCPServerConfig{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestMCPServerHelperProcess", "--"},
+	}
+}
+
+func newHelperMCPServer(t *testing.T, behavior string) *MCPServer {
+	t.Helper()
+	srv := &MCPServer{
+		name: "helper",
+		cfg:  helperMCPServerConfig(),
+		env:  map[string]string{"GO_WANT_MCP_HELPER": "1", "GO_MCP_BEHAVIOR": behavior},
+	}
+	t.Cleanup(func() { _ = srv.stop() })
+	return srv
+}
+
+type mcpCallOutcome struct {
+	resp string
+	err  error
+}
+
+func callAsync(ctx context.Context, srv *MCPServer, method string, params any) <-chan mcpCallOutcome {
+	ch := make(chan mcpCallOutcome, 1)
+	go func() {
+		resp, err := srv.Call(ctx, method, params)
+		ch <- mcpCallOutcome{resp: resp, err: err}
+	}()
+	return ch
+}
+
+func awaitOutcome(t *testing.T, ch <-chan mcpCallOutcome, bound time.Duration) mcpCallOutcome {
+	t.Helper()
+	select {
+	case o := <-ch:
+		return o
+	case <-time.After(bound):
+		t.Fatalf("call did not return within %s", bound)
+	}
+	return mcpCallOutcome{}
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(mcpTestBound)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func admissionHeld(srv *MCPServer) bool { return len(srv.admission()) == 1 }
+
+// awaitResponseWait blocks until a request is written and its caller is parked
+// waiting for the response: registered as pending with admission released.
+func awaitResponseWait(t *testing.T, srv *MCPServer) {
+	t.Helper()
+	waitFor(t, "caller in response wait", func() bool {
+		srv.mu.Lock()
+		n := len(srv.pending)
+		srv.mu.Unlock()
+		return n > 0 && !admissionHeld(srv)
+	})
+}
+
+// entrySignalWriter closes entered when a Write begins, before it can block.
+type entrySignalWriter struct {
+	io.WriteCloser
+	once    sync.Once
+	entered chan struct{}
+}
+
+func (w *entrySignalWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	return w.WriteCloser.Write(p)
+}
+
+// wrapStdinWithEntrySignal lets a test cancel only once a write is truly in
+// flight, so cancellation cannot win against the pre-write context check.
+func wrapStdinWithEntrySignal(srv *MCPServer) <-chan struct{} {
+	entered := make(chan struct{})
+	srv.mu.Lock()
+	srv.stdin = &entrySignalWriter{WriteCloser: srv.stdin, entered: entered}
+	srv.mu.Unlock()
+	return entered
+}
+
+// pipeMCP is an in-process MCP peer built from io.Pipe; the test plays the server.
+type pipeMCP struct {
+	srv  *MCPServer
+	reqs *bufio.Scanner
+	out  io.Writer
+}
+
+func newPipeMCP(t *testing.T) *pipeMCP {
+	t.Helper()
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	srv := &MCPServer{name: "pipe"}
+	srv.attach(nil, stdinW, stdoutR)
+	t.Cleanup(func() {
+		_ = srv.stop()
+		_ = stdinR.Close()
+		_ = stdoutW.Close()
+	})
+	sc := bufio.NewScanner(stdinR)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	return &pipeMCP{srv: srv, reqs: sc, out: stdoutW}
+}
+
+func (p *pipeMCP) readRequest(t *testing.T) (id int, tag string) {
+	t.Helper()
+	if !p.reqs.Scan() {
+		t.Fatalf("request stream ended: %v", p.reqs.Err())
+	}
+	var req struct {
+		ID     int `json:"id"`
+		Params struct {
+			Tag string `json:"tag"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(p.reqs.Bytes(), &req); err != nil {
+		t.Fatalf("bad request line %q: %v", p.reqs.Text(), err)
+	}
+	return req.ID, req.Params.Tag
+}
+
+func (p *pipeMCP) respond(t *testing.T, id int, tag string) {
+	t.Helper()
+	line := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"tag":%q}}`+"\n", id, tag)
+	if _, err := io.WriteString(p.out, line); err != nil {
+		t.Fatalf("respond id %d: %v", id, err)
+	}
+}
+
+func TestMCPServer_SilentInitializationFailsFinite(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "silent_init")
+	srv.handshakeTimeout = 300 * time.Millisecond
+
+	o := awaitOutcome(t, callAsync(context.Background(), srv, "tools/list", nil), mcpTestBound)
+	if !errors.Is(o.err, context.DeadlineExceeded) || !strings.Contains(o.err.Error(), "initialize failed") {
+		t.Fatalf("want wrapped initialize deadline error, got %v", o.err)
+	}
+	if srv.cmd != nil || srv.activeReaders.Load() != 0 {
+		t.Fatalf("failed start must tear down: cmd=%v readers=%d", srv.cmd, srv.activeReaders.Load())
+	}
+}
+
+func TestMCPServer_SilentToolsListDiscoveryFailsFinite(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "silent_list")
+	if err := srv.start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	type result struct {
+		proxies []*mcpProxyTool
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		p, err := enumerateMCPTools(ctx, srv)
+		ch <- result{p, err}
+	}()
+	select {
+	case r := <-ch:
+		if !errors.Is(r.err, context.DeadlineExceeded) || !strings.Contains(r.err.Error(), "tools/list call failed") {
+			t.Fatalf("want wrapped tools/list deadline error, got %v", r.err)
+		}
+	case <-time.After(mcpTestBound):
+		t.Fatal("silent tools/list discovery did not finish")
+	}
+}
+
+func TestMCPServer_BlockedWriteTearsDownAndReturns(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "stall_after_init")
+	if err := srv.start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	entered := wrapStdinWithEntrySignal(srv)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	big := strings.Repeat("x", 4*1024*1024)
+	ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": big})
+	<-entered
+	cancel()
+	o := awaitOutcome(t, ch, mcpTestBound)
+	if !errors.Is(o.err, context.Canceled) || !strings.Contains(o.err.Error(), "write request") {
+		t.Fatalf("want wrapped write cancel error, got %v", o.err)
+	}
+	if srv.cmd != nil || srv.activeReaders.Load() != 0 || admissionHeld(srv) {
+		t.Fatalf("blocked write must tear down: cmd=%v readers=%d held=%v", srv.cmd, srv.activeReaders.Load(), admissionHeld(srv))
+	}
+}
+
+func TestMCPServer_BlockedPipeWriteCancelled(t *testing.T) {
+	t.Parallel()
+	p := newPipeMCP(t) // nobody reads the request pipe, so the write blocks
+	entered := wrapStdinWithEntrySignal(p.srv)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := callAsync(ctx, p.srv, "tools/call", map[string]any{"tag": "w"})
+	<-entered
+	cancel()
+	o := awaitOutcome(t, ch, mcpTestBound)
+	if !errors.Is(o.err, context.Canceled) {
+		t.Fatalf("want wrapped context.Canceled, got %v", o.err)
+	}
+	if p.srv.activeReaders.Load() != 0 || admissionHeld(p.srv) {
+		t.Fatalf("readers=%d held=%v", p.srv.activeReaders.Load(), admissionHeld(p.srv))
+	}
+}
+
+func TestMCPServer_CancelWhileQueuedBehindHolder(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "silent_init")
+	srv.handshakeTimeout = mcpTestBound
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	holder := callAsync(ctx1, srv, "tools/list", nil)
+	waitFor(t, "holder admitted", func() bool { return admissionHeld(srv) })
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+	start := time.Now()
+	o := awaitOutcome(t, callAsync(ctx2, srv, "tools/list", nil), 3*time.Second)
+	if !errors.Is(o.err, context.DeadlineExceeded) || !strings.Contains(o.err.Error(), "waiting for transport") {
+		t.Fatalf("want wrapped queued deadline error, got %v", o.err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Fatalf("queued caller waited %s", time.Since(start))
+	}
+	select {
+	case <-holder:
+		t.Fatal("holder finished before it was cancelled")
+	default:
+	}
+
+	cancel1()
+	o = awaitOutcome(t, holder, mcpTestBound)
+	if !errors.Is(o.err, context.Canceled) {
+		t.Fatalf("holder: want context.Canceled, got %v", o.err)
+	}
+}
+
+func TestMCPServer_CancelDuringResponseWait(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "")
+	if err := srv.start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "slow", "delay_ms": 30000})
+	awaitResponseWait(t, srv)
+	cancel()
+	o := awaitOutcome(t, ch, mcpTestBound)
+	if !errors.Is(o.err, context.Canceled) {
+		t.Fatalf("want wrapped context.Canceled, got %v", o.err)
+	}
+	if srv.activeReaders.Load() != 1 || admissionHeld(srv) {
+		t.Fatalf("transport should survive a read-wait cancel: readers=%d", srv.activeReaders.Load())
+	}
+}
+
+//nolint:gocognit // table rounds interleave cancel, late response and reuse
+func TestMCPServer_CancelThenReuseNeverStealsResponse(t *testing.T) {
+	t.Parallel()
+	for _, lateBeforeNext := range []bool{true, false} {
+		t.Run(fmt.Sprintf("lateBeforeNext=%t", lateBeforeNext), func(t *testing.T) {
+			t.Parallel()
+			p := newPipeMCP(t)
+			for i := 0; i < 3; i++ {
+				ctx, cancel := context.WithCancel(context.Background())
+				stale := callAsync(ctx, p.srv, "tools/call", map[string]any{"tag": "cancelled"})
+				staleID, _ := p.readRequest(t)
+				waitFor(t, "stale request written", func() bool { return !admissionHeld(p.srv) })
+				cancel()
+				if o := awaitOutcome(t, stale, mcpTestBound); !errors.Is(o.err, context.Canceled) {
+					t.Fatalf("round %d: want context.Canceled, got %v", i, o.err)
+				}
+				if lateBeforeNext {
+					p.respond(t, staleID, "stale")
+				}
+
+				fresh := callAsync(context.Background(), p.srv, "tools/call", map[string]any{"tag": "fresh"})
+				freshID, _ := p.readRequest(t)
+				if !lateBeforeNext {
+					p.respond(t, staleID, "stale")
+				}
+				p.respond(t, freshID, "fresh")
+				o := awaitOutcome(t, fresh, mcpTestBound)
+				if o.err != nil || !strings.Contains(o.resp, `"fresh"`) || strings.Contains(o.resp, "stale") {
+					t.Fatalf("round %d: later call got resp=%q err=%v", i, o.resp, o.err)
+				}
+			}
+			if n := p.srv.activeReaders.Load(); n != 1 {
+				t.Fatalf("exactly one reader expected across cancel/reuse, got %d", n)
+			}
+		})
+	}
+}
+
+func TestMCPServer_ConcurrentCallersGetOwnResponses(t *testing.T) {
+	t.Parallel()
+	const callers = 8
+	p := newPipeMCP(t)
+
+	p.srv.admission() <- struct{}{} // hold admission so every caller queues
+	cancelled, cancelQueued := context.WithCancel(context.Background())
+	queuedCancel := callAsync(cancelled, p.srv, "tools/call", map[string]any{"tag": "x"})
+	chans := make([]<-chan mcpCallOutcome, callers)
+	for i := range chans {
+		chans[i] = callAsync(context.Background(), p.srv, "tools/call", map[string]any{"tag": fmt.Sprintf("c%d", i)})
+	}
+	cancelQueued()
+	if o := awaitOutcome(t, queuedCancel, mcpTestBound); !errors.Is(o.err, context.Canceled) {
+		t.Fatalf("queued caller: want context.Canceled, got %v", o.err)
+	}
+	p.srv.release()
+
+	ids := make([]int, callers)
+	tags := make([]string, callers)
+	for i := 0; i < callers; i++ {
+		ids[i], tags[i] = p.readRequest(t)
+	}
+	for i := callers - 1; i >= 0; i-- {
+		p.respond(t, ids[i], tags[i])
+	}
+	for i, ch := range chans {
+		o := awaitOutcome(t, ch, mcpTestBound)
+		if o.err != nil {
+			t.Fatalf("caller %d: %v", i, o.err)
+		}
+		want := fmt.Sprintf(`"c%d"`, i)
+		if !strings.Contains(o.resp, want) {
+			t.Fatalf("caller %d got %q, want tag %s", i, o.resp, want)
+		}
+	}
+}
+
+func TestMCPServer_ResponsesRoutedByIDWithNotifications(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "notify")
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tag := fmt.Sprintf("n%d", i)
+			resp, err := srv.Call(context.Background(), "tools/call", map[string]any{"tag": tag, "delay_ms": 20 * (4 - i)})
+			if err != nil || !strings.Contains(resp, fmt.Sprintf("%q", tag)) {
+				t.Errorf("caller %d got %q err=%v", i, resp, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if n := srv.activeReaders.Load(); n != 1 {
+		t.Fatalf("readers=%d", n)
+	}
+}
+
+func TestMCPServer_RepeatedCancelKeepsSingleReaderAndStopJoins(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "")
+	if err := srv.start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "late", "delay_ms": 30000})
+		awaitResponseWait(t, srv)
+		cancel()
+		o := awaitOutcome(t, ch, mcpTestBound)
+		if !errors.Is(o.err, context.Canceled) {
+			t.Fatalf("round %d: %v", i, o.err)
+		}
+		if n := srv.activeReaders.Load(); n != 1 {
+			t.Fatalf("round %d: readers=%d", i, n)
+		}
+	}
+	o := awaitOutcome(t, callAsync(context.Background(), srv, "tools/call", map[string]any{"tag": "final"}), mcpTestBound)
+	if o.err != nil || !strings.Contains(o.resp, `"final"`) {
+		t.Fatalf("final call: resp=%q err=%v", o.resp, o.err)
+	}
+	if err := srv.stop(); err != nil {
+		t.Fatal(err)
+	}
+	if n := srv.activeReaders.Load(); n != 0 {
+		t.Fatalf("reader not joined by stop: %d", n)
+	}
+}
+
+//nolint:cyclop // one lifecycle walk: never-started, running, double stop, restart
+func TestMCPServer_StopIsIdempotentKillsAndRestarts(t *testing.T) {
+	t.Parallel()
+	never := &MCPServer{name: "never"}
+	if err := never.stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := never.stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newHelperMCPServer(t, "")
+	if o := awaitOutcome(t, callAsync(context.Background(), srv, "tools/list", nil), mcpTestBound); o.err != nil {
+		t.Fatal(o.err)
+	}
+	cmd := srv.cmd
+	if cmd == nil || cmd.Process == nil {
+		t.Fatal("helper process not running")
+	}
+	for i := 0; i < 2; i++ {
+		if err := srv.stop(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("stop did not wait for the subprocess")
+	}
+	if srv.activeReaders.Load() != 0 {
+		t.Fatal("reader not joined")
+	}
+
+	o := awaitOutcome(t, callAsync(context.Background(), srv, "tools/list", nil), mcpTestBound)
+	if o.err != nil || srv.lastID != 2 {
+		t.Fatalf("restart after stop: err=%v lastID=%d", o.err, srv.lastID)
+	}
+}
+
+func TestMCPServer_DeadTransportRestartsOnNextCall(t *testing.T) {
+	t.Parallel()
+	srv := newHelperMCPServer(t, "")
+	if o := awaitOutcome(t, callAsync(context.Background(), srv, "tools/list", nil), mcpTestBound); o.err != nil {
+		t.Fatal(o.err)
+	}
+	_ = srv.cmd.Process.Kill()
+	waitFor(t, "reader to observe EOF", func() bool { return srv.activeReaders.Load() == 0 })
+	o := awaitOutcome(t, callAsync(context.Background(), srv, "tools/call", map[string]any{"tag": "again"}), mcpTestBound)
+	if o.err != nil || !strings.Contains(o.resp, `"again"`) {
+		t.Fatalf("restart: resp=%q err=%v", o.resp, o.err)
+	}
+}
+
+//nolint:paralleltest // overrides package timeout and process environment
+func TestAppendMCPTools_DiscoveryBoundedAndStopsFailedServer(t *testing.T) {
+	t.Setenv("GO_WANT_MCP_HELPER", "1")
+	t.Setenv("GO_MCP_BEHAVIOR", "silent_list")
+	origTimeout, origFn := mcpDiscoveryTimeout, enumerateMCPToolsFunc
+	t.Cleanup(func() { mcpDiscoveryTimeout, enumerateMCPToolsFunc = origTimeout, origFn })
+	mcpDiscoveryTimeout = 400 * time.Millisecond
+
+	var started *MCPServer
+	enumerateMCPToolsFunc = func(ctx context.Context, srv mcpCaller) ([]*mcpProxyTool, error) {
+		started, _ = srv.(*MCPServer)
+		// Start outside the short bound so the timeout lands on the silent tools/list.
+		if err := srv.start(context.Background()); err != nil {
+			return nil, err
+		}
+		return enumerateMCPTools(ctx, srv)
+	}
+	cfg := &config.Config{Tools: config.ToolsConfig{MCPServers: map[string]config.MCPServerConfig{"silent": helperMCPServerConfig()}}}
+	cfg.Runtime.StorageRoot = t.TempDir()
+
+	begin := time.Now()
+	tools, cleanup := appendMCPtools(context.Background(), cfg, nil)
+	if time.Since(begin) > mcpTestBound {
+		t.Fatalf("discovery took %s", time.Since(begin))
+	}
+	if len(tools) != 1 {
+		t.Fatalf("tools=%#v", tools)
+	}
+	if _, ok := tools[0].(*mcpTool); !ok || tools[0].Name() != "silent" {
+		t.Fatalf("expected passthrough fallback, got %#v", tools[0])
+	}
+	if started == nil || started.cmd != nil || started.activeReaders.Load() != 0 {
+		t.Fatalf("failed enumeration left a running server (captured=%v)", started != nil)
+	}
+	cleanup()
+	cleanup()
+}
+
+//nolint:paralleltest // overrides process environment
+func TestAppendMCPTools_CleanupStopsServersIdempotently(t *testing.T) {
+	t.Setenv("GO_WANT_MCP_HELPER", "1")
+	t.Setenv("GO_MCP_BEHAVIOR", "")
+	cfg := &config.Config{Tools: config.ToolsConfig{MCPServers: map[string]config.MCPServerConfig{"live": helperMCPServerConfig()}}}
+	cfg.Runtime.StorageRoot = t.TempDir()
+
+	tools, cleanup := appendMCPtools(context.Background(), cfg, nil)
+	if len(tools) != 1 {
+		t.Fatalf("tools=%#v", tools)
+	}
+	proxy, ok := tools[0].(*mcpProxyTool)
+	if !ok {
+		t.Fatalf("expected proxy tool, got %#v", tools[0])
+	}
+	srv, ok := proxy.server.(*MCPServer)
+	if !ok || srv.cmd == nil || srv.activeReaders.Load() != 1 {
+		t.Fatalf("server should be running after discovery: %#v", proxy.server)
+	}
+	cmd := srv.cmd
+	cleanup()
+	cleanup()
+	if cmd.ProcessState == nil || srv.cmd != nil || srv.activeReaders.Load() != 0 {
+		t.Fatalf("cleanup did not stop and join: state=%v readers=%d", cmd.ProcessState, srv.activeReaders.Load())
 	}
 }

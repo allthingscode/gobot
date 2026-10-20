@@ -67,9 +67,11 @@ func buildAgentStack(ctx context.Context, cfg *config.Config, tmgr *reporter.Tem
 	sessionRoot := filepath.Join(cfg.StorageRoot(), "sessions")
 	registry := NewToolRegistry(sessionRoot)
 
-	runner.SetTools(RegisterTools(cfg, prov, model, memStore, vecStore, embedProv, registry, tmgr, tracer, providers))
+	tools, mcpCleanup := registerToolsWithCleanup(ctx, cfg, prov, model, memStore, vecStore, embedProv, registry, tmgr, tracer, providers)
+	runner.SetTools(tools)
 
 	finalCleanup := func() {
+		mcpCleanup()
 		cleanup()
 		vecCleanup()
 	}
