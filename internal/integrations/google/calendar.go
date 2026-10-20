@@ -62,9 +62,29 @@ func listCalendarsWithClient(ctx context.Context, token string, client *http.Cli
 	}
 }
 
-// ListUpcomingEvents returns up to maxResults upcoming events from the
-// primary calendar, ordered by start time. Returns nil slice (not error)
-// when the calendar is empty.
+// CalendarIncompleteError reports that some calendars failed while the others
+// loaded, so the events returned alongside it are not the complete schedule.
+type CalendarIncompleteError struct {
+	Failed []string // names of the calendars that could not be loaded
+	Err    error    // first per-calendar failure
+}
+
+// Error implements error.
+func (e *CalendarIncompleteError) Error() string {
+	return fmt.Sprintf("calendar events incomplete: %d calendar(s) failed (%s): %v", len(e.Failed), strings.Join(e.Failed, ", "), e.Err)
+}
+
+// Unwrap returns the first per-calendar failure.
+func (e *CalendarIncompleteError) Unwrap() error { return e.Err }
+
+// ListUpcomingEvents returns up to maxResults upcoming events across every
+// readable calendar, ordered by start time.
+//
+// A nil error means every calendar loaded; an empty result is then a genuinely
+// empty schedule. When some but not all calendars fail, it returns the healthy
+// events together with a *CalendarIncompleteError, so callers must check
+// errors.As before treating the error as fatal. When every calendar fails, or
+// ctx is canceled or past its deadline, it returns nil events and an error.
 func ListUpcomingEvents(ctx context.Context, secretsRoot string, maxResults int) ([]CalendarEvent, error) {
 	return listUpcomingEventsWithClient(ctx, secretsRoot, maxResults, TimeoutClient)
 }
@@ -88,25 +108,57 @@ func listUpcomingEventsWithClient(ctx context.Context, secretsRoot string, maxRe
 		"orderBy":      {"startTime"},
 	}
 	var all []CalendarEvent
+	var failed []string
+	var firstErr error
 	for _, cal := range calendars {
-		if ctx.Err() != nil {
-			break
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("calendar events: %w", err)
 		}
 		events, err := listCalendarEventsWithClient(ctx, token, cal, perCalParams, maxResults, client)
 		if err != nil {
+			// The parent ctx, not the fetch error, decides cancellation: a per-request
+			// client timeout also satisfies errors.Is(err, context.DeadlineExceeded).
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("calendar events: %w", ctxErr)
+			}
 			// A shared calendar failure must not block other calendars or leak partial pages.
 			slog.Warn("calendar: skipping calendar due to fetch error",
 				slog.String("calendar", cal.Summary), logattr.Err(err))
+			failed = append(failed, calendarLabel(cal))
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		all = append(all, events...)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("calendar events: %w", err)
+	}
+	return finishCalendarEvents(all, failed, firstErr, len(calendars), maxResults)
+}
 
+// finishCalendarEvents applies the completeness contract documented on ListUpcomingEvents.
+func finishCalendarEvents(all []CalendarEvent, failed []string, firstErr error, total, maxResults int) ([]CalendarEvent, error) {
+	if len(failed) > 0 && len(failed) == total {
+		return nil, fmt.Errorf("calendar events: all %d calendars failed: %w", total, firstErr)
+	}
 	sortCalendarEvents(all)
 	if len(all) > maxResults {
 		all = all[:maxResults]
 	}
+	if len(failed) > 0 {
+		return all, &CalendarIncompleteError{Failed: failed, Err: firstErr}
+	}
 	return all, nil
+}
+
+// calendarLabel names a calendar for failure reports, falling back to its ID.
+func calendarLabel(cal calendarListEntry) string {
+	if cal.Summary != "" {
+		return cal.Summary
+	}
+	return cal.ID
 }
 
 // listCalendarEventsWithClient collects enough ordered events before publishing a calendar.

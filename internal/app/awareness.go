@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -102,11 +103,7 @@ func loadScheduleContext(secretsRoot string) string {
 
 	g.Go(func() error {
 		events, err := google.ListUpcomingEvents(gctx, secretsRoot, 10)
-		if err != nil {
-			slog.Debug("schedule context: calendar unavailable", "err", err)
-			return nil
-		}
-		calendarMD = google.FormatEventsMarkdown(events)
+		calendarMD = calendarScheduleSection(events, err)
 		return nil
 	})
 
@@ -135,6 +132,24 @@ func loadScheduleContext(secretsRoot string) string {
 		return ""
 	}
 	return "## TODAY'S CONTEXT (live)\n" + strings.Join(parts, "\n")
+}
+
+const calendarUnavailableNotice = "Calendar unavailable: upcoming events could not be loaded, so the schedule is unknown (not empty).\n"
+
+// calendarScheduleSection keeps a partial calendar with its warning and turns a
+// failed or canceled load into a notice, so neither reads as a clear schedule.
+func calendarScheduleSection(events []google.CalendarEvent, err error) string {
+	var incomplete *google.CalendarIncompleteError
+	switch {
+	case err == nil:
+		return google.FormatEventsMarkdown(events)
+	case errors.As(err, &incomplete):
+		slog.Debug("schedule context: calendar incomplete", "err", err)
+		return formatCalendarResult(events, incomplete)
+	default:
+		slog.Debug("schedule context: calendar unavailable", "err", err)
+		return calendarUnavailableNotice
+	}
 }
 
 // EnsureAwarenessFile writes a default AWARENESS.md into

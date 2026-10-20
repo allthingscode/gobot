@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -65,13 +66,34 @@ func (t *ListCalendarTool) Execute(ctx context.Context, _, _ string, args map[st
 			err = fmt.Errorf("list upcoming events: %w", err2)
 		}
 	}
-	if err != nil {
+	// A partial result still reaches the model, but labelled as incomplete.
+	var incomplete *google.CalendarIncompleteError
+	if err != nil && !errors.As(err, &incomplete) {
 		return "", fmt.Errorf("list_calendar_events: %w", err)
 	}
-	if len(events) == 0 {
-		return "No upcoming calendar events found.", nil
+	return formatCalendarResult(events, incomplete), nil
+}
+
+// formatCalendarResult renders events as Markdown and states explicitly when
+// some calendars failed, so a partial list is never presented as complete.
+func formatCalendarResult(events []google.CalendarEvent, incomplete *google.CalendarIncompleteError) string {
+	if incomplete == nil {
+		if len(events) == 0 {
+			return "No upcoming calendar events found."
+		}
+		return google.FormatEventsMarkdown(events)
 	}
-	return google.FormatEventsMarkdown(events), nil
+	body := google.FormatEventsMarkdown(events)
+	if body == "" {
+		body = "No upcoming events were found in the calendars that loaded.\n"
+	}
+	return body + "\n" + calendarIncompleteWarning(incomplete)
+}
+
+func calendarIncompleteWarning(incomplete *google.CalendarIncompleteError) string {
+	return "WARNING: incomplete schedule. These calendars could not be loaded: " +
+		strings.Join(incomplete.Failed, ", ") +
+		". Their events are missing, so this is not the complete schedule."
 }
 
 func (t *ListCalendarTool) parseMaxResults(args map[string]any) int {
