@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,9 @@ import (
 )
 
 const calendarBaseURL = "https://www.googleapis.com/calendar/v3"
+
+// errCalendarRepeatedPageToken marks a continuation token the API already returned, which would loop forever.
+var errCalendarRepeatedPageToken = errors.New("repeated pagination token prevents progress")
 
 // CalendarEvent is a simplified view of a Google Calendar event.
 type CalendarEvent struct {
@@ -37,6 +41,7 @@ type calendarListEntry struct {
 func listCalendarsWithClient(ctx context.Context, token string, client *http.Client) ([]calendarListEntry, error) {
 	params := url.Values{"minAccessRole": {"reader"}}
 	var all []calendarListEntry
+	seen := map[string]struct{}{}
 	for {
 		var resp struct {
 			Items         []calendarListEntry `json:"items"`
@@ -49,6 +54,10 @@ func listCalendarsWithClient(ctx context.Context, token string, client *http.Cli
 		if resp.NextPageToken == "" {
 			return all, nil
 		}
+		if _, dup := seen[resp.NextPageToken]; dup {
+			return nil, fmt.Errorf("calendar list: %w", errCalendarRepeatedPageToken)
+		}
+		seen[resp.NextPageToken] = struct{}{}
 		params.Set("pageToken", resp.NextPageToken)
 	}
 }
@@ -107,6 +116,7 @@ func listCalendarEventsWithClient(ctx context.Context, token string, cal calenda
 		params[key] = append([]string(nil), values...)
 	}
 	var events []CalendarEvent
+	seen := map[string]struct{}{}
 	for {
 		apiURL := fmt.Sprintf("%s/calendars/%s/events?%s", calendarBaseURL, url.PathEscape(cal.ID), params.Encode())
 		var resp struct {
@@ -148,6 +158,10 @@ func listCalendarEventsWithClient(ctx context.Context, token string, cal calenda
 		if resp.NextPageToken == "" || len(events) >= maxResults {
 			return events, nil
 		}
+		if _, dup := seen[resp.NextPageToken]; dup {
+			return nil, fmt.Errorf("calendar events: %w", errCalendarRepeatedPageToken)
+		}
+		seen[resp.NextPageToken] = struct{}{}
 		params.Set("pageToken", resp.NextPageToken)
 	}
 }

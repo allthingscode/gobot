@@ -4,10 +4,13 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -704,6 +707,84 @@ func TestCalendarLaterPageFailures(t *testing.T) {
 							t.Errorf("partial event leaked: %+v", ev)
 						}
 					}
+				}
+			})
+		}
+	}
+}
+
+const calendarTestListEndpoint = "list"
+
+//nolint:gocognit,cyclop // Cycle matrix covers both endpoints with a self-terminating fixture.
+func TestCalendarRepeatedContinuationToken(t *testing.T) {
+	t.Parallel()
+	const hardStop = 8
+	cases := []struct {
+		name      string
+		tokens    []string
+		items     bool
+		maxCalls  int
+		wantOK    bool
+		onlyEvent bool
+		max       int
+	}{
+		{name: "identical", tokens: []string{"A", "A"}, items: true, maxCalls: 3, max: 5},
+		{name: "alternating", tokens: []string{"A", "B", "A"}, items: true, maxCalls: 4, max: 5},
+		{name: "after unique prefix", tokens: []string{"U", "A", "A"}, items: true, maxCalls: 4, max: 5},
+		{name: "empty pages", tokens: []string{"A", "A"}, items: false, maxCalls: 3, max: 5},
+		{name: "cap before repeat", tokens: []string{"A", "A"}, items: true, maxCalls: 1, wantOK: true, onlyEvent: true, max: 1},
+	}
+	for _, endpoint := range []string{calendarTestListEndpoint, "events"} {
+		for _, tc := range cases {
+			if endpoint == calendarTestListEndpoint && tc.onlyEvent {
+				continue
+			}
+			t.Run(endpoint+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				var calls atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					n := int(calls.Add(1))
+					if n > hardStop {
+						http.Error(w, "runaway", http.StatusInternalServerError)
+						return
+					}
+					tok := tc.tokens[len(tc.tokens)-1]
+					if n <= len(tc.tokens) {
+						tok = tc.tokens[n-1]
+					}
+					items := `[]`
+					if tc.items {
+						items = fmt.Sprintf(`[{"id":"i%d","start":{"date":"2026-04-01"}}]`, n)
+					}
+					_, _ = fmt.Fprintf(w, `{"items":%s,"nextPageToken":%q}`, items, tok)
+				}))
+				defer srv.Close()
+				client := redirectClient(calendarBaseURL, srv.URL)
+				var err error
+				var got int
+				if endpoint == calendarTestListEndpoint {
+					var cals []calendarListEntry
+					cals, err = listCalendarsWithClient(context.Background(), "tok", client)
+					got = len(cals)
+				} else {
+					var evs []CalendarEvent
+					evs, err = listCalendarEventsWithClient(context.Background(), "tok", calendarListEntry{ID: "cal"}, url.Values{}, tc.max, client)
+					got = len(evs)
+				}
+				if int(calls.Load()) > tc.maxCalls {
+					t.Errorf("requests %d exceed bound %d", calls.Load(), tc.maxCalls)
+				}
+				if tc.wantOK {
+					if err != nil || got == 0 {
+						t.Fatalf("want success, got %d err %v", got, err)
+					}
+					return
+				}
+				if !errors.Is(err, errCalendarRepeatedPageToken) || got != 0 {
+					t.Fatalf("got %d err %v", got, err)
+				}
+				if want := "calendar " + endpoint; !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q lacks %q", err, want)
 				}
 			})
 		}
