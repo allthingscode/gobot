@@ -224,3 +224,38 @@ func TestBuildAgentStack_IndependentOwners(t *testing.T) {
 		})
 	}
 }
+
+//nolint:paralleltest // sets process environment for the helper subprocess
+func TestBuildAgentStack_CleanupStopsMCPServers(t *testing.T) {
+	t.Setenv("GO_WANT_MCP_HELPER", "1")
+	t.Setenv("GO_MCP_BEHAVIOR", "")
+	registry := provider.NewRegistry()
+	if err := registry.Register(fakeBuildProvider{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Agents.Defaults.Provider = coverageFakeProvider
+	cfg.Agents.Defaults.Model = coverageFakeModel
+	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{"helper": helperMCPServerConfig()}
+
+	stack, cleanup, err := buildAgentStack(context.Background(), cfg, nil, nil, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, ok := stack.Runner.ToolsByName["helper_tool"].(*mcpProxyTool)
+	if !ok {
+		t.Fatalf("helper_tool not registered: %#v", stack.Runner.ToolsByName)
+	}
+	srv, ok := proxy.server.(*MCPServer)
+	if !ok || srv.cmd == nil || srv.activeReaders.Load() != 1 {
+		t.Fatalf("MCP server should be running after build: %#v", proxy.server)
+	}
+	cmd := srv.cmd
+
+	cleanup()
+	cleanup()
+	if cmd.ProcessState == nil || srv.cmd != nil || srv.activeReaders.Load() != 0 {
+		t.Fatalf("stack cleanup left MCP running: state=%v readers=%d", cmd.ProcessState, srv.activeReaders.Load())
+	}
+}

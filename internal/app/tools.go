@@ -82,17 +82,26 @@ func (t *ReadTextFileTool) Execute(ctx context.Context, sessionKey, userID strin
 }
 
 // RegisterTools initializes all tools (spawn, shell, MCP, google, etc) and returns them.
+// Callers that own runtime cleanup should use registerToolsWithCleanup so MCP
+// subprocesses are stopped.
 func RegisterTools(cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer, resolver provider.Resolver) []Tool {
+	tools, _ := registerToolsWithCleanup(context.Background(), cfg, prov, model, memStore, vecStore, embedProv, registry, tmgr, tracer, resolver)
+	return tools
+}
+
+// registerToolsWithCleanup is RegisterTools plus an idempotent cleanup that
+// stops every MCP server created during registration. ctx bounds discovery only.
+func registerToolsWithCleanup(ctx context.Context, cfg *config.Config, prov provider.Provider, model string, memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, registry *ToolRegistry, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer, resolver provider.Resolver) (registered []Tool, cleanup func()) {
 	specialistModels := buildSpecialistModels(cfg)
 	secretsRoot := cfg.SecretsRoot()
 	tools := buildBaseTools(cfg, prov, model, specialistModels, memStore, vecStore, embedProv, registry, resolver)
 	tools = appendCalendarTaskTools(secretsRoot, tools, tracer)
-	tools = appendMCPtools(cfg, tools)
+	tools, cleanup = appendMCPtools(ctx, cfg, tools)
 	tools = appendMemoryTools(memStore, vecStore, embedProv, cfg, tools, tracer)
 	tools = appendGoogleTools(cfg, tools, tracer)
 	tools = appendGmailTools(cfg, secretsRoot, tools, registry, tmgr, tracer)
 	wireSubTools(tools)
-	return tools
+	return tools, cleanup
 }
 
 // wireSubTools finds the SpawnTool in the list and gives it a safe read-only subset
@@ -143,22 +152,41 @@ func buildBaseTools(cfg *config.Config, prov provider.Provider, model string, sp
 //nolint:gochecknoglobals // mockable function for testing
 var enumerateMCPToolsFunc = enumerateMCPTools
 
-func appendMCPtools(cfg *config.Config, tools []Tool) []Tool {
+// appendMCPtools registers MCP tools and returns an idempotent cleanup that
+// stops every server it created.
+func appendMCPtools(ctx context.Context, cfg *config.Config, tools []Tool) (registered []Tool, cleanup func()) {
 	existingNames := make(map[string]bool)
 	for _, t := range tools {
 		existingNames[t.Name()] = true
 	}
 
+	var owned []mcpStopper
+	stopAll := func() {
+		for _, s := range owned {
+			if err := s.stop(); err != nil {
+				slog.Warn("mcp: stop failed", "err", err)
+			}
+		}
+	}
+	var once sync.Once
+
 	for name, srvCfg := range cfg.Tools.MCPServers {
 		env := cfg.MCPEnvFor(name)
 		srv := &MCPServer{name: name, cfg: srvCfg, env: env}
 
-		proxies, err := enumerateMCPToolsFunc(context.Background(), srv)
+		dctx, cancel := context.WithTimeout(ctx, mcpDiscoveryTimeout)
+		proxies, err := enumerateMCPToolsFunc(dctx, srv)
+		cancel()
 		if err != nil {
 			slog.Warn("mcp: failed to enumerate tools, registering passthrough", "server", name, "err", err)
-			tools = append(tools, newMCPTool(name, srvCfg, env))
+			// The passthrough tool builds its own server, so release this one.
+			_ = srv.stop()
+			fallback := newMCPTool(name, srvCfg, env)
+			owned = append(owned, fallback.server)
+			tools = append(tools, fallback)
 			continue
 		}
+		owned = append(owned, srv)
 		for _, p := range proxies {
 			finalName := sanitizeMCPToolName(p.toolName)
 			if existingNames[finalName] {
@@ -171,7 +199,7 @@ func appendMCPtools(cfg *config.Config, tools []Tool) []Tool {
 			slog.Info("run: registered MCP proxy tool", "server", name, "tool", p.toolName)
 		}
 	}
-	return tools
+	return tools, func() { once.Do(stopAll) }
 }
 
 func appendMemoryTools(memStore *memory.MemoryStore, vecStore *vector.Store, embedProv vector.EmbeddingProvider, cfg *config.Config, tools []Tool, tracer *observability.DispatchTracer) []Tool {
