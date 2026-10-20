@@ -33,6 +33,8 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
 }
 . $helpersPath
 . (Join-Path $PSScriptRoot "lib/time.ps1")
+. (Join-Path $PSScriptRoot "lib/project-root.ps1")
+$ProjectRoot = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
 $StateFile = Join-Path $sessionDir "global/session_state.json"
 $LockFile = Join-Path $sessionDir "global/session_state.lock"

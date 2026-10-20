@@ -4,8 +4,15 @@ param (
         "research", "grooming", "implementation", "verification", "deployment", "coder", "done",
         "researcher", "groomer", "architect", "reviewer", "operator"
     )]
-    [string]$Specialist
+    [string]$Specialist,
+
+    [Parameter(Mandatory=$false)]
+    [string]$ProjectRoot = ""
 )
+
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib/project-root.ps1")
+$resolvedProjectRoot = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 
 # Normalize specialist to phase names
 $normalized = $Specialist
@@ -75,4 +82,4 @@ $IdleJson = $IdleStates[$normalized] | ConvertTo-Json -Compress
 $ScriptPath = Join-Path $PSScriptRoot "update-session-state.ps1"
 
 Write-Host "[CLEANUP] Clearing $normalized session state..." -ForegroundColor Cyan
-& $ScriptPath -Specialist $normalized -UpdateJson $IdleJson -Merge:$false
+& $ScriptPath -Specialist $normalized -UpdateJson $IdleJson -Merge:$false -ProjectRoot $resolvedProjectRoot

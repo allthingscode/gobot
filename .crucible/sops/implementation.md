@@ -1,4 +1,4 @@
-<!-- prompt_version: architect-sop-v5 -->
+<!-- prompt_version: architect-sop-v6 -->
 # SOP: Implementation
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -25,7 +25,7 @@
 
 Read `.crucible/session/{task_id}/implementation/task.md` for resolved paths and instructions, the incoming handoff, and `{{crucible_root}}/docs/operating-manual.md`. If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first.
 
-Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1 implementation` to clear stale state safely. Do not edit `session_state.json` manually.
+Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1 implementation -ProjectRoot "{project_root}"` to clear stale state safely. Do not edit `session_state.json` manually.
 
 For state updates, use `update-session-state.ps1 -Specialist implementation -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Implementation session files go to `.crucible/session/{task_id}/implementation/`.
 

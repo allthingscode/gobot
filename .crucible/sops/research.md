@@ -1,4 +1,4 @@
-<!-- prompt_version: researcher-sop-v2 -->
+<!-- prompt_version: researcher-sop-v3 -->
 # SOP: Researcher
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -36,7 +36,7 @@ You consume untrusted external sources. These rules are non-negotiable:
 
 ## Session Start
 
-1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 research` to clear stale state.
+1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 research -ProjectRoot "{project_root}"` to clear stale state.
 2. Read `task.md` and the incoming handoff - extract the specific questions and scope boundary.
 3. Check `.crucible/research/` for existing artifacts before going external.
 

@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v6 -->
+<!-- prompt_version: reviewer-sop-v7 -->
 # SOP: Verification
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -24,7 +24,7 @@
 ## Review Workflow
 
 ### Step 1 - Pre-Review Setup
-1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 verification` to clear stale state safely
+1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 verification -ProjectRoot "{project_root}"` to clear stale state safely
 2. Read the backlog spec for `{task_id}` - understand what was supposed to be built
 3. Enter the assigned task worktree at `.crucible/.agent-workspaces/implementation-{task_id}` and review there. Do not check out task branches from the main checkout.
 
