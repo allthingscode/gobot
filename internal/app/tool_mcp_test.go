@@ -495,6 +495,28 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 func admissionHeld(srv *MCPServer) bool { return len(srv.admission()) == 1 }
 
+// entrySignalWriter closes entered when a Write begins, before it can block.
+type entrySignalWriter struct {
+	io.WriteCloser
+	once    sync.Once
+	entered chan struct{}
+}
+
+func (w *entrySignalWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	return w.WriteCloser.Write(p)
+}
+
+// wrapStdinWithEntrySignal lets a test cancel only once a write is truly in
+// flight, so cancellation cannot win against the pre-write context check.
+func wrapStdinWithEntrySignal(srv *MCPServer) <-chan struct{} {
+	entered := make(chan struct{})
+	srv.mu.Lock()
+	srv.stdin = &entrySignalWriter{WriteCloser: srv.stdin, entered: entered}
+	srv.mu.Unlock()
+	return entered
+}
+
 // pipeMCP is an in-process MCP peer built from io.Pipe; the test plays the server.
 type pipeMCP struct {
 	srv  *MCPServer
@@ -585,13 +607,20 @@ func TestMCPServer_SilentToolsListDiscoveryFailsFinite(t *testing.T) {
 func TestMCPServer_BlockedWriteTearsDownAndReturns(t *testing.T) {
 	t.Parallel()
 	srv := newHelperMCPServer(t, "stall_after_init")
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	if err := srv.start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	entered := wrapStdinWithEntrySignal(srv)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	big := strings.Repeat("x", 4*1024*1024)
-	o := awaitOutcome(t, callAsync(ctx, srv, "tools/call", map[string]any{"tag": big}), mcpTestBound)
-	if !errors.Is(o.err, context.DeadlineExceeded) || !strings.Contains(o.err.Error(), "write request") {
-		t.Fatalf("want wrapped write deadline error, got %v", o.err)
+	ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": big})
+	<-entered
+	cancel()
+	o := awaitOutcome(t, ch, mcpTestBound)
+	if !errors.Is(o.err, context.Canceled) || !strings.Contains(o.err.Error(), "write request") {
+		t.Fatalf("want wrapped write cancel error, got %v", o.err)
 	}
 	if srv.cmd != nil || srv.activeReaders.Load() != 0 || admissionHeld(srv) {
 		t.Fatalf("blocked write must tear down: cmd=%v readers=%d held=%v", srv.cmd, srv.activeReaders.Load(), admissionHeld(srv))
@@ -601,9 +630,10 @@ func TestMCPServer_BlockedWriteTearsDownAndReturns(t *testing.T) {
 func TestMCPServer_BlockedPipeWriteCancelled(t *testing.T) {
 	t.Parallel()
 	p := newPipeMCP(t) // nobody reads the request pipe, so the write blocks
+	entered := wrapStdinWithEntrySignal(p.srv)
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := callAsync(ctx, p.srv, "tools/call", map[string]any{"tag": "w"})
-	waitFor(t, "write in flight", func() bool { return admissionHeld(p.srv) })
+	<-entered
 	cancel()
 	o := awaitOutcome(t, ch, mcpTestBound)
 	if !errors.Is(o.err, context.Canceled) {

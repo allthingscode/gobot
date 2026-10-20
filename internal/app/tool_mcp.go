@@ -384,7 +384,7 @@ func (s *MCPServer) send(ctx context.Context, method string, params any) (mcpReq
 		s.deregister(req.id)
 		return mcpRequest{}, fmt.Errorf("mcp %s: marshal request: %w", s.name, err)
 	}
-	slog.Debug("mcp: sending request", "server", s.name, "req", string(b))
+	slog.Debug("mcp: sending request", "server", s.name, "id", req.id, "method", method, "bytes", len(b))
 	if err := s.write(ctx, stdin, append(b, '\n')); err != nil {
 		s.deregister(req.id)
 		return mcpRequest{}, err
