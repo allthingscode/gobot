@@ -495,6 +495,18 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 func admissionHeld(srv *MCPServer) bool { return len(srv.admission()) == 1 }
 
+// awaitResponseWait blocks until a request is written and its caller is parked
+// waiting for the response: registered as pending with admission released.
+func awaitResponseWait(t *testing.T, srv *MCPServer) {
+	t.Helper()
+	waitFor(t, "caller in response wait", func() bool {
+		srv.mu.Lock()
+		n := len(srv.pending)
+		srv.mu.Unlock()
+		return n > 0 && !admissionHeld(srv)
+	})
+}
+
 // entrySignalWriter closes entered when a Write begins, before it can block.
 type entrySignalWriter struct {
 	io.WriteCloser
@@ -582,6 +594,9 @@ func TestMCPServer_SilentInitializationFailsFinite(t *testing.T) {
 func TestMCPServer_SilentToolsListDiscoveryFailsFinite(t *testing.T) {
 	t.Parallel()
 	srv := newHelperMCPServer(t, "silent_list")
+	if err := srv.start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
 
@@ -680,16 +695,18 @@ func TestMCPServer_CancelWhileQueuedBehindHolder(t *testing.T) {
 func TestMCPServer_CancelDuringResponseWait(t *testing.T) {
 	t.Parallel()
 	srv := newHelperMCPServer(t, "")
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	if err := srv.start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	start := time.Now()
-	o := awaitOutcome(t, callAsync(ctx, srv, "tools/call", map[string]any{"tag": "slow", "delay_ms": 3000}), 2500*time.Millisecond)
-	if !errors.Is(o.err, context.DeadlineExceeded) {
-		t.Fatalf("want wrapped deadline error, got %v", o.err)
-	}
-	if time.Since(start) > 2500*time.Millisecond {
-		t.Fatalf("response wait ignored the context for %s", time.Since(start))
+	ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "slow", "delay_ms": 30000})
+	awaitResponseWait(t, srv)
+	cancel()
+	o := awaitOutcome(t, ch, mcpTestBound)
+	if !errors.Is(o.err, context.Canceled) {
+		t.Fatalf("want wrapped context.Canceled, got %v", o.err)
 	}
 	if srv.activeReaders.Load() != 1 || admissionHeld(srv) {
 		t.Fatalf("transport should survive a read-wait cancel: readers=%d", srv.activeReaders.Load())
@@ -800,10 +817,12 @@ func TestMCPServer_RepeatedCancelKeepsSingleReaderAndStopJoins(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
-		o := awaitOutcome(t, callAsync(ctx, srv, "tools/call", map[string]any{"tag": "late", "delay_ms": 200}), mcpTestBound)
+		ctx, cancel := context.WithCancel(context.Background())
+		ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "late", "delay_ms": 30000})
+		awaitResponseWait(t, srv)
 		cancel()
-		if !errors.Is(o.err, context.DeadlineExceeded) {
+		o := awaitOutcome(t, ch, mcpTestBound)
+		if !errors.Is(o.err, context.Canceled) {
 			t.Fatalf("round %d: %v", i, o.err)
 		}
 		if n := srv.activeReaders.Load(); n != 1 {
