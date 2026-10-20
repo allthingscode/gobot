@@ -168,36 +168,82 @@ func (s *Service) Send(ctx context.Context, to string, content EmailContent) err
 
 // SearchMessages searches for messages matching the query.
 func (s *Service) SearchMessages(ctx context.Context, query string, maxResults int) ([]MessageSummary, error) {
-	u, _ := url.Parse(s.baseURL + "/messages")
+	if maxResults <= 0 {
+		maxResults = 5
+	}
+	u, err := url.Parse(s.baseURL + "/messages")
+	if err != nil {
+		return nil, fmt.Errorf("search messages URL: %w", err)
+	}
+	var messages []MessageSummary
+	seen := make(map[string]bool)
 	q := u.Query()
 	q.Set("q", query)
-	if maxResults > 0 {
-		q.Set("maxResults", fmt.Sprintf("%d", maxResults))
+	q.Del("pageToken")
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("search messages: %w", err)
+		}
+		remaining := maxResults - len(messages)
+		q.Set("maxResults", fmt.Sprintf("%d", min(500, remaining)))
+		u.RawQuery = q.Encode()
+		page, err := s.searchMessagesPage(ctx, u.String())
+		if err != nil {
+			return nil, fmt.Errorf("search messages: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("search messages: %w", err)
+		}
+		messages = append(messages, page.Messages[:min(remaining, len(page.Messages))]...)
+		if len(messages) == maxResults || page.NextPageToken == "" {
+			return messages, nil
+		}
+		token := page.NextPageToken
+		if seen[token] {
+			return nil, fmt.Errorf("search messages: repeated continuation token")
+		}
+		seen[token] = true
+		q.Set("pageToken", token)
 	}
-	u.RawQuery = q.Encode()
+}
 
-	var result struct {
-		Messages []MessageSummary `json:"messages"`
-	}
+type gmailSearchPage struct {
+	Messages      []MessageSummary `json:"messages"`
+	NextPageToken string           `json:"nextPageToken"`
+}
 
+func (s *Service) searchMessagesPage(ctx context.Context, endpoint string) (gmailSearchPage, error) {
+	var page gmailSearchPage
 	err := resilience.Do(ctx, resilience.DefaultRetryConfig, resilience.IsRetryable, func() error {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), http.NoBody)
+		page = gmailSearchPage{}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
+		if err != nil {
+			return fmt.Errorf("search request: %w", err)
+		}
 		req.Header.Set("Authorization", "Bearer "+s.accessToken)
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
+			// The retry logger must not expose the request query or token.
+			var urlErr *url.Error
+			if errors.As(err, &urlErr) {
+				err = urlErr.Err
+			}
 			return fmt.Errorf("http search: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
-			b, _ := io.ReadAll(resp.Body)
-			return &resilience.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(b)}
+			// Retry logging must not include server-echoed query or message content.
+			return &resilience.HTTPStatusError{StatusCode: resp.StatusCode}
 		}
-		return json.NewDecoder(resp.Body).Decode(&result)
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			return fmt.Errorf("decode search page: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("search messages: %w", err)
+		return gmailSearchPage{}, fmt.Errorf("search page: %w", err)
 	}
-	return result.Messages, nil
+	return page, nil
 }
 
 // GetMessage retrieves a full message by ID.

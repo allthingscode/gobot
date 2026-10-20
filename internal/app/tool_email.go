@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -142,6 +144,8 @@ func (s *SendEmailTool) Execute(ctx context.Context, sessionKey, userID string, 
 
 const searchGmailToolName = "search_gmail"
 
+const noGmailMessages = "No messages found matching the query."
+
 type SearchGmailTool struct {
 	secretsRoot    string
 	tracer         *observability.DispatchTracer
@@ -154,7 +158,7 @@ func newSearchGmailTool(secretsRoot string, tracer *observability.DispatchTracer
 
 type searchGmailArgs struct {
 	Query      string `json:"query" schema:"Gmail search query (e.g. 'from:example.com', 'is:unread', 'subject:report')."`
-	MaxResults int    `json:"max_results,omitempty" schema:"Maximum number of results to return. Defaults to 5."`
+	MaxResults int    `json:"max_results,omitempty" schema:"Maximum total number of results to return. Invalid or omitted values default to 5."`
 }
 
 func (s *SearchGmailTool) Name() string { return searchGmailToolName }
@@ -186,7 +190,7 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 	}
 
 	if len(summaries) == 0 {
-		return "No messages found matching the query.", nil
+		return noGmailMessages, nil
 	}
 
 	messages, err := s.fetchDetails(ctx, svc, summaries)
@@ -198,13 +202,12 @@ func (s *SearchGmailTool) Execute(ctx context.Context, _, _ string, args map[str
 }
 
 func (s *SearchGmailTool) parseMaxResults(args map[string]any) int {
-	maxResults := 5
-	if v, ok := args["max_results"]; ok {
-		if n, ok := v.(float64); ok {
-			maxResults = int(n)
-		}
+	n, ok := args["max_results"].(float64)
+	// Use an exclusive power-of-two bound: float64 rounds MaxInt64 up.
+	if !ok || math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 || math.Trunc(n) != n || n >= math.Ldexp(1, strconv.IntSize-1) {
+		return 5
 	}
-	return maxResults
+	return int(n)
 }
 
 func (s *SearchGmailTool) searchMessages(ctx context.Context, svc gmailService, query string, maxResults int) ([]google.MessageSummary, error) {
