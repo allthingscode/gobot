@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
@@ -35,11 +36,20 @@ type GeminiProvider struct {
 	// Gemini endpoint and http.DefaultClient so runtime behavior is unchanged.
 	baseURL    string
 	httpClient *http.Client
+
+	// requestTimeout bounds each Embed call; zero means defaultEmbedRequestTimeout.
+	requestTimeout time.Duration
 }
 
 const geminiEmbedBaseURL = "https://generativelanguage.googleapis.com"
 
+// defaultEmbedRequestTimeout bounds one whole embedContent HTTP request (headers
+// and full body read). It is a compile-time default; a caller can bound it
+// shorter with an earlier ctx deadline, which always wins.
+const defaultEmbedRequestTimeout = 60 * time.Second
+
 // NewGeminiProvider creates a new EmbeddingProvider using the Gemini REST API directly.
+// Each Embed call is bounded by defaultEmbedRequestTimeout (60 seconds).
 func NewGeminiProvider(apiKey, model string) *GeminiProvider {
 	return &GeminiProvider{
 		apiKey:     apiKey,
@@ -82,6 +92,13 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	timeout := p.requestTimeout
+	if timeout <= 0 {
+		timeout = defaultEmbedRequestTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	url := p.buildURL()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))

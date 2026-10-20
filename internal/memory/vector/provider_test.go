@@ -4,12 +4,14 @@ package vector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 )
@@ -268,4 +270,96 @@ func TestGeminiProvider_Embed_Errors(t *testing.T) {
 		_, err := p.Embed(context.Background(), "hello")
 		assertErrContains(t, err, "create request")
 	})
+}
+
+//nolint:gocognit,cyclop,funlen // table of stall scenarios with local helpers
+func TestGeminiProvider_Embed_RequestBounds(t *testing.T) {
+	t.Parallel()
+	const guard = 30 * time.Second
+
+	newServer := func(t *testing.T, mode string) (*httptest.Server, <-chan struct{}) {
+		t.Helper()
+		arrived := make(chan struct{}, 1)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body) // lets the server notice a client disconnect
+			select {
+			case arrived <- struct{}{}:
+			default:
+			}
+			if mode == "body" {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"embedding":`))
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			}
+			<-r.Context().Done()
+		}))
+		t.Cleanup(ts.Close)
+		return ts, arrived
+	}
+	run := func(t *testing.T, fn func() error) error {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- fn() }()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(guard):
+			t.Fatal("request did not terminate: no finite deadline applied")
+			return nil
+		}
+	}
+	build := func(url string, d time.Duration) *GeminiProvider {
+		p := NewGeminiProvider("k", "m")
+		p.baseURL = url
+		p.httpClient = http.DefaultClient
+		p.requestTimeout = d
+		return p
+	}
+
+	for _, mode := range []string{"header", "body"} {
+		t.Run(mode+" stall hits operational timeout", func(t *testing.T) {
+			t.Parallel()
+			ts, _ := newServer(t, mode)
+			p := build(ts.URL, 50*time.Millisecond)
+			err := run(t, func() error { _, e := p.Embed(context.Background(), "hello"); return e })
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("got %v, want context.DeadlineExceeded", err)
+			}
+		})
+		t.Run(mode+" stall honors earlier parent deadline", func(t *testing.T) {
+			t.Parallel()
+			ts, _ := newServer(t, mode)
+			p := build(ts.URL, time.Hour)
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			err := run(t, func() error { _, e := p.Embed(ctx, "hello"); return e })
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("got %v, want context.DeadlineExceeded", err)
+			}
+		})
+		t.Run(mode+" stall honors parent cancellation", func(t *testing.T) {
+			t.Parallel()
+			ts, arrived := newServer(t, mode)
+			p := build(ts.URL, time.Hour)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-arrived
+				cancel()
+			}()
+			err := run(t, func() error { _, e := p.Embed(ctx, "hello"); return e })
+			if !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("got %v, want context.Canceled only", err)
+			}
+		})
+	}
+}
+
+func TestGeminiProvider_DefaultRequestTimeout(t *testing.T) {
+	t.Parallel()
+	if defaultEmbedRequestTimeout <= 0 || NewGeminiProvider("k", "m").requestTimeout != 0 {
+		t.Fatal("embed default must be finite and applied when the field is zero")
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
@@ -165,4 +166,16 @@ func TestAnthropicProvider_MergeMessages(t *testing.T) {
 	if len(mapped[0].Content) != 2 {
 		t.Errorf("got %d content blocks, want 2", len(mapped[0].Content))
 	}
+}
+
+func TestAnthropicProvider_Chat_RequestBounds(t *testing.T) {
+	t.Parallel()
+	runStallMatrix(t, func(url string, d time.Duration) func(context.Context) error {
+		p := NewAnthropicProvider("k", url)
+		p.requestTimeout = d
+		return func(ctx context.Context) error {
+			_, err := p.Chat(ctx, chatRequestForTimeout())
+			return err
+		}
+	})
 }
