@@ -4,10 +4,13 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
@@ -156,5 +159,138 @@ func TestOpenAIProvider_Chat_Error(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid_request_error") {
 		t.Errorf("expected invalid_request_error, got: %v", err)
+	}
+}
+
+const testGuard = 30 * time.Second
+
+// newStallServer returns a server that accepts a request, signals arrived and
+// then stalls until the client gives up. In "body" mode it first sends response
+// headers and a partial body.
+func newStallServer(t *testing.T, mode string) (srv *httptest.Server, arrived <-chan struct{}) {
+	t.Helper()
+	signal := make(chan struct{}, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body) // lets the server notice a client disconnect
+		select {
+		case signal <- struct{}{}:
+		default:
+		}
+		if mode == "body" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"choices":[`))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(ts.Close)
+	return ts, signal
+}
+
+func runGuarded(t *testing.T, fn func() error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(testGuard):
+		t.Fatal("request did not terminate: no finite deadline applied")
+		return nil
+	}
+}
+
+// runStallMatrix exercises header and body stalls against the operational
+// timeout, an earlier parent deadline and explicit parent cancellation.
+// newCall builds a request func against url using the given operational timeout.
+func runStallMatrix(t *testing.T, newCall func(url string, timeout time.Duration) func(context.Context) error) {
+	t.Helper()
+	for _, mode := range []string{"header", "body"} {
+		t.Run(mode+" stall hits operational timeout", func(t *testing.T) {
+			t.Parallel()
+			ts, _ := newStallServer(t, mode)
+			call := newCall(ts.URL, 50*time.Millisecond)
+			err := runGuarded(t, func() error { return call(context.Background()) })
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("got %v, want context.DeadlineExceeded", err)
+			}
+		})
+		t.Run(mode+" stall honors earlier parent deadline", func(t *testing.T) {
+			t.Parallel()
+			ts, _ := newStallServer(t, mode)
+			call := newCall(ts.URL, time.Hour)
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			err := runGuarded(t, func() error { return call(ctx) })
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("got %v, want context.DeadlineExceeded", err)
+			}
+		})
+		t.Run(mode+" stall honors parent cancellation", func(t *testing.T) {
+			t.Parallel()
+			ts, arrived := newStallServer(t, mode)
+			call := newCall(ts.URL, time.Hour)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-arrived
+				cancel()
+			}()
+			err := runGuarded(t, func() error { return call(ctx) })
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("got %v, want context.Canceled", err)
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("cancellation was replaced by a timeout error: %v", err)
+			}
+		})
+	}
+}
+
+func chatRequestForTimeout() ChatRequest {
+	str := "hello"
+	return ChatRequest{
+		Model:    "m",
+		Messages: []agentctx.StrategicMessage{{Role: agentctx.RoleUser, Content: &agentctx.MessageContent{Str: &str}}},
+	}
+}
+
+func TestOpenAIProvider_Chat_RequestBounds(t *testing.T) {
+	t.Parallel()
+	ctors := map[string]func(url string) *OpenAIProvider{
+		"openai":     func(url string) *OpenAIProvider { return NewOpenAIProvider("k", url) },
+		"openrouter": func(url string) *OpenAIProvider { return NewOpenRouterProvider("k", url) },
+	}
+	for name, ctor := range ctors {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runStallMatrix(t, func(url string, d time.Duration) func(context.Context) error {
+				p := ctor(url)
+				p.requestTimeout = d
+				return func(ctx context.Context) error {
+					_, err := p.Chat(ctx, chatRequestForTimeout())
+					return err
+				}
+			})
+		})
+	}
+}
+
+func TestOpenAIProvider_DefaultRequestTimeout(t *testing.T) {
+	t.Parallel()
+	if defaultChatRequestTimeout <= 0 {
+		t.Fatalf("default chat timeout must be finite and positive, got %v", defaultChatRequestTimeout)
+	}
+	ctx, cancel := withRequestTimeout(context.Background(), 0, defaultChatRequestTimeout)
+	defer cancel()
+	dl, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("zero timeout must fall back to a finite default deadline")
+	}
+	if remaining := time.Until(dl); remaining > defaultChatRequestTimeout {
+		t.Fatalf("deadline %v exceeds default %v", remaining, defaultChatRequestTimeout)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
@@ -17,7 +18,25 @@ const (
 	defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 	providerNameOpenAI       = "openai"
 	providerNameOpenRouter   = "openrouter"
+
+	// defaultChatRequestTimeout bounds one whole chat HTTP request (headers and
+	// full body read) for the OpenAI, OpenRouter and Anthropic providers. It is a
+	// compile-time default sized for slow reasoning models and stays below the
+	// 10-minute cron job contexts. A caller that needs a shorter bound passes a
+	// ctx with an earlier deadline; the earlier deadline always wins.
+	defaultChatRequestTimeout = 5 * time.Minute
 )
+
+// withRequestTimeout derives a context limited to d (or fallback when d <= 0)
+// from ctx. The parent's earlier deadline or cancellation still applies and its
+// error stays recognizable through errors.Is. The caller must call the returned
+// cancel only after the response body has been fully read.
+func withRequestTimeout(ctx context.Context, d, fallback time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		d = fallback
+	}
+	return context.WithTimeout(ctx, d)
+}
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs.
 type OpenAIProvider struct {
@@ -25,9 +44,14 @@ type OpenAIProvider struct {
 	apiKey  string
 	baseURL string
 	client  *http.Client
+
+	// requestTimeout bounds each Chat call; zero means defaultChatRequestTimeout.
+	requestTimeout time.Duration
 }
 
-// NewOpenAIProvider creates a new OpenAIProvider.
+// NewOpenAIProvider creates a new OpenAIProvider. Each Chat call is bounded by
+// defaultChatRequestTimeout (5 minutes, headers plus full body), which suits
+// slow models; use a shorter ctx deadline to bound it further.
 func NewOpenAIProvider(apiKey, baseURL string) *OpenAIProvider {
 	if baseURL == "" {
 		baseURL = defaultOpenAIBaseURL
@@ -44,6 +68,7 @@ func NewOpenAIProvider(apiKey, baseURL string) *OpenAIProvider {
 }
 
 // NewOpenRouterProvider creates a new OpenAIProvider configured for OpenRouter.
+// It shares the 5-minute defaultChatRequestTimeout of NewOpenAIProvider.
 func NewOpenRouterProvider(apiKey, baseURL string) *OpenAIProvider {
 	if baseURL == "" {
 		baseURL = defaultOpenRouterBaseURL
@@ -119,6 +144,9 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if err != nil {
 		return nil, fmt.Errorf("%s: failed to marshal request: %w", p.name, err)
 	}
+
+	ctx, cancel := withRequestTimeout(ctx, p.requestTimeout, defaultChatRequestTimeout)
+	defer cancel()
 
 	url := fmt.Sprintf("%s/chat/completions", p.baseURL)
 	resp, err := p.sendRequest(ctx, url, jsonData)

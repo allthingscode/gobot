@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
 )
@@ -22,9 +23,14 @@ type AnthropicProvider struct {
 	apiKey  string
 	baseURL string
 	client  *http.Client
+
+	// requestTimeout bounds each Chat call; zero means defaultChatRequestTimeout.
+	requestTimeout time.Duration
 }
 
-// NewAnthropicProvider creates a new AnthropicProvider.
+// NewAnthropicProvider creates a new AnthropicProvider. Each Chat call is
+// bounded by defaultChatRequestTimeout (5 minutes, headers plus full body),
+// which suits slow models; use a shorter ctx deadline to bound it further.
 func NewAnthropicProvider(apiKey, baseURL string) *AnthropicProvider {
 	if baseURL == "" {
 		baseURL = defaultAnthropicAPIURL
@@ -61,6 +67,9 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: failed to marshal request: %w", err)
 	}
+
+	ctx, cancel := withRequestTimeout(ctx, p.requestTimeout, defaultChatRequestTimeout)
+	defer cancel()
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL, bytes.NewBuffer(jsonData))
 	if err != nil {
