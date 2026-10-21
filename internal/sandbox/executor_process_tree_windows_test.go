@@ -19,28 +19,50 @@ import (
 )
 
 const sandboxHelperEnv = "GOBOT_SANDBOX_HELPER"
+const sandboxStartupDelayEnv = "GOBOT_SANDBOX_STARTUP_DELAY"
 
 func TestExecutorCancelsProcessTree(t *testing.T) { //nolint:paralleltest // manipulates inherited helper env and process tree state
 	ctx, cancel := context.WithCancel(context.Background())
-	pidFile := sandboxProcessTreeHelper(t, ctx, sandbox.Config{SandboxRoot: t.TempDir()})
+	t.Cleanup(cancel)
+	helper := sandboxProcessTreeHelper(t, ctx, sandbox.Config{SandboxRoot: t.TempDir()})
 
-	grandchildPID := waitForHelperPID(t, pidFile)
-	t.Cleanup(func() { terminateProcessIfAlive(t, grandchildPID) })
-
+	grandchildPID := waitForHelperPID(t, helper)
 	cancel()
 	waitForProcessExit(t, grandchildPID, 5*time.Second)
+	helper.wait(t, "Run after cancellation")
 }
 
 func TestExecutorTimeoutKillsProcessTree(t *testing.T) { //nolint:paralleltest // manipulates inherited helper env and process tree state
-	pidFile := sandboxProcessTreeHelper(t, context.Background(), sandbox.Config{
+	// Controlled startup pressure exceeds the old 750ms budget. This delay
+	// exercises helper startup, rather than sleeping in an assertion loop.
+	t.Setenv(sandboxStartupDelayEnv, "1s")
+	helper := sandboxProcessTreeHelper(t, context.Background(), sandbox.Config{
 		SandboxRoot: t.TempDir(),
-		Timeout:     750 * time.Millisecond,
+		// Startup shares this budget. Concurrent suite/coverage load measured
+		// 8.74s to observe readiness. Allow 10s for readiness and 5s for
+		// observing a live grandchild before the configured timeout fires.
+		Timeout: 15 * time.Second,
 	})
 
-	grandchildPID := waitForHelperPID(t, pidFile)
-	t.Cleanup(func() { terminateProcessIfAlive(t, grandchildPID) })
+	grandchildPID := waitForHelperPID(t, helper)
+	waitForProcessExit(t, grandchildPID, 20*time.Second)
+	helper.wait(t, "Run after configured timeout")
+}
 
-	waitForProcessExit(t, grandchildPID, 5*time.Second)
+func TestExecutorProcessTreeStartupConsumesTimeout(t *testing.T) { //nolint:paralleltest // inherited helper env
+	t.Setenv(sandboxStartupDelayEnv, "1s")
+	helper := sandboxProcessTreeHelper(t, context.Background(), sandbox.Config{
+		SandboxRoot: t.TempDir(), Timeout: 750 * time.Millisecond,
+	})
+	helper.wait(t, "configured timeout before readiness")
+	select {
+	case <-helper.done:
+		if _, err := os.Stat(helper.pidFile); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected timeout before PID publication, stat error=%v; output=%q", err, helper.result.output)
+		}
+	default:
+		t.Fatal("Run did not complete")
+	}
 }
 
 func TestExecutorEnforcesMemoryLimit(t *testing.T) {
@@ -65,12 +87,13 @@ func TestExecutorEnforcesMemoryLimit(t *testing.T) {
 	}
 }
 
-func sandboxProcessTreeHelper(t *testing.T, ctx context.Context, cfg sandbox.Config) string {
+func sandboxProcessTreeHelper(t *testing.T, ctx context.Context, cfg sandbox.Config) *treeHelper {
 	t.Helper()
 	t.Setenv(sandboxHelperEnv, "1")
 
 	pidFile := t.TempDir() + `\grandchild.pid`
-	done := make(chan runResult, 1)
+	ctx, cancel := context.WithCancel(ctx)
+	helper := &treeHelper{pidFile: pidFile, done: make(chan struct{}), started: time.Now()}
 	runner := sandbox.New(cfg)
 	go func() {
 		output, err := runner.Run(ctx, os.Args[0], []string{
@@ -79,21 +102,55 @@ func sandboxProcessTreeHelper(t *testing.T, ctx context.Context, cfg sandbox.Con
 			"tree-parent",
 			pidFile,
 		})
-		done <- runResult{output: output, err: err}
+		helper.result = runResult{output: output, err: err}
+		close(helper.done)
 	}()
 
 	t.Cleanup(func() {
-		select {
-		case result := <-done:
-			if result.err == nil {
-				t.Errorf("expected sandbox helper to be terminated, got nil error and output %q", result.output)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("sandbox helper did not exit within cleanup deadline")
-		}
+		cancel() // Also stop Run if readiness or a later assertion fails.
+		helper.wait(t, "Run cleanup")
 	})
 
-	return pidFile
+	return helper
+}
+
+type treeHelper struct {
+	pidFile string
+	done    chan struct{}
+	result  runResult // Published by closing done; never read before then.
+	started time.Time
+}
+
+// Five seconds is a termination/pipe-drain allowance, independent of startup.
+// Normal waits reserve another five seconds for cleanup before the test deadline.
+func treeWaitBound(t *testing.T, bound time.Duration, cleanup bool) time.Duration {
+	t.Helper()
+	if deadline, ok := t.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if !cleanup {
+			remaining -= 5 * time.Second
+		}
+		if remaining < bound {
+			bound = remaining
+		}
+	}
+	if bound < 0 {
+		return 0
+	}
+	return bound
+}
+
+func (h *treeHelper) wait(t *testing.T, stage string) {
+	t.Helper()
+	select {
+	case <-h.done:
+		t.Logf("%s: Run completed after %s: %v; output=%q", stage, time.Since(h.started), h.result.err, h.result.output)
+		if h.result.err == nil {
+			t.Errorf("%s: expected non-nil Run error after %s; output=%q", stage, time.Since(h.started), h.result.output)
+		}
+	case <-time.After(treeWaitBound(t, 5*time.Second, stage == "Run cleanup")):
+		t.Errorf("%s: Run still pending after %s (PID file %s)", stage, time.Since(h.started), h.pidFile)
+	}
 }
 
 type runResult struct {
@@ -138,6 +195,15 @@ func runTreeParentHelper(args []string) {
 	if len(args) != 1 {
 		fmt.Fprintln(os.Stderr, "tree-parent requires pid file path")
 		os.Exit(2)
+	}
+	if delayText := os.Getenv(sandboxStartupDelayEnv); delayText != "" {
+		delay, err := time.ParseDuration(delayText)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "parse startup delay: %v\n", err)
+			os.Exit(2)
+		}
+		fmt.Printf("tree-parent startup delay %s\n", delay)
+		time.Sleep(delay)
 	}
 
 	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestSandboxHelperProcess$", "--", "tree-grandchild") //nolint:gosec // test helper executes current test binary
@@ -210,21 +276,26 @@ func sleepForever() {
 	}
 }
 
-func waitForHelperPID(t *testing.T, pidFile string) uint32 {
+func waitForHelperPID(t *testing.T, helper *treeHelper) uint32 {
 	t.Helper()
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(treeWaitBound(t, 10*time.Second, false))
 	var lastRead string
 	var lastParseErr error
 	for time.Now().Before(deadline) {
-		raw, err := os.ReadFile(pidFile)
+		select {
+		case <-helper.done:
+			t.Fatalf("PID readiness: Run exited after %s: %v; output=%q", time.Since(helper.started), helper.result.err, helper.result.output)
+		default:
+		}
+		raw, err := os.ReadFile(helper.pidFile)
 		if err == nil {
 			lastRead = string(raw)
 			pidText := strings.TrimSpace(lastRead)
 			if pidText != "" {
 				pid, parseErr := strconv.ParseUint(pidText, 10, 32)
 				if parseErr == nil {
-					return uint32(pid)
+					return requireLiveGrandchild(t, uint32(pid), helper.started)
 				}
 				lastParseErr = parseErr
 			}
@@ -237,8 +308,19 @@ func waitForHelperPID(t *testing.T, pidFile string) uint32 {
 	if lastParseErr != nil {
 		t.Fatalf("helper did not report parseable grandchild PID before deadline; last read %q: %v", lastRead, lastParseErr)
 	}
-	t.Fatalf("helper did not report grandchild PID before deadline")
+	t.Fatalf("PID readiness: helper did not report grandchild PID after %s (Run pending, last read %q)", time.Since(helper.started), lastRead)
 	return 0
+}
+
+func requireLiveGrandchild(t *testing.T, pid uint32, started time.Time) uint32 {
+	t.Helper()
+	t.Cleanup(func() { terminateProcessIfAlive(t, pid) })
+	alive, err := isProcessAlive(pid)
+	if err != nil || !alive {
+		t.Fatalf("PID readiness: grandchild %d not alive after %s: %v", pid, time.Since(started), err)
+	}
+	t.Logf("PID readiness: live grandchild after %s", time.Since(started))
+	return pid
 }
 
 func isPendingHelperPIDRead(err error) bool {
@@ -250,7 +332,7 @@ func isPendingHelperPIDRead(err error) bool {
 func waitForProcessExit(t *testing.T, pid uint32, timeout time.Duration) {
 	t.Helper()
 
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(treeWaitBound(t, timeout, false))
 	for time.Now().Before(deadline) {
 		alive, err := isProcessAlive(pid)
 		if err != nil {
