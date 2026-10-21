@@ -31,12 +31,12 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Codex CLI specialist execution capturing combined stdout and stderr to stream and parse agent verdicts."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates-handoff.ps1"
         Pattern      = '(?i)\$preflightRaw\s*=\s*&\s*\$preflightScript.*2>&1'
         Reason       = "PowerShell script invocation for handoff schema preflight validation capturing diagnostic stderr."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates-breakers.ps1"
         Pattern      = '(?i)\$testOutput\s*=\s*&\s*\(Get-PwshCommand\).*isolatedChecksScript.*2>&1'
         Reason       = "Child PowerShell process running isolated checks test suite to capture full runner output."
     },
@@ -46,12 +46,12 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Invoke-GitChecked wrapper executing scriptblocks and capturing pipeline output for error diagnosis."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates-human.ps1"
         Pattern      = '(?i)\$ciOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running CI watcher during automated promotion."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
+        RelativePath = "powershell/lib/crucible-gates-human.ps1"
         Pattern      = '(?i)\$postPushOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running post-push CI watcher during automated promotion."
     },

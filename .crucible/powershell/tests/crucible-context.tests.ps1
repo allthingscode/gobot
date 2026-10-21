@@ -47,14 +47,26 @@ $results += Run-Test -Name "Assert-CrucibleContextKeys rejects a null context" -
     Assert-Result -Name "null context throws" -Condition ($message -match "CrucibleContext is null") -FailureMessage ("expected a null-context error, got: " + $message)
 }
 
+# The gate library is split across powershell/lib/crucible-gates*.ps1 (item 14). Both sweeps
+# below read every file of it, and the file count is pinned so a new file is a deliberate
+# edit here rather than a file the sweeps never read.
+$EXPECTED_GATE_LIBRARY_FILES = 5
+function Get-GateLibraryFunctions {
+    $files = @(Get-ChildItem -LiteralPath (Join-Path $REPO_ROOT "powershell/lib") -Filter "crucible-gates*.ps1" -File)
+    Assert-Result -Name "gate library file count" -Condition ($files.Count -eq $EXPECTED_GATE_LIBRARY_FILES) `
+        -FailureMessage ("expected " + $EXPECTED_GATE_LIBRARY_FILES + " powershell/lib/crucible-gates*.ps1 files, found " + $files.Count + ": " + (($files | ForEach-Object { $_.Name }) -join ", "))
+    foreach ($file in $files) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$null)
+        $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+    }
+}
+
 # Written as a sweep over the source rather than one test per function on purpose: a gate
 # function added later that reads $Context.LogFile without declaring it is caught by this
 # existing test instead of needing a new one. That is the failure this item is about -
 # thirteen functions followed the convention, one did not, and nothing detected it.
 $results += Run-Test -Name "Every gate function reading a log destination declares it" -Body {
-    $gatesPath = Join-Path $REPO_ROOT "powershell/lib/crucible-gates.ps1"
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile($gatesPath, [ref]$null, [ref]$null)
-    $functions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))
+    $functions = @(Get-GateLibraryFunctions)
 
     # Assert-CrucibleFrameworkIntegrity is deliberately exempt. It reports a context too
     # malformed to name a log file as an operator-readable reason and exits 2, with the
@@ -110,6 +122,48 @@ $results += Run-Test -Name "The human-gate helpers refuse a destination inherite
     Assert-Result -Name "neither helper wrote to the ambient path" `
         -Condition (-not (Test-Path -LiteralPath $LOG_FILE) -and -not (Test-Path -LiteralPath $CB_HISTORY_FILE)) `
         -FailureMessage "a human-gate helper wrote to the calling frame's log path"
+}
+
+$results += Run-Test -Name "No gate function reads a caller's variable by name" -Body {
+    # Get-Variable resolves up the dynamic scope chain, so a gate that asks for "handoff"
+    # gets whichever caller happens to hold one, and nothing in its signature says so. The
+    # accept and reject arms did exactly that until item 249, and an AST walk over variable
+    # reads (item 14 step C3) cannot see it, because Get-Variable is a command. Each
+    # allowlist entry is a function and a name, with the item that owns removing it; an
+    # entry that matches nothing fails, so a fixed site cannot leave a dead exemption.
+    $allowed = @(
+        @{ Function = "Invoke-HumanGateAction"; Name = "REPO_ROOT"; Reason = "ambient project-root fallback when -ProjectRoot is empty; an I6 source item 244 owns" }
+    )
+    $used = @{}
+    $offenders = @()
+    $functions = @(Get-GateLibraryFunctions)
+    Assert-Result -Name "the variable sweep read gate functions" -Condition ($functions.Count -ge 40) `
+        -FailureMessage ("expected at least 40 gate functions, found " + $functions.Count)
+    foreach ($fn in $functions) {
+        $calls = @($fn.Body.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @("Get-Variable", "gv")
+        }, $true))
+        foreach ($call in $calls) {
+            $nameArg = ""
+            $elements = @($call.CommandElements)
+            for ($i = 1; $i -lt $elements.Count; $i++) {
+                $el = $elements[$i]
+                if ($el -is [System.Management.Automation.Language.CommandParameterAst]) {
+                    if ($el.ParameterName -like "N*" -and $i + 1 -lt $elements.Count) { $nameArg = $elements[$i + 1].Extent.Text.Trim('"', "'") }
+                } elseif ([string]::IsNullOrEmpty($nameArg) -and $elements[$i - 1] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+                    $nameArg = $el.Extent.Text.Trim('"', "'")
+                }
+            }
+            $entry = $allowed | Where-Object { $_.Function -eq $fn.Name -and $_.Name -eq $nameArg } | Select-Object -First 1
+            if ($null -ne $entry) { $used[$fn.Name + "/" + $nameArg] = $true; continue }
+            $offenders += ($fn.Name + " reads '" + $nameArg + "': " + $call.Extent.Text)
+        }
+    }
+    Assert-Result -Name "no gate function reads a caller variable outside the allowlist" -Condition ($offenders.Count -eq 0) `
+        -FailureMessage ("pass the value as a parameter instead: " + ($offenders -join "; "))
+    $dead = @($allowed | Where-Object { -not $used.ContainsKey($_.Function + "/" + $_.Name) } | ForEach-Object { $_.Function + "/" + $_.Name })
+    Assert-Result -Name "every caller-variable allowlist entry still matches" -Condition ($dead.Count -eq 0) `
+        -FailureMessage ("delete these allowlist entries, their reads are gone: " + ($dead -join ", "))
 }
 
 $failed = @($results | Where-Object { -not $_ }).Count

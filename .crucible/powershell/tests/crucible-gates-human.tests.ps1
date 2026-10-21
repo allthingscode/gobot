@@ -2546,6 +2546,47 @@ review:
         }
     }
 
+    $results += Run-Test -Name "The accept arm reads its review settings once, with the documented defaults" -Body {
+        # In process: Get-HumanGateAcceptConfig returns instead of exiting (item 14 step C4),
+        # so the values the publish phase acts on are checked here rather than inferred from
+        # a spawned gate's output. The unparseable-value case is item 252's, not pinned here.
+        $cfgRoot = Join-Path $tempRoot "accept-config"
+        $absent = Join-Path $cfgRoot "absent"
+        New-Item -ItemType Directory -Path (Join-Path $absent ".crucible") -Force | Out-Null
+        $defaults = Get-HumanGateAcceptConfig -ProjectRoot $absent
+        Assert-Result -Name "auto_push defaults off" -Condition ($defaults.AutoPush -eq $false) -FailureMessage ("got " + $defaults.AutoPush)
+        Assert-Result -Name "require_green_ci defaults off" -Condition ($defaults.RequireGreenCi -eq $false) -FailureMessage ("got " + $defaults.RequireGreenCi)
+        Assert-Result -Name "ci_timeout_minutes defaults to 20" -Condition ($defaults.CiTimeoutMinutes -eq 20) -FailureMessage ("got " + $defaults.CiTimeoutMinutes)
+        Assert-Result -Name "ci_queued_grace_minutes defaults to 15" -Condition ($defaults.CiQueuedGraceMinutes -eq 15) -FailureMessage ("got " + $defaults.CiQueuedGraceMinutes)
+        Assert-Result -Name "ci_required_checks defaults to none" -Condition ([string]::IsNullOrEmpty($defaults.CiRequiredChecks)) -FailureMessage ("got " + $defaults.CiRequiredChecks)
+        Assert-Result -Name "ci_post_push_watch defaults off" -Condition ($defaults.CiPostPushWatch -eq $false) -FailureMessage ("got " + $defaults.CiPostPushWatch)
+
+        $set = Join-Path $cfgRoot "set"
+        New-Item -ItemType Directory -Path (Join-Path $set ".crucible") -Force | Out-Null
+        $cfg = @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+review:
+  auto_push: true
+  require_green_ci: true
+  ci_timeout_minutes: 7
+  ci_queued_grace_minutes: 0
+  ci_required_checks: "build"
+  ci_post_push_watch: true
+"@
+        $cfg | Set-Content -LiteralPath (Join-Path $set ".crucible/config.yaml") -Encoding UTF8
+        $values = Get-HumanGateAcceptConfig -ProjectRoot $set
+        Assert-Result -Name "auto_push true is read" -Condition ($values.AutoPush -eq $true) -FailureMessage ("got " + $values.AutoPush)
+        Assert-Result -Name "require_green_ci true is read" -Condition ($values.RequireGreenCi -eq $true) -FailureMessage ("got " + $values.RequireGreenCi)
+        Assert-Result -Name "ci_timeout_minutes 7 is read" -Condition ($values.CiTimeoutMinutes -eq 7) -FailureMessage ("got " + $values.CiTimeoutMinutes)
+        Assert-Result -Name "ci_queued_grace_minutes 0 is read, not defaulted" -Condition ($values.CiQueuedGraceMinutes -eq 0) -FailureMessage ("got " + $values.CiQueuedGraceMinutes)
+        Assert-Result -Name "ci_required_checks is read" -Condition ($values.CiRequiredChecks -eq "build") -FailureMessage ("got " + $values.CiRequiredChecks)
+        Assert-Result -Name "ci_post_push_watch true is read" -Condition ($values.CiPostPushWatch -eq $true) -FailureMessage ("got " + $values.CiPostPushWatch)
+    }
+
     $results += Run-Test -Name "Shipped instructions never hardcode an Accept line the gate did not emit" -Body {
         # The gate computes option 1 from review.auto_push, but the human never reads that
         # string if the presenter takes its menu from an SOP instead. Four shipped surfaces

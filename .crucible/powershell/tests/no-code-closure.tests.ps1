@@ -277,7 +277,11 @@ $results += Run-Test -Name "The gate and the validator both decide No-Code Closu
     # The third acceptance criterion of TODO item 72. The evidence is shared only for as
     # long as nobody re-inlines a second copy of it, and a second copy is invisible to every
     # behavioural test here until the two copies disagree.
-    $gateText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/crucible-gates.ps1") -Raw -Encoding UTF8
+    # The whole gate library (item 14 split it by concern), so a second copy cannot hide in
+    # a sibling file the negative assertion below never reads.
+    $gateFiles = @(Get-ChildItem -LiteralPath (Join-Path $REPO_ROOT "powershell/lib") -Filter "crucible-gates*.ps1" -File)
+    Assert-Result -Name "gate library files were found" -Condition ($gateFiles.Count -ge 3) -FailureMessage ("expected the split gate library, found " + $gateFiles.Count + " crucible-gates*.ps1 files")
+    $gateText = ($gateFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
     $validatorText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/validate-handoff.ps1") -Raw -Encoding UTF8
     $libText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/no-code-closure.ps1") -Raw -Encoding UTF8
 

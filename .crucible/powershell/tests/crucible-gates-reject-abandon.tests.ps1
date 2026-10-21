@@ -1866,6 +1866,66 @@ Complete-CrucibleSourceSession -Context `$ctx
         Assert-Result -Name "F12 premature Resolved error message" -Condition (($output | Out-String) -match "marked Production or Resolved in BACKLOG.md prior to human gate approval") -FailureMessage ("expected premature Resolved message, got: " + ($output | Out-String))
     }
 
+    $results += Run-Test -Name "The reject unwind resets the primary branch only for this task's own merge" -Body {
+        # I8 at its reject-unwind enforcement point, in process: Get-HumanGateRejectUnwind
+        # returns instead of exiting (item 14 step C4). A merge of task/F-10 is not F-1's
+        # merge, a plain commit is nobody's, and once the branch is gone only the merge
+        # subject or the fast-forward reflog entry can name the task. Item 180.
+        $repo = Join-Path $tempRoot "unwind-identity"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        Push-Location $repo
+        try {
+            $null = Invoke-Git init -q -b master
+            $null = Invoke-Git config user.email "test@example.com"
+            $null = Invoke-Git config user.name "Test"
+            $null = Invoke-Git commit -q --allow-empty -m "base"
+            $null = Invoke-Git branch "task/F-1"
+            $null = Invoke-Git branch "task/F-10"
+            $null = Invoke-Git checkout -q "task/F-10"
+            $null = Invoke-Git commit -q --allow-empty -m "F-10 work"
+            $null = Invoke-Git checkout -q "task/F-1"
+            $null = Invoke-Git commit -q --allow-empty -m "F-1 work"
+            $null = Invoke-Git checkout -q master
+            $base = (Invoke-Git rev-parse HEAD).Raw.Trim()
+
+            $null = Invoke-Git merge -q --no-ff --no-edit "task/F-10"
+            $other = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "a merge of task/F-10 is not F-1's merge" -Condition (-not $other.HeadIsTaskMerge) `
+                -FailureMessage ("F-1's unwind would reset master to " + $other.UnwindTarget + " for F-10's merge")
+
+            $null = Invoke-Git reset -q --hard $base
+            $null = Invoke-Git merge -q --no-ff --no-edit "task/F-1"
+            $own = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "F-1's own merge is unwound to its first parent" -Condition ($own.HeadIsTaskMerge -and $own.UnwindTarget -eq $base) `
+                -FailureMessage ("expected HeadIsTaskMerge and target " + $base + ", got " + $own.HeadIsTaskMerge + " / " + $own.UnwindTarget)
+            Assert-Result -Name "the merge's parents are returned for the branch restore" -Condition (@($own.ParentList).Count -eq 2) `
+                -FailureMessage ("expected two parents, got " + (@($own.ParentList) -join " "))
+
+            $null = Invoke-Git branch -D "task/F-1"
+            $bySubject = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "with the branch gone, the merge subject names the task" -Condition ($bySubject.HeadIsTaskMerge -and $bySubject.UnwindTarget -eq $base) `
+                -FailureMessage ("expected the subject to identify F-1's merge, got " + $bySubject.HeadIsTaskMerge)
+
+            $null = Invoke-Git reset -q --hard $base
+            $null = Invoke-Git commit -q --allow-empty -m "unrelated"
+            $plain = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "a plain commit is nobody's merge" -Condition (-not $plain.HeadIsTaskMerge -and $null -eq $plain.UnwindTarget) `
+                -FailureMessage ("a plain head was identified as F-1's merge, target " + $plain.UnwindTarget)
+
+            $null = Invoke-Git reset -q --hard $base
+            $null = Invoke-Git branch "task/F-1" "HEAD"
+            $null = Invoke-Git checkout -q "task/F-1"
+            $null = Invoke-Git commit -q --allow-empty -m "F-1 fast-forward work"
+            $null = Invoke-Git checkout -q master
+            $null = Invoke-Git merge -q --ff-only "task/F-1"
+            $ff = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "a fast-forward counts only through its reflog entry" -Condition ($ff.HeadIsTaskMerge -and $ff.UnwindTarget -eq $base) `
+                -FailureMessage ("expected the fast-forward reflog entry to identify F-1, got " + $ff.HeadIsTaskMerge + " / " + $ff.UnwindTarget)
+        } finally {
+            Pop-Location
+        }
+    }
+
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

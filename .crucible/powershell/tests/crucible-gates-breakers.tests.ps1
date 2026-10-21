@@ -204,9 +204,15 @@ try {
         # is defined. Literal arguments only; the two computed sites in
         # Invoke-HandoffPreflightValidation resolve at runtime and cannot be read here.
         $guardNameCodes = @(Get-WedgeGuardNameCodes)
-        $gateSource = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/crucible-gates.ps1") -Raw -Encoding UTF8
+        # Every file of the gate library, which item 14 split by concern. A scan of one
+        # file keeps passing while the codes emitted by the others go unchecked, so the
+        # human gate's own breaker code is required to be among those found.
+        $gateFiles = @(Get-ChildItem -LiteralPath (Join-Path $REPO_ROOT "powershell/lib") -Filter "crucible-gates*.ps1" -File)
+        Assert-Result -Name "gate library files were found" -Condition ($gateFiles.Count -ge 3) -FailureMessage ("expected the split gate library, found " + $gateFiles.Count + " crucible-gates*.ps1 files")
+        $gateSource = ($gateFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
         $emittedCodes = @([regex]::Matches($gateSource, '-BreakerCode\s+"([a-z0-9_]+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
         Assert-Result -Name "source scan finds emitted breaker codes" -Condition ($emittedCodes.Count -ge 10) -FailureMessage ("expected the source scan to find the emitted breaker codes, found " + $emittedCodes.Count)
+        Assert-Result -Name "source scan reaches the human gate's breaker code" -Condition ($emittedCodes -contains "recurring_merge_conflicts") -FailureMessage "the scan did not find recurring_merge_conflicts, so it is not reading the human gate's file"
 
         foreach ($code in $emittedCodes) {
             Assert-Result -Name ("recovery table contains " + $code) -Condition ($codes -contains $code) -FailureMessage ("crucible-gates.ps1 emits breaker code '" + $code + "' with no WEDGE_RECOVERY_BY_CODE entry, so its wedge tells the human no recovery is defined")
