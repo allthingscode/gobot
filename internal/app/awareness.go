@@ -98,6 +98,11 @@ func loadScheduleContext(secretsRoot string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	return loadScheduleContextWithContext(ctx, secretsRoot)
+}
+
+// loadScheduleContextWithContext fetches and renders the schedule within the caller's context.
+func loadScheduleContextWithContext(ctx context.Context, secretsRoot string) string {
 	g, gctx := errgroup.WithContext(ctx)
 	var calendarMD, tasksMD string
 
