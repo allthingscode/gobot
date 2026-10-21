@@ -230,3 +230,41 @@ In addition to circuit breakers, `crucible.ps1` enforces runtime validation gate
 - **Assertion-Deletion Gate** (framework repo only; the gate is not part of a bundle and an adopter's hooks do not run it): `check-assertion-deletion.ps1` diffs test files (`*.tests.ps1`) for dropped `Assert-Result` calls, and runs at two points. At `commit-msg` it reads the index and refuses the commit unless the message being written carries a non-empty `Assertions-Removed: <reason>` trailer; merge commits skip this leg, because a merge's first-parent diff restates the merged branch. At `pre-push` it walks every commit in the push range and charges a commit for a name dropped against every parent of that commit, so a merge is charged for a removal that appears on neither parent and not for work already on a parent. The commit-msg leg is where the trailer is a one-line edit for ordinary commits; the pre-push leg is the backstop for removals that reached the range without one.
 
 The Baseline Cleanliness Probe at task start is advisory and does not block. There is no Task Dependency Gate.
+
+## 8. Pipeline Invariants
+
+The state machine in section 5 says which transitions are legal. This section says what
+must be true of the repository, the backlog and the session state across every transition,
+whichever path reaches it. Each invariant is enforced at one place in the runtime, and a
+change that would make it conditional on the path taken is a defect, not a design choice.
+
+A fix that restores one of these is not finished until the invariant is checked where the
+state changes, not where the bug was seen. A new gate or a new path through an existing
+gate is reviewed against this list before it merges.
+
+| # | Invariant | Enforced where | Record |
+|---|---|---|---|
+| I1 | What is tested is what merges. The independent checks refuse a task worktree with uncommitted changes, so the merge ships exactly the tree the checks ran on. | verification -> deployment checks, breaker `uncommitted_task_worktree` | item 221 |
+| I2 | Nothing deletes uncommitted task work. Cleanup leaves a dirty or locked worktree in place and names its files. `--force` is never the normal path. | acceptance cleanup | item 221 |
+| I3 | A task is marked terminal only after the action that makes it terminal has succeeded. Finalization and archival run after a successful merge and before any push; a merge that reworks, blocks or fails leaves the row and spec unchanged. | human gate accept | item 222 |
+| I4 | Every handoff that reaches a gate was selected and bound to the task once, through the one reader. Recovery, relocation or repair of a handoff file happens before that reader, never after. | handoff preflight, `Restore-MisplacedHandoff` | items 185, 223 |
+| I5 | One writer per shared file. A lock is held as an exclusive handle for the whole write and released by closing it; no waiter deletes another holder's lock. | backlog lock, event-log lock | item 224 |
+| I6 | Branch, path and directory names come from configuration, never from a built-in list of likely values, and a check that cannot read its input fails closed. | scope check, encoding baseline, filing continuation, state clearing | items 225, 229, 240 |
+| I7 | A decision is persisted before the action it authorizes runs, so every path that performs the action sees the same recorded decision. | human gate reject, pending-file and command-line paths | item 226 |
+| I8 | An identifier matches exactly or not at all. A lookup by task ID matches the ID cell, not a substring of the row, and a missing row is refused rather than approximated. | backlog finalization, archive fallback | item 227 |
+| I9 | A required header or marker counts only in the position the contract names. An example or quotation elsewhere in the document cannot satisfy it. | review header check | item 228 |
+| I10 | The first write to a missing state file persists exactly as a write to an existing one would. The missing-file branch builds the same object shape deserialization gives. | session state writer | item 234 |
+| I11 | A gate refusal is unconditional. No caller, catch block or configuration can convert a refusal into a pass. | every gate `exit` | item 36 |
+| I12 | A check that did not run is reported as NOT RUN, never as passed, and is listed at the gate that would otherwise accept without it. | isolated checks, Reviewer handoff, Human Gate menu | item 239 |
+
+How the list is used:
+
+- When a defect is filed, name the invariant it violates. If none fits, that is either a
+  new invariant to add here or a defect of a different class. Either way, say which.
+- When a fix lands, the regression test exercises the invariant at its enforcement point
+  with the path the defect took. A test that pins only the symptom is not a regression for
+  the invariant.
+- When a change adds a path that reaches an enforcement point, the author lists which
+  invariants the new path is covered by and the Reviewer checks it.
+- The list grows only by filed defect or by design. It does not grow by restating
+  implementation detail.

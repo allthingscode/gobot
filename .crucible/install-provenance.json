@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "0ec3fab664ab2004600bcb235d72351e4ad944ec",
+  "source_commit": "c6f245d024d236b62eeb6d71243e6453c95fd1a3",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -71,8 +71,8 @@
       "base_hash": "84a6fda488165cd8930dc580f1c6852166cb66fa4a2779751a02b1eab79b5a0d"
     },
     "docs/policy.md": {
-      "hash": "75e985eee1f487a3b53e59da68d41f002628671689619f6a18ce8611515cf13d",
-      "base_hash": "75e985eee1f487a3b53e59da68d41f002628671689619f6a18ce8611515cf13d"
+      "hash": "b99976a30850a8598aab8499efaf8a8b3c392334f7840c9a8f79270917b16474",
+      "base_hash": "b99976a30850a8598aab8499efaf8a8b3c392334f7840c9a8f79270917b16474"
     },
     "docs/README.md": {
       "hash": "3ceed16ca450db577c46e07c60d9c137b3fe3d53c1a8e031e49deb5f85bdd3af",
