@@ -81,6 +81,10 @@ verification:
       command: golangci-lint run --modules-download-mode=readonly ./internal/... ./cmd/...
     - name: tests
       command: gotestsum --format testdox -- -mod=readonly ./internal/... ./cmd/...
+    - name: race tests
+      host_gate: cgo
+      alternative_runner: wsl --cd "$PWD" -e bash -lc "CGO_ENABLED=1 GOFLAGS=-buildvcs=false go test -race -mod=readonly ./internal/... ./cmd/..."
+      command: go test -race -mod=readonly ./internal/... ./cmd/...
     - name: doc lint
       command: go run -mod=readonly scripts/doc_lint.go
     - name: mod-tidy
