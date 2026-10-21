@@ -274,12 +274,7 @@ function Invoke-HumanGateAction {
         $Handoff = $null
     )
     $primaryBranch = Get-ConfiguredPrimaryBranch
-    $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        $ProjectRoot
-    } else {
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
-    }
+    $resolvedProjectRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
         Invoke-HumanGateAcceptRedirect -TaskId $TaskId -Outcome $Outcome -LogFile $LogFile `
@@ -990,7 +985,7 @@ function Invoke-HumanGate {
     $GateRedirectTarget = $Context.GateRedirectTarget
     $crucibleRoot = $Context.CrucibleRoot
     $Quiet = [bool]$Context.Quiet
-    $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+    $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
     $LOG_FILE = $Context.LogFile
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
 

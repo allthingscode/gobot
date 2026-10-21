@@ -10,6 +10,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 function Get-CurrentCommit {
     param([string]$Root)
@@ -274,7 +275,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ([string]::IsNullOrWhiteSpace($CrucibleRoot)) {
-    $CrucibleRoot = (Get-Location).Path
+    $CrucibleRoot = Resolve-ConfigProjectRoot
 }
 if (Test-Path -LiteralPath $CrucibleRoot) {
     $CrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot).Path

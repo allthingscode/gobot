@@ -44,7 +44,7 @@ function Invoke-CircuitBreakerGates {
     # --- 3. Circuit Breakers ---
     # Scan research findings/artifacts (RH2)
     if ($handoff.source_phase -eq "research") {
-        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
         if ($repoRoot -and (Test-Path -LiteralPath $repoRoot)) {
             $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path
         }

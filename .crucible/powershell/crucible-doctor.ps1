@@ -7,9 +7,11 @@ param (
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+
 # Anchor paths to the project root (where .crucible/ lives).
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $REPO_ROOT = (Get-Location).Path
+    $REPO_ROOT = Resolve-ConfigProjectRoot
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
@@ -449,7 +451,8 @@ if ($frameworkMode) {
             }
         }
         if ($frameworkSource) {
-            $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet main
+            $frameworkBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $frameworkSource
+            $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet $frameworkBranch
             $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitMainResult) { ($gitMainResult | Out-String).Trim() } else { "" }
             if (-not ($frameworkHead -match '^[0-9a-f]{40}$')) {
                 $gitHeadResult = git -C $frameworkSource rev-parse HEAD 2>$null

@@ -459,6 +459,10 @@ try {
 
         $fwPath = Join-Path $tempRoot "fw-stale"
         $fw = Initialize-FrameworkFixture -Path $fwPath
+        git -C $fwPath branch release $fw.Head
+        git -C $fwPath reset --hard $fw.OlderCommit --quiet
+        New-Item -ItemType Directory -Path (Join-Path $fwPath ".crucible") -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $fwPath ".crucible/config.yaml") -Value "project:`n  default_branch: release`n" -Encoding UTF8
 
         @(
             'crucible_root: ".crucible"',
@@ -484,12 +488,16 @@ try {
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
             }
+            $banner = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT "powershell/crucible.ps1") -ProjectRoot $projectRoot
+            }
         } finally {
             $env:CRUCIBLE_DEV_ROOT = $oldDevRoot
         }
         $output = $res.Output -join "`n"
 
         Assert-Result -Name "staleness check warn status" -Condition ($output -match "\[bundle\.staleness\].*lags framework HEAD") -FailureMessage "doctor did not warn about staleness. Output:`n$output"
+        Assert-Result -Name "entrypoint staleness follows the configured framework branch" -Condition ($banner.Output -match 'Installed Crucible bundle lags framework HEAD') -FailureMessage ($banner.Output -join "`n")
     }
 
     $results += Run-Test -Name "Doctor checks for bundle staleness and stays silent when up-to-date" -Body {

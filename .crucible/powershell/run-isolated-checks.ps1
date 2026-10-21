@@ -17,7 +17,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $ProjectRoot = (Get-Location).Path
+    $ProjectRoot = Resolve-ConfigProjectRoot
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Error ("-ProjectRoot path does not exist: {0}" -f $ProjectRoot)

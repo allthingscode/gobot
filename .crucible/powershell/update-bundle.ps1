@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$FrameworkSource,
-    [Parameter(Mandatory=$false)][string]$AdopterRoot = (Get-Location).Path,
+    [Parameter(Mandatory=$false)][string]$AdopterRoot = "",
     [Parameter(Mandatory=$false)][switch]$DryRun,
     [Parameter(Mandatory=$false)][ValidateSet("interactive", "auto-safe", "report-only")][string]$Mode = "interactive",
     [Parameter(Mandatory=$false)][switch]$Prune,
@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+$AdopterRoot = Resolve-ConfigProjectRoot -ProjectRoot $AdopterRoot
 
 # Retention for the per-run report written to session/update-bundle/. A normal update writes
 # two logs - the dry run and the apply - so twenty is roughly the last ten updates, which is

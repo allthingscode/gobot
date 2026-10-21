@@ -35,7 +35,7 @@ function Test-NoCodeClosure {
         return $false
     }
 
-    $resolvedRoot = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { (Get-Location).Path } else { $ProjectRoot }
+    $resolvedRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
     $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $resolvedRoot
     if ([string]::IsNullOrEmpty($specPath) -or -not (Test-Path -LiteralPath $specPath)) {

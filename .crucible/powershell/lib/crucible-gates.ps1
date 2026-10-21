@@ -439,7 +439,7 @@ function Complete-CrucibleSourceSession {
 
         # Deployment encoding & integrity guards
         if ($handoff.source_phase -eq "deployment" -or $handoff.target_phase -eq "deployment") {
-            $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+            $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
             $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $repoRoot
             $backlogPath = Join-Path $backlogDir "BACKLOG.md"
 
@@ -575,7 +575,7 @@ function Complete-CrucibleSourceSession {
 
         # Promote the deployment checklist item to a real gate: the BACKLOG.md entry shows Production/Resolved
         if ($handoff.source_phase -eq "deployment" -and $handoff.target_phase -eq "done" -and -not [string]::IsNullOrEmpty($handoff.task_id)) {
-            $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+            $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
             $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $repoRoot
             $backlogPath = Join-Path $backlogDir "BACKLOG.md"
             if (Test-Path -LiteralPath $backlogPath) {
@@ -779,7 +779,7 @@ function Invoke-CrucibleRuntimeValidation {
     if ($handoff.psobject.Properties["artifacts"] -and $handoff.artifacts -ne $null) {
         $missingArtifacts = @()
 
-        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
         $workspacesDir = if ($Context.ContainsKey("WorkspacesDir")) { $Context.WorkspacesDir } else { Get-ConfiguredPath -Key "workspaces" -ProjectRoot $repoRoot }
         $wtPath = Resolve-ImplementationWorktreePath -TaskId $handoff.task_id -WorkspacesDir $workspacesDir
         $baseArtifactDir = if (Test-Path $wtPath) { $wtPath } else { $repoRoot }
@@ -1014,7 +1014,7 @@ function Invoke-CrucibleScopeGates {
 
     # --- 2.1c Research Scope Boundary Check ---
     if ($handoff.source_phase -eq "research" -and $handoff.target_phase -eq "grooming") {
-        $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { (Get-Location).Path }
+        $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { Resolve-ConfigProjectRoot }
         try {
             # Files, not collapsed directories, so a new stub is judged by its own name.
             $statusLines = @(git -C $repoRoot status --porcelain --untracked-files=all 2>$null)
@@ -1233,7 +1233,7 @@ function Test-CompletionArtifactGate {
                 # No-Code Closure: no task branch means no merge to prove for research or
                 # grooming. Share the decision with validate-handoff.ps1 so both use the
                 # same evidence and the accepted handoff can be written. Item 72.
-                $noCodeClosureRepoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+                $noCodeClosureRepoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
                 $noCodeClosureCommitHash = if ($handoff.psobject.Properties["commit_hash"]) { [string]$handoff.commit_hash } else { "" }
                 $isNoCodeClosure = Test-NoCodeClosure -TaskId ([string]$handoff.task_id) -CommitHash $noCodeClosureCommitHash -ProjectRoot $noCodeClosureRepoRoot
                 if ($isNoCodeClosure) {
@@ -1349,7 +1349,7 @@ function Assert-CodeTaskWorktree {
         [Parameter(Mandatory=$true)][string]$WorktreePath,
         [Parameter(Mandatory=$true)][string]$Check
     )
-    $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { (Get-Location).Path }
+    $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { Resolve-ConfigProjectRoot }
     git -C $repoRoot rev-parse --verify --quiet "refs/heads/task/$TaskId" *> $null
     if ($LASTEXITCODE -ne 0) { return }
     if (Test-Path -LiteralPath $WorktreePath) {
@@ -1446,7 +1446,7 @@ function Invoke-RepositoryIntegrityGates {
     $sessionDir = $Context.SessionDir
     $LOG_FILE = $Context.LogFile
     $CB_HISTORY_FILE = $Context.CircuitBreakerHistoryFile
-    $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+    $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
 
     # --- 3a. Baseline Cleanliness Probe at Task START ---
     # Runs when a fresh task enters its first phase (grooming) via crucible.ps1 -Init.
@@ -1606,7 +1606,7 @@ function Resolve-CrucibleTransition {
     }
 
     if ($handoff.target_phase -eq "done") {
-        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+        $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
 
         if ($handoff.source_phase -eq "grooming") {
             # Check if Research Gate approved it or Human Gate approved it
@@ -1741,7 +1741,7 @@ function Resolve-CrucibleTransition {
                     return $false
                 }
 
-                $repoRootForStatus = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { (Get-Location).Path }
+                $repoRootForStatus = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
                 $bDir = if ($Context.ContainsKey("BacklogDir")) { $Context.BacklogDir } else { "" }
                 if ([string]::IsNullOrWhiteSpace($bDir)) {
                     $bDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $repoRootForStatus

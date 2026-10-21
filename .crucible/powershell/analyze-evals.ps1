@@ -9,7 +9,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 # Item 188: mine the configured session rather than silently reporting no history.
-$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot (Get-Location).Path
+$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot (Resolve-ConfigProjectRoot)
 $GateDir     = Join-Path $sessionDir "global/gate_decisions"
 $LogDir      = Join-Path $sessionDir "archived"
 $EvalDir     = Join-Path $sessionDir "eval"

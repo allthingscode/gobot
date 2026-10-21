@@ -179,7 +179,8 @@ function Test-FrameworkDevOnlyFile {
         # Lints framework backlog, docs and schema. The hook invokes it only when
         # REPO_ROOT equals FRAMEWORK_ROOT, which adopter bundle layouts cannot satisfy.
         # Shipped tests skip the go-run when this file is absent. Item 108.
-        "scripts/crucible_lint.go"
+        "scripts/crucible_lint.go",
+        "scripts/crucible_lint_test.go"
     )
     if ($devOnlyPaths -contains $normalized) {
         return $true

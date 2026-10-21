@@ -233,12 +233,7 @@ function Restore-BacklogTask {
         [string]$ProjectRoot = "",
         [string]$ActiveStatus = "In Progress"
     )
-    $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        $ProjectRoot
-    } else {
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
-    }
+    $resolvedProjectRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
     $backlogPath = Join-Path $backlogDir "BACKLOG.md"

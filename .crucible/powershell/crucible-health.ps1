@@ -16,7 +16,7 @@ $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 . $crucibleLibPath
 # Anchor paths to the project root (where .crucible/ lives).
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $REPO_ROOT = (Get-Location).Path
+    $REPO_ROOT = Resolve-ConfigProjectRoot
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red

@@ -131,9 +131,7 @@ $results += Run-Test -Name "No gate function reads a caller's variable by name" 
     # reads (item 14 step C3) cannot see it, because Get-Variable is a command. Each
     # allowlist entry is a function and a name, with the item that owns removing it; an
     # entry that matches nothing fails, so a fixed site cannot leave a dead exemption.
-    $allowed = @(
-        @{ Function = "Invoke-HumanGateAction"; Name = "REPO_ROOT"; Reason = "ambient project-root fallback when -ProjectRoot is empty; an I6 source item 244 owns" }
-    )
+    $allowed = @()
     $used = @{}
     $offenders = @()
     $functions = @(Get-GateLibraryFunctions)

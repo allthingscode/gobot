@@ -124,7 +124,7 @@ $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 function Get-CrucibleRoot {
     param([string]$ProjectRoot = "")
     $root = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $REPO_ROOT } else { $ProjectRoot }
-    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = Resolve-ConfigProjectRoot }
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (Test-Path -LiteralPath $configPath) {
         try {
@@ -185,7 +185,8 @@ if (-not $Quiet) {
                         }
                     }
                     if ($frameworkSource) {
-                        $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet main
+                        $frameworkBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $frameworkSource
+                        $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet $frameworkBranch
                         $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitMainResult) { ($gitMainResult | Out-String).Trim() } else { "" }
                         if (-not ($frameworkHead -match '^[0-9a-f]{40}$')) {
                             $gitHeadResult = git -C $frameworkSource rev-parse HEAD 2>$null

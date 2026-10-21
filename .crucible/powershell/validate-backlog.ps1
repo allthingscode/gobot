@@ -84,23 +84,7 @@ if (Test-Path $BacklogPath) {
 }
 
 # Resolve the project root for file_affinity checks (D46)
-$resolvedProjectRoot = ""
-if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $resolvedProjectRoot = $ProjectRoot
-} else {
-    $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-    if ($null -ne $repoRootVar) {
-        $resolvedProjectRoot = $repoRootVar.Value
-    } else {
-        $resolvedProjectRoot = (Get-Location).Path
-    }
-}
-if ($resolvedProjectRoot -and (Test-Path -LiteralPath $resolvedProjectRoot)) {
-    $resolvedProjectRoot = (Resolve-Path -LiteralPath $resolvedProjectRoot).Path
-}
-if ([string]::IsNullOrWhiteSpace($resolvedProjectRoot)) {
-    $resolvedProjectRoot = (Get-Location).Path
-}
+$resolvedProjectRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
 try {
     Write-Quiet "=== BACKLOG VALIDATION START ==="

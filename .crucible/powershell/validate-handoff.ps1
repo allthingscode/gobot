@@ -123,14 +123,7 @@ foreach ($field in $requiredFields) {
     }
 }
 
-$resolvedProjectRoot = $null
-$repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-if ($null -ne $repoRootVar) {
-    $resolvedProjectRoot = $repoRootVar.Value
-}
-if ([string]::IsNullOrEmpty($resolvedProjectRoot)) {
-    $resolvedProjectRoot = (Get-Location).Path
-}
+$resolvedProjectRoot = Resolve-ConfigProjectRoot
 
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $resolvedProjectRoot
 $isRework = Test-DeploymentReworkReentry -Handoff $handoff -SessionDir $sessionDir
