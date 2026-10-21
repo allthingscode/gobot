@@ -468,6 +468,48 @@ try {
         Assert-Result -Name "not-run reason is persisted" -Condition ((Get-Content -LiteralPath $record -Raw) -match 'unavailable check: requires environment variable') -FailureMessage (Get-Content -LiteralPath $record -Raw)
         Assert-Result -Name "alternative runner runs instead of configured host command" -Condition ($out -match 'alternative runner:' -and $out -match '==> alternate check' -and $out -match 'exit code: 0' -and $out -notmatch 'exit code: 9') -FailureMessage $out
     }
+    $results += Run-Test -Name "Command ending in a double-quoted argument runs as written (item 241)" -Body {
+        $cfgPath = Join-Path $projectRoot ".crucible/config.yaml"
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: quoted argument",
+            "      command: $pwshCmd -NoProfile -Command `"Write-Output 'command argument preserved'; exit 0`""
+        ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+        $out = $res.Output -join "`n"
+        Assert-Result -Name "command runs with its complete argument" -Condition ($res.ExitCode -eq 0 -and $out -match 'command argument preserved' -and $out -match 'exit code: 0') -FailureMessage $out
+    }
+    $results += Run-Test -Name "Command starting and ending with separate quoted words runs as written (item 241)" -Body {
+        $cfgPath = Join-Path $projectRoot ".crucible/config.yaml"
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: quoted words",
+            "      command: 'outer' | Out-Null; $pwshCmd -NoProfile -Command 'Write-Output ''outer quotes preserved''; exit 0'"
+        ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+        $out = $res.Output -join "`n"
+        Assert-Result -Name "command keeps both quoted words" -Condition ($res.ExitCode -eq 0 -and $out -match 'outer quotes preserved' -and $out -match 'exit code: 0') -FailureMessage $out
+    }
+    $results += Run-Test -Name "Alternative runner ending in a double-quoted argument runs as written (item 241)" -Body {
+        $cfgPath = Join-Path $projectRoot ".crucible/config.yaml"
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: quoted alternative argument",
+            "      command: $pwshCmd -NoProfile -Command exit 9",
+            "      host_gate: env=CRUCIBLE_ITEM241_MISSING",
+            "      alternative_runner: $pwshCmd -NoProfile -Command `"Write-Output 'alternative argument preserved'; exit 0`""
+        ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Remove-Item Env:\CRUCIBLE_ITEM241_MISSING -ErrorAction SilentlyContinue
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+        $out = $res.Output -join "`n"
+        Assert-Result -Name "alternative runs with its complete argument" -Condition ($res.ExitCode -eq 0 -and $out -match 'alternative runner:' -and $out -match 'alternative argument preserved' -and $out -match 'exit code: 0' -and $out -notmatch 'exit code: 9') -FailureMessage $out
+    }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $worktreePath

@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "f74ca97ad6ba04ea58f62e3818db23ee3f1fbe22",
+  "source_commit": "0ec3fab664ab2004600bcb235d72351e4ad944ec",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -335,8 +335,8 @@
       "base_hash": "5c32db3870d59497486b68e131438438809d59822cfc7f10e04011bad4e26d33"
     },
     "powershell/run-isolated-checks.ps1": {
-      "hash": "b1331290063ff40fbf52e8b132ccbe743f1ab7dd89eb3e625078d83f584f3d48",
-      "base_hash": "b1331290063ff40fbf52e8b132ccbe743f1ab7dd89eb3e625078d83f584f3d48"
+      "hash": "72a25dba63f6f99527143e28cf858b8d30cc203a44324f0818a197f143936a5e",
+      "base_hash": "72a25dba63f6f99527143e28cf858b8d30cc203a44324f0818a197f143936a5e"
     },
     "powershell/sync-claude-agents.ps1": {
       "hash": "2d5f183ae86296659c55aa3340ca3c914c2893060108af267e2451ea45787a91",
@@ -651,8 +651,8 @@
       "base_hash": "561bbd4efd355d96c71fc2e037e2453c8e9dc9d9708eec918c5f2ba397ceb9cc"
     },
     "powershell/tests/run-isolated-checks.tests.ps1": {
-      "hash": "cd6debb2465de3d24106da383e8cb9f0a5a43f221cc8cf312e51a5114b2c6290",
-      "base_hash": "cd6debb2465de3d24106da383e8cb9f0a5a43f221cc8cf312e51a5114b2c6290"
+      "hash": "3936d9faa1aac92e204163bd37c0ad78736f223c2a7e89ea73c987e3fe78a9de",
+      "base_hash": "3936d9faa1aac92e204163bd37c0ad78736f223c2a7e89ea73c987e3fe78a9de"
     },
     "powershell/tests/run-lock.tests.ps1": {
       "hash": "10fdfad85837f6aadfb1dd6330b8e5adc7335706a491bf2b7fe5604900aa4cc5",

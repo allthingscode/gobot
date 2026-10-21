@@ -93,6 +93,16 @@ $currentCommand = $null
 # Map "test" mode to "quick" if the framework calls it with "test" for backward compatibility
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
 
+function Read-InlineScalar {
+    param([string]$Value)
+    if ($Value.Length -ge 2 -and ($Value[0] -eq '"' -or $Value[0] -eq "'") -and $Value[0] -eq $Value[$Value.Length - 1]) {
+        $inner = $Value.Substring(1, $Value.Length - 2)
+        # `"a.exe" "b"` starts and ends with a quote but is not one quoted scalar.
+        if (-not $inner.Contains([string]$Value[0])) { return $inner }
+    }
+    return $Value
+}
+
 # Read a YAML block scalar (| literal or > folded) whose header line is at index
 # $HeaderIndex. Adopters commonly write a multi-statement verification command as a
 # folded scalar (`command: >-`) for readability; the inline regex only captured the
@@ -174,13 +184,13 @@ for ($idx = 0; $idx -lt $lines.Count; $idx++) {
             if ($null -ne $currentCommand) {
                 $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
             }
-            $currentName = $Matches[1].Trim("`"' ")
+            $currentName = Read-InlineScalar -Value $Matches[1]
             $currentHostGate = ""
             $currentAlternativeRunner = ""
             $currentCommand = $null
         }
-        if ($line -match "^\s{6}host_gate:\s*(.*?)\s*$") { $currentHostGate = $Matches[1].Trim("`"' ") }
-        if ($line -match "^\s{6}alternative_runner:\s*(.*?)\s*$") { $currentAlternativeRunner = $Matches[1].Trim("`"' ") }
+        if ($line -match "^\s{6}host_gate:\s*(.*?)\s*$") { $currentHostGate = Read-InlineScalar -Value $Matches[1] }
+        if ($line -match "^\s{6}alternative_runner:\s*(.*?)\s*$") { $currentAlternativeRunner = Read-InlineScalar -Value $Matches[1] }
         if ($line -match "^(\s{6})command:\s*(.+?)\s*$") {
             $keyIndent = $Matches[1].Length
             $rawVal = $Matches[2].Trim()
@@ -189,13 +199,13 @@ for ($idx = 0; $idx -lt $lines.Count; $idx++) {
                 $currentCommand = $bs.Value
                 $idx = $bs.NextIndex - 1
             } else {
-                $currentCommand = $rawVal.Trim("`"' ")
+                $currentCommand = Read-InlineScalar -Value $rawVal
             }
         }
     }
     if ($inConfigCheck) {
         if ($line -match "^\s{4}name:\s*(.+?)\s*$") {
-            $configCheckName = $Matches[1].Trim("`"' ")
+            $configCheckName = Read-InlineScalar -Value $Matches[1]
         }
         if ($line -match "^(\s{4})command:\s*(.+?)\s*$") {
             $keyIndent = $Matches[1].Length
@@ -205,7 +215,7 @@ for ($idx = 0; $idx -lt $lines.Count; $idx++) {
                 $configCheckCommand = $bs.Value
                 $idx = $bs.NextIndex - 1
             } else {
-                $configCheckCommand = $rawVal.Trim("`"' ")
+                $configCheckCommand = Read-InlineScalar -Value $rawVal
             }
         }
     }
