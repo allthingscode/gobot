@@ -37,13 +37,8 @@ try {
         for ($i = 0; $i -lt $args.Count - 1; $i++) {
             if ("$($args[$i])" -eq "-ProjectRoot") { $projectRoot = "$($args[$i + 1])"; break }
         }
-        if ([string]::IsNullOrWhiteSpace($projectRoot)) {
-            $derivedParent = Split-Path -Path $PSScriptRoot -Parent
-            if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
-                $derivedParent = Split-Path -Path $derivedParent -Parent
-            }
-            $projectRoot = (Resolve-Path -LiteralPath $derivedParent).Path
-        }
+        . (Join-Path $PSScriptRoot "lib/project-root.ps1")
+        $projectRoot = Resolve-CrucibleProjectRoot -ProjectRoot $projectRoot -ScriptRoot $PSScriptRoot
 
         $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $projectRoot
         $logFile = if ($taskId -eq "unknown") {

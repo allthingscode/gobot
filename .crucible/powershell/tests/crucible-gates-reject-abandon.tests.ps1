@@ -1490,6 +1490,33 @@ $f14Row
         Assert-Result -Name "Restore word boundary normalizes F-1 row" -Condition ($backlogText.Contains("| [F-1](features/active/F-1_Spec.md) | P1 | In Progress | Feature One | Riley |")) -FailureMessage ("expected F-1 row to be restored to In Progress, got: " + $backlogText)
     }
 
+    # Item 245: restore deleted every row naming the ID in any cell, so a row that only
+    # mentioned F-1 in its title was removed with it.
+    $results += Run-Test -Name "Restore-BacklogTask removes only the rows whose ID cell is the task" -Body {
+        $caseRoot = Join-Path $tempRoot "restore-id-cell"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot ".crucible/config.yaml"), "paths:`n  backlog: `"backlog`"`n", [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/active/F-1_Spec.md"), "---`nitem_id: `"F-1`"`ntitle: Feature One`ntype: feature`npriority: P1`nstatus: In Progress`n---`nSpec content`n", [System.Text.UTF8Encoding]::new($false))
+        $f2Row = "| [F-2](features/active/F-2_Spec.md) | P2 | Ready | Follow-up to F-1 | Casey |"
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $backlogText = @(
+            "# Project Backlog",
+            "",
+            "## Features",
+            "| ID | Priority | Status | Title | Owner |",
+            "|---|---|---|---|---|",
+            "| [F-1](features/active/F-1_Spec.md) | P1 | Production | Feature One | Riley |",
+            $f2Row
+        ) -join "`n"
+        [System.IO.File]::WriteAllText($backlogPath, $backlogText + "`n", [System.Text.UTF8Encoding]::new($false))
+
+        Restore-BacklogTask -TaskId "F-1" -ProjectRoot $caseRoot -ActiveStatus "In Progress"
+
+        $after = [System.IO.File]::ReadAllText($backlogPath)
+        Assert-Result -Name "the row that mentions F-1 is kept" -Condition ($after.Contains($f2Row)) -FailureMessage ("F-2's row was removed with F-1's: " + $after)
+        Assert-Result -Name "F-1's own row is restored" -Condition ($after.Contains("| [F-1](features/active/F-1_Spec.md) | P1 | In Progress | Feature One | Riley |")) -FailureMessage ("F-1 was not restored: " + $after)
+    }
+
     $results += Run-Test -Name "F14 Deployment gate detects BOM encoding corruption in BACKLOG.md" -Body {
         $caseRoot = Join-Path $tempRoot "f14-bom-guard"
         New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
@@ -1782,6 +1809,70 @@ Complete-CrucibleSourceSession -Context `$ctx
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F12 title with Production exit code is not 2" -Condition ($exitCode -ne 2) -FailureMessage ("expected gate not to block with exit code 2 when Status is Active, got exit code: $exitCode. Output: " + ($output | Out-String))
+    }
+
+    # Item 245: the guard matched the first row that mentioned the ID anywhere, so another
+    # task's Production row naming F-702 in its title stopped F-702's deployment.
+    $results += Run-Test -Name "F12 Deployment gate reads the task's own row, not one that mentions its ID" -Body {
+        $caseRoot = Join-Path $tempRoot "f12-other-row-mentions-id"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot ".crucible/config.yaml"), "paths:`n  backlog: `"backlog`"`n", [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/active/F-702_Spec.md"), "---`nid: F-702`nstatus: Ready for Deploy`n---`nSpec content`n", [System.Text.UTF8Encoding]::new($false))
+        $backlogText = @(
+            "# Project Backlog",
+            "",
+            "## Production Items",
+            "| ID | Title | Priority | Status | Spec |",
+            "| F-703 | Follow-up to F-702 | P1 | Production | [F-703_Spec.md](features/archived/F-703_Spec.md) |",
+            "",
+            "## Features",
+            "| ID | Title | Priority | Status | Spec |",
+            "| F-702 | Deploy pipeline | P1 | Ready for Deploy | [F-702_Spec.md](features/active/F-702_Spec.md) |"
+        ) -join "`n"
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot "backlog/BACKLOG.md"), $backlogText + "`n", [System.Text.UTF8Encoding]::new($false))
+
+        $sessionDir = Join-Path $caseRoot "session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "F-702/deployment"), (Join-Path $sessionDir "handoffs") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $sessionDir "F-702/deployment/task.md"), "# Task List`n- [x] Step 1`n", [System.Text.UTF8Encoding]::new($false))
+        Write-TestHandoff -Path (Join-Path $sessionDir "handoffs/F-702-20260801.json") -Values @{
+            task_id = "F-702"
+            source_phase = "deployment"
+            target_phase = "done"
+            cumulative_handoff_count = 1
+        }
+
+        $scriptPath = Join-Path $caseRoot "run_test.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+`$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
+. (Join-Path `$REPO_ROOT 'powershell/lib/platform.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/crucible-lib.ps1')
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '$caseRoot/.crucible'
+    LogFile = '$sessionDir/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = '$sessionDir/global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    BudgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-702'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Complete-CrucibleSourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output | Out-String
+        Assert-Result -Name "another task's Production row does not stop F-702" -Condition ($outputText -notmatch "marked Production or Resolved in BACKLOG.md prior to human gate approval") -FailureMessage ("the gate read F-703's row as F-702's status. Exit: $exitCode. Output: " + $outputText)
     }
 
     $results += Run-Test -Name "F12 Deployment gate blocks premature Resolved status in BACKLOG.md" -Body {

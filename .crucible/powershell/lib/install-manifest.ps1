@@ -115,6 +115,10 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/framework-worktree-hygiene.tests.ps1",
         "powershell/tests/_worktree-fixture.ps1",
         "powershell/tests/crucible-lint-authoring.tests.ps1",
+        # Its owners table and allowances name the framework's own powershell/ paths and
+        # line patterns. A bundle lays them out under .crucible/powershell/, so every owner
+        # would report itself missing. Item 245.
+        "powershell/tests/format-owners.tests.ps1",
         # Proves the two shipped test files that still name scripts/crucible_lint.go
         # do not invoke it from a bundle that has been through this list. Item 108.
         # The named files themselves ship; this wrapper does not, because it uses

@@ -251,11 +251,12 @@ gate is reviewed against this list before it merges.
 | I5 | One writer per shared file. A lock is held as an exclusive handle for the whole write and released by closing it; no waiter deletes another holder's lock. | backlog lock, event-log lock | item 224 |
 | I6 | Branch, path and directory names come from configuration, never from a built-in list of likely values, and a check that cannot read its input fails closed. | `scripts/crucible_lint.go` (the framework repo's lint, run by its pre-commit hook and CI): `lintConfiguredInputs` over runtime PowerShell, with reasoned allowances that fail when stale | item 244 |
 | I7 | A decision is persisted before the action it authorizes runs, so every path that performs the action sees the same recorded decision. | human gate reject, pending-file and command-line paths | item 226 |
-| I8 | An identifier matches exactly or not at all. A lookup by task ID matches the ID cell, not a substring of the row, and a missing row is refused rather than approximated. | backlog finalization, archive fallback | item 227 |
+| I8 | An identifier matches exactly or not at all. A lookup by task ID matches the ID cell, not a substring of the row, and a missing row is refused rather than approximated. | `Test-BacklogTaskRow` in `lib/backlog-io.ps1`, the one row matcher that finalization, archival, restore, status lookup and the premature-status gate call; second readers fail I13's guard | items 227, 245 |
 | I9 | A required header or marker counts only in the position the contract names. An example or quotation elsewhere in the document cannot satisfy it. | review header check | item 228 |
 | I10 | The first write to a missing state file persists exactly as a write to an existing one would. The missing-file branch builds the same object shape deserialization gives. | session state writer | item 234 |
 | I11 | A gate refusal is unconditional. No caller, catch block or configuration can convert a refusal into a pass. | every gate `exit` | item 36 |
 | I12 | A check that did not run is reported as NOT RUN, never as passed, and is listed at the gate that would otherwise accept without it. | isolated checks, Reviewer handoff, Human Gate menu | item 239 |
+| I13 | Each persisted format has one owning reader: BACKLOG.md rows by task ID, spec filenames, spec frontmatter fields, the handoff schema, artifact paths, the verification checks block and the project root. A second reader calls the owner instead of parsing the format again. | the owners table in `powershell/tests/format-owners.tests.ps1` (the framework repo's own guard test, not shipped), which fails on a format's signature outside its owner, with reasoned allowances that fail when stale | item 245 |
 
 How the list is used:
 

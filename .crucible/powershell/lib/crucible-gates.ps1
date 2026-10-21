@@ -526,9 +526,10 @@ function Complete-CrucibleSourceSession {
                         $isPremature = $false
                         $statusLines = $rawText -split "`r?`n"
                         $matchingRowIdx = -1
+                        # Only the task's own row counts; another row that mentions the ID
+                        # in its title is not this task's status. Item 245.
                         for ($i = 0; $i -lt $statusLines.Count; $i++) {
-                            $line = $statusLines[$i]
-                            if ($line -match '^\s*\|' -and $line -notmatch '^\s*\|\s*(\*\*P[0-3]\*\*|Priority)\s*\|' -and $line -match ('\b' + [regex]::Escape($handoff.task_id) + '\b')) {
+                            if (Test-BacklogTaskRow -Line $statusLines[$i] -TaskId $handoff.task_id) {
                                 $matchingRowIdx = $i
                                 break
                             }
@@ -549,15 +550,11 @@ function Complete-CrucibleSourceSession {
                                         $isPremature = $true
                                     }
                                 }
-                            } else {
-                                if ($rawText -match '(?m)^\s*\|.*?\b' + [regex]::Escape($handoff.task_id) + '\b.*?\b(?:Production|Resolved)\b.*?\|') {
-                                    $isPremature = $true
-                                }
-                            }
-                        } else {
-                            if ($rawText -match '(?m)^\s*\|.*?\b' + [regex]::Escape($handoff.task_id) + '\b.*?\b(?:Production|Resolved)\b.*?\|') {
+                            } elseif ($statusLines[$matchingRowIdx] -match '\b(?:Production|Resolved)\b') {
                                 $isPremature = $true
                             }
+                        } elseif ($matchingRowIdx -ge 0 -and $statusLines[$matchingRowIdx] -match '\b(?:Production|Resolved)\b') {
+                            $isPremature = $true
                         }
 
                         if ($isPremature) {

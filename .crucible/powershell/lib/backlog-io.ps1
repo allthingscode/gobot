@@ -105,6 +105,18 @@ function Get-BacklogSpecFiles {
     }
 }
 
+# The one matcher of a BACKLOG.md or ARCHIVED.md row by task ID: the first cell is the ID
+# or a link whose text is the ID (item 227). Find, edit and delete all ask it. Item 245.
+function Test-BacklogTaskRow {
+    param(
+        [AllowEmptyString()][string]$Line,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$TaskId
+    )
+
+    $escaped = [regex]::Escape($TaskId)
+    return ($Line -match ('^\s*\|\s*(?:' + $escaped + '|\[' + $escaped + '\]\([^|]*\))\s*\|'))
+}
+
 # Resolve a spec from a task id, preferring active over loose over archived.
 # Keep this shared lookup independent of gate orchestration. Item 14.
 function Get-BacklogItemPathForTaskProjectRoot {
@@ -192,7 +204,6 @@ function Get-BacklogTaskStatus {
         $searched += $name
 
         $statusColumnIndex = -1
-        $escaped = [regex]::Escape($Task)
         foreach ($line in (Get-Content -Path $indexPath -Encoding UTF8)) {
             if ($line -match '^\|\s*ID\s*\|') {
                 $headerCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
@@ -201,7 +212,7 @@ function Get-BacklogTaskStatus {
             }
             if ($line -match '^\|\s*[-: ]+\|') { continue }
 
-            if ($line -match "^\|\s*(:?\[$escaped\]\([^)]+\)|$escaped)\s*\|") {
+            if (Test-BacklogTaskRow -Line $line -TaskId $Task) {
                 $rowCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
                 $status = if ($statusColumnIndex -ge 0 -and $statusColumnIndex -lt $rowCols.Count) {
                     $rowCols[$statusColumnIndex]
@@ -291,11 +302,11 @@ function Restore-BacklogTask {
         $lines = [System.Collections.Generic.List[string]]::new()
         foreach ($line in $rawLines) { [void]$lines.Add($line) }
 
-        # 1. Find and extract row matching TaskId (ignoring Priority Summary table rows)
+        # 1. Find and extract every row whose ID cell is TaskId. A row that only mentions
+        # the ID in another cell belongs to another task and stays. Item 245.
         $matchingIndexes = @()
         for ($i = 0; $i -lt $lines.Count; $i++) {
-            $line = $lines[$i]
-            if ($line -match '^\s*\|' -and $line -notmatch '^\s*\|\s*(\*\*P[0-3]\*\*|Priority)\s*\|' -and $line -match ('\b' + [regex]::Escape($TaskId) + '\b')) {
+            if (Test-BacklogTaskRow -Line $lines[$i] -TaskId $TaskId) {
                 $matchingIndexes += $i
             }
         }
@@ -511,8 +522,7 @@ function Get-TaskFinalizationDetails {
     $lines = [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)
     $taskRowIndex = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
-        if ($line -match '^\s*\|' -and $line -notmatch '^\s*\|\s*(\*\*P[0-3]\*\*|Priority)\s*\|' -and $line -match ('^\s*\|\s*(?:' + [regex]::Escape($TaskId) + '|\[' + [regex]::Escape($TaskId) + '\]\([^|]*\))\s*\|')) {
+        if (Test-BacklogTaskRow -Line $lines[$i] -TaskId $TaskId) {
             $taskRowIndex = $i
             break
         }

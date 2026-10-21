@@ -274,6 +274,9 @@ try {
         Assert-Result -Name "no illegal-path crash" -Condition (-not ($output -match "Illegal characters in path")) -FailureMessage "folded-scalar command crashed the doctor. Output:`n$output"
         Assert-Result -Name "ran to completion" -Condition ($output -match "\[DOCTOR\] Result:") -FailureMessage "doctor did not complete with a folded-scalar command. Output:`n$output"
         Assert-Result -Name "block-scalar indicator not treated as a tool" -Condition (-not ($output -match "verification\.tool\.[>|]")) -FailureMessage "the YAML block-scalar indicator was misparsed as a verification tool. Output:`n$output"
+        # Item 245: the doctor reads the checks with the runner's reader, so the folded
+        # command's own tool is checked rather than skipped.
+        Assert-Result -Name "folded command names its tool" -Condition ($output -match "verification\.tool\.go\]") -FailureMessage "the folded command's tool was not checked. Output:`n$output"
     }
 
     $results += Run-Test -Name "Doctor reports unauthenticated gh as advisory, stays READY" -Body {

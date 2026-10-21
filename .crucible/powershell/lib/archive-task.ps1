@@ -114,10 +114,11 @@ function Get-BacklogArchiveRow {
             break
         }
     }
-    # Item 227: both ID fallbacks must match the complete first cell.
+    # Item 227: both ID fallbacks must match the complete first cell, which is what the
+    # row matcher in backlog-io.ps1 checks. Item 245.
     if ($rowIndex -lt 0 -and -not [string]::IsNullOrEmpty($ItemId)) {
         for ($i = 0; $i -lt $Lines.Count; $i++) {
-            if ($Lines[$i] -match ('^\s*\|\s*(?:' + [regex]::Escape($ItemId) + '|\[' + [regex]::Escape($ItemId) + '\]\([^|]*\))\s*\|')) {
+            if (Test-BacklogTaskRow -Line $Lines[$i] -TaskId $ItemId) {
                 $rowIndex = $i
                 break
             }
@@ -127,7 +128,7 @@ function Get-BacklogArchiveRow {
         $fileName = Split-Path -Leaf $ActiveRelPath
         $taskIdFromFile = ($fileName -replace '_.*$', '') -replace '\.md$', ''
         for ($i = 0; $i -lt $Lines.Count; $i++) {
-            if ($Lines[$i] -match ('^\s*\|\s*(?:' + [regex]::Escape($taskIdFromFile) + '|\[' + [regex]::Escape($taskIdFromFile) + '\]\([^|]*\))\s*\|')) {
+            if (Test-BacklogTaskRow -Line $Lines[$i] -TaskId $taskIdFromFile) {
                 $rowIndex = $i
                 break
             }

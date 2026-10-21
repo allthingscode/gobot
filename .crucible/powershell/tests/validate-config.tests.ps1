@@ -446,9 +446,13 @@ review:
         # The runtime reads this file indent-agnostically. A validator that only
         # understands two spaces disagrees with it about the same config, and reports
         # fields as missing that the runtime reads without trouble.
+        # The verification block is the exception: the runner reads it at fixed indents, and
+        # since item 245 the validator reads it with the runner's reader. Item 256.
         $base = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $inVerification = $false
         $widened = (($base + $goodReview) -split "`r?`n" | ForEach-Object {
-            if ($_ -match '^( +)(.*)$') { (" " * ($Matches[1].Length * 2)) + $Matches[2] } else { $_ }
+            if ($_ -match '^[A-Za-z_]') { $inVerification = ($_ -match '^verification:') }
+            if (-not $inVerification -and $_ -match '^( +)(.*)$') { (" " * ($Matches[1].Length * 2)) + $Matches[2] } else { $_ }
         }) -join "`n"
         $path = Join-Path $projectRoot ".crucible/config-wide-indent.yaml"
         [System.IO.File]::WriteAllText($path, $widened, (New-Object System.Text.UTF8Encoding($false)))
@@ -484,6 +488,25 @@ review:
         $runner = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $runnerPath }
         Assert-Result -Name "empty alternative_runner exit" -Condition ($runner.ExitCode -eq 2) -FailureMessage ("expected exit 2, got " + $runner.ExitCode + ". Output: " + $runner.Output)
         Assert-Result -Name "empty alternative_runner message" -Condition ($runner.Output -match 'verification alternative_runner must be a non-empty command\.') -FailureMessage $runner.Output
+    }
+
+    # Item 245: the validator read host_gate with the config scalar reader, which drops a
+    # trailing comment, and the runner read it without, so a commented gate validated and
+    # then threw at run time. Both now ask Get-VerificationChecks.
+    $results += Run-Test -Name "A host_gate the runner cannot read fails validation" -Body {
+        $base = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+        $commented = [regex]::Replace($base, '(?m)(^\s{6}command:.*$)', '$1' + [Environment]::NewLine + '      host_gate: cgo  # race detector', 1)
+        $commentedPath = Join-Path $projectRoot ".crucible/config-commented-host-gate.yaml"
+        [System.IO.File]::WriteAllText($commentedPath, $commented, (New-Object System.Text.UTF8Encoding($false)))
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $commentedPath }
+        Assert-Result -Name "commented host_gate exit" -Condition ($res.ExitCode -eq 2) -FailureMessage ("expected exit 2, got " + $res.ExitCode + ". Output: " + $res.Output)
+        Assert-Result -Name "commented host_gate names the value the runner reads" -Condition ($res.Output -match [regex]::Escape("(got 'cgo  # race detector')")) -FailureMessage $res.Output
+
+        $elsewhere = $base.TrimEnd() + [Environment]::NewLine + "unrelated:" + [Environment]::NewLine + "  block:" + [Environment]::NewLine + "    entry:" + [Environment]::NewLine + "      host_gate: gpu" + [Environment]::NewLine
+        $elsewherePath = Join-Path $projectRoot ".crucible/config-host-gate-elsewhere.yaml"
+        [System.IO.File]::WriteAllText($elsewherePath, $elsewhere, (New-Object System.Text.UTF8Encoding($false)))
+        $outside = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $elsewherePath }
+        Assert-Result -Name "host_gate outside verification is not a check" -Condition ($outside.Output -notmatch 'verification host_gate must be') -FailureMessage $outside.Output
     }
 }
 finally {

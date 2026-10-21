@@ -170,6 +170,174 @@ function Get-ConfigBlockList {
     return $items
 }
 
+# --- verification checks block -------------------------------------------------
+# The one reader of verification.quick, verification.full and verification.config_check.
+# It was the runner's own loop until item 245; validate-config.ps1 and crucible-doctor.ps1
+# each read the block with their own regexes and disagreed with it (item 241).
+
+function Read-VerificationInlineScalar {
+    param([string]$Value)
+    if ($Value.Length -ge 2 -and ($Value[0] -eq '"' -or $Value[0] -eq "'") -and $Value[0] -eq $Value[$Value.Length - 1]) {
+        $inner = $Value.Substring(1, $Value.Length - 2)
+        # `"a.exe" "b"` starts and ends with a quote but is not one quoted scalar.
+        if (-not $inner.Contains([string]$Value[0])) { return $inner }
+    }
+    return $Value
+}
+
+# Read a YAML block scalar (| literal or > folded) whose header line is at index
+# $HeaderIndex. Adopters commonly write a multi-statement verification command as a
+# folded scalar (`command: >-`) for readability; the inline regex only captured the
+# `>-` indicator, so Invoke-Expression later choked on a bare `>`. Returns the joined
+# body plus NextIndex (first line NOT consumed). Folded joins content lines with
+# spaces (blank line -> newline); literal joins with newlines. Chomping indicators
+# are accepted; the trailing newline is irrelevant to Invoke-Expression.
+function Read-VerificationBlockScalar {
+    param(
+        [string[]]$Lines,
+        [int]$HeaderIndex,
+        [string]$Indicator,
+        [int]$KeyIndent
+    )
+    $folded = $Indicator.StartsWith(">")
+    $bodyLines = New-Object System.Collections.Generic.List[string]
+    $blockIndent = -1
+    $i = $HeaderIndex + 1
+    while ($i -lt $Lines.Count) {
+        $line = $Lines[$i]
+        if ($line -match "^\s*$") {
+            $bodyLines.Add("")
+            $i++
+            continue
+        }
+        $indent = ($line -replace "^(\s*).*$", '$1').Length
+        if ($indent -le $KeyIndent) { break }
+        if ($blockIndent -lt 0) { $blockIndent = $indent }
+        if ($line.Length -ge $blockIndent) {
+            $bodyLines.Add($line.Substring($blockIndent))
+        } else {
+            $bodyLines.Add($line.TrimStart())
+        }
+        $i++
+    }
+    while ($bodyLines.Count -gt 0 -and $bodyLines[$bodyLines.Count - 1] -eq "") {
+        $bodyLines.RemoveAt($bodyLines.Count - 1)
+    }
+    if ($folded) {
+        $value = ""
+        foreach ($b in $bodyLines) {
+            if ($b -eq "") { $value += "`n" }
+            elseif ($value -eq "" -or $value.EndsWith("`n")) { $value += $b }
+            else { $value += " " + $b }
+        }
+    } else {
+        $value = ($bodyLines -join "`n")
+    }
+    return @{ Value = $value; NextIndex = $i }
+}
+
+# Returns one record per check in the mode: Name, Command, HostGate, AlternativeRunner.
+# Full mode appends config_check last. HostGate and AlternativeRunner are $null when the
+# key is absent and "" when it is written empty, so the validator can refuse the second.
+function Get-VerificationChecks {
+    param(
+        [AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory = $true)][ValidateSet("quick", "full")][string]$Mode
+    )
+
+    $lines = @(([string]$Content) -split '\r?\n')
+    $commands = @()
+    $inVerification = $false
+    $inMode = $false
+    $inConfigCheck = $false
+    $currentName = ""
+    $configCheckName = ""
+    $configCheckCommand = ""
+    $currentHostGate = $null
+    $currentAlternativeRunner = $null
+    $currentCommand = $null
+
+    for ($idx = 0; $idx -lt $lines.Count; $idx++) {
+        $line = $lines[$idx]
+        if ($line -match "^verification:\s*$") {
+            $inVerification = $true
+            continue
+        }
+        if ($inVerification -and $line -match "^[a-zA-Z]") {
+            $inVerification = $false
+        }
+        if (-not $inVerification) { continue }
+
+        if ($line -match "^\s{2}${Mode}:\s*$") {
+            $inMode = $true
+            $inConfigCheck = $false
+            continue
+        }
+        if ($line -match "^\s{2}config_check:\s*$") {
+            $inConfigCheck = $true
+            $inMode = $false
+            continue
+        }
+        if (($inMode -or $inConfigCheck) -and $line -match "^\s{2}[a-zA-Z]") {
+            $inMode = $false
+            $inConfigCheck = $false
+        }
+        if ($inMode) {
+            if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
+                if ($null -ne $currentCommand) {
+                    $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
+                }
+                $currentName = Read-VerificationInlineScalar -Value $Matches[1]
+                $currentHostGate = $null
+                $currentAlternativeRunner = $null
+                $currentCommand = $null
+            }
+            if ($line -match "^\s{6}host_gate:\s*(.*?)\s*$") { $currentHostGate = Read-VerificationInlineScalar -Value $Matches[1] }
+            if ($line -match "^\s{6}alternative_runner:\s*(.*?)\s*$") { $currentAlternativeRunner = Read-VerificationInlineScalar -Value $Matches[1] }
+            if ($line -match "^(\s{6})command:\s*(.+?)\s*$") {
+                $keyIndent = $Matches[1].Length
+                $rawVal = $Matches[2].Trim()
+                if ($rawVal -match "^[|>][+-]?\d*$") {
+                    $bs = Read-VerificationBlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
+                    $currentCommand = $bs.Value
+                    $idx = $bs.NextIndex - 1
+                } else {
+                    $currentCommand = Read-VerificationInlineScalar -Value $rawVal
+                }
+            }
+        }
+        if ($inConfigCheck) {
+            if ($line -match "^\s{4}name:\s*(.+?)\s*$") {
+                $configCheckName = Read-VerificationInlineScalar -Value $Matches[1]
+            }
+            if ($line -match "^(\s{4})command:\s*(.+?)\s*$") {
+                $keyIndent = $Matches[1].Length
+                $rawVal = $Matches[2].Trim()
+                if ($rawVal -match "^[|>][+-]?\d*$") {
+                    $bs = Read-VerificationBlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
+                    $configCheckCommand = $bs.Value
+                    $idx = $bs.NextIndex - 1
+                } else {
+                    $configCheckCommand = Read-VerificationInlineScalar -Value $rawVal
+                }
+            }
+        }
+    }
+
+    if ($null -ne $currentCommand) {
+        $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
+    }
+
+    if ($Mode -eq "full" -and $configCheckName -and $configCheckCommand) {
+        $commands += @{
+            Name = $configCheckName
+            Command = $configCheckCommand
+        }
+    }
+
+    return $commands
+}
+
 function Resolve-ConfigProjectRoot {
     param(
         [string]$ProjectRoot = "",

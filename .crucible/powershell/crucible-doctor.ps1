@@ -110,18 +110,13 @@ function Get-VerificationTools {
 
     $shells = @("pwsh", "powershell", "powershell.exe", "cmd", "cmd.exe", "sh", "bash")
     $tools = New-Object System.Collections.Generic.List[string]
-    foreach ($m in [regex]::Matches($ConfigText, '(?m)^\s*command:\s*(.+?)\s*$')) {
-        $cmd = $m.Groups[1].Value.Trim()
-        if ($cmd.Length -ge 2) {
-            if (($cmd.StartsWith('"') -and $cmd.EndsWith('"')) -or ($cmd.StartsWith("'") -and $cmd.EndsWith("'"))) {
-                $cmd = $cmd.Substring(1, $cmd.Length - 2).Trim()
-            }
-        }
+    # The runner's own reader, so a folded command names its tool and a command: key
+    # outside the checks block names none. Item 245.
+    $checks = @(Get-VerificationChecks -Content $ConfigText -Mode quick) + @(Get-VerificationChecks -Content $ConfigText -Mode full)
+    foreach ($check in $checks) {
+        $cmd = ([string]$check.Command).Trim()
         if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
         if ($cmd -match 'replace-with|REPLACE_WITH') { continue }
-        # YAML block-scalar indicator (command: >- / |- etc.); the real command
-        # is on the following indented lines, not this one. Skip it.
-        if ($cmd -match '^[>|][+-]?[0-9]*$') { continue }
         $first = ($cmd -split '\s+')[0]
         if ([string]::IsNullOrWhiteSpace($first)) { continue }
         # Manual leaf extraction: [IO.Path]::GetFileName throws on illegal path

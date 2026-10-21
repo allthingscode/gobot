@@ -226,17 +226,10 @@ foreach ($tier in @("fast", "high-capability")) {
 $null = Test-RequiredSection -Path @("verification", "quick") -Name "verification.quick"
 $null = Test-RequiredSection -Path @("verification", "full") -Name "verification.full"
 
-# The verification entries are a list of maps, so command: is not reachable as a
-# mapping key path; it is looked for anywhere inside the verification block instead.
-$verificationNode = Find-Node -Path @("verification")
-$hasVerificationCommand = $false
-if ($null -ne $verificationNode) {
-    for ($i = $verificationNode.SpanStart; $i -lt $verificationNode.SpanEnd; $i++) {
-        if ($entries[$i].Key -eq "command" -and -not [string]::IsNullOrWhiteSpace($entries[$i].Value)) {
-            $hasVerificationCommand = $true
-        }
-    }
-}
+# The checks are read by the runner's own reader, so a value validated here is the value
+# run-isolated-checks.ps1 runs. Item 245.
+$verificationChecks = @(Get-VerificationChecks -Content $content -Mode quick) + @(Get-VerificationChecks -Content $content -Mode full)
+$hasVerificationCommand = @($verificationChecks | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Command) }).Count -gt 0
 if (-not $hasVerificationCommand) {
     $errors += "Missing or invalid config field: verification command"
 }
@@ -247,17 +240,16 @@ if ($content -match "replace-with-project-") {
 
 # Host-gated checks use the small string schema consumed by run-isolated-checks.ps1.
 # Keep accepted condition forms and option names closed so typos cannot silently skip work.
-$hostGateMatches = [regex]::Matches($content, '(?m)^\s{6}host_gate:\s*(.*?)\s*$')
-foreach ($match in $hostGateMatches) {
-    $condition = (ConvertFrom-ConfigScalar $match.Groups[1].Value)
-    if ($condition -notmatch '^(cgo|os=(windows|linux|macos)|command=[A-Za-z0-9_.+-]+|env=[A-Za-z_][A-Za-z0-9_]*)$') {
-        $errors += "verification host_gate must be cgo, os=windows|linux|macos, command=<name>, or env=<name> (got '$condition')."
+foreach ($check in $verificationChecks) {
+    if ($null -ne $check.HostGate) {
+        $condition = [string]$check.HostGate
+        if ($condition -notmatch '^(cgo|os=(windows|linux|macos)|command=[A-Za-z0-9_.+-]+|env=[A-Za-z_][A-Za-z0-9_]*)$') {
+            $errors += "verification host_gate must be cgo, os=windows|linux|macos, command=<name>, or env=<name> (got '$condition')."
+        }
     }
-}
-$altMatches = [regex]::Matches($content, '(?m)^\s{6}alternative_runner:\s*(.*?)\s*$')
-foreach ($match in $altMatches) {
-    $runner = ConvertFrom-ConfigScalar $match.Groups[1].Value
-    if ([string]::IsNullOrWhiteSpace($runner)) { $errors += "verification alternative_runner must be a non-empty command." }
+    if ($null -ne $check.AlternativeRunner -and [string]::IsNullOrWhiteSpace([string]$check.AlternativeRunner)) {
+        $errors += "verification alternative_runner must be a non-empty command."
+    }
 }
 
 if ($content -match "Replace with project-specific engineering rules") {
