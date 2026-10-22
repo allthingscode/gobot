@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "e1480716bf2c866d805513510bd759d0bb7f2dfd",
+  "source_commit": "1daeeb546fc99096bff7cd6a3fc5c3eecda3d00f",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -71,8 +71,8 @@
       "base_hash": "84a6fda488165cd8930dc580f1c6852166cb66fa4a2779751a02b1eab79b5a0d"
     },
     "docs/policy.md": {
-      "hash": "46b2423d9ee323ad6923be73827958f8308ff64d5e1bdb2632f3b02cc3fb1214",
-      "base_hash": "46b2423d9ee323ad6923be73827958f8308ff64d5e1bdb2632f3b02cc3fb1214"
+      "hash": "361ee33cfaf82f3b86323de78032a1c507b5d2623649e42f9cd03582d293cc46",
+      "base_hash": "361ee33cfaf82f3b86323de78032a1c507b5d2623649e42f9cd03582d293cc46"
     },
     "docs/README.md": {
       "hash": "3ceed16ca450db577c46e07c60d9c137b3fe3d53c1a8e031e49deb5f85bdd3af",
@@ -139,8 +139,8 @@
       "base_hash": "002e8f9400238a5dcfd07be20941656968ed44476f325b8fc70ebde38a6dca86"
     },
     "powershell/check-merge-conflicts.ps1": {
-      "hash": "2e85c63cbbe58508037e68113673b15e88cee3575460d2d9db96c68d530369b5",
-      "base_hash": "2e85c63cbbe58508037e68113673b15e88cee3575460d2d9db96c68d530369b5"
+      "hash": "e3968041ece90733bb65eadc446d250a77b7bd3475795b1f1e3b3dcdfb186e9f",
+      "base_hash": "e3968041ece90733bb65eadc446d250a77b7bd3475795b1f1e3b3dcdfb186e9f"
     },
     "powershell/clear-session-state.ps1": {
       "hash": "74127f987383b9346b3bd78be8555c5b02a2890ac251a61c7d87dbc9ec56f6a6",
@@ -151,8 +151,8 @@
       "base_hash": "c449e914835de8b541e9f54d292d6ea806c1fec979f3ce404890b44ae7a1d2f6"
     },
     "powershell/crucible-health.ps1": {
-      "hash": "b7e2d8902fdfa8dafdb6a3391084415a5169b60df0d7e92793636658435b3042",
-      "base_hash": "b7e2d8902fdfa8dafdb6a3391084415a5169b60df0d7e92793636658435b3042"
+      "hash": "5eb44ae776f98d705626fc296dfdd536160fcc2a80ee3d788573336a3158dfca",
+      "base_hash": "5eb44ae776f98d705626fc296dfdd536160fcc2a80ee3d788573336a3158dfca"
     },
     "powershell/crucible-lib.ps1": {
       "hash": "7e795d40a70caa7dcc7e456f9d1ef2ed54a189419b1529785564e063fa3eeb38",
@@ -223,8 +223,8 @@
       "base_hash": "4a2c7e8a48809528b8d93215aded8cb0a4701dad3662230be18c9576c03e7b9c"
     },
     "powershell/lib/crucible-gates-human.ps1": {
-      "hash": "f47365b91088b4a0484837cb9ddcdd7de9155a8125c7cab168e8323e9f473a29",
-      "base_hash": "f47365b91088b4a0484837cb9ddcdd7de9155a8125c7cab168e8323e9f473a29"
+      "hash": "6019ce4ff0552e1152eb55ba13d320844bc05402e9d0fad33ea51d481a453153",
+      "base_hash": "6019ce4ff0552e1152eb55ba13d320844bc05402e9d0fad33ea51d481a453153"
     },
     "powershell/lib/crucible-gates-wedge-report.ps1": {
       "hash": "12b0dfae6c7163438b057e4fc1c22d8eb9e8f70155b88a0c354021f1e997365c",
@@ -239,8 +239,8 @@
       "base_hash": "cb3daa43356fe29f06789454e04a54e0f67201d91924c53b3f9fdc0342729f2f"
     },
     "powershell/lib/git.ps1": {
-      "hash": "7243291e2475ae6951ba7ed3abd957eb7e00c908eb3cac7df5a9c2278f243526",
-      "base_hash": "7243291e2475ae6951ba7ed3abd957eb7e00c908eb3cac7df5a9c2278f243526"
+      "hash": "b7615fc2eb74bf85cfdde1f5e9ce42d39e5d337c0bc465455ea1dcddca801888",
+      "base_hash": "b7615fc2eb74bf85cfdde1f5e9ce42d39e5d337c0bc465455ea1dcddca801888"
     },
     "powershell/lib/gitignore-conformance.ps1": {
       "hash": "9152407971c62d944f26e4eabe221d18a1fefb4ef99ace8a9cb246b1d0aa6679",
@@ -255,8 +255,8 @@
       "base_hash": "626cde3dcce599ca841514b4a0518241f0e4c33a3361ec58545cd056918dfdc8"
     },
     "powershell/lib/install-manifest.ps1": {
-      "hash": "0faa3b2047729454db987897ed6590c5156430d554cba96f5490672245142646",
-      "base_hash": "0faa3b2047729454db987897ed6590c5156430d554cba96f5490672245142646"
+      "hash": "3a4cdf8357f90a5258b3dbcf9408da4670c943a2bb71e90bae60479a233d9df2",
+      "base_hash": "3a4cdf8357f90a5258b3dbcf9408da4670c943a2bb71e90bae60479a233d9df2"
     },
     "powershell/lib/instruction-blocks.ps1": {
       "hash": "a27392699623de960293be3ec5f3dab80fff0b38f0805697fa59337c1382b622",
@@ -323,8 +323,8 @@
       "base_hash": "7f3f0d9fc000943f36d8b1565c1e5079d03a204734f7c61818e07e6f91ff3a25"
     },
     "powershell/lib/worktree.ps1": {
-      "hash": "e7da36dff635f3c2dcad72caf15a494e3dad7b0da8a0d6e71ff82d1da68f9420",
-      "base_hash": "e7da36dff635f3c2dcad72caf15a494e3dad7b0da8a0d6e71ff82d1da68f9420"
+      "hash": "a939881a75cef646a8d2edc7287c812a6fc41407611c5c758dc5395b3b191ceb",
+      "base_hash": "a939881a75cef646a8d2edc7287c812a6fc41407611c5c758dc5395b3b191ceb"
     },
     "powershell/new-handoff.ps1": {
       "hash": "b17337b203ad9c615f45cf3d3ecdd6e0a74e938e6afa8866a77bf65f8f4c3364",
@@ -483,8 +483,8 @@
       "base_hash": "4d04086d03f292467e0c6642e2829bf5e5d9a68a6ccb0c64115b1bcc6389df42"
     },
     "powershell/tests/crucible-gates-routing.tests.ps1": {
-      "hash": "677dee4c97a101a0be90b46392a6b2d12d350994ea17ee6e18220c9aba8476df",
-      "base_hash": "677dee4c97a101a0be90b46392a6b2d12d350994ea17ee6e18220c9aba8476df"
+      "hash": "ae4073ed4bca427ce48e628100e7340abaab4500e05a528422e425b74e464a5e",
+      "base_hash": "ae4073ed4bca427ce48e628100e7340abaab4500e05a528422e425b74e464a5e"
     },
     "powershell/tests/crucible-gates-wedge-report.tests.ps1": {
       "hash": "8b7a6567eac5dc7fbc2698dd727021763e614bd303397c678b1993c318184d4b",
@@ -525,6 +525,10 @@
     "powershell/tests/factory-shim.tests.ps1": {
       "hash": "cdf8271a6176cc39574688d5df82da81d3e4ab5db1b778321b48dfcc5139ea9b",
       "base_hash": "cdf8271a6176cc39574688d5df82da81d3e4ab5db1b778321b48dfcc5139ea9b"
+    },
+    "powershell/tests/git-discard-safety.tests.ps1": {
+      "hash": "ef50febef0d1dfd8ccf10b14e2c314253e3de4239d66365af79849df6f82fae4",
+      "base_hash": "ef50febef0d1dfd8ccf10b14e2c314253e3de4239d66365af79849df6f82fae4"
     },
     "powershell/tests/git-test-isolation.tests.ps1": {
       "hash": "0c1e7ce872ca0223d94201376164444a31e5b0ef111622ed648b5952b9ca2a18",

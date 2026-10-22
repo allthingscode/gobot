@@ -81,6 +81,10 @@ function Invoke-HumanGateMerge {
         }
     }
 
+    if (-not (Test-GitDiscardSafe -Directory $ProjectRoot -Operation "human gate merge and abort" -IncludeUntracked:$false)) {
+        try { & $removePrematureAccept } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
+        exit 2
+    }
     Write-Quiet "[HUMAN GATE] Merging branch task/$TaskId into $PrimaryBranch..."
     Invoke-GitChecked { git checkout $PrimaryBranch } | Out-Null
     Invoke-GitChecked { git merge --no-ff --no-edit "task/$TaskId" } | Out-Null
@@ -115,6 +119,10 @@ function Invoke-HumanGateMerge {
 
     $rebaseClean = $false
     if (Test-Path $wtPath) {
+        if (-not (Test-GitDiscardSafe -Directory $wtPath -Operation "task rebase and abort" -IncludeUntracked:$false)) {
+            try { & $removePrematureAccept } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
+            exit 2
+        }
         Write-Quiet "[HUMAN GATE] Rebasing task/$TaskId onto $PrimaryBranch in $wtPath..."
         $rebaseRes = Invoke-Git -Directory $wtPath rebase $PrimaryBranch
         foreach ($line in $rebaseRes.Lines) { Write-Quiet $line }
@@ -257,6 +265,17 @@ function Assert-GateReason {
         }
         exit 1
     }
+}
+
+function Assert-HumanGateDecisionSafe {
+    # Run before either intake path records reject/abandon. The action repeats the
+    # guard for direct callers and immediately before the checkout/reset.
+    param([string]$TaskId, [string]$Outcome, [string]$SourcePhase, [string]$ProjectRoot)
+    if ($SourcePhase -eq 'grooming' -or $Outcome -notin @('rejected', 'abandoned')) { return }
+    $primary = Get-ConfiguredPrimaryBranch -ProjectRoot $ProjectRoot
+    $unwind = Get-HumanGateRejectUnwind -TaskId $TaskId -PrimaryBranch $primary
+    $target = if ($unwind.HeadIsTaskMerge) { $unwind.UnwindTarget } else { '' }
+    $null = Test-GitDiscardSafe -Directory $ProjectRoot -Operation "$Outcome decision unwind" -AllowConfiguredRuntime -IncludeUntracked:$false -ResetTarget $target -Refuse
 }
 
 function Invoke-HumanGateAction {
@@ -697,24 +716,28 @@ function Invoke-HumanGateRejectAbandon {
         $Handoff = $null
     )
     if ($SourcePhase -ne "grooming") {
-        if ($Outcome -eq "rejected") {
-            # Restore backlog state if it was archived
-            Restore-BacklogTask -TaskId $TaskId -ProjectRoot $ProjectRoot -ActiveStatus "In Progress"
-        } elseif ($Outcome -eq "abandoned") {
-            Invoke-AbandonedBacklogTaskArchive -TaskId $TaskId -ProjectRoot $ProjectRoot
-        }
-
         $unwind = Get-HumanGateRejectUnwind -TaskId $TaskId -PrimaryBranch $PrimaryBranch
+        $target = if ($unwind.HeadIsTaskMerge) { $unwind.UnwindTarget } else { '' }
+        $null = Test-GitDiscardSafe -Directory $ProjectRoot -Operation "$Outcome decision unwind" -AllowConfiguredRuntime -IncludeUntracked:$false -ResetTarget $target -Refuse
         $currentHead = $unwind.CurrentHead
         $parentList = @($unwind.ParentList)
         $headIsTaskMerge = $unwind.HeadIsTaskMerge
         $unwindTarget = $unwind.UnwindTarget
-        Invoke-GitChecked { git checkout $PrimaryBranch }
+        Invoke-GitChecked { git -C $ProjectRoot checkout $PrimaryBranch }
         if ($headIsTaskMerge) {
             Write-Quiet "[HUMAN GATE] Unwinding this task's local merge. Resetting $PrimaryBranch to its pre-merge tip ($unwindTarget)..."
-            Invoke-GitChecked { git reset --hard $unwindTarget }
+            $null = Test-GitDiscardSafe -Directory $ProjectRoot -Operation "$Outcome decision unwind" -AllowConfiguredRuntime -IncludeUntracked:$false -ResetTarget $unwindTarget -Refuse
+            Invoke-GitChecked { git -C $ProjectRoot reset --hard $unwindTarget }
         } else {
             Write-Quiet "[HUMAN GATE] $PrimaryBranch does not end in a merge of task/$TaskId; leaving it untouched."
+        }
+
+        # Restore/archive only after safety and unwind: neither may dirty files that
+        # the reset would then discard. A refused decision has no partial state.
+        if ($Outcome -eq "rejected") {
+            Restore-BacklogTask -TaskId $TaskId -ProjectRoot $ProjectRoot -ActiveStatus "In Progress"
+        } elseif ($Outcome -eq "abandoned") {
+            Invoke-AbandonedBacklogTaskArchive -TaskId $TaskId -ProjectRoot $ProjectRoot
         }
 
         if ($Outcome -eq "rejected") {
@@ -1110,6 +1133,7 @@ function Invoke-HumanGate {
 
             $trimmedGateReason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "" } else { (ConvertTo-AsciiSafeText -Text $GateReason).Trim() }
             Assert-GateReason -Reason $GateReason
+            Assert-HumanGateDecisionSafe -TaskId $handoff.task_id -Outcome $GateOutcome -SourcePhase $handoff.source_phase -ProjectRoot $repoRoot
             
             $primaryBranch = Get-ConfiguredPrimaryBranch
             $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
@@ -1235,6 +1259,7 @@ function Invoke-HumanGate {
                         } else {
                             $fileReason = if ($gateData.PSObject.Properties["reason"]) { [string]$gateData.reason } else { "" }
                             Assert-GateReason -Reason $fileReason -DecisionFile $gateTemplatePath
+                            Assert-HumanGateDecisionSafe -TaskId $handoff.task_id -Outcome $gateData.outcome -SourcePhase $handoff.source_phase -ProjectRoot $repoRoot
                             $timestamp = Get-UtcFileTimestamp
                             $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
                             $gateData | Add-Member -NotePropertyName "session_cycle_id" -NotePropertyValue $currentGateCycle -Force

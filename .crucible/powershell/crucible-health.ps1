@@ -330,7 +330,8 @@ try {
                 foreach ($wt in $orphanedWorktrees) {
                     if ($Force) {
                         Write-Quiet ("Removing worktree: " + $wt) -ForegroundColor Yellow
-                        git worktree remove --force $wt
+                        if (-not (Test-GitDiscardSafe -Directory $wt -Operation "orphaned worktree cleanup" -IncludeUntracked)) { continue }
+                        git worktree remove $wt
                     } else {
                         Write-Quiet ("Would remove worktree: " + $wt) -ForegroundColor Gray
                     }

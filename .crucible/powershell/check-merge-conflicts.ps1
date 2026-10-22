@@ -40,12 +40,7 @@ if ($LASTEXITCODE -ne 0) {
 # safely separate it from edits that were already there, so refuse to start over any. Untracked
 # files are untouched by both the merge and its abort. Exit 2 means "not run", never a
 # conflict, so the Operator does not send the task back for a rebase. Item 179.
-$dirty = @(git -C $REPO_ROOT status --porcelain --untracked-files=no)
-if ($dirty.Count -gt 0) {
-    Write-Host "Error: the checkout at $REPO_ROOT has uncommitted changes to tracked files. Commit or stash them, then rerun the merge simulation:" -ForegroundColor Red
-    $dirty | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Yellow }
-    exit 2
-}
+$null = Test-GitDiscardSafe -Directory $REPO_ROOT -Operation "merge simulation and abort" -IncludeUntracked:$false -Refuse
 
 $currentBranch = git -C $REPO_ROOT rev-parse --abbrev-ref HEAD
 if ($currentBranch -ne $mainBranch) {

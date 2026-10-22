@@ -249,17 +249,8 @@ function Remove-ImplementationWorktree {
     if (-not (Test-Path $wtPath)) { return $true }
 
     # Never --force: uncommitted work was not merged, and deleting it is unrecoverable. Item 221.
-    $uncommitted = @()
-    try {
-        $uncommitted = @(Get-WorktreeUncommittedPaths -WorktreePath $wtPath)
-    } catch {
-        Write-Host "[HUMAN GATE] Could not read the state of $wtPath ($($_.Exception.Message)); left it and task/$TaskId in place." -ForegroundColor Yellow
-        return $false
-    }
-    if ($uncommitted.Count -gt 0) {
-        Write-Host "[HUMAN GATE] Worktree at $wtPath has uncommitted changes that were not merged; left it and task/$TaskId in place:" -ForegroundColor Yellow
-        foreach ($line in $uncommitted) { Write-Host "  $line" -ForegroundColor Yellow }
-        Write-Host "  Keep them by committing them for a new task, or discard them, then run: git worktree remove `"$wtPath`"; git branch -d task/$TaskId" -ForegroundColor Yellow
+    if (-not (Test-GitDiscardSafe -Directory $wtPath -Operation "implementation worktree cleanup" -IncludeUntracked)) {
+        Write-Host "[HUMAN GATE] Worktree at $wtPath has uncommitted changes that were not merged; left it and task/$TaskId in place." -ForegroundColor Yellow
         return $false
     }
 

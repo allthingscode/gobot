@@ -119,6 +119,8 @@ function Test-FrameworkDevOnlyFile {
         # line patterns. A bundle lays them out under .crucible/powershell/, so every owner
         # would report itself missing. Item 245.
         "powershell/tests/format-owners.tests.ps1",
+        # Scans this framework repo's runtime for I2 discard sites and stale allowances.
+        "powershell/tests/git-discard-guard.tests.ps1",
         # Proves the two shipped test files that still name scripts/crucible_lint.go
         # do not invoke it from a bundle that has been through this list. Item 108.
         # The named files themselves ship; this wrapper does not, because it uses

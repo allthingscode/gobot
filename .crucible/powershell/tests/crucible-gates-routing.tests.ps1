@@ -104,14 +104,19 @@ param($Root, $Case)
 $ErrorActionPreference = "Stop"
 . (Join-Path $Root "lib/crucible-gates.ps1")
 if ($Case -eq "abandon-archived") { . (Join-Path $Root "lib/status-helpers.ps1") }
-# Stop after the backlog step so no merge, push or session work is needed.
+# This fixture tests missing archive helpers, not git. Item 253 moved the safety
+# check and unwind before archival; model a safe checkout with nothing to unwind.
 function git { $global:LASTEXITCODE = 1 }
-function Invoke-GitChecked { throw "REACHED_AFTER_BACKLOG" }
+function Get-HumanGateRejectUnwind { return @{ CurrentHead = 'base'; ParentList = @(); HeadIsTaskMerge = $false; UnwindTarget = '' } }
+function Test-GitDiscardSafe { return $true }
+function Invoke-GitChecked {}
+function Write-Quiet {}
 try {
     if ($Case -eq "accept") {
         Invoke-HumanGateAcceptRedirect -TaskId "F-197" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl")
     } else {
         Invoke-HumanGateRejectAbandon -TaskId "F-197" -Outcome "abandoned" -ProjectRoot $Root -PrimaryBranch "master"
+        throw "REACHED_AFTER_BACKLOG"
     }
     throw "Gate unexpectedly completed"
 } catch {

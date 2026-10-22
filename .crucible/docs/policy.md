@@ -245,7 +245,7 @@ gate is reviewed against this list before it merges.
 | # | Invariant | Enforced where | Record |
 |---|---|---|---|
 | I1 | What is tested is what merges. The independent checks refuse a task worktree with uncommitted changes, so the merge ships exactly the tree the checks ran on. | verification -> deployment checks, breaker `uncommitted_task_worktree` | item 221 |
-| I2 | Nothing deletes uncommitted task work. Cleanup leaves a dirty or locked worktree in place and names its files. `--force` is never the normal path. | acceptance cleanup | item 221 |
+| I2 | Nothing deletes uncommitted task work. Cleanup leaves a dirty or locked worktree in place and names its files. `--force` is never the normal path. | `Test-GitDiscardSafe` in `lib/git.ps1`, before discard or before starting an abortable operation; `powershell/tests/git-discard-guard.tests.ps1` (the framework repo's own guard test) enforces calls and reasoned allowances that fail when stale | items 179, 221, 253 |
 | I3 | A task is marked terminal only after the action that makes it terminal has succeeded. Finalization and archival run after a successful merge and before any push; a merge that reworks, blocks or fails leaves the row and spec unchanged. | human gate accept | item 222 |
 | I4 | Every handoff that reaches a gate was selected and bound to the task once, through the one reader. Recovery, relocation or repair of a handoff file happens before that reader, never after. | handoff preflight, `Restore-MisplacedHandoff` | items 185, 223 |
 | I5 | One writer per shared file. A lock is held as an exclusive handle for the whole write and released by closing it; no waiter deletes another holder's lock. | backlog lock, event-log lock | item 224 |
