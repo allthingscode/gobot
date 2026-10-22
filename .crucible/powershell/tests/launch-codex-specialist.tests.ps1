@@ -132,6 +132,22 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, "Pipeline complete", $enc) }
         exit 0
     }
+    "oldlogfields" {
+        # Item 246: a log line with no task_id, and a phase logged under the older "specialist"
+        # key. The handoff names deployment, which never starts.
+        $phaseDir = Split-Path -Parent $outFile
+        $phaseName = Split-Path -Leaf $phaseDir
+        $taskDir = Split-Path -Parent $phaseDir
+        $taskName = Split-Path -Leaf $taskDir
+        $ts = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+        $events = @(
+            ('{"event":"heartbeat","timestamp":"' + $ts + '"}'),
+            ('{"event":"session_end","task_id":"' + $taskName + '","specialist":"' + $phaseName + '","timestamp":"' + $ts + '","outcome":"success","notes":"Handoff to deployment"}')
+        )
+        [System.IO.File]::AppendAllText((Join-Path $taskDir "pipeline.log.jsonl"), (($events -join "`n") + "`n"), $enc)
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, "Approved. Handoff created for deployment.", $enc) }
+        exit 0
+    }
     { $_ -in @("halfadvance", "fulladvance") } {
         # Mimic the specialist's crucible.ps1 -Init in the task's pipeline log. halfadvance is
         # the run Codex killed mid-advance: the phase ended, the next one never started.
@@ -608,6 +624,8 @@ try {
         # Item 188: ship the config resolver alongside the launcher in this minimal bundle.
         New-Item -ItemType Directory -Path (Join-Path $shipDir "lib") -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1") -Destination (Join-Path $shipDir "lib/config-helpers.ps1")
+        # Item 246: and the outcome classifier and emitter.
+        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/codex-launch-outcome.ps1") -Destination (Join-Path $shipDir "lib/codex-launch-outcome.ps1")
         $originalPath = $env:PATH
         $originalMode = $env:CODEX_FAKE_MODE
         try {
@@ -1009,6 +1027,82 @@ try {
             "-TaskId", "C-973", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $handoffRoot)
         Assert-Result -Name "handoff written stays success" -Condition ($res3.Output -match "STATUS=SUCCESS") -FailureMessage "a run that ended its phase must be SUCCESS. Output:`n$($res3.Output)"
+    }
+
+    # Item 246: every outcome is one record, written to stdout and to the status file by one
+    # emitter, so the two agree line for line. RUNNING is printed when codex starts.
+    $start246 = '{"event":"session_start","task_id":"C-246","phase":"implementation","timestamp":"2020-01-01T00:00:00Z"}'
+    foreach ($case in @(
+        @{ Name = "success"; Mode = "success"; Phase = "verification"; Status = "SUCCESS"; Exit = 0; Extra = @() },
+        @{ Name = "infra"; Mode = "infra"; Phase = "verification"; Status = "LAUNCH_FAILED"; Exit = 1; Extra = @() },
+        @{ Name = "schema"; Mode = "badverdict"; Phase = "verification"; Status = "LAUNCH_FAILED"; Exit = 1; Extra = @("-ReviewSchema") },
+        @{ Name = "usagelimit"; Mode = "usagelimit"; Phase = "implementation"; Status = "USAGE_LIMIT"; Exit = 5; Extra = @() },
+        @{ Name = "halfadvance"; Mode = "halfadvance"; Phase = "verification"; Status = "ADVANCE_INCOMPLETE"; Exit = 3; Extra = @() },
+        @{ Name = "nohandoff"; Mode = "success"; Phase = "implementation"; Status = "NO_HANDOFF"; Exit = 4; Extra = @(); Seed = $start246 },
+        @{ Name = "oldlogfields"; Mode = "oldlogfields"; Phase = "verification"; Status = "ADVANCE_INCOMPLETE"; Exit = 3; Extra = @() }
+    )) {
+        $results += Run-Test -Name ("stdout and the status file carry one record: " + $case.Name + " (item 246)") -Body {
+            $projectRoot = Join-Path $tempRoot ("proj-246-" + $case.Name)
+            $taskDir = Join-Path $projectRoot ".crucible/session/C-246"
+            New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+            if ($case.ContainsKey("Seed")) {
+                [System.IO.File]::WriteAllText((Join-Path $taskDir "pipeline.log.jsonl"), ($case.Seed + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+            }
+            $res = Invoke-Launcher -Mode $case.Mode -BinDir $binDir -LauncherArgs (@(
+                "-TaskId", "C-246", "-Phase", $case.Phase, "-Model", "gpt-6-sol", "-Effort", "low",
+                "-PromptText", "WORK", "-ProjectRoot", $projectRoot) + $case.Extra)
+            $outLines = @($res.Output -split "\r?\n")
+            $statusIdx = @(for ($n = 0; $n -lt $outLines.Count; $n++) { if ($outLines[$n] -match "^\[CODEX SPECIALIST\] STATUS=") { $n } })
+            Assert-Result -Name "246 $($case.Name) exit code" -Condition ($res.ExitCode -eq $case.Exit) -FailureMessage "expected exit $($case.Exit), got $($res.ExitCode). Output:`n$($res.Output)"
+            Assert-Result -Name "246 $($case.Name) outcome is the last stdout status" -Condition ($statusIdx.Count -ge 1 -and $outLines[$statusIdx[-1]] -ceq ("[CODEX SPECIALIST] STATUS=" + $case.Status)) -FailureMessage "expected STATUS=$($case.Status) last. Output:`n$($res.Output)"
+            $block = @("STATUS=" + $case.Status)
+            for ($n = $statusIdx[-1] + 1; $n -lt $outLines.Count -and $outLines[$n] -match "^  \S"; $n++) { $block += $outLines[$n].Substring(2) }
+            $statusFile = Join-Path $taskDir ($case.Phase + "/codex-launch-status.txt")
+            $fileLines = @([System.IO.File]::ReadAllText($statusFile) -split "`n")
+            Assert-Result -Name "246 $($case.Name) status file ends with one newline" -Condition ($fileLines[-1] -eq "" -and $fileLines[-2] -ne "") -FailureMessage "status file must end in exactly one newline: $($fileLines -join '|')"
+            $fileLines = @($fileLines[0..($fileLines.Count - 2)])
+            Assert-Result -Name "246 $($case.Name) stdout and file agree line for line" -Condition (($block -join "`n") -ceq ($fileLines -join "`n")) -FailureMessage ("stdout block:`n" + ($block -join "`n") + "`nstatus file:`n" + ($fileLines -join "`n"))
+            Assert-Result -Name "246 $($case.Name) record names the transcript" -Condition (@($fileLines -match "^transcript: .*[\\/]C-246[\\/]$($case.Phase)[\\/]codex-transcript\.txt$").Count -eq 1) -FailureMessage "status file must name the transcript: $($fileLines -join '|')"
+            Assert-Result -Name "246 $($case.Name) RUNNING printed when codex starts" -Condition ($statusIdx.Count -eq 2 -and $outLines[$statusIdx[0]] -ceq "[CODEX SPECIALIST] STATUS=RUNNING") -FailureMessage "expected STATUS=RUNNING, then the outcome, on stdout. Output:`n$($res.Output)"
+        }
+    }
+
+    # Item 246 review: a quota stop is evident from the transcript, so a pipeline log the
+    # launcher cannot read must not turn it into LAUNCH_FAILED and lose the reset time.
+    $results += Run-Test -Name "A usage-limit stop survives an unreadable pipeline log (item 246)" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-246-unreadable-log"
+        $taskDir = Join-Path $projectRoot ".crucible/session/C-246"
+        # A directory where the log file belongs: Test-Path holds and every read fails.
+        New-Item -ItemType Directory -Path (Join-Path $taskDir "pipeline.log.jsonl") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "usagelimit" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-246", "-Phase", "implementation", "-Model", "gpt-6-sol", "-Effort", "low",
+            "-PromptText", "WORK", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "unreadable log keeps exit 5" -Condition ($res.ExitCode -eq 5) -FailureMessage "expected exit 5, got $($res.ExitCode). Output:`n$($res.Output)"
+        $fileText = [System.IO.File]::ReadAllText((Join-Path $taskDir "implementation/codex-launch-status.txt"))
+        $fileLines = @($fileText -split "`n")
+        Assert-Result -Name "unreadable log keeps USAGE_LIMIT and the reset time" -Condition ($fileLines[0] -eq "STATUS=USAGE_LIMIT" -and ($fileLines -contains "resets: 11:37 PM") -and ($fileLines -contains "retry_not_before: 11:38 PM")) -FailureMessage "status file: $fileText"
+        Assert-Result -Name "unreadable log is named" -Condition (@($fileLines -match "^evidence not read: pipeline log: ").Count -eq 1) -FailureMessage "status file: $fileText"
+        Assert-Result -Name "unreadable log stdout outcome" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=USAGE_LIMIT") -FailureMessage $res.Output
+    }
+
+    # Item 246 review: an exception that stops codex from running must still end in a STATUS,
+    # not leave RUNNING as the last word. A codex function that throws is the injected fault.
+    $results += Run-Test -Name "An exception running codex reports LAUNCH_FAILED, not RUNNING (item 246)" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-246-invoke-throws"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $wrapper = Join-Path $tempRoot "launch-codex-throws.ps1"
+        [IO.File]::WriteAllText($wrapper, ('function global:codex { throw "injected codex fault" }' + "`n& '" + $LAUNCHER.Replace("'", "''") + "' @args`nexit `$LASTEXITCODE`n"))
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $wrapper -TaskId C-246 -Phase verification -Model gpt-6-sol -Effort low -PromptText WORK -ProjectRoot $projectRoot
+        }
+        $statusFile = Join-Path $projectRoot ".crucible/session/C-246/verification/codex-launch-status.txt"
+        $fileText = if (Test-Path -LiteralPath $statusFile) { [System.IO.File]::ReadAllText($statusFile) } else { "<missing>" }
+        $fileLines = @($fileText -split "`n")
+        Assert-Result -Name "invoke fault final status" -Condition ($fileLines[0] -eq "STATUS=LAUNCH_FAILED") -FailureMessage "status file: $fileText`nOutput:`n$($res.Output)"
+        Assert-Result -Name "invoke fault reason" -Condition ($fileLines -contains "reason: codex invocation failed: injected codex fault") -FailureMessage "status file: $fileText"
+        Assert-Result -Name "invoke fault exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode). Output:`n$($res.Output)"
+        $statusLines = @(($res.Output -split "\r?\n") -match "^\[CODEX SPECIALIST\] STATUS=")
+        Assert-Result -Name "invoke fault stdout outcome" -Condition ($statusLines.Count -eq 2 -and $statusLines[-1] -eq "[CODEX SPECIALIST] STATUS=LAUNCH_FAILED") -FailureMessage $res.Output
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

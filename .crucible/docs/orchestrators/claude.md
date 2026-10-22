@@ -169,7 +169,8 @@ launch status.
    > (see "Reviewer Repair Pass" in `sops/orchestrator.md`). Everything the specialist needs for a normal phase belongs in the
    > spec and the handoff - authored by the upstream phase - not in the dispatch call.
 
-4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=SUCCESS` or
+4. **Trust the status, not the label.** The launcher prints `[CODEX SPECIALIST] STATUS=RUNNING` when
+   Codex starts and its outcome as the last STATUS line, such as `[CODEX SPECIALIST] STATUS=SUCCESS` or
    `STATUS=LAUNCH_FAILED`. A verdict is only valid when `STATUS=SUCCESS` **and** the handoff +
    `### CHECKPOINT` checks below pass. `STATUS=LAUNCH_FAILED` is an infrastructure failure - re-run the
    preflight, fix the runtime, and re-dispatch; never record it as `CHANGES_REQUESTED`.

@@ -30,9 +30,10 @@ prints. `STATUS=NO_HANDOFF` (exit 4) means a grooming, implementation or verific
 without completing its phase; read its last message. `STATUS=USAGE_LIMIT` (exit 5) means the Codex
 account hit its usage limit, not that the runtime is broken: stop, tell the human the reset time it
 prints, and do not relaunch or rerun until at least one full minute after it (the launcher prints that
-time as `retry_not_before`); uncommitted work the run left in the working tree is kept. The launcher also writes the STATUS line to `codex-launch-status.txt` in the session directory,
-with `STATUS=RUNNING` and its process ID while the run is in progress, so a lost stdout does not lose the
-result. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
+time as `retry_not_before`); uncommitted work the run left in the working tree is kept. The launcher prints
+`STATUS=RUNNING` when Codex starts, and the last STATUS line it prints is the outcome. It writes the same
+STATUS line and fields to `codex-launch-status.txt` in the session directory, with `STATUS=RUNNING` and its
+process ID while the run is in progress, so a lost stdout does not lose the result. Run `launch-codex-specialist.ps1 -Preflight -Model {model}` first.
 
 > **Why not the plugin `task` runtime / `codex-rescue` subagent for full-access specialist work?** That
 > path hardcodes a `read-only`/`workspace-write` sandbox and routes through the app-server broker, which
