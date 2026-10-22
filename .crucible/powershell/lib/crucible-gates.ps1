@@ -9,6 +9,29 @@
 . (Join-Path $PSScriptRoot "crucible-gates-handoff.ps1")
 . (Join-Path $PSScriptRoot "crucible-gates-breakers.ps1")
 . (Join-Path $PSScriptRoot "no-code-closure.ps1")
+. (Join-Path $PSScriptRoot "checks-not-run.ps1")
+
+function Get-GateNotRunSessionDir {
+    # A skip that cannot be recorded would reach the Reviewer and the Human Gate as a pass. I12.
+    param([Parameter(Mandatory=$true)][hashtable]$Context)
+    if (-not $Context.ContainsKey("SessionDir") -or [string]::IsNullOrWhiteSpace([string]$Context["SessionDir"])) {
+        throw "A skipped check cannot be recorded as not run: Context.SessionDir is missing."
+    }
+    return [string]$Context["SessionDir"]
+}
+
+function Clear-GateCheckNotRun {
+    # A record that cannot be cleared stays as an over-report, which is the safe side, so a
+    # context without SessionDir skips the clear where Get-GateNotRunSessionDir would refuse a write.
+    param(
+        [Parameter(Mandatory=$true)][hashtable]$Context,
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$Source,
+        [Parameter(Mandatory=$true)][string]$Check
+    )
+    if (-not $Context.ContainsKey("SessionDir") -or [string]::IsNullOrWhiteSpace([string]$Context["SessionDir"])) { return }
+    Clear-ChecksNotRun -SessionDir ([string]$Context["SessionDir"]) -TaskId $TaskId -Source $Source -Check $Check
+}
 
 function Get-RootRelativePath {
     # Cross-platform relative path of $Path under $Root. Avoids [System.Uri]/MakeRelativeUri:
@@ -389,6 +412,19 @@ function Assert-CrucibleFrameworkIntegrity {
             Write-Quiet ("[INTEGRITY] Could not record the unverifiable-baseline event: " + $_.Exception.Message) -ForegroundColor DarkYellow
         }
         Write-Quiet "[INTEGRITY] No task baseline resolved; only the working tree was checked. A framework edit committed during this task would not be seen." -ForegroundColor Yellow
+    }
+    # Unlike the event above, the not-run record is what the Reviewer and Human Gate read. Item 258.
+    $integrityTaskId = if ($Context.ContainsKey("TaskId") -and -not [string]::IsNullOrWhiteSpace([string]$Context.TaskId)) { [string]$Context.TaskId }
+        elseif ($Context.ContainsKey("Handoff") -and $null -ne $Context.Handoff -and $Context.Handoff.PSObject.Properties["task_id"]) { [string]$Context.Handoff.task_id }
+        else { "" }
+    if ($Context.ContainsKey("FrameworkIntegrityBaseline") -and -not [string]::IsNullOrWhiteSpace($integrityTaskId)) {
+        $integrityCheck = "framework integrity committed-change check"
+        if ($null -eq $Context["FrameworkIntegrityBaseline"]) {
+            Write-CheckNotRun -SessionDir (Get-GateNotRunSessionDir -Context $Context) -TaskId $integrityTaskId -Source "integrity gate" -Check $integrityCheck `
+                -Reason "no task baseline (no base_commit and no task branch merge-base), so only the working tree was checked and framework edits committed during the task were not"
+        } else {
+            Clear-GateCheckNotRun -Context $Context -TaskId $integrityTaskId -Source "integrity gate" -Check $integrityCheck
+        }
     }
 
     if ($changes.Count -eq 0) {
@@ -964,10 +1000,17 @@ function Invoke-CrucibleScopeGates {
     $backlogDir = $Context.BacklogDir
     $workspacesDir = $Context.WorkspacesDir
 
+    $hasAffinity = ($handoff.psobject.Properties["file_affinity"] -and $handoff.file_affinity -ne $null -and @($handoff.file_affinity).Count -gt 0)
+    $conflictCheck = "file affinity conflict check"
+
     # --- 2.1 File Affinity Conflict Check ---
-    if ($handoff.psobject.Properties["file_affinity"] -and $handoff.file_affinity -ne $null -and @($handoff.file_affinity).Count -gt 0) {
+    if ($hasAffinity) {
         $affinityScript = "$FRAMEWORK_POWERSHELL/check-file-affinity.ps1"
-        if (Test-Path $affinityScript) {
+        if (-not (Test-Path $affinityScript)) {
+            Write-Host "[ADVISORY] check-file-affinity.ps1 is missing; file affinity conflict check skipped." -ForegroundColor Yellow
+            Write-CheckNotRun -SessionDir (Get-GateNotRunSessionDir -Context $Context) -TaskId $handoff.task_id -Source "scope gate" `
+                -Check $conflictCheck -Reason ("check-file-affinity.ps1 not found at " + $affinityScript + ", so overlap with other active tasks was not checked")
+        } else {
             & $affinityScript -TaskId $handoff.task_id -Affinity $handoff.file_affinity
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "Error: File affinity overlap detected with another active task." -ForegroundColor Red
@@ -976,7 +1019,14 @@ function Invoke-CrucibleScopeGates {
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 exit 1
             }
+            Clear-GateCheckNotRun -Context $Context -TaskId $handoff.task_id -Source "scope gate" -Check $conflictCheck
         }
+    } elseif (@("implementation", "verification", "deployment") -contains $handoff.source_phase -or @("implementation", "verification", "deployment") -contains $handoff.target_phase) {
+        # The conflict check applies wherever code is written, reviewed or shipped. Research and
+        # grooming-only transitions (research -> grooming, grooming -> research or done) change no
+        # task files, so there is nothing to overlap and no skip to report. Item 258.
+        Write-CheckNotRun -SessionDir (Get-GateNotRunSessionDir -Context $Context) -TaskId $handoff.task_id -Source "scope gate" `
+            -Check $conflictCheck -Reason "no file_affinity declared, so overlap with other active tasks was not checked"
     }
 
     # --- 2.1b Architect Scope Boundary Check ---
@@ -990,10 +1040,17 @@ function Invoke-CrucibleScopeGates {
             }
 
             $outOfScopeFiles = @()
+            $scopeCheck = "implementation scope check"
             if (@($declaredAffinity).Count -gt 0) {
                 $outOfScopeFiles = @(Get-OutOfScopeImplementationFiles -WorktreePath $wtPath -TaskId $handoff.task_id -FileAffinity $declaredAffinity)
+                if ($outOfScopeFiles.Count -eq 0) {
+                    Clear-GateCheckNotRun -Context $Context -TaskId $handoff.task_id -Source "scope gate" -Check $scopeCheck
+                }
             } else {
+                # Empty affinity stays allowed; the skip is reported, not refused. Item 258.
                 Write-Host "[ADVISORY] No file_affinity declared; scope check skipped." -ForegroundColor Yellow
+                Write-CheckNotRun -SessionDir (Get-GateNotRunSessionDir -Context $Context) -TaskId $handoff.task_id -Source "scope gate" -Check $scopeCheck `
+                    -Reason "no file_affinity declared, so the files this task changed were not compared with a declared scope"
             }
             if ($outOfScopeFiles.Count -gt 0) {
                 $joined = ($outOfScopeFiles -join ", ")
@@ -1015,6 +1072,7 @@ function Invoke-CrucibleScopeGates {
         try {
             # Files, not collapsed directories, so a new stub is judged by its own name.
             $statusLines = @(git -C $repoRoot status --porcelain --untracked-files=all 2>$null)
+            if ($LASTEXITCODE -ne 0) { throw ("git status exited " + $LASTEXITCODE + " in " + $repoRoot) }
             $filingScope = Get-ResearchGateFilingScope -TaskId $handoff.task_id -RepoRoot $repoRoot
             $modifiedFiles = @()
             foreach ($line in $statusLines) {
@@ -1054,8 +1112,12 @@ function Invoke-CrucibleScopeGates {
                 }
                 Write-Quiet "  Note: The Researcher is expected to write files only under `.crucible/research/`." -ForegroundColor Yellow
             }
+            Clear-GateCheckNotRun -Context $Context -TaskId $handoff.task_id -Source "scope gate" -Check "research scope check"
         } catch {
-            # Skip silently, never throw from the gate
+            # The gate does not throw on this advisory check, but its skip is reported. Item 258.
+            Write-Host ("[ADVISORY] Research scope check could not run: " + $_.Exception.Message) -ForegroundColor Yellow
+            Write-CheckNotRun -SessionDir (Get-GateNotRunSessionDir -Context $Context) -TaskId $handoff.task_id -Source "scope gate" `
+                -Check "research scope check" -Reason ("could not read the changed files: " + $_.Exception.Message)
         }
     }
 }

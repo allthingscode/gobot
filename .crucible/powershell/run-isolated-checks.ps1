@@ -15,6 +15,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 . (Join-Path $PSScriptRoot "lib/platform.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/checks-not-run.ps1")
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = Resolve-ConfigProjectRoot
@@ -81,7 +82,17 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
 
 # Item 245: the checks block has one reader, shared with validate-config.ps1 and crucible-doctor.ps1.
-$commands = @(Get-VerificationChecks -Content (Get-Content -LiteralPath $configPath -Raw -Encoding UTF8) -Mode $targetMode)
+$configContent = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+$identityErrors = @(Get-VerificationCheckIdentityErrors -Content $configContent)
+if ($identityErrors.Count -gt 0) {
+    [Console]::Error.WriteLine(($identityErrors -join "`n"))
+    exit 2
+}
+$commands = @(Get-VerificationChecks -Content $configContent -Mode $targetMode)
+
+# A not-run line clears only when its own check executes, so a quick run or an early failure
+# keeps a skip that a full run or another step recorded. Item 258.
+$sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
 
 
 function Invoke-Check {
@@ -91,9 +102,14 @@ function Invoke-Check {
     )
     Write-Host ("==> {0}" -f $Name)
     # Execute the string as a command line
+    $global:LASTEXITCODE = 0
     Invoke-Expression $CommandString
-    Write-Host ("    exit code: {0}" -f $LASTEXITCODE)
-    if ($LASTEXITCODE -ne 0) {
+    $checkExit = $LASTEXITCODE
+    # A nonzero command exit is still an executed check. A launch/parse error throws
+    # above, retaining its previous skip instead of claiming that it ran.
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $Name
+    Write-Host ("    exit code: {0}" -f $checkExit)
+    if ($checkExit -ne 0) {
         # Emit a stable stdout marker before throwing. The orchestrator parses this line
         # to name the failing check; child-process error rendering differs across
         # hosts, so relying on
@@ -171,10 +187,15 @@ $mojibakeScript = Join-Path $PSScriptRoot "gates/check-mojibake.ps1"
 if (-not (Test-Path -LiteralPath $mojibakeScript)) {
     $mojibakeScript = Join-Path $PSScriptRoot "tests/check-mojibake.ps1"
 }
-if ($scanFiles.Count -gt 0 -and (Test-Path -LiteralPath $mojibakeScript)) {
+if ($scanFiles.Count -gt 0 -and -not (Test-Path -LiteralPath $mojibakeScript)) {
+    Write-Host "NOT RUN: Encoding guard (BOM/mojibake) - check-mojibake.ps1 not found" -ForegroundColor Yellow
+    Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Encoding guard (BOM/mojibake)" -Reason ("check-mojibake.ps1 not found at " + $mojibakeScript)
+} elseif ($scanFiles.Count -gt 0) {
     $host_exe = (Get-Process -Id $PID).Path
     & $host_exe -NoProfile -ExecutionPolicy Bypass -File $mojibakeScript @scanFiles
-    if ($LASTEXITCODE -ne 0) {
+    $mojibakeExit = $LASTEXITCODE
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Encoding guard (BOM/mojibake)"
+    if ($mojibakeExit -ne 0) {
         Write-Host "Check failed: Encoding guard (BOM/mojibake)"
         throw "Check failed: Encoding guard (BOM/mojibake)"
     }
@@ -263,6 +284,7 @@ function Get-GitHookToolPath {
 # before the Human Gate so acceptance includes its checks. Item 172.
 function Invoke-ProjectPrePushHook {
     . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/checks-not-run.ps1")
     $checkName = "Project pre-push hook"
     try {
         $hooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot
@@ -304,6 +326,7 @@ function Invoke-ProjectPrePushHook {
     $proc.WaitForExit()
     $hookExit = $proc.ExitCode
     $proc.Dispose()
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $checkName
     if ($hookExit -ne 0) {
         Write-Host ("The project's pre-push hook exits {0} on task/{1}, so the push after the Human Gate would be refused." -f $hookExit, $TaskId)
         Write-Host ("Check failed: {0}" -f $checkName)
@@ -311,15 +334,17 @@ function Invoke-ProjectPrePushHook {
     }
 }
 
+# A mode with no checks is reported, not passed (I12). Item 256 may make it a refusal.
+$modeCheck = "verification." + $targetMode + " checks"
 if ($commands.Count -eq 0) {
-    Write-Host "No commands found for verification mode '${targetMode}'. Skipping checks." -ForegroundColor Yellow
+    Write-Host "NOT RUN: No commands found for verification mode '${targetMode}'. Skipping checks." -ForegroundColor Yellow
+    Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $modeCheck -Reason ("config.yaml configures no verification." + $targetMode + " checks, so none ran")
+} else {
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $modeCheck
 }
 
 Push-Location $worktree
 try {
-    $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
-    $notRunFile = Join-Path $sessionRoot "$TaskId/verification/checks-not-run.txt"
-    if (Test-Path -LiteralPath $notRunFile) { Remove-Item -LiteralPath $notRunFile -Force }
     foreach ($cmd in $commands) {
         $reason = Get-HostGateReason -Condition $cmd.HostGate
         if ($null -ne $reason -and -not [string]::IsNullOrWhiteSpace($cmd.AlternativeRunner)) {
@@ -327,9 +352,7 @@ try {
             Invoke-Check -Name $cmd.Name -CommandString $cmd.AlternativeRunner
         } elseif ($null -ne $reason) {
             Write-Host ("NOT RUN: {0} - {1}" -f $cmd.Name, $reason) -ForegroundColor Yellow
-            $notRunDir = Split-Path -Parent $notRunFile
-            New-Item -ItemType Directory -Path $notRunDir -Force | Out-Null
-            [System.IO.File]::AppendAllText($notRunFile, ("{0}: {1}`n" -f $cmd.Name, $reason), [System.Text.UTF8Encoding]::new($false))
+            Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $cmd.Name -Reason $reason
         } else {
             Invoke-Check -Name $cmd.Name -CommandString $cmd.Command
         }
@@ -341,8 +364,26 @@ try {
 if ($null -ne $commitWorktree) {
     if ($targetMode -eq "full") {
         Write-Host "The project pre-push hook checks a branch push, so it does not run for -Commit."
+        try {
+            $commitHooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot
+        } catch {
+            $commitHooksDir = ""
+            Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Project pre-push hook" -Reason ("hooks.project_dir is unusable: " + $_.Exception.Message)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($commitHooksDir)) {
+            $commitHook = Join-Path (Join-Path $worktree ([System.IO.Path]::GetRelativePath($ProjectRoot, $commitHooksDir))) "pre-push"
+            if (Test-Path -LiteralPath $commitHook -PathType Leaf) {
+                Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Project pre-push hook" -Reason "-Commit runs the checks in a detached worktree and the hook checks a branch push"
+            }
+        }
     }
     Remove-CommitWorktree
 } elseif ($targetMode -eq "full") {
     Invoke-ProjectPrePushHook
+}
+
+$recordedNotRun = @(Get-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId)
+if ($recordedNotRun.Count -gt 0) {
+    Write-Host ("Checks not run for {0}, recorded in {1}. They are not passes:" -f $TaskId, (Get-ChecksNotRunPath -SessionDir $sessionRoot -TaskId $TaskId)) -ForegroundColor Yellow
+    foreach ($line in $recordedNotRun) { Write-Host ("  - " + $line) -ForegroundColor Yellow }
 }

@@ -338,6 +338,30 @@ function Get-VerificationChecks {
     return $commands
 }
 
+function Get-VerificationCheckIdentityErrors {
+    param([AllowEmptyString()][string]$Content)
+
+    # Names own persistent not-run records across modes. Reserve built-ins even when
+    # they do not run on this host or in this mode, and validate the whole config.
+    $owners = [System.Collections.Generic.Dictionary[string,string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $owners.Add("Encoding guard (BOM/mojibake)", "built-in check-mojibake.ps1")
+    $owners.Add("Encoding guard (whitespace)", "built-in git diff --check")
+    $owners.Add("Project pre-push hook", "built-in project pre-push hook")
+    $owners.Add("verification.quick checks", "built-in verification.quick availability check")
+    $owners.Add("verification.full checks", "built-in verification.full availability check")
+    foreach ($mode in @("quick", "full")) {
+        foreach ($check in @(Get-VerificationChecks -Content $Content -Mode $mode)) {
+            $name = ([string]$check.Name -replace '[\r\n]+', ' ').Trim()
+            $command = "verification.${mode}: " + $check.Command
+            if ($owners.ContainsKey($name)) {
+                "Duplicate verification check name '$name': '$($owners[$name])' conflicts with '$command'. Check names must be unique across modes and built-in checks."
+            } else {
+                $owners.Add($name, $command)
+            }
+        }
+    }
+}
+
 function Resolve-ConfigProjectRoot {
     param(
         [string]$ProjectRoot = "",

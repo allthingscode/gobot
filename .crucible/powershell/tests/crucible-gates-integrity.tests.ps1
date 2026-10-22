@@ -209,6 +209,260 @@ try {
         $logFile = $ctx.LogFile
         $logged = if (Test-Path -LiteralPath $logFile) { Get-Content -LiteralPath $logFile -Raw } else { "" }
         Assert-Result -Name "unverifiable gate is logged with a kind" -Condition ($logged -match "framework_integrity_no_baseline" -and $logged -match '"outcome":"unverifiable"') -FailureMessage ("expected a degraded/unverifiable event naming the kind, got: " + $logged)
+        $notRun = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "F-032") -join "`n"
+        Assert-Result -Name "I12 unrun committed leg reaches the not-run record (item 258)" `
+            -Condition ($notRun.Contains("[integrity gate v2] framework integrity committed-change check: no task baseline")) -FailureMessage ("record: " + $notRun)
+
+        $ctx.Handoff = [pscustomobject]@{ task_id = "F-032"; base_commit = (git -C $repo rev-parse HEAD).Trim() }
+        Assert-CrucibleFrameworkIntegrity -Context $ctx
+        $afterBaseline = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "F-032") -join "`n"
+        Assert-Result -Name "the record clears once the committed leg runs" -Condition (-not $afterBaseline.Contains("[integrity gate v2]")) -FailureMessage ("record: " + $afterBaseline)
+    }
+
+    $results += Run-Test -Name "The not-run record keeps each source's lines apart (item 258)" -Body {
+        $session = Join-Path $tempRoot "not-run-record/session"
+        $record = Get-ChecksNotRunPath -SessionDir $session -TaskId "F-258"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $record) -Force | Out-Null
+        [System.IO.File]::WriteAllText($record, "legacy check: written before item 258`n", (New-Object System.Text.UTF8Encoding($false)))
+        Write-CheckNotRun -SessionDir $session -TaskId "F-258" -Source "scope gate" -Check "implementation scope check" -Reason "first reason"
+        Write-CheckNotRun -SessionDir $session -TaskId "F-258" -Source "scope gate" -Check "implementation scope check" -Reason "second reason"
+        Write-CheckNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "gpu check" -Reason "requires command 'gpu-tool' on PATH"
+        $lines = @(Get-ChecksNotRun -SessionDir $session -TaskId "F-258")
+        Assert-Result -Name "a check is recorded once, with its latest reason" -Condition (@($lines | Where-Object { $_ -like "[[]scope gate v2] implementation scope check: *" }).Count -eq 1 -and ($lines -contains "[scope gate v2] implementation scope check: second reason")) -FailureMessage ($lines -join " | ")
+
+        Clear-ChecksNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "gpu check"
+        Clear-ChecksNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "legacy check"
+        $lines = @(Get-ChecksNotRun -SessionDir $session -TaskId "F-258")
+        Assert-Result -Name "isolated checks clear their own and pre-258 lines only" -Condition ($lines.Count -eq 1 -and $lines[0] -eq "[scope gate v2] implementation scope check: second reason") -FailureMessage ($lines -join " | ")
+
+        Write-CheckNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "lint" -Reason "plain lint not run"
+        Write-CheckNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "lint: go" -Reason "go lint not run"
+        $lines = @(Get-ChecksNotRun -SessionDir $session -TaskId "F-258")
+        Assert-Result -Name "a check named like another's prefix keeps its own line" -Condition (($lines -contains "[isolated checks v2] lint: plain lint not run") -and ($lines -contains "[isolated checks v2] lint\: go: go lint not run")) -FailureMessage ($lines -join " | ")
+        Clear-ChecksNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "lint"
+        $lines = @(Get-ChecksNotRun -SessionDir $session -TaskId "F-258")
+        Assert-Result -Name "clearing lint keeps lint: go" -Condition (($lines -notcontains "[isolated checks v2] lint: plain lint not run") -and ($lines -contains "[isolated checks v2] lint\: go: go lint not run")) -FailureMessage ($lines -join " | ")
+        Write-CheckNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "lint" -Reason "plain lint not run"
+        Clear-ChecksNotRun -SessionDir $session -TaskId "F-258" -Source "isolated checks" -Check "lint: go"
+        $lines = @(Get-ChecksNotRun -SessionDir $session -TaskId "F-258")
+        Assert-Result -Name "clearing lint: go keeps lint" -Condition (($lines -contains "[isolated checks v2] lint: plain lint not run") -and -not ($lines -match 'go lint not run')) -FailureMessage ($lines -join " | ")
+
+        $refused = $false
+        try { Write-CheckNotRun -SessionDir $session -TaskId "F-258" -Source "scope gate" -Check "x" -Reason " " } catch { $refused = $true }
+        Assert-Result -Name "a skip without a reason is refused" -Condition $refused -FailureMessage "blank reason was recorded"
+    }
+
+    foreach ($legacy in @('[isolated checks] lint: go: previous skip', 'lint: go: previous skip', '[isolated checks] lint\: go: previous skip')) {
+        foreach ($checkName in @('lint', 'lint: go')) {
+            $results += Run-Test -Name ("Ambiguous legacy identity survives clearing " + $checkName + ': ' + $legacy) -Body {
+                $session = Join-Path $tempRoot 'not-run-legacy/session'
+                $record = Get-ChecksNotRunPath -SessionDir $session -TaskId F-258
+                New-Item -ItemType Directory -Path (Split-Path -Parent $record) -Force | Out-Null
+                [IO.File]::WriteAllText($record, $legacy + "`n", [Text.UTF8Encoding]::new($false))
+                Clear-ChecksNotRun -SessionDir $session -TaskId F-258 -Source 'isolated checks' -Check $checkName
+                $after = @(Get-ChecksNotRun -SessionDir $session -TaskId F-258)
+                Assert-Result -Name ("ambiguous legacy line retained for " + $checkName + ': ' + $legacy) -Condition ($after.Count -eq 1 -and $after[0] -ceq $legacy) -FailureMessage ($after -join ' | ')
+                Write-CheckNotRun -SessionDir $session -TaskId F-258 -Source 'isolated checks' -Check $checkName -Reason 'new reason: with a delimiter'
+                $afterWrite = @(Get-ChecksNotRun -SessionDir $session -TaskId F-258)
+                Assert-Result -Name 'replacement preserves ambiguous history beside the new identity' -Condition ($afterWrite.Count -eq 2 -and $afterWrite -contains $legacy) -FailureMessage ($afterWrite -join ' | ')
+                Clear-ChecksNotRun -SessionDir $session -TaskId F-258 -Source 'isolated checks' -Check $checkName
+                $afterClear = @(Get-ChecksNotRun -SessionDir $session -TaskId F-258)
+                Assert-Result -Name 'versioned identity clears despite a delimiter in its reason' -Condition ($afterClear.Count -eq 1 -and $afterClear[0] -ceq $legacy) -FailureMessage ($afterClear -join ' | ')
+            }
+        }
+    }
+
+    function Start-RecordWorker {
+        param([string]$Directory, [string]$Name, [string]$Body)
+        $scriptPath = Join-Path $Directory ($Name + '.ps1')
+        [IO.File]::WriteAllText($scriptPath, @'
+param($Library, $Session, $Record, $Ready, $Release, $Blocked)
+$ErrorActionPreference = 'Stop'
+. $Library
+'@ + "`n" + $Body, [Text.UTF8Encoding]::new($false))
+        $psi = [Diagnostics.ProcessStartInfo]::new($pwshCmd)
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        foreach ($arg in @('-NoProfile', '-File', $scriptPath, (Join-Path $REPO_ROOT 'powershell/lib/checks-not-run.ps1'), $session, $record, $ready, $release, $blocked)) { $psi.ArgumentList.Add($arg) }
+        return [Diagnostics.Process]::Start($psi)
+    }
+
+    function Wait-RecordSignal {
+        param([string]$Path, [Diagnostics.Process]$Process)
+        $deadline = [datetime]::UtcNow.AddSeconds(30)
+        while (-not (Test-Path -LiteralPath $Path) -and -not $Process.HasExited -and [datetime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 20 }
+        return (Test-Path -LiteralPath $Path)
+    }
+
+    # The reader body below is a scheduling seam: it keeps the same non-delete-sharing
+    # handle as ReadAllLines open until the parent releases it. Get-ChecksNotRun must
+    # coordinate that entire read, not just the existence check or publication.
+    foreach ($holderKind in @('record lock', 'record reader')) {
+        $results += Run-Test -Name ("A writer waits for an acknowledged " + $holderKind + ' in another process') -Body {
+            $caseDir = Join-Path $tempRoot ('not-run-held-' + $holderKind.Replace(' ', '-'))
+            $session = Join-Path $caseDir 'session'
+            $record = Get-ChecksNotRunPath -SessionDir $session -TaskId F-258
+            New-Item -ItemType Directory -Path (Split-Path -Parent $record) -Force | Out-Null
+            $original = "[scope gate] old check: still skipped`n"
+            [IO.File]::WriteAllText($record, $original, [Text.UTF8Encoding]::new($false))
+            $ready = Join-Path $caseDir 'ready'
+            $release = Join-Path $caseDir 'release'
+            $blocked = Join-Path $caseDir 'blocked'
+            $holderBody = if ($holderKind -eq 'record lock') {
+                @'
+Invoke-FileLock -LockPath ($Record + '.lock') -ScriptBlock {
+    [IO.File]::WriteAllText($Ready, 'locked')
+    while (-not (Test-Path -LiteralPath $Release)) { Start-Sleep -Milliseconds 20 }
+}
+'@
+            } else {
+                @'
+function Read-ChecksNotRunFile {
+    param([string]$Path)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        [IO.File]::WriteAllText($Ready, 'reader open')
+        while (-not (Test-Path -LiteralPath $Release)) { Start-Sleep -Milliseconds 20 }
+        $reader = [IO.StreamReader]::new($stream)
+        try { $reader.ReadToEnd().TrimEnd() } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+}
+Get-ChecksNotRun -SessionDir $Session -TaskId F-258
+'@
+            }
+            $writerBody = @'
+$lockImplementation = ${function:Invoke-FileLock}
+function Invoke-FileLock {
+    param($LockPath, $ScriptBlock, $TimeoutMessage)
+    & $lockImplementation -LockPath $LockPath -ScriptBlock $ScriptBlock -TimeoutMs 100 -TimeoutMessage $TimeoutMessage
+}
+function Write-Quiet {
+    param($Message, $ForegroundColor)
+    [IO.File]::WriteAllText($Blocked, $Message)
+}
+Write-CheckNotRun -SessionDir $Session -TaskId F-258 -Source 'isolated checks' -Check 'new check' -Reason 'writer published'
+'@
+            $holder = $null
+            $writer = $null
+            try {
+                $holder = Start-RecordWorker -Directory $caseDir -Name holder -Body $holderBody
+                $holderReady = Wait-RecordSignal -Path $ready -Process $holder
+                Assert-Result -Name 'holder acknowledges acquisition before writer starts' -Condition $holderReady -FailureMessage 'holder did not open its handle'
+                $writer = Start-RecordWorker -Directory $caseDir -Name writer -Body $writerBody
+                $writerBlocked = Wait-RecordSignal -Path $blocked -Process $writer
+                $writerError = if ($writer.HasExited) { $writer.StandardError.ReadToEnd() } else { '' }
+                Assert-Result -Name ("writer acknowledges contention on " + $holderKind) -Condition $writerBlocked -FailureMessage $writerError
+                Assert-Result -Name 'writer cannot publish before holder release' -Condition (-not $writer.HasExited -and [IO.File]::ReadAllText($record) -ceq $original) -FailureMessage 'writer published or exited while holder was active'
+                [IO.File]::WriteAllText($release, 'release')
+                $holderDone = $holder.WaitForExit(30000)
+                $writerDone = $writer.WaitForExit(30000)
+                Assert-Result -Name 'holder and writer exit successfully after release' -Condition ($holderDone -and $writerDone -and $holder.ExitCode -eq 0 -and $writer.ExitCode -eq 0) -FailureMessage 'holder or writer failed after release'
+                $published = @(Get-ChecksNotRun -SessionDir $session -TaskId F-258)
+                Assert-Result -Name 'publication after release preserves both records' -Condition ($published.Count -eq 2 -and ($published -join "`n").Contains('new check: writer published')) -FailureMessage ($published -join ' | ')
+                Assert-Result -Name 'record lock is released after publication' -Condition (-not (Test-Path -LiteralPath ($record + '.lock'))) -FailureMessage 'lock pathname remains'
+            } finally {
+                [IO.File]::WriteAllText($release, 'release')
+                foreach ($proc in @($writer, $holder)) {
+                    if ($null -ne $proc) {
+                        if (-not $proc.WaitForExit(5000)) { $proc.Kill($true); $proc.WaitForExit() }
+                        $proc.Dispose()
+                    }
+                }
+            }
+        }
+    }
+
+    $results += Run-Test -Name 'A permanent lock open error is not retried as contention' -Body {
+        $caseDir = Join-Path $tempRoot 'not-run-missing-directory'
+        New-Item -ItemType Directory -Path $caseDir -Force | Out-Null
+        $session = Join-Path $caseDir 'session'
+        $record = Join-Path $caseDir 'missing/record'
+        $ready = Join-Path $caseDir 'entered'
+        $release = Join-Path $caseDir 'unused-release'
+        $blocked = Join-Path $caseDir 'unused-blocked'
+        $body = @'
+[IO.File]::WriteAllText($Ready, 'started')
+Invoke-FileLock -LockPath ($Record + '.lock') -TimeoutMs 100 -ScriptBlock { throw 'must not execute protected body' }
+'@
+        $proc = Start-RecordWorker -Directory $caseDir -Name missing -Body $body
+        try {
+            Assert-Result -Name 'missing-directory worker reaches lock call' -Condition (Wait-RecordSignal -Path $ready -Process $proc) -FailureMessage 'worker did not start'
+            $done = $proc.WaitForExit(5000)
+            Assert-Result -Name 'missing directory fails promptly instead of retrying forever' -Condition $done -FailureMessage 'lock acquisition kept retrying a permanent open error'
+            $errText = $proc.StandardError.ReadToEnd()
+            Assert-Result -Name 'permanent lock error names the failed path' -Condition ($proc.ExitCode -ne 0 -and $errText.Contains('Cannot acquire lock') -and $errText.Contains($record) -and -not $errText.Contains('must not execute protected body')) -FailureMessage $errText
+        } finally {
+            if (-not $proc.HasExited) { $proc.Kill($true); $proc.WaitForExit() }
+            $proc.Dispose()
+        }
+    }
+
+    $results += Run-Test -Name "Not-run writers in separate processes do not lose each other's lines (I5, item 258)" -Body {
+        $session = Join-Path $tempRoot "not-run-concurrent/session"
+        $go = Join-Path $tempRoot "not-run-concurrent/go"
+        New-Item -ItemType Directory -Path $session -Force | Out-Null
+        $libText = (Join-Path $REPO_ROOT "powershell/lib/checks-not-run.ps1").Replace("'", "''")
+        $procs = @()
+        foreach ($source in @("scope gate", "isolated checks")) {
+            $script = Join-Path $tempRoot ("not-run-concurrent/" + $source.Replace(" ", "-") + ".ps1")
+            $body = @(
+                "`$ErrorActionPreference = 'Stop'",
+                ". '$libText'",
+                "while (-not (Test-Path -LiteralPath '$go')) { Start-Sleep -Milliseconds 10 }",
+                "for (`$i = 0; `$i -lt 25; `$i++) { Write-CheckNotRun -SessionDir '$session' -TaskId 'F-259' -Source '$source' -Check (""check "" + `$i) -Reason ""writer race"" }"
+            ) -join "`n"
+            [System.IO.File]::WriteAllText($script, $body, (New-Object System.Text.UTF8Encoding($false)))
+            $procs += Start-Process -FilePath $pwshCmd -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $script) -PassThru -NoNewWindow -RedirectStandardError ($script + ".err")
+        }
+        Start-Sleep -Milliseconds 1500
+        [System.IO.File]::WriteAllText($go, "go")
+        foreach ($p in $procs) { $p.WaitForExit(120000) | Out-Null }
+        $errors = @($procs | ForEach-Object { $_.ExitCode }) -join ","
+        $errText = (@(Get-ChildItem -LiteralPath (Join-Path $tempRoot "not-run-concurrent") -Filter "*.err" | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n")
+        Assert-Result -Name "both writers exit cleanly" -Condition ($errors -eq "0,0") -FailureMessage ("exit codes " + $errors + "`n" + $errText)
+        $lines = @(Get-ChecksNotRun -SessionDir $session -TaskId "F-259")
+        Assert-Result -Name "every line from both writers survives" -Condition ($lines.Count -eq 50) -FailureMessage ("kept " + $lines.Count + " of 50 lines")
+        $leftovers = @(Get-ChildItem -LiteralPath (Split-Path -Parent (Get-ChecksNotRunPath -SessionDir $session -TaskId "F-259")) -File | Where-Object { $_.Name -ne "checks-not-run.txt" })
+        Assert-Result -Name "no temporary or lock file is left" -Condition ($leftovers.Count -eq 0) -FailureMessage (($leftovers | ForEach-Object { $_.Name }) -join ", ")
+    }
+
+    $results += Run-Test -Name "The empty-affinity conflict check is recorded wherever it applies, and clears only when it runs (item 258)" -Body {
+        $caseRoot = Join-Path $tempRoot "conflict-applies"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-260"
+        $ctx.Handoff = [pscustomobject]@{ task_id = "F-260"; source_phase = "verification"; target_phase = "deployment"; file_affinity = @() }
+        $null = (& { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 | Out-String)
+        $lines = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "F-260") -join "`n"
+        Assert-Result -Name "I12 verification to deployment without affinity records the conflict check" -Condition ($lines.Contains("[scope gate v2] file affinity conflict check: no file_affinity declared")) -FailureMessage ("record: " + $lines)
+
+        $research = New-TestContext -TempRoot $caseRoot -TaskId "R-260"
+        $research.Handoff = [pscustomobject]@{ task_id = "R-260"; source_phase = "research"; target_phase = "grooming"; file_affinity = @() }
+        $research.RepoRoot = $caseRoot
+        $null = (& { Invoke-CrucibleScopeGates -Context $research } 6>&1 | Out-String)
+        $researchLines = @(Get-ChecksNotRun -SessionDir $research.SessionDir -TaskId "R-260") -join "`n"
+        Assert-Result -Name "research to grooming has no files to overlap and records no conflict skip" -Condition (-not $researchLines.Contains("file affinity conflict check")) -FailureMessage ("record: " + $researchLines)
+
+        # A stub that leaves a marker proves the check executed before its line clears.
+        $marker = Join-Path $caseRoot "affinity-ran.txt"
+        [System.IO.File]::WriteAllText((Join-Path $ctx.FrameworkPowerShell "check-file-affinity.ps1"), ("param(`$TaskId, `$Affinity)`n[System.IO.File]::WriteAllText('" + $marker.Replace("'", "''") + "', `$TaskId)`nexit 0`n"), (New-Object System.Text.UTF8Encoding($false)))
+        $ctx.Handoff = [pscustomobject]@{ task_id = "F-260"; source_phase = "verification"; target_phase = "deployment"; file_affinity = @("src/a.txt") }
+        $null = (& { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 | Out-String)
+        $after = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "F-260") -join "`n"
+        Assert-Result -Name "a check that ran clears its line" -Condition ((Test-Path -LiteralPath $marker) -and -not $after.Contains("file affinity conflict check")) -FailureMessage ("marker present: " + (Test-Path -LiteralPath $marker) + "; record: " + $after)
+    }
+    $results += Run-Test -Name "Scope gate skips that are not the empty-affinity one are recorded too (item 258)" -Body {
+        $caseRoot = Join-Path $tempRoot "scope-skips"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "R-258"
+        # FrameworkPowerShell has no check-file-affinity.ps1, and RepoRoot is not a git repository.
+        $ctx.Handoff = [pscustomobject]@{ task_id = "R-258"; source_phase = "research"; target_phase = "grooming"; file_affinity = @("src/a.txt") }
+        $ctx.RepoRoot = $caseRoot
+        $out = (& { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 | Out-String)
+        $lines = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "R-258") -join "`n"
+        Assert-Result -Name "I12 missing affinity script is recorded" -Condition ($lines.Contains("[scope gate v2] file affinity conflict check: check-file-affinity.ps1 not found")) -FailureMessage ($lines + "`n" + $out)
+        Assert-Result -Name "I12 unreadable research scope is recorded" -Condition ($lines.Contains("[scope gate v2] research scope check: could not read the changed files")) -FailureMessage ($lines + "`n" + $out)
     }
 
     $results += Run-Test -Name "A tree the integrity check cannot read is reported, not passed" -Body {

@@ -80,7 +80,7 @@ verification:
     - name: test
       command: replace-with-project-quick-test-command
   full:
-    - name: test
+    - name: full test
       command: replace-with-project-full-test-command
 
 project_mandates:

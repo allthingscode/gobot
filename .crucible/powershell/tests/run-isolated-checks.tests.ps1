@@ -446,6 +446,29 @@ try {
         $none = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-001 -Mode quick -ProjectRoot $commitRoot }
         Assert-Result -Name "no worktree points at -Commit" -Condition ($none.ExitCode -ne 0 -and (($none.Output -join "`n") -match "passes -Commit")) -FailureMessage ("Output:`n" + ($none.Output -join "`n"))
     }
+    $results += Run-Test -Name "-Commit full mode records the project pre-push hook it does not run (item 258)" -Body {
+        $hookRoot = Join-Path $tempRoot "commit-hook-project"
+        Initialize-Repo -ProjectRoot $hookRoot
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  full:",
+            "    - name: passes",
+            "      command: $pwshCmd -NoProfile -Command exit 0",
+            "hooks:",
+            "  project_dir: project-hooks"
+        ) | Set-Content -LiteralPath (Join-Path $hookRoot ".crucible/config.yaml") -Encoding UTF8
+        New-Item -ItemType Directory -Path (Join-Path $hookRoot "project-hooks") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $hookRoot "project-hooks/pre-push"), "#!/bin/sh`nexit 0`n")
+        git -C $hookRoot add .crucible/config.yaml project-hooks/pre-push
+        git -C $hookRoot commit -m "hook" --quiet
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-258 -Mode full -Commit HEAD -ProjectRoot $hookRoot }
+        $runOut = $run.Output -join "`n"
+        Assert-Result -Name "full -Commit passes" -Condition ($run.ExitCode -eq 0) -FailureMessage $runOut
+        $hookRecord = @(Get-Content -LiteralPath (Join-Path $hookRoot ".crucible/session/R-258/verification/checks-not-run.txt") -Encoding UTF8 -ErrorAction SilentlyContinue) -join "`n"
+        Assert-Result -Name "I12 unrun pre-push hook is recorded" -Condition ($hookRecord.Contains("[isolated checks v2] Project pre-push hook: -Commit runs the checks in a detached worktree")) -FailureMessage ("record: " + $hookRecord + "`n" + $runOut)
+        Assert-Result -Name "I12 unrun pre-push hook is listed in the output" -Condition ($runOut.Contains("  - [isolated checks v2] Project pre-push hook:")) -FailureMessage $runOut
+    }
     $results += Run-Test -Name "host-gated checks are NOT RUN with a reason and alternative runners execute (item 239)" -Body {
         $cfgPath = Join-Path $projectRoot ".crucible/config.yaml"
         @(
@@ -468,6 +491,143 @@ try {
         Assert-Result -Name "not-run reason is persisted" -Condition ((Get-Content -LiteralPath $record -Raw) -match 'unavailable check: requires environment variable') -FailureMessage (Get-Content -LiteralPath $record -Raw)
         Assert-Result -Name "alternative runner runs instead of configured host command" -Condition ($out -match 'alternative runner:' -and $out -match '==> alternate check' -and $out -match 'exit code: 0' -and $out -notmatch 'exit code: 9') -FailureMessage $out
     }
+    $results += Run-Test -Name "A not-run line clears only when its own check runs: quick runs, failures and empty modes keep skips (item 258)" -Body {
+        $cfgPath = Join-Path $projectRoot ".crucible/config.yaml"
+        $record = Join-Path $projectRoot ".crucible/session/$taskId/verification/checks-not-run.txt"
+        if (Test-Path -LiteralPath $record) { Remove-Item -LiteralPath $record -Force }
+        Remove-Item Env:\CRUCIBLE_ITEM258_RACE -ErrorAction SilentlyContinue
+        $raceLine = "[isolated checks v2] race check: requires environment variable 'CRUCIBLE_ITEM258_RACE'"
+        $full = @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: unit",
+            "      command: $pwshCmd -NoProfile -Command exit 0",
+            "  full:",
+            "    - name: full unit",
+            "      command: $pwshCmd -NoProfile -Command exit 0",
+            "    - name: race check",
+            "      command: $pwshCmd -NoProfile -Command exit 0",
+            "      host_gate: env=CRUCIBLE_ITEM258_RACE"
+        )
+        $full | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        $fullRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
+        Assert-Result -Name "full run records the race skip" -Condition ($fullRun.ExitCode -eq 0 -and (Get-Content -LiteralPath $record -Raw).Contains($raceLine)) -FailureMessage ($fullRun.Output -join "`n")
+
+        $quickRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+        Assert-Result -Name "a passing quick run keeps the full-only skip" -Condition ($quickRun.ExitCode -eq 0 -and (Get-Content -LiteralPath $record -Raw).Contains($raceLine)) -FailureMessage ((Get-Content -LiteralPath $record -Raw -ErrorAction SilentlyContinue) + "`n" + ($quickRun.Output -join "`n"))
+
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: unit",
+            "      command: $pwshCmd -NoProfile -Command exit 4"
+        ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        $failRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+        Assert-Result -Name "an early failure keeps prior skips" -Condition ($failRun.ExitCode -ne 0 -and (Get-Content -LiteralPath $record -Raw).Contains($raceLine)) -FailureMessage ((Get-Content -LiteralPath $record -Raw -ErrorAction SilentlyContinue) + "`n" + ($failRun.Output -join "`n"))
+
+        @(
+            "project: RunIsolatedChecksTest",
+            "verification:",
+            "  quick:",
+            "    - name: unit",
+            "      command: $pwshCmd -NoProfile -Command exit 0",
+            "  full:"
+        ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        $emptyRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
+        $emptyRecord = Get-Content -LiteralPath $record -Raw
+        Assert-Result -Name "I12 a mode with no checks is recorded as not run" -Condition ($emptyRecord.Contains("[isolated checks v2] verification.full checks: config.yaml configures no verification.full checks")) -FailureMessage ($emptyRecord + "`n" + ($emptyRun.Output -join "`n"))
+        Assert-Result -Name "I12 a mode with no checks says NOT RUN" -Condition (($emptyRun.Output -join "`n") -match 'NOT RUN: No commands found') -FailureMessage ($emptyRun.Output -join "`n")
+
+        $full | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        $env:CRUCIBLE_ITEM258_RACE = "1"
+        try {
+            $raceRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
+        } finally {
+            Remove-Item Env:\CRUCIBLE_ITEM258_RACE -ErrorAction SilentlyContinue
+        }
+        $raceOut = $raceRun.Output -join "`n"
+        $afterRace = if (Test-Path -LiteralPath $record) { Get-Content -LiteralPath $record -Raw } else { "" }
+        Assert-Result -Name "the race check's line clears once it runs, as does the empty-mode line" -Condition ($raceRun.ExitCode -eq 0 -and $raceOut -match '==> race check' -and -not $afterRace.Contains("race check") -and -not $afterRace.Contains("verification.full checks")) -FailureMessage ($afterRace + "`n" + $raceOut)
+    }
+    $identityCases = @(
+        @{ Label = 'same mode'; Name = 'unit'; First = 'go test -race ./...'; Second = 'go test ./...'; Block = "  quick:`n    - name: unit`n      command: go test -race ./...`n      host_gate: env=CRUCIBLE_ITEM258_DUPLICATE`n    - name: unit`n      command: go test ./..." },
+        @{ Label = 'across modes'; Name = 'unit'; First = 'go test -race ./...'; Second = 'go test ./...'; Block = "  full:`n    - name: unit`n      command: go test -race ./...`n  quick:`n    - name: unit`n      command: go test ./..." },
+        @{ Label = 'config check'; Name = 'unit'; First = 'go test -race ./...'; Second = 'go test ./...'; Block = "  quick:`n    - name: unit`n      command: go test -race ./...`n  config_check:`n    name: unit`n    command: go test ./..." }
+    )
+    foreach ($builtIn in @('Encoding guard (BOM/mojibake)', 'Encoding guard (whitespace)', 'Project pre-push hook', 'verification.quick checks', 'verification.full checks')) {
+        $identityCases += @{ Label = $builtIn; Name = $builtIn; First = 'built-in'; Second = 'go test ./...'; Block = "  quick:`n    - name: $builtIn`n      command: go test ./..." }
+    }
+    foreach ($case in $identityCases) {
+        $results += Run-Test -Name ("Ambiguous check identities fail at runtime: " + $case.Label) -Body {
+            $cfgPath = Join-Path $projectRoot '.crucible/config.yaml'
+            [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n" + $case.Block + "`n", [Text.UTF8Encoding]::new($false))
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+            $out = $res.Output -join "`n"
+            Assert-Result -Name ("runtime refuses duplicate identity: " + $case.Label) -Condition ($res.ExitCode -ne 0 -and $out.Contains('Duplicate verification check name') -and $out.Contains($case.Name) -and $out.Contains($case.First) -and $out.Contains($case.Second)) -FailureMessage $out
+            Assert-Result -Name 'identity refusal precedes all checks' -Condition ($out -notmatch '==>') -FailureMessage $out
+        }
+    }
+
+    $results += Run-Test -Name 'Duplicate identities refuse an in-process caller (I11)' -Body {
+        $cfgPath = Join-Path $projectRoot '.crucible/config.yaml'
+        $duplicateConfig = "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: unit`n      command: unused-first`n    - name: unit`n      command: unused-second`n"
+        [IO.File]::WriteAllText($cfgPath, $duplicateConfig, [Text.UTF8Encoding]::new($false))
+        $savedStderr = [Console]::Error
+        $stderr = [IO.StringWriter]::new()
+        try {
+            [Console]::SetError($stderr)
+            $global:LASTEXITCODE = 0
+            try {
+                $output = @(& $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot 6>&1)
+            } catch {
+                $output = @($_.Exception.Message)
+            }
+            $refusalExit = $LASTEXITCODE
+            $errorText = $stderr.ToString()
+        } finally {
+            [Console]::SetError($savedStderr)
+            $stderr.Dispose()
+        }
+        $allOutput = ($output -join "`n") + $errorText
+        Assert-Result -Name 'in-process call reaches identity refusal before checks' -Condition ($allOutput.Contains('Duplicate verification check name') -and $allOutput -notmatch '==>') -FailureMessage $allOutput
+        Assert-Result -Name 'in-process identity refusal leaves nonzero LASTEXITCODE despite catch' -Condition ($refusalExit -ne 0) -FailureMessage ("LASTEXITCODE=$refusalExit`n" + $allOutput)
+        Assert-Result -Name 'in-process identity refusal exits 2 and writes both owners to stderr' -Condition ($refusalExit -eq 2 -and $errorText.Contains('unit') -and $errorText.Contains('unused-first') -and $errorText.Contains('unused-second')) -FailureMessage $allOutput
+    }
+
+    foreach ($route in @('command', 'alternative_runner')) {
+        foreach ($launch in @(@{ Label = 'missing command'; Command = 'crucible-item258-command-does-not-exist' }, @{ Label = 'parse error'; Command = 'if (' })) {
+            $results += Run-Test -Name ("Launch failure preserves its skip: " + $route + ', ' + $launch.Label) -Body {
+                $cfgPath = Join-Path $projectRoot '.crucible/config.yaml'
+                $record = Join-Path $projectRoot ".crucible/session/$taskId/verification/checks-not-run.txt"
+                New-Item -ItemType Directory -Path (Split-Path -Parent $record) -Force | Out-Null
+                $prior = "launch check: previous host unavailable`n"
+                [IO.File]::WriteAllText($record, $prior, [Text.UTF8Encoding]::new($false))
+                $check = if ($route -eq 'command') { "      command: " + $launch.Command } else {
+                    "      command: unused`n      host_gate: env=CRUCIBLE_ITEM258_LAUNCH`n      alternative_runner: " + $launch.Command
+                }
+                Remove-Item Env:\CRUCIBLE_ITEM258_LAUNCH -ErrorAction SilentlyContinue
+                [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: launch check`n$check`n", [Text.UTF8Encoding]::new($false))
+                $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+                $out = $res.Output -join "`n"
+                Assert-Result -Name 'launch failure exits nonzero after reaching the check' -Condition ($res.ExitCode -ne 0 -and $out.Contains('==> launch check')) -FailureMessage $out
+                $after = if (Test-Path -LiteralPath $record) { [IO.File]::ReadAllText($record) } else { '' }
+                Assert-Result -Name ("skip survives launch failure: " + $route + ', ' + $launch.Label) -Condition ($after -ceq $prior) -FailureMessage ($after + "`n" + $out)
+            }
+        }
+        $results += Run-Test -Name ("An executed failing check clears its skip: " + $route) -Body {
+            $cfgPath = Join-Path $projectRoot '.crucible/config.yaml'
+            $record = Join-Path $projectRoot ".crucible/session/$taskId/verification/checks-not-run.txt"
+            [IO.File]::WriteAllText($record, "launch check: previous host unavailable`n", [Text.UTF8Encoding]::new($false))
+            $command = "$pwshCmd -NoProfile -Command exit 7"
+            $check = if ($route -eq 'command') { "      command: $command" } else { "      command: unused`n      host_gate: env=CRUCIBLE_ITEM258_LAUNCH`n      alternative_runner: $command" }
+            [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: launch check`n$check`n", [Text.UTF8Encoding]::new($false))
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
+            Assert-Result -Name 'nonzero executed check clears the skip and still fails' -Condition ($res.ExitCode -ne 0 -and ($res.Output -join "`n").Contains('exit code: 7') -and -not (Test-Path -LiteralPath $record)) -FailureMessage ($res.Output -join "`n")
+        }
+    }
+
     $results += Run-Test -Name "Command ending in a double-quoted argument runs as written (item 241)" -Body {
         $cfgPath = Join-Path $projectRoot ".crucible/config.yaml"
         @(

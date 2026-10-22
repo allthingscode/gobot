@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot "checks-not-run.ps1")
+
 function Write-NextStep {
     param(
         [Parameter(Mandatory=$true)][string]$SessionDir,
@@ -378,6 +380,13 @@ function New-CruciblePromptText {
             Write-Host "[ERROR] Add a replacement rule in crucible.ps1 section 5 for each token." -ForegroundColor Yellow
             exit 1
         }
+
+    # The Reviewer handoff's copy of every check that did not run, added after the placeholder
+    # guard because a recorded reason is data, not template. I12, item 258.
+    $notRunSection = Format-ChecksNotRunSection -SessionDir $sessionDir -TaskId $handoff.task_id
+    if (-not [string]::IsNullOrEmpty($notRunSection)) {
+        $promptText = $promptText + "`n`n" + $notRunSection
+    }
 
     $Context.TypeDir = $typeDir
     $Context.RelativeHandoffPath = $relativeHandoffPath

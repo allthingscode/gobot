@@ -6,6 +6,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
 $VALIDATE_SCRIPT = Join-Path $REPO_ROOT "powershell/validate-config.ps1"
+$pwshCmd = Get-PwshCommand
 $results = @()
 
 
@@ -488,6 +489,27 @@ review:
         $runner = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $runnerPath }
         Assert-Result -Name "empty alternative_runner exit" -Condition ($runner.ExitCode -eq 2) -FailureMessage ("expected exit 2, got " + $runner.ExitCode + ". Output: " + $runner.Output)
         Assert-Result -Name "empty alternative_runner message" -Condition ($runner.Output -match 'verification alternative_runner must be a non-empty command\.') -FailureMessage $runner.Output
+    }
+
+    $identityCases = @(
+        @{ Label = 'same mode'; Name = 'unit'; First = 'go test -race ./...'; Second = 'go test ./...'; Block = "  quick:`n    - name: unit`n      command: go test -race ./...`n      host_gate: cgo`n    - name: unit`n      command: go test ./...`n  full: []" },
+        @{ Label = 'across modes'; Name = 'unit'; First = 'go test -race ./...'; Second = 'go test ./...'; Block = "  quick:`n    - name: unit`n      command: go test -race ./...`n  full:`n    - name: unit`n      command: go test ./..." },
+        @{ Label = 'config check'; Name = 'unit'; First = 'go test -race ./...'; Second = 'go test ./...'; Block = "  quick:`n    - name: unit`n      command: go test -race ./...`n  full: []`n  config_check:`n    name: unit`n    command: go test ./..." },
+        @{ Label = 'case and whitespace'; Name = 'UNIT'; First = 'go test -race ./...'; Second = 'go test ./...'; Block = "  quick:`n    - name: unit`n      command: go test -race ./...`n  full:`n    - name: ' UNIT '`n      command: go test ./..." }
+    )
+    foreach ($builtIn in @('Encoding guard (BOM/mojibake)', 'Encoding guard (whitespace)', 'Project pre-push hook', 'verification.quick checks', 'verification.full checks')) {
+        $identityCases += @{ Label = $builtIn; Name = $builtIn; First = 'built-in'; Second = 'go test ./...'; Block = "  quick:`n    - name: $builtIn`n      command: go test ./...`n  full: []" }
+    }
+    foreach ($case in $identityCases) {
+        $results += Run-Test -Name ("Ambiguous check identities fail validation: " + $case.Label) -Body {
+            $base = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+            $candidate = [regex]::Replace($base, '(?ms)^verification:.*?(?=^\S|\z)', "verification:`n" + $case.Block + "`n`n")
+            $candidatePath = Join-Path $projectRoot '.crucible/config-duplicate.yaml'
+            [IO.File]::WriteAllText($candidatePath, $candidate, [Text.UTF8Encoding]::new($false))
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $VALIDATE_SCRIPT -ConfigPath $candidatePath }
+            $out = $res.Output -join "`n"
+            Assert-Result -Name ("validator refuses duplicate identity: " + $case.Label) -Condition ($res.ExitCode -eq 2 -and $out.Contains('Duplicate verification check name') -and $out.Contains($case.Name) -and $out.Contains($case.First) -and $out.Contains($case.Second)) -FailureMessage $out
+        }
     }
 
     # Item 245: the validator read host_gate with the config scalar reader, which drops a

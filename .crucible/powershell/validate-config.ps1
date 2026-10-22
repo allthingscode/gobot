@@ -229,6 +229,7 @@ $null = Test-RequiredSection -Path @("verification", "full") -Name "verification
 # The checks are read by the runner's own reader, so a value validated here is the value
 # run-isolated-checks.ps1 runs. Item 245.
 $verificationChecks = @(Get-VerificationChecks -Content $content -Mode quick) + @(Get-VerificationChecks -Content $content -Mode full)
+$errors += @(Get-VerificationCheckIdentityErrors -Content $content)
 $hasVerificationCommand = @($verificationChecks | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Command) }).Count -gt 0
 if (-not $hasVerificationCommand) {
     $errors += "Missing or invalid config field: verification command"

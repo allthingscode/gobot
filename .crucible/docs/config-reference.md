@@ -42,7 +42,7 @@ verification:
       command: npm run lint
     - name: typecheck
       command: npx tsc --noEmit
-    - name: test
+    - name: full test
       command: npm test
 
 project_mandates:                         # required; at least one rule
@@ -204,6 +204,12 @@ models:
 
 Shell commands the Reviewer runs to verify Architect work. These must match your project's language and toolchain exactly. Crucible does not supply defaults - every project configures its own commands.
 
+Check names must be unique across `quick`, `full`, and `config_check`, ignoring
+case and surrounding whitespace. Names also cannot match the built-in encoding
+guards, project pre-push hook, or mode availability checks. Both config validation
+and isolated execution refuse collisions and name both commands. Give the same
+command distinct names in different modes so each owns its not-run evidence.
+
 #### `verification.quick`
 
 Run after every Architect commit. Kept fast - typically just the test suite.
@@ -226,7 +232,7 @@ verification:
       command: npm run lint
     - name: typecheck
       command: npx tsc --noEmit
-    - name: test
+    - name: full test
       command: npm test
 ```
 
@@ -245,7 +251,7 @@ Each step:
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `name` | string | yes | Label shown in Crucible output and Reviewer reports. |
+| `name` | string | yes | Unique label shown in Crucible output and Reviewer reports; owns the check's not-run record. |
 | `command` | string | yes | Shell command to run. Must not contain scaffold placeholder values (`replace-with-...`). |
 
 **Language examples:**
@@ -258,7 +264,7 @@ verification:
   full:
     - { name: vet,  command: "go vet ./..." }
     - { name: lint, command: "golangci-lint run ./..." }
-    - { name: test, command: "go test ./..." }
+    - { name: full-test, command: "go test ./..." }
     - { name: mod-tidy, command: "go mod tidy -diff" }
 
 # Python
@@ -268,7 +274,7 @@ verification:
   full:
     - { name: lint,     command: "ruff check ." }
     - { name: typecheck, command: "mypy ." }
-    - { name: test,     command: pytest }
+    - { name: full-test, command: pytest }
 
 # Rust
 verification:
@@ -277,7 +283,7 @@ verification:
   full:
     - { name: fmt,    command: "cargo fmt --check" }
     - { name: clippy, command: "cargo clippy --all-targets" }
-    - { name: test,   command: "cargo test" }
+    - { name: full-test, command: "cargo test" }
 
 # TypeScript / Node
 verification:
@@ -286,7 +292,7 @@ verification:
   full:
     - { name: lint,      command: "npm run lint" }
     - { name: typecheck, command: "npx tsc --noEmit" }
-    - { name: test,      command: "npm test" }
+    - { name: full-test, command: "npm test" }
 ```
 
 ---
@@ -360,7 +366,7 @@ verification:
       command: go test -race ./...
 ```
 
-`validate-config.ps1` rejects unsupported or empty host conditions and empty alternative commands. Checks not run are written to `.crucible/session/{task_id}/verification/checks-not-run.txt` for the Reviewer handoff and Human Gate.
+`validate-config.ps1` rejects unsupported or empty host conditions and empty alternative commands. Checks not run are written to `.crucible/session/{task_id}/verification/checks-not-run.txt` for the Reviewer handoff and Human Gate. The same record holds pipeline checks the gates skipped, such as the scope check for a task with no `file_affinity`; a line is removed only when its check runs again.
 
 A task with no implementation worktree, such as research, runs the configured checks with `run-isolated-checks.ps1 -Commit <rev>`. The commands run in a temporary detached worktree at that commit under `.crucible/.agent-workspaces/`, which is removed afterwards whether the checks pass or fail, so files they write never reach the main checkout. Each command's exit code is printed. The pre-push hook does not run in this mode.
 

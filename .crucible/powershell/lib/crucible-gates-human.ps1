@@ -14,6 +14,7 @@
 . (Join-Path $PSScriptRoot "backlog-io.ps1")
 . (Join-Path $PSScriptRoot "worktree.ps1")
 . (Join-Path $PSScriptRoot "crucible-gates-wedge-report.ps1")
+. (Join-Path $PSScriptRoot "checks-not-run.ps1")
 
 function Invoke-HumanGateMerge {
     # Merges task/$TaskId into $PrimaryBranch at the accept gate. A clean merge returns
@@ -935,13 +936,10 @@ Copy-Item `$right `$rightCopy -Force
         $editorOpenCommand = "& `"$resolvedEditor`" `"$wtPathDisplay`""
     }
 
-    $notRunFile = Join-Path $SessionDir "$TaskId/verification/checks-not-run.txt"
-    if (Test-Path -LiteralPath $notRunFile -PathType Leaf) {
-        $notRunChecks = @(Get-Content -LiteralPath $notRunFile -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        if ($notRunChecks.Count -gt 0) {
-            Write-Host "[CHECKS NOT RUN] These checks did not run; accepting means accepting this gap:" -ForegroundColor Yellow
-            foreach ($notRunCheck in $notRunChecks) { Write-Host ("  - " + $notRunCheck) -ForegroundColor Yellow }
-        }
+    $notRunChecks = @(Get-ChecksNotRun -SessionDir $SessionDir -TaskId $TaskId)
+    if ($notRunChecks.Count -gt 0) {
+        Write-Host "[CHECKS NOT RUN] These checks did not run; accepting means accepting this gap:" -ForegroundColor Yellow
+        foreach ($notRunCheck in $notRunChecks) { Write-Host ("  - " + $notRunCheck) -ForegroundColor Yellow }
     }
     Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
     if ($TaskBranchExists) {

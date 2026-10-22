@@ -154,7 +154,9 @@ try {
             -FailureMessage "blocked record does not name 'scope_violation'. Content:`n$blockedJson"
     }
 
-    $results += Run-Test -Name "Scope check skipped and advisory logged when file_affinity is empty" -Body {
+    # Item 258 (I12): the skip is allowed, and it must reach the Reviewer's prompt, survive
+    # isolated verification rewriting its own results, and be listed at the Human Gate.
+    $results += Run-Test -Name "Scope check skipped and advisory logged when file_affinity is empty, and the skip reaches every not-run surface (I12)" -Body {
         # 1. Setup new project root
         $projectRoot2 = Join-Path $tempRoot "app2"
         New-Item -ItemType Directory -Path $projectRoot2 -Force | Out-Null
@@ -212,7 +214,8 @@ try {
         }
 
         $wtPath2 = Join-Path $projectRoot2 ".crucible/.agent-workspaces/implementation-$taskId2"
-        Set-Content -Path (Join-Path $wtPath2 "src/b.txt") -Value "out-of-scope change"
+        # LF only, so isolated verification's whitespace guard passes on Windows too.
+        [System.IO.File]::WriteAllText((Join-Path $wtPath2 "src/b.txt"), "out-of-scope change`n")
         Push-Location $wtPath2
         try {
             git add "src/b.txt"
@@ -263,6 +266,60 @@ try {
         Assert-Result -Name "Advisory logged for empty file_affinity" `
             -Condition ($output -match "\[ADVISORY\] No file_affinity declared") `
             -FailureMessage "Expected advisory in output, got: $output"
+
+        $scopeLine = "[scope gate v2] implementation scope check: no file_affinity declared"
+        $record2 = Join-Path $projectRoot2 ".crucible/session/$taskId2/verification/checks-not-run.txt"
+        $recordText = if (Test-Path -LiteralPath $record2) { Get-Content -LiteralPath $record2 -Raw -Encoding UTF8 } else { "(no record at $record2)" }
+        Assert-Result -Name "I12 skipped scope check is recorded with its reason" `
+            -Condition ($recordText.Contains($scopeLine)) -FailureMessage $recordText
+
+        $reviewerPrompt = Join-Path $projectRoot2 ".crucible/session/$taskId2/verification/prompt.md"
+        $promptText2 = if (Test-Path -LiteralPath $reviewerPrompt) { Get-Content -LiteralPath $reviewerPrompt -Raw -Encoding UTF8 } else { "(no prompt at $reviewerPrompt)" }
+        Assert-Result -Name "I12 Reviewer prompt lists the skipped scope check and its reason" `
+            -Condition ($promptText2.Contains("## Checks Not Run") -and $promptText2.Contains("- " + $scopeLine)) -FailureMessage $promptText2
+
+        # Isolated verification, as the Reviewer runs it: one check runs, one is host-gated.
+        $pwshCmd2 = Get-PwshCommand
+        $configPath2 = Join-Path $projectRoot2 ".crucible/config.yaml"
+        $checksBlock = "verification:`n  quick:`n    - name: passing check`n      command: $pwshCmd2 -NoProfile -Command exit 0`n" +
+            "  full:`n    - name: full passing check`n      command: $pwshCmd2 -NoProfile -Command exit 0`n" +
+            "    - name: unavailable check`n      command: $pwshCmd2 -NoProfile -Command exit 0`n      host_gate: env=CRUCIBLE_ITEM258_MISSING"
+        $configText2 = [System.IO.File]::ReadAllText($configPath2)
+        $configText2 = $configText2 -replace '(?ms)^verification:.*?(?=\r?\n\r?\n|\z|\r?\n[a-zA-Z_])', $checksBlock
+        [System.IO.File]::WriteAllText($configPath2, $configText2, (New-Object System.Text.UTF8Encoding($false)))
+        Remove-Item Env:\CRUCIBLE_ITEM258_MISSING -ErrorAction SilentlyContinue
+        $checksRun = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File (Join-Path $REPO_ROOT "powershell/run-isolated-checks.ps1") `
+                -TaskId $taskId2 -Mode full -ProjectRoot $projectRoot2
+        }
+        $checksOutput = $checksRun.Output -join "`n"
+        Assert-Result -Name "isolated verification passes with a host-gated check" -Condition ($checksRun.ExitCode -eq 0) `
+            -FailureMessage ("exit " + $checksRun.ExitCode + ". Output:`n" + $checksOutput)
+        Assert-Result -Name "I12 isolated verification output lists the earlier scope skip" `
+            -Condition ($checksOutput.Contains("  - " + $scopeLine)) -FailureMessage $checksOutput
+        $recordAfter = if (Test-Path -LiteralPath $record2) { Get-Content -LiteralPath $record2 -Raw -Encoding UTF8 } else { "(no record at $record2)" }
+        Assert-Result -Name "I12 isolated verification keeps the scope record beside its own" `
+            -Condition ($recordAfter.Contains($scopeLine) -and $recordAfter.Contains("[isolated checks v2] unavailable check: requires environment variable 'CRUCIBLE_ITEM258_MISSING'")) `
+            -FailureMessage $recordAfter
+
+        # The Human Gate menu, as the accept gate prints it.
+        $gateScript = Join-Path $tempRoot "gate-surface-258.ps1"
+        $libPath = (Join-Path $REPO_ROOT "powershell/crucible-lib.ps1").Replace("'", "''")
+        $root2 = $projectRoot2.Replace("'", "''")
+        $session2 = (Join-Path $projectRoot2 ".crucible/session").Replace("'", "''")
+        $workspaces2 = (Join-Path $projectRoot2 ".crucible/.agent-workspaces").Replace("'", "''")
+        $gateLines = @(
+            ". '$libPath'",
+            "`$ctx = @{ WorkspacesDir = '$workspaces2'; SessionDir = '$session2'; RepoRoot = '$root2' }",
+            "Write-GatePendingSurface -Context `$ctx -RepoRoot '$root2' -SessionDir '$session2' -TaskId '$taskId2' -PendingFilePath (Join-Path '$session2' '$taskId2/pending.json') -TaskBranchExists `$false -NoCodeReviewHint 'review' -AcceptDesc 'accept'"
+        )
+        [System.IO.File]::WriteAllText($gateScript, ($gateLines -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        $gateRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $gateScript }
+        $gateOutput = $gateRun.Output -join "`n"
+        Assert-Result -Name "I12 Human Gate lists the skipped scope check and its reason" `
+            -Condition ($gateOutput.Contains("[CHECKS NOT RUN]") -and $gateOutput.Contains("  - " + $scopeLine)) -FailureMessage $gateOutput
+        Assert-Result -Name "I12 Human Gate lists the host-gated check too" `
+            -Condition ($gateOutput.Contains("  - [isolated checks v2] unavailable check:")) -FailureMessage $gateOutput
     }
 } finally {
     Remove-Item env:CRUCIBLE_CYCLE_ID -ErrorAction SilentlyContinue
