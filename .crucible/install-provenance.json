@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "c857b39b285e4d6603cb83346850d74a0301ca9a",
+  "source_commit": "7de068ccffc7757a2ff4d7ef7029ffe5a7eaea1a",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -71,8 +71,8 @@
       "base_hash": "84a6fda488165cd8930dc580f1c6852166cb66fa4a2779751a02b1eab79b5a0d"
     },
     "docs/policy.md": {
-      "hash": "02e010f6da9dcb989f6a6764b1b22ea1e2a33c5681dfd5deb85735e6e73c8dab",
-      "base_hash": "02e010f6da9dcb989f6a6764b1b22ea1e2a33c5681dfd5deb85735e6e73c8dab"
+      "hash": "99ed7c57b49476b46c275ef95154add44f4fb7e066a36a3d2141f392b6cceb60",
+      "base_hash": "99ed7c57b49476b46c275ef95154add44f4fb7e066a36a3d2141f392b6cceb60"
     },
     "docs/README.md": {
       "hash": "3ceed16ca450db577c46e07c60d9c137b3fe3d53c1a8e031e49deb5f85bdd3af",
@@ -227,8 +227,8 @@
       "base_hash": "4a2c7e8a48809528b8d93215aded8cb0a4701dad3662230be18c9576c03e7b9c"
     },
     "powershell/lib/crucible-gates-human.ps1": {
-      "hash": "72389dddadef49f4619d26631118a6ee1234a71c698646cf97f42fc0f58276db",
-      "base_hash": "72389dddadef49f4619d26631118a6ee1234a71c698646cf97f42fc0f58276db"
+      "hash": "8a8537b3607d9d931b06adf24e7d35b4bceadb5c283b99bee9975bbf6d5f8cfd",
+      "base_hash": "8a8537b3607d9d931b06adf24e7d35b4bceadb5c283b99bee9975bbf6d5f8cfd"
     },
     "powershell/lib/crucible-gates-wedge-report.ps1": {
       "hash": "12b0dfae6c7163438b057e4fc1c22d8eb9e8f70155b88a0c354021f1e997365c",
@@ -469,6 +469,10 @@
     "powershell/tests/crucible-gates-completion.tests.ps1": {
       "hash": "8543aeabc1580e3d5bb84ab94df042ad28eb1a3d6c3ace7e5355cdca0943e388",
       "base_hash": "8543aeabc1580e3d5bb84ab94df042ad28eb1a3d6c3ace7e5355cdca0943e388"
+    },
+    "powershell/tests/crucible-gates-decision.tests.ps1": {
+      "hash": "a70c8c464acd2b6f01ba30281295b42e82008c70cc8a5b0b02a0d9c8bb94e440",
+      "base_hash": "a70c8c464acd2b6f01ba30281295b42e82008c70cc8a5b0b02a0d9c8bb94e440"
     },
     "powershell/tests/crucible-gates-handoff.tests.ps1": {
       "hash": "4143fcad31b76328f25c566ee39c0a6a318a9dcb7a4916ac2e0c4934c6050c43",

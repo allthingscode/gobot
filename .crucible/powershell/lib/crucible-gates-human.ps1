@@ -2,7 +2,7 @@
 # reject arms, each arm's phases, and the review surface the human is shown.
 #
 # Enforced here: I3 (the phase order in Invoke-HumanGateAcceptRedirect), I7 (decision
-# intake in Invoke-HumanGate and Assert-GateReason), I8 at the reject unwind
+# persistence in Write-HumanGateDecision), I8 at the reject unwind
 # (Get-HumanGateRejectUnwind), I12 at the Human Gate menu (Write-GatePendingSurface), and
 # I11 for every refusal here, each an exit. docs/policy.md section 8.
 #
@@ -47,10 +47,10 @@ function Invoke-HumanGateMerge {
         $HandoffScript = Join-Path (Split-Path -Parent $PSScriptRoot) "new-handoff.ps1"
     }
 
-    # The CLI gate persists an "accepted" decision BEFORE calling this action (the
+    # Both gate inputs persist an "accepted" decision BEFORE calling this action (the
     # reject path's rework handoff depends on that ordering). When an accepted merge
     # does not complete -- it routes to rework or trips the breaker -- that premature
-    # "accepted" record must be removed, or the deployment->done completion guard will
+    # advancing record (accepted or redirected) must be removed, or the deployment->done completion guard will
     # see it on the next run and block the retry (commit not merged into primary).
     $removePrematureAccept = {
         try {
@@ -66,13 +66,13 @@ function Invoke-HumanGateMerge {
                         Write-Quiet "[HUMAN GATE] Warning: Could not inspect gate decision $($f.Name) while removing premature acceptance: $($_.Exception.Message)" -ForegroundColor Yellow
                         continue
                     }
-                    if ($d.outcome -eq "accepted") {
+                    if ($d.outcome -in @("accepted", "redirected")) {
                         try {
                             Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
                         } catch {
                             throw ("Could not inspect or remove premature accepted gate decisions before returning the merge outcome: " + $_.Exception.Message)
                         }
-                        Write-Quiet "[HUMAN GATE] Removed premature 'accepted' gate decision $($f.Name) (merge did not complete)."
+                        Write-Quiet "[HUMAN GATE] Removed premature '$($d.outcome)' gate decision $($f.Name) (merge did not complete)."
                         break
                     }
                 }
@@ -277,6 +277,80 @@ function Assert-HumanGateDecisionSafe {
     $unwind = Get-HumanGateRejectUnwind -TaskId $TaskId -PrimaryBranch $primary
     $target = if ($unwind.HeadIsTaskMerge) { $unwind.UnwindTarget } else { '' }
     $null = Test-GitDiscardSafe -Directory $ProjectRoot -Operation "$Outcome decision unwind" -AllowConfiguredRuntime -IncludeUntracked:$false -ResetTarget $target -Refuse
+}
+
+function Write-HumanGateDecision {
+    # Both inputs must persist the authorization before dispatch. A merge that does
+    # not complete removes premature acceptance in Invoke-HumanGateMerge. I7, item 251.
+    # The pending-file input's template is consumed here, before dispatch, so the archived
+    # record is the only authority: an action that exits early cannot leave a filled
+    # template to be replayed without a human when the gate next fires. The CLI input
+    # never reads the template, so it passes none. Item 242.
+    param(
+        [Parameter(Mandatory=$true)][hashtable]$Context,
+        [Parameter(Mandatory=$true)][psobject]$Decision,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot,
+        [AllowEmptyString()][string]$SessionCycleId,
+        [switch]$ResolveReviewRange,
+        [string]$DecisionFile = "",
+        [string]$PendingTemplate = ""
+    )
+    $archivePath = ""
+    $recorded = $false
+    try {
+        Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @("Handoff", "SessionDir")
+        if ((Get-HumanGateOutcomes) -notcontains $Decision.outcome) {
+            throw ("Unrecognized gate outcome '" + $Decision.outcome + "'. Expected one of: " + ((Get-HumanGateOutcomes) -join ", ") + ".")
+        }
+        $reason = if ($Decision.PSObject.Properties["reason"]) { [string]$Decision.reason } else { "" }
+        Assert-GateReason -Reason $reason -DecisionFile $DecisionFile
+        Assert-HumanGateDecisionSafe -TaskId $Context.Handoff.task_id -Outcome $Decision.outcome `
+            -SourcePhase $Context.Handoff.source_phase -ProjectRoot $ProjectRoot
+        # CLI metadata is resolved only after validation. A refused reason must
+        # not depend on a readable Git range. Pending templates already carry it.
+        if ($ResolveReviewRange) {
+            $handoff = $Context.Handoff
+            $commit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
+            $range = Get-GateReviewRange -PrimaryBranch (Get-ConfiguredPrimaryBranch -ProjectRoot $ProjectRoot) `
+                -TaskId $handoff.task_id -CommitHash $commit
+            $Decision | Add-Member -NotePropertyName "base_sha" -NotePropertyValue $range.BaseSha -Force
+            $Decision | Add-Member -NotePropertyName "branch_sha" -NotePropertyValue $range.BranchSha -Force
+        }
+        $fields = @{
+            task_id = $Context.Handoff.task_id
+            backlog_item = $Context.Handoff.task_id
+            gate_fired_at = Get-UtcTimestamp
+            reason = (ConvertTo-AsciiSafeText -Text $reason).Trim()
+            rework_requested = ($Decision.outcome -eq "rejected")
+            session_cycle_id = $SessionCycleId
+        }
+        foreach ($key in $fields.Keys) {
+            $Decision | Add-Member -NotePropertyName $key -NotePropertyValue $fields[$key] -Force
+        }
+        $gateDir = Join-Path $Context.SessionDir "global/gate_decisions"
+        $archivePath = Join-Path $gateDir ($Context.Handoff.task_id + "-" + (Get-UtcFileTimestamp) + ".json")
+        $Decision | ConvertTo-Json | Set-Content -LiteralPath $archivePath -Encoding UTF8 -ErrorAction Stop
+        $recorded = $true
+        if (-not [string]::IsNullOrEmpty($PendingTemplate) -and (Test-Path -LiteralPath $PendingTemplate)) {
+            Remove-Item -LiteralPath $PendingTemplate -Force -ErrorAction Stop
+        }
+    } catch {
+        # A catch in the pending-file path or an embedding caller cannot authorize
+        # the action after persistence failed. Write-Error could throw before exit.
+        $message = $_.Exception.Message
+        if ($recorded) {
+            # Withdraw the record so the template stays the one copy of the decision and
+            # a rerun retries it, rather than finding the gate passed with nothing done.
+            try {
+                Remove-Item -LiteralPath $archivePath -Force -ErrorAction Stop
+                $message = "could not consume the pending template " + $PendingTemplate + ": " + $message + " The recorded decision was withdrawn; nothing was dispatched."
+            } catch {
+                $message = "could not consume the pending template " + $PendingTemplate + ": " + $message + " The recorded decision " + $archivePath + " could not be withdrawn either: " + $_.Exception.Message + " Remove both files before the gate fires again."
+            }
+        }
+        [Console]::Error.WriteLine("Cannot record human gate decision: " + $message)
+        exit 1
+    }
 }
 
 function Invoke-HumanGateAction {
@@ -1130,31 +1204,14 @@ function Invoke-HumanGate {
             }
 
             $trimmedGateReason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "" } else { (ConvertTo-AsciiSafeText -Text $GateReason).Trim() }
-            Assert-GateReason -Reason $GateReason
-            Assert-HumanGateDecisionSafe -TaskId $handoff.task_id -Outcome $GateOutcome -SourcePhase $handoff.source_phase -ProjectRoot $repoRoot
             
-            $primaryBranch = Get-ConfiguredPrimaryBranch
-            $gateHandoffCommit = if ($handoff.PSObject.Properties["commit_hash"]) { $handoff.commit_hash } else { "" }
-            $gateRange = Get-GateReviewRange -PrimaryBranch $primaryBranch -TaskId $handoff.task_id -CommitHash $gateHandoffCommit
-            $baseSha = $gateRange.BaseSha
-            $branchSha = $gateRange.BranchSha
-
             $decision = [ordered]@{
-                task_id = $handoff.task_id
-                backlog_item = $handoff.task_id
-                gate_fired_at = Get-UtcTimestamp
                 outcome = $GateOutcome
                 reason = $trimmedGateReason
-                rework_requested = ($GateOutcome -eq "rejected")
                 redirect_target = $GateRedirectTarget
-                session_cycle_id = $currentGateCycle
-                base_sha = $baseSha
-                branch_sha = $branchSha
             }
             
-            $timestamp = Get-UtcFileTimestamp
-            $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
-            $decision | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
+            Write-HumanGateDecision -Context $Context -Decision ([pscustomobject]$decision) -ProjectRoot $repoRoot -SessionCycleId $currentGateCycle -ResolveReviewRange
             Write-Host ("`n[HUMAN GATE] Decision recorded via CLI flag: " + $GateOutcome) -ForegroundColor Green
             Write-Host ("Reason: " + $trimmedGateReason) -ForegroundColor Gray
 
@@ -1255,29 +1312,13 @@ function Invoke-HumanGate {
                             
                             exit 0
                         } else {
-                            $fileReason = if ($gateData.PSObject.Properties["reason"]) { [string]$gateData.reason } else { "" }
-                            Assert-GateReason -Reason $fileReason -DecisionFile $gateTemplatePath
-                            Assert-HumanGateDecisionSafe -TaskId $handoff.task_id -Outcome $gateData.outcome -SourcePhase $handoff.source_phase -ProjectRoot $repoRoot
-                            $timestamp = Get-UtcFileTimestamp
-                            $archivePath = Join-Path $GATE_DIR ($handoff.task_id + "-" + $timestamp + ".json")
-                            $gateData | Add-Member -NotePropertyName "session_cycle_id" -NotePropertyValue $currentGateCycle -Force
-                            # Item 226: the handoff writer needs the saved rejection to
-                            # authorize the first deployment -> implementation re-entry.
-                            if ($gateData.outcome -eq "rejected") {
-                                $gateData | Add-Member -NotePropertyName "rework_requested" -NotePropertyValue $true -Force
-                                $gateData | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
-                            }
+                            Write-HumanGateDecision -Context $Context -Decision $gateData -ProjectRoot $repoRoot -SessionCycleId $currentGateCycle -DecisionFile $gateTemplatePath `
+                                -PendingTemplate $gateTemplatePath
 
                             # Execute push or reset based on manual decision
                             Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason -Handoff $handoff `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
 
-                            # Archive other outcomes after the action, stamping the firing
-                            # cycle so only a same-cycle re-run is already-passed.
-                            if ($gateData.outcome -ne "rejected") {
-                                $gateData | ConvertTo-Json | Set-Content -Path $archivePath -Encoding UTF8
-                            }
-                            Remove-Item -Path $gateTemplatePath -Force
                             Write-Host ("`n[HUMAN GATE] Decision recorded: " + $gateData.outcome) -ForegroundColor Green
                             
                             # Cleanup machine-readable signal
