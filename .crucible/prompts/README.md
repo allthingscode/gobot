@@ -1,4 +1,4 @@
-<!-- prompt_version: readme-v3 -->
+<!-- prompt_version: readme-v4 -->
 # Prompt Library
 
 Ultra-short prompts for common tasks. Use these instead of verbose commands.
@@ -13,7 +13,7 @@ The phrases in this file are human shorthand. They are not a second routing tabl
 1. Recognize it as a **minimalist trigger** for your specialist workflow.
 2. Immediately read `.crucible/session/handoffs/` and your specialist's `task.md`.
 3. Understand that **all technical details, reasons, and objectives** are in the data files, not the prompt.
-4. Follow the workflow defined in your specialist's **machine template** (e.g., `implementation_prompt.md`). Note that documentation files (e.g., `docs/implementation-phase-reference.md`) are for human reference and manual invocations only; do not rely on them for operating instructions in the automated pipeline.
+4. Read the phase SOP linked by your specialist's **machine template** (e.g., `implementation_prompt.md`) and follow that SOP's workflow. Note that documentation files (e.g., `docs/implementation-phase-reference.md`) are for human reference and manual invocations only; do not rely on them for operating instructions in the automated pipeline.
 
 The prompt's only job is to trigger the correct persona and target ID. All context is "pulled" by the agent from the file system, not "pushed" through the prompt.
 

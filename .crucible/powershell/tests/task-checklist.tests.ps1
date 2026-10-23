@@ -166,10 +166,11 @@ try {
         $silent = @()
         foreach ($promptFile in $promptFiles) {
             $lines = @(Get-Content -LiteralPath $promptFile.FullName -Encoding UTF8)
-            if ($promptFile.Name -eq "implementation_prompt.md") {
+            if ($promptFile.Name -like "*_prompt.md") {
                 # Implementation keeps workflow in its SOP. TODO item 193.
-                Assert-Result -Name "implementation prompt links the quality bar" -Condition ($lines -contains '- [Quality Bar](<{{crucible_root}}/sops/implementation.md#quality-bar>) - required `task.md` checklist before handoff') -FailureMessage "implementation prompt omits the checklist rule link"
-                $lines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/implementation.md") -Encoding UTF8)
+                $phase = $promptFile.Name -replace "_prompt.md$", ""
+                Assert-Result -Name "implementation prompt links the quality bar" -Condition ($lines -contains ('- [Quality Bar](<{{crucible_root}}/sops/' + $phase + '.md#quality-bar>) - required `task.md` checklist before handoff')) -FailureMessage "implementation prompt omits the checklist rule link"
+                $lines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/$phase.md") -Encoding UTF8)
             }
             if (@($lines | Where-Object { $_.Trim() -eq $canonical }).Count -eq 0) {
                 $silent += $promptFile.Name
@@ -230,6 +231,8 @@ try {
         $sop = [System.IO.File]::ReadAllText((Join-Path $REPO_ROOT "sops/grooming.md"))
         $prompt = [System.IO.File]::ReadAllText((Join-Path $REPO_ROOT "prompts/grooming_prompt.md"))
         Assert-Result -Name "SOP keeps named files" -Condition ($sop -match '(?im)^(?=[^\r\n]*Keep)(?=[^\r\n]*paths)(?=[^\r\n]*approved stub)(?=[^\r\n]*names)(?=[^\r\n]*Widen only)(?=[^\r\n]*record why)[^\r\n]+\r?$') -FailureMessage "sops/grooming.md does not tell the Groomer to keep the approved paths"
+        Assert-Result -Name "prompt links approved scope owner" -Condition ($prompt.Contains('/sops/grooming.md#step-2')) -FailureMessage 'Missing scope pointer'
+        $prompt += $sop
         Assert-Result -Name "prompt keeps named files" -Condition ($prompt -match '(?im)^(?=[^\r\n]*Keep)(?=[^\r\n]*files|[^\r\n]*packages)(?=[^\r\n]*approved stub)(?=[^\r\n]*names)(?=[^\r\n]*widen only)(?=[^\r\n]*record why)[^\r\n]+\r?$') -FailureMessage "prompts/grooming_prompt.md does not tell the Groomer to keep the approved paths"
     }
 } finally {

@@ -277,6 +277,12 @@ Ceiling {budget_ceiling}
 
         $text = New-CruciblePromptText -Context $ctx
 
+        Assert-Result -Name "rebase prompt names configured branch fact and SOP" -Condition ($text -match 'Primary branch: main' -and $text.Contains('/sops/implementation.md#rebase-workflow')) -FailureMessage $text
+        $sop = Get-Content (Join-Path $REPO_ROOT 'sops/implementation.md') -Raw -Encoding UTF8
+        # Render the owning recipe through the same fact substitution path.
+        $section = [regex]::Match($sop, '(?s)## Rebase Workflow.*?(?=## Decision Tree)').Value
+        [IO.File]::WriteAllText((Join-Path $ctx.PromptLib 'implementation_prompt.md'), $section)
+        $text += New-CruciblePromptText -Context $ctx
         Assert-Result -Name "rebases onto main" -Condition ($text -match 'git rebase main task/F-916' -and $text -match 'git pull origin main') -FailureMessage ("prompt: " + $text)
         Assert-Result -Name "no master" -Condition (-not ($text -match 'master')) -FailureMessage ("prompt still names master: " + $text)
     }
@@ -320,6 +326,8 @@ Ceiling {budget_ceiling}
         "<!-- prompt_version: 1 -->`nWork in {worktree}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
         $text = New-CruciblePromptText -Context $ctx
         Assert-Result -Name "prompt workdir is the project root" -Condition ($text -match ('Work in ' + [regex]::Escape($caseRoot) + '\r?\n')) -FailureMessage ("prompt: " + $text)
+        Assert-Result -Name "no-code prompt links its owner" -Condition ($text.Contains('/sops/implementation.md#no-code-review-fix')) -FailureMessage $text
+        $text += Get-Content (Join-Path $REPO_ROOT 'sops/implementation.md') -Raw -Encoding UTF8
         Assert-Result -Name "prompt says not to branch or commit" -Condition ($text -match 'No-Code Review-Fix' -and $text -match 'do not commit') -FailureMessage ("prompt: " + $text)
     }
 
@@ -339,6 +347,8 @@ Ceiling {budget_ceiling}
 
         Assert-Result -Name "classified as a no-code re-review" -Condition (Test-NoCodeReReview -Handoff $ctx.Handoff -RepoRoot $caseRoot) -FailureMessage "an R-* re-review with no task branch should be a no-code re-review"
         $text = New-CruciblePromptText -Context $ctx
+        Assert-Result -Name "no-code review links its owner" -Condition ($text.Contains('/sops/verification.md#stub-only-close-out')) -FailureMessage $text
+        $text += Get-Content (Join-Path $REPO_ROOT 'sops/verification.md') -Raw -Encoding UTF8
         Assert-Result -Name "prompt routes to the Stub-Only Close-Out" -Condition ($text -match '## No-Code Re-Review' -and $text -match 'Stub-Only Close-Out' -and $text -match 'Do not run run-isolated-checks\.ps1') -FailureMessage ("prompt: " + $text)
 
         $fromGrooming = $ctx.Handoff.PSObject.Copy(); $fromGrooming.source_phase = "grooming"
@@ -362,6 +372,9 @@ Ceiling {budget_ceiling}
 
             $text = New-CruciblePromptText -Context $ctx
 
+            Assert-Result -Name ("incoming " + $incoming + ": prompt carries next count fact") -Condition ($text.Contains('**Next rebase count**: ' + ($incoming + 1)) -and $text.Contains('/sops/deployment.md#step-7')) -FailureMessage $text
+            Copy-Item -LiteralPath (Join-Path $REPO_ROOT 'sops/deployment.md') -Destination (Join-Path $ctx.PromptLib 'deployment_prompt.md') -Force
+            $text += New-CruciblePromptText -Context $ctx
             $reworkLines = @(($text -split "`r?`n") | Where-Object { $_ -match 'new-handoff\.ps1' -and $_ -match '-Source deployment -Target implementation' })
             Assert-Result -Name ("incoming " + $incoming + ": one merge-conflict handoff command") -Condition ($reworkLines.Count -eq 1) -FailureMessage ("expected one deployment -> implementation new-handoff command in the rendered prompt, found " + $reworkLines.Count)
             if ($reworkLines.Count -ne 1) { continue }

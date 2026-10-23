@@ -77,47 +77,17 @@ When using `worker`, the parent prompt must assign clear ownership and remind th
 
 ## Checkpoint Discipline
 
-Gemini subagents have previously skipped over checkpoint expectations. Codex orchestration must make checkpoints an explicit parent-owned contract.
-
-The parent session must do the following for every specialist subagent:
-
-1. Include checkpoint instructions in the spawn prompt:
-
-   ```text
-   Follow the checkpoint mandate in your SOP. After every major phase, append
-   `### CHECKPOINT [brief summary]` to your task.md. Do not write the final
-   handoff until the required checkpoints and task checklist are complete.
-   ```
-
-2. After the subagent returns, inspect `.crucible/session/{TASK_ID}/{phase}/task.md`.
-3. Confirm the file contains at least one `### CHECKPOINT` marker for non-trivial work.
-4. Confirm the required `## Task List` has no unchecked required items before accepting the handoff.
-5. If checkpoints are missing, do not advance the pipeline. Re-dispatch the same specialist with a repair prompt, or ask the human for direction if the work cannot be verified.
-
-Checkpoint verification is not a replacement for `crucible.ps1` gates. It is an additional parent-side check to prevent subagents from rushing directly to handoff.
+Use a pointer to the phase SOP in the dispatch payload. Follow [Step 5](../../sops/orchestrator.md#step-5---verify-specialist-output-and-track-budget) for parent verification.
 
 ## Bootstrap: Next Backlog Item
 
-`crucible.ps1 -Init -TaskId` requires a task ID, so `"Groomer: Next Item"` starts in bootstrap mode.
+Spawn a Groomer with this payload, using the native type below:
 
-1. Parent spawns a Groomer subagent with a short bootstrap prompt:
+```text
+Groomer: Next Item. Target: codex. Read and follow .crucible/sops/grooming.md#bootstrap-no-task-id.
+```
 
-   ```text
-   Groomer: Next Item
-
-    Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md,
-    and .crucible/sops/grooming.md. Select the next eligible backlog item, write or
-    update its spec, write the grooming -> implementation handoff, run crucible.ps1
-    -Init -TaskId <selected_task_id> -ProjectRoot "{project_root}" -Quiet, then stop
-    and report the task ID and
-    Crucible output. Follow your SOP checkpoint mandate: append `### CHECKPOINT`
-    entries to task.md after each major pass, and do not write the handoff until
-    required checklist items are complete.
-   ```
-
-2. Parent waits for the Groomer subagent to finish.
-3. Parent reads the generated handoff and Crucible output paths.
-4. Parent asks the human for confirmation before launching the Architect subagent.
+Follow [orchestrator Step 5](../../sops/orchestrator.md#step-5---verify-specialist-output-and-track-budget) after it returns.
 
 ## Continuation: Known Task ID
 
@@ -138,10 +108,7 @@ If no gate or circuit breaker is active, the parent spawns the next specialist s
 ```text
 {Role}: {TASK_ID} - read and follow all instructions in .crucible/session/{TASK_ID}/{phase}/prompt.md
 
-Follow your SOP checkpoint mandate. Append `### CHECKPOINT [brief summary]`
-to task.md after every major phase. Do not write the final handoff until the
-required checkpoints and task checklist are complete. Stop after running
-crucible.ps1 and report the result to the parent.
+Follow the phase SOP linked by that prompt.
 ```
 
 ## Parent Session Responsibilities
@@ -161,17 +128,7 @@ The parent Codex session is responsible for:
 
 ## Subagent Prompt Rules
 
-Specialist subagent prompts should be short. They should point to filesystem instructions, not inline the whole process.
-
-Required prompt constraints:
-
-- Tell the subagent to read `AGENTS.md`.
-- Tell the subagent to read the generated `prompt.md` for its role when one exists.
-- Tell the subagent to run `crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}" -Quiet` at session end after writing handoff JSON.
-- Tell the subagent to append `### CHECKPOINT` markers to `task.md` after major phases.
-- Tell the subagent not to write handoff JSON until required checklist items are complete.
-- Tell the subagent to stop after Crucible output is produced and report the result to the parent.
-- Tell the subagent it is not alone in the codebase and must not revert unrelated edits.
+Pass only the generated prompt pointer (or bootstrap SOP pointer), the target and ownership facts. The phase SOP owns workflow, checkpoints and session end.
 
 ## Parallelization Policy (Codex)
 
@@ -187,15 +144,12 @@ Use parallelism to reduce cycle time without weakening control:
 
 ## Session Lifecycle Automation
 
-Treat session lifecycle as a hard requirement:
-
-- On session start, run `crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot "{project_root}"` and verify artifacts exist before specialist launch.
-- On specialist completion, validate handoff + checkpoints, then follow SOP Step 6 to verify Crucible output and next phase artifacts before routing.
-- On session end, ensure the specialist handoff is written, clear lock/process residue per SOP, and report the verified Crucible output to the human. Rerun `-Init` only under SOP Step 6 recovery, repair, or changed-input conditions.
+Follow [Step 1](../../sops/orchestrator.md#step-1---initialize-the-step), then Step 5 and Step 6 to verify Crucible output and next phase artifacts. Follow [Session End](../../sops/orchestrator.md#session-end) when the loop ends.
 
 ## Gate and Failure Protocols
 
-All gate presentation formats (Research Gate, Human Gate, Circuit Breaker Gate) and the failure decision tree are defined in `.crucible/sops/orchestrator.md`. Follow them exactly. The Codex parent session does not have its own gate format - all tools use the same canonical presentation.
+Follow the [Gate Protocol](../../sops/orchestrator.md#gate-protocol), [Failure Protocol](../../sops/orchestrator.md#failure-protocol), and [Session End](../../sops/orchestrator.md#session-end).
+
 
 ## Status
 

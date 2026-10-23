@@ -53,14 +53,7 @@ spawn_subagent({
   prompt: `{Role}: {task_id} - read and follow all instructions in
 .crucible/session/{task_id}/{phase}/prompt.md
 
-Follow your SOP checkpoint mandate: append \`### CHECKPOINT [brief summary]\`
-to task.md after each major phase. Do not write the final handoff until all
-required task checklist items are complete.
-
-After writing handoff JSON, run:
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target grok -ProjectRoot "{adopter project root}" -Quiet
-
-Report the Crucible output verbatim. Stop after reporting. Do not spawn successor agents.`
+Follow the linked phase SOP.`
 })
 ```
 
@@ -79,20 +72,7 @@ spawn_subagent({
   subagent_type: "general-purpose",
   cwd: "{adopter project root}",
   description: "Groomer bootstrap - select next backlog item",
-  prompt: `Groomer: Next Item
-
-Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, and
-.crucible/sops/grooming.md. Select the next eligible backlog item. Once you have
-selected a task ID, create your scratchpad at
-.crucible/session/<selected_task_id>/grooming/task.md (create the directory if
-needed) and use it for all ### CHECKPOINT entries throughout your session.
-
-Write or update the item's spec, write the grooming -> implementation handoff, then run:
-
-  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <selected_task_id> -Target grok -ProjectRoot "{adopter project root}" -Quiet
-
-Do not write the handoff until required checklist items are complete. Stop after
-Crucible output is produced. Report the selected task ID and Crucible output verbatim.`
+  prompt: `Groomer: Next Item. Target: grok. Read and follow .crucible/sops/grooming.md#bootstrap-no-task-id.`
 })
 ```
 
@@ -144,23 +124,18 @@ Initialize on entry or resume as in SOP Step 1. After normal specialist completi
 
 ## After Each Sub-Agent Returns
 
-Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (verify Crucible output and next phase artifacts). A gate signal at `.crucible/session/{task_id}/gate_pending.txt` goes straight to the Gate Protocol before anything else.
+Follow [Step 5](../../sops/orchestrator.md#step-5---verify-specialist-output-and-track-budget), then [Step 6](../../sops/orchestrator.md#step-6---verify-crucible-output-and-next-phase-artifacts) to verify Crucible output and next phase artifacts.
 
-Point at Step 5; do not re-inline it.
 
 ## Human Confirmation Model
 
-Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3. The human is the Pilot in Command. Do not dispatch until the human confirms with an explicit "go" or redirect, unless `crucible.ps1 -Init` printed `[APPROVAL MODE] to-gate`; then follow "Approval mode" in `.crucible/sops/orchestrator.md` Step 3.
+Follow the [approval mode and status procedure](../../sops/orchestrator.md#step-3---report-to-human-and-request-confirmation).
+
 
 ## Gate and Failure Protocols
 
-All gate presentation formats and the failure decision tree are in `.crucible/sops/orchestrator.md`. Follow them exactly.
+Follow the [Gate Protocol](../../sops/orchestrator.md#gate-protocol), [Failure Protocol](../../sops/orchestrator.md#failure-protocol), and [Session End](../../sops/orchestrator.md#session-end).
 
-After recording a Human Gate decision via `crucible.ps1 -GateOutcome`, stop. Do not spawn another specialist. Do not run `crucible.ps1 -Init` looking for the next prompt.
-
-A task that merges code to trunk is not done until adopter CI for the merge commit reports `[CI WATCH] STATUS=GREEN`. After any push of accepted task work, run `{{crucible_root}}/powershell/watch-adopter-ci.ps1 -Commit <merge-sha>`.
-
-The orchestrator MUST NOT complete specialist work to keep the loop moving.
 
 ## Status
 

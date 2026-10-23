@@ -1267,6 +1267,10 @@ budget_tier: "low"
             if (-not (Test-Path -LiteralPath $doc)) {
                 throw "Deployment doc not found: $doc"
             }
+            if ($doc -like '*deployment_prompt.md') {
+                $pointer = Get-Content -LiteralPath $doc -Raw -Encoding UTF8
+                if (-not $pointer.Contains('/sops/deployment.md#step-7')) { throw 'Missing commit hash owner pointer' }
+            }
             $mentions = 0
             $lines = @(Get-Content -LiteralPath $doc -Encoding UTF8)
             for ($i = 0; $i -lt $lines.Count; $i++) {

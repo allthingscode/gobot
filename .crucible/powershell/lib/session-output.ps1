@@ -212,27 +212,13 @@ function New-CruciblePromptText {
         # Conditional rebase section injection. The branch is the configured primary branch,
         # not a hardcoded master, so a main-only repository gets commands that run. Item 189.
         $rebaseOnto = if ($rebaseCount -gt 0) { Get-ConfiguredPrimaryBranch -ProjectRoot $repoRoot } else { "" }
+        $promptText = $promptText.Replace("{primary_branch}", $rebaseOnto)
         $architectRebaseContent = "`n## Rebase Workflow`n`n" +
-            "If you are receiving this task for rebase (status: `"Ready for Rebase`"):`n`n" +
-            "1. **Check out ${rebaseOnto}**: ``git checkout $rebaseOnto`` `n" +
-            "2. **Update ${rebaseOnto}**: ``git pull origin $rebaseOnto`` `n" +
-            "3. **Rebase Task Branch**: ``git rebase $rebaseOnto task/$($handoff.task_id)`` `n" +
-            "4. **Resolve Conflicts**:`n" +
-            "   - Manually resolve any conflicts in the files listed in ``conflict_report.json``.`n" +
-            "   - Use ``git add`` to mark resolved files.`n" +
-            "   - Continue rebase: ``git rebase --continue``.`n" +
-            "5. **Validation**: Run full test suite to ensure the rebase didn't break anything.`n" +
-            "6. **Handoff**:`n" +
-            "   - ``rebase_count`` carries forward on its own. Do not edit handoff JSON.`n" +
-            "   - Status: `"Ready for Review`".`n" +
-            "   - Reason: `"Rebase onto $rebaseOnto complete. Conflicts resolved.`"`n" +
-            "   - Hand off to **Reviewer**."
-            
+            "Primary branch: " + $rebaseOnto + ". Rebase count: " + $rebaseCount + ".`n" +
+            "[Rebase SOP](<" + $resolvedCrucibleRoot + "/sops/implementation.md#rebase-workflow>).`n"
         $reviewerRebaseContent = "`n## Post-Rebase Verification`n`n" +
-            "If the handoff indicates this is a post-rebase review:`n`n" +
-            "1. **Verify Clean Merge**: Confirm that the Architect resolved all conflicts from conflict_report.json.`n" +
-            "2. **Full Regression Check**: Since a rebase involves changing the base of the branch, pay extra attention to any semantic conflicts that git might have missed.`n" +
-            "3. **Check rebase_count**: If rebase_count is 3 or more, and conflicts persist, flag for human escalation."
+            "Primary branch: " + $rebaseOnto + ". Rebase count: " + $rebaseCount + ".`n" +
+            "[Post-rebase SOP](<" + $resolvedCrucibleRoot + "/sops/verification.md#post-rebase-verification>).`n"
 
         if ($rebaseCount -gt 0) {
             if ($handoff.target_phase -eq "implementation") {
@@ -271,18 +257,15 @@ function New-CruciblePromptText {
 
         if (Test-NoCodeReviewFix -Handoff $handoff -RepoRoot $repoRoot) {
             $promptText += "`n`n## No-Code Review-Fix`n`n" +
-                "This is a research item with no task branch, so there is no worktree and no code to change. " +
-                "The fix is to the backlog spec and session files named above, which are gitignored: edit them in place under " +
-                $repoRoot + ". Do not create a branch or worktree, and do not commit or force-add these files; " +
-                "a task branch would also defeat the No-Code Closure at deployment.`n"
+                "This research item has no task branch or worktree. Its backlog spec and session files are under " + $repoRoot + ".`n" +
+                "[No-code review-fix SOP](<" + $resolvedCrucibleRoot + "/sops/implementation.md#no-code-review-fix>).`n"
         }
 
         if (Test-NoCodeReReview -Handoff $handoff -RepoRoot $repoRoot) {
             $promptText += "`n`n## No-Code Re-Review`n`n" +
-                "This handoff comes from implementation, but it is a no-code review-fix on a research item with no task branch: " +
-                "there is no worktree, no diff and no code to check. Use the Stub-Only Close-Out workflow, not Pattern A/B. " +
-                "Do not run run-isolated-checks.ps1 and do not create a branch or worktree; the backlog validator is the automated check. " +
-                "Also confirm every fix in " + ($sessionRootForPrompt + "/" + $TaskId) + "/implementation/task.md was made.`n"
+                "This research review-fix has no task branch, worktree, code or diff. " +
+                "Fix specification: " + ($sessionRootForPrompt + "/" + $TaskId) + "/implementation/task.md.`n" +
+                "[Stub-Only Close-Out SOP](<" + $resolvedCrucibleRoot + "/sops/verification.md#stub-only-close-out-grooming---verification-shortcut>).`n"
         }
 
         # Handoff context injection
@@ -336,7 +319,7 @@ function New-CruciblePromptText {
             "- **Budget**: " + $handoffCount + "/" + $ceiling + " handoffs used (" + $budgetRemaining + " remaining)"
         if ([int]$strikeCount -eq 2) {
             $contextBlock += "`n`n> **WARNING (Strike 2/3):** One more review failure will BLOCK this task. " +
-                "Architect: reduce scope, don't attempt a full re-implementation."
+                "[Review-fix SOP](<" + $resolvedCrucibleRoot + "/sops/implementation.md#session-start>)."
         }
         $promptText = $promptText.Replace("{context_block}", $contextBlock)
     }
@@ -349,8 +332,7 @@ function New-CruciblePromptText {
         }
         $recoveryMsg = "## RECOVERY MODE`n" +
                        "You are in RECOVERY MODE. Your last recorded progress was: $recoveryMarker.`n" +
-                       "Please re-read the session context and continue from this point.`n" +
-                       "Do not repeat work that has already been verified as complete.`n`n"
+                       "[Recovery SOP](<" + $resolvedCrucibleRoot + "/sops/specialist-workspace.md#recovery>).`n`n"
         $promptText = $recoveryMsg + $promptText
     }
 

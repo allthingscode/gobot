@@ -74,6 +74,8 @@ $results += Run-Test "Claude specialists require absolute worktree paths for eve
     foreach ($n in @("crucible-strong", "crucible-default", "crucible-light")) {
         $body = Read-Agent $root $n
         Assert-Result ($n + " explains inherited directory") ($body -match 'working directory.*orchestrator.*not.*worktree') $body
+        Assert-Result ($n + " points at workspace owner") ($body.Contains('Specialist Workspace SOP')) $body
+        $body += Get-Content (Join-Path $REPO_ROOT 'sops/specialist-workspace.md') -Raw -Encoding UTF8
         Assert-Result ($n + " requires absolute write paths including .NET") ($body -match 'every write.*absolute paths.*worktree' -and $body.Contains('[IO.File]::WriteAllText')) $body
     }
 }

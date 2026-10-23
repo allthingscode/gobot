@@ -1,5 +1,7 @@
-<!-- prompt_version: operator-sop-v8 -->
+<!-- prompt_version: operator-sop-v9 -->
 # SOP: Deployment
+
+Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
@@ -19,6 +21,21 @@
 | Backlog | `{{backlog_dir}}/BACKLOG.md` |
 
 ---
+
+## Session Start
+
+Read the task context, incoming handoff, persona and operating manual using the resolved paths in the prompt. If task.md is missing, stop and ask the orchestrator to initialize the session.
+Before proceeding, echo the following from the required files:
+
+1. From task.md: What is the Cycle ID?
+2. From the incoming handoff: What is the handoff reason?
+3. Which legal successor phase will this session use: `done`, `grooming`, or `implementation` (rework only)?
+
+If any answer is missing, stop and re-read the files.
+
+For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist deployment -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Never edit session_state.json directly.
+
+The specialist never pushes. The Human Gate pushes only when `review.auto_push` is true. Perform deployment work in the main checkout; leave merge and cleanup to the Human Gate. Run the configured health check before and after significant operational changes. Write full reports to `.crucible/session/{task_id}/deployment/deployment_report.md` and summarize them in 1-2 sentences.
 
 ## Standard Deployment Workflow
 
@@ -43,8 +60,12 @@ Before touching `master`, run the merge simulation:
 
 **If simulation fails with exit 1 (a conflict):**
 - Set task status to `"Ready for Rebase"`
-- Write handoff to **implementation** with reason: "Merge conflict detected during simulation. See conflict_report.json.", passing `-RebaseCount` one above the incoming handoff's `rebase_count`. Validation refuses deployment -> implementation at `rebase_count` 0. The rendered prompt gives the exact command.
+- Write handoff to **implementation** with reason: "Merge conflict detected during simulation. See conflict_report.json.", passing `-RebaseCount` one above the incoming handoff's `rebase_count`. Validation refuses deployment -> implementation at `rebase_count` 0. Use the next rebase count supplied in the prompt as `{next_rebase_count}` in this command:
+  ```powershell
+  pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target implementation -Reason "Merge conflict detected during simulation. See conflict_report.json." -RebaseCount {next_rebase_count} -ProjectRoot "{project_root}"
+  ```
 - Instruct implementation to rebase `task/{task_id}` onto `master`
+- After writing the conflict handoff, run Crucible with the advance command in Step 7, then STOP. Skip Steps 4-6: nothing was deployed, so do not write a dev log or eval record. Do not write the Step 7 deployment-to-done handoff.
 
 - If simulation passes: Proceed to Step 4.
 
@@ -147,7 +168,7 @@ pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -GateOutcome <outcome> -GateReason "<human's one-sentence quality note>" -Quiet
 ```
 
-Present Crucible output to the human. Wait for confirmation before ending your session.
+Present a 2-3 sentence summary of the deployment and commit hash, and only the single `[NEXT SESSION COMMAND]` command line from Crucible output, verbatim in a code block. Do NOT paste the full Crucible output, CI banners, gate logs, backlog validation lines or other diagnostics. If no next-session command was emitted, follow the Human Gate handling above. Wait for confirmation before ending your session.
 
 ---
 
@@ -195,7 +216,7 @@ pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target grooming -Reason "Production issues detected - see deployment_report.md. grooming should dispatch Researcher." -ProjectRoot "{project_root}"
 ```
 (The tool automatically sets `generated_by` and `tool_version` to satisfy preflight verification.)
-3. Run Crucible and present output to human
+3. Run Crucible and present the next-session command as specified in [Step 7](#step-7---run-new-handoffps1--advance-pipeline).
 
 > **Note**: `deployment -> research` is NOT a valid pipeline transition. The deployment phase can only route to grooming. The grooming phase can then dispatch the Researcher if a research task is warranted.
 
@@ -211,3 +232,9 @@ Pre-flight gate - confirm all are true before writing handoff:
 - [ ] `task_id` in handoff matches the task I was given
 - [ ] `commit_hash` rule: for `deployment -> done` with code changes, it matches the merge commit on the primary branch; for No-Code Closures (type: research/grooming or R-* task ID, no task branch, no commit_hash), it is null/absent; for `deployment -> grooming` incident handoffs, it identifies the merged commit that caused the production issue
 - [ ] Eval record written to `.crucible/session/eval/eval-{task_id}.json`
+
+- [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2
+
+## Session End
+
+Follow the handoff and advance commands above. Present the emitted next-session command verbatim, report the outcome briefly, then stop. Do not spawn successor agents.

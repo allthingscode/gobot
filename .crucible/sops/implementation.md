@@ -1,5 +1,7 @@
-<!-- prompt_version: architect-sop-v6 -->
+<!-- prompt_version: architect-sop-v7 -->
 # SOP: Implementation
+
+Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
@@ -33,11 +35,27 @@ For state updates, use `update-session-state.ps1 -Specialist implementation -Tas
 
 **Check for pre-written fix spec first:** If `task.md` exists and describes code review fixes from a verification handoff - follow it directly. Do NOT redesign. Skip to Phase 2: Code.
 
+**Strike 2 of 3:** When the prompt warns of review strike 2, reduce scope; do NOT re-implement. Follow the fix spec and make only the changes needed to address the review findings before re-review.
+
 The backlog spec's pre-filled "Next Step" line is for post-deployment sequencing, not routing. Follow this SOP's Verification handoff.
 
 Before proceeding, echo the Cycle ID from `task.md`, the incoming handoff reason, the permitted successor from this SOP, and the worktree path from `task.md`'s Resolved Paths. If any answer is missing, stop and re-read the files.
 
 ---
+
+## No-Code Review-Fix
+
+When the prompt identifies a No-Code Review-Fix, the task has no task branch or worktree. Edit only the backlog spec and session files named in the task context in the project root. These files are gitignored: do not commit or force-add them, and do not create a branch or worktree; a task branch would defeat the No-Code Closure at deployment. Follow the fix specification, then the handoff procedure below.
+
+## Rebase Workflow
+
+When the prompt identifies a rebase, use its Primary branch task fact as `{primary_branch}` in these commands:
+
+1. Check out the primary branch: `git checkout {primary_branch}`.
+2. Update it: `git pull origin {primary_branch}`.
+3. Rebase the task branch: `git rebase {primary_branch} task/{task_id}`.
+4. Resolve the files in conflict_report.json, mark resolutions with `git add`, then `git rebase --continue`.
+5. Run the full test suite, set the task status to Ready for Review, and hand off to verification with the rebase result in the reason. The tool carries `rebase_count` forward; do not edit handoff JSON.
 
 ## Decision Tree (For New Features/Bugs - Not Review Fixes)
 
@@ -156,7 +174,7 @@ pwsh -ExecutionPolicy Bypass \
 pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
 ```
-5. Present a 2-3 sentence summary and the exact verbatim `[NEXT SESSION COMMAND]` block from the Crucible output in a code block. Do not fabricate, paraphrase or shorten the command. Include the `-Quiet` flag if present. You run Crucible via the shell tool; do not ask the human to run it.
+5. Present a 2-3 sentence summary and the exact verbatim `[NEXT SESSION COMMAND]` block from the Crucible output in a code block. Do not fabricate, paraphrase or shorten the command. Include the `-Quiet` flag if present.
 6. Stop and wait for human confirmation. Do not begin another backlog item or adopt the next phase persona.
 
 ---
@@ -171,3 +189,7 @@ Before writing handoff.json, confirm:
 - [ ] `session_cycle_id` included in handoff
 - [ ] `task_id` in handoff matches the task I was given
 - [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2
+
+## Session End
+
+Follow the handoff and advance commands above. Present the emitted next-session command verbatim, report the outcome briefly, then stop. Do not spawn successor agents.

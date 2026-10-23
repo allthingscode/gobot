@@ -243,6 +243,13 @@ try {
     $results += Run-Test -Name "Deployment routing questions name every successor the DAG allows" -Body {
         $allowed = @((Get-PipelineValidTransitions -DeploymentRework $true)["deployment"] | Sort-Object -Unique)
         $promptLines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "prompts/deployment_prompt.md"))
+        Assert-Result -Name "deployment prompt links workflow owner" -Condition (($promptLines -join "`n").Contains('/sops/deployment.md')) -FailureMessage 'Missing workflow pointer'
+        foreach ($line in @($promptLines | Where-Object { $_ -match '(?i)^\d+\. .*successor|^- \[ \] .*rout' })) {
+            Assert-Result -Name 'any prompt routing question still names all successors' -Condition ($line -cnotmatch '\bONE\b') -FailureMessage $line
+            $named = @([regex]::Matches($line, '`([a-z]+)`') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+            Assert-StringArrayEqual -Name 'any prompt routing question still matches the DAG' -Actual $named -Expected $allowed
+        }
+        $promptLines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/deployment.md"))
         $sopLines = @(Get-Content -LiteralPath (Join-Path $REPO_ROOT "sops/deployment.md"))
         $routingLines = @(
             @{ Name = "prompt readiness question"; Lines = @($promptLines | Where-Object { $_ -match '(?i)^\d+\. .*successor' }) },

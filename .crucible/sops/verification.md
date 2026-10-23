@@ -1,5 +1,7 @@
-<!-- prompt_version: reviewer-sop-v8 -->
+<!-- prompt_version: reviewer-sop-v9 -->
 # SOP: Verification
+
+Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
 
@@ -20,6 +22,15 @@
 | Architect's output summary | `.crucible/session/{task_id}/implementation/output.md` |
 
 ---
+
+## Session Start
+
+Read the task context, incoming handoff, persona and operating manual using the resolved paths in the prompt. If task.md is missing, stop and ask the orchestrator to initialize the session.
+Echo the Cycle ID from task.md and the incoming handoff reason before following this SOP.
+
+For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist verification -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Never edit session_state.json directly.
+
+The Reviewer does not change code. Record required fixes and route through this SOP. Edit BACKLOG.md only on approval as described under Decision Logic; terminal status belongs to the Human Gate.
 
 ## Review Workflow
 
@@ -45,6 +56,8 @@ pwsh -ExecutionPolicy Bypass -File {{crucible_root}}/powershell/run-isolated-che
 ```
 
 In full mode this also runs the project's own `pre-push` hook on the task branch when `hooks.project_dir` names one. A failure there is a **BLOCKER**: the push after the Human Gate would be refused. Quote the hook's output in the finding.
+
+**Cross-platform caveat:** The isolated checker exercises only the host OS. A `[cross-platform]` advisory means other CI platforms were not exercised. Inspect OS-sensitive tests for platform-independent assertions; origin CI supplies the multi-OS evidence.
 
 Verify that package manifests/lockfiles are tidy and have no drift (e.g. `go mod tidy -diff` for Go, or equivalent lockfile checks).
 
@@ -102,6 +115,10 @@ Format findings as:
 
 ---
 
+## Post-Rebase Verification
+
+When the prompt identifies a post-rebase review, confirm the conflicts in conflict_report.json are resolved and run the full regression review. Pay particular attention to semantic conflicts Git cannot find. If `rebase_count` is three or more and conflicts persist, escalate to the human.
+
 ## Decision Logic
 
 ### If APPROVED (zero BLOCKERs)
@@ -152,8 +169,11 @@ pwsh -ExecutionPolicy Bypass \
 
 When the incoming handoff has `source_phase: grooming` and **no** Architect worktree exists (i.e., this is a pure data-grooming pass with no implementation), run this abbreviated checklist instead of the full code-review workflow above. The same applies to the re-review after a no-code review-fix on such a task: the handoff comes from `implementation`, but there is still no worktree or task branch, and the prompt says so under `## No-Code Re-Review`. Do not run `run-isolated-checks.ps1` there; it needs a worktree.
 
+Do not run run-isolated-checks.ps1 for a No-Code Re-Review and do not create a branch or worktree. The backlog validator is the automated check. Also confirm every fix in the implementation task.md named by the prompt was made.
+
 ### Stub-Only Close-Out Checklist
 1. **BACKLOG.md structure** - run `{{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"` and confirm it exits 0.
+   Paste the validator output into your session response. If the exit code is non-zero, you MUST reject the handoff: set `review_decision: CHANGES_REQUESTED` and `acceptance_criteria_met: false` in the review report, then write a handoff to `implementation` using the changes-requested procedure above so the backlog structure can be repaired.
 2. **Stub-row convention** - verify every new stub row has: `item_id`, `title`, `type`, `priority`, `status: Stub`, and a link to its spec file.
 3. **Parent-task closure** - confirm the parent task's spec frontmatter `status` matches its BACKLOG.md row, and that the closure reason is recorded in the spec.
 4. **No orphaned specs** - every stub row in BACKLOG.md has a corresponding spec file in `backlog/{type}/active/`.
@@ -177,3 +197,15 @@ Before writing handoff.json, confirm:
 - [ ] If APPROVED: backlog status updated to `Ready for Deploy`
 - [ ] `task_id` in handoff matches the task I was given
 - [ ] If the diff renames or relocates a path, file, key, or exported identifier: no unchanged consumer of the old name remains unless the spec lists it under `## Out of Scope`
+
+- [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2
+
+## Session End
+
+After writing the handoff, advance the pipeline:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet
+```
+
+Present the emitted next-session command verbatim, report the outcome briefly, then stop. Do not spawn successor agents.
