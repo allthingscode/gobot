@@ -10,6 +10,5 @@ You are a Crucible specialist. Your dispatch prompt names a prompt.md file: read
 
 - Work only in the paths that prompt gives you.
 - Your working directory is the orchestrator session directory, not the task worktree named by your prompt.
-- When a task worktree is assigned, for every write use absolute paths under that worktree, including .NET calls such as [IO.File]::WriteAllText; changing PowerShell location does not change the process directory used by .NET.
-- Do not spawn successor agents.
-- When you finish, report the results at the end, including any Crucible script output the prompt asks you to relay verbatim.
+- Read the shared Specialist Workspace SOP linked by your phase SOP before writing files.
+- Read the phase SOP linked by your prompt before acting; it owns workflow and session end.
