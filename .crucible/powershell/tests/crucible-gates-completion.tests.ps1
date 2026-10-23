@@ -591,6 +591,39 @@ try {
         Assert-Result -Name "D25 normalized to relative" -Condition ($savedArtifact -eq "docs/METRICS.md") -FailureMessage "expected docs/METRICS.md, got $savedArtifact"
     }
 
+    $results += Run-Test -Name "I8: stale-lock cleanup for F-1 keeps F-10's lock and other phases" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-stale-lock-test"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-1"
+        $lockDir = Join-Path $caseRoot ".crucible/locks"
+        New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
+        $own = Join-Path $lockDir "F-1_verification.lock"
+        $other = Join-Path $lockDir "F-10_verification.lock"
+        $otherPhase = Join-Path $lockDir "F-1_implementation.lock"
+        $tail = Join-Path $lockDir "XF-1_verification.lock"
+        "own" | Set-Content -LiteralPath $own -Encoding UTF8
+        "other" | Set-Content -LiteralPath $other -Encoding UTF8
+        "phase" | Set-Content -LiteralPath $otherPhase -Encoding UTF8
+        "tail" | Set-Content -LiteralPath $tail -Encoding UTF8
+        $otherBefore = (Get-FileHash -LiteralPath $other -Algorithm SHA256).Hash
+
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-1-20260530T120000Z.json"
+        $handoffObj = @{ task_id = "F-1"; source_phase = "implementation"; target_phase = "verification"; cumulative_handoff_count = 1; reason = "lock test" }
+        $handoffObj | ConvertTo-Json | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+        $ctx.RepoRoot = $caseRoot
+
+        Push-Location $caseRoot
+        try { Normalize-CrucibleInputState -Context $ctx } finally { Pop-Location }
+
+        Assert-Result -Name "own stale lock removed" -Condition (-not (Test-Path -LiteralPath $own)) -FailureMessage "F-1 verification lock should be removed"
+        Assert-Result -Name "F-10 lock kept" -Condition ((Test-Path -LiteralPath $other) -and (Get-FileHash -LiteralPath $other -Algorithm SHA256).Hash -eq $otherBefore) -FailureMessage "F-10's lock was deleted or changed by a cleanup for F-1"
+        Assert-Result -Name "other phase lock kept" -Condition (Test-Path -LiteralPath $otherPhase) -FailureMessage "F-1 implementation lock must survive a verification cleanup"
+        Assert-Result -Name "suffix-colliding lock kept" -Condition (Test-Path -LiteralPath $tail) -FailureMessage "XF-1 lock must survive a cleanup for F-1"
+    }
+
     $results += Run-Test -Name "Checklist gate STOP does not emit degraded event and is actionable" -Body {
         $caseRoot = Join-Path $tempRoot "checklist-actionable-test"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
@@ -771,6 +804,85 @@ Complete-CrucibleSourceSession -Context `$ctx
         Assert-Result -Name "unreadable decision still enforces backlog finalization" -Condition ($exitCode -eq 2) -FailureMessage ("an unfinalized backlog passed the source-session finalization gate. Exit " + $exitCode + ". Output: " + $outputText)
         Assert-Result -Name "unreadable decision names the finalization failure" -Condition ($outputText -match "did not finalize the backlog") -FailureMessage ("expected the finalization reason. Output: " + $outputText)
         Assert-Result -Name "unreadable finalization decision is reported as unverifiable" -Condition ($logContent -match '"kind":"unreadable_gate_decision"' -and $logContent -match '"outcome":"unverifiable"') -FailureMessage ("expected an unreadable_gate_decision degraded event. Log: " + $logContent)
+    }
+
+    function Invoke-FinalizationGateCase {
+        param([string]$CaseName, [string]$TaskId, [string]$BacklogRows, [bool]$ArchivedProduction = $false)
+        $caseRoot = Join-Path $tempRoot $CaseName
+        $sessionDir = Join-Path $caseRoot ".crucible/session"
+        $backlogDir = Join-Path $caseRoot ".crucible/backlog"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        $logFile = Join-Path $sessionDir ($TaskId + "/pipeline.log.jsonl")
+        New-Item -ItemType Directory -Path $backlogDir, $gateDir, (Split-Path -Parent $logFile) -Force | Out-Null
+        $header = "# Backlog`n`n## Active Items`n`n| ID | Priority | Status | Title | Target |`n|---|---|---|---|---|`n"
+        [System.IO.File]::WriteAllText((Join-Path $backlogDir "BACKLOG.md"), ($header + $BacklogRows + "`n"), (New-Object System.Text.UTF8Encoding $false))
+        Set-Content -LiteralPath (Join-Path $gateDir ($TaskId + "-20260902T120000Z.json")) -Value ('{"task_id":"' + $TaskId + '","outcome":"accepted"}') -Encoding UTF8
+        if ($ArchivedProduction) {
+            $archDir = Join-Path $backlogDir "features/archived"
+            New-Item -ItemType Directory -Path $archDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $archDir ($TaskId + "_test.md")) -Value "---`nitem_id: `"$TaskId`"`nstatus: `"Production`"`n---`n# $TaskId" -Encoding UTF8
+        }
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            `$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
+            `$Quiet = `$true
+            Set-Location '$($caseRoot.Replace("'", "''"))'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$($caseRoot.Replace("'", "''"))'
+                SessionDir = '$($sessionDir.Replace("'", "''"))'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$(Join-Path $sessionDir "global/circuit_breakers.jsonl")'
+                Quiet = `$true
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = '$TaskId'
+                    source_phase = 'deployment'
+                    target_phase = 'done'
+                    cumulative_handoff_count = 2
+                    budget_tier = 'low'
+                }
+            }
+            Complete-CrucibleSourceSession -Context `$ctx
+"@ 2>&1)
+        return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = ($output -join "`n") }
+    }
+
+    $results += Run-Test -Name "I8: deployment-to-done finalization fails closed without an exact backlog row" -Body {
+        $prefixOnly = Invoke-FinalizationGateCase -CaseName "i8-final-prefix" -TaskId "F-1" -BacklogRows "| [F-10](features/active/F-10_test.md) | P2 | Ready for Deploy | Test | Operator |"
+        Assert-Result -Name "prefix-only row refuses" -Condition ($prefixOnly.ExitCode -eq 2 -and $prefixOnly.Text -match "no exact row for F-1") -FailureMessage ("expected exit 2 naming the missing exact row. Exit " + $prefixOnly.ExitCode + ". Output: " + $prefixOnly.Text)
+        Assert-Result -Name "refusal names the remedy" -Condition ($prefixOnly.Text -match "Repair the row") -FailureMessage ("expected a remedy. Output: " + $prefixOnly.Text)
+
+        $malformed = Invoke-FinalizationGateCase -CaseName "i8-final-malformed" -TaskId "F-1" -BacklogRows "| **F-1** | P2 | Production | Test | Operator |"
+        Assert-Result -Name "malformed row refuses" -Condition ($malformed.ExitCode -eq 2 -and $malformed.Text -match "no exact row for F-1") -FailureMessage ("expected exit 2 for a malformed row. Exit " + $malformed.ExitCode + ". Output: " + $malformed.Text)
+
+        $open = Invoke-FinalizationGateCase -CaseName "i8-final-open" -TaskId "F-1" -BacklogRows "| [F-1](features/active/F-1_test.md) | P2 | Ready for Deploy | Test | Operator |"
+        Assert-Result -Name "exact non-terminal row still stops" -Condition ($open.ExitCode -eq 2 -and $open.Text -match "did not finalize the backlog") -FailureMessage ("expected the finalization stop. Exit " + $open.ExitCode + ". Output: " + $open.Text)
+
+        $done = Invoke-FinalizationGateCase -CaseName "i8-final-done" -TaskId "F-1" -BacklogRows "| [F-1](features/archived/F-1_test.md) | P2 | Production | Test | Operator |" -ArchivedProduction $true
+        Assert-Result -Name "exact terminal row advances" -Condition ($done.ExitCode -eq 0 -and $done.Text -notmatch "STOP") -FailureMessage ("expected exit 0. Exit " + $done.ExitCode + ". Output: " + $done.Text)
+    }
+
+    $results += Run-Test -Name "I8: stale-lock cleanup keeps whole-identifier semantics with separators" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-lock-separators"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-1"
+        $lockDir = Join-Path $caseRoot ".crucible/locks"
+        New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
+        $removed = @("F-1-verification.lock", "lock-F-1_verification.lock")
+        $kept = @("F-10_verification.lock", "F-1a_verification.lock", "F-1.2_verification.lock")
+        foreach ($n in ($removed + $kept)) { "x" | Set-Content -LiteralPath (Join-Path $lockDir $n) -Encoding UTF8 }
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-1-20260530T120000Z.json"
+        $handoffObj = @{ task_id = "F-1"; source_phase = "implementation"; target_phase = "verification"; cumulative_handoff_count = 1; reason = "lock test" }
+        $handoffObj | ConvertTo-Json | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+        $ctx.RepoRoot = $caseRoot
+        Push-Location $caseRoot
+        try { Normalize-CrucibleInputState -Context $ctx } finally { Pop-Location }
+        foreach ($n in $removed) { Assert-Result -Name "$n removed" -Condition (-not (Test-Path -LiteralPath (Join-Path $lockDir $n))) -FailureMessage "$n is a lock for F-1 verification and must be cleaned" }
+        foreach ($n in $kept) { Assert-Result -Name "$n kept" -Condition (Test-Path -LiteralPath (Join-Path $lockDir $n)) -FailureMessage "$n belongs to another task and must survive" }
     }
 
     $results += Run-Test -Name "Workspace cleanliness gate: start-phase probe and deploy-phase block with classification" -Body {

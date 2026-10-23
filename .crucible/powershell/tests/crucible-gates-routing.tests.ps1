@@ -258,6 +258,55 @@ Write-Host "GATE_COMPLETED"
         Assert-Result -Name "No warning for terminal task F-104" -Condition ($logText -notmatch "F-104") -FailureMessage "unexpected warning for terminal task F-104, got: $logText"
     }
 
+    $results += Run-Test -Name "I8: Groomer exclusion for R-1 keeps R-10's session visible" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-groomer-test"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "R-1"
+        $ownDir = Join-Path $ctx.SessionDir "R-1/grooming"
+        $otherDir = Join-Path $ctx.SessionDir "R-10/grooming"
+        New-Item -ItemType Directory -Path $ownDir, $otherDir -Force | Out-Null
+        "task" | Set-Content -Path (Join-Path $ownDir "task.md") -Encoding UTF8
+        "task" | Set-Content -Path (Join-Path $otherDir "task.md") -Encoding UTF8
+        @"
+| ID | Title | Status |
+|---|---|---|
+| [R-1](features/active/R-1_test.md) | Test 1 | Ready |
+| [R-10](features/active/R-10_test.md) | Test 10 | Ready |
+"@ | Set-Content -Path (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+        $ctx.Handoff = [PSCustomObject]@{ task_id = "R-1"; source_phase = "research"; target_phase = "grooming" }
+        $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
+        $ctx.IsBootstrap = $false
+
+        $logText = (& { Resolve-CrucibleTransition -Context $ctx } 6>&1) -join "`n"
+
+        Assert-Result -Name "R-10 session is reported" -Condition ($logText -match "R-10[/\\]grooming[/\\]task\.md") -FailureMessage "R-1 excluded R-10's grooming session. Output: $logText"
+        Assert-Result -Name "R-1 own session is excluded" -Condition ($logText -notmatch "[/\\]R-1[/\\]grooming") -FailureMessage "R-1 reported its own session. Output: $logText"
+    }
+
+    $results += Run-Test -Name "I8: Groomer exclusion with an empty task ID skips only the root session" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-groomer-empty-id"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId ""
+        $rootDir = Join-Path $ctx.SessionDir "grooming"
+        $otherDir = Join-Path $ctx.SessionDir "R-10/grooming"
+        New-Item -ItemType Directory -Path $rootDir, $otherDir -Force | Out-Null
+        "task" | Set-Content -Path (Join-Path $rootDir "task.md") -Encoding UTF8
+        "task" | Set-Content -Path (Join-Path $otherDir "task.md") -Encoding UTF8
+        @"
+| ID | Title | Status |
+|---|---|---|
+| [R-10](features/active/R-10_test.md) | Test 10 | Ready |
+"@ | Set-Content -Path (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+        $ctx.Handoff = [PSCustomObject]@{ task_id = ""; source_phase = "research"; target_phase = "grooming" }
+        $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
+        $ctx.IsBootstrap = $false
+
+        $logText = (& { Resolve-CrucibleTransition -Context $ctx } 6>&1) -join "`n"
+
+        Assert-Result -Name "other task session is reported" -Condition ($logText -match "R-10[/\\]grooming[/\\]task\.md") -FailureMessage "expected R-10 reported. Output: $logText"
+        Assert-Result -Name "root session is the current one and is excluded" -Condition ($logText -notmatch "session[/\\]grooming[/\\]task\.md") -FailureMessage "the current root session was reported as concurrent. Output: $logText"
+    }
+
     $results += Run-Test -Name "D39b: a long-untouched Groomer session is reported as stale, not as concurrent" -Body {
         # Measured on the dogfood adopter 2026-09-05: the only session this check warned
         # about had last been written 2026-08-03. Presence of a task.md is not evidence

@@ -613,7 +613,17 @@ function Complete-CrucibleSourceSession {
             $backlogPath = Join-Path $backlogDir "BACKLOG.md"
             if (Test-Path -LiteralPath $backlogPath) {
                 $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-                if ($backlogContent -match [regex]::Escape($handoff.task_id)) {
+                $hasExactBacklogRow = @($backlogContent -split "`r?`n" | Where-Object { Test-BacklogTaskRow -Line $_ -TaskId $handoff.task_id }).Count -gt 0
+                if (-not $hasExactBacklogRow) {
+                    # Fail closed: an ID only in prose, a prefix of another row, or a malformed row
+                    # cannot show the task was finalized. Items 281 and 282, I8 and I11.
+                    Write-Host ("[STOP] Quality gate failed: BACKLOG.md has no exact row for " + $handoff.task_id + ". A row must start with | " + $handoff.task_id + " | or | [" + $handoff.task_id + "](spec path) |. Repair the row in BACKLOG.md, then rerun this handoff.") -ForegroundColor Red
+                    Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                        -Outcome "retry_required" -Notes "Deployment finalization gate found no exact BACKLOG.md row" `
+                        -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                    exit 2
+                }
+                if ($hasExactBacklogRow) {
                     # Determine if the human gate has already passed.
                     # We only enforce this finalization gate when transitioning to done (which requires the gate to have passed).
                     $gateAlreadyPassed = $false
@@ -1790,12 +1800,18 @@ function Resolve-CrucibleTransition {
                 if ($fullName -notmatch "[/\\]grooming[/\\]task\.md$") {
                     return $false
                 }
-                # 3. Exclude current task ID
-                if ($fullName -match [regex]::Escape($handoff.task_id)) {
+                # 3. Exclude current task ID: the session directory name must equal it. Item 281.
+                $otherTaskId = Split-Path -Parent (Split-Path -Parent $fullName) | Split-Path -Leaf
+                $sessionOfFile = Split-Path -Parent (Split-Path -Parent $fullName)
+                $isCurrentSession = if ([string]::IsNullOrEmpty($handoff.task_id)) {
+                    [IO.Path]::GetFullPath($sessionOfFile).TrimEnd([char]92, [char]47) -eq [IO.Path]::GetFullPath($sessionDir).TrimEnd([char]92, [char]47)
+                } else {
+                    $otherTaskId -eq $handoff.task_id
+                }
+                if ($isCurrentSession) {
                     return $false
                 }
                 # 4. Exclude tasks whose BACKLOG row is terminal (Production/Resolved)
-                $otherTaskId = Split-Path -Parent (Split-Path -Parent $fullName) | Split-Path -Leaf
                 if ([string]::IsNullOrWhiteSpace($otherTaskId)) {
                     return $false
                 }

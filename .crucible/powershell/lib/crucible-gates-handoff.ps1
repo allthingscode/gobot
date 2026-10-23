@@ -586,6 +586,20 @@ function Invoke-HandoffPreflightValidation {
     }
 }
 
+# A lock belongs to a task and phase only when both appear in its name as whole
+# identifiers, task first. A bare substring match let F-1 delete F-10's locks. Item 282.
+function Test-LockNameForTaskPhase {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$TaskId,
+        [Parameter(Mandatory = $true)][string]$Phase
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TaskId) -or [string]::IsNullOrWhiteSpace($Phase)) { return $false }
+    $pattern = '(?<![A-Za-z0-9])' + [regex]::Escape($TaskId) + '(?![A-Za-z0-9]|\.[0-9]).*(?<![A-Za-z0-9])' + [regex]::Escape($Phase) + '(?![A-Za-z0-9])'
+    return ($Name -match $pattern)
+}
+
 function Normalize-CrucibleInputState {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
@@ -667,7 +681,7 @@ function Normalize-CrucibleInputState {
     # Clear stale locks and scratchpads for the target phase to prevent "zombie state"
     $LOCK_DIR = ".crucible/locks"
     if (Test-Path $LOCK_DIR) {
-        $staleLocks = Get-ChildItem -Path $LOCK_DIR -Filter ("*" + $handoff.task_id + "*" + $handoff.target_phase + "*")
+        $staleLocks = @(Get-ChildItem -Path $LOCK_DIR -File | Where-Object { Test-LockNameForTaskPhase -Name $_.Name -TaskId $handoff.task_id -Phase $handoff.target_phase })
         if ($staleLocks) {
             Write-Quiet ("[CLEANUP] Removing stale locks for " + $handoff.task_id + " " + $handoff.target_phase + "...") -ForegroundColor Cyan
             $staleLocks | Remove-Item -Force
