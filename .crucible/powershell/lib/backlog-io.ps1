@@ -105,6 +105,22 @@ function Get-BacklogSpecFiles {
     }
 }
 
+# Findings use the same exact filename forms as specs. All research-directory readers
+# return every match in ordinal filename order, independent of mtimes. Item 257, I8/I13.
+function Get-ResearchFindingsArtifact {
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskId,
+        [Parameter(Mandatory = $true)][string]$ResearchDirectory
+    )
+
+    $files = @(Get-BacklogSpecFiles -Task $TaskId -Directory $ResearchDirectory)
+    $names = [string[]]@($files | ForEach-Object { $_.Name })
+    [Array]::Sort($names, [StringComparer]::Ordinal)
+    foreach ($name in $names) {
+        $files | Where-Object { $_.Name -ceq $name }
+    }
+}
+
 # The one matcher of a BACKLOG.md or ARCHIVED.md row by task ID: the first cell is the ID
 # or a link whose text is the ID (item 227). Find, edit and delete all ask it. Item 245.
 function Test-BacklogTaskRow {

@@ -40,6 +40,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/time.ps1")
 . (Join-Path $PSScriptRoot "lib/project-root.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/backlog-io.ps1")
 
 $ErrorActionPreference = "Stop"
 
@@ -83,8 +84,12 @@ if (-not (Test-Path -LiteralPath $researchSessionDir)) {
 $researchDir = Join-Path $resolvedCrucibleRoot "research"
 $findingsRel = "$CrucibleRoot/research/<findings artifact>"
 if (Test-Path -LiteralPath $researchDir) {
-    $artifact = Get-ChildItem -LiteralPath $researchDir -Filter ($TaskId + "*.md") -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($artifact) { $findingsRel = "$CrucibleRoot/research/$($artifact.Name)" }
+    $artifacts = @(Get-ResearchFindingsArtifact -TaskId $TaskId -ResearchDirectory $researchDir)
+    if ($artifacts.Count -gt 1) {
+        [Console]::Error.WriteLine("Multiple exact findings artifacts for ${TaskId}:`n" + (($artifacts | ForEach-Object { $_.FullName }) -join "`n") + "`nKeep one exact findings file (move or rename the others), then record the research gate again.")
+        exit 1
+    }
+    if ($artifacts.Count -eq 1) { $findingsRel = "$CrucibleRoot/research/$($artifacts[0].Name)" }
 }
 
 $timestamp = Get-UtcFileTimestamp

@@ -567,6 +567,11 @@ try {
     Pop-Location
 }
 "@
+        # Rejection's rework dispatch requires an exact backlog row (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-999 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
         $scriptContentReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         $outputLines2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
@@ -841,6 +846,12 @@ try {
         git -C $localRepo checkout master 2>$null | Out-Null
         git -C $localRepo merge --no-edit task/F-100 2>$null | Out-Null
 
+        # Rejection's rework dispatch requires an exact backlog row (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-100 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
+
         # Remove task branch first to test restoration
         git -C $localRepo branch -D task/F-100 2>$null | Out-Null
 
@@ -932,6 +943,12 @@ try {
         New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
 
         # Run unwind human gate rejected
+        # A permitted rejection needs a restorable task before any unwind (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-998 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
+
         $scriptPath = Join-Path $caseRoot "run-d22-followup.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $scriptReject = @"
@@ -1019,6 +1036,12 @@ finally {
         New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
 
         # Run unwind human gate rejected
+        # A permitted rejection needs a restorable task before any unwind (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-997 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
+
         $scriptPath = Join-Path $caseRoot "run-d52-unwind.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $scriptReject = @"
@@ -1169,6 +1192,12 @@ try {
 
         $sessionDir = Join-Path $localRepo ".crucible/session"
         New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+
+        # A permitted rejection needs a restorable task before any unwind (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-779 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
 
         $scriptPath = Join-Path $caseRoot "run-new-flow-reject.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")

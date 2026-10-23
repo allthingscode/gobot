@@ -1476,7 +1476,7 @@ function Get-ResearchMisrouteAdvisory {
                 $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $ProjectRoot $crucibleRoot }
                 $researchDir = Join-Path $resolvedCrucibleRoot "research"
                 if (Test-Path -LiteralPath $researchDir) {
-                    $artifact = Get-ChildItem -LiteralPath $researchDir -Filter ($Handoff.task_id + "*.md") -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                    $artifact = Get-ResearchFindingsArtifact -TaskId $Handoff.task_id -ResearchDirectory $researchDir
                     if ($artifact) { $hasResearchLineage = $true }
                 }
             }

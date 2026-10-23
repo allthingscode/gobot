@@ -268,11 +268,38 @@ function Assert-GateReason {
     }
 }
 
+function Assert-HumanGateReworkAvailable {
+    # Restore can synthesize the row from a spec, but needs BACKLOG.md to exist.
+    param([string]$TaskId, [string]$ProjectRoot)
+    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
+    $backlogPath = Join-Path $backlogDir "BACKLOG.md"
+    if (-not (Test-Path -LiteralPath $backlogPath)) {
+        Write-Host "[STOP] Backlog file $backlogPath is missing for rework of ${TaskId}. Add BACKLOG.md and an exact ID row or active/archived spec, then reject again." -ForegroundColor Red
+        exit 1
+    }
+    try {
+        foreach ($line in (Get-Content -LiteralPath $backlogPath -Encoding UTF8 -ErrorAction Stop)) {
+            if (Test-BacklogTaskRow -Line $line -TaskId $TaskId) { return }
+        }
+    } catch {
+        Write-Host "[STOP] Cannot read backlog for rework of ${TaskId}: $($_.Exception.Message). Make $backlogPath readable, then reject again." -ForegroundColor Red
+        exit 1
+    }
+    foreach ($type in @('features', 'bugs', 'chores')) {
+        foreach ($state in @('active', 'archived')) {
+            if (@(Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir "$type/$state")).Count -gt 0) { return }
+        }
+    }
+    Write-Host "[STOP] Task $TaskId has no exact ID row in $backlogPath or active/archived spec. Add the row or spec, then reject again." -ForegroundColor Red
+    exit 1
+}
+
 function Assert-HumanGateDecisionSafe {
     # Run before either intake path records reject/abandon. The action repeats the
     # guard for direct callers and immediately before the checkout/reset.
     param([string]$TaskId, [string]$Outcome, [string]$SourcePhase, [string]$ProjectRoot)
     if ($SourcePhase -eq 'grooming' -or $Outcome -notin @('rejected', 'abandoned')) { return }
+    if ($Outcome -eq 'rejected') { Assert-HumanGateReworkAvailable -TaskId $TaskId -ProjectRoot $ProjectRoot }
     $primary = Get-ConfiguredPrimaryBranch -ProjectRoot $ProjectRoot
     $unwind = Get-HumanGateRejectUnwind -TaskId $TaskId -PrimaryBranch $primary
     $target = if ($unwind.HeadIsTaskMerge) { $unwind.UnwindTarget } else { '' }
@@ -791,6 +818,7 @@ function Invoke-HumanGateRejectAbandon {
         $Handoff = $null
     )
     if ($SourcePhase -ne "grooming") {
+        if ($Outcome -eq "rejected") { Assert-HumanGateReworkAvailable -TaskId $TaskId -ProjectRoot $ProjectRoot }
         $unwind = Get-HumanGateRejectUnwind -TaskId $TaskId -PrimaryBranch $PrimaryBranch
         $target = if ($unwind.HeadIsTaskMerge) { $unwind.UnwindTarget } else { '' }
         $null = Test-GitDiscardSafe -Directory $ProjectRoot -Operation "$Outcome decision unwind" -AllowConfiguredRuntime -IncludeUntracked:$false -ResetTarget $target -Refuse
@@ -834,11 +862,16 @@ function Invoke-HumanGateRejectAbandon {
             $hasTaskInBacklog = $false
             if (Test-Path -LiteralPath $backlogPath) {
                 try {
-                    $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-                    if ($backlogContent -match [regex]::Escape($TaskId)) {
-                        $hasTaskInBacklog = $true
+                    foreach ($line in (Get-Content -LiteralPath $backlogPath -Encoding UTF8 -ErrorAction Stop)) {
+                        if (Test-BacklogTaskRow -Line $line -TaskId $TaskId) {
+                            $hasTaskInBacklog = $true
+                            break
+                        }
                     }
-                } catch {}
+                } catch {
+                    Write-Host "[STOP] Cannot read backlog for rework of ${TaskId}: $($_.Exception.Message)" -ForegroundColor Red
+                    exit 1
+                }
             }
 
             if ($hasTaskInBacklog) {
@@ -889,7 +922,9 @@ function Invoke-HumanGateRejectAbandon {
                     & $generatorScript @handoffParams
                 }
             } else {
-                Write-Quiet "[HUMAN GATE] Task $TaskId not found in backlog; skipping handoff generation."
+                $problem = if (Test-Path -LiteralPath $backlogPath) { "Task $TaskId has no exact ID row in $backlogPath" } else { "Backlog file $backlogPath is missing" }
+                Write-Host "[STOP] ${problem}; refusing rework handoff generation. Add BACKLOG.md and the row or spec, then reject again." -ForegroundColor Red
+                exit 1
             }
         }
     }
@@ -1104,8 +1139,8 @@ function Invoke-HumanGate {
     }
 
     # Resolve a concrete review pointer for a No-Code Closure. Prefer a
-    # findings/.md artifact named in the handoff; else the newest research/.md file
-    # matching the task id; else fall back to the archived spec.
+    # findings/.md artifact named in the handoff; else all exact research matches
+    # in ordinal filename order; else the archived spec.
     $noCodeClosureReviewDoc = ""
     $reviewDocCandidates = @()
     if ($handoff.PSObject.Properties["artifacts"] -and $handoff.artifacts) {
@@ -1120,10 +1155,11 @@ function Invoke-HumanGate {
     if ([string]::IsNullOrEmpty($noCodeClosureReviewDoc) -and -not [string]::IsNullOrEmpty($crucibleRoot)) {
         $noCodeClosureResearchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
         if (Test-Path -LiteralPath $noCodeClosureResearchDir) {
-            $noCodeClosureFound = Get-ChildItem -LiteralPath $noCodeClosureResearchDir -Filter "$($handoff.task_id)*.md" -File -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            $noCodeClosureFound = Get-ResearchFindingsArtifact -TaskId $handoff.task_id -ResearchDirectory $noCodeClosureResearchDir
             if ($noCodeClosureFound) {
-                $noCodeClosureReviewDoc = ((Join-Path $crucibleRoot "research") + "/" + $noCodeClosureFound.Name) -replace '\\', '/'
+                $noCodeClosureReviewDoc = (@($noCodeClosureFound | ForEach-Object {
+                    ((Join-Path $crucibleRoot "research") + "/" + $_.Name) -replace '\\', '/'
+                }) -join ', ')
             }
         }
     }

@@ -12,7 +12,7 @@ try {
             foreach ($dirty in @($true, $false)) {
                 $results += Run-Test -Name "$outcome via $inputPath dirty=$dirty" -Body {
                     $root = Join-Path $fixture "$outcome-$inputPath-$dirty"
-                    New-Item -ItemType Directory -Path (Join-Path $root '.crucible'), (Join-Path $root 'live/session'), (Join-Path $root 'live/workspaces') -Force | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $root '.crucible'), (Join-Path $root 'live/session/global/gate_decisions'), (Join-Path $root 'live/workspaces') -Force | Out-Null
                     @'
 project:
   default_branch: trunk
@@ -22,6 +22,12 @@ paths:
 '@ | Set-Content -LiteralPath (Join-Path $root '.crucible/config.yaml')
                     'original' | Set-Content -LiteralPath (Join-Path $root 'human notes.txt')
                     'runtime' | Set-Content -LiteralPath (Join-Path $root 'live/session/state.txt')
+                    # A permitted rejection proceeds to rework, which requires an exact
+                    # backlog row (item 250). Commit it so the unwind retains it.
+                    $backlog = Join-Path $root '.crucible/backlog'
+                    New-Item -ItemType Directory -Path $backlog -Force | Out-Null
+                    '| F-253 | P2 | In Progress | Rework | Architect |' |
+                        Set-Content -LiteralPath (Join-Path $backlog 'BACKLOG.md') -Encoding utf8NoBOM
                     git -C $root init -q -b trunk
                     git -C $root add .
                     git -C $root commit -qm base
@@ -36,7 +42,7 @@ paths:
                     if ($dirty) { 'precious human edit' | Set-Content -LiteralPath (Join-Path $root 'human notes.txt') }
                     $runner = Join-Path $fixture 'run.ps1'
                     @'
-param($Lib, $Root, $Outcome, $InputPath)
+param($Lib, $Root, $Outcome, $InputPath, $Dirty)
 $ErrorActionPreference = 'Stop'
 $Quiet = $true
 . $Lib
@@ -46,6 +52,16 @@ function Restore-BacklogTask { 'restore' | Set-Content -LiteralPath (Join-Path $
 function Invoke-AbandonedBacklogTaskArchive { 'archive' | Set-Content -LiteralPath (Join-Path $Root 'mutated.txt') }
 function Restore-ImplementationWorktree {}
 if ($InputPath -eq 'action') {
+    if ($Outcome -eq 'rejected' -and $Dirty -eq 'False') {
+        # Direct action callers supply the decision that intake normally persists.
+        # The real rework writer now runs, so give this permitted path its authority.
+        $ctx = @{
+            SessionDir = (Join-Path $Root 'live/session')
+            Handoff = [pscustomobject]@{ task_id = 'F-253'; source_phase = 'deployment' }
+        }
+        $decision = [pscustomobject]@{ outcome = 'rejected'; reason = 'The implementation needs revision' }
+        Write-HumanGateDecision -Context $ctx -Decision $decision -ProjectRoot $Root -SessionCycleId test
+    }
     Invoke-HumanGateAction -TaskId F-253 -Outcome $Outcome -ProjectRoot $Root -LogFile unused -CircuitBreakerHistoryFile unused
 } else {
     $session = Join-Path $Root 'live/session'
@@ -65,7 +81,7 @@ if ($InputPath -eq 'action') {
     Invoke-HumanGate -Context $ctx
 }
 '@ | Set-Content -LiteralPath $runner
-                    $run = Invoke-ExternalCommand -Command { & (Get-PwshCommand) -NoProfile -File $runner (Join-Path $repoRoot 'powershell/crucible-lib.ps1') $root $outcome $inputPath }
+                    $run = Invoke-ExternalCommand -Command { & (Get-PwshCommand) -NoProfile -File $runner (Join-Path $repoRoot 'powershell/crucible-lib.ps1') $root $outcome $inputPath $dirty.ToString() }
                     $head = (git -C $root rev-parse HEAD).Trim()
                     if ($dirty) {
                         Assert-Result -Name 'planted edit survives' -Condition ((Get-Content -LiteralPath (Join-Path $root 'human notes.txt') -Raw).Trim() -eq 'precious human edit') -FailureMessage $run.Output
