@@ -193,7 +193,15 @@ function Invoke-HumanGateMerge {
         if ($artifacts.Count -gt 0) {
             $handoffParams["Artifacts"] = @($artifacts)
         }
+        $global:LASTEXITCODE = 0
         & $HandoffScript @handoffParams | Out-Null
+        if ($LASTEXITCODE -eq 2) {
+            # The generator refused (exit 2, I11): no rework was queued, so claim none. The
+            # premature accept goes so a retry is not blocked, as in the unsafe-worktree exit above.
+            try { & $removePrematureAccept } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
+            Write-Host "[STOP] The rework handoff for ${TaskId} was refused, so no rework was queued. Fix the cause named above, then run the gate again." -ForegroundColor Red
+            exit 2
+        }
     }
     & $removePrematureAccept
     return "rework"
@@ -292,6 +300,28 @@ function Assert-HumanGateReworkAvailable {
     }
     Write-Host "[STOP] Task $TaskId has no exact ID row in $backlogPath or active/archived spec. Add the row or spec, then reject again." -ForegroundColor Red
     exit 1
+}
+
+function Get-HumanGateReworkRecoveryCommand {
+    # The command that finishes a rejection whose rework handoff did not get written: the
+    # same parameters the normal rejection passes, with the incremented strike count.
+    param([string]$TaskId, [string]$ProjectRoot, [string]$GateReason, $Handoff = $null)
+    $strike = 1
+    $cycle = ""
+    $artifacts = @()
+    if ($null -ne $Handoff) {
+        if ($Handoff.PSObject.Properties["review_strike_count"]) { $strike = [int]$Handoff.review_strike_count + 1 }
+        if ($Handoff.PSObject.Properties["session_cycle_id"]) { $cycle = [string]$Handoff.session_cycle_id }
+        elseif ($Handoff.PSObject.Properties["cycle_id"]) { $cycle = [string]$Handoff.cycle_id }
+        if ($Handoff.PSObject.Properties["artifacts"]) { $artifacts = @($Handoff.artifacts) }
+    }
+    $reason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "Deployment rejected. Rework requested." } else { "Deployment rejected: $GateReason" }
+    $parameters = [ordered]@{ TaskId = $TaskId; Source = "deployment"; Target = "implementation"; Reason = $reason; ReviewStrikeCount = [string]$strike; ProjectRoot = $ProjectRoot }
+    if (-not [string]::IsNullOrEmpty($cycle)) { $parameters["SessionCycleId"] = $cycle }
+    # pwsh -File binds a list only as one comma-delimited argument, which new-handoff.ps1 splits.
+    if ($artifacts.Count -gt 0) { $parameters["Artifacts"] = (@($artifacts) -join ",") }
+    $command = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters $parameters -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot) -Invoker "pwsh -NoProfile -ExecutionPolicy Bypass -File"
+    return $command
 }
 
 function Assert-HumanGateDecisionSafe {
@@ -869,7 +899,7 @@ function Invoke-HumanGateRejectAbandon {
                         }
                     }
                 } catch {
-                    Write-Host "[STOP] Cannot read backlog for rework of ${TaskId}: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "[STOP] Cannot read backlog for rework of ${TaskId}: $($_.Exception.Message). The rejection is already recorded and task/$TaskId restored, but no rework handoff was generated. Make $backlogPath readable, then run: $(Get-HumanGateReworkRecoveryCommand -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff) (do not reject again)." -ForegroundColor Red
                     exit 1
                 }
             }
@@ -919,11 +949,16 @@ function Invoke-HumanGateRejectAbandon {
                         $handoffParams["Artifacts"] = @($artifacts)
                     }
                     
+                    $global:LASTEXITCODE = 0
                     & $generatorScript @handoffParams
+                    if ($LASTEXITCODE -eq 2) {
+                        # The generator refuses with exit 2 (I11); a refusal must not read as a written handoff.
+                        exit 2
+                    }
                 }
             } else {
                 $problem = if (Test-Path -LiteralPath $backlogPath) { "Task $TaskId has no exact ID row in $backlogPath" } else { "Backlog file $backlogPath is missing" }
-                Write-Host "[STOP] ${problem}; refusing rework handoff generation. Add BACKLOG.md and the row or spec, then reject again." -ForegroundColor Red
+                Write-Host "[STOP] ${problem}; refusing rework handoff generation. The rejection is already recorded and task/$TaskId restored, but no rework handoff was generated. Restore BACKLOG.md with an exact row for $TaskId, then run: $(Get-HumanGateReworkRecoveryCommand -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff) (do not reject again)." -ForegroundColor Red
                 exit 1
             }
         }

@@ -807,7 +807,7 @@ Complete-CrucibleSourceSession -Context `$ctx
     }
 
     function Invoke-FinalizationGateCase {
-        param([string]$CaseName, [string]$TaskId, [string]$BacklogRows, [bool]$ArchivedProduction = $false)
+        param([string]$CaseName, [string]$TaskId, [string]$BacklogRows, [bool]$ArchivedProduction = $false, [bool]$OmitBacklogFile = $false)
         $caseRoot = Join-Path $tempRoot $CaseName
         $sessionDir = Join-Path $caseRoot ".crucible/session"
         $backlogDir = Join-Path $caseRoot ".crucible/backlog"
@@ -815,7 +815,9 @@ Complete-CrucibleSourceSession -Context `$ctx
         $logFile = Join-Path $sessionDir ($TaskId + "/pipeline.log.jsonl")
         New-Item -ItemType Directory -Path $backlogDir, $gateDir, (Split-Path -Parent $logFile) -Force | Out-Null
         $header = "# Backlog`n`n## Active Items`n`n| ID | Priority | Status | Title | Target |`n|---|---|---|---|---|`n"
-        [System.IO.File]::WriteAllText((Join-Path $backlogDir "BACKLOG.md"), ($header + $BacklogRows + "`n"), (New-Object System.Text.UTF8Encoding $false))
+        if (-not $OmitBacklogFile) {
+            [System.IO.File]::WriteAllText((Join-Path $backlogDir "BACKLOG.md"), ($header + $BacklogRows + "`n"), (New-Object System.Text.UTF8Encoding $false))
+        }
         Set-Content -LiteralPath (Join-Path $gateDir ($TaskId + "-20260902T120000Z.json")) -Value ('{"task_id":"' + $TaskId + '","outcome":"accepted"}') -Encoding UTF8
         if ($ArchivedProduction) {
             $archDir = Join-Path $backlogDir "features/archived"
@@ -861,6 +863,12 @@ Complete-CrucibleSourceSession -Context `$ctx
 
         $done = Invoke-FinalizationGateCase -CaseName "i8-final-done" -TaskId "F-1" -BacklogRows "| [F-1](features/archived/F-1_test.md) | P2 | Production | Test | Operator |" -ArchivedProduction $true
         Assert-Result -Name "exact terminal row advances" -Condition ($done.ExitCode -eq 0 -and $done.Text -notmatch "STOP") -FailureMessage ("expected exit 0. Exit " + $done.ExitCode + ". Output: " + $done.Text)
+    }
+
+    $results += Run-Test -Name "I11: deployment-to-done finalization fails closed without BACKLOG.md" -Body {
+        $missing = Invoke-FinalizationGateCase -CaseName "i11-final-nofile" -TaskId "F-1" -BacklogRows "" -OmitBacklogFile $true
+        Assert-Result -Name "missing BACKLOG.md refuses with exit 2" -Condition ($missing.ExitCode -eq 2 -and $missing.Text -match "BACKLOG\.md is missing at .*BACKLOG\.md") -FailureMessage ("expected exit 2 naming the missing path. Exit " + $missing.ExitCode + ". Output: " + $missing.Text)
+        Assert-Result -Name "missing BACKLOG.md refusal names the remedy" -Condition ($missing.Text -match "Restore BACKLOG\.md with an exact row for F-1") -FailureMessage ("expected a remedy. Output: " + $missing.Text)
     }
 
     $results += Run-Test -Name "I8: stale-lock cleanup keeps whole-identifier semantics with separators" -Body {

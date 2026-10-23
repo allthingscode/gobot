@@ -593,9 +593,19 @@ function Invoke-HumanGateBacklogFinalization {
     )
 
     $finalizationOk = $true
-    if (Test-Path -LiteralPath $backlogPath) {
+    if (-not (Test-Path -LiteralPath $backlogPath)) {
+        # A missing backlog cannot show the task was finalized; fail closed. Item 287, I11.
+        Write-Host "[D44] ERROR: BACKLOG.md is missing at $backlogPath, so $TaskId cannot be finalized. Restore BACKLOG.md with an exact row for $TaskId, then re-run the gate with -GateOutcome accepted." -ForegroundColor Red
+        $finalizationOk = $false
+    } else {
         $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-        if ($backlogContent -match [regex]::Escape($TaskId)) {
+        $hasExactRow = @($backlogContent -split "`r?`n" | Where-Object { Test-BacklogTaskRow -Line $_ -TaskId $TaskId }).Count -gt 0
+        if (-not $hasExactRow) {
+            # Fail closed like the deployment-to-done gate: an ID only in prose or as a prefix of
+            # another row cannot show the task was finalized. Item 285, I8.
+            Write-Host ("[D44] ERROR: BACKLOG.md has no exact row for $TaskId. A row must start with | $TaskId | or | [$TaskId](spec path) |. Repair the row in BACKLOG.md, then re-run the gate with -GateOutcome accepted.") -ForegroundColor Red
+            $finalizationOk = $false
+        } else {
             $finalization = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $ProjectRoot
             if (-not $finalization.IsFinalized) {
                 # The expected path, not a recovery: the deployment prompt forbids the Operator

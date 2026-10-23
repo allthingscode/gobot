@@ -50,8 +50,8 @@ function Register-TaskId {
     if (Test-Path -LiteralPath $backlogFile) {
         $content = Get-Content -LiteralPath $backlogFile -Raw -Encoding UTF8
     }
-    if ($content -notmatch [regex]::Escape($TaskId)) {
-        $content += "`n- $TaskId"
+    if ($content -notmatch ('(?m)^\|\s*' + [regex]::Escape($TaskId) + '\s*\|')) {
+        $content += "`n| $TaskId | Ready | Test |"
         $content | Set-Content -LiteralPath $backlogFile -Encoding UTF8
     }
 }
@@ -62,9 +62,10 @@ function Invoke-Generator {
         Register-TaskId $InputArgs.TaskId
     }
     try {
+        $global:LASTEXITCODE = 0
         $output = & $generator @InputArgs 2>&1
         return @{
-            ExitCode = 0
+            ExitCode = $(if ($global:LASTEXITCODE -eq 2) { 2 } else { 0 })
             Output   = ($output -join "`n")
         }
     } catch {
@@ -683,6 +684,50 @@ budget_tier: "low"
         }
     }
 
+    Invoke-Test -Name "fails when TaskId is only a prefix of another BACKLOG.md row" -Script {
+        $taskId = New-TestTaskId "PREFIX-ONLY"
+        Register-TaskId ($taskId + "0")
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "only a look-alike row exists"
+            SchemaPath = $schemaPath
+        } -NoRegister
+        if ($result.ExitCode -eq 0) {
+            throw "Expected refusal for an ID that is only a prefix of another row, but succeeded"
+        }
+        if ((ConvertTo-NormalizedOutput $result.Output) -notmatch ("no exact row for " + (ConvertTo-NormalizedOutput $taskId) + " A row must start with")) {
+            throw "Expected the missing exact row and remedy, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "missing exact row refuses with exit 2, not a catchable throw" -Script {
+        $taskId = New-TestTaskId "EXIT-TWO"
+        Register-TaskId ($taskId + "0")
+        $script = Join-Path $tempRoot "exit-two-runner.ps1"
+        @(
+            "param(`$Generator, `$TaskId, `$SchemaPath, `$Root)",
+            "`$ErrorActionPreference = 'Stop'",
+            "try {",
+            "    `$global:LASTEXITCODE = 0",
+            "    & `$Generator -TaskId `$TaskId -Source grooming -Target implementation -Reason x -SchemaPath `$SchemaPath -ProjectRoot `$Root 2>&1 | Out-Null",
+            "    Write-Output ('CALLER_LASTEXIT=' + `$LASTEXITCODE)",
+            "} catch { Write-Output ('CALLER_CAUGHT=' + `$_.Exception.Message) }"
+        ) | Set-Content -LiteralPath $script -Encoding UTF8
+        $inProc = & (Get-PwshCommand) -NoProfile -File $script $generator $taskId $schemaPath $tempRoot 2>&1
+        $text = $inProc -join "`n"
+        if ($text -match "CALLER_CAUGHT" -or $text -notmatch "CALLER_LASTEXIT=2") {
+            throw "Expected an in-process caller to see exit 2 without a catch, got: $text"
+        }
+        $child = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -File $generator -TaskId $taskId -Source grooming -Target implementation -Reason x -SchemaPath $schemaPath -ProjectRoot $tempRoot
+        }
+        if ($child.ExitCode -ne 2) {
+            throw "Expected exit code exactly 2, got $($child.ExitCode): $($child.Output)"
+        }
+    }
+
     Invoke-Test -Name "fails when ProjectRoot is omitted and CWD has no backlog" -Script {
         $taskId = New-TestTaskId "CWD-FAIL"
         
@@ -1003,7 +1048,7 @@ budget_tier: "low"
             $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
             New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
             $backlogFile = Join-Path $backlogDir "BACKLOG.md"
-            "- $taskId" | Set-Content -LiteralPath $backlogFile -Encoding UTF8
+            "| $taskId | Ready | Test |" | Set-Content -LiteralPath $backlogFile -Encoding UTF8
             
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
@@ -1080,7 +1125,7 @@ budget_tier: "low"
 
             $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
             New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
-            "- $taskId" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+            "| $taskId | Ready | Test |" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
 
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
@@ -1201,7 +1246,7 @@ budget_tier: "low"
             ) | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
             $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
             New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
-            "- $taskId" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+            "| $taskId | Ready | Test |" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
 
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md

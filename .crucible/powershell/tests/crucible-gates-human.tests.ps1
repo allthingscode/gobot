@@ -11,6 +11,16 @@ $pwshCmd = Get-PwshCommand
 
 $results = @()
 
+function Write-FinalizedBacklogFixture {
+    param([Parameter(Mandatory=$true)][string]$ProjectRoot, [Parameter(Mandatory=$true)][string]$TaskId)
+    # A finalized task: an exact Production row and its archived spec. A missing BACKLOG.md now refuses (item 287).
+    $dir = Join-Path $ProjectRoot ".crucible/backlog"
+    $archived = Join-Path $dir "features/archived"
+    New-Item -ItemType Directory -Path $archived -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $archived ($TaskId + "_fixture.md")), "---`nitem_id: `"$TaskId`"`ntype: feature`nstatus: `"Production`"`n---`n# $TaskId`n", [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Join-Path $dir "BACKLOG.md"), "| ID | Priority | Status | Title | Specialist |`n|---|---|---|---|---|`n| [$TaskId](features/archived/${TaskId}_fixture.md) | P2 | Production | Fixture | Operator |`n", [System.Text.UTF8Encoding]::new($false))
+}
+
 function Write-TestHandoff {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
@@ -285,6 +295,7 @@ function Invoke-CiGateCase {
 "@
     }
 
+    Write-FinalizedBacklogFixture -ProjectRoot $Case.LocalRepo -TaskId $TaskId
     $scriptContent = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -478,6 +489,7 @@ review:
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
 
         # Test Case 1: Accepted outcome -> should push changes to origin
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-999'
         $scriptContentAccept = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -653,6 +665,7 @@ review:
 
         # Test Case 1: Accept with no-op push
         Reset-PendingFiles
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-100'
         $scriptAcceptNoOp = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -744,6 +757,7 @@ try {
         git -C $localRepo commit -m "second commit" 2>$null | Out-Null
 
         Reset-PendingFiles
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-100'
         $scriptRealPush = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -792,6 +806,7 @@ try {
         # Test Case 4: Failing push (invalid remote / remote ref)
         git -C $localRepo remote set-url origin "https://example.invalid/repo.git"
         Reset-PendingFiles
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-100'
         $scriptFailedPush = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -1983,6 +1998,7 @@ review:
 "@
         $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
 
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-777'
         $scriptContent = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -2115,6 +2131,7 @@ review:
         $scriptPath = Join-Path $caseRoot "run-prune.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $fwPwsh = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-778'
         $scriptContent = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true

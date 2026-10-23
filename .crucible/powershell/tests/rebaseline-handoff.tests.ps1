@@ -39,7 +39,7 @@ function New-InFlightAdopter {
         "  session: .crucible/session",
         "  workspaces: .crucible/.agent-workspaces"
     ) | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
-    @("- $taskId", "- F-140") | Set-Content -LiteralPath (Join-Path $crucible "backlog/BACKLOG.md") -Encoding UTF8
+    @("| $taskId | Ready | Test |", "| F-140 | Ready | Test |") | Set-Content -LiteralPath (Join-Path $crucible "backlog/BACKLOG.md") -Encoding UTF8
     ".crucible/session/" | Set-Content -LiteralPath (Join-Path $Path ".gitignore") -Encoding UTF8
 
     Invoke-Git $Path @("init", "-b", "master", "--quiet") | Out-Null

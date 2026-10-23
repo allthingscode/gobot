@@ -79,8 +79,9 @@ try {
         throw "BACKLOG.md not found at $backlogPath; please check ProjectRoot or REPO_ROOT."
     }
     $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-    if ($backlogContent -notmatch [regex]::Escape($TaskId)) {
-        throw "TaskId $TaskId not found in the bundle at $REPO_ROOT; pass -ProjectRoot pointing at the adopter repo."
+    if (@($backlogContent -split "`r?`n" | Where-Object { Test-BacklogTaskRow -Line $_ -TaskId $TaskId }).Count -eq 0) {
+        Write-Error -ErrorAction Continue "[STOP] TaskId $TaskId not found in the bundle at ${REPO_ROOT}: BACKLOG.md has no exact row for $TaskId. A row must start with | $TaskId | or | [$TaskId](spec path) |. Add or repair the row, or pass -ProjectRoot pointing at the adopter repo."
+        exit 2
     }
 
 # Default schema location: framework's own schemas/ directory (one level up from powershell/).

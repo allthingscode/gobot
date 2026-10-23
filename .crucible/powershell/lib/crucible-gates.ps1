@@ -673,6 +673,12 @@ function Complete-CrucibleSourceSession {
                         }
                     }
                 }
+            } else {
+                Write-Host ("[STOP] Quality gate failed: BACKLOG.md is missing at " + $backlogPath + ", so " + $handoff.task_id + " cannot be shown finalized. Restore BACKLOG.md with an exact row for " + $handoff.task_id + ", then rerun this handoff.") -ForegroundColor Red
+                Write-EventLog -Event "quality_gate_retry" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
+                    -Outcome "retry_required" -Notes "Deployment finalization gate found no BACKLOG.md" `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                exit 2
             }
         }
 

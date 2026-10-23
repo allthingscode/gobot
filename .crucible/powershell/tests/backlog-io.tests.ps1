@@ -154,6 +154,37 @@ try {
         }
     }
 
+    $results += Run-Test -Name "Human-gate backlog finalization refuses a missing BACKLOG.md" -Body {
+        $root = Join-Path $tempRoot "gate-nobacklog"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "features/active/F-1_Test.md" -ItemId "F-1" -Type "feature" -Priority "P2" -Title "Test" | Out-Null
+        $backlog = Join-Path $root "BACKLOG.md"
+        if (Test-Path -LiteralPath $backlog) { Remove-Item -LiteralPath $backlog -Force }
+        $output = @(Invoke-HumanGateBacklogFinalization -TaskId "F-1" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1)
+        $text = $output -join "`n"
+        Assert-Result "missing BACKLOG.md returns false" ($output[-1] -eq $false) $text
+        Assert-Result "refusal names the path and remedy" ($text -match "BACKLOG\.md is missing at .*BACKLOG\.md" -and $text -match "Restore BACKLOG\.md with an exact row for F-1" -and $text -match "STOP:.*refusing to push") $text
+        Assert-Result "spec left active" (Test-Path -LiteralPath (Join-Path $root "features/active/F-1_Test.md")) "the spec was archived without a backlog"
+    }
+
+    foreach ($rowCase in @("prefix-only", "prose-only")) {
+        $results += Run-Test -Name ("Human-gate backlog finalization refuses a missing exact row: " + $rowCase) -Body {
+            $root = Join-Path $tempRoot ("gate-norow-" + $rowCase)
+            New-MinimalBacklogTree -Root $root
+            New-SpecFile -Root $root -RelPath "features/active/F-1_Test.md" -ItemId "F-1" -Type "feature" -Priority "P2" -Title "Test" | Out-Null
+            $other = if ($rowCase -eq "prefix-only") { "| F-10 | Ready | Other |" } else { "| F-20 | Ready | Replaces F-1 |" }
+            $backlog = Join-Path $root "BACKLOG.md"
+            [System.IO.File]::WriteAllText($backlog, ("| ID | Status | Title |`n|---|---|---|`n" + $other + "`n"), [System.Text.UTF8Encoding]::new($false))
+            New-Item -ItemType Directory -Path (Join-Path $root ".crucible") -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), "paths:`n  backlog: .`n", [System.Text.UTF8Encoding]::new($false))
+            $output = @(Invoke-HumanGateBacklogFinalization -TaskId "F-1" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1)
+            $text = $output -join "`n"
+            Assert-Result "missing exact row returns false" ($output[-1] -eq $false) $text
+            Assert-Result "refusal names the exact row and remedy" ($text -match 'no exact row for F-1' -and $text -match 'Repair the row in BACKLOG.md' -and $text -match 'STOP:.*refusing to push') $text
+            Assert-Result "spec left active" (Test-Path -LiteralPath (Join-Path $root "features/active/F-1_Test.md")) "the spec was archived without a row"
+        }
+    }
+
     foreach ($state in @("active", "archived")) {
         $results += Run-Test -Name ("Abandoned backlog archival from " + $state) -Body {
             $root = Join-Path $tempRoot ("gate-abandon-" + $state)
