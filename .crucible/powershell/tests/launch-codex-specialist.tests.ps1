@@ -853,10 +853,10 @@ try {
         $promptRef = if ($tx -match "read and follow all instructions in ([^\r\n]+)") { $Matches[1].Trim() } else { "" }
         $promptResolves = (-not [string]::IsNullOrWhiteSpace($promptRef)) -and [System.IO.Path]::IsPathRooted($promptRef) -and (Test-Path -LiteralPath $promptRef)
         Assert-Result -Name "prompt path is absolute and exists" -Condition $promptResolves -FailureMessage "prompt path '$promptRef' must be absolute and exist. Transcript:`n$tx"
-        $rootRef = if ($tx -match '-Init -TaskId C-979 -ProjectRoot "([^"]+)"') { $Matches[1] } else { "" }
+        $rootRef = if ($tx -match "-Init -TaskId 'C-979' -ProjectRoot '([^']+)'") { $Matches[1] } else { "" }
         $rootResolves = (-not [string]::IsNullOrWhiteSpace($rootRef)) -and (Test-Path -LiteralPath (Join-Path $rootRef ".crucible/session/C-979"))
         Assert-Result -Name "crucible line passes the project root" -Condition $rootResolves -FailureMessage "Crucible line must pass -ProjectRoot naming the adopter root. Transcript:`n$tx"
-        $scriptRef = if ($tx -match 'pwsh -File "([^"]+)" -Init') { $Matches[1] } else { "" }
+        $scriptRef = if ($tx -match "pwsh -NoProfile -ExecutionPolicy Bypass -File '([^']+)' -Init") { $Matches[1] } else { "" }
         Assert-Result -Name "crucible script path is absolute" -Condition ([System.IO.Path]::IsPathRooted($scriptRef)) -FailureMessage "crucible.ps1 path '$scriptRef' must be absolute. Transcript:`n$tx"
     }
 
@@ -872,12 +872,12 @@ try {
             "-TaskId", "C-980", "-Phase", "implementation", "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
         $transcript = Join-Path $promptDir "codex-transcript.txt"
         $tx = if (Test-Path -LiteralPath $transcript) { Get-Content -LiteralPath $transcript -Raw } else { "" }
-        $line = @($tx -split "`r?`n" | Where-Object { $_ -match '-Init -TaskId C-980' }) | Select-Object -First 1
+        $line = @($tx -split "`r?`n" | Where-Object { $_ -match "-Init -TaskId 'C-980'" }) | Select-Object -First 1
         $resolvedRoot = (Resolve-Path -LiteralPath $projectRoot).Path
         Assert-Result -Name "dollar root passed as a literal" -Condition ($null -ne $line -and $line.Contains("-ProjectRoot '" + $resolvedRoot + "' -Quiet")) -FailureMessage ("line: " + $line + "`nTranscript:`n" + $tx)
-        Assert-Result -Name "dollar root script path is a literal" -Condition ($null -ne $line -and $line.Contains("pwsh -File '" + (Join-Path $resolvedRoot ".crucible")) -and $line.Contains("crucible.ps1' -Init")) -FailureMessage ("line: " + $line)
+        Assert-Result -Name "dollar root script path is a literal" -Condition ($null -ne $line -and $line.Contains("pwsh -NoProfile -ExecutionPolicy Bypass -File '" + (Join-Path $resolvedRoot ".crucible")) -and $line.Contains("crucible.ps1' -Init")) -FailureMessage ("line: " + $line)
         if ($null -ne $line) {
-            $scriptBlockText = '& { $args } ' + $line.Trim().Substring("pwsh -File ".Length)
+            $scriptBlockText = '& { $args } ' + $line.Trim().Substring("pwsh ".Length)
             $argv = @(& ([scriptblock]::Create($scriptBlockText)))
             $rootAt = [Array]::IndexOf($argv, "-ProjectRoot")
             Assert-Result -Name "PowerShell reads the root verbatim" -Condition ($rootAt -ge 0 -and $argv[$rootAt + 1] -ceq $resolvedRoot) -FailureMessage ($argv -join " | ")
@@ -971,7 +971,7 @@ try {
         Assert-Result -Name "not reported as success" -Condition (-not ($res.Output -match "STATUS=SUCCESS")) -FailureMessage "must not report SUCCESS. Output:`n$($res.Output)"
         Assert-Result -Name "exit 3" -Condition ($res.ExitCode -eq 3) -FailureMessage "expected exit 3, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "names the missing phase" -Condition ($res.Output -match "never started deployment") -FailureMessage "expected the missing phase named. Output:`n$($res.Output)"
-        Assert-Result -Name "gives the recovery command" -Condition ($res.Output -match "-Init -TaskId C-977 -ProjectRoot") -FailureMessage "expected the -Init recovery command. Output:`n$($res.Output)"
+        Assert-Result -Name "gives the recovery command" -Condition ($res.Output -match "pwsh -NoProfile -ExecutionPolicy Bypass -File '[^']*crucible\.ps1' -Init -TaskId 'C-977' -ProjectRoot") -FailureMessage "expected the shell-neutral -Init recovery command. Output:`n$($res.Output)"
     }
 
     foreach ($case in @(

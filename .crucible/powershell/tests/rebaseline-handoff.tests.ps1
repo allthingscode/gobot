@@ -137,13 +137,16 @@ exit 0
         $commandLine = @($breaker.Output | ForEach-Object { ([string]$_) -split "\r?\n" } | Where-Object { $_ -match "new-handoff\.ps1" })
         Assert-Result -Name "one recovery command printed" -Condition ($commandLine.Count -eq 1) -FailureMessage ("expected one new-handoff.ps1 line, got: " + ($commandLine -join " | "))
         $printed = $commandLine[0].Trim()
-        Assert-Result -Name "command names the task" -Condition ($printed -match ("-TaskId " + [regex]::Escape($taskId) + " -Rebaseline")) -FailureMessage ("expected the real task id, got: " + $printed)
+        Assert-Result -Name "command names the task" -Condition ($printed -match ("-TaskId '" + [regex]::Escape($taskId) + "' -Rebaseline")) -FailureMessage ("expected the real task id, got: " + $printed)
+        Assert-Result -Name "printed recovery uses the direct PowerShell form" -Condition ($printed.StartsWith("& '")) -FailureMessage $printed
 
         # Run the line as printed, with only the placeholder filled in, from the project root.
-        $runnable = $printed.Replace("<commit-of-the-bundle-update>", $updateSha) -replace '^pwsh ', ("& '" + $pwshCmd + "' -NoProfile ")
+        $runnable = $printed.Replace("<commit-of-the-bundle-update>", $updateSha)
+        $recoveryDriver = Join-Path (Split-Path -Parent $driver) "printed-recovery.ps1"
+        [IO.File]::WriteAllText($recoveryDriver, ($runnable + "`n"), [Text.UTF8Encoding]::new($false))
         Push-Location $fx.Repo
         try {
-            $run = Invoke-ExternalCommand { Invoke-Expression $runnable }
+            $run = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $recoveryDriver }
         } finally {
             Pop-Location
         }

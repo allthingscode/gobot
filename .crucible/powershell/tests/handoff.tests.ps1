@@ -93,6 +93,26 @@ try {
         }
     }
 
+    # Item 302: an absolute artifact was relativized against the worktree or project root
+    # by a bare prefix match, so a file under task-F-10 became "0/out.md" under task-F-1.
+    $results += Run-Test -Name "An artifact under a sibling-prefixed worktree or project keeps its own path" -Body {
+        $project = Join-Path $tempRoot "project-302"
+        $worktree = Join-Path $project "workspaces/task-F-1"
+        $siblingWorktree = Join-Path $project "workspaces/task-F-10"
+        $siblingProject = Join-Path $tempRoot "project-3022"
+        New-Item -ItemType Directory -Path $worktree, $siblingWorktree, $siblingProject -Force | Out-Null
+        $worktreeArtifact = Join-Path $siblingWorktree "out.md"
+        $projectArtifact = Join-Path $siblingProject "doc.md"
+        foreach ($file in @($worktreeArtifact, $projectArtifact)) {
+            [IO.File]::WriteAllText($file, "fixture", [Text.UTF8Encoding]::new($false))
+        }
+        $fromWorktree = @(Normalize-HandoffArtifactPaths -Artifacts @($worktreeArtifact) -WorktreePath $worktree -ProjectRoot $project)
+        Assert-Result -Name "task-F-10 artifact relative to the project" -Condition ($fromWorktree.Count -eq 1 -and $fromWorktree[0] -ceq "workspaces/task-F-10/out.md") -FailureMessage ("expected workspaces/task-F-10/out.md, got: " + ($fromWorktree -join "|"))
+        $fromProject = @(Normalize-HandoffArtifactPaths -Artifacts @($projectArtifact) -WorktreePath $worktree -ProjectRoot $project)
+        $expected = (Resolve-Path -LiteralPath $projectArtifact).Path.Replace("\", "/").TrimStart("/")
+        Assert-Result -Name "sibling project artifact stays absolute" -Condition ($fromProject.Count -eq 1 -and $fromProject[0] -ceq $expected) -FailureMessage ("expected " + $expected + ", got: " + ($fromProject -join "|"))
+    }
+
     $results += Run-Test -Name "Get-HandoffTextForSecurityScan flattens scalar and array fields" -Body {
         $handoff = [PSCustomObject]@{
             reason = "Reason"

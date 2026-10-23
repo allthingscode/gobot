@@ -652,7 +652,7 @@ try {
                 $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
             } else {
                 # The rerun names the file this run read, so it validates the same backlog. Item 247.
-                $fixRerun = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Parameters ([ordered]@{ BacklogPath = $BacklogPath; FixSummary = $true }) -CrucibleRoot (Split-Path -Parent $PSScriptRoot) -Invoker "pwsh -ExecutionPolicy Bypass -File"
+                $fixRerun = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Transport PowerShell -Parameters ([ordered]@{ BacklogPath = $BacklogPath; FixSummary = $true }) -CrucibleRoot (Split-Path -Parent $PSScriptRoot)
                 $errors += ("BACKLOG.md changed while it was being validated, so the Priority Summary was not rewritten. Rerun: " + $fixRerun)
             }
         } else {

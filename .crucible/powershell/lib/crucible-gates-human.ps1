@@ -318,9 +318,9 @@ function Get-HumanGateReworkRecoveryCommand {
     $reason = if ([string]::IsNullOrWhiteSpace($GateReason)) { "Deployment rejected. Rework requested." } else { "Deployment rejected: $GateReason" }
     $parameters = [ordered]@{ TaskId = $TaskId; Source = "deployment"; Target = "implementation"; Reason = $reason; ReviewStrikeCount = [string]$strike; ProjectRoot = $ProjectRoot }
     if (-not [string]::IsNullOrEmpty($cycle)) { $parameters["SessionCycleId"] = $cycle }
-    # pwsh -File binds a list only as one comma-delimited argument, which new-handoff.ps1 splits.
+    # new-handoff.ps1 splits a comma-delimited artifacts value.
     if ($artifacts.Count -gt 0) { $parameters["Artifacts"] = (@($artifacts) -join ",") }
-    $command = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters $parameters -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot) -Invoker "pwsh -NoProfile -ExecutionPolicy Bypass -File"
+    $command = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Transport PowerShell -Parameters $parameters -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot)
     return $command
 }
 
@@ -738,7 +738,7 @@ function Invoke-HumanGatePublish {
         Write-Host "  git push origin $PrimaryBranch" -ForegroundColor Cyan
         if ($requireGreenCi) {
             Write-Host "[HUMAN GATE] After that push, watch adopter CI for the merge commit:" -ForegroundColor Yellow
-            Write-Host ("  " + (New-CrucibleCommand -Script "powershell/watch-adopter-ci.ps1" -Parameters ([ordered]@{ Commit = $mergedSha }) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot) -Invoker "pwsh -File")) -ForegroundColor Cyan
+            Write-Host ("  " + (New-CrucibleCommand -Script "powershell/watch-adopter-ci.ps1" -Transport PowerShell -Parameters ([ordered]@{ Commit = $mergedSha }) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot))) -ForegroundColor Cyan
         }
     }
 }
@@ -1126,7 +1126,7 @@ Copy-Item `$right `$rightCopy -Force
     } else {
         $menu += "  - $NoCodeReviewHint`n`n"
     }
-    $menu += ("Gate fired. Run " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $RepoRoot; GateOutcome = "<choice>"; GateReason = "<one concrete reason>" }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File") + " to record the decision.")
+    $menu += ("Gate fired. Run " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $RepoRoot; GateOutcome = "<choice>"; GateReason = "<one concrete reason>" }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context)) + " to record the decision.")
     $menu | Set-Content -Path $PendingFilePath -Encoding UTF8
 }
 
@@ -1188,7 +1188,8 @@ function Invoke-HumanGate {
         $noCodeClosureReviewDoc = $reviewDocCandidates | Select-Object -First 1
     }
     if ([string]::IsNullOrEmpty($noCodeClosureReviewDoc) -and -not [string]::IsNullOrEmpty($crucibleRoot)) {
-        $noCodeClosureResearchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
+        $noCodeClosureBundleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $repoRoot -CrucibleRoot $crucibleRoot
+        $noCodeClosureResearchDir = Join-Path $noCodeClosureBundleRoot "research"
         if (Test-Path -LiteralPath $noCodeClosureResearchDir) {
             $noCodeClosureFound = Get-ResearchFindingsArtifact -TaskId $handoff.task_id -ResearchDirectory $noCodeClosureResearchDir
             if ($noCodeClosureFound) {

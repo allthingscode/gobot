@@ -52,16 +52,16 @@ Do not commit runtime data:
 - `.crucible/cache/`
 - generated logs, JSONL files, handoffs, and eval output
 
-Run the installed runtime from the project root:
+Run the installed runtime from the project root at a PowerShell 7+ prompt:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id> -ProjectRoot "{project_root}"
+& '{{crucible_root}}/powershell/crucible.ps1' -Init -TaskId <task-id> -ProjectRoot '{project_root}'
 ```
 <!-- crucible-instructions-end -->
 ````
 <!-- crucible:end instruction-block-agents -->
 
-> `init-project.ps1 -AppendInstructions` writes this block with `pwsh` (PowerShell 7+), the only supported host.
+> `init-project.ps1 -AppendInstructions` writes a direct script invocation in this block. Run it at a PowerShell 7+ prompt (`pwsh`), the only supported host.
 
 ## Optional Tool-Specific Files
 

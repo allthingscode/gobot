@@ -191,7 +191,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
         Assert-Result -Name "exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit 1, got $exitCode. Output:`n$outputText"
         Assert-Result -Name "names the missing spec" -Condition ($outputText -match "no backlog spec found for TaskId: R-033") -FailureMessage "missing spec wording. Output:`n$outputText"
         Assert-Result -Name "names where it looked" -Condition ($outputText -match [regex]::Escape("R-033_*.md") -and $outputText -match [regex]::Escape("R-033.md") -and $outputText -match [regex]::Escape((Join-Path $ctx.BacklogDir "features/active"))) -FailureMessage "missing search locations. Output:`n$outputText"
-        Assert-Result -Name "says -Init bootstraps once the spec exists" -Condition ($outputText -match "rerun crucible\.ps1 -Init -TaskId R-033") -FailureMessage "missing -Init guidance. Output:`n$outputText"
+        Assert-Result -Name "says -Init bootstraps once the spec exists" -Condition ($outputText -match "rerun crucible\.ps1 -Init -TaskId 'R-033' -ProjectRoot '\{project_root\}'") -FailureMessage "missing -Init guidance. Output:`n$outputText"
         Assert-Result -Name "writes no handoff" -Condition (@(Get-ChildItem -Path $ctx.HandoffDir -Filter "R-033-*" -ErrorAction SilentlyContinue).Count -eq 0) -FailureMessage "a handoff was written without a spec"
     }
 

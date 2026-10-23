@@ -293,10 +293,7 @@ if ($frameworkMode) {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($crucibleRootValue)) {
-        $resolvedBundle = $crucibleRootValue
-        if (-not [System.IO.Path]::IsPathRooted($resolvedBundle)) {
-            $resolvedBundle = Join-Path $REPO_ROOT $crucibleRootValue
-        }
+        $resolvedBundle = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $crucibleRootValue
         if (Test-Path -LiteralPath $resolvedBundle -PathType Container) {
             Add-DoctorResult -Check "bundle.root" -Status "pass" -Severity "critical" `
                 -Details ("Bundle directory exists at " + $resolvedBundle + ".")
@@ -462,7 +459,7 @@ if ($frameworkMode) {
                     if ($LASTEXITCODE -eq 0) {
                         Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `
                             -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") lags framework HEAD (" + $frameworkHead.Substring(0, 7) + ").") `
-                            -Remediation ("Run " + (New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource -Invoker "pwsh -ExecutionPolicy Bypass -File") + " to bring it current.")
+                            -Remediation ("Run " + (New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource) + " to bring it current.")
                     } else {
                         Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
                             -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") is not stale relative to framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")

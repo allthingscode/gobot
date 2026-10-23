@@ -4,6 +4,9 @@ if (-not (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue)) {
         . $backlogIoPath
     }
 }
+if (-not (Get-Command "Test-PathWithinDirectory" -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
 
 function Get-BacklogTerminalStatus {
     # Production means code merged to the main branch; Resolved means closed without
@@ -307,7 +310,7 @@ function Invoke-BacklogTaskArchive {
         }
         $resolvedSpec = $specMatches[0].Path
 
-        if (-not $resolvedSpec.StartsWith($resolvedBacklogDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (-not (Test-PathWithinDirectory -Path $resolvedSpec -Directory $resolvedBacklogDir)) {
             throw "Spec path is not under backlog directory: $resolvedSpec"
         }
 

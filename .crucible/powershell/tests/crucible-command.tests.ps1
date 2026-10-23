@@ -42,14 +42,13 @@ try {
             Assert-Result -Name ("degrades " + $case.Error) -Condition ($degraded.StartsWith("# (command unavailable: ") -and $degraded.Contains($case.Error)) -FailureMessage $degraded
         }
         $preflight = New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ Preflight = $true; Model = "model" }) -CrucibleRoot $tempRoot
-        Assert-Result "preflight needs no effort" ($preflight.Contains("-Preflight -Model model")) $preflight
+        Assert-Result "preflight needs no effort" ($preflight.Contains("-Preflight -Model 'model'")) $preflight
     }
 
-    # Only what no quoting puts on one command line is refused: an empty value (older PowerShell
-    # drops it), a line break or NUL anywhere, and a leading dash where pwsh -File would bind
-    # the value as a parameter name.
+    # Line breaks and NUL remain unsafe in the direct form. Native transports keep their
+    # empty-value and leading-dash refusals.
     $results += Run-Test -Name "Unsafe values refuse before any command is returned" -Body {
-        foreach ($case in @(@{ Value = ""; Invoker = "" }, @{ Value = "a`nb"; Invoker = "" }, @{ Value = "a`rb"; Invoker = "" }, @{ Value = ("a" + [char]0 + "b"); Invoker = "" }, @{ Value = "-bad"; Invoker = "pwsh -File" })) {
+        foreach ($case in @(@{ Value = "a`nb"; Invoker = "" }, @{ Value = "a`rb"; Invoker = "" }, @{ Value = ("a" + [char]0 + "b"); Invoker = "" })) {
             $value = $case.Value
             $message = ""
             try { $null = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ TaskId = $value }) -CrucibleRoot $tempRoot -Invoker $case.Invoker -Strict } catch { $message = $_.Exception.Message }
@@ -58,6 +57,13 @@ try {
         $argMessage = ""
         try { $null = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ TaskId = "-bad" }) -CrucibleRoot $tempRoot -Transport ArgumentList -Strict } catch { $argMessage = $_.Exception.Message }
         Assert-Result "leading dash refused for ArgumentList" ($argMessage.Contains("pwsh -File binds")) $argMessage
+        foreach ($transport in @("Bash", "ArgumentList")) {
+            foreach ($value in @("", "-bad")) {
+                $message = ""
+                try { $null = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ TaskId = $value }) -CrucibleRoot $tempRoot -Transport $transport -Strict } catch { $message = $_.Exception.Message }
+                Assert-Result ($transport + " refuses native-only unsafe value '" + $value + "'") ($message -match 'has an empty value|pwsh -File binds') $message
+            }
+        }
     }
 
     # Review of 6dcfdcf: next_step.txt is executed, not read, so the note must do nothing.
@@ -94,9 +100,12 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
         Assert-Result "direct values preserved" ($actual -ceq $expected) $actual
 
         $native = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot -Invoker "pwsh -NoProfile -File"
-        $run = Invoke-ExternalCommand { & ([scriptblock]::Create($native)) }
+        $driver = Join-Path $tempRoot "legacy-invoker.ps1"
+        [IO.File]::WriteAllText($driver, ($native + "`n"), $utf8)
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver }
         Assert-Result "native invocation succeeds" ($run.ExitCode -eq 0) $run.Output
         Assert-Result "native values preserved" (($run.Output.Trim() -replace "`r`n", "`n") -ceq $expected) $run.Output
+        Assert-Result "legacy invoker renders a direct call" ($native -ceq $direct) $native
 
         $stdout = Join-Path $tempRoot "background.out"
         $stderr = Join-Path $tempRoot "background.err"
@@ -140,17 +149,10 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
                 Assert-Result ("bash literal " + $i) ($bashOutput.ExitCode -eq 0 -and @($bashOutput.Lines)[2] -ceq $expected) ($bashLine + " => " + ($bashOutput.Lines -join " | "))
             }
 
-            # Windows PowerShell 5.1 and PowerShell 7.0 to 7.2 pass these to pwsh -File broken,
-            # so a PowerShell -File line prints the unavailable note instead.
-            $olderBreaks = $value.Contains('"') -or ($value.EndsWith("\") -and $value -match '\s')
+            # Legacy invokers must also render the direct form; no native passing remains.
             $native = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot -Invoker "pwsh -NoProfile -File"
-            if ($olderBreaks) {
-                Assert-Result ("native literal " + $i + " unavailable") ($native.StartsWith("# (command unavailable: ")) $native
-            } else {
-                $run = Invoke-ExternalCommand { & ([scriptblock]::Create($native)) }
-                $nativeLine = @($run.Output -split "`r?`n")[2]
-                Assert-Result ("native literal " + $i) ($run.ExitCode -eq 0 -and $nativeLine -ceq $expected) ($native + " => " + $run.Output)
-            }
+            $nativeLine = @(& ([scriptblock]::Create($native)))[2]
+            Assert-Result ("native literal " + $i) ($native.StartsWith("& '") -and $nativeLine -ceq $expected) ($native + " => " + $nativeLine)
 
             $argumentList = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot -Transport ArgumentList -Strict
             $stdout = Join-Path $tempRoot ("literal-" + $i + ".out")
@@ -168,8 +170,65 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
         $actual = @(& ([scriptblock]::Create($cmd))) -join "`n"
         Assert-Result "array retains two IDs" ($actual -ceq "C-1|C-10") $actual
         $message = ""
-        try { $null = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ HumanApproved = @("C-1", "C-10") }) -CrucibleRoot $captureRoot -Invoker "pwsh -File" -Strict } catch { $message = $_.Exception.Message }
+        try { $null = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ HumanApproved = @("C-1", "C-10") }) -CrucibleRoot $captureRoot -Transport ArgumentList -Strict } catch { $message = $_.Exception.Message }
         Assert-Result "native list refuses rather than collapsing IDs" ($message.Contains("pwsh -File accepts only scalar arguments")) $message
+        $legacy = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ TaskId = "R-1"; Source = "research"; Target = "grooming"; Reason = "approve"; HumanApproved = @("C-1", "C-10") }) -CrucibleRoot $captureRoot -Invoker "pwsh -File" -Strict
+        Assert-Result "legacy invoker retains two IDs directly" ((@(& ([scriptblock]::Create($legacy))) -join "`n") -ceq "C-1|C-10") $legacy
+    }
+
+    # Run the printed line inside a fresh pwsh, rather than passing its values through a
+    # native -File boundary. The fixture writes bytes so even an empty value has evidence.
+    $literalRoot = Join-Path $tempRoot "bundle O'Brien `$literal"
+    $literalDir = Join-Path $literalRoot "powershell"
+    $null = New-Item -ItemType Directory -Path $literalDir -Force
+    [IO.File]::WriteAllText((Join-Path $literalDir "capture.ps1"), @'
+param([AllowEmptyString()][string]$ProjectRoot, [string]$OutputPath)
+if (-not $PSBoundParameters.ContainsKey('ProjectRoot')) { throw 'ProjectRoot was not bound' }
+[IO.File]::WriteAllBytes($OutputPath, [Text.Encoding]::UTF8.GetBytes($ProjectRoot))
+'@, $utf8)
+    $results += Run-Test -Name "A child script can call its parent's loaded command builder" -Body {
+        $child = Join-Path $tempRoot "build-from-child.ps1"
+        [IO.File]::WriteAllText($child, @'
+param($Root, $Destination)
+New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $Root -CrucibleRoot $Root -Parameters ([ordered]@{ ProjectRoot = 'child''s $HOME'; OutputPath = $Destination })
+'@, $utf8)
+        $destination = Join-Path $tempRoot "child-bytes.out"
+        $line = & $child -Root $literalRoot -Destination $destination
+        Assert-Result "child script builds a direct command" ($line.StartsWith("& '")) $line
+        $driver = Join-Path $tempRoot "run-child-command.ps1"
+        [IO.File]::WriteAllText($driver, ($line + "`n"), $utf8)
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver }
+        Assert-Result "child-built command executes" ($run.ExitCode -eq 0 -and (Test-Path -LiteralPath $destination)) ($line + " => " + $run.Output)
+        Assert-Result "child-built literal arrives byte-for-byte" ([Convert]::ToBase64String([IO.File]::ReadAllBytes($destination)) -ceq [Convert]::ToBase64String($utf8.GetBytes("child's `$HOME"))) $line
+    }
+    $cases = [ordered]@{
+        "root with whitespace and trailing backslash" = 'C:\work dir\'
+        "embedded double quote" = 'say "approved"'
+        "single quote" = "O'Brien"
+        "dollar sign" = 'cash$HOME'
+        "empty value" = ""
+    }
+    $caseIndex = 0
+    foreach ($caseName in $cases.Keys) {
+        foreach ($invoker in @("pwsh -NoProfile -File", "powershell.exe -File")) {
+            $caseIndex++
+            $results += Run-Test -Name ("PowerShell printed literal: " + $caseName + "; invoker '" + $invoker + "'") -Body {
+                $value = $cases[$caseName]
+                $outputPath = Join-Path $tempRoot ("bytes-" + $caseIndex + ".out")
+                $line = New-CrucibleCommand -Script "powershell/capture.ps1" -BundleRoot $literalRoot -CrucibleRoot $literalRoot -Parameters ([ordered]@{ ProjectRoot = $value; OutputPath = $outputPath }) -Invoker $invoker
+                $driver = Join-Path $tempRoot ("printed-" + $caseIndex + ".ps1")
+                [IO.File]::WriteAllText($driver, ($line + "`n"), $utf8)
+                $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver }
+                Assert-Result "printed literal executes in pwsh" ($run.ExitCode -eq 0) ($line + " => " + $run.Output)
+                Assert-Result "fixture received the printed literal" (Test-Path -LiteralPath $outputPath) $line
+                $actualBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($outputPath))
+                $expectedBytes = [Convert]::ToBase64String($utf8.GetBytes($value))
+                Assert-Result "printed literal arrives byte-for-byte" ($actualBytes -ceq $expectedBytes) ($line + " => " + $actualBytes)
+                $expectedPath = (Join-Path $literalDir "capture.ps1").Replace("'", "''")
+                Assert-Result "printed literal uses direct quoted script" ($line.StartsWith("& '" + $expectedPath + "' -ProjectRoot ")) $line
+                Assert-Result "printed literal uses single-quoted value" ($line.Contains("-ProjectRoot '" + $value.Replace("'", "''") + "' -OutputPath ")) $line
+            }
+        }
     }
 } finally {
     $resolved = [IO.Path]::GetFullPath($tempRoot)

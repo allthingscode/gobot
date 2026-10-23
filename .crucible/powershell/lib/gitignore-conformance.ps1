@@ -1,4 +1,7 @@
 . (Join-Path $PSScriptRoot "platform.ps1")
+if (-not (Get-Command "Test-PathWithinDirectory" -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
 
 # Crucible tells adopters which installed files to commit, but nothing verified
 # that the adopter's own ignore rules leave those files committable. An unanchored
@@ -49,10 +52,10 @@ function Get-BundleCommittablePath {
 
     $relative = New-Object System.Collections.Generic.List[string]
     foreach ($full in $collected) {
-        $rel = $full
-        if ($full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $rel = $full.Substring($rootFull.Length)
-        }
+        # A file outside the project is not the project's to ignore, and an absolute path
+        # with its leading slash trimmed would read as project-relative. Item 302.
+        if (-not (Test-PathWithinDirectory -Path $full -Directory $rootFull)) { continue }
+        $rel = $full.Substring($rootFull.Length)
         $rel = $rel.Replace("\", "/").TrimStart("/")
         if ([string]::IsNullOrWhiteSpace($rel)) { continue }
         if ($rel.StartsWith(".git/")) { continue }
@@ -97,6 +100,12 @@ function Test-GitignoreConformance {
     if ($topResult.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($topLevel)) {
         $result.Status = "skipped"
         $result.Reason = "Not inside a git work tree; ignore rules cannot be evaluated."
+        return $result
+    }
+
+    if (-not (Test-PathWithinDirectory -Path (Resolve-Path -LiteralPath $BundleRoot).Path -Directory (Resolve-Path -LiteralPath $ProjectRoot).Path)) {
+        $result.Status = "skipped"
+        $result.Reason = "Bundle at " + $BundleRoot + " is outside the project; the project's ignore rules cannot exclude its files."
         return $result
     }
 

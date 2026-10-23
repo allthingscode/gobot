@@ -81,12 +81,7 @@ $crucibleRootPath = Test-RequiredValue -Path @("crucible_root") -Name "crucible_
 
 if (-not [string]::IsNullOrWhiteSpace($crucibleRootPath)) {
     $isRooted = [System.IO.Path]::IsPathRooted($crucibleRootPath) -or $crucibleRootPath -match '^([A-Za-z]:|[\\/])'
-    $resolvedCrucibleRoot = $crucibleRootPath
-    if (-not $isRooted) {
-        $configDir = Split-Path -Parent $ConfigPath
-        $projRoot = Split-Path -Parent $configDir
-        $resolvedCrucibleRoot = Join-Path $projRoot $crucibleRootPath
-    }
+    $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot (Split-Path -Parent (Split-Path -Parent $ConfigPath)) -CrucibleRoot $crucibleRootPath
 
     if ($isRooted) {
         $errors += "crucible_root must be a relative path inside the project (e.g. .crucible, .crucible-bundle, tools/crucible)."

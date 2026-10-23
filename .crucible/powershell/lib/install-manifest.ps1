@@ -1,4 +1,7 @@
 . (Join-Path $PSScriptRoot "normalized-hash.ps1")
+if (-not (Get-Command "Test-PathWithinDirectory" -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
 
 function Get-InstallManifest {
     param([string]$FrameworkRoot = "")
@@ -386,7 +389,7 @@ function Test-CrucibleGitIgnored {
 
     $absoluteFilePath = [System.IO.Path]::GetFullPath((Join-Path $BundleRoot $RelativePath))
 
-    if ($absoluteFilePath.StartsWith($gitRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (Test-PathWithinDirectory -Path $absoluteFilePath -Directory $gitRoot) {
         $relativeToGit = $absoluteFilePath.Substring($gitRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
         $relativeToGit = $relativeToGit -replace '\\', '/'
 

@@ -189,7 +189,7 @@ try {
             }
             $agentLine = @(($output -split "`r?`n") | Where-Object { $_ -match '\[RECOMMENDED AGENT\]' })
             Assert-Result -Name ($case.Phase + " names " + $case.Want) -Condition ($agentLine.Count -eq 1 -and $agentLine[0] -match ('\] ' + $case.Want + ' - dispatch with subagent_type')) -FailureMessage $output
-            Assert-Result -Name ($case.Phase + " warns with the sync command when the file is missing") -Condition ($output -match ('\[WARN\] Agent definition ' + $case.Want + ' is missing') -and $output -match 'sync-claude-agents\.ps1 -ProjectRoot \.') -FailureMessage $output
+            Assert-Result -Name ($case.Phase + " warns with the sync command when the file is missing") -Condition ($output -match ('\[WARN\] Agent definition ' + $case.Want + ' is missing') -and $output -match "& '[^']*sync-claude-agents\.ps1' -ProjectRoot '\.'") -FailureMessage $output
 
             & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $ctx.RepoRoot 6>&1 | Out-Null
             try {
@@ -208,7 +208,7 @@ try {
         $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
         Assert-Result -Name "level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = gpt-6\.1-sol at low effort \(target codex\)') -FailureMessage ("got: " + ($lines -join " | "))
         $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
-        Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match 'low - .*-Model gpt-6\.1-sol') -FailureMessage ("got: " + ($effort -join " | "))
+        Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match "low - .*launch-codex-specialist\.ps1 -Effort 'low', with -Model gpt-6\.1-sol \(Codex only\)") -FailureMessage ("got: " + ($effort -join " | "))
     }
 
     # Item 212: a Claude tier is a level too; the effort goes to the Agent tool's effort parameter.

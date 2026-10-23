@@ -268,7 +268,7 @@ function Invoke-UpdateBundle {
 
     $baselineCommit = Read-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit"
     if (-not ($baselineCommit -match '^[0-9a-f]{40}$')) {
-        throw ("Missing crucible_install_commit in .crucible/config.yaml. Run once from the Crucible source checkout: " + (New-CrucibleCommand -Script "powershell/init-project.ps1" -Parameters ([ordered]@{ ProjectRoot = $AdopterRoot; StampVersionOnly = $true }) -CrucibleRoot $frameworkRoot -Invoker "pwsh -ExecutionPolicy Bypass -File"))
+        throw ("Missing crucible_install_commit in .crucible/config.yaml. Run once from the Crucible source checkout: " + (New-CrucibleCommand -Script "powershell/init-project.ps1" -Transport PowerShell -Parameters ([ordered]@{ ProjectRoot = $AdopterRoot; StampVersionOnly = $true }) -CrucibleRoot $frameworkRoot))
     }
 
     $provManifest = Read-ProvenanceManifest -BundleRoot $adopterCrucibleRoot

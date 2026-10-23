@@ -301,6 +301,18 @@ try {
         try { $null = Get-SupersededRenameMap -Manifest $self } catch { $threwOnSelf = $true }
         Assert-Result -Name "self rename throws" -Condition $threwOnSelf -FailureMessage "an entry renaming a path to itself was accepted"
     }
+
+    # Item 302: the file was placed under the git root by a bare prefix match, so a path in
+    # the sibling directory proj2 was asked of proj's ignore rules as 2/<file>.
+    $results += Run-Test -Name "A path in a sibling-prefixed directory is not judged by the project's ignore rules" -Body {
+        $project = Join-Path $tempRoot "gitignored-sibling/proj"
+        $bundle = Join-Path $project ".crucible"
+        New-Item -ItemType Directory -Path $bundle, (Join-Path $tempRoot "gitignored-sibling/proj2") -Force | Out-Null
+        $null = git init --quiet $project 2>$null
+        [System.IO.File]::WriteAllText((Join-Path $project ".gitignore"), "/2/`n/local/`n", (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Result -Name "an ignored path inside the project is reported" -Condition (Test-CrucibleGitIgnored -BundleRoot $bundle -RelativePath "../local/a.txt") -FailureMessage "the fixture's ignore rule did not apply inside the project, so the check below is vacuous"
+        Assert-Result -Name "a sibling path is not ignored by the project" -Condition (-not (Test-CrucibleGitIgnored -BundleRoot $bundle -RelativePath "../../proj2/ignored.txt")) -FailureMessage "a path outside the git root was judged against its ignore rules"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

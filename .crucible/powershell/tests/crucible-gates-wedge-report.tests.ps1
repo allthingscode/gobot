@@ -79,9 +79,9 @@ $results += Run-Test -Name "Every recovery that re-runs Init carries the supplie
     $missing = @()
     foreach ($code in $codes) {
         $recovery = Get-WedgeRecovery -BreakerCode $code -TaskId "F-126" -ProjectRoot $root
-        if ($recovery -notmatch 'crucible\.ps1"? -Init') { continue }
+        if ($recovery -notmatch "& '[^']*crucible\.ps1' -Init") { continue }
         $rerunCount++
-        if (-not $recovery.Contains('-ProjectRoot "' + $root + '"') -or $recovery.Contains("{project_root}")) {
+        if (-not $recovery.Contains("-ProjectRoot '" + $root + "'") -or $recovery.Contains("{project_root}")) {
             $missing += ($code + ": " + $recovery)
         }
     }
@@ -93,13 +93,13 @@ $results += Run-Test -Name "A recovery override gets the same -ProjectRoot subst
     $override = 'Fix it, then run: crucible.ps1 -Init -TaskId F-126 -ProjectRoot "{project_root}" -Recover'
     $lines = Get-WedgeReportLines -TaskId "F-126" -SourcePhase "a" -TargetPhase "b" -BreakerCode "human_escalation" -Why "x" -RecoveryOverride $override -ProjectRoot "C:/work/adopter"
     $joined = $lines -join "`n"
-    Assert-Result -Name "override root substituted" -Condition ($joined.Contains('-ProjectRoot "C:/work/adopter" -Recover')) -FailureMessage "override kept its placeholder or lost the root. Lines:`n$joined"
+    Assert-Result -Name "override root substituted" -Condition ($joined.Contains("-ProjectRoot 'C:/work/adopter' -Recover")) -FailureMessage "override kept its placeholder or lost the root. Lines:`n$joined"
 }
 
 $results += Run-Test -Name "A blank ProjectRoot leaves the placeholder visible rather than an empty root" -Body {
     $recovery = Get-WedgeRecovery -BreakerCode "scope_violation" -TaskId "F-126"
-    Assert-Result -Name "placeholder kept" -Condition ($recovery.Contains('-ProjectRoot "{project_root}"')) -FailureMessage ("expected the {project_root} placeholder, as {task_id} is kept for a blank TaskId. Got: " + $recovery)
-    Assert-Result -Name "no empty root" -Condition (-not $recovery.Contains('-ProjectRoot ""')) -FailureMessage ("an empty -ProjectRoot resolves the current directory, which is the defect. Got: " + $recovery)
+    Assert-Result -Name "placeholder kept" -Condition ($recovery.Contains("-ProjectRoot '{project_root}'")) -FailureMessage ("expected the {project_root} placeholder, as {task_id} is kept for a blank TaskId. Got: " + $recovery)
+    Assert-Result -Name "no empty root" -Condition (-not $recovery.Contains("-ProjectRoot ''") -and -not $recovery.Contains('-ProjectRoot ""')) -FailureMessage ("an empty -ProjectRoot resolves the current directory, which is the defect. Got: " + $recovery)
 }
 
 # Review of 5d1b869 (item 247). The builder threw on a root it could not double-quote, so the
@@ -109,7 +109,7 @@ $results += Run-Test -Name "The STOP report prints for any project root, with th
     foreach ($case in @(
             @{ Root = 'C:\cash$root'; Literal = "-ProjectRoot 'C:\cash`$root'" },
             @{ Root = 'C:\tick`root'; Literal = "-ProjectRoot 'C:\tick``root'" },
-            @{ Root = 'D:\'; Literal = '-ProjectRoot "D:\"' })) {
+            @{ Root = 'D:\'; Literal = "-ProjectRoot 'D:\'" })) {
         $lines = @(Get-WedgeReportLines -TaskId "F-247" -SourcePhase "a" -TargetPhase "b" -BreakerCode "scope_violation" -Why "x" -ProjectRoot $case.Root)
         $joined = $lines -join "`n"
         Assert-Result -Name ("report printed for " + $case.Root) -Condition ($joined -match "\[STOP\] HUMAN INTERVENTION REQUIRED" -and $joined -match "(?m)^RECOVERY:\s+Follow") -FailureMessage $joined

@@ -192,7 +192,7 @@ if (-not $Quiet) {
                             $null = git -C $frameworkSource merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host ("WARNING: Installed Crucible bundle lags framework HEAD. Installed: " + $bannerCommit.Substring(0, 7) + " | Upstream HEAD: " + $frameworkHead.Substring(0, 7)) -ForegroundColor Yellow
-                                $updateCommand = New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource -Invoker "pwsh -ExecutionPolicy Bypass -File"
+                                $updateCommand = New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource
                                 Write-Host ("  Run " + $updateCommand + " to bring it current.") -ForegroundColor Yellow
                             }
                         }
@@ -371,9 +371,9 @@ if ($Rewind) {
 if ([string]::IsNullOrEmpty($TaskId)) {
     Write-Host "`n[ERROR] -TaskId is required." -ForegroundColor Red
     $crucibleRootForUsage = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { ".\" + $crucibleRoot.Replace("/", "\") }
-    Write-Host ("Usage: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = "{task_id}"; ProjectRoot = "{project_root}" }) -CrucibleRoot $crucibleRootForUsage)) -ForegroundColor Yellow
-    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Health = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for health checks)") -ForegroundColor DarkGray
-    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Doctor = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for readiness checks)") -ForegroundColor DarkGray
+    Write-Host ("Usage: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = "{task_id}"; ProjectRoot = "{project_root}" }) -CrucibleRoot $crucibleRootForUsage)) -ForegroundColor Yellow
+    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Health = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for health checks)") -ForegroundColor DarkGray
+    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Doctor = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for readiness checks)") -ForegroundColor DarkGray
     Write-Host "No task ID? Start orchestration in bootstrap mode: a Groomer selects the next item (sops/orchestrator.md, Session Start, step 5)." -ForegroundColor Yellow
     exit 1
 }

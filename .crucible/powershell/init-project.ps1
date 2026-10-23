@@ -137,7 +137,7 @@ function Copy-TemplateDirectory {
     foreach ($entry in $entries) {
         $relative = $entry.FullName.Substring($sourceRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 
-        if ($entry.FullName.StartsWith($REPO_ROOT, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (Test-PathWithinDirectory -Path $entry.FullName -Directory $REPO_ROOT) {
             $repoRel = $entry.FullName.Substring($REPO_ROOT.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Replace("\", "/")
             if (Test-NestedCrucibleRuntimePath -RelativePath $repoRel -Manifest $Manifest) {
                 continue
@@ -458,10 +458,14 @@ Write-Info "  - .crucible/agent-instructions/ (copy-ready root instruction snipp
 Write-Info "  - .crucible/docs/, personas/, sops/, prompts/, schemas/, standards/, powershell/"
 Write-Info "  - .claude/agents/crucible-*.md (generated Claude agent definitions; regenerate with .crucible/powershell/sync-claude-agents.ps1)"
 Write-Info ""
-$backlogDirForRel = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
+# Slice the normalized forms the containment test compares: the configured value can
+# spell the same directory differently (doubled backslashes, item 307), so cutting the raw
+# string at the project root's length lands mid-name.
+$backlogDirForRel = [System.IO.Path]::GetFullPath((Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot))
+$projectRootForRel = [System.IO.Path]::GetFullPath($resolvedProjectRoot)
 $relativeBacklogPath = $backlogDirForRel
-if ($backlogDirForRel.StartsWith($resolvedProjectRoot)) {
-    $relativeBacklogPath = $backlogDirForRel.Substring($resolvedProjectRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+if (Test-PathWithinDirectory -Path $backlogDirForRel -Directory $projectRootForRel) {
+    $relativeBacklogPath = $backlogDirForRel.Substring($projectRootForRel.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 }
 $relativeBacklogPath = $relativeBacklogPath -replace '\\', '/'
 if (-not $relativeBacklogPath.EndsWith('/')) { $relativeBacklogPath += '/' }
@@ -488,9 +492,9 @@ if ($AppendInstructions) {
     Write-Info "  2. Merge .crucible/agent-instructions/AGENTS.md into the project root AGENTS.md."
     Write-Info "  3. Add CLAUDE.md or GEMINI.md forwarding snippets if those tools are used."
 }
-Write-Info ("  4. From the project root, run " + (New-CrucibleCommand -Script "powershell/validate-config.ps1" -Parameters ([ordered]@{ ConfigPath = ".crucible/config.yaml" }) -CrucibleRoot ".crucible") + ".")
+Write-Info ("  4. From the project root, run " + (New-CrucibleCommand -Script "powershell/validate-config.ps1" -Transport PowerShell -Parameters ([ordered]@{ ConfigPath = ".crucible/config.yaml" }) -CrucibleRoot ".crucible") + ".")
 if ($WithSampleTask) {
-    Write-Info ("  5. F-001 sample task installed. Run '" + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = "F-001"; ProjectRoot = $resolvedProjectRoot }) -CrucibleRoot ".\.crucible") + "' to smoke-test the pipeline. Add your own backlog items afterward.") -ForegroundColor DarkGray
+    Write-Info ("  5. F-001 sample task installed. Run '" + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = "F-001"; ProjectRoot = $resolvedProjectRoot }) -CrucibleRoot ".\.crucible") + "' to smoke-test the pipeline. Add your own backlog items afterward.") -ForegroundColor DarkGray
 } else {
     Write-Info "  5. Add initial backlog items under $relativeBacklogPath."
 }

@@ -102,7 +102,7 @@ function Get-WedgeRecovery {
         $entry = $script:WEDGE_RECOVERY_BY_CODE[$code]
         $rerunParameters = [ordered]@{ Init = $true; TaskId = $replacementTaskId; ProjectRoot = $replacementProjectRoot }
         if ($entry.Recover) { $rerunParameters["Recover"] = $true }
-        $rerun = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $rerunParameters -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot) -Invoker "pwsh -ExecutionPolicy Bypass -File"
+        $rerun = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters $rerunParameters -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot)
         return ([string]$entry.Text).Replace("{task_id}", $replacementTaskId) + " " + $rerun
     }
     return "No automated recovery is defined. Read docs/circuit-breaker-runbook.md and choose a human resolution before rerunning crucible.ps1."

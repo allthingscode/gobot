@@ -445,19 +445,52 @@ function Get-ConfiguredCrucibleRoot {
 
     $value = Get-ConfiguredCrucibleRootValue -ProjectRoot $ProjectRoot
     if ($null -eq $value) { return $null }
-    if ([System.IO.Path]::IsPathRooted($value)) { return $value }
-    return (Join-Path (Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot) $value)
+    return (Resolve-CrucibleBundleRoot -ProjectRoot (Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot) -CrucibleRoot $value)
+}
+
+# The one resolver of a bundle root (I13, item 301): an absolute crucible_root is used as is,
+# a relative one is joined to the project root. config.yaml must hold a relative value
+# (validate-config.ps1), but -CrucibleRoot and Context.CrucibleRoot may carry an absolute one,
+# and a project root joined in front of it names a directory that does not exist, which
+# made the research scan skip every artifact (items 280, 300). An empty input refuses.
+function Resolve-CrucibleBundleRoot {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][AllowNull()][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][AllowNull()][string]$CrucibleRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CrucibleRoot)) {
+        throw "Cannot resolve the Crucible bundle: the crucible_root value is empty."
+    }
+    if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) { return $CrucibleRoot }
+    if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        throw ("Cannot resolve the Crucible bundle '" + $CrucibleRoot + "': it is relative and the project root is empty.")
+    }
+    return (Join-Path $ProjectRoot $CrucibleRoot)
+}
+
+# Whether Path is Directory or inside it, compared on full paths at a separator boundary so
+# a sibling sharing the prefix (C:\bundle2 beside C:\bundle, research-old beside research)
+# is outside. Ordinal and case-insensitive: a scan that misses an artifact by case fails open.
+function Test-PathWithinDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Directory
+    )
+
+    $normalizedPath = [System.IO.Path]::GetFullPath($Path).Replace("\", "/").TrimEnd("/")
+    $normalizedDirectory = [System.IO.Path]::GetFullPath($Directory).Replace("\", "/").TrimEnd("/")
+    if ($normalizedPath.Equals($normalizedDirectory, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    $directoryPrefix = $normalizedDirectory + "/"
+    return $normalizedPath.StartsWith($directoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Test-ConfiguredRuntimePath {
     # Item 188: custom session/workspaces roots have the same runtime-data exemption.
     param([string]$Path, [string]$ProjectRoot)
     $fullPath = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $ProjectRoot $Path }
-    $normalizedPath = [System.IO.Path]::GetFullPath($fullPath).Replace("\", "/")
     foreach ($key in @("session", "workspaces")) {
-        $root = [System.IO.Path]::GetFullPath((Get-ConfiguredPath -Key $key -ProjectRoot $ProjectRoot)).Replace("\", "/").TrimEnd("/")
-        if ($normalizedPath.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
-            $normalizedPath.StartsWith($root + "/", [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (Test-PathWithinDirectory -Path $fullPath -Directory (Get-ConfiguredPath -Key $key -ProjectRoot $ProjectRoot)) {
             return $true
         }
     }

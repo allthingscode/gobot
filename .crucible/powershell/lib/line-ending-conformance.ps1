@@ -1,4 +1,7 @@
 . (Join-Path $PSScriptRoot "platform.ps1")
+if (-not (Get-Command "Test-PathWithinDirectory" -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
 
 # init-project.ps1 installs .crucible/.gitattributes, but nearest-.gitattributes-wins
 # means it governs only the bundle subtree. The adopter's own tree is left to whatever
@@ -54,7 +57,7 @@ function Test-LineEndingConformance {
     if (Test-Path -LiteralPath $BundleRoot -PathType Container) {
         $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).Path.Replace("\", "/").TrimEnd("/")
         $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).Path.Replace("\", "/").TrimEnd("/")
-        if ($bundleFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (Test-PathWithinDirectory -Path $bundleFull -Directory $rootFull) {
             $bundlePrefix = $bundleFull.Substring($rootFull.Length).TrimStart("/") + "/"
         }
     }

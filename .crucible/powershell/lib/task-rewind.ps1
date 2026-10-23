@@ -131,6 +131,6 @@ function Invoke-TaskRewind {
         }
         Write-Host "`n[REWIND] Next suggested command to start grooming:" -ForegroundColor Green
         $rootForCommand = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "{project_root}" } else { $ProjectRoot }
-        Write-Host ("  " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $rootForCommand }) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $rootForCommand) -Invoker "pwsh -NoProfile -ExecutionPolicy Bypass -File")) -ForegroundColor Yellow
+        Write-Host ("  " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $rootForCommand }) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $rootForCommand))) -ForegroundColor Yellow
     }
 }

@@ -170,6 +170,37 @@ try {
         Assert-Result -Name "bundle rules stay internal" -Condition (@($report.Violations).Count -eq 0) -FailureMessage "nested bundle rules were misfiled as external: $(@($report.Violations | ForEach-Object { $_.Source }) -join ', ')"
     }
 
+    # Item 302: the bundle was placed under the project by a bare prefix match, so a
+    # bundle in the sibling directory apps beside the project app became s/<file>, and a
+    # project rule for s/ was reported against files the project does not hold.
+    $results += Run-Test -Name "A bundle in a sibling-prefixed directory is not relativized under the project" -Body {
+        # The holder's name is also a project rule: an outside path with its leading slash
+        # trimmed (tmp/.../scratch302/apps/README.md off Windows) matches it.
+        $holder = Join-Path $tempRoot "scratch302"
+        $project = Join-Path $holder "app"
+        $bundle = Join-Path $holder "apps"
+        $built = New-ConformanceFixture -Path (Join-Path $holder "source") -NoGit
+        Move-Item -LiteralPath $built -Destination $bundle
+        New-Item -ItemType Directory -Path $project -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $project ".gitignore") -Value @("/s/", "scratch302/") -Encoding UTF8
+        $null = Invoke-Git @("init", "--quiet", $project)
+
+        # The function returns its list with the comma operator, so @() around the call
+        # would wrap it as one element; assign first, then enumerate.
+        $candidates = Get-BundleCommittablePath -ProjectRoot $project -BundleRoot $bundle
+        $candidates = @($candidates)
+        Assert-Result -Name "sibling bundle files found" -Condition (@(Get-ChildItem -LiteralPath $bundle -Recurse -File).Count -gt 0) -FailureMessage "the fixture bundle holds no files, so the checks below are vacuous"
+        $relativized = @($candidates | Where-Object { $_ -like "s/*" })
+        Assert-Result -Name "no sibling file made project-relative" -Condition ($relativized.Count -eq 0) -FailureMessage ("files outside the project were relativized under it: " + ($relativized -join ", "))
+        Assert-Result -Name "no file outside the project submitted" -Condition ($candidates.Count -eq 0) -FailureMessage ("files outside the project were offered to its ignore rules: " + ($candidates -join ", "))
+
+        $report = Test-GitignoreConformance -ProjectRoot $project -BundleRoot $bundle
+        $misfiled = @($report.Violations | Where-Object { $_.Path -like "s/*" })
+        Assert-Result -Name "no project rule reported against the sibling" -Condition ($misfiled.Count -eq 0) -FailureMessage ("a project rule was reported against files outside the project: " + (@($misfiled | ForEach-Object { $_.Path }) -join ", "))
+        Assert-Result -Name "outside bundle skipped" -Condition ($report.Status -eq "skipped" -and @($report.Violations).Count -eq 0) -FailureMessage ("expected skipped with no violations, got '" + $report.Status + "': " + $report.Reason + " " + (@($report.Violations | ForEach-Object { $_.Path }) -join ", "))
+        Assert-Result -Name "skip says the bundle is outside" -Condition ($report.Reason -match 'outside the project') -FailureMessage ("the skip does not say why: " + $report.Reason)
+    }
+
     $results += Run-Test -Name "Outside a git work tree the check skips rather than passing" -Body {
         $project = Join-Path $tempRoot "no-git"
         $bundle = New-ConformanceFixture -Path $project -RootIgnore @("AGENTS.md") -NoGit

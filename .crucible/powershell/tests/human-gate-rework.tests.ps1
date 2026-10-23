@@ -73,11 +73,11 @@ exit 0
             Set-Content -LiteralPath $script -Value $runner -Encoding utf8NoBOM
             $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $script $dir $REPO_ROOT $case }
             if ($case -in @('late-read-error', 'late-missing-row')) {
-                Assert-Result -Name 'late refusal prints the recovery command with the incremented strike count' -Condition ($run.Output -match 'new-handoff\.ps1' -and $run.Output -match '-ReviewStrikeCount 3\b' -and $run.Output -match '-ProjectRoot ' -and $run.Output -match '-SessionCycleId cycle-7\b' -and $run.Output -match 'already recorded and task/F-1 restored') -FailureMessage $run.Output
+                Assert-Result -Name 'late refusal prints the recovery command with the incremented strike count' -Condition ($run.Output -match "new-handoff\.ps1'" -and $run.Output -match "-ReviewStrikeCount '3'" -and $run.Output -match '-ProjectRoot ' -and $run.Output -match "-SessionCycleId 'cycle-7'" -and $run.Output -match 'already recorded and task/F-1 restored') -FailureMessage $run.Output
                 Assert-Result -Name 'late refusal does not tell the human to reject again' -Condition ($run.Output -notmatch 'then reject again' -and $run.Output -match 'do not reject again') -FailureMessage $run.Output
             }
             if ($case -eq 'late-read-error') {
-                Assert-Result -Name 'late read error names the state it leaves and a remedy' -Condition ($run.Output -match 'injected late read error' -and $run.Output -match 'already recorded and task/F-1 restored' -and $run.Output -match 'new-handoff\.ps1\W+-TaskId F-1\b' -and $run.Output -match 'do not reject again' -and $run.Output -notmatch 'then reject again') -FailureMessage $run.Output
+                Assert-Result -Name 'late read error names the state it leaves and a remedy' -Condition ($run.Output -match 'injected late read error' -and $run.Output -match 'already recorded and task/F-1 restored' -and $run.Output -match "& '[^']*new-handoff\.ps1' -TaskId 'F-1'" -and $run.Output -match 'do not reject again' -and $run.Output -notmatch 'then reject again') -FailureMessage $run.Output
             }
             if ($case -eq 'read-error') {
                 Assert-Result -Name 'read error is diagnosed under Continue preference' -Condition ($run.Output -match 'Cannot read backlog for rework of F-1:.*injected backlog read error' -and $run.Output -notmatch 'no exact ID row') -FailureMessage $run.Output
@@ -219,7 +219,7 @@ Get-HumanGateReworkRecoveryCommand -TaskId F-1 -ProjectRoot $Root -GateReason 'r
         $script = Join-Path $dir 'print.ps1'
         Set-Content -LiteralPath $script -Value $runner -Encoding utf8NoBOM
         $printed = (& (Get-PwshCommand) -NoProfile -File $script $dir $REPO_ROOT | Out-String).Trim()
-        Assert-Result -Name 'command carries both artifacts' -Condition ($printed -match 'one file\.md' -and $printed -match 'two file\.md' -and $printed -match '-ReviewStrikeCount 2') -FailureMessage $printed
+        Assert-Result -Name 'command carries both artifacts' -Condition ($printed.StartsWith("& '") -and $printed -match "-Artifacts 'one file\.md,two file\.md'" -and $printed -match "-ReviewStrikeCount '2'") -FailureMessage $printed
         $exec = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -Command ($printed + '; exit $LASTEXITCODE') }
         Assert-Result -Name 'printed command binds and reaches the row check (exit 2, not a binding failure)' -Condition ($exec.ExitCode -eq 2 -and $exec.Output -match 'no exact row for F-1') -FailureMessage ("exit " + $exec.ExitCode + ": " + $exec.Output)
     }

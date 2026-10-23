@@ -84,10 +84,10 @@ try {
         Assert-Result "one Codex command" ($codex.Count -eq 1) "expected one printed Codex command"
         Assert-Result "no PromptText" ($codex[0] -notmatch '-PromptText') "printed Codex command must not use -PromptText"
         $pointerPath = Join-Path (Split-Path $p.GateFiling) "gate-filing-pointer.md"
-        Assert-Result "quoted PromptFile path" ($codex[0].Contains('-PromptFile "' + $pointerPath + '"')) "expected quoted pointer file path"
+        Assert-Result "quoted PromptFile path" ($codex[0].Contains("-PromptFile '" + $pointerPath + "'")) "expected quoted pointer file path"
         # Item 219: a Codex level includes both model and effort.
         Assert-Result "model and effort in dispatch" ($codex[0] -match '-Model <model> -Effort <effort>') "expected both halves of the Codex level"
-        Assert-Result "task-scoped dispatch" ($codex[0] -match '-TaskId R-021 -Phase research') "expected TaskId and Phase"
+        Assert-Result "task-scoped dispatch" ($codex[0] -match "-TaskId 'R-021' -Phase 'research'") "expected TaskId and Phase"
         Assert-Result "pointer written" (Test-Path -LiteralPath $pointerPath) "missing pointer file"
         $pointer = [IO.File]::ReadAllText($pointerPath)
         $expected = "Researcher: $($p.TaskId) - read and follow all instructions in $($p.GateFiling)"
@@ -184,7 +184,7 @@ try {
         Assert-Result "no dollar sign" ($body -notmatch '\$') ("gate-filing.md holds an unexpanded variable: " + $body)
         Assert-Result "names the findings artifact" ($body -match '`\.crucible/research/R-021_Quality_Audit_20260715\.md`') "gate-filing.md should name the findings artifact in backticks"
         Assert-Result "names the backlog path" ($body.Contains('`' + (Join-Path $p.Root '.crucible/backlog') + '/{bugs,chores,features}/active/`')) "gate-filing.md should name the backlog directory in backticks"
-        Assert-Result "handoff IDs singly quoted" ($body -match '-HumanApproved "C-350","C-351"') "handoff command should quote each ID once"
+        Assert-Result "handoff IDs singly quoted" ($body -match "-HumanApproved 'C-350','C-351'") "handoff command should quote each ID once"
         Assert-Result "no suspicious-content sentinel" ($body -notmatch 'SuspiciousContent') "the handoff command must not pass -SuspiciousContent"
         Assert-Result "stubs filed as Stub" ($body -match 'status: "Stub"' -and $body -notmatch 'status: "Ready"') "stubs must be filed with status Stub for the Stub-Only Close-Out"
     }

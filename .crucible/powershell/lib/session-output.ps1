@@ -166,7 +166,7 @@ function New-CruciblePromptText {
     $workspacesDir = $Context.WorkspacesDir
     $crucibleRoot = $Context.CrucibleRoot
     $repoRoot = $Context.RepoRoot
-    $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $repoRoot $crucibleRoot }
+    $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $repoRoot -CrucibleRoot $crucibleRoot
     $Recover = [bool]$Context.Recover
 
     # --- 5. Template Assembly ---
@@ -443,7 +443,7 @@ function Initialize-CrucibleTargetSession {
     $backlogDir = $Context.BacklogDir
     $REPO_ROOT = $Context.RepoRoot
     $crucibleRoot = $Context.CrucibleRoot
-    $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $REPO_ROOT $crucibleRoot }
+    $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $crucibleRoot
     $FRAMEWORK_POWERSHELL = $Context.FrameworkPowerShell
     $TaskId = $Context.TaskId
     $Init = [bool]$Context.Init
@@ -542,8 +542,8 @@ function Initialize-CrucibleTargetSession {
             Check-Dependencies -BacklogItemPath $backlogItemPath -TargetSpecialist $handoff.target_phase -TaskId $handoff.task_id
 
             $pwshCmd = Get-PwshCommand
-            $isolatedChecksCommand = New-CrucibleCommand -Script "powershell/run-isolated-checks.ps1" -Parameters ([ordered]@{ TaskId = $handoff.task_id; Mode = "full"; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $resolvedCrucibleRoot -Invoker ($pwshCmd + " -ExecutionPolicy Bypass -File")
-            $mergeSimulationCommand = New-CrucibleCommand -Script "powershell/check-merge-conflicts.ps1" -Parameters ([ordered]@{ TaskId = $handoff.task_id; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $resolvedCrucibleRoot -Invoker ($pwshCmd + " -ExecutionPolicy Bypass -File")
+            $isolatedChecksCommand = New-CrucibleCommand -Script "powershell/run-isolated-checks.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ TaskId = $handoff.task_id; Mode = "full"; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $resolvedCrucibleRoot
+            $mergeSimulationCommand = New-CrucibleCommand -Script "powershell/check-merge-conflicts.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ TaskId = $handoff.task_id; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $resolvedCrucibleRoot
 
             $taskLists = @{
                 grooming = "- [ ] Read BACKLOG.md and identify target item (or confirm {task_id})`n- [ ] Read existing spec file or create from template`n- [ ] Validate/paraphrase any Researcher findings (never copy-paste)`n- [ ] Write detailed implementation spec with acceptance criteria (mark [-] when not routing to implementation)`n- [ ] Set ``depends_on`` frontmatter if applicable`n- [ ] Update BACKLOG.md status + run validate-backlog.ps1`n- [ ] Record progress via ### CHECKPOINT`n- [ ] Write handoff.json to the routed phase (implementation, research, done, or verification for a Stub-Only Close-Out)"

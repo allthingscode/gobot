@@ -79,6 +79,8 @@ Path to the installed Crucible bundle for this project. In a normal install this
 
 This value must point to a relative path inside the project. Applications that use Crucible must use their own installed framework folder, rather than referencing absolute or external directories, and the path must not escape the project root (no `..` segments).
 
+`validate-config.ps1` refuses an absolute value here. The scripts themselves resolve a bundle root the same way wherever it comes from: an absolute value is used as is, and a relative one is joined to the project root. A bundle root handed to a script directly, such as the `-CrucibleRoot` parameter or a test's context, can therefore be absolute, and a config that has not been validated still has its research artifacts scanned. One function does this resolution (`Resolve-CrucibleBundleRoot` in `powershell/lib/config-helpers.ps1`, item 301). `launch-codex-specialist.ps1` is stricter: it refuses an absolute `-CrucibleRoot` outside the project.
+
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
 | `crucible_root` | string | yes | Path to this project's installed Crucible bundle. Must be relative, safe, and contain a complete bundle structure. The orchestrator invokes `<crucible_root>/powershell/crucible.ps1` from the project directory to run the pipeline. |

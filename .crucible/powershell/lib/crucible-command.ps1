@@ -117,23 +117,34 @@ function Get-CrucibleCommandCompanionProblems {
     return $problems
 }
 
-# The characters PowerShell reads as a double or a single quote: ASCII and the typographic
-# forms its tokenizer also accepts.
-$script:CrucibleCommandDoubleQuotes = @([char]0x22, [char]0x201C, [char]0x201D, [char]0x201E)
-$script:CrucibleCommandSingleQuotes = @([char]0x27, [char]0x2018, [char]0x2019, [char]0x201A, [char]0x201B)
-
-# One value as a PowerShell prompt reads it. A bare token prints as is; a value with nothing
-# a double-quoted string expands is double-quoted; anything else is a single-quoted literal
-# with its quotes doubled, which carries $, backticks and double quotes verbatim.
+# A literal for a PowerShell 7+ prompt. Doubling every quote its tokenizer accepts carries
+# quotes, $, backticks, trailing backslashes and empty strings without native passing.
 function ConvertTo-CrucibleCommandPowerShellLiteral {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
-    if ($Value -match '^[A-Za-z0-9_.][A-Za-z0-9_.-]*$') { return $Value }
-    $expands = $Value.Contains('$') -or $Value.Contains('`')
-    foreach ($q in $script:CrucibleCommandDoubleQuotes) { if ($Value.Contains([string]$q)) { $expands = $true } }
-    if (-not $expands) { return ('"' + $Value + '"') }
+    if ($Value -eq '--%') {
+        throw "New-CrucibleCommand: --% is PowerShell's stop-parsing token even inside quotes; no direct command is available."
+    }
     $escaped = $Value
-    foreach ($q in $script:CrucibleCommandSingleQuotes) { $escaped = $escaped.Replace([string]$q, ([string]$q + [string]$q)) }
+    foreach ($q in @([char]0x27, [char]0x2018, [char]0x2019, [char]0x201A, [char]0x201B)) { $escaped = $escaped.Replace([string]$q, ([string]$q + [string]$q)) }
     return ("'" + $escaped + "'")
+}
+
+# A literal shared by Bash and PowerShell, for an agent whose shell is not prescribed.
+# Keep the pre-284 native-passing refusals. Single quotes protect dollars and backticks
+# in both shells; double quotes carry apostrophes when neither shell expands the value.
+function ConvertTo-CrucibleCommandShellNeutralLiteral {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) { throw "New-CrucibleCommand: shell-neutral -File has an empty value." }
+    if ($Value.Contains('"')) { throw "New-CrucibleCommand: shell-neutral -File cannot carry a double quote on older launching PowerShell hosts." }
+    if ($Value.EndsWith('\') -and $Value -match '\s') { throw "New-CrucibleCommand: shell-neutral -File cannot carry whitespace and a trailing backslash on older launching PowerShell hosts." }
+    if ($Value -notmatch "['\u2018\u2019\u201A\u201B]") { return ("'" + $Value + "'") }
+    if ($Value.EndsWith('\')) {
+        throw "New-CrucibleCommand: quotes and a trailing backslash escape the closing double quote in Bash; no shared Bash/PowerShell literal is available."
+    }
+    if ($Value -match '[$`\u201C\u201D\u201E]' -or $Value.Contains('\\')) {
+        throw "New-CrucibleCommand: the value combines quotes with shell expansions or doubled backslashes; no shared Bash/PowerShell literal is available."
+    }
+    return ('"' + $Value + '"')
 }
 
 # One value as a process command line carries it (Start-Process -ArgumentList, and
@@ -171,25 +182,23 @@ function ConvertTo-CrucibleCommandBashLiteral {
 
 # One parameter value for the transport. A placeholder such as <model> prints as given for a
 # PowerShell prompt, for a human to replace, and single-quoted for a shell, where < is a
-# redirect. Refused, because no quoting represents them on one command line: an empty value
-# (Windows PowerShell 5.1 and PowerShell 7.0 to 7.2 drop it), a carriage return, a newline or
-# a NUL; where the script is started with -File, a value beginning with '-', which pwsh -File
-# binds as a parameter name; and on a PowerShell prompt's -File line, a double quote, or a
-# trailing backslash in a value with whitespace, which those PowerShell versions pass to the
-# script broken.
+# redirect. A carriage return, newline or NUL cannot appear on one command line. The native
+# -File transports also refuse empty values and values beginning with '-', which older
+# PowerShell drops or pwsh -File binds as a parameter name.
 function Format-CrucibleCommandValue {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value,
-        [ValidateSet("PowerShell", "ArgumentList", "Bash")][string]$Transport = "PowerShell",
+        [ValidateSet("PowerShell", "ShellNeutral", "ArgumentList", "Bash")][string]$Transport = "PowerShell",
         [switch]$File
     )
     if ($Value -match '^<[^<>"''`$\r\n]+>$') {
+        if ($Transport -eq "ShellNeutral") { return (ConvertTo-CrucibleCommandShellNeutralLiteral -Value $Value) }
         if ($Transport -eq "Bash") { return ("'" + $Value + "'") }
         if ($Value -match '\s') { return ('"' + $Value + '"') }
         return $Value
     }
-    if ([string]::IsNullOrEmpty($Value)) {
+    if ($Transport -ne "PowerShell" -and [string]::IsNullOrEmpty($Value)) {
         throw ("New-CrucibleCommand: -" + $Name + " has an empty value; omit the parameter or pass a placeholder such as <" + $Name.ToLowerInvariant() + ">.")
     }
     foreach ($bad in @("`r", "`n", [string][char]0)) {
@@ -201,14 +210,6 @@ function Format-CrucibleCommandValue {
     if ($File -and $Value.StartsWith("-")) {
         throw ("New-CrucibleCommand: the value of -" + $Name + " starts with '-', which pwsh -File binds as a parameter name: " + $Value)
     }
-    if ($File -and $Transport -eq "PowerShell") {
-        if ($Value.Contains('"')) {
-            throw ("New-CrucibleCommand: the value of -" + $Name + " contains a double quote, which Windows PowerShell 5.1 and PowerShell 7.0 to 7.2 pass to pwsh -File broken: " + $Value)
-        }
-        if ($Value.EndsWith("\") -and $Value -match '\s') {
-            throw ("New-CrucibleCommand: the value of -" + $Name + " has whitespace and a trailing backslash, which Windows PowerShell 5.1 and PowerShell 7.0 to 7.2 pass to pwsh -File with its closing quote escaped: " + $Value)
-        }
-    }
     # Git Bash rewrites an argument that looks like a POSIX path before a Windows program sees
     # it, and quoting does not stop it: /tmp, //x, @/x, x=/tmp and x=@/y all arrive changed.
     # Turning the rewrite off (MSYS_NO_PATHCONV) would reach git and the hooks the command
@@ -217,6 +218,10 @@ function Format-CrucibleCommandValue {
     if ($Transport -eq "Bash" -and $onWindows -and ($Value -match '^@?/' -or $Value -match '^\S*=@?/')) {
         throw ("New-CrucibleCommand: the value of -" + $Name + " looks like a POSIX path, which Git Bash rewrites before pwsh sees it: " + $Value)
     }
+    if ($Transport -eq "ShellNeutral" -and $onWindows -and ($Value -match '^@?/' -or $Value -match '^\S*=@?/')) {
+        throw ("New-CrucibleCommand: the value of -" + $Name + " looks like a POSIX path, which Git Bash rewrites before pwsh sees it: " + $Value)
+    }
+    if ($Transport -eq "ShellNeutral") { return (ConvertTo-CrucibleCommandShellNeutralLiteral -Value $Value) }
     if ($Transport -eq "ArgumentList") { return (ConvertTo-CrucibleCommandNativeArgument -Value $Value) }
     if ($Transport -eq "Bash") { return (ConvertTo-CrucibleCommandBashLiteral -Value $Value) }
     return (ConvertTo-CrucibleCommandPowerShellLiteral -Value $Value)
@@ -230,13 +235,17 @@ function New-CrucibleCommand {
         -Script is bundle-relative (powershell/crucible.ps1). -Parameters is ordered: a switch
         takes $true, a list prints comma-joined with each element quoted, anything else is a
         string. -CrucibleRoot roots the path at the bundle the reader runs ("" prints the
-        bundle-relative path, for the framework repository). -Invoker, such as
-        "pwsh -ExecutionPolicy Bypass -File", prefixes the line and quotes the path.
-        -Transport PowerShell (the default) is a line for a PowerShell prompt; -Transport Bash
+        bundle-relative path, for the framework repository).
+        -Transport PowerShell (the default) is a direct & '<script>' line for a PowerShell
+        7+ prompt. It ignores -Invoker, so callers cannot reintroduce native passing.
+        -Transport Bash
         is a line for a POSIX shell (an agent's Bash tool), which starts the script through
         -Invoker, default "pwsh -NoProfile -ExecutionPolicy Bypass -File"; -Transport
         ArgumentList is the argument string for Start-Process -FilePath pwsh -ArgumentList,
         which starts the script with -NoProfile -ExecutionPolicy Bypass -File.
+        -Transport ShellNeutral is for agent-executed instructions without a prescribed
+        shell: it starts pwsh -File from Bash or PowerShell (including a 5.1 launching
+        shell) and retains the older hosts' native-passing refusals. It takes no -Invoker.
         -Reference prints only the script's file name for prose that names a parameter rather
         than a line to run; the parameters are still bound, the companion rules are not applied.
         A command that cannot be built returns "# (command unavailable: <reason>)", a comment
@@ -248,7 +257,7 @@ function New-CrucibleCommand {
         [System.Collections.Specialized.OrderedDictionary]$Parameters = $null,
         [Parameter(Mandatory = $true, ParameterSetName = "Command")][AllowEmptyString()][string]$CrucibleRoot,
         [Parameter(ParameterSetName = "Command")][string]$Invoker = "",
-        [Parameter(ParameterSetName = "Command")][ValidateSet("PowerShell", "ArgumentList", "Bash")][string]$Transport = "PowerShell",
+        [Parameter(ParameterSetName = "Command")][ValidateSet("PowerShell", "ShellNeutral", "ArgumentList", "Bash")][string]$Transport = "PowerShell",
         [Parameter(Mandatory = $true, ParameterSetName = "Reference")][switch]$Reference,
         [string]$BundleRoot = "",
         [switch]$Strict
@@ -259,11 +268,11 @@ function New-CrucibleCommand {
         $normalized = $Script.Replace("\", "/")
         $declared = Get-CrucibleScriptParameters -Script $normalized -BundleRoot $BundleRoot
         $isReference = ($PSCmdlet.ParameterSetName -eq "Reference")
-        if (-not $isReference -and $Transport -eq "ArgumentList" -and -not [string]::IsNullOrEmpty($Invoker)) {
-            throw "New-CrucibleCommand: -Transport ArgumentList supplies its own pwsh arguments; it takes no -Invoker."
+        if (-not $isReference -and $Transport -in @("ArgumentList", "ShellNeutral") -and -not [string]::IsNullOrEmpty($Invoker)) {
+            throw ("New-CrucibleCommand: -Transport " + $Transport + " supplies its own pwsh arguments; it takes no -Invoker.")
         }
         if (-not $isReference -and $Transport -eq "Bash" -and [string]::IsNullOrEmpty($Invoker)) { $Invoker = "pwsh -NoProfile -ExecutionPolicy Bypass -File" }
-        $viaFile = (-not $isReference) -and ($Transport -in @("ArgumentList", "Bash") -or $Invoker -match '(?i)(?:^|\s)-File(?:\s|$)')
+        $viaFile = (-not $isReference) -and ($Transport -in @("ArgumentList", "Bash", "ShellNeutral"))
         $valueTransport = if ($isReference) { "PowerShell" } else { $Transport }
 
         $names = @()
@@ -325,16 +334,12 @@ function New-CrucibleCommand {
         if ($path.Contains("`r") -or $path.Contains("`n") -or $path.Contains([string][char]0)) {
             throw ("New-CrucibleCommand: the script path contains a line break or NUL, which no quoting puts on one command line: " + $path)
         }
-        if ($Transport -eq "ArgumentList") {
+        if ($Transport -eq "ShellNeutral") {
+            $head = "pwsh -NoProfile -ExecutionPolicy Bypass -File " + (ConvertTo-CrucibleCommandShellNeutralLiteral -Value $path)
+        } elseif ($Transport -eq "ArgumentList") {
             $head = "-NoProfile -ExecutionPolicy Bypass -File " + (ConvertTo-CrucibleCommandNativeArgument -Value $path)
         } elseif ($Transport -eq "Bash") {
             $head = $Invoker.Trim() + " " + (ConvertTo-CrucibleCommandBashLiteral -Value $path)
-        } elseif (-not [string]::IsNullOrEmpty($Invoker)) {
-            $quotedPath = ConvertTo-CrucibleCommandPowerShellLiteral -Value $path
-            if (-not ($quotedPath.StartsWith('"') -or $quotedPath.StartsWith("'"))) { $quotedPath = '"' + $quotedPath + '"' }
-            $head = $Invoker.Trim() + " " + $quotedPath
-        } elseif ($path -match '^[A-Za-z0-9_./\\:][A-Za-z0-9_./\\:-]*$') {
-            $head = $path
         } else {
             $head = "& " + (ConvertTo-CrucibleCommandPowerShellLiteral -Value $path)
         }

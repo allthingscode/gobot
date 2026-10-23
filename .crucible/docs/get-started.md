@@ -11,11 +11,11 @@ For reference documentation, see [operating-manual.md](operating-manual.md). For
 Get from clone to a running first task in under 10 minutes.
 
 ### Prerequisites
-- A PowerShell host: Windows PowerShell 5.1 (built into Windows, the field-tested default) **or** [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS
+- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. Windows PowerShell 5.1 is not supported.
 - Git
 - One of: Go, Node, Python, or Rust toolchain (matching the `-Language` flag below)
 
-> **Running the commands below.** On Windows, run the `.ps1` scripts directly as shown. On Linux/macOS, prefix the script path with `pwsh` (e.g. `pwsh ./powershell/init-project.ps1 ...`). Forward-slash paths work on every platform.
+> **Running the commands below.** Run the PowerShell examples from a PowerShell 7+ (`pwsh`) prompt on every platform. Direct `& '<script>' ...` commands run in that prompt. From another shell, start `pwsh` first. Forward-slash paths work on every platform.
 
 ### Install
 1. Clone the Crucible framework repository to a stable directory outside your project (e.g., `C:/src/crucible` on Windows, `~/src/crucible` on Linux/macOS):
@@ -67,7 +67,7 @@ Crucible also echoes the full assembled prompt and a CI banner; copy the `agent 
 
 ## Prerequisites
 
-- A PowerShell host: Windows PowerShell 5.1 (Windows) or [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (Windows, Linux, or macOS). The runtime is CI-verified on Windows and Linux; macOS is supported via `pwsh`. See [ROADMAP.md](../ROADMAP.md) for the planned Go rewrite.
+- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. Windows PowerShell 5.1 is not supported. The runtime is CI-verified on Windows and Linux; macOS is supported via `pwsh`. See [ROADMAP.md](../ROADMAP.md) for the planned Go rewrite.
 - Git
 - Your project's normal build/test toolchain (in this example: Node + npm)
 
@@ -209,7 +209,7 @@ From your project root:
 ```powershell
 ./.crucible/powershell/crucible.ps1 -Init -TaskId F-002 -ProjectRoot "<your-project-path>"
 ```
-*(Linux/macOS: prefix the script path with `pwsh`.)*
+*(Run these commands from a PowerShell 7+ prompt on every platform.)*
 
 Expected output excerpt:
 

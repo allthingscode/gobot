@@ -15,7 +15,7 @@ try {
     }
     $results += Run-Test -Name "Missing TaskId usage names the installed script" -Body {
         foreach ($mode in @('Init', 'Health', 'Doctor')) {
-            $expected = '.\.crucible\powershell\crucible.ps1 -' + $mode
+            $expected = "& '.\.crucible\powershell\crucible.ps1' -" + $mode
             Assert-Result -Name "$mode script path" -Condition ($output.Contains($expected)) -FailureMessage $output
         }
     }

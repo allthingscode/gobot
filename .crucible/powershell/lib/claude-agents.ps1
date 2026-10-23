@@ -34,17 +34,7 @@ function Get-ClaudeAgentRegenerateCommand {
         $projectArgument = $root
     }
     $regenerateParameters = [ordered]@{ ProjectRoot = $projectArgument }
-    if ($bundle -eq "{crucible_root}") {
-        # No config to read the bundle from: the placeholder stands where the path goes, for
-        # the reader to fill in, rather than a guessed .crucible.
-        return ("pwsh -File {crucible_root}/" + (New-CrucibleCommand -Script "powershell/sync-claude-agents.ps1" -Parameters $regenerateParameters -CrucibleRoot ""))
-    }
-    $bare =New-CrucibleCommand -Script "powershell/sync-claude-agents.ps1" -Parameters $regenerateParameters -CrucibleRoot $bundle
-    if ($bare.StartsWith("#")) { return $bare }
-    if ($bare.StartsWith("& ")) {
-        return (New-CrucibleCommand -Script "powershell/sync-claude-agents.ps1" -Parameters $regenerateParameters -CrucibleRoot $bundle -Invoker "pwsh -File")
-    }
-    return ("pwsh -File " + $bare)
+    return (New-CrucibleCommand -Script "powershell/sync-claude-agents.ps1" -Transport PowerShell -Parameters $regenerateParameters -CrucibleRoot $bundle)
 }
 
 function Get-ClaudeAgentsDir {

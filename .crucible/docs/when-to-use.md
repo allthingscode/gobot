@@ -63,8 +63,9 @@ This is the half that matters most, and the half most tools skip.
 - **Teams wanting a shared dashboard or assignment queue.** Crucible is single-session
   and local-first by design; a GUI is an explicit non-goal (see
   [ROADMAP.md](../ROADMAP.md)).
-- **If you will not run PowerShell.** The runtime is PowerShell (5.1 on Windows, `pwsh`
-  7+ on Linux/macOS). There is no other implementation today.
+- **If you will not run PowerShell.** The runtime requires PowerShell 7+ (`pwsh`)
+  on Windows, Linux and macOS. Run printed direct commands at a PowerShell 7+ prompt.
+  There is no other implementation today.
 
 ---
 

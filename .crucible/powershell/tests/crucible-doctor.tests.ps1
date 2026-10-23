@@ -450,7 +450,7 @@ try {
         $output = $res.Output -join "`n"
         $resolved = (Resolve-Path -LiteralPath $projectRoot).Path
         $advice = @($output -split "`r?`n" | Where-Object { $_ -match 'sync-claude-agents\.ps1' }) -join "`n"
-        Assert-Result -Name "advice names the checked project" -Condition ($advice.Contains('-ProjectRoot "' + $resolved + '"')) -FailureMessage "Output:`n$output"
+        Assert-Result -Name "advice names the checked project" -Condition ($advice.Contains("-ProjectRoot '" + $resolved + "'")) -FailureMessage "Output:`n$output"
         Assert-Result -Name "advice names the project's bundle" -Condition ($advice.Replace("\", "/").Contains(($resolved.Replace("\", "/") + "/.crucible/powershell/sync-claude-agents.ps1"))) -FailureMessage "Output:`n$output"
     }
 

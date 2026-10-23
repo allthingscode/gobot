@@ -26,6 +26,31 @@ try {
         Assert-Result -Name "two-part defaults patch 0" -Condition ((ToStr (Parse-SemVer "1.4")) -eq "1.4.0") -FailureMessage "1.4 should parse to 1.4.0"
     }
 
+    # Item 301: one resolver for a bundle root; items 280 and 300 joined the project root in
+    # front of an absolute one.
+    $results += Run-Test -Name "Resolve-CrucibleBundleRoot keeps an absolute root and joins a relative one" -Body {
+        $project = Join-Path $tempRoot "bundle root project"
+        $absolute = Join-Path $tempRoot "outside bundle/.crucible"
+        Assert-Result -Name "absolute with spaces as is" -Condition ((Resolve-CrucibleBundleRoot -ProjectRoot $project -CrucibleRoot $absolute) -eq $absolute) -FailureMessage "an absolute crucible_root must be used as is"
+        Assert-Result -Name "relative under the project" -Condition ((Resolve-CrucibleBundleRoot -ProjectRoot $project -CrucibleRoot "tools/crucible") -eq (Join-Path $project "tools/crucible")) -FailureMessage "a relative crucible_root must be joined to the project root"
+        foreach ($case in @(@{ Project = $project; Root = "" }, @{ Project = $project; Root = "  " }, @{ Project = ""; Root = ".crucible" })) {
+            $message = ""
+            try { $null = Resolve-CrucibleBundleRoot -ProjectRoot $case.Project -CrucibleRoot $case.Root } catch { $message = $_.Exception.Message }
+            Assert-Result -Name ("empty input refused: '" + $case.Project + "' / '" + $case.Root + "'") -Condition ($message -match "Cannot resolve the Crucible bundle") -FailureMessage ("expected a refusal, got: '" + $message + "'")
+        }
+    }
+
+    $results += Run-Test -Name "Test-PathWithinDirectory compares on a separator boundary" -Body {
+        $bundle = if ($IsWindows) { "C:\bundle" } else { "/bundle" }
+        Assert-Result -Name "the directory itself" -Condition (Test-PathWithinDirectory -Path $bundle -Directory $bundle) -FailureMessage "a directory contains itself"
+        Assert-Result -Name "a child" -Condition (Test-PathWithinDirectory -Path (Join-Path $bundle "research/F-1_findings.md") -Directory (Join-Path $bundle "research")) -FailureMessage "a file under the directory is inside it"
+        Assert-Result -Name "trailing separator on the directory" -Condition (Test-PathWithinDirectory -Path (Join-Path $bundle "x.md") -Directory ($bundle + [System.IO.Path]::DirectorySeparatorChar)) -FailureMessage "a trailing separator must not change the answer"
+        Assert-Result -Name "sibling bundle2 refused" -Condition (-not (Test-PathWithinDirectory -Path ($bundle + "2") -Directory $bundle)) -FailureMessage ($bundle + "2 shares the prefix but is not inside " + $bundle)
+        Assert-Result -Name "file in sibling bundle2 refused" -Condition (-not (Test-PathWithinDirectory -Path (Join-Path ($bundle + "2") "research/x.md") -Directory $bundle)) -FailureMessage "a file under a sibling sharing the prefix is outside"
+        Assert-Result -Name "research-old refused" -Condition (-not (Test-PathWithinDirectory -Path (Join-Path $bundle "research-old/x.md") -Directory (Join-Path $bundle "research"))) -FailureMessage "research-old is a sibling of research, not inside it"
+        Assert-Result -Name "dot-dot escape refused" -Condition (-not (Test-PathWithinDirectory -Path (Join-Path $bundle "research/../x.md") -Directory (Join-Path $bundle "research"))) -FailureMessage "a path that climbs out of the directory is outside"
+    }
+
     $results += Run-Test -Name "Parse-SemVer returns null for non-versions" -Body {
         Assert-Result -Name "empty" -Condition ($null -eq (Parse-SemVer "")) -FailureMessage "empty should be null"
         Assert-Result -Name "whitespace" -Condition ($null -eq (Parse-SemVer "   ")) -FailureMessage "whitespace should be null"

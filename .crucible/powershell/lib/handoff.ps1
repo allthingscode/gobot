@@ -1,3 +1,7 @@
+if (-not (Get-Command "Test-PathWithinDirectory" -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
+
 function Normalize-HandoffArtifactPaths {
     # Keep generator and gate path handling identical (TODO item 198).
     param(
@@ -30,9 +34,9 @@ function Normalize-HandoffArtifactPaths {
         }
         $relPath = $art
         if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
-            if ($fullArtPath.StartsWith($resolvedWtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            if (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedWtPath) {
                 $relPath = $fullArtPath.Substring($resolvedWtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
-            } elseif ($fullArtPath.StartsWith($resolvedRepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            } elseif (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedRepoRoot) {
                 $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
             }
         } else {

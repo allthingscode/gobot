@@ -278,11 +278,7 @@ function Get-CrucibleFrameworkStatusChanges {
         throw "Framework integrity check cannot run: Context.CrucibleRoot is empty."
     }
 
-    $cruciblePath = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) {
-        $crucibleRoot
-    } else {
-        Join-Path $repoRoot $crucibleRoot
-    }
+    $cruciblePath = Resolve-CrucibleBundleRoot -ProjectRoot $repoRoot -CrucibleRoot $crucibleRoot
     if (-not (Test-Path -LiteralPath $cruciblePath)) {
         throw ("Framework integrity check cannot run: no Crucible bundle at " + $cruciblePath + ". Re-run init-project.ps1, or correct crucible_root in .crucible/config.yaml.")
     }
@@ -447,7 +443,7 @@ function Assert-CrucibleFrameworkIntegrity {
     # the task onto them so the handoff records the decision.
     Write-Host "`n[STOP] Revert the framework-owned edits above before continuing." -ForegroundColor Red
     Write-Host "       If this was a deliberate bundle update, commit it and re-baseline the task onto that commit:" -ForegroundColor Red
-    Write-Host ("         " + (New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ TaskId = $handoff.task_id; Rebaseline = $true; BaseCommit = "<commit-of-the-bundle-update>"; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")) -ForegroundColor Red
+    Write-Host ("         " + (New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Transport PowerShell -Parameters ([ordered]@{ TaskId = $handoff.task_id; Rebaseline = $true; BaseCommit = "<commit-of-the-bundle-update>"; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context))) -ForegroundColor Red
     Write-Host "       This carries the incoming handoff forward with only base_commit changed. It does not count against the handoff budget." -ForegroundColor Red
     exit 2
 }
@@ -738,7 +734,7 @@ function Complete-CrucibleSourceSession {
                 if ($checklistOffenders.Count -gt $checklistListLimit) {
                     Write-Host ("  ... and " + ($checklistOffenders.Count - $checklistListLimit) + " more.") -ForegroundColor Red
                 }
-                Write-Host ("Tick the required ## Task List checkboxes in task.md, then re-run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")) -ForegroundColor Red
+                Write-Host ("Tick the required ## Task List checkboxes in task.md, then re-run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context))) -ForegroundColor Red
                 exit 2
             }
         }
@@ -1490,7 +1486,7 @@ function Get-ResearchMisrouteAdvisory {
         if (-not $hasResearchLineage) {
             $crucibleRoot = if ($Context.ContainsKey("CrucibleRoot")) { $Context.CrucibleRoot } else { "" }
             if (-not [string]::IsNullOrEmpty($crucibleRoot)) {
-                $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $ProjectRoot $crucibleRoot }
+                $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $ProjectRoot -CrucibleRoot $crucibleRoot
                 $researchDir = Join-Path $resolvedCrucibleRoot "research"
                 if (Test-Path -LiteralPath $researchDir) {
                     $artifact = Get-ResearchFindingsArtifact -TaskId $Handoff.task_id -ResearchDirectory $researchDir
@@ -1586,7 +1582,7 @@ function Invoke-RepositoryIntegrityGates {
         Write-Quiet "`n[DEV LOG] Running Dev Log security validation..." -ForegroundColor Cyan
         # Item 188: dev logs belong to the bundle, not to the session directory's parent.
         $crucibleRoot = if ($Context.ContainsKey("CrucibleRoot")) { $Context.CrucibleRoot } else { ".crucible" }
-        $bundleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $repoRoot $crucibleRoot }
+        $bundleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $repoRoot -CrucibleRoot $crucibleRoot
         $devLogPath = Join-Path $bundleRoot "dev-logs/UNPUBLISHED_LOGS.md"
         if (-not (Test-Path $devLogPath)) {
             Write-Host "[DEV LOG] VALIDATION FAILED: $devLogPath does not exist." -ForegroundColor Red
@@ -1630,7 +1626,7 @@ function Invoke-RepositoryIntegrityGates {
                 Write-Host "  - $f [$classification]" -ForegroundColor Yellow
             }
             Write-Host "`nSTASH or SURFACE untracked non-private files. Require human confirmation before deleting anything that is not obviously empty/scratch (marked as safe-to-remove). Never blanket-delete." -ForegroundColor Red
-            Write-Host ("After resolving, re-run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = $repoRoot }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")) -ForegroundColor Red
+            Write-Host ("After resolving, re-run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = $repoRoot }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context))) -ForegroundColor Red
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "blocked" -Notes ("Stray untracked files: " + ($strayFiles -join ", ")) -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             exit 2
         }

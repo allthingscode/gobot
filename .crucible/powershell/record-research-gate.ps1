@@ -74,7 +74,7 @@ if ($approvedList.Count -eq 0 -and $deferredList.Count -eq 0 -and $rejectedList.
     throw "At least one of -Approved / -Deferred / -Rejected / -ApprovedUpstream must be provided; a Research Gate decision cannot be empty."
 }
 
-$resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) { $CrucibleRoot } else { Join-Path $REPO_ROOT $CrucibleRoot }
+$resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $CrucibleRoot
 # Item 188: gate continuation and decision records follow paths.session.
 $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $researchSessionDir = Join-Path $sessionRoot (Join-Path $TaskId "research")
@@ -90,10 +90,10 @@ $handoffParameters = [ordered]@{ TaskId = $TaskId; Source = "research"; Target =
 if ($approvedList.Count -gt 0) { $handoffParameters["HumanApproved"] = @($approvedList); $handoffParameters["StubSpecsCreated"] = @($approvedList) }
 if ($deferredList.Count -gt 0) { $handoffParameters["HumanDeferred"] = @($deferredList) }
 if ($rejectedList.Count -gt 0) { $handoffParameters["HumanRejected"] = @($rejectedList) }
-$handoffCommand = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters $handoffParameters -CrucibleRoot $CrucibleRoot
-$validateCommand = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Parameters ([ordered]@{ ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
-$advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; Quiet = $true; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
-$dispatchCommand = New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ TaskId = $TaskId; Phase = "research"; Model = "<model>"; Effort = "<effort>"; ProjectRoot = $REPO_ROOT; PromptFile = $pointerPath }) -CrucibleRoot $CrucibleRoot
+$handoffCommand = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Transport PowerShell -Parameters $handoffParameters -CrucibleRoot $CrucibleRoot
+$validateCommand = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Transport PowerShell -Parameters ([ordered]@{ ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; Quiet = $true; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$dispatchCommand = New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Transport PowerShell -Parameters ([ordered]@{ TaskId = $TaskId; Phase = "research"; Model = "<model>"; Effort = "<effort>"; ProjectRoot = $REPO_ROOT; PromptFile = $pointerPath }) -CrucibleRoot $CrucibleRoot
 
 $researchDir = Join-Path $resolvedCrucibleRoot "research"
 $findingsRel = "$CrucibleRoot/research/<findings artifact>"

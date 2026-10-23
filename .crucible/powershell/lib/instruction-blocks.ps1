@@ -17,21 +17,12 @@ function Get-CrucibleBlock {
         the doc "matches", with nothing comparing the two; by the time anything checked, the
         doc still told adopters to run the pre-rename factory.ps1. Edit here and regenerate.
 
-        PwshCommand overrides the host named on the runtime line. The gate pins
-        pwsh so the generated region is byte-identical on every platform;
-        callers that actually write the block omit it and get Get-PwshCommand.
+        PwshCommand is retained for existing callers and intentionally unused. Direct
+        commands run in the reader's PowerShell 7+ prompt; no invoker is passed to the builder.
     #>
     param(
         [Parameter(Mandatory=$false)][string]$PwshCommand
     )
-
-    if ([string]::IsNullOrWhiteSpace($PwshCommand)) {
-        if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
-            . (Join-Path $PSScriptRoot "platform.ps1")
-        }
-        $PwshCommand = Get-PwshCommand
-    }
-    $pwshCmd = $PwshCommand
 
     $agentsBody = @'
 ## Crucible
@@ -72,13 +63,13 @@ Do not commit runtime data:
 - `.crucible/cache/`
 - generated logs, JSONL files, handoffs, and eval output
 
-Run the installed runtime from the project root:
+Run the installed runtime from the project root at a PowerShell 7+ prompt:
 
 ```powershell
 {{init_command}}
 ```
 '@
-    $initCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = "<task-id>"; ProjectRoot = "{project_root}" }) -CrucibleRoot "{{crucible_root}}" -Invoker ($pwshCmd + " -ExecutionPolicy Bypass -File")
+    $initCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = "<task-id>"; ProjectRoot = "{project_root}" }) -CrucibleRoot "{{crucible_root}}"
     $agentsBody = $agentsBody.Replace("{{init_command}}", $initCommand)
 
     $claudeBody = @'

@@ -568,6 +568,33 @@ paths:
         $res2 = Get-BacklogItemPathForTaskProjectRoot -Task "C-999" -ProjectRoot $root
         Assert-Result -Name "resolver prioritizes active spec over archived" -Condition ($res2 -eq $activeSpec) -FailureMessage ("expected active spec path, got: " + $res2)
     }
+
+    # Item 302: "under the backlog directory" was a bare prefix match, so a sibling whose
+    # name starts with the backlog directory's name counted as inside it. A sibling named
+    # backlogfeatures leaves features/active/<spec> after the prefix, which the active-path
+    # check accepted, and the foreign spec was archived into the backlog.
+    foreach ($sibling in @("backlog2", "backlogfeatures")) {
+        $results += Run-Test -Name "A spec under the sibling directory $sibling is refused as outside the backlog" -Body {
+            $root = Join-Path $tempRoot ("sibling-" + $sibling)
+            $backlogDir = Join-Path $root "backlog"
+            New-MinimalBacklogTree -Root $backlogDir
+            $activeRel = "features/active/F-302_Sibling.md"
+            $backlog = New-SingleItemBacklog -Root $backlogDir -ItemId "F-302" -Priority "P2" -RelPath $activeRel -Title "Sibling"
+            $siblingRel = if ($sibling -eq "backlogfeatures") { "active/F-302_Sibling.md" } else { $activeRel }
+            $siblingRoot = Join-Path $root $sibling
+            New-SpecFile -Root $siblingRoot -RelPath $siblingRel -ItemId "F-302" -Type "Feature" -Priority "P2" -Title "Sibling"
+            $siblingSpec = Join-Path $siblingRoot $siblingRel
+            $specBefore = [System.IO.File]::ReadAllText($siblingSpec)
+            $backlogBefore = [System.IO.File]::ReadAllText($backlog)
+
+            $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath $siblingSpec -ShippedCode $true
+            Assert-Result -Name "$sibling spec refused" -Condition ($r.ExitCode -ne 0) -FailureMessage ("a spec outside the backlog directory was archived. Output: " + $r.Output)
+            Assert-Result -Name "$sibling refusal names containment" -Condition ($r.Output -match 'not under backlog directory') -FailureMessage ("the refusal is not the containment check. Output: " + $r.Output)
+            Assert-Result -Name "$sibling spec untouched" -Condition ((Test-Path -LiteralPath $siblingSpec) -and [System.IO.File]::ReadAllText($siblingSpec) -ceq $specBefore) -FailureMessage "the sibling spec was moved or rewritten"
+            Assert-Result -Name "$sibling backlog untouched" -Condition ([System.IO.File]::ReadAllText($backlog) -ceq $backlogBefore) -FailureMessage "BACKLOG.md was rewritten for a spec outside the backlog"
+            Assert-Result -Name "$sibling nothing archived" -Condition (-not (Test-Path -LiteralPath (Join-Path $backlogDir "features/archived/F-302_Sibling.md"))) -FailureMessage "the sibling spec was archived into the backlog"
+        }
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

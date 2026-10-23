@@ -1776,6 +1776,81 @@ try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
         Assert-Result -Name "No-Code Closure: no literal placeholder remains" -Condition ($outputText -notlike "*<findings doc>*") -FailureMessage "expected no '<findings doc>' placeholder, got:`n$outputText"
     }
 
+    # Item 280: an absolute CrucibleRoot was joined onto the project root
+    # (C:\project\C:\bundle\research), so the review fell back to the archived spec.
+    $results += Run-Test -Name "No-Code Closure finds the exact-ID findings doc under an absolute CrucibleRoot with spaces" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-nocode-closure-absolute-root"
+        $localRepo = Join-Path $caseRoot "local"
+        $bundleRoot = Join-Path $caseRoot "abs bundle dir/.crucible"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+"@ | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        $researchDir = Join-Path $bundleRoot "research"
+        New-Item -ItemType Directory -Path $researchDir -Force | Out-Null
+        "findings body" | Set-Content -LiteralPath (Join-Path $researchDir "R-902_findings.md") -Encoding UTF8
+        "prefix collision" | Set-Content -LiteralPath (Join-Path $researchDir "R-9020_findings.md") -Encoding UTF8
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-nocode-closure-absolute-root.ps1"
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $bundleLiteral = $bundleRoot.Replace("'", "''")
+        $repoLiteral = $localRepo.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$bundleLiteral'
+    RepoRoot = '$repoLiteral'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'R-902'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$baseSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$repoLiteral'
+try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $outputText = $output -join "`n"
+
+        $expectedDoc = ((Join-Path $researchDir "R-902_findings.md") -replace '\\', '/')
+        Assert-Result -Name "absolute root: review hint names the exact-ID findings doc" -Condition ($outputText.Contains("review $expectedDoc")) -FailureMessage "expected the hint to name $expectedDoc, got:`n$outputText"
+        Assert-Result -Name "absolute root: review does not fall back to the archived spec" -Condition ($outputText -notlike "*review the archived spec*") -FailureMessage "expected the findings doc, not the archived-spec fallback, got:`n$outputText"
+        Assert-Result -Name "absolute root: prefix-colliding findings doc is not named" -Condition ($outputText -notlike "*R-9020_findings.md*") -FailureMessage "expected only the exact-ID findings doc, got:`n$outputText"
+    }
+
     $results += Run-Test -Name "Human gate visual review affordances fall back to text git diff when diff_tool is unconfigured" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "gate-no-affordances"

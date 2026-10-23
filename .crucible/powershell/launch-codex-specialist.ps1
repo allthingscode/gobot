@@ -379,7 +379,7 @@ if (-not [string]::IsNullOrWhiteSpace($PromptFile) -and [string]::IsNullOrWhiteS
     }
 }
 
-$crucibleDir = Join-Path $REPO_ROOT $CrucibleRoot
+$crucibleDir = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $CrucibleRoot
 # Item 188: prompts, launch artifacts and completion detection use the same session root.
 $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from script location" } else { "from -ProjectRoot" }
@@ -394,7 +394,7 @@ if ([string]::IsNullOrWhiteSpace($PromptText)) {
     if (-not (Test-Path -LiteralPath $bootstrapPromptPath)) {
         Write-Host ("[CODEX] Error: phase prompt not found: " + $bootstrapPromptPath) -ForegroundColor Red
         Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
-        Write-Host ("Run " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = "<adopter root>" }) -CrucibleRoot $CrucibleRoot) + " first, and pass that same -ProjectRoot here.") -ForegroundColor Yellow
+        Write-Host ("Run " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = "<adopter root>" }) -CrucibleRoot $CrucibleRoot) + " first, and pass that same -ProjectRoot here.") -ForegroundColor Yellow
         exit 2
     }
 }
@@ -488,7 +488,7 @@ if ($ReviewSchema) {
 if (-not [string]::IsNullOrWhiteSpace($bootstrapPromptPath)) {
     # Built, not interpolated: a root such as C:/cash$root must reach the specialist as
     # written, in the script path and in -ProjectRoot alike. Item 247.
-    $advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT; Quiet = $true }) -CrucibleRoot $crucibleDir -Invoker "pwsh -File"
+    $advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT; Quiet = $true }) -CrucibleRoot $crucibleDir
     $PromptText = New-BootstrapPrompt -RoleLabel $Role -TaskIdValue $TaskId -PromptPath $bootstrapPromptPath `
         -AdvanceCommand $advanceCommand -RequireJsonVerdict $useSchema
 }
@@ -522,7 +522,7 @@ $launchStartUtc = [datetime]::UtcNow.AddSeconds(-1)
 $statusEffort = if ([string]::IsNullOrWhiteSpace($Effort)) { "Codex's own default effort" } else { $Effort + " effort" }
 # An ad hoc run has no task to advance, so it has no recovery command.
 $recoveryCommand = if ([string]::IsNullOrWhiteSpace($TaskId)) { "" } else {
-    New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $crucibleDir -Invoker "pwsh -File"
+    New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $crucibleDir
 }
 Write-CodexLaunchStatus -StatusPath $statusPath -Record (Get-CodexLaunchOutcome -Evidence @{ Running = $true; Level = ($Model + " at " + $statusEffort) })
 
