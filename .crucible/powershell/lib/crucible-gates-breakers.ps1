@@ -49,20 +49,18 @@ function Invoke-CircuitBreakerGates {
             $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path
         }
         
+        # crucible_root through its one owner (I13): a quoted value with a trailing comment
+        # is read, and an empty or unreadable one is a config read failure (D40), never a
+        # fallback to a research root the bundle does not use. Item 247.
         $crucibleRoot = ".crucible"
-        $configPath = Join-Path $repoRoot ".crucible/config.yaml"
         $configUnreadable = $false
         $configReadError = ""
-        if (Test-Path -LiteralPath $configPath) {
-            try {
-                $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-                if ($content -match '(?m)^crucible_root:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
-                    $crucibleRoot = $Matches[1].Trim()
-                }
-            } catch {
-                $configUnreadable = $true
-                $configReadError = $_.Exception.Message
-            }
+        try {
+            $configuredRoot = Get-ConfiguredCrucibleRootValue -ProjectRoot $repoRoot
+            if (-not [string]::IsNullOrWhiteSpace($configuredRoot)) { $crucibleRoot = $configuredRoot }
+        } catch {
+            $configUnreadable = $true
+            $configReadError = $_.Exception.Message
         }
         $researchDir = Join-Path $repoRoot (Join-Path $crucibleRoot "research")
 
@@ -187,18 +185,18 @@ function Invoke-CircuitBreakerGates {
                         $distinctNotes = "researcher_config_unreadable: $scanFailedFile"
                         $summaryMsg = "Could not determine the configured research directory because $scanFailedFile could not be read: $scanFailedError. Research input cannot be scanned without it."
                         $wedgeWhy = $summaryMsg + " Reason: Configuration read failure."
-                        $recoveryOverride = "Restore read access to " + $scanFailedFile + ", verify the configured research directory, archive the blocked record, then run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover"
+                        $recoveryOverride = "Restore read access to " + $scanFailedFile + ", verify the configured research directory, archive the blocked record, then run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context); Recover = $true }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")
                     } else {
                         $distinctNotes = "researcher_artifact_unscannable: $scanFailedFile"
                         $summaryMsg = "Could not scan $scanFailedFile for prompt injection: $scanFailedError. Unscannable research input is treated as a block."
                         $wedgeWhy = $summaryMsg + " Reason: Scan failure."
-                        $recoveryOverride = "Review external sources before continuing. File: " + $scanFailedFile + "; Scan failure: " + $scanFailedError + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover"
+                        $recoveryOverride = "Review external sources before continuing. File: " + $scanFailedFile + "; Scan failure: " + $scanFailedError + ". Then archive the blocked record and run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context); Recover = $true }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")
                     }
                 } else {
                     $distinctNotes = "researcher_silent_detector_hit: ${detectedFile}:$detectedRule"
                     $summaryMsg = "Silent injection match in ${detectedFile}: $detectedRule (researcher silent detector hit)"
                     $wedgeWhy = $summaryMsg + ". Reason: Silent corroboration."
-                    $recoveryOverride = "Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover"
+                    $recoveryOverride = "Review external sources before continuing. File: " + $detectedFile + "; Rule: " + $detectedRule + ". Then archive the blocked record and run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context); Recover = $true }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")
                 }
 
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes $distinctNotes `
@@ -219,7 +217,7 @@ function Invoke-CircuitBreakerGates {
         Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Suspicious content flagged in handoff: " + $handoff.suspicious_content)
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
             -Why ("Suspicious Content detected. Suspicious content flagged in handoff: " + $handoff.suspicious_content) `
-            -RecoveryOverride ("Review external sources before continuing. Then archive the blocked record and run: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`" -Recover")
+            -RecoveryOverride ("Review external sources before continuing. Then archive the blocked record and run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context); Recover = $true }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File"))
         exit 2
     }
 
@@ -349,7 +347,7 @@ function Invoke-CircuitBreakerGates {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "uncommitted_task_worktree" -Notes ("Uncommitted changes in task worktree: " + $joined) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "uncommitted_task_worktree" `
-                    -Why ("The task worktree " + $wtPath + " has uncommitted changes: " + $joined + ". The independent checks would test them, but the merge ships only commits on task/" + $handoff.task_id + ". Commit them there or discard them, then rerun crucible.ps1 -Init.")
+                    -Why ("The task worktree " + $wtPath + " has uncommitted changes: " + $joined + ". The independent checks would test them, but the merge ships only commits on task/" + $handoff.task_id + ". Commit them there or discard them, then rerun as RECOVERY says.")
                 exit 2
             }
             Write-Quiet "`n[VERIFY] Running independent isolated full verification in worktree before accepting APPROVED..." -ForegroundColor Cyan

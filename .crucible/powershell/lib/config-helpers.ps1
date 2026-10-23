@@ -421,6 +421,34 @@ function Get-ConfiguredPath {
     return (Join-Path $root $defaults[$Key])
 }
 
+# The owner of crucible_root (I13): its value as configured, ".crucible" when the config
+# does not set it, and $null when the project has no config, so a caller can tell an
+# installed project from a guess. Item 247.
+function Get-ConfiguredCrucibleRootValue {
+    param([string]$ProjectRoot = "")
+
+    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
+    $configPath = Join-Path $root ".crucible/config.yaml"
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $null }
+    $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $value = Get-ConfigBlockValue -Content $content -Path @("crucible_root") -Source $configPath
+    if ([string]::IsNullOrWhiteSpace($value)) { return ".crucible" }
+    return $value.Trim()
+}
+
+# The project's installed bundle as a path: crucible_root under the project root, or $null
+# when the project has no config. Printed commands name this bundle, not the one whose
+# library happens to be loaded, so a framework checkout run against an adopter still prints
+# the adopter's paths. Item 247.
+function Get-ConfiguredCrucibleRoot {
+    param([string]$ProjectRoot = "")
+
+    $value = Get-ConfiguredCrucibleRootValue -ProjectRoot $ProjectRoot
+    if ($null -eq $value) { return $null }
+    if ([System.IO.Path]::IsPathRooted($value)) { return $value }
+    return (Join-Path (Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot) $value)
+}
+
 function Test-ConfiguredRuntimePath {
     # Item 188: custom session/workspaces roots have the same runtime-data exemption.
     param([string]$Path, [string]$ProjectRoot)

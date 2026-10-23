@@ -23,7 +23,7 @@ if ($Check) {
     foreach ($item in $drift) {
         Write-Host ("[CLAUDE AGENTS] " + $item.Status + ": " + $item.Name) -ForegroundColor Yellow
     }
-    Write-Host ("[CLAUDE AGENTS] regenerate with: pwsh -File " + $script:CLAUDE_AGENT_REGENERATE) -ForegroundColor Yellow
+    Write-Host ("[CLAUDE AGENTS] regenerate with: " + (Get-ClaudeAgentRegenerateCommand -ProjectRoot $root)) -ForegroundColor Yellow
     exit 1
 }
 

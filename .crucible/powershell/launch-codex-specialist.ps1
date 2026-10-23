@@ -75,6 +75,7 @@ param(
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 . (Join-Path $PSScriptRoot "lib/codex-launch-outcome.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 $ErrorActionPreference = "Stop"
 
 function Resolve-ProjectRoot {
@@ -114,8 +115,7 @@ function New-BootstrapPrompt {
         [string]$RoleLabel,
         [string]$TaskIdValue,
         [string]$PromptPath,
-        [string]$CrucibleScriptPath,
-        [string]$ProjectRootValue,
+        [string]$AdvanceCommand,
         [bool]$RequireJsonVerdict
     )
     $lines = @(
@@ -127,7 +127,7 @@ function New-BootstrapPrompt {
         "complete. You are not alone in the codebase; do not revert unrelated edits.",
         "",
         "After writing handoff JSON, run:",
-        "  pwsh -File `"$CrucibleScriptPath`" -Init -TaskId $TaskIdValue -ProjectRoot `"$ProjectRootValue`" -Quiet",
+        ("  " + $AdvanceCommand),
         "That command can run for several minutes (an approved review re-runs the full project",
         "checks) and prints nothing under -Quiet. Wait until the process itself has exited before",
         "you end your session; ending early kills it and leaves the next phase unprepared.",
@@ -291,7 +291,7 @@ if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Model)) {
-    Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED LEVEL] pair from crucible.ps1 -Init -Target codex: its model as -Model, its effort as -Effort)." -ForegroundColor Red
+    Write-Host ("[CODEX] Error: -Model is required (use the [RECOMMENDED LEVEL] pair from " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; Target = "codex" }) -Reference) + ": its model as -Model, its effort as -Effort).") -ForegroundColor Red
     exit 2
 }
 
@@ -394,7 +394,7 @@ if ([string]::IsNullOrWhiteSpace($PromptText)) {
     if (-not (Test-Path -LiteralPath $bootstrapPromptPath)) {
         Write-Host ("[CODEX] Error: phase prompt not found: " + $bootstrapPromptPath) -ForegroundColor Red
         Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
-        Write-Host ("Run crucible.ps1 -Init -TaskId " + $TaskId + " -ProjectRoot <adopter root> first, and pass that same -ProjectRoot here.") -ForegroundColor Yellow
+        Write-Host ("Run " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = "<adopter root>" }) -CrucibleRoot $CrucibleRoot) + " first, and pass that same -ProjectRoot here.") -ForegroundColor Yellow
         exit 2
     }
 }
@@ -486,9 +486,11 @@ if ($ReviewSchema) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($bootstrapPromptPath)) {
+    # Built, not interpolated: a root such as C:/cash$root must reach the specialist as
+    # written, in the script path and in -ProjectRoot alike. Item 247.
+    $advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT; Quiet = $true }) -CrucibleRoot $crucibleDir -Invoker "pwsh -File"
     $PromptText = New-BootstrapPrompt -RoleLabel $Role -TaskIdValue $TaskId -PromptPath $bootstrapPromptPath `
-        -CrucibleScriptPath (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) `
-        -ProjectRootValue $REPO_ROOT -RequireJsonVerdict $useSchema
+        -AdvanceCommand $advanceCommand -RequireJsonVerdict $useSchema
 }
 
 $codexArgs = @(
@@ -518,7 +520,10 @@ if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 # Event timestamps carry whole seconds; back off one so an event in the launch second counts.
 $launchStartUtc = [datetime]::UtcNow.AddSeconds(-1)
 $statusEffort = if ([string]::IsNullOrWhiteSpace($Effort)) { "Codex's own default effort" } else { $Effort + " effort" }
-$recoveryCommand = "pwsh -File `"" + (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) + "`" -Init -TaskId " + $TaskId + " -ProjectRoot `"" + $REPO_ROOT + "`""
+# An ad hoc run has no task to advance, so it has no recovery command.
+$recoveryCommand = if ([string]::IsNullOrWhiteSpace($TaskId)) { "" } else {
+    New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $crucibleDir -Invoker "pwsh -File"
+}
 Write-CodexLaunchStatus -StatusPath $statusPath -Record (Get-CodexLaunchOutcome -Evidence @{ Running = $true; Level = ($Model + " at " + $statusEffort) })
 
 # From here to the exit, every outcome is decided by Get-CodexLaunchOutcome and written by

@@ -128,6 +128,21 @@ try {
         Assert-Result -Name "manifest reset_budget" -Condition ($manifest.reset_budget -eq $false) -FailureMessage "manifest reset_budget should be false"
     }
 
+    # Review of 5d1b869 (item 247): the suggested command named the bundle whose library was
+    # loaded, so the framework checkout run against an adopter printed framework paths.
+    $results += Run-Test -Name "Rewind suggests the project's configured bundle, not the framework checkout" -Body {
+        $adopter = Join-Path $tempRoot "configured-bundle adopter"
+        New-Item -ItemType Directory -Path (Join-Path $adopter ".crucible/session/handoffs"), (Join-Path $adopter ".crucible/session/B-247/grooming") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $adopter ".crucible/config.yaml"), "crucible_root: `"tools/bundle`"`n", (New-Object System.Text.UTF8Encoding($false)))
+        $r = Invoke-CrucibleRewind -TaskId "B-247" -ToPhase "grooming" -ProjectRoot $adopter
+        Assert-Result -Name "configured-bundle rewind succeeds" -Condition ($r.ExitCode -eq 0) -FailureMessage $r.Output
+        $suggestion = @($r.Output -split "`r?`n" | Where-Object { $_ -match 'crucible\.ps1.* -Init' }) -join "`n"
+        $normalized = $suggestion.Replace("\", "/")
+        $resolvedAdopter = (Resolve-Path -LiteralPath $adopter).Path.Replace("\", "/")
+        Assert-Result -Name "suggestion names the configured bundle" -Condition ($normalized.Contains($resolvedAdopter + "/tools/bundle/powershell/crucible.ps1")) -FailureMessage $r.Output
+        Assert-Result -Name "suggestion does not name the framework checkout" -Condition (-not $normalized.Contains($REPO_ROOT.Replace("\", "/") + "/powershell/crucible.ps1")) -FailureMessage $r.Output
+    }
+
     # Test 5: Rewind with ResetBudget archives pipeline.log.jsonl
     $results += Run-Test -Name "Rewind with ResetBudget archives pipeline log" -Body {
         # Setup directories

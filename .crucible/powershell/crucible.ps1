@@ -125,16 +125,12 @@ function Get-CrucibleRoot {
     param([string]$ProjectRoot = "")
     $root = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $REPO_ROOT } else { $ProjectRoot }
     if ([string]::IsNullOrWhiteSpace($root)) { $root = Resolve-ConfigProjectRoot }
-    $configPath = Join-Path $root ".crucible/config.yaml"
-    if (Test-Path -LiteralPath $configPath) {
-        try {
-            $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-            if ($content -match '(?m)^crucible_root:\s*["'']([^"''\r\n]+)["'']\s*$') {
-                return $Matches[1].Trim()
-            }
-        } catch {}
-    }
-    return ".crucible"
+    # Read through the one owner of crucible_root (I13). An unreadable value keeps this
+    # entrypoint's long-standing default rather than stopping every phase. Item 247.
+    $value = $null
+    try { $value = Get-ConfiguredCrucibleRootValue -ProjectRoot $root } catch { $value = $null }
+    if ([string]::IsNullOrWhiteSpace($value)) { return ".crucible" }
+    return $value
 }
 # Framework powershell/ directory - used to resolve sibling scripts regardless of CWD.
 $FRAMEWORK_POWERSHELL = $PSScriptRoot
@@ -196,7 +192,8 @@ if (-not $Quiet) {
                             $null = git -C $frameworkSource merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host ("WARNING: Installed Crucible bundle lags framework HEAD. Installed: " + $bannerCommit.Substring(0, 7) + " | Upstream HEAD: " + $frameworkHead.Substring(0, 7)) -ForegroundColor Yellow
-                                Write-Host ("  Run 'update-bundle.ps1 -FrameworkSource " + $frameworkSource + "' to bring it current.") -ForegroundColor Yellow
+                                $updateCommand = New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource -Invoker "pwsh -ExecutionPolicy Bypass -File"
+                                Write-Host ("  Run " + $updateCommand + " to bring it current.") -ForegroundColor Yellow
                             }
                         }
                     }
@@ -373,9 +370,10 @@ if ($Rewind) {
 # --- 0a. Require -TaskId for all pipeline operations ---
 if ([string]::IsNullOrEmpty($TaskId)) {
     Write-Host "`n[ERROR] -TaskId is required." -ForegroundColor Red
-    Write-Host "Usage: .\.crucible\powershell\crucible.ps1 -Init -TaskId {task_id} -ProjectRoot `"{project_root}`"" -ForegroundColor Yellow
-    Write-Host "       .\.crucible\powershell\crucible.ps1 -Health  (no -TaskId needed for health checks)" -ForegroundColor DarkGray
-    Write-Host "       .\.crucible\powershell\crucible.ps1 -Doctor  (no -TaskId needed for readiness checks)" -ForegroundColor DarkGray
+    $crucibleRootForUsage = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { ".\" + $crucibleRoot.Replace("/", "\") }
+    Write-Host ("Usage: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = "{task_id}"; ProjectRoot = "{project_root}" }) -CrucibleRoot $crucibleRootForUsage)) -ForegroundColor Yellow
+    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Health = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for health checks)") -ForegroundColor DarkGray
+    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Doctor = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for readiness checks)") -ForegroundColor DarkGray
     Write-Host "No task ID? Start orchestration in bootstrap mode: a Groomer selects the next item (sops/orchestrator.md, Session Start, step 5)." -ForegroundColor Yellow
     exit 1
 }

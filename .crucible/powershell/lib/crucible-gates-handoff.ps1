@@ -176,7 +176,10 @@ function Resolve-CrucibleInputHandoff {
                     Write-Host ("Looked for " + $TaskId + "_*.md or " + $TaskId + ".md in:") -ForegroundColor Red
                     $searched | ForEach-Object { Write-Host $_ -ForegroundColor Red }
                 }
-                Write-Host ("Write the spec there, then rerun crucible.ps1 -Init -TaskId " + $TaskId + "; it bootstraps the task from the spec.") -ForegroundColor Red
+                $bootstrapParameters = [ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }
+                $bootstrapCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $bootstrapParameters -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File"
+                $bootstrapReference = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $bootstrapParameters -Reference
+                Write-Host ("Write the spec there, then rerun " + $bootstrapReference + "; it bootstraps the task from the spec. Command: " + $bootstrapCommand) -ForegroundColor Red
                 exit 1
             }
         }
@@ -384,7 +387,7 @@ function Invoke-HandoffPreflightValidation {
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode $missingReasonCode `
             -Why ("reason_code=" + $missingReasonCode + "; handoff_file=" + $handoffFileName + "; message=Validator script missing: powershell/validate-handoff.ps1") `
-            -RecoveryOverride ("Restore powershell/validate-handoff.ps1 from the Crucible bundle, then rerun: pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"{project_root}`"")
+            -RecoveryOverride ("Restore powershell/validate-handoff.ps1 from the Crucible bundle, then rerun: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File"))
         exit 2
     }
 
@@ -535,7 +538,7 @@ function Invoke-HandoffPreflightValidation {
     # specialists from outside the adopter repository without depending on their current directory.
     $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $Context.RepoRoot $crucibleRoot }
     $pwshCmd = Get-PwshCommand
-    $Context.NextCrucibleCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$($Context.RepoRoot)`" -Quiet"
+    $Context.NextCrucibleCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = $Context.RepoRoot; Quiet = $true }) -CrucibleRoot $resolvedCrucibleRoot -Transport Bash -Invoker ($pwshCmd + " -NoProfile -ExecutionPolicy Bypass -File")
 
     # Read the expected cycle from the source task.md, not the handoff being checked,
     # so a handoff cannot validate its own session_cycle_id. Item 186.

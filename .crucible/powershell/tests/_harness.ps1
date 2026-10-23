@@ -427,3 +427,24 @@ function Initialize-GitTestIsolation {
 $CRUCIBLE_TEST_ROOT_CREATED = -not ($env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT))
 
 $null = Initialize-GitTestIsolation
+
+# The bash an agent's Bash tool runs: Git Bash beside git on Windows (System32 bash is WSL),
+# bash on PATH elsewhere.
+function Get-TestBash {
+    if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+        $git = Get-Command git -ErrorAction SilentlyContinue
+        if ($null -ne $git) {
+            $dir = Split-Path -Parent $git.Source
+            for ($up = 0; $up -lt 3 -and -not [string]::IsNullOrEmpty($dir); $up++) {
+                foreach ($candidate in @((Join-Path $dir "bin/bash.exe"), (Join-Path $dir "usr/bin/bash.exe"))) {
+                    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+                }
+                $dir = Split-Path -Parent $dir
+            }
+        }
+        throw "Git Bash was not found beside git; the Bash transport cannot be checked."
+    }
+    $found = Get-Command bash -ErrorAction SilentlyContinue
+    if ($null -eq $found) { throw "bash was not found on PATH; the Bash transport cannot be checked." }
+    return $found.Source
+}

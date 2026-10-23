@@ -708,7 +708,7 @@ function Invoke-HumanGatePublish {
         Write-Host "  git push origin $PrimaryBranch" -ForegroundColor Cyan
         if ($requireGreenCi) {
             Write-Host "[HUMAN GATE] After that push, watch adopter CI for the merge commit:" -ForegroundColor Yellow
-            Write-Host ("  pwsh -File .crucible/powershell/watch-adopter-ci.ps1 -Commit " + $mergedSha) -ForegroundColor Cyan
+            Write-Host ("  " + (New-CrucibleCommand -Script "powershell/watch-adopter-ci.ps1" -Parameters ([ordered]@{ Commit = $mergedSha }) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot) -Invoker "pwsh -File")) -ForegroundColor Cyan
         }
     }
 }
@@ -1091,7 +1091,7 @@ Copy-Item `$right `$rightCopy -Force
     } else {
         $menu += "  - $NoCodeReviewHint`n`n"
     }
-    $menu += "Gate fired. Run crucible.ps1 -Init -TaskId $TaskId -ProjectRoot `"$RepoRoot`" -GateOutcome <choice> [-GateReason `"Reason`"] to record the decision."
+    $menu += ("Gate fired. Run " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $RepoRoot; GateOutcome = "<choice>"; GateReason = "<one concrete reason>" }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File") + " to record the decision.")
     $menu | Set-Content -Path $PendingFilePath -Encoding UTF8
 }
 
@@ -1343,7 +1343,7 @@ function Invoke-HumanGate {
                             
                             # Construct gate-specific command for next_step.txt
                             $pwshCmd = Get-PwshCommand
-                            $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$repoRoot`" -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
+                            $gateCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = $repoRoot; GateOutcome = "accepted"; GateReason = "<one concrete quality reason>"; Quiet = $true }) -CrucibleRoot $crucibleRoot -Transport Bash -Invoker ($pwshCmd + " -NoProfile -ExecutionPolicy Bypass -File")
                             Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                             
                             exit 0
@@ -1412,7 +1412,7 @@ function Invoke-HumanGate {
                     
                     # Construct gate-specific command for next_step.txt
                     $pwshCmd = Get-PwshCommand
-                    $gateCommand = "$pwshCmd -ExecutionPolicy Bypass -File `"$crucibleRoot/powershell/crucible.ps1`" -Init -TaskId $($handoff.task_id) -ProjectRoot `"$repoRoot`" -GateOutcome accepted -GateReason `"<one concrete quality reason>`" -Quiet"
+                    $gateCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = $repoRoot; GateOutcome = "accepted"; GateReason = "<one concrete quality reason>"; Quiet = $true }) -CrucibleRoot $crucibleRoot -Transport Bash -Invoker ($pwshCmd + " -NoProfile -ExecutionPolicy Bypass -File")
                     Write-NextStep -SessionDir $sessionDir -Command $gateCommand -TaskId $handoff.task_id -Specialist $handoff.source_phase
                     
                     exit 0

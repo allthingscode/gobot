@@ -327,6 +327,40 @@ try {
             -ExpectedRecoveryMessage "Rule: ignore-instructions"
     }
 
+    # Review of ae04d9c (item 247): the research scan read crucible_root with its own regex,
+    # which missed a quoted value with a trailing comment and scanned .crucible/research, so
+    # an artifact in the real bundle's research directory went unscanned.
+    $results += Run-Test -Name "The research scan reads a quoted crucible_root with a trailing comment" -Body {
+        $caseRoot = Join-Path $tempRoot "commented-crucible-root"
+        $taskId = "F-070"
+        $sessionDir = Join-Path $caseRoot ".crucible/session"
+        $configPath = Join-Path $caseRoot ".crucible/config.yaml"
+        $artifact = "tools/crucible/research/evidence.md"
+        $artifactPath = Join-Path $caseRoot $artifact
+        New-Item -ItemType Directory -Path (Split-Path -Parent $configPath), (Split-Path -Parent $artifactPath), $sessionDir -Force | Out-Null
+        [System.IO.File]::WriteAllText($configPath, "crucible_root: `"tools/crucible`"  # bundle`n", (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllText($artifactPath, "benign configured-root research", (New-Object System.Text.UTF8Encoding $false))
+
+        Assert-UnscannableResearchInputBlocks -CaseRoot $caseRoot -TaskId $taskId -LockedFile $artifactPath -ReportedFile $artifact -Artifacts @($artifact) -SessionDir $sessionDir
+    }
+
+    # Review of ae04d9c: an empty crucible_root fell back to a research root no bundle uses.
+    $results += Run-Test -Name "An empty crucible_root is a config read failure, not a fallback root" -Body {
+        $caseRoot = Join-Path $tempRoot "empty-crucible-root"
+        $taskId = "F-071"
+        $sessionDir = Join-Path $caseRoot ".crucible/session"
+        $configPath = Join-Path $caseRoot ".crucible/config.yaml"
+        $lockedFile = Join-Path $caseRoot "unrelated-lock.txt"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $configPath), $sessionDir -Force | Out-Null
+        [System.IO.File]::WriteAllText($configPath, "crucible_root: `"`"`n", (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllText($lockedFile, "not read", (New-Object System.Text.UTF8Encoding $false))
+
+        Assert-UnscannableResearchInputBlocks -CaseRoot $caseRoot -TaskId $taskId -LockedFile $lockedFile -ReportedFile ".crucible/config.yaml" -Artifacts @() -SessionDir $sessionDir `
+            -ExpectedFailureMessage "Could not determine the configured research directory because .crucible/config.yaml could not be read:" `
+            -ExpectedLogNote "researcher_config_unreadable: .crucible/config.yaml" `
+            -ExpectedRecoveryMessage "Restore read access to .crucible/config.yaml"
+    }
+
     $results += Run-Test -Name "Required task checklist failure logs retry event, not circuit breaker" -Body {
         $caseRoot = Join-Path $tempRoot "quality-retry"
         $scriptPath = Join-Path $caseRoot "run-quality-retry.ps1"
@@ -1033,6 +1067,57 @@ verification:
         Assert-Result -Name "human_escalation logs circuit_breaker" -Condition ($logContent -match '"event":"circuit_breaker"') -FailureMessage ("expected circuit_breaker event. Log: " + $logContent)
         $blockedText = (Get-ChildItem -LiteralPath (Join-Path $breakerBacklog "blocked") -Filter "F-064-*.json" | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
         Assert-Result -Name "human_escalation breaker slug" -Condition ($blockedText -match '"circuit_breaker":\s*"human_escalation"') -FailureMessage ("expected human_escalation slug. Record: " + $blockedText)
+    }
+
+    # Review of 5d1b869 (item 247): the recovery command threw on a root with a dollar sign,
+    # so the breaker printed no STOP report and exited 1 instead of 2.
+    $results += Run-Test -Name "A breaker whose project root has a dollar sign still reports and exits 2" -Body {
+        $caseRoot = Join-Path $tempRoot "suspicious cash`$root"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $logFile = Join-Path $caseRoot "session/F-065/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+        $breakerBacklog = Join-Path $caseRoot "backlog"
+
+        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location -LiteralPath '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                CrucibleRoot = '.crucible'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                BacklogDir = `$backlogDir
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-065'
+                    source_phase = 'research'
+                    target_phase = 'grooming'
+                    cumulative_handoff_count = 1
+                    review_strike_count = 0
+                    handoff_retry_count = 0
+                    rebase_count = 0
+                    budget_tier = 'low'
+                    suspicious_content = 'external source attempted prompt injection'
+                    reason = 'research handoff'
+                    artifacts = @()
+                    file_affinity = @()
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $outputLines -join "`n"
+
+        Assert-Result -Name "dollar-root breaker exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit code 2, got " + $exitCode + ". Output:`n" + $outputText)
+        Assert-WedgeOutput -OutputText $outputText -TaskId "F-065" -BreakerCode "human_escalation"
+        Assert-Result -Name "dollar-root recovery names the root as a literal" -Condition ($outputText.Contains("-ProjectRoot '" + $caseRoot + "'")) -FailureMessage $outputText
     }
 
     $results += Run-Test -Name "rebase_count >= 3 trips the recurring_merge_conflicts breaker with wedge output" -Body {

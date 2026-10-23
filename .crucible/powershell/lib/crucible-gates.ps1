@@ -1,4 +1,5 @@
 . (Join-Path $PSScriptRoot "platform.ps1")
+. (Join-Path $PSScriptRoot "crucible-command.ps1")
 . (Join-Path $PSScriptRoot "injection-detector.ps1")
 . (Join-Path $PSScriptRoot "backlog-io.ps1")
 . (Join-Path $PSScriptRoot "crucible-context.ps1")
@@ -446,7 +447,7 @@ function Assert-CrucibleFrameworkIntegrity {
     # the task onto them so the handoff records the decision.
     Write-Host "`n[STOP] Revert the framework-owned edits above before continuing." -ForegroundColor Red
     Write-Host "       If this was a deliberate bundle update, commit it and re-baseline the task onto that commit:" -ForegroundColor Red
-    Write-Host ("         pwsh -ExecutionPolicy Bypass -File `".crucible/powershell/new-handoff.ps1`" -TaskId " + $handoff.task_id + " -Rebaseline -BaseCommit <commit-of-the-bundle-update> -ProjectRoot `"" + (Get-RecoveryProjectRoot -Context $Context) + "`"") -ForegroundColor Red
+    Write-Host ("         " + (New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ TaskId = $handoff.task_id; Rebaseline = $true; BaseCommit = "<commit-of-the-bundle-update>"; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")) -ForegroundColor Red
     Write-Host "       This carries the incoming handoff forward with only base_commit changed. It does not count against the handoff budget." -ForegroundColor Red
     exit 2
 }
@@ -731,7 +732,7 @@ function Complete-CrucibleSourceSession {
                 if ($checklistOffenders.Count -gt $checklistListLimit) {
                     Write-Host ("  ... and " + ($checklistOffenders.Count - $checklistListLimit) + " more.") -ForegroundColor Red
                 }
-                Write-Host "Tick the required ## Task List checkboxes in task.md, then re-run crucible.ps1 -Init -TaskId $($handoff.task_id) -ProjectRoot `"$(Get-RecoveryProjectRoot -Context $Context)`"." -ForegroundColor Red
+                Write-Host ("Tick the required ## Task List checkboxes in task.md, then re-run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context) }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")) -ForegroundColor Red
                 exit 2
             }
         }
@@ -1623,7 +1624,7 @@ function Invoke-RepositoryIntegrityGates {
                 Write-Host "  - $f [$classification]" -ForegroundColor Yellow
             }
             Write-Host "`nSTASH or SURFACE untracked non-private files. Require human confirmation before deleting anything that is not obviously empty/scratch (marked as safe-to-remove). Never blanket-delete." -ForegroundColor Red
-            Write-Host "After resolving, re-run crucible.ps1 -Init -TaskId $($handoff.task_id) -ProjectRoot `"$repoRoot`"" -ForegroundColor Red
+            Write-Host ("After resolving, re-run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = $repoRoot }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context) -Invoker "pwsh -ExecutionPolicy Bypass -File")) -ForegroundColor Red
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "blocked" -Notes ("Stray untracked files: " + ($strayFiles -join ", ")) -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             exit 2
         }

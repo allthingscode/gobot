@@ -462,7 +462,7 @@ if ($frameworkMode) {
                     if ($LASTEXITCODE -eq 0) {
                         Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `
                             -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") lags framework HEAD (" + $frameworkHead.Substring(0, 7) + ").") `
-                            -Remediation ("Run 'update-bundle.ps1 -FrameworkSource " + $frameworkSource + "' to bring it current.")
+                            -Remediation ("Run " + (New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource -Invoker "pwsh -ExecutionPolicy Bypass -File") + " to bring it current.")
                     } else {
                         Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
                             -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") is not stale relative to framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
@@ -487,7 +487,7 @@ if (-not $codexCmd) {
         -Remediation "Install the Codex CLI and run 'codex login' only if you use Codex as a pipeline specialist."
 } else {
     Add-DoctorResult -Check "codex.cli" -Status "pass" -Severity "advisory" `
-        -Details ("Found codex at " + $codexCmd.Source + "; verify the runtime with 'launch-codex-specialist.ps1 -Preflight -Model <codex-model>' before dispatching.")
+        -Details ("Found codex at " + $codexCmd.Source + "; verify the runtime with '" + (New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ Preflight = $true; Model = "<codex-model>" }) -Reference) + "' before dispatching.")
 }
 
 # Check (adopter, advisory): the generated Claude agent definitions match the configured
@@ -509,7 +509,7 @@ if ($adopterMode) {
             $driftText = ($agentDrift | ForEach-Object { $_.Name + " (" + $_.Status + ")" }) -join ", "
             Add-DoctorResult -Check "claude.agents" -Status "warn" -Severity "advisory" `
                 -Details ("Claude agent definitions drifted from config.yaml: " + $driftText + ".") `
-                -Remediation ("Run: pwsh -File " + $script:CLAUDE_AGENT_REGENERATE)
+                -Remediation ("Run: " + (Get-ClaudeAgentRegenerateCommand -ProjectRoot $REPO_ROOT))
         }
     } catch {
         Add-DoctorResult -Check "claude.agents" -Status "warn" -Severity "advisory" `

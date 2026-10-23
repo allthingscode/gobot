@@ -2763,6 +2763,21 @@ try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
         Assert-Result -Name "second checks-not-run entry is printed" -Condition ($output -match '  - gpu check: requires command ''gpu-tool'' on PATH') -FailureMessage $output
     }
 
+    # Review of 5d1b869 (item 247): the decision command threw on a root with a dollar sign,
+    # so the pending menu was never written and the human had nothing to fill in.
+    $results += Run-Test -Name "The Human Gate menu is written when the project root has a dollar sign" -Body {
+        $caseRoot = Join-Path $tempRoot "gate menu cash`$root"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-ITEM247"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible") -Force | Out-Null
+        @('project:', '  name: "Human Gate test"', 'review:') | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+        New-Item -ItemType Directory -Path (Join-Path $ctx.SessionDir $ctx.TaskId) -Force | Out-Null
+        $pendingPath = Join-Path $ctx.SessionDir "$($ctx.TaskId)/pending.json"
+        $output = (& { Write-GatePendingSurface -Context $ctx -RepoRoot $caseRoot -SessionDir $ctx.SessionDir -TaskId $ctx.TaskId -PendingFilePath $pendingPath -TaskBranchExists $false -NoCodeReviewHint "No code changes" -AcceptDesc "accept the work" } 6>&1 | Out-String)
+        Assert-Result -Name "pending menu written" -Condition (Test-Path -LiteralPath $pendingPath) -FailureMessage $output
+        $menu = if (Test-Path -LiteralPath $pendingPath) { Get-Content -LiteralPath $pendingPath -Raw } else { "" }
+        Assert-Result -Name "menu decision command names the root as a literal" -Condition ($menu.Contains("-ProjectRoot '" + $caseRoot + "'") -and $menu.Contains("-GateOutcome <choice>")) -FailureMessage $menu
+    }
+
     $results += Run-Test -Name "Every outcome the CLI accepts reaches a dispatch arm" -Body {
         # The pairing the fix above depends on: -GateOutcome validates against
         # Get-HumanGateOutcomes, so any value on that list which the dispatcher does not

@@ -1,6 +1,8 @@
 # Idempotent instruction-block management for adopter root instruction files.
 # Owns the sentinel markers, canonical block content, and append/detect logic.
 
+. (Join-Path $PSScriptRoot "crucible-command.ps1")
+
 $SENTINEL_START = "<!-- crucible-instructions-start -->"
 $SENTINEL_END   = "<!-- crucible-instructions-end -->"
 
@@ -73,9 +75,11 @@ Do not commit runtime data:
 Run the installed runtime from the project root:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id> -ProjectRoot "{project_root}"
+{{init_command}}
 ```
-'@ -replace 'powershell.exe', $pwshCmd
+'@
+    $initCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = "<task-id>"; ProjectRoot = "{project_root}" }) -CrucibleRoot "{{crucible_root}}" -Invoker ($pwshCmd + " -ExecutionPolicy Bypass -File")
+    $agentsBody = $agentsBody.Replace("{{init_command}}", $initCommand)
 
     $claudeBody = @'
 # Claude Instructions

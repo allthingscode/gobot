@@ -133,7 +133,7 @@ try {
         # required siblings. Copying the whole powershell/ tree (lib/ included) is what makes
         # this real doctor output instead of a source-text assertion: crucible-lib.ps1 and its
         # dot-sourced chain must resolve for the doctor to run at all.
-        $isolatedRoot = Join-Path $tempRoot "isolated-doctor"
+        $isolatedRoot = Join-Path $tempRoot "isolated-doctor/powershell"
         New-Item -ItemType Directory -Path $isolatedRoot -Force | Out-Null
         $sourceDir = Join-Path $REPO_ROOT "powershell"
         foreach ($file in @(Get-ChildItem -LiteralPath $sourceDir -Filter "*.ps1" -File)) {
@@ -441,6 +441,19 @@ try {
         $clean = $cleanRes.Output -join "`n"
         Assert-Result -Name "synced definitions pass" -Condition ($clean -notmatch "crucible-strong \(") -FailureMessage "Output:`n$clean"
     }
+    # Review of 9b0bb92 (item 247): the fix named .crucible and -ProjectRoot ., which from
+    # anywhere but the checked project regenerates the wrong tree.
+    $results += Run-Test -Name "Doctor's agent regeneration advice names the checked project and its bundle" -Body {
+        $projectRoot = Join-Path $tempRoot "claude-agents-other-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
+        $output = $res.Output -join "`n"
+        $resolved = (Resolve-Path -LiteralPath $projectRoot).Path
+        $advice = @($output -split "`r?`n" | Where-Object { $_ -match 'sync-claude-agents\.ps1' }) -join "`n"
+        Assert-Result -Name "advice names the checked project" -Condition ($advice.Contains('-ProjectRoot "' + $resolved + '"')) -FailureMessage "Output:`n$output"
+        Assert-Result -Name "advice names the project's bundle" -Condition ($advice.Replace("\", "/").Contains(($resolved.Replace("\", "/") + "/.crucible/powershell/sync-claude-agents.ps1"))) -FailureMessage "Output:`n$output"
+    }
+
     $results += Run-Test -Name "Doctor reports Codex CLI as advisory, never blocks READY" -Body {
         $projectRoot = Join-Path $tempRoot "codex-probe-project"
         Write-DoctorFixture -ProjectRoot $projectRoot

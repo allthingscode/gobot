@@ -42,3 +42,14 @@ function Get-RecoveryProjectRoot {
     }
     return "{project_root}"
 }
+
+# The bundle a printed command for a Crucible script is rooted at, read the same guarded way
+# and for the same reason: a context without CrucibleRoot prints the placeholder. Item 247.
+function Get-RecoveryCrucibleRoot {
+    param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    if ($Context.ContainsKey("CrucibleRoot") -and -not [string]::IsNullOrWhiteSpace([string]$Context.CrucibleRoot)) {
+        return [string]$Context.CrucibleRoot
+    }
+    return "{crucible_root}"
+}

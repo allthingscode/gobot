@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot "crucible-command.ps1")
+
 function Invoke-TaskRewind {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -129,6 +131,6 @@ function Invoke-TaskRewind {
         }
         Write-Host "`n[REWIND] Next suggested command to start grooming:" -ForegroundColor Green
         $rootForCommand = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "{project_root}" } else { $ProjectRoot }
-        Write-Host "  pwsh -NoProfile -ExecutionPolicy Bypass -File .crucible/powershell/crucible.ps1 -Init -TaskId $TaskId -ProjectRoot `"$rootForCommand`"" -ForegroundColor Yellow
+        Write-Host ("  " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $rootForCommand }) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $rootForCommand) -Invoker "pwsh -NoProfile -ExecutionPolicy Bypass -File")) -ForegroundColor Yellow
     }
 }

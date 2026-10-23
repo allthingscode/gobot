@@ -27,6 +27,7 @@ foreach ($lib in "instruction-blocks.ps1", "language-presets.ps1", "config-helpe
 . (Join-Path $PSScriptRoot "lib/language-presets.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 . (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 
 function Write-Info {
     param(
@@ -487,9 +488,9 @@ if ($AppendInstructions) {
     Write-Info "  2. Merge .crucible/agent-instructions/AGENTS.md into the project root AGENTS.md."
     Write-Info "  3. Add CLAUDE.md or GEMINI.md forwarding snippets if those tools are used."
 }
-Write-Info "  4. From the project root, run .crucible/powershell/validate-config.ps1 -ConfigPath .crucible/config.yaml."
+Write-Info ("  4. From the project root, run " + (New-CrucibleCommand -Script "powershell/validate-config.ps1" -Parameters ([ordered]@{ ConfigPath = ".crucible/config.yaml" }) -CrucibleRoot ".crucible") + ".")
 if ($WithSampleTask) {
-    Write-Info "  5. F-001 sample task installed. Run '.\.crucible\powershell\crucible.ps1 -Init -TaskId F-001 -ProjectRoot `"$resolvedProjectRoot`"' to smoke-test the pipeline. Add your own backlog items afterward." -ForegroundColor DarkGray
+    Write-Info ("  5. F-001 sample task installed. Run '" + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = "F-001"; ProjectRoot = $resolvedProjectRoot }) -CrucibleRoot ".\.crucible") + "' to smoke-test the pipeline. Add your own backlog items afterward.") -ForegroundColor DarkGray
 } else {
     Write-Info "  5. Add initial backlog items under $relativeBacklogPath."
 }

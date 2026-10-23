@@ -105,6 +105,28 @@ try {
         Assert-Result -Name "checklist worktree" -Condition ($text.Contains("Enter worktree $wt")) -FailureMessage $text
     }
 
+    # Review of 6dcfdcf (item 247): task.md says to run the session-end line "via your Bash
+    # tool", but it was quoted for PowerShell, so bash read 'it''s $x' as its $x. The line is
+    # parsed here by bash itself, with printf standing in for pwsh so nothing else runs.
+    $results += Run-Test -Name "The session-end line in task.md reads as bash says it should" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "bash it's `$x end") -TaskId "F-247" -TargetPhase "verification"
+        $ctx.TypeDir = "features"
+        $env:CRUCIBLE_CYCLE_ID = "item247-bash"
+        Initialize-CrucibleTargetSession -Context $ctx
+        $text = Get-Content -LiteralPath (Join-Path $ctx.SessionDir "F-247/verification/task.md") -Raw
+        $lines = @($text -split "`r?`n")
+        $at = [Array]::IndexOf($lines, @($lines | Where-Object { $_ -match 'via your Bash tool' })[0])
+        $command = @($lines[($at + 1)..($lines.Count - 1)] | Where-Object { $_.Trim() -ne "" })[0].Trim()
+        Assert-Result -Name "session-end line starts pwsh -File" -Condition ($command -match '^\S+ -NoProfile -ExecutionPolicy Bypass -File ') -FailureMessage $command
+        $probe = "printf '%s\n'" + ($command -replace '^\S+ -NoProfile -ExecutionPolicy Bypass -File', '')
+        $probePath = Join-Path $tempRoot "bash-session-end.sh"
+        [System.IO.File]::WriteAllText($probePath, $probe + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $bash = Get-TestBash
+        $argv = @(& $bash $probePath 2>&1 | ForEach-Object { [string]$_ })
+        $rootAt = [Array]::IndexOf($argv, "-ProjectRoot")
+        Assert-Result -Name "bash reads the project root verbatim" -Condition ($LASTEXITCODE -eq 0 -and $rootAt -ge 0 -and $argv[$rootAt + 1] -ceq $ctx.RepoRoot) -FailureMessage ($command + " => " + ($argv -join " | "))
+    }
+
     $results += Run-Test -Name "Write-NextStep writes expected content with explicit SessionDir" -Body {
         $sessionDir = Join-Path $tempRoot "next-step/session"
         $command = "$((Get-PwshCommand)) -File crucible.ps1 -Init -TaskId F-901"

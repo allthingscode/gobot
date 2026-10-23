@@ -36,6 +36,25 @@ function Read-Agent {
 
 $names = @("crucible-strong", "crucible-default", "crucible-light", "crucible-researcher")
 
+# Review of 9b0bb92 (item 247): the regenerate command hardcoded .crucible, so a project with
+# crucible_root: tools/crucible was told to run a script that is not there.
+$results += Run-Test "Regenerate commands name the configured bundle" {
+    $root = New-AgentRoot -Name "agents-tools-bundle"
+    $configPath = Join-Path $root ".crucible/config.yaml"
+    [System.IO.File]::WriteAllText($configPath, ("crucible_root: `"tools/crucible`"`n" + [System.IO.File]::ReadAllText($configPath)), (New-Object System.Text.UTF8Encoding $false))
+    $run = Invoke-Sync -Root $root
+    Assert-Result "tools bundle sync exit 0" ($run.ExitCode -eq 0) $run.Output
+    $strong = Read-Agent $root "crucible-strong"
+    Assert-Result "header names the configured bundle" ($strong.Contains("Regenerate with: pwsh -File tools/crucible/powershell/sync-claude-agents.ps1 -ProjectRoot . -->")) $strong
+    Remove-Item -LiteralPath (Join-Path $root ".claude/agents/crucible-light.md")
+    Push-Location (New-TestFixtureRoot -NameHint "agents-elsewhere")
+    try { $check = Invoke-Sync -Root $root -Check } finally { Pop-Location }
+    $resolved = (Resolve-Path -LiteralPath $root).Path
+    $advice = @($check.Output -split "`r?`n" | Where-Object { $_ -match 'regenerate with' }) -join "`n"
+    Assert-Result "check advice names the bundle under the project" ($advice.Replace("\", "/").Contains(($resolved.Replace("\", "/") + "/tools/crucible/powershell/sync-claude-agents.ps1"))) $check.Output
+    Assert-Result "check advice names the project root" ($advice.Contains('-ProjectRoot "' + $resolved + '"')) $check.Output
+}
+
 $results += Run-Test "Sync writes the four agent definitions with the configured full model ID and effort" {
     $root = New-AgentRoot -Name "agents-gen" -Models @"
 models:

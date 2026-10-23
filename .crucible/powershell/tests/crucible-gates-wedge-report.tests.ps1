@@ -101,6 +101,60 @@ $results += Run-Test -Name "A blank ProjectRoot leaves the placeholder visible r
     Assert-Result -Name "placeholder kept" -Condition ($recovery.Contains('-ProjectRoot "{project_root}"')) -FailureMessage ("expected the {project_root} placeholder, as {task_id} is kept for a blank TaskId. Got: " + $recovery)
     Assert-Result -Name "no empty root" -Condition (-not $recovery.Contains('-ProjectRoot ""')) -FailureMessage ("an empty -ProjectRoot resolves the current directory, which is the defect. Got: " + $recovery)
 }
+
+# Review of 5d1b869 (item 247). The builder threw on a root it could not double-quote, so the
+# STOP report never printed and the caller's exit 2 became an exception. A root is data: it
+# prints as a literal, and one no command line can carry costs only the command.
+$results += Run-Test -Name "The STOP report prints for any project root, with the root as a literal" -Body {
+    foreach ($case in @(
+            @{ Root = 'C:\cash$root'; Literal = "-ProjectRoot 'C:\cash`$root'" },
+            @{ Root = 'C:\tick`root'; Literal = "-ProjectRoot 'C:\tick``root'" },
+            @{ Root = 'D:\'; Literal = '-ProjectRoot "D:\"' })) {
+        $lines = @(Get-WedgeReportLines -TaskId "F-247" -SourcePhase "a" -TargetPhase "b" -BreakerCode "scope_violation" -Why "x" -ProjectRoot $case.Root)
+        $joined = $lines -join "`n"
+        Assert-Result -Name ("report printed for " + $case.Root) -Condition ($joined -match "\[STOP\] HUMAN INTERVENTION REQUIRED" -and $joined -match "(?m)^RECOVERY:\s+Follow") -FailureMessage $joined
+        Assert-Result -Name ("root is a literal for " + $case.Root) -Condition ($joined.Contains($case.Literal)) -FailureMessage $joined
+    }
+    $lines = @(Get-WedgeReportLines -TaskId "F-247" -SourcePhase "a" -TargetPhase "b" -BreakerCode "scope_violation" -Why "x" -ProjectRoot "C:\line`nbreak")
+    $joined = $lines -join "`n"
+    Assert-Result -Name "report printed when no command can carry the root" -Condition ($joined -match "(?m)^RECOVERY:\s+Follow.*\(command unavailable: .*newline") -FailureMessage $joined
+}
+
+$results += Run-Test -Name "A recovery override's root placeholder takes the root as a literal, not inside its quotes" -Body {
+    $override = 'Fix it, then run: crucible.ps1 -Init -TaskId F-247 -ProjectRoot "{project_root}" -Recover'
+    $recovery = Get-WedgeRecovery -BreakerCode "human_escalation" -TaskId "F-247" -RecoveryOverride $override -ProjectRoot 'C:\cash$root'
+    Assert-Result -Name "override root is a single-quoted literal" -Condition ($recovery.Contains("-ProjectRoot 'C:\cash`$root' -Recover")) -FailureMessage $recovery
+    Assert-Result -Name "override root not spliced into double quotes" -Condition (-not $recovery.Contains('"C:\cash$root"')) -FailureMessage $recovery
+}
+
+$results += Run-Test -Name "A recovery re-run names the project's configured bundle, not the loaded library's" -Body {
+    $adopter = Join-Path (New-TestFixtureRoot -NameHint "wedge-bundle") "adopter"
+    New-Item -ItemType Directory -Path (Join-Path $adopter ".crucible") -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $adopter ".crucible/config.yaml"), "crucible_root: `"tools/bundle`"`n", (New-Object System.Text.UTF8Encoding($false)))
+    $recovery = Get-WedgeRecovery -BreakerCode "scope_violation" -TaskId "F-247" -ProjectRoot $adopter
+    $bundleScript = Join-Path (Join-Path $adopter "tools/bundle") "powershell/crucible.ps1"
+    $normalized = $recovery.Replace("\", "/")
+    Assert-Result -Name "configured bundle named" -Condition ($normalized.Contains($bundleScript.Replace("\", "/"))) -FailureMessage ("expected " + $bundleScript + " in: " + $recovery)
+    Assert-Result -Name "framework bundle not named" -Condition (-not $normalized.Contains(($REPO_ROOT.Replace("\", "/") + "/powershell/crucible.ps1"))) -FailureMessage $recovery
+}
+
+# Review of 6dcfdcf: with no config the bundle was guessed as <root>/.crucible.
+$results += Run-Test -Name "A project with no config prints the bundle placeholder, not a guessed path" -Body {
+    $bare = Join-Path (New-TestFixtureRoot -NameHint "wedge-noconfig") "no config here"
+    New-Item -ItemType Directory -Path $bare -Force | Out-Null
+    $recovery = Get-WedgeRecovery -BreakerCode "scope_violation" -TaskId "F-247" -ProjectRoot $bare
+    Assert-Result -Name "bundle placeholder printed" -Condition ($recovery.Contains("{crucible_root}/powershell/crucible.ps1")) -FailureMessage $recovery
+    Assert-Result -Name "no guessed bundle" -Condition (-not $recovery.Replace("\", "/").Contains(($bare.Replace("\", "/") + "/.crucible"))) -FailureMessage $recovery
+}
+
+# Review of 6dcfdcf: a bare placeholder in an override's prose was spliced with the raw root.
+$results += Run-Test -Name "Only a quoted root placeholder in an override is filled" -Body {
+    $override = 'See {project_root}/notes, then run: crucible.ps1 -Init -TaskId F-247 -ProjectRoot "{project_root}"'
+    $recovery = Get-WedgeRecovery -BreakerCode "human_escalation" -TaskId "F-247" -RecoveryOverride $override -ProjectRoot 'C:\cash$root'
+    Assert-Result -Name "quoted placeholder filled" -Condition ($recovery.Contains("-ProjectRoot 'C:\cash`$root'")) -FailureMessage $recovery
+    Assert-Result -Name "prose placeholder not spliced" -Condition ($recovery.StartsWith("See {project_root}/notes")) -FailureMessage $recovery
+}
+
 $failed = @($results | Where-Object { -not $_ }).Count
 if ($failed -gt 0) {
     Write-Host ("`n$failed crucible-gates-wedge-report test(s) failed.") -ForegroundColor Red

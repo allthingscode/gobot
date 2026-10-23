@@ -40,6 +40,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/time.ps1")
 . (Join-Path $PSScriptRoot "lib/project-root.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 . (Join-Path $PSScriptRoot "lib/backlog-io.ps1")
 
 $ErrorActionPreference = "Stop"
@@ -80,6 +81,19 @@ $researchSessionDir = Join-Path $sessionRoot (Join-Path $TaskId "research")
 if (-not (Test-Path -LiteralPath $researchSessionDir)) {
     throw "No research session directory at $researchSessionDir. Run the research phase for $TaskId before recording its gate."
 }
+
+# Every command the continuation and the guidance print. The human's reason and IDs are data:
+# the builder quotes them as literals, and one it cannot put on a command line prints as
+# command unavailable rather than stopping the gate from being recorded. Item 247.
+$pointerPath = Join-Path $researchSessionDir "gate-filing-pointer.md"
+$handoffParameters = [ordered]@{ TaskId = $TaskId; Source = "research"; Target = "grooming"; Reason = $Reason }
+if ($approvedList.Count -gt 0) { $handoffParameters["HumanApproved"] = @($approvedList); $handoffParameters["StubSpecsCreated"] = @($approvedList) }
+if ($deferredList.Count -gt 0) { $handoffParameters["HumanDeferred"] = @($deferredList) }
+if ($rejectedList.Count -gt 0) { $handoffParameters["HumanRejected"] = @($rejectedList) }
+$handoffCommand = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters $handoffParameters -CrucibleRoot $CrucibleRoot
+$validateCommand = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Parameters ([ordered]@{ ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; Quiet = $true; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$dispatchCommand = New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ TaskId = $TaskId; Phase = "research"; Model = "<model>"; Effort = "<effort>"; ProjectRoot = $REPO_ROOT; PromptFile = $pointerPath }) -CrucibleRoot $CrucibleRoot
 
 $researchDir = Join-Path $resolvedCrucibleRoot "research"
 $findingsRel = "$CrucibleRoot/research/<findings artifact>"
@@ -123,15 +137,6 @@ $approvedMd = Format-List -Items $approvedList
 $deferredMd = Format-List -Items $deferredList
 $rejectedMd = Format-List -Items $rejectedList
 $upstreamMd = Format-List -Items $upstreamList
-
-$approvedQuoted = if ($approvedList.Count -gt 0) { ($approvedList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
-$deferredQuoted = if ($deferredList.Count -gt 0) { ($deferredList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
-$rejectedQuoted = if ($rejectedList.Count -gt 0) { ($rejectedList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
-
-$handoffArgs = "-TaskId $TaskId -Source research -Target grooming -Reason `"$Reason`""
-if ($approvedQuoted -ne '') { $handoffArgs += " -HumanApproved $approvedQuoted -StubSpecsCreated $approvedQuoted" }
-if ($deferredQuoted -ne '') { $handoffArgs += " -HumanDeferred $deferredQuoted" }
-if ($rejectedQuoted -ne '') { $handoffArgs += " -HumanRejected $rejectedQuoted" }
 
 # Leave terminal status to human acceptance: the deployment gate refuses Production
 # or Resolved tasks before acceptance, and the Human Gate finalizes them.
@@ -212,14 +217,14 @@ $fileStep
 
 Run new-handoff.ps1:
 
-    $CrucibleRoot/powershell/new-handoff.ps1 $handoffArgs
+    $handoffCommand
 
 This records the human decision in the handoff ``human_decisions`` block.
 
 ## Step 4 - Validate and advance
 
-    $CrucibleRoot/powershell/validate-backlog.ps1 -ProjectRoot "$REPO_ROOT"
-    $CrucibleRoot/powershell/crucible.ps1 -Init -TaskId $TaskId -Quiet -ProjectRoot "$REPO_ROOT"
+    $validateCommand
+    $advanceCommand
 
 Fix any validate-backlog count mismatch before finishing. Append a ``### CHECKPOINT`` line to
 your research task.md noting the stubs filed and the handoff written. Report the Crucible
@@ -232,7 +237,6 @@ $gateFilingPath = Join-Path $researchSessionDir "gate-filing.md"
 # --- Orchestrator guidance ---
 $pointer = "Researcher: $TaskId - read and follow all instructions in $gateFilingPath"
 # TODO item 208: file-sourced prompts survive background pwsh -File argument parsing.
-$pointerPath = Join-Path $researchSessionDir "gate-filing-pointer.md"
 [System.IO.File]::WriteAllText($pointerPath, ($pointer + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Write-Host ""
 Write-Host "[RESEARCH GATE RECORDED] $TaskId" -ForegroundColor Green
@@ -245,7 +249,7 @@ Write-Host ("  decision record: " + $decisionPath)
 Write-Host ("  continuation prompt: " + $gateFilingPath)
 Write-Host ""
 Write-Host "  Re-dispatch the Researcher with a ONE-LINE pointer to the continuation prompt:" -ForegroundColor Cyan
-Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -Effort <effort> -ProjectRoot `"$REPO_ROOT`" -PromptFile `"$pointerPath`"")
+Write-Host ("    Codex:  " + $dispatchCommand)
 Write-Host ("    Claude: Agent tool, prompt = `"$pointer`"")
 Write-Host ""
 Write-Host "  The gate is CLOSED; the specialist will file the approved stubs and hand off without re-presenting."

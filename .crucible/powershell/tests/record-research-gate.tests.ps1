@@ -110,6 +110,21 @@ try {
         Assert-Result "rejected recorded" ($obj.rejected -contains "C-999") "rejected list missing C-999"
     }
 
+    # Review of 5d1b869 (item 247): the printed commands were built first and refused a reason
+    # they could not double-quote, so an ordinary human reason was never recorded.
+    $results += Run-Test -Name "a reason with a dollar sign and quotes is recorded and printed as a literal" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "dollar-reason")
+        $reason = 'Approve C-350; costs $5 and it''s "cheap"'
+        $output = (& $SCRIPT -TaskId $p.TaskId -Reason $reason -Approved "C-350" -ProjectRoot $p.Root 6>&1 | Out-String)
+        $gateDir = Join-Path $p.Root ".crucible/session/global/research_gate"
+        $rec = @(Get-ChildItem -LiteralPath $gateDir -Filter "$($p.TaskId)-*.json" -ErrorAction SilentlyContinue)
+        Assert-Result "decision recorded" ($rec.Count -eq 1) $output
+        $obj = if ($rec.Count -eq 1) { Get-Content -LiteralPath $rec[0].FullName -Raw | ConvertFrom-Json } else { $null }
+        Assert-Result "reason recorded verbatim" ($null -ne $obj -and $obj.reason -ceq $reason) $output
+        $body = if (Test-Path -LiteralPath $p.GateFiling) { Get-Content -LiteralPath $p.GateFiling -Raw } else { "" }
+        Assert-Result "handoff command carries the reason as a literal" ($body.Contains("-Reason 'Approve C-350; costs `$5 and it''s `"cheap`"'")) $body
+    }
+
     $results += Run-Test -Name "all-deferred decision files no stubs but still records and hands off" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "defer")
         & $SCRIPT -TaskId $p.TaskId -Reason "not now" -Deferred "C-350","C-351" -ProjectRoot $p.Root | Out-Null

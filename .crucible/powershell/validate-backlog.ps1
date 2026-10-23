@@ -20,6 +20,7 @@ $ErrorActionPreference = "Stop"
 $errors = @()
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "backlog-io.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "crucible-command.ps1")
 
 function Write-Quiet {
     param(
@@ -650,7 +651,9 @@ try {
                 Write-Quiet "BACKLOG.md updated successfully."
                 $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
             } else {
-                $errors += "BACKLOG.md changed while it was being validated, so the Priority Summary was not rewritten. Rerun validate-backlog.ps1 -FixSummary."
+                # The rerun names the file this run read, so it validates the same backlog. Item 247.
+                $fixRerun = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Parameters ([ordered]@{ BacklogPath = $BacklogPath; FixSummary = $true }) -CrucibleRoot (Split-Path -Parent $PSScriptRoot) -Invoker "pwsh -ExecutionPolicy Bypass -File"
+                $errors += ("BACKLOG.md changed while it was being validated, so the Priority Summary was not rewritten. Rerun: " + $fixRerun)
             }
         } else {
             Write-Quiet "BACKLOG.md Priority Summary already current; no changes written."

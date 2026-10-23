@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 $AdopterRoot = Resolve-ConfigProjectRoot -ProjectRoot $AdopterRoot
 
 # Retention for the per-run report written to session/update-bundle/. A normal update writes
@@ -267,7 +268,7 @@ function Invoke-UpdateBundle {
 
     $baselineCommit = Read-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit"
     if (-not ($baselineCommit -match '^[0-9a-f]{40}$')) {
-        throw "Missing crucible_install_commit in .crucible/config.yaml. Run init-project.ps1 -StampVersionOnly once from a Crucible source checkout."
+        throw ("Missing crucible_install_commit in .crucible/config.yaml. Run once from the Crucible source checkout: " + (New-CrucibleCommand -Script "powershell/init-project.ps1" -Parameters ([ordered]@{ ProjectRoot = $AdopterRoot; StampVersionOnly = $true }) -CrucibleRoot $frameworkRoot -Invoker "pwsh -ExecutionPolicy Bypass -File"))
     }
 
     $provManifest = Read-ProvenanceManifest -BundleRoot $adopterCrucibleRoot
@@ -586,7 +587,7 @@ function Invoke-UpdateBundle {
             if ($agentsChanged) { Write-Host "  git add .claude/agents" }
             Write-Host ("  git commit -m `"chore(crucible): update adopter bundle " + $old7 + " -> " + $new7 + "`"")
             Write-Host "The framework-integrity circuit breaker treats uncommitted .crucible/ changes as a"
-            Write-Host "specialist modifying framework-owned files and will hard-stop crucible.ps1 -Init with exit 2."
+            Write-Host ("specialist modifying framework-owned files and will hard-stop " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true }) -Reference) + " with exit 2.")
         }
     }
 

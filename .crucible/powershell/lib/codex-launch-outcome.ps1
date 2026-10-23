@@ -18,6 +18,12 @@ $script:InfraMarkers = @(
 )
 
 $script:CodexLaunchPhases = @("research", "grooming", "implementation", "verification", "deployment")
+
+# Bind advice only when emitted. Loading this library for other helpers must not read
+# unrelated entrypoints (the deprecated shim loads crucible-lib just to log its event).
+if (-not (Get-Command New-CrucibleCommand -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "crucible-command.ps1")
+}
 # The apostrophe in "You've" as Codex writes it (U+2019) or a user types it, and the U+2019
 # UTF-8 bytes as an OEM (code page 437) or ANSI (1252) host decodes them. Item 211.
 $script:CodexUsageLimitApostrophes = @(
@@ -208,7 +214,7 @@ function Get-CodexLaunchOutcomeCore {
             -Detail @(("reason: codex invocation failed: " + $Evidence["InvokeError"]), ("transcript: " + $Evidence["TranscriptPath"])) -Advice @(
             "This is an INFRASTRUCTURE failure, NOT a review verdict. The launcher could not run",
             "codex to completion. Do not record it as CHANGES_REQUESTED. Re-run",
-            "launch-codex-specialist.ps1 -Preflight, fix the runtime, then re-dispatch."
+            ((New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ Preflight = $true }) -Reference) + ", fix the runtime, then re-dispatch.")
         )
     }
     if ($null -eq $Evidence["ExitCode"]) { throw "codex returned no exit code" }
@@ -270,7 +276,7 @@ function Get-CodexLaunchOutcomeCore {
         return New-CodexLaunchRecord -Status "LAUNCH_FAILED" -ExitCode 1 -Color "Red" `
             -Detail @($exitLine, ("reason: " + $failReason), $transcriptLine) -Advice @(
             "This is an INFRASTRUCTURE failure, NOT a review verdict. Do not record it as",
-            "CHANGES_REQUESTED. Re-run launch-codex-specialist.ps1 -Preflight, fix the",
+            ("CHANGES_REQUESTED. Re-run " + (New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ Preflight = $true }) -Reference) + ", fix the"),
             "runtime/auth, then re-dispatch; or escalate to the human."
         )
     }
@@ -285,7 +291,7 @@ function Get-CodexLaunchOutcomeCore {
             return New-CodexLaunchRecord -Status "ADVANCE_INCOMPLETE" -ExitCode 3 -Color "Yellow" `
                 -Detail @($exitLine, ("next phase never started: " + $advanceTarget), $lastMessageLine, $transcriptLine) -Advice @(
                 ("Crucible ended the " + $phase + " phase but never started " + $advanceTarget + ":"),
-                "the specialist's crucible.ps1 -Init was cut off before it finished.",
+                ("the specialist's " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true }) -Reference) + " was cut off before it finished."),
                 "The handoff is intact. Finish the advance, then dispatch the next phase:",
                 ("  " + $Evidence["RecoveryCommand"])
             )

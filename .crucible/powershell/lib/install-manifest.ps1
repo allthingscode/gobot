@@ -119,6 +119,8 @@ function Test-FrameworkDevOnlyFile {
         # line patterns. A bundle lays them out under .crucible/powershell/, so every owner
         # would report itself missing. Item 245.
         "powershell/tests/format-owners.tests.ps1",
+        # Scans Crucible's runtime command call sites, not an adopter's source tree.
+        "powershell/tests/printed-commands.tests.ps1",
         # Exercises the same framework-only detector and catalog. Item 257 review.
         "powershell/tests/format-owners-review.tests.ps1",
         # Scans this framework repo's runtime for I2 discard sites and stale allowances.

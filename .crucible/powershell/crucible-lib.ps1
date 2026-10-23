@@ -199,6 +199,7 @@ function Get-SpecBudgetTier {
 }
 
 . (Join-Path $PSScriptRoot "lib/file-lock.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 
 $crucibleContextPath = Join-Path $PSScriptRoot "lib/crucible-context.ps1"
 if (-not (Test-Path -LiteralPath $crucibleContextPath)) {
