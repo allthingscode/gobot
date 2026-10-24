@@ -197,10 +197,7 @@ try {
             # A directory without pre-commit leaves the worktree unprotected. Item 155.
             $ok = $false
             if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
-                $resolved = $hooksPath.Trim()
-                if (-not [System.IO.Path]::IsPathRooted($resolved)) {
-                    $resolved = Join-Path $wt $resolved
-                }
+                $resolved = Resolve-PathFromRoot -Root $wt -Path $hooksPath.Trim()
                 if (Test-Path -LiteralPath (Join-Path $resolved "pre-commit") -PathType Leaf) {
                     $ok = $true
                 }

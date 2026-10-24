@@ -38,6 +38,23 @@ $CB_HISTORY_FILE = Join-Path $tempRoot "logs/circuit_breakers.jsonl"
 New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 
 try {
+    $results += Run-Test -Name "Artifact relativization normalizes a missing path before slicing" -Body {
+        $project = Join-Path $tempRoot "relativize-project"
+        $worktree = Join-Path $project "workspaces/task"
+        New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+        $artifact = $worktree + "/unused/../Docs/Missing.md"
+        $actual = @(Normalize-HandoffArtifactPaths -Artifacts @($artifact) -WorktreePath ($worktree + "/") -ProjectRoot $project)
+        Assert-Result -Name "canonical suffix, original leaf case" -Condition ($actual.Count -eq 1 -and $actual[0] -ceq "Docs/Missing.md") -FailureMessage ($actual -join ", ")
+        $display = Get-RootRelativePath -Root ($project + "/unused/..") -Path ($worktree + "/Docs/Missing.md")
+        Assert-Result -Name "display adapter uses the same normalized suffix" -Condition ($display -ceq "workspaces/task/Docs/Missing.md") -FailureMessage $display
+        $outside = $project + "2/Docs/Missing.md"
+        Assert-Result -Name "outside display fallback unchanged" -Condition ((Get-RootRelativePath -Root $project -Path $outside) -ceq $outside.Replace("\", "/")) -FailureMessage "outside path changed"
+        if ($IsWindows) {
+            $actual = @(Normalize-HandoffArtifactPaths -Artifacts @($artifact) -WorktreePath $worktree.ToUpperInvariant() -ProjectRoot $project)
+            Assert-Result -Name "case-folded directory keeps suffix case" -Condition ($actual.Count -eq 1 -and $actual[0] -ceq "Docs/Missing.md") -FailureMessage ($actual -join ", ")
+        }
+    }
+
     $results += Run-Test -Name "Artifact normalization caller parity (TODO item 198)" -Body {
         $project = Join-Path $tempRoot "project"
         $worktree = Join-Path $project "workspaces/F-198"

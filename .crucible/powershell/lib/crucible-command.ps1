@@ -132,6 +132,9 @@ function ConvertTo-CrucibleCommandPowerShellLiteral {
 # A literal shared by Bash and PowerShell, for an agent whose shell is not prescribed.
 # Keep the pre-284 native-passing refusals. Single quotes protect dollars and backticks
 # in both shells; double quotes carry apostrophes when neither shell expands the value.
+# A value with both is written as adjacent segments after a bare first character: both
+# shells join them into one argument, but PowerShell splits a word that starts with a
+# quote, so a value that cannot start bare has no shared literal. Item 290.
 function ConvertTo-CrucibleCommandShellNeutralLiteral {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
     if ([string]::IsNullOrEmpty($Value)) { throw "New-CrucibleCommand: shell-neutral -File has an empty value." }
@@ -141,10 +144,34 @@ function ConvertTo-CrucibleCommandShellNeutralLiteral {
     if ($Value.EndsWith('\')) {
         throw "New-CrucibleCommand: quotes and a trailing backslash escape the closing double quote in Bash; no shared Bash/PowerShell literal is available."
     }
-    if ($Value -match '[$`\u201C\u201D\u201E]' -or $Value.Contains('\\')) {
-        throw "New-CrucibleCommand: the value combines quotes with shell expansions or doubled backslashes; no shared Bash/PowerShell literal is available."
+    if ($Value -notmatch '[$`\u201C\u201D\u201E]' -and -not $Value.Contains('\\')) { return ('"' + $Value + '"') }
+    if ($Value -cnotmatch '^[A-Za-z0-9_/]') {
+        throw "New-CrucibleCommand: the value combines quotes with shell expansions or doubled backslashes and does not start with a letter, digit, underscore or slash; no shared Bash/PowerShell literal is available."
     }
-    return ('"' + $Value + '"')
+    $segments = @([regex]::Matches($Value.Substring(1), "['\u2018\u2019\u201A\u201B]+|[^'\u2018\u2019\u201A\u201B]+") | ForEach-Object {
+        if ($_.Value -match "^['\u2018\u2019\u201A\u201B]") { '"' + $_.Value + '"' } else { "'" + $_.Value + "'" }
+    })
+    return ($Value.Substring(0, 1) + ($segments -join ""))
+}
+
+# A shell-neutral line that starts a generated script taking no parameters. A caller that
+# writes its values into such a script keeps them off the native command line, where lists,
+# double quotes and empty values do not survive every launching shell. Item 291.
+function New-CrucibleScriptFileCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$Strict
+    )
+    try {
+        if ($Path.Contains("`r") -or $Path.Contains("`n") -or $Path.Contains([string][char]0)) {
+            throw ("New-CrucibleCommand: the script path contains a line break or NUL, which no quoting puts on one command line: " + $Path)
+        }
+        return ("pwsh -NoProfile -ExecutionPolicy Bypass -File " + (ConvertTo-CrucibleCommandShellNeutralLiteral -Value $Path))
+    } catch {
+        if ($Strict) { throw }
+        $reason = ($_.Exception.Message -replace '^New-CrucibleCommand: ', '') -replace '[\r\n]+', ' '
+        return ("# (command unavailable: " + $reason + ")")
+    }
 }
 
 # One value as a process command line carries it (Start-Process -ArgumentList, and
@@ -245,7 +272,9 @@ function New-CrucibleCommand {
         which starts the script with -NoProfile -ExecutionPolicy Bypass -File.
         -Transport ShellNeutral is for agent-executed instructions without a prescribed
         shell: it starts pwsh -File from Bash or PowerShell (including a 5.1 launching
-        shell) and retains the older hosts' native-passing refusals. It takes no -Invoker.
+        shell) and retains the older hosts' native-passing refusals. It takes no -Invoker
+        and no lists; a caller with lists writes the direct form into a generated script
+        and prints New-CrucibleScriptFileCommand for it.
         -Reference prints only the script's file name for prose that names a parameter rather
         than a line to run; the parameters are still bound, the companion rules are not applied.
         A command that cannot be built returns "# (command unavailable: <reason>)", a comment
@@ -335,7 +364,7 @@ function New-CrucibleCommand {
             throw ("New-CrucibleCommand: the script path contains a line break or NUL, which no quoting puts on one command line: " + $path)
         }
         if ($Transport -eq "ShellNeutral") {
-            $head = "pwsh -NoProfile -ExecutionPolicy Bypass -File " + (ConvertTo-CrucibleCommandShellNeutralLiteral -Value $path)
+            $head = New-CrucibleScriptFileCommand -Path $path -Strict
         } elseif ($Transport -eq "ArgumentList") {
             $head = "-NoProfile -ExecutionPolicy Bypass -File " + (ConvertTo-CrucibleCommandNativeArgument -Value $path)
         } elseif ($Transport -eq "Bash") {

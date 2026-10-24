@@ -390,7 +390,7 @@ function Test-CrucibleGitIgnored {
     $absoluteFilePath = [System.IO.Path]::GetFullPath((Join-Path $BundleRoot $RelativePath))
 
     if (Test-PathWithinDirectory -Path $absoluteFilePath -Directory $gitRoot) {
-        $relativeToGit = $absoluteFilePath.Substring($gitRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+        $relativeToGit = Get-PathRelativeToDirectory -Path $absoluteFilePath -Directory $gitRoot
         $relativeToGit = $relativeToGit -replace '\\', '/'
 
         $null = git -C $gitRoot check-ignore --quiet -- $relativeToGit 2>$null

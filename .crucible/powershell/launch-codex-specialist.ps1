@@ -281,9 +281,10 @@ $REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoo
 if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
     $resolvedCrucibleRoot = $CrucibleRoot
     try { $resolvedCrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot -ErrorAction Stop).Path } catch { }
-    $repoPrefix = $REPO_ROOT.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-    if ($resolvedCrucibleRoot.StartsWith($repoPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $CrucibleRoot = $resolvedCrucibleRoot.Substring($repoPrefix.Length)
+    $relativeCrucibleRoot = $null
+    try { $relativeCrucibleRoot = Get-PathRelativeToDirectory -Path $resolvedCrucibleRoot -Directory $REPO_ROOT } catch { }
+    if (-not [string]::IsNullOrEmpty($relativeCrucibleRoot)) {
+        $CrucibleRoot = $relativeCrucibleRoot
     } else {
         Write-Host ("[CODEX] Error: -CrucibleRoot must be relative to the repo root (e.g. '.crucible'), not an absolute path outside it: " + $CrucibleRoot) -ForegroundColor Red
         exit 2

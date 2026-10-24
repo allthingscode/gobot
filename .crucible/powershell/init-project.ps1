@@ -138,7 +138,7 @@ function Copy-TemplateDirectory {
         $relative = $entry.FullName.Substring($sourceRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 
         if (Test-PathWithinDirectory -Path $entry.FullName -Directory $REPO_ROOT) {
-            $repoRel = $entry.FullName.Substring($REPO_ROOT.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Replace("\", "/")
+            $repoRel = Get-PathRelativeToDirectory -Path $entry.FullName -Directory $REPO_ROOT -Separator "/"
             if (Test-NestedCrucibleRuntimePath -RelativePath $repoRel -Manifest $Manifest) {
                 continue
             }
@@ -465,7 +465,7 @@ $backlogDirForRel = [System.IO.Path]::GetFullPath((Get-ConfiguredPath -Key "back
 $projectRootForRel = [System.IO.Path]::GetFullPath($resolvedProjectRoot)
 $relativeBacklogPath = $backlogDirForRel
 if (Test-PathWithinDirectory -Path $backlogDirForRel -Directory $projectRootForRel) {
-    $relativeBacklogPath = $backlogDirForRel.Substring($projectRootForRel.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $relativeBacklogPath = Get-PathRelativeToDirectory -Path $backlogDirForRel -Directory $projectRootForRel
 }
 $relativeBacklogPath = $relativeBacklogPath -replace '\\', '/'
 if (-not $relativeBacklogPath.EndsWith('/')) { $relativeBacklogPath += '/' }

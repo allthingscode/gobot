@@ -134,7 +134,9 @@ try {
     }
 
     $results += Run-Test -Name 'Shell-neutral values and script paths retain native-passing refusals' -Body {
-        foreach ($value in @('', 'say "approved"', 'C:\work dir\', "O'Brien `$HOME", "O'Brien \\share")) {
+        # Item 290 carries a mixed value that starts bare (crucible-command.tests.ps1); one
+        # that starts with a quote or a space still has no shared literal.
+        foreach ($value in @('', 'say "approved"', 'C:\work dir\', "'O'Brien' `$HOME", " O'Brien \\share")) {
             $line = New-CrucibleCommand -Script 'powershell/crucible.ps1' -Parameters ([ordered]@{ ProjectRoot = $value }) -CrucibleRoot $captureRoot -Transport ShellNeutral
             Assert-Result 'unsafe native value prints unavailable note' ($line.StartsWith('# (command unavailable: ')) $line
             $reason = ''

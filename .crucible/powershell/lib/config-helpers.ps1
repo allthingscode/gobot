@@ -406,19 +406,16 @@ function Get-ConfiguredPath {
     }
 
     if (-not (Test-Path -LiteralPath $configPath)) {
-        return (Join-Path $root $defaults[$Key])
+        return (Resolve-PathFromRoot -Root $root -Path $defaults[$Key])
     }
 
     $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
     $val = Get-ConfigBlockValue -Content $content -Path @("paths", $Key) -Source $configPath
     if ($null -ne $val) {
-        if ([System.IO.Path]::IsPathRooted($val)) {
-            return $val
-        }
-        return (Join-Path $root $val)
+        return (Resolve-PathFromRoot -Root $root -Path $val)
     }
 
-    return (Join-Path $root $defaults[$Key])
+    return (Resolve-PathFromRoot -Root $root -Path $defaults[$Key])
 }
 
 # The owner of crucible_root (I13): its value as configured, ".crucible" when the config
@@ -448,6 +445,19 @@ function Get-ConfiguredCrucibleRoot {
     return (Resolve-CrucibleBundleRoot -ProjectRoot (Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot) -CrucibleRoot $value)
 }
 
+# Item 304: one owner for rooted-as-is versus relative-under-root composition.
+# Do not canonicalize, trim, change separators or require existence. Keep Join-Path's
+# binding for relative values (including empty/null); callers own their validation.
+function Resolve-PathFromRoot {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][AllowNull()]$Root,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][AllowNull()]$Path
+    )
+
+    if ([System.IO.Path]::IsPathRooted($Path)) { return $Path }
+    return (Join-Path $Root $Path)
+}
+
 # The one resolver of a bundle root (I13, item 301): an absolute crucible_root is used as is,
 # a relative one is joined to the project root. config.yaml must hold a relative value
 # (validate-config.ps1), but -CrucibleRoot and Context.CrucibleRoot may carry an absolute one,
@@ -462,11 +472,16 @@ function Resolve-CrucibleBundleRoot {
     if ([string]::IsNullOrWhiteSpace($CrucibleRoot)) {
         throw "Cannot resolve the Crucible bundle: the crucible_root value is empty."
     }
-    if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) { return $CrucibleRoot }
-    if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        throw ("Cannot resolve the Crucible bundle '" + $CrucibleRoot + "': it is relative and the project root is empty.")
+    # Preserve this specialization's empty-root diagnostic, including whitespace roots.
+    $resolutionRoot = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "" } else { $ProjectRoot }
+    try {
+        return (Resolve-PathFromRoot -Root $resolutionRoot -Path $CrucibleRoot)
+    } catch {
+        if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+            throw ("Cannot resolve the Crucible bundle '" + $CrucibleRoot + "': it is relative and the project root is empty.")
+        }
+        throw
     }
-    return (Join-Path $ProjectRoot $CrucibleRoot)
 }
 
 # Whether Path is Directory or inside it, compared on full paths at a separator boundary so
@@ -475,20 +490,59 @@ function Resolve-CrucibleBundleRoot {
 function Test-PathWithinDirectory {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Directory
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [System.StringComparison]$Comparison = [System.StringComparison]::OrdinalIgnoreCase
     )
 
+    # Resolve-Path callers trim trailing separators, including a drive root's slash.
+    # Treat a bare drive as that drive's root, never its process-relative directory.
+    if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
+        if ($Path -match '^[A-Za-z]:$') { $Path += "\" }
+        if ($Directory -match '^[A-Za-z]:$') { $Directory += "\" }
+    }
+    if (-not [System.IO.Path]::IsPathFullyQualified($Path) -or
+        -not [System.IO.Path]::IsPathFullyQualified($Directory)) {
+        throw "Cannot test path containment: Path and Directory must both be absolute."
+    }
     $normalizedPath = [System.IO.Path]::GetFullPath($Path).Replace("\", "/").TrimEnd("/")
     $normalizedDirectory = [System.IO.Path]::GetFullPath($Directory).Replace("\", "/").TrimEnd("/")
-    if ($normalizedPath.Equals($normalizedDirectory, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($normalizedPath.Equals($normalizedDirectory, $Comparison)) { return $true }
     $directoryPrefix = $normalizedDirectory + "/"
-    return $normalizedPath.StartsWith($directoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+    return $normalizedPath.StartsWith($directoryPrefix, $Comparison)
+}
+
+# Item 305: return a suffix only after the containment owner accepts the same full
+# paths that are sliced. Empty string means the directory itself; $null means outside.
+# Require absolute inputs: GetFullPath must never choose the process working directory.
+# Keep the suffix's case and trailing separator; callers select their existing separator.
+function Get-PathRelativeToDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [System.StringComparison]$Comparison = [System.StringComparison]::OrdinalIgnoreCase,
+        [ValidateSet("/", "\")][string]$Separator = [string][System.IO.Path]::DirectorySeparatorChar
+    )
+
+    # Resolve-Path callers trim trailing separators, including a drive root's slash.
+    # Treat a bare drive as that drive's root, never its process-relative directory.
+    if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
+        if ($Path -match '^[A-Za-z]:$') { $Path += "\" }
+        if ($Directory -match '^[A-Za-z]:$') { $Directory += "\" }
+    }
+    if (-not [System.IO.Path]::IsPathFullyQualified($Path) -or
+        -not [System.IO.Path]::IsPathFullyQualified($Directory)) {
+        throw "Cannot relativize a path: Path and Directory must both be absolute."
+    }
+    $fullPath = [System.IO.Path]::GetFullPath($Path).Replace("\", "/")
+    $fullDirectory = [System.IO.Path]::GetFullPath($Directory).Replace("\", "/").TrimEnd("/")
+    if (-not (Test-PathWithinDirectory -Path $Path -Directory $Directory -Comparison $Comparison)) { return $null }
+    return $fullPath.Substring($fullDirectory.Length).TrimStart("/").Replace("/", $Separator)
 }
 
 function Test-ConfiguredRuntimePath {
     # Item 188: custom session/workspaces roots have the same runtime-data exemption.
     param([string]$Path, [string]$ProjectRoot)
-    $fullPath = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $ProjectRoot $Path }
+    $fullPath = Resolve-PathFromRoot -Root $ProjectRoot -Path $Path
     foreach ($key in @("session", "workspaces")) {
         if (Test-PathWithinDirectory -Path $fullPath -Directory (Get-ConfiguredPath -Key $key -ProjectRoot $ProjectRoot)) {
             return $true
@@ -556,7 +610,7 @@ function Resolve-ProjectHooksDirValue {
         throw ("hooks.project_dir must name the project's own hooks, not a directory under .crucible (got '" + $val + "').")
     }
 
-    $full = Join-Path $root $val
+    $full = Resolve-PathFromRoot -Root $root -Path $val
     if (-not (Test-Path -LiteralPath $full -PathType Container)) {
         throw ("hooks.project_dir names a directory that does not exist: " + $val)
     }

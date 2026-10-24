@@ -314,7 +314,7 @@ function Invoke-BacklogTaskArchive {
             throw "Spec path is not under backlog directory: $resolvedSpec"
         }
 
-        $relativeSpec = $resolvedSpec.Substring($resolvedBacklogDir.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        $relativeSpec = (Get-PathRelativeToDirectory -Path $resolvedSpec -Directory $resolvedBacklogDir)
         $relativeSpec = $relativeSpec.Replace("\", "/")
         if ($relativeSpec -notmatch '^(features|bugs|chores)/active/[^/]+\.md$') {
             throw "Spec path must be an active feature, bug, or chore markdown file: $relativeSpec"

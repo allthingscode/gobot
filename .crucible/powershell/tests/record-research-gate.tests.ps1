@@ -189,6 +189,89 @@ try {
         Assert-Result "stubs filed as Stub" ($body -match 'status: "Stub"' -and $body -notmatch 'status: "Ready"') "stubs must be filed with status Stub for the Stub-Only Close-Out"
     }
 
+    # Item 291: Steps 3 and 4 are run by the Researcher in whichever shell it has; Codex's is
+    # often Bash, where the direct & '<script>' form is a syntax error. Inert copies of the
+    # real param blocks write what they bound, so no handoff, backlog or agent CLI runs.
+    $results += Run-Test -Name "gate-filing Steps 3 and 4 run unchanged under Bash, pwsh and a Windows PowerShell launcher" -Body {
+        $utf8 = New-Object System.Text.UTF8Encoding($false)
+        $p = New-GateProject -Root (Join-Path $tempRoot "gate O'Brien `$HOME")
+        $bundle = Join-Path $p.Root ".crucible/powershell"
+        $null = New-Item -ItemType Directory -Path $bundle -Force
+        $capture = @'
+
+$captured = @(foreach ($name in @($PSBoundParameters.Keys | Sort-Object)) {
+    $value = $PSBoundParameters[$name]
+    if ($value -is [array]) { $name + "=[" + (@($value) -join "|") + "]#" + @($value).Count } else { $name + "=" + $value }
+})
+$captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
+[IO.File]::WriteAllText((Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) ("capture-" + (Split-Path -Leaf $PSCommandPath) + ".txt")), ($captured -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+'@
+        foreach ($name in @("new-handoff.ps1", "validate-backlog.ps1", "crucible.ps1")) {
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT ("powershell/" + $name)), [ref]$tokens, [ref]$errors)
+            [IO.File]::WriteAllText((Join-Path $bundle $name), ($ast.ParamBlock.Extent.Text + $capture), $utf8)
+        }
+        $reason = 'Approve C-350; costs $5 and it''s "cheap" `tick \\share' + [char]0x2019 + 's'
+        & $SCRIPT -TaskId $p.TaskId -Reason $reason -Approved "C-350","C-351" -Deferred "C-352,C-353" -Rejected "C-999" -ProjectRoot $p.Root | Out-Null
+        $body = [IO.File]::ReadAllText($p.GateFiling)
+        $steps = $body.Substring($body.IndexOf("## Step 3"))
+        $lines = @($steps -split "`n" | Where-Object { $_ -match '^    \S' -and $_ -notmatch '^    #' } | ForEach-Object { $_.Substring(4) })
+        Assert-Result "three executable lines in Steps 3 and 4" ($lines.Count -eq 3) ($lines -join "`n")
+
+        $expected = @(
+            ("capture-new-handoff.ps1.txt", (@("HumanApproved=[C-350|C-351]#2", "HumanDeferred=[C-352|C-353]#2", "HumanRejected=[C-999]#1", ("Reason=" + $reason), "Source=research", "StubSpecsCreated=[C-350|C-351]#2", "Target=grooming", ("TaskId=" + $p.TaskId), "host7plus=True") -join "`n")),
+            ("capture-validate-backlog.ps1.txt", (@(("ProjectRoot=" + $p.Root), "host7plus=True") -join "`n")),
+            ("capture-crucible.ps1.txt", (@("Init=True", ("ProjectRoot=" + $p.Root), "Quiet=True", ("TaskId=" + $p.TaskId), "host7plus=True") -join "`n"))
+        )
+        $bash = Get-TestBash
+        $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
+        $cdBash = "cd -- '" + $p.Root.Replace("'", "'\''") + "' || exit 9"
+        $cdPs = "Set-Location -LiteralPath '" + $p.Root.Replace("'", "''") + "'"
+        for ($i = 0; $i -lt 3; $i++) {
+            $shells = @(
+                @{ Name = "Bash"; Ext = "sh"; Text = ($cdBash + "`n" + $lines[$i] + "`n"); Bom = $false },
+                @{ Name = "pwsh"; Ext = "ps1"; Text = ($cdPs + "`n" + $lines[$i] + "`n"); Bom = $false }
+            )
+            if ($null -ne $legacy) { $shells += @{ Name = "Windows PowerShell"; Ext = "ps1"; Text = ($cdPs + "`n" + $lines[$i] + "`n"); Bom = $true } }
+            foreach ($shell in $shells) {
+                $capturePath = Join-Path $p.Root $expected[$i][0]
+                if (Test-Path -LiteralPath $capturePath) { Remove-Item -LiteralPath $capturePath -Force }
+                $driver = Join-Path $tempRoot ("step-line-" + $i + "." + $shell.Ext)
+                [IO.File]::WriteAllText($driver, $shell.Text, (New-Object System.Text.UTF8Encoding($shell.Bom)))
+                $run = switch ($shell.Name) {
+                    "Bash" { Invoke-ExternalCommand { & $bash $driver } }
+                    "pwsh" { Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver } }
+                    default { Invoke-ExternalCommand { & $legacy.Source -NoProfile -ExecutionPolicy Bypass -File $driver } }
+                }
+                $actual = if (Test-Path -LiteralPath $capturePath) { [IO.File]::ReadAllText($capturePath) } else { "(nothing captured)" }
+                $want = $utf8.GetBytes($expected[$i][1])
+                Assert-Result ($shell.Name + " runs line " + ($i + 1) + " and delivers every value byte for byte") ($run.ExitCode -eq 0 -and (Test-Path -LiteralPath $capturePath) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($capturePath)) -ceq [Convert]::ToBase64String($want)) ($lines[$i] + "`n=> exit " + $run.ExitCode + ": " + $run.Output + "`ncaptured: " + $actual)
+            }
+        }
+
+        foreach ($line in $lines) {
+            Assert-Result "each line starts pwsh rather than the agent shell's own host" ($line.StartsWith("pwsh -NoProfile -ExecutionPolicy Bypass -File ")) $line
+        }
+        $runnerPath = Join-Path (Split-Path -Parent $p.GateFiling) "gate-handoff.ps1"
+        $runner = @([IO.File]::ReadAllText($runnerPath) -split "`n")
+        Assert-Result "the reading copy is the command the runner holds" ($steps.Contains("    # " + $runner[1] + "`n")) ($runner -join "`n")
+
+        # A refused handoff stops the Researcher before Step 4.
+        [IO.File]::WriteAllText((Join-Path $bundle "new-handoff.ps1"), ((Get-Content -LiteralPath (Join-Path $bundle "new-handoff.ps1") -Raw) + "`nexit 2`n"), $utf8)
+        $driver = Join-Path $tempRoot "step-refused.sh"
+        [IO.File]::WriteAllText($driver, ($cdBash + "`n" + $lines[0] + "`n"), $utf8)
+        $run = Invoke-ExternalCommand { & $bash $driver }
+        Assert-Result "the runner exits with new-handoff's refusal code" ($run.ExitCode -eq 2) ("exit " + $run.ExitCode + ": " + $run.Output)
+    }
+
+    $results += Run-Test -Name "a handoff command the builder cannot write leaves a runner that exits nonzero" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "unavailable-handoff")
+        & $SCRIPT -TaskId $p.TaskId -Reason "line one`nline two" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        $runnerPath = Join-Path (Split-Path -Parent $p.GateFiling) "gate-handoff.ps1"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runnerPath }
+        Assert-Result "unavailable handoff runner exits 2 and says why" ($run.ExitCode -eq 2 -and $run.Output -match 'command unavailable' -and $run.Output -match 'newline') ("exit " + $run.ExitCode + ": " + $run.Output)
+    }
+
     $results += Run-Test -Name "a value that is not a backlog ID is refused (item 174)" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "bad-id")
         $threw = $false

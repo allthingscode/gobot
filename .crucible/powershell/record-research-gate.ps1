@@ -90,9 +90,15 @@ $handoffParameters = [ordered]@{ TaskId = $TaskId; Source = "research"; Target =
 if ($approvedList.Count -gt 0) { $handoffParameters["HumanApproved"] = @($approvedList); $handoffParameters["StubSpecsCreated"] = @($approvedList) }
 if ($deferredList.Count -gt 0) { $handoffParameters["HumanDeferred"] = @($deferredList) }
 if ($rejectedList.Count -gt 0) { $handoffParameters["HumanRejected"] = @($rejectedList) }
+# The Researcher runs Steps 3 and 4 in whichever shell it has (Codex's is often Bash). The
+# handoff carries ID lists and the human's reason, which no native -File line passes intact
+# from every launching shell, so it is written in the direct form into a generated script
+# that pwsh runs; only that script's path is on the printed line. Item 291.
 $handoffCommand = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Transport PowerShell -Parameters $handoffParameters -CrucibleRoot $CrucibleRoot
-$validateCommand = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Transport PowerShell -Parameters ([ordered]@{ ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
-$advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; Quiet = $true; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$handoffRunnerPath = Join-Path $researchSessionDir "gate-handoff.ps1"
+$handoffRunCommand = New-CrucibleScriptFileCommand -Path $handoffRunnerPath
+$validateCommand = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; Quiet = $true; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
 $dispatchCommand = New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Transport PowerShell -Parameters ([ordered]@{ TaskId = $TaskId; Phase = "research"; Model = "<model>"; Effort = "<effort>"; ProjectRoot = $REPO_ROOT; PromptFile = $pointerPath }) -CrucibleRoot $CrucibleRoot
 
 $researchDir = Join-Path $resolvedCrucibleRoot "research"
@@ -215,13 +221,21 @@ $fileStep
 
 ## Step 3 - Write the research -> grooming handoff (do NOT hand-edit JSON)
 
-Run new-handoff.ps1:
+Run the generated handoff script from the project root, in Bash or PowerShell:
 
-    $handoffCommand
+    $handoffRunCommand
+
+It runs new-handoff.ps1 with the decision above, so no shell quoting touches the reason or
+the IDs, and exits nonzero if the handoff is refused. For reading only, not for pasting
+into a shell, it holds this PowerShell command:
+
+    # $handoffCommand
 
 This records the human decision in the handoff ``human_decisions`` block.
 
 ## Step 4 - Validate and advance
+
+Run these from the project root, in Bash or PowerShell:
 
     $validateCommand
     $advanceCommand
@@ -233,6 +247,20 @@ output. Do NOT spawn successor agents.
 
 $gateFilingPath = Join-Path $researchSessionDir "gate-filing.md"
 [System.IO.File]::WriteAllText($gateFilingPath, ($gateFilingContent -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
+
+# A refused handoff, including one the builder could not write, exits nonzero rather than
+# letting the Researcher advance on a handoff that was never written.
+$runnerExit = if ($handoffCommand.StartsWith("# (command unavailable: ")) {
+    "[Console]::Error.WriteLine(" + (ConvertTo-CrucibleCommandPowerShellLiteral -Value ("The research gate handoff " + $handoffCommand.Substring(2) + ". Record the gate again with a reason it can carry.")) + ")`nexit 2"
+} else {
+    "if (-not `$?) { if (`$LASTEXITCODE -gt 0) { exit `$LASTEXITCODE }; exit 1 }"
+}
+$handoffRunner = @(
+    "# generated_by: record-research-gate.ps1. Run with pwsh -File from the project root.",
+    $handoffCommand,
+    $runnerExit
+) -join "`n"
+[System.IO.File]::WriteAllText($handoffRunnerPath, ($handoffRunner + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
 # --- Orchestrator guidance ---
 $pointer = "Researcher: $TaskId - read and follow all instructions in $gateFilingPath"

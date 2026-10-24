@@ -4,6 +4,10 @@ if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot "git.ps1")
 }
 
+if (-not (Get-Command Resolve-PathFromRoot -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
+
 function Normalize-RepoRelativePath {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
@@ -176,7 +180,7 @@ function Initialize-ImplementationWorktreeHooks {
             $hooksPath = git -C $WorktreePath config --get core.hooksPath 2>$null
             if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
                 $hooksDir = $hooksPath.Trim()
-                if (-not [System.IO.Path]::IsPathRooted($hooksDir)) { $hooksDir = Join-Path $WorktreePath $hooksDir }
+                $hooksDir = Resolve-PathFromRoot -Root $WorktreePath -Path $hooksDir
                 if (Test-Path -LiteralPath $hooksDir -PathType Container) {
                     Get-ChildItem -LiteralPath $hooksDir -File | ForEach-Object { & chmod "+x" $_.FullName }
                 }

@@ -55,7 +55,7 @@ function Get-BundleCommittablePath {
         # A file outside the project is not the project's to ignore, and an absolute path
         # with its leading slash trimmed would read as project-relative. Item 302.
         if (-not (Test-PathWithinDirectory -Path $full -Directory $rootFull)) { continue }
-        $rel = $full.Substring($rootFull.Length)
+        $rel = Get-PathRelativeToDirectory -Path $full -Directory $rootFull
         $rel = $rel.Replace("\", "/").TrimStart("/")
         if ([string]::IsNullOrWhiteSpace($rel)) { continue }
         if ($rel.StartsWith(".git/")) { continue }
@@ -183,10 +183,7 @@ function Test-GitignoreConformance {
             # The source is relative to the git top-level while the path is relative
             # to ProjectRoot: two different bases on the same output line.
             $source = $match.Groups["source"].Value
-            $sourceFull = $source
-            if (-not [System.IO.Path]::IsPathRooted($sourceFull)) {
-                $sourceFull = Join-Path $topLevel $source
-            }
+            $sourceFull = Resolve-PathFromRoot -Root $topLevel -Path $source
             $sourceFull = $sourceFull.Replace("\", "/")
             if ($sourceFull.StartsWith(($bundleFull + "/"), [System.StringComparison]::OrdinalIgnoreCase)) {
                 continue

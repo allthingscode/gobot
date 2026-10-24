@@ -18,11 +18,11 @@ function Normalize-HandoffArtifactPaths {
         if ([string]::IsNullOrWhiteSpace($art)) { continue }
         $fullArtPath = $art
         if (-not [System.IO.Path]::IsPathRooted($art)) {
-            $wtCheck = Join-Path $resolvedWtPath $art
+            $wtCheck = Resolve-PathFromRoot -Root $resolvedWtPath -Path $art
             if (Test-Path $wtCheck) {
                 $fullArtPath = (Resolve-Path $wtCheck).Path
             } else {
-                $repoCheck = Join-Path $resolvedRepoRoot $art
+                $repoCheck = Resolve-PathFromRoot -Root $resolvedRepoRoot -Path $art
                 if (Test-Path $repoCheck) {
                     $fullArtPath = (Resolve-Path $repoCheck).Path
                 }
@@ -35,9 +35,9 @@ function Normalize-HandoffArtifactPaths {
         $relPath = $art
         if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
             if (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedWtPath) {
-                $relPath = $fullArtPath.Substring($resolvedWtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+                $relPath = Get-PathRelativeToDirectory -Path $fullArtPath -Directory $resolvedWtPath
             } elseif (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedRepoRoot) {
-                $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+                $relPath = Get-PathRelativeToDirectory -Path $fullArtPath -Directory $resolvedRepoRoot
             }
         } else {
             $wtRelPrefix = Get-RootRelativePath -Root $resolvedRepoRoot -Path $resolvedWtPath

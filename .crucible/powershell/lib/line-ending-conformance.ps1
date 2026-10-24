@@ -58,7 +58,7 @@ function Test-LineEndingConformance {
         $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).Path.Replace("\", "/").TrimEnd("/")
         $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).Path.Replace("\", "/").TrimEnd("/")
         if (Test-PathWithinDirectory -Path $bundleFull -Directory $rootFull) {
-            $bundlePrefix = $bundleFull.Substring($rootFull.Length).TrimStart("/") + "/"
+            $bundlePrefix = (Get-PathRelativeToDirectory -Path $bundleFull -Directory $rootFull -Separator "/") + "/"
         }
     }
 

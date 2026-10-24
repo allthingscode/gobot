@@ -201,6 +201,60 @@ New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $Root -Crucible
         Assert-Result "child-built command executes" ($run.ExitCode -eq 0 -and (Test-Path -LiteralPath $destination)) ($line + " => " + $run.Output)
         Assert-Result "child-built literal arrives byte-for-byte" ([Convert]::ToBase64String([IO.File]::ReadAllBytes($destination)) -ceq [Convert]::ToBase64String($utf8.GetBytes("child's `$HOME"))) $line
     }
+    # Item 290: a quote mixed with $, a backtick, typographic double quotes or a doubled
+    # backslash was refused on ShellNeutral. Adjacent segments after a bare first character
+    # are one argument in both shells; a value that cannot start bare stays refused.
+    $results += Run-Test -Name "Shell-neutral literals carry quotes mixed with expansions under Bash, pwsh and a Windows PowerShell launcher" -Body {
+        $carried = @("O'Brien `$HOME", "O'Brien \\share", "it's ``tick", ("O" + [char]0x2019 + "Brien `$x"), "1'x `$y", "C:\O'Brien\`$x\\y", "_a'b `$c", ("O'Brien " + [char]0x201C + "q" + [char]0x201D))
+        if (-not (Test-PlatformIsWindows)) { $carried += "/srv/o'brien/`$x" }
+        $bash = Get-TestBash
+        $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
+        $index = 0
+        foreach ($value in $carried) {
+            $index++
+            $outputPath = Join-Path $tempRoot ("mixed-" + $index + ".out")
+            $line = New-CrucibleCommand -Script "powershell/capture.ps1" -BundleRoot $literalRoot -CrucibleRoot $literalRoot -Parameters ([ordered]@{ ProjectRoot = $value; OutputPath = $outputPath }) -Transport ShellNeutral -Strict
+            Assert-Result ("mixed value " + $index + " starts pwsh") ($line.StartsWith("pwsh -NoProfile -ExecutionPolicy Bypass -File ")) $line
+            $shells = @(@{ Name = "Bash"; Ext = "sh"; Bom = $false }, @{ Name = "pwsh"; Ext = "ps1"; Bom = $false })
+            if ($null -ne $legacy) { $shells += @{ Name = "Windows PowerShell"; Ext = "ps1"; Bom = $true } }
+            foreach ($shell in $shells) {
+                if (Test-Path -LiteralPath $outputPath) { Remove-Item -LiteralPath $outputPath -Force }
+                $driver = Join-Path $tempRoot ("mixed-" + $index + "." + $shell.Ext)
+                [IO.File]::WriteAllText($driver, ($line + "`n"), (New-Object System.Text.UTF8Encoding($shell.Bom)))
+                $run = switch ($shell.Name) {
+                    "Bash" { Invoke-ExternalCommand { & $bash $driver } }
+                    "pwsh" { Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver } }
+                    default { Invoke-ExternalCommand { & $legacy.Source -NoProfile -ExecutionPolicy Bypass -File $driver } }
+                }
+                $actual = if (Test-Path -LiteralPath $outputPath) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($outputPath)) } else { "" }
+                Assert-Result ($shell.Name + " delivers mixed value " + $index + " byte for byte") ($run.ExitCode -eq 0 -and $actual -ceq [Convert]::ToBase64String($utf8.GetBytes($value))) ($line + " => exit " + $run.ExitCode + ": " + $run.Output)
+            }
+        }
+        foreach ($value in @("'quoted' `$x", " O'Brien `$x", ".O'Brien `$x", "~O'Brien `$x", "@O'Brien `$x")) {
+            $line = New-CrucibleCommand -Script "powershell/capture.ps1" -BundleRoot $literalRoot -CrucibleRoot $literalRoot -Parameters ([ordered]@{ ProjectRoot = $value }) -Transport ShellNeutral
+            $message = ""
+            try { $null = New-CrucibleCommand -Script "powershell/capture.ps1" -BundleRoot $literalRoot -CrucibleRoot $literalRoot -Parameters ([ordered]@{ ProjectRoot = $value }) -Transport ShellNeutral -Strict } catch { $message = $_.Exception.Message }
+            $bashRun = Invoke-TestBashLine -Bash $bash -Line $line -Name "mixed-refused"
+            Assert-Result ("a value that cannot start bare stays refused: " + $value) ($line.StartsWith("# (command unavailable: ") -and $message.Contains("does not start with a letter") -and $bashRun.ExitCode -eq 0 -and @($bashRun.Lines).Count -eq 0) ($line + "; strict=" + $message)
+        }
+    }
+
+    $results += Run-Test -Name "A generated script's shell-neutral line runs it from Bash and pwsh" -Body {
+        $outputPath = Join-Path $tempRoot "runner.out"
+        $runnerPath = Join-Path $literalRoot "gate-handoff.ps1"
+        [IO.File]::WriteAllText($runnerPath, ("& '" + (Join-Path $literalDir "capture.ps1").Replace("'", "''") + "' -ProjectRoot 'a b' -OutputPath '" + $outputPath.Replace("'", "''") + "'`n"), $utf8)
+        $line = New-CrucibleScriptFileCommand -Path $runnerPath -Strict
+        foreach ($ext in @("sh", "ps1")) {
+            if (Test-Path -LiteralPath $outputPath) { Remove-Item -LiteralPath $outputPath -Force }
+            $driver = Join-Path $tempRoot ("runner." + $ext)
+            [IO.File]::WriteAllText($driver, ($line + "`n"), $utf8)
+            $run = if ($ext -eq "sh") { Invoke-ExternalCommand { & (Get-TestBash) $driver } } else { Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver } }
+            Assert-Result ("runner line runs from " + $ext) ($run.ExitCode -eq 0 -and (Test-Path -LiteralPath $outputPath) -and [IO.File]::ReadAllText($outputPath) -ceq "a b") ($line + " => " + $run.Output)
+        }
+        $note = New-CrucibleScriptFileCommand -Path ("x`ny.ps1")
+        Assert-Result "a runner path with a line break prints the unavailable note" ($note.StartsWith("# (command unavailable: ")) $note
+    }
+
     $cases = [ordered]@{
         "root with whitespace and trailing backslash" = 'C:\work dir\'
         "embedded double quote" = 'say "approved"'

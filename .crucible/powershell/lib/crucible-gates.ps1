@@ -42,14 +42,15 @@ function Get-RootRelativePath {
         [Parameter(Mandatory=$true)][string]$Root,
         [Parameter(Mandatory=$true)][string]$Path
     )
-    $normRoot = $Root.TrimEnd("\", "/").Replace("\", "/")
-    $normPath = $Path.Replace("\", "/")
-    if ($normPath.Equals($normRoot, [System.StringComparison]::Ordinal)) { return "" }
-    $prefix = $normRoot + "/"
-    if ($normPath.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
-        return $normPath.Substring($prefix.Length)
-    }
-    return $normPath
+    # This display adapter also accepts non-qualified display paths (e.g. \shared\backlog).
+    # Only full paths can be compared by the filesystem owner; others keep their spelling.
+    if ($Root -match '^[A-Za-z]:$') { $Root += "\" }
+    if (-not [System.IO.Path]::IsPathFullyQualified($Root) -or
+        -not [System.IO.Path]::IsPathFullyQualified($Path)) { return $Path.Replace("\", "/") }
+    # This display adapter retains the historical ordinal case rule and outside fallback.
+    $relative = Get-PathRelativeToDirectory -Path $Path -Directory $Root -Comparison Ordinal -Separator "/"
+    if ($null -ne $relative) { return $relative }
+    return $Path.Replace("\", "/")
 }
 
 function Get-StrayFileClassification {
@@ -837,7 +838,7 @@ function Invoke-CrucibleRuntimeValidation {
             $matchedPath = $null
             foreach ($base in @($wtPath, $repoRoot)) {
                 if ([string]::IsNullOrWhiteSpace($base)) { continue }
-                $candidate = if ([System.IO.Path]::IsPathRooted($artifact)) { $artifact } else { Join-Path $base $artifact }
+                $candidate = Resolve-PathFromRoot -Root $base -Path $artifact
                 if (Test-Path $candidate) {
                     $exists = $true
                     $matchedPath = $candidate
@@ -850,7 +851,7 @@ function Invoke-CrucibleRuntimeValidation {
                     $archivedArtifact = $artifact -replace '(?i)([/\\])active([/\\])', '${1}archived${2}'
                     foreach ($base in @($wtPath, $repoRoot)) {
                         if ([string]::IsNullOrWhiteSpace($base)) { continue }
-                        $candidate = if ([System.IO.Path]::IsPathRooted($archivedArtifact)) { $archivedArtifact } else { Join-Path $base $archivedArtifact }
+                        $candidate = Resolve-PathFromRoot -Root $base -Path $archivedArtifact
                         if (Test-Path $candidate) {
                             $exists = $true
                             $matchedPath = $candidate

@@ -113,7 +113,7 @@ function Invoke-CircuitBreakerGates {
                 if ([string]::IsNullOrWhiteSpace($art)) { continue }
                 # An artifact path is absolute or relative to the project root, the way the
                 # spec-artifact check reads it; joining an absolute one would skip it. Item 300.
-                $fullPath = if ([System.IO.Path]::IsPathRooted($art)) { $art } else { Join-Path $repoRoot $art }
+                $fullPath = Resolve-PathFromRoot -Root $repoRoot -Path $art
                 if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
                     $resolvedPath = (Resolve-Path -LiteralPath $fullPath).Path
                     $resolvedResearchDir = $researchDir

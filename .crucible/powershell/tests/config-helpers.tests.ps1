@@ -40,6 +40,49 @@ try {
         }
     }
 
+    $results += Run-Test -Name "General path resolution preserves rooted spelling and relative Join-Path output" -Body {
+        $root = Join-Path $tempRoot "ResolutionRoot"
+        $absolute = $tempRoot.Replace("\", "/") + "/Outside//unused/../Leaf/"
+        $cases = @(
+            @{ Root = $root; Path = $absolute; Expected = $absolute },
+            @{ Root = $null; Path = $absolute; Expected = $absolute },
+            @{ Root = ""; Path = $absolute; Expected = $absolute },
+            @{ Root = $root; Path = "Child/MixedLeaf/"; Expected = (Join-Path $root "Child/MixedLeaf/") },
+            @{ Root = ($root + "/"); Path = "Child/../MixedLeaf"; Expected = (Join-Path ($root + "/") "Child/../MixedLeaf") },
+            @{ Root = $root; Path = ""; Expected = (Join-Path $root "") },
+            @{ Root = $root; Path = "  "; Expected = (Join-Path $root "  ") }
+        )
+        if ($IsWindows) {
+            $cases += @{ Root = $root; Path = "C:MixedLeaf"; Expected = "C:MixedLeaf" }
+            $cases += @{ Root = $root; Path = "\MixedLeaf/"; Expected = "\MixedLeaf/" }
+            $cases += @{ Root = $root; Path = "\\server\share\MixedLeaf\"; Expected = "\\server\share\MixedLeaf\" }
+        }
+        foreach ($case in $cases) {
+            $actual = Resolve-PathFromRoot -Root $case.Root -Path $case.Path
+            Assert-Result -Name ("exact output for '" + $case.Path + "' under '" + $case.Root + "'") -Condition ($actual -ceq $case.Expected) -FailureMessage ("expected '" + $case.Expected + "', got '" + $actual + "'")
+        }
+        Assert-Result -Name "bundle specialization keeps rooted spelling with no root" -Condition ((Resolve-CrucibleBundleRoot -ProjectRoot "  " -CrucibleRoot $absolute) -ceq $absolute) -FailureMessage "bundle specialization changed the rooted value"
+    }
+
+    $results += Run-Test -Name "General resolution retains null binding and bundle refusal diagnostics" -Body {
+        foreach ($case in @(
+            @{ Root = $tempRoot; Path = $null; Parameter = "ChildPath"; Kind = "null" },
+            @{ Root = $null; Path = "leaf"; Parameter = "Path"; Kind = "null" },
+            @{ Root = ""; Path = "leaf"; Parameter = "Path"; Kind = "empty string" }
+        )) {
+            $message = ""
+            $actual = $null
+            try { $actual = Resolve-PathFromRoot -Root $case.Root -Path $case.Path } catch { $message = $_.Exception.Message }
+            $preserved = if ($case.Parameter -eq "ChildPath") {
+                $message -ceq "" -and $actual -ceq (Join-Path $case.Root $null)
+            } else { $message -match $case.Parameter -and $message -match $case.Kind }
+            Assert-Result -Name ("Join-Path binding preserved for " + $case.Parameter + " " + $case.Kind) -Condition $preserved -FailureMessage ("output '" + $actual + "'; error '" + $message + "'")
+        }
+        $message = ""
+        try { $null = Resolve-CrucibleBundleRoot -ProjectRoot "  " -CrucibleRoot "bundle" } catch { $message = $_.Exception.Message }
+        Assert-Result -Name "bundle keeps its exact empty-root diagnostic" -Condition ($message -ceq "Cannot resolve the Crucible bundle 'bundle': it is relative and the project root is empty.") -FailureMessage $message
+    }
+
     $results += Run-Test -Name "Test-PathWithinDirectory compares on a separator boundary" -Body {
         $bundle = if ($IsWindows) { "C:\bundle" } else { "/bundle" }
         Assert-Result -Name "the directory itself" -Condition (Test-PathWithinDirectory -Path $bundle -Directory $bundle) -FailureMessage "a directory contains itself"
@@ -49,6 +92,37 @@ try {
         Assert-Result -Name "file in sibling bundle2 refused" -Condition (-not (Test-PathWithinDirectory -Path (Join-Path ($bundle + "2") "research/x.md") -Directory $bundle)) -FailureMessage "a file under a sibling sharing the prefix is outside"
         Assert-Result -Name "research-old refused" -Condition (-not (Test-PathWithinDirectory -Path (Join-Path $bundle "research-old/x.md") -Directory (Join-Path $bundle "research"))) -FailureMessage "research-old is a sibling of research, not inside it"
         Assert-Result -Name "dot-dot escape refused" -Condition (-not (Test-PathWithinDirectory -Path (Join-Path $bundle "research/../x.md") -Directory (Join-Path $bundle "research"))) -FailureMessage "a path that climbs out of the directory is outside"
+    }
+
+    $results += Run-Test -Name "Path relativization owns normalization, outside and output spelling" -Body {
+        $directory = Join-Path $tempRoot "OwnerRoot"
+        $cases = @(
+            @{ Path = (Join-Path $directory "Child/File.md"); Directory = $directory; Expected = "Child/File.md" },
+            @{ Path = (Join-Path $directory "Child/../File.md"); Directory = $directory; Expected = "File.md" },
+            @{ Path = (Join-Path $directory "File.md"); Directory = (Join-Path $directory "unused/.."); Expected = "File.md" },
+            @{ Path = ($directory + "/Child/"); Directory = ($directory + "/"); Expected = "Child/" },
+            @{ Path = $directory; Directory = $directory; Expected = "" },
+            @{ Path = (Join-Path ($directory + "2") "File.md"); Directory = $directory; Expected = $null }
+        )
+        if ($IsWindows) {
+            $cases += @{ Path = (Join-Path $directory "Child/File.md"); Directory = $directory.ToUpperInvariant(); Expected = "Child/File.md" }
+        }
+        foreach ($case in $cases) {
+            $actual = Get-PathRelativeToDirectory -Path $case.Path -Directory $case.Directory -Separator "/"
+            Assert-Result -Name ("suffix for " + $case.Path + " under " + $case.Directory) -Condition ($actual -ceq $case.Expected) -FailureMessage ("expected '" + $case.Expected + "', got '" + $actual + "'")
+        }
+        $native = Get-PathRelativeToDirectory -Path ($directory + "/Child/") -Directory $directory
+        Assert-Result -Name "native separator and trailing separator" -Condition ($native -ceq ("Child" + [IO.Path]::DirectorySeparatorChar)) -FailureMessage $native
+        $caseMismatch = Get-PathRelativeToDirectory -Path (Join-Path $directory "File.md") -Directory ($directory + "x/../ownerroot") -Comparison Ordinal
+        Assert-Result -Name "ordinal display adapter can keep case sensitivity" -Condition ($null -eq $caseMismatch) -FailureMessage "ordinal matching must not fold case"
+        foreach ($pair in @(@{ Path = "child"; Directory = $directory }, @{ Path = $directory; Directory = "root" })) {
+            $message = ""
+            try { $null = Get-PathRelativeToDirectory @pair } catch { $message = $_.Exception.Message }
+            Assert-Result -Name "relative input refuses before GetFullPath" -Condition ($message -match "must both be absolute") -FailureMessage $message
+            $message = ""
+            try { $null = Test-PathWithinDirectory @pair } catch { $message = $_.Exception.Message }
+            Assert-Result -Name "containment also refuses relative input" -Condition ($message -match "must both be absolute") -FailureMessage $message
+        }
     }
 
     $results += Run-Test -Name "Parse-SemVer returns null for non-versions" -Body {

@@ -381,10 +381,7 @@ if ($frameworkMode) {
             $hooksRel = $gitHooks.Output.Trim()
         }
     }
-    $adopterHook = $hooksRel
-    if (-not [System.IO.Path]::IsPathRooted($adopterHook)) {
-        $adopterHook = Join-Path $REPO_ROOT $hooksRel
-    }
+    $adopterHook = Resolve-PathFromRoot -Root $REPO_ROOT -Path $hooksRel
     $adopterHook = Join-Path $adopterHook "pre-commit"
     if (-not (Test-Path -LiteralPath $adopterHook)) {
         Add-DoctorResult -Check "hooks.pre-commit" -Status "warn" -Severity "advisory" `
