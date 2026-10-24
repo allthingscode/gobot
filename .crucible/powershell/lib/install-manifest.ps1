@@ -187,6 +187,7 @@ function Test-FrameworkDevOnlyFile {
         "scripts/test-linux.ps1",
         # Windows process profiling is maintainer tooling, not adopter runtime. Item 201.
         "scripts/profile-tests.ps1",
+        "powershell/tests/profile-tests.tests.ps1",
         # Provisions WSL tools for the dev-only Linux leg and Go linter.
         "scripts/wsl-bootstrap.sh",
         # Lints framework backlog, docs and schema. The hook invokes it only when

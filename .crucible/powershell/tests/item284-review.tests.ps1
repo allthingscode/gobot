@@ -52,6 +52,7 @@ try {
         'task.md isolated checks' = Get-ReviewAssignment $session 'isolatedChecksCommand'
         'task.md merge simulation' = Get-ReviewAssignment $session 'mergeSimulationCommand'
     }
+    $launcherCases = @{ WindowsPowerShell = 0 }
     $siteIndex = 0
     foreach ($siteName in $sites.Keys) {
         $siteIndex++
@@ -90,7 +91,7 @@ try {
             $bash = Get-TestBash
             $bashRun = Invoke-ExternalCommand { & $bash $bashDriver }
             $psRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $psDriver }
-            $legacy = Get-Command powershell.exe -ErrorAction SilentlyContinue
+            $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
             if ($null -ne $legacy) {
                 $legacyRun = Invoke-ExternalCommand { & $legacy.Source -NoProfile -ExecutionPolicy Bypass -File $psDriver }
             }
@@ -99,9 +100,15 @@ try {
             Assert-Result 'pwsh runs the printed command and preserves binding' ($psRun.ExitCode -eq 0 -and ($psRun.Output.Trim() -replace "`r`n", "`n") -ceq $expected) ($line + ' => ' + $psRun.Output)
             if ($null -ne $legacy) {
                 Assert-Result 'a Windows PowerShell agent shell starts a PowerShell 7 runtime' ($legacyRun.ExitCode -eq 0 -and ($legacyRun.Output.Trim() -replace "`r`n", "`n") -ceq $expected) ($line + ' => ' + $legacyRun.Output)
+                $launcherCases.WindowsPowerShell++
             }
             Assert-Result 'command selects pwsh rather than the agent shell host' ($line.StartsWith('pwsh ') -and $line.Contains(' -File ')) $line
         }
+    }
+
+    $results += Run-Test -Name 'Windows PowerShell launcher coverage matches the platform' -Body {
+        $expectedCases = if (Test-PlatformIsWindows) { $sites.Count } else { 0 }
+        Assert-Result 'every Windows launcher case executes on Windows only' ($launcherCases.WindowsPowerShell -eq $expectedCases) ("Expected $expectedCases Windows PowerShell launcher cases, executed $($launcherCases.WindowsPowerShell)")
     }
 
     $results += Run-Test -Name 'Shell-neutral apostrophes with a backslash before the closing quote refuse safely' -Body {

@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "90f6f5a4ed4ff51bf70284c5d57dc9b596d770b0",
+  "source_commit": "9ac319ff6f78e15dd30507205ced908a00076d93",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -271,8 +271,8 @@
       "base_hash": "626cde3dcce599ca841514b4a0518241f0e4c33a3361ec58545cd056918dfdc8"
     },
     "powershell/lib/install-manifest.ps1": {
-      "hash": "5b2372b1eb0573d37b25ffb914af8178636e04cfd4acd27cd4d8cb66175c4226",
-      "base_hash": "5b2372b1eb0573d37b25ffb914af8178636e04cfd4acd27cd4d8cb66175c4226"
+      "hash": "80ad37312bcffc04296cb46cae7004109d101f0a726f1c689c11d6151ff825b7",
+      "base_hash": "80ad37312bcffc04296cb46cae7004109d101f0a726f1c689c11d6151ff825b7"
     },
     "powershell/lib/instruction-blocks.ps1": {
       "hash": "1e291f50c0a0b8361883079b232add9560cec7392672c4661eddfc6a6600fbdc",
@@ -359,8 +359,8 @@
       "base_hash": "310493aa7909ca87536da4641177791c1d37b815cebc4d768374ab61b728d080"
     },
     "powershell/run-all-tests.ps1": {
-      "hash": "5c32db3870d59497486b68e131438438809d59822cfc7f10e04011bad4e26d33",
-      "base_hash": "5c32db3870d59497486b68e131438438809d59822cfc7f10e04011bad4e26d33"
+      "hash": "45b48b409cfbb7a8596cc675a16009c478eae994029130062633b5d39bb874c2",
+      "base_hash": "45b48b409cfbb7a8596cc675a16009c478eae994029130062633b5d39bb874c2"
     },
     "powershell/run-isolated-checks.ps1": {
       "hash": "501845e998b9ceaca4614f3192481a45f043d42016d9dc7ed7c7345e20aedd01",
@@ -615,8 +615,8 @@
       "base_hash": "2aa0d67b8042f4e6d36af8dbe3e5571fd5d646505e0ed309bad4b418c095bf9c"
     },
     "powershell/tests/item284-review.tests.ps1": {
-      "hash": "ff0ee331aa8ec34122d6aaad2c0530883eadd8875d5dc3eae29037e7ec8ff39a",
-      "base_hash": "ff0ee331aa8ec34122d6aaad2c0530883eadd8875d5dc3eae29037e7ec8ff39a"
+      "hash": "fc460f3278af81de9151dc04ce3a85df7e02c71f824ef634c99148fca7f84221",
+      "base_hash": "fc460f3278af81de9151dc04ce3a85df7e02c71f824ef634c99148fca7f84221"
     },
     "powershell/tests/launch-codex-specialist.tests.ps1": {
       "hash": "7df6d30b12c392ab4bbc4aa8dcb96c69f1e5ffb9432d9070ce8a88af3a971048",
@@ -713,6 +713,10 @@
     "powershell/tests/run-all-tests-serial-marker.tests.ps1": {
       "hash": "561bbd4efd355d96c71fc2e037e2453c8e9dc9d9708eec918c5f2ba397ceb9cc",
       "base_hash": "561bbd4efd355d96c71fc2e037e2453c8e9dc9d9708eec918c5f2ba397ceb9cc"
+    },
+    "powershell/tests/run-all-tests-stdin.tests.ps1": {
+      "hash": "eaa08a972c84e0f79fc3139829156a5c24467e1448dae8e0d5d592e4093937d1",
+      "base_hash": "eaa08a972c84e0f79fc3139829156a5c24467e1448dae8e0d5d592e4093937d1"
     },
     "powershell/tests/run-isolated-checks.tests.ps1": {
       "hash": "72ac97cba941c66abcd1b15eee66ff8a6fb4ffdce552ddeafc1e07b12456d833",

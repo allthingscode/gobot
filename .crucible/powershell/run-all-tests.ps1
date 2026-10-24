@@ -233,8 +233,9 @@ try {
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $shell
-        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($file.FullName)`""
+        $psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$($file.FullName)`""
         $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.CreateNoWindow = $true
@@ -242,6 +243,9 @@ try {
         $p = New-Object System.Diagnostics.Process
         $p.StartInfo = $psi
         [void]$p.Start()
+        # A test must get a binding error, never a prompt that waits on the runner's
+        # console or open stdin pipe. Also give direct stdin readers immediate EOF.
+        $p.StandardInput.Close()
 
         # Streaming callers read both redirected streams themselves. Parallel mode
         # buffers per-line reads without echoing them until the child exits. Each
