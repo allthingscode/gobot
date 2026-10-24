@@ -189,6 +189,9 @@ try {
         Assert-Result "stubs filed as Stub" ($body -match 'status: "Stub"' -and $body -notmatch 'status: "Ready"') "stubs must be filed with status Stub for the Stub-Only Close-Out"
     }
 
+    $launcherCases = @{ WindowsPowerShell = 0 }
+    $stepLineCount = 3
+    $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
     # Item 291: Steps 3 and 4 are run by the Researcher in whichever shell it has; Codex's is
     # often Bash, where the direct & '<script>' form is a syntax error. Inert copies of the
     # real param blocks write what they bound, so no handoff, backlog or agent CLI runs.
@@ -216,7 +219,7 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
         $body = [IO.File]::ReadAllText($p.GateFiling)
         $steps = $body.Substring($body.IndexOf("## Step 3"))
         $lines = @($steps -split "`n" | Where-Object { $_ -match '^    \S' -and $_ -notmatch '^    #' } | ForEach-Object { $_.Substring(4) })
-        Assert-Result "three executable lines in Steps 3 and 4" ($lines.Count -eq 3) ($lines -join "`n")
+        Assert-Result "$stepLineCount executable lines in Steps 3 and 4" ($lines.Count -eq $stepLineCount) ($lines -join "`n")
 
         $expected = @(
             ("capture-new-handoff.ps1.txt", (@("HumanApproved=[C-350|C-351]#2", "HumanDeferred=[C-352|C-353]#2", "HumanRejected=[C-999]#1", ("Reason=" + $reason), "Source=research", "StubSpecsCreated=[C-350|C-351]#2", "Target=grooming", ("TaskId=" + $p.TaskId), "host7plus=True") -join "`n")),
@@ -224,10 +227,9 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
             ("capture-crucible.ps1.txt", (@("Init=True", ("ProjectRoot=" + $p.Root), "Quiet=True", ("TaskId=" + $p.TaskId), "host7plus=True") -join "`n"))
         )
         $bash = Get-TestBash
-        $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
         $cdBash = "cd -- '" + $p.Root.Replace("'", "'\''") + "' || exit 9"
         $cdPs = "Set-Location -LiteralPath '" + $p.Root.Replace("'", "''") + "'"
-        for ($i = 0; $i -lt 3; $i++) {
+        for ($i = 0; $i -lt $stepLineCount; $i++) {
             $shells = @(
                 @{ Name = "Bash"; Ext = "sh"; Text = ($cdBash + "`n" + $lines[$i] + "`n"); Bom = $false },
                 @{ Name = "pwsh"; Ext = "ps1"; Text = ($cdPs + "`n" + $lines[$i] + "`n"); Bom = $false }
@@ -246,6 +248,7 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
                 $actual = if (Test-Path -LiteralPath $capturePath) { [IO.File]::ReadAllText($capturePath) } else { "(nothing captured)" }
                 $want = $utf8.GetBytes($expected[$i][1])
                 Assert-Result ($shell.Name + " runs line " + ($i + 1) + " and delivers every value byte for byte") ($run.ExitCode -eq 0 -and (Test-Path -LiteralPath $capturePath) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($capturePath)) -ceq [Convert]::ToBase64String($want)) ($lines[$i] + "`n=> exit " + $run.ExitCode + ": " + $run.Output + "`ncaptured: " + $actual)
+                if ($shell.Name -eq "Windows PowerShell") { $launcherCases.WindowsPowerShell++ }
             }
         }
 
@@ -262,6 +265,15 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
         [IO.File]::WriteAllText($driver, ($cdBash + "`n" + $lines[0] + "`n"), $utf8)
         $run = Invoke-ExternalCommand { & $bash $driver }
         Assert-Result "the runner exits with new-handoff's refusal code" ($run.ExitCode -eq 2) ("exit " + $run.ExitCode + ": " + $run.Output)
+    }
+
+    $results += Run-Test -Name 'Windows PowerShell launcher coverage matches the platform' -Body {
+        $expectedCases = if (Test-PlatformIsWindows) { $stepLineCount } else { 0 }
+        $probeResult = if ($null -eq $legacy) { 'not found ($null)' } else { $legacy.Source }
+        Assert-Result 'every Windows launcher case executes on Windows only' ($launcherCases.WindowsPowerShell -eq $expectedCases) ("Expected $expectedCases Windows PowerShell launcher cases, executed $($launcherCases.WindowsPowerShell); powershell.exe probe: $probeResult")
+        if (-not (Test-PlatformIsWindows)) {
+            Skip-Test -Reason 'Windows PowerShell launcher checks require Windows; the powershell.exe probe is disabled on this platform.'
+        }
     }
 
     $results += Run-Test -Name "a handoff command the builder cannot write leaves a runner that exits nonzero" -Body {
@@ -303,10 +315,4 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
     }
 }
 
-$failures = @($results | Where-Object { -not $_ }).Count
-if ($failures -gt 0) {
-    Write-Host ("`n{0} test(s) failed." -f $failures) -ForegroundColor Red
-    exit 1
-}
-Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
-exit 0
+Write-TestFileSummary -Results $results

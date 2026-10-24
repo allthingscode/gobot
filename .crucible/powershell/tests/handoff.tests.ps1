@@ -37,6 +37,39 @@ $LOG_FILE = Join-Path $tempRoot "logs/pipeline.log.jsonl"
 $CB_HISTORY_FILE = Join-Path $tempRoot "logs/circuit_breakers.jsonl"
 New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 
+function New-OutsideArtifactCase {
+    param([string]$Name)
+
+    $project = Join-Path $tempRoot ($Name + "/project")
+    $outsideDir = $project + "2/Docs"
+    $workspaces = Join-Path $project "workspaces"
+    New-Item -ItemType Directory -Path $outsideDir, (Join-Path $workspaces "implementation-F-308"), (Join-Path $project ".crucible/backlog") -Force | Out-Null
+    $outside = Join-Path $outsideDir "file.md"
+    [IO.File]::WriteAllText($outside, "outside artifact", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $project ".crucible/backlog/BACKLOG.md"), "| F-308 | Ready | Outside artifact |", [Text.UTF8Encoding]::new($false))
+    $handoffPath = Join-Path $project "handoff.json"
+    $values = @{
+        task_id = "F-308"
+        source_phase = "grooming"
+        target_phase = "implementation"
+        reason = "outside artifact"
+        artifacts = @((Resolve-Path -LiteralPath $outside).Path.Replace("\", "/"))
+    }
+    Write-TestHandoff -Path $handoffPath -Values $values
+    return @{
+        RepoRoot = $project
+        WorkspacesDir = $workspaces
+        SessionDir = Join-Path $project ".crucible/session"
+        FrameworkPowerShell = Join-Path $REPO_ROOT "powershell"
+        LogFile = Join-Path $project "pipeline.log.jsonl"
+        CircuitBreakerHistoryFile = Join-Path $project "circuit_breakers.jsonl"
+        Recover = $false
+        TaskId = "F-308"
+        Handoff = [pscustomobject]$values
+        LatestHandoff = Get-Item -LiteralPath $handoffPath
+    }
+}
+
 try {
     $results += Run-Test -Name "Artifact relativization normalizes a missing path before slicing" -Body {
         $project = Join-Path $tempRoot "relativize-project"
@@ -82,13 +115,21 @@ try {
             @{ Input = "././docs/worktree.md"; Expected = "docs/worktree.md" }
             @{ Input = "missing/"; Expected = "missing/" }
             @{ Input = "docs/"; Expected = "docs/" }
-            @{ Input = $outside; Expected = $outside.Replace("\", "/").TrimStart("/") }
+            @{ Input = $outside; Expected = $outside.Replace("\", "/") }
             @{ Input = "./workspaces/F-198/missing.md"; Expected = "missing.md" }
             @{ Input = 'workspaces\F-198\missing.md'; Expected = "missing.md" }
             @{ Input = " "; Expected = $null }
             @{ Input = "./"; Expected = $null }
             @{ Input = "./absent.md"; Expected = "absent.md" }
         )
+        if ($IsWindows) {
+            # Missing paths avoid Resolve-Path rewriting the spelling under test.
+            $cases += @(
+                @{ Input = '\\127.0.0.1\crucible-item308-missing\Docs\file.md'; Expected = '//127.0.0.1/crucible-item308-missing/Docs/file.md' }
+                @{ Input = ('\\?\' + $outside + '.missing'); Expected = ('//?/' + $outside.Replace("\", "/") + '.missing') }
+            )
+        }
+        $parityFailures = @()
         foreach ($case in $cases) {
             $generatorResult = @(& {
                 $REPO_ROOT = $project
@@ -105,9 +146,14 @@ try {
                 $normalizedArtifacts
             })
             $expected = @($case.Expected | Where-Object { $null -ne $_ })
-            Assert-Result -Name ("caller parity: " + $case.Input) -Condition (($generatorResult -join "|") -ceq ($gateResult -join "|") -and $generatorResult.Count -eq $gateResult.Count) -FailureMessage "callers normalized differently"
-            Assert-Result -Name ("preserved output: " + $case.Input) -Condition (($generatorResult -join "|") -ceq ($expected -join "|") -and $generatorResult.Count -eq $expected.Count) -FailureMessage "normalization behavior changed"
+            try {
+                Assert-Result -Name ("caller parity: " + $case.Input) -Condition (($generatorResult -join "|") -ceq ($gateResult -join "|") -and $generatorResult.Count -eq $gateResult.Count) -FailureMessage "callers normalized differently"
+                Assert-Result -Name ("preserved output: " + $case.Input) -Condition (($generatorResult -join "|") -ceq ($expected -join "|") -and $generatorResult.Count -eq $expected.Count) -FailureMessage ("expected: " + ($expected -join "|") + "; got: " + ($generatorResult -join "|"))
+            } catch {
+                $parityFailures += $_.Exception.Message
+            }
         }
+        Assert-Result -Name "all caller parity cases" -Condition ($parityFailures.Count -eq 0) -FailureMessage ($parityFailures -join "`n")
     }
 
     # Item 302: an absolute artifact was relativized against the worktree or project root
@@ -126,8 +172,64 @@ try {
         $fromWorktree = @(Normalize-HandoffArtifactPaths -Artifacts @($worktreeArtifact) -WorktreePath $worktree -ProjectRoot $project)
         Assert-Result -Name "task-F-10 artifact relative to the project" -Condition ($fromWorktree.Count -eq 1 -and $fromWorktree[0] -ceq "workspaces/task-F-10/out.md") -FailureMessage ("expected workspaces/task-F-10/out.md, got: " + ($fromWorktree -join "|"))
         $fromProject = @(Normalize-HandoffArtifactPaths -Artifacts @($projectArtifact) -WorktreePath $worktree -ProjectRoot $project)
-        $expected = (Resolve-Path -LiteralPath $projectArtifact).Path.Replace("\", "/").TrimStart("/")
+        $expected = (Resolve-Path -LiteralPath $projectArtifact).Path.Replace("\", "/")
         Assert-Result -Name "sibling project artifact stays absolute" -Condition ($fromProject.Count -eq 1 -and $fromProject[0] -ceq $expected) -FailureMessage ("expected " + $expected + ", got: " + ($fromProject -join "|"))
+    }
+
+    # Item 308: these run on both hosts; WSL supplies the POSIX absolute-path case.
+    $results += Run-Test -Name "Generator accepts and records an outside absolute artifact" -Body {
+        $ctx = New-OutsideArtifactCase -Name "generator-308"
+        $expected = $ctx.Handoff.artifacts[0]
+        $path = Join-Path $ctx.RepoRoot "generated.json"
+        $run = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -NonInteractive -File (Join-Path $REPO_ROOT "powershell/new-handoff.ps1") -ProjectRoot $ctx.RepoRoot -TaskId F-308 -Source grooming -Target implementation -Reason "outside artifact" -Artifacts $expected -FileAffinity Docs/ -PromptVersion implementation_prompt-v21 -OutputPath $path
+        }
+        $actual = @()
+        if (Test-Path -LiteralPath $path) {
+            $actual = @((Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json).artifacts)
+        }
+        Assert-Result -Name "generator preserves actual absolute path" -Condition ($run.ExitCode -eq 0 -and $actual.Count -eq 1 -and $actual[0] -ceq $expected) -FailureMessage ("expected " + $expected + ", got: " + ($actual -join "|") + "; exit " + $run.ExitCode + "; " + ($run.Output -join "`n"))
+    }
+
+    $results += Run-Test -Name "Gate keeps an outside artifact absolute in memory and on disk" -Body {
+        $ctx = New-OutsideArtifactCase -Name "gate-308"
+        $expected = $ctx.Handoff.artifacts[0]
+        Push-Location $ctx.RepoRoot
+        try { Normalize-CrucibleInputState -Context $ctx } finally { Pop-Location }
+        $actual = @($ctx.Handoff.artifacts)
+        $saved = @((Get-Content -LiteralPath $ctx.LatestHandoff.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).artifacts)
+        Assert-Result -Name "gate preserves actual absolute path" -Condition ($actual.Count -eq 1 -and $actual[0] -ceq $expected -and $saved.Count -eq 1 -and $saved[0] -ceq $expected) -FailureMessage ("expected " + $expected + ", memory: " + ($actual -join "|") + ", disk: " + ($saved -join "|"))
+    }
+
+    $results += Run-Test -Name "Missing-artifact validation resolves a normalized outside absolute file" -Body {
+        $ctx = New-OutsideArtifactCase -Name "resolve-308"
+        $projectLiteral = $ctx.RepoRoot.Replace("'", "''")
+        $handoffLiteral = $ctx.LatestHandoff.FullName.Replace("'", "''")
+        $libLiteral = $CRUCIBLE_LIB.Replace("'", "''")
+        # Run in a child because the artifact-integrity gate exits on a missing file.
+        $code = @"
+`$ErrorActionPreference = 'Stop'
+`$Quiet = `$true
+. '$libLiteral'
+Set-Location -LiteralPath '$projectLiteral'
+`$ctx = @{
+    RepoRoot = '$projectLiteral'
+    WorkspacesDir = Join-Path '$projectLiteral' 'workspaces'
+    SessionDir = Join-Path '$projectLiteral' '.crucible/session'
+    FrameworkPowerShell = Split-Path -Parent '$libLiteral'
+    LogFile = Join-Path '$projectLiteral' 'pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = Join-Path '$projectLiteral' 'circuit_breakers.jsonl'
+    Recover = `$false
+    TaskId = 'F-308'
+    Handoff = Get-Content -LiteralPath '$handoffLiteral' -Raw -Encoding UTF8 | ConvertFrom-Json
+    LatestHandoff = Get-Item -LiteralPath '$handoffLiteral'
+}
+Normalize-CrucibleInputState -Context `$ctx
+Invoke-CrucibleRuntimeValidation -Context `$ctx
+Write-Output 'OUTSIDE_ARTIFACT_RESOLVED'
+"@
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -NonInteractive -Command $code }
+        Assert-Result -Name "outside file is found after normalization" -Condition ($run.ExitCode -eq 0 -and $run.Output -contains "OUTSIDE_ARTIFACT_RESOLVED") -FailureMessage ("exit " + $run.ExitCode + "; " + ($run.Output -join "`n"))
     }
 
     $results += Run-Test -Name "Get-HandoffTextForSecurityScan flattens scalar and array fields" -Body {

@@ -141,12 +141,12 @@ function ConvertTo-CrucibleCommandShellNeutralLiteral {
     if ($Value.Contains('"')) { throw "New-CrucibleCommand: shell-neutral -File cannot carry a double quote on older launching PowerShell hosts." }
     if ($Value.EndsWith('\') -and $Value -match '\s') { throw "New-CrucibleCommand: shell-neutral -File cannot carry whitespace and a trailing backslash on older launching PowerShell hosts." }
     if ($Value -notmatch "['\u2018\u2019\u201A\u201B]") { return ("'" + $Value + "'") }
-    if ($Value.EndsWith('\')) {
-        throw "New-CrucibleCommand: quotes and a trailing backslash escape the closing double quote in Bash; no shared Bash/PowerShell literal is available."
-    }
-    if ($Value -notmatch '[$`\u201C\u201D\u201E]' -and -not $Value.Contains('\\')) { return ('"' + $Value + '"') }
+    # A trailing backslash must sit in a single-quoted segment, away from Bash's
+    # closing double quote. Item 320 uses the same bare-start rule as item 290.
+    if (-not $Value.EndsWith('\') -and $Value -notmatch '[$`\u201C\u201D\u201E]' -and -not $Value.Contains('\\')) { return ('"' + $Value + '"') }
     if ($Value -cnotmatch '^[A-Za-z0-9_/]') {
-        throw "New-CrucibleCommand: the value combines quotes with shell expansions or doubled backslashes and does not start with a letter, digit, underscore or slash; no shared Bash/PowerShell literal is available."
+        $shape = if ($Value.EndsWith('\')) { 'a trailing backslash' } else { 'shell expansions or doubled backslashes' }
+        throw "New-CrucibleCommand: the value combines quotes with $shape and does not start with a letter, digit, underscore or slash; no shared Bash/PowerShell literal is available."
     }
     $segments = @([regex]::Matches($Value.Substring(1), "['\u2018\u2019\u201A\u201B]+|[^'\u2018\u2019\u201A\u201B]+") | ForEach-Object {
         if ($_.Value -match "^['\u2018\u2019\u201A\u201B]") { '"' + $_.Value + '"' } else { "'" + $_.Value + "'" }

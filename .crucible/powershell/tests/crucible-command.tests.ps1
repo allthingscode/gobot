@@ -201,14 +201,15 @@ New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $Root -Crucible
         Assert-Result "child-built command executes" ($run.ExitCode -eq 0 -and (Test-Path -LiteralPath $destination)) ($line + " => " + $run.Output)
         Assert-Result "child-built literal arrives byte-for-byte" ([Convert]::ToBase64String([IO.File]::ReadAllBytes($destination)) -ceq [Convert]::ToBase64String($utf8.GetBytes("child's `$HOME"))) $line
     }
+    $carried = @("O'Brien `$HOME", "O'Brien \\share", "it's ``tick", ("O" + [char]0x2019 + "Brien `$x"), "1'x `$y", "C:\O'Brien\`$x\\y", "_a'b `$c", ("O'Brien " + [char]0x201C + "q" + [char]0x201D))
+    $launcherCases = @{ WindowsPowerShell = 0 }
+    $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
     # Item 290: a quote mixed with $, a backtick, typographic double quotes or a doubled
     # backslash was refused on ShellNeutral. Adjacent segments after a bare first character
     # are one argument in both shells; a value that cannot start bare stays refused.
     $results += Run-Test -Name "Shell-neutral literals carry quotes mixed with expansions under Bash, pwsh and a Windows PowerShell launcher" -Body {
-        $carried = @("O'Brien `$HOME", "O'Brien \\share", "it's ``tick", ("O" + [char]0x2019 + "Brien `$x"), "1'x `$y", "C:\O'Brien\`$x\\y", "_a'b `$c", ("O'Brien " + [char]0x201C + "q" + [char]0x201D))
         if (-not (Test-PlatformIsWindows)) { $carried += "/srv/o'brien/`$x" }
         $bash = Get-TestBash
-        $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
         $index = 0
         foreach ($value in $carried) {
             $index++
@@ -228,6 +229,7 @@ New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $Root -Crucible
                 }
                 $actual = if (Test-Path -LiteralPath $outputPath) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($outputPath)) } else { "" }
                 Assert-Result ($shell.Name + " delivers mixed value " + $index + " byte for byte") ($run.ExitCode -eq 0 -and $actual -ceq [Convert]::ToBase64String($utf8.GetBytes($value))) ($line + " => exit " + $run.ExitCode + ": " + $run.Output)
+                if ($shell.Name -eq "Windows PowerShell") { $launcherCases.WindowsPowerShell++ }
             }
         }
         foreach ($value in @("'quoted' `$x", " O'Brien `$x", ".O'Brien `$x", "~O'Brien `$x", "@O'Brien `$x")) {
@@ -236,6 +238,15 @@ New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $Root -Crucible
             try { $null = New-CrucibleCommand -Script "powershell/capture.ps1" -BundleRoot $literalRoot -CrucibleRoot $literalRoot -Parameters ([ordered]@{ ProjectRoot = $value }) -Transport ShellNeutral -Strict } catch { $message = $_.Exception.Message }
             $bashRun = Invoke-TestBashLine -Bash $bash -Line $line -Name "mixed-refused"
             Assert-Result ("a value that cannot start bare stays refused: " + $value) ($line.StartsWith("# (command unavailable: ") -and $message.Contains("does not start with a letter") -and $bashRun.ExitCode -eq 0 -and @($bashRun.Lines).Count -eq 0) ($line + "; strict=" + $message)
+        }
+    }
+
+    $results += Run-Test -Name 'Windows PowerShell launcher coverage matches the platform' -Body {
+        $expectedCases = if (Test-PlatformIsWindows) { $carried.Count } else { 0 }
+        $probeResult = if ($null -eq $legacy) { 'not found ($null)' } else { $legacy.Source }
+        Assert-Result 'every Windows launcher case executes on Windows only' ($launcherCases.WindowsPowerShell -eq $expectedCases) ("Expected $expectedCases Windows PowerShell launcher cases, executed $($launcherCases.WindowsPowerShell); powershell.exe probe: $probeResult")
+        if (-not (Test-PlatformIsWindows)) {
+            Skip-Test -Reason 'Windows PowerShell launcher checks require Windows; the powershell.exe probe is disabled on this platform.'
         }
     }
 
@@ -291,5 +302,4 @@ New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $Root -Crucible
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
 
-if (@($results | Where-Object { -not $_ }).Count -gt 0) { exit 1 }
-Write-Host "ALL TESTS PASSED ($($results.Count) tests)"
+Write-TestFileSummary -Results $results

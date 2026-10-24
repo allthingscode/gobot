@@ -52,6 +52,7 @@ try {
         'task.md isolated checks' = Get-ReviewAssignment $session 'isolatedChecksCommand'
         'task.md merge simulation' = Get-ReviewAssignment $session 'mergeSimulationCommand'
     }
+    $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
     $launcherCases = @{ WindowsPowerShell = 0 }
     $siteIndex = 0
     foreach ($siteName in $sites.Keys) {
@@ -91,7 +92,6 @@ try {
             $bash = Get-TestBash
             $bashRun = Invoke-ExternalCommand { & $bash $bashDriver }
             $psRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $psDriver }
-            $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
             if ($null -ne $legacy) {
                 $legacyRun = Invoke-ExternalCommand { & $legacy.Source -NoProfile -ExecutionPolicy Bypass -File $psDriver }
             }
@@ -108,18 +108,72 @@ try {
 
     $results += Run-Test -Name 'Windows PowerShell launcher coverage matches the platform' -Body {
         $expectedCases = if (Test-PlatformIsWindows) { $sites.Count } else { 0 }
-        Assert-Result 'every Windows launcher case executes on Windows only' ($launcherCases.WindowsPowerShell -eq $expectedCases) ("Expected $expectedCases Windows PowerShell launcher cases, executed $($launcherCases.WindowsPowerShell)")
+        $probeResult = if ($null -eq $legacy) { 'not found ($null)' } else { $legacy.Source }
+        Assert-Result 'every Windows launcher case executes on Windows only' ($launcherCases.WindowsPowerShell -eq $expectedCases) ("Expected $expectedCases Windows PowerShell launcher cases, executed $($launcherCases.WindowsPowerShell); powershell.exe probe: $probeResult")
+        if (-not (Test-PlatformIsWindows)) {
+            Skip-Test -Reason 'Windows PowerShell launcher checks require Windows; the powershell.exe probe is disabled on this platform.'
+        }
     }
 
-    $results += Run-Test -Name 'Shell-neutral apostrophes with a backslash before the closing quote refuse safely' -Body {
+    # Keep each shell/value pair in its own Run-Test so the old refusal fails every
+    # binding assertion by name. Base64 reports the actual UTF-8 parameter bytes.
+    $captureAst = Read-ReviewAst 'powershell/crucible.ps1'
+    [IO.File]::WriteAllText((Join-Path $captureRoot 'powershell/capture.ps1'), ($captureAst.ParamBlock.Extent.Text + "`n[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$ProjectRoot))`n"), $utf8)
+    $backslashValues = @("O'Brien\", "O'Brien\\", "O'Brien\\\", "path\O'Brien\", ("O" + [char]0x2019 + 'Brien\'))
+    $shells = @('Bash', 'pwsh', 'Windows PowerShell')
+    $backslashCases = @{ WindowsPowerShell = 0 }
+    $valueIndex = 0
+    foreach ($value in $backslashValues) {
+        $valueIndex++
+        foreach ($shell in $shells) {
+            $results += Run-Test -Name ("Shell-neutral trailing backslash value $valueIndex binds under $shell") -Body {
+                if ($shell -eq 'Windows PowerShell') {
+                    if (-not (Test-PlatformIsWindows)) {
+                        Skip-Test -Reason 'Windows PowerShell trailing-backslash checks require Windows; the powershell.exe probe is disabled on this platform.'
+                    }
+                    Assert-Result 'Windows PowerShell trailing-backslash launcher is available' ($null -ne $legacy) 'powershell.exe probe: not found ($null)'
+                }
+                $line = New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $captureRoot -CrucibleRoot $captureRoot -Parameters ([ordered]@{ ProjectRoot = $value }) -Transport ShellNeutral
+                $driver = Join-Path $tempRoot ('trailing-backslash-' + $valueIndex + $(if ($shell -eq 'Bash') { '.sh' } else { '.ps1' }))
+                [IO.File]::WriteAllText($driver, ($line + "`n"), $utf8)
+                $run = switch ($shell) {
+                    'Bash' { Invoke-ExternalCommand { & (Get-TestBash) $driver } }
+                    'pwsh' { Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver } }
+                    # A prompt has no file encoding. EncodedCommand preserves the
+                    # typographic apostrophe without a BOM in the driver file.
+                    default {
+                        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($line))
+                        Invoke-ExternalCommand { & $legacy.Source -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded }
+                    }
+                }
+                Assert-Result ("$shell delivers trailing backslash value $valueIndex byte for byte") ($run.ExitCode -eq 0 -and $run.Output.Trim() -ceq [Convert]::ToBase64String($utf8.GetBytes($value))) ($line + ' => exit ' + $run.ExitCode + ': ' + $run.Output)
+                if ($shell -eq 'Windows PowerShell') { $backslashCases.WindowsPowerShell++ }
+            }
+        }
+    }
+
+    $results += Run-Test -Name 'Windows PowerShell trailing-backslash coverage matches the platform' -Body {
+        $expectedCases = if (Test-PlatformIsWindows) { $backslashValues.Count } else { 0 }
+        $probeResult = if ($null -eq $legacy) { 'not found ($null)' } else { $legacy.Source }
+        Assert-Result 'every Windows trailing-backslash case executes on Windows only' ($backslashCases.WindowsPowerShell -eq $expectedCases) ("Expected $expectedCases Windows PowerShell trailing-backslash cases, executed $($backslashCases.WindowsPowerShell); powershell.exe probe: $probeResult")
+        if (-not (Test-PlatformIsWindows)) {
+            Skip-Test -Reason 'Windows PowerShell trailing-backslash coverage requires Windows; the powershell.exe probe is disabled on this platform.'
+        }
+    }
+
+    $results += Run-Test -Name 'Shell-neutral trailing backslashes that cannot use segments refuse safely' -Body {
         $failures = @()
-        # Include adjacent runs, whitespace, an earlier backslash, and PowerShell's
-        # typographic apostrophe tokens. Every case forces the double-quoted branch.
-        $values = @("O'Brien\", "O'Brien\\", "O'Brien\\\", "O'Brien \", "path\O'Brien\", ("O" + [char]0x2019 + 'Brien\'))
+        $values = @("O'Brien \", " O'Brien\", "'O'Brien\", ".O'Brien\", "~O'Brien\", "@O'Brien\")
         foreach ($value in $values) {
             $line = New-CrucibleCommand -Script 'powershell/crucible.ps1' -Parameters ([ordered]@{ ProjectRoot = $value }) -CrucibleRoot $captureRoot -Transport ShellNeutral
             $message = ''
             try { $null = New-CrucibleCommand -Script 'powershell/crucible.ps1' -Parameters ([ordered]@{ ProjectRoot = $value }) -CrucibleRoot $captureRoot -Transport ShellNeutral -Strict } catch { $message = $_.Exception.Message }
+            $expectedReason = if ($value -match '\s') {
+                'shell-neutral -File cannot carry whitespace and a trailing backslash on older launching PowerShell hosts.'
+            } else {
+                'the value combines quotes with a trailing backslash and does not start with a letter, digit, underscore or slash; no shared Bash/PowerShell literal is available.'
+            }
+            Assert-Result ("closing-backslash refusal explains the unsupported shape: $value") ($message -ceq ('New-CrucibleCommand: ' + $expectedReason) -and $line -ceq ('# (command unavailable: ' + $expectedReason + ')')) ($line + '; strict=' + $message)
             $driver = Join-Path $tempRoot 'closing-backslash.sh'
             [IO.File]::WriteAllText($driver, ($line + "`n"), $utf8)
             $bash = Get-TestBash
@@ -186,5 +240,4 @@ try {
     if (-not $resolved.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw "Fixture escaped the test root: $resolved" }
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
-if (@($results | Where-Object { -not $_ }).Count -gt 0) { exit 1 }
-Write-Host "ALL TESTS PASSED ($($results.Count) tests)"
+Write-TestFileSummary -Results $results

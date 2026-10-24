@@ -17,7 +17,9 @@ function Normalize-HandoffArtifactPaths {
     foreach ($art in $Artifacts) {
         if ([string]::IsNullOrWhiteSpace($art)) { continue }
         $fullArtPath = $art
+        $relativeArtifact = $false
         if (-not [System.IO.Path]::IsPathRooted($art)) {
+            $relativeArtifact = $true
             $wtCheck = Resolve-PathFromRoot -Root $resolvedWtPath -Path $art
             if (Test-Path $wtCheck) {
                 $fullArtPath = (Resolve-Path $wtCheck).Path
@@ -36,8 +38,10 @@ function Normalize-HandoffArtifactPaths {
         if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
             if (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedWtPath) {
                 $relPath = Get-PathRelativeToDirectory -Path $fullArtPath -Directory $resolvedWtPath
+                $relativeArtifact = $true
             } elseif (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedRepoRoot) {
                 $relPath = Get-PathRelativeToDirectory -Path $fullArtPath -Directory $resolvedRepoRoot
+                $relativeArtifact = $true
             }
         } else {
             $wtRelPrefix = Get-RootRelativePath -Root $resolvedRepoRoot -Path $resolvedWtPath
@@ -47,10 +51,13 @@ function Normalize-HandoffArtifactPaths {
             }
         }
         $relPath = $relPath.Replace("\", "/").Trim()
-        while ($relPath.StartsWith("./")) {
-            $relPath = $relPath.Substring(2)
+        # Prefix cleanup belongs to relative paths; an outside POSIX root is significant.
+        if ($relativeArtifact) {
+            while ($relPath.StartsWith("./")) {
+                $relPath = $relPath.Substring(2)
+            }
+            $relPath = $relPath.TrimStart("/")
         }
-        $relPath = $relPath.TrimStart("/")
         if (-not [string]::IsNullOrWhiteSpace($relPath)) {
             $normalizedArtifacts += $relPath
         }
