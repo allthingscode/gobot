@@ -29,18 +29,21 @@ function Resolve-CrucibleProjectRoot {
         if (-not (Test-Path -LiteralPath $ProjectRoot)) {
             throw ($ParameterName + " path does not exist: '" + $ProjectRoot + "'.")
         }
-        return (Resolve-Path -LiteralPath $ProjectRoot).Path
+        return (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
     }
 
     $derivedParent = Split-Path -Path $ScriptRoot -Parent
     if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
         $derivedParent = Split-Path -Path $derivedParent -Parent
     }
-    $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
+    $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).ProviderPath
     if (Test-CrucibleProjectRoot -Path $derivedRoot) { return $derivedRoot }
 
-    $cwd = (Get-Location).Path
-    if (Test-CrucibleProjectRoot -Path $cwd) { return $cwd }
+    $location = Get-Location
+    $cwd = $location.Path
+    if ($location.Provider.Name -eq 'FileSystem' -and (Test-CrucibleProjectRoot -Path $cwd)) {
+        return $location.ProviderPath
+    }
 
     throw ("Pass " + $ParameterName + " naming the project to operate on. It was omitted, the directory derived from this script ('" + $derivedRoot + "') is not a valid Crucible project, and neither is the current working directory ('" + $cwd + "') - both are missing .crucible/backlog and .crucible/config.yaml.")
 }

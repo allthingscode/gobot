@@ -21,17 +21,53 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
         exit 1
     }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 }
+# Native git cannot use a PowerShell drive alias, including one selected by the CWD.
+$REPO_ROOT = Resolve-FilesystemPath -Path $REPO_ROOT
 
 Write-Host "--- MERGE SIMULATION: $TaskId ---" -ForegroundColor Cyan
 
-# 1. Verify branches
-$mainBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $REPO_ROOT
-
-# 1b. Verify task branch exists
-git -C $REPO_ROOT show-ref --verify --quiet "refs/heads/task/$TaskId"
-if ($LASTEXITCODE -ne 0) {
+# 1. A quiet exit 1 is only a candidate missing task ref. Repository/launch failures
+# must refuse (I11), even when an embedding caller catches exceptions.
+$previousPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "Continue"
+    $global:LASTEXITCODE = $null
+    $taskRefOutput = @(Invoke-GitChecked {
+        git -C $REPO_ROOT show-ref --verify --quiet "refs/heads/task/$TaskId"
+    } 2>&1)
+    $taskRefExitCode = $LASTEXITCODE
+    $taskRefMissing = ($taskRefExitCode -eq 1 -and $taskRefOutput.Count -eq 0)
+    if ($taskRefMissing) {
+        # --verify --quiet also returns a silent 1 for a malformed loose ref.
+        # Probe only this task ref: unrelated broken refs must not prevent closure.
+        # The scoped probe diagnoses corruption; an absent ref is still a silent 1.
+        $global:LASTEXITCODE = $null
+        $taskRefOutput = @(Invoke-GitChecked {
+            git -C $REPO_ROOT show-ref --quiet "refs/heads/task/$TaskId"
+        } 2>&1)
+        $taskRefExitCode = $LASTEXITCODE
+        $taskRefMissing = ($taskRefExitCode -eq 1 -and $taskRefOutput.Count -eq 0)
+    }
+} catch {
+    Write-Host ("Error: Could not query task branch: " + $_.Exception.Message) -ForegroundColor Red
+    exit 2
+} finally {
+    $ErrorActionPreference = $previousPreference
+}
+if (-not $taskRefMissing -and ($null -eq $taskRefExitCode -or $taskRefExitCode -ne 0 -or $taskRefOutput.Count -gt 0)) {
+    Write-Host ("Error: Could not query task branch (git show-ref exit " + $taskRefExitCode + "): " + ($taskRefOutput -join "`n")) -ForegroundColor Red
+    exit 2
+}
+# Validate configuration before No-Code Closure; an outer catch must not bypass it (I11).
+try {
+    $mainBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $REPO_ROOT
+} catch {
+    Write-Host ("Error: Could not resolve primary branch: " + $_.Exception.Message) -ForegroundColor Red
+    exit 1
+}
+if ($taskRefMissing) {
     Write-Host "No task branch (task/$TaskId) exists. Nothing to merge (No-Code Closure)." -ForegroundColor Green
     exit 0
 }

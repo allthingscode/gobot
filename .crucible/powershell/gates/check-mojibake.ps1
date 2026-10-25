@@ -68,12 +68,27 @@ if ($Paths.Count -eq 0 -and -not $MessageFile) {
         } finally {
             Pop-Location
         }
-        $scope = @($Paths | ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\', '/') })
+        try {
+            $qualificationHelper = Join-Path $PSScriptRoot '../lib/config-helpers.ps1'
+            if (-not (Test-Path -LiteralPath $qualificationHelper -PathType Leaf)) {
+                throw "Filesystem qualification helper not found at $qualificationHelper."
+            }
+            . $qualificationHelper
+            $scope = @($Paths | ForEach-Object { [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $_)).TrimEnd('\', '/') })
+        } catch {
+            Write-Host ("[FAIL] Cannot qualify staged scope: " + $_.Exception.Message) -ForegroundColor Red
+            exit 1
+        }
         $stagedInScope = @()
         foreach ($rel in $stagedNames) {
             if ([string]::IsNullOrWhiteSpace($rel)) { continue }
             if ($rel -notmatch '\.(md|ps1)$') { continue }
-            $full = [System.IO.Path]::GetFullPath((Join-Path $contentRoot $rel))
+            try {
+                $full = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path (Join-Path $contentRoot $rel)))
+            } catch {
+                Write-Host ("[FAIL] Cannot qualify staged path: " + $_.Exception.Message) -ForegroundColor Red
+                exit 1
+            }
             if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
             foreach ($root in $scope) {
                 if ($full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or

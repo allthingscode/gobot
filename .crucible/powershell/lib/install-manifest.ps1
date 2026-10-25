@@ -372,7 +372,7 @@ function Test-CrucibleGitIgnored {
         [Parameter(Mandatory=$true)][string]$RelativePath
     )
     $gitRoot = $null
-    $dir = [System.IO.Path]::GetFullPath($BundleRoot)
+    $dir = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $BundleRoot))
     while ($null -ne $dir) {
         if (Test-Path -LiteralPath (Join-Path $dir ".git")) {
             $gitRoot = $dir
@@ -388,7 +388,7 @@ function Test-CrucibleGitIgnored {
         return $false
     }
 
-    $absoluteFilePath = [System.IO.Path]::GetFullPath((Join-Path $BundleRoot $RelativePath))
+    $absoluteFilePath = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path (Join-Path $BundleRoot $RelativePath)))
 
     if (Test-PathWithinDirectory -Path $absoluteFilePath -Directory $gitRoot) {
         $relativeToGit = Get-PathRelativeToDirectory -Path $absoluteFilePath -Directory $gitRoot

@@ -132,13 +132,14 @@ function Copy-TemplateDirectory {
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     }
 
-    $sourceRoot = (Resolve-Path -LiteralPath $Source).Path
+    $sourceRoot = (Resolve-Path -LiteralPath $Source).ProviderPath
+    $frameworkRoot = Resolve-FilesystemPath -Path $REPO_ROOT
     $entries = Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse
     foreach ($entry in $entries) {
         $relative = $entry.FullName.Substring($sourceRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 
-        if (Test-PathWithinDirectory -Path $entry.FullName -Directory $REPO_ROOT) {
-            $repoRel = Get-PathRelativeToDirectory -Path $entry.FullName -Directory $REPO_ROOT -Separator "/"
+        if (Test-PathWithinDirectory -Path $entry.FullName -Directory $frameworkRoot) {
+            $repoRel = Get-PathRelativeToDirectory -Path $entry.FullName -Directory $frameworkRoot -Separator "/"
             if (Test-NestedCrucibleRuntimePath -RelativePath $repoRel -Manifest $Manifest) {
                 continue
             }
@@ -461,8 +462,8 @@ Write-Info ""
 # Slice the normalized forms the containment test compares: the configured value can
 # spell the same directory differently (doubled backslashes, item 307), so cutting the raw
 # string at the project root's length lands mid-name.
-$backlogDirForRel = [System.IO.Path]::GetFullPath((Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot))
-$projectRootForRel = [System.IO.Path]::GetFullPath($resolvedProjectRoot)
+$backlogDirForRel = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path (Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot)))
+$projectRootForRel = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $resolvedProjectRoot))
 $relativeBacklogPath = $backlogDirForRel
 if (Test-PathWithinDirectory -Path $backlogDirForRel -Directory $projectRootForRel) {
     $relativeBacklogPath = Get-PathRelativeToDirectory -Path $backlogDirForRel -Directory $projectRootForRel

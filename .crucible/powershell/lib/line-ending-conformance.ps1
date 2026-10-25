@@ -35,6 +35,8 @@ function Test-LineEndingConformance {
         return $result
     }
 
+    $ProjectRoot = Resolve-FilesystemPath -Path $ProjectRoot
+    $BundleRoot = Resolve-FilesystemPath -Path $BundleRoot
     $topResult = Invoke-Git @("rev-parse", "--show-toplevel") -Directory $ProjectRoot
     $topLevel = ($topResult.Raw | Out-String).Trim()
     if ($topResult.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($topLevel)) {
@@ -55,8 +57,8 @@ function Test-LineEndingConformance {
     # A finding there is a broken bundle, a different defect, and would only add noise.
     $bundlePrefix = ""
     if (Test-Path -LiteralPath $BundleRoot -PathType Container) {
-        $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).Path.Replace("\", "/").TrimEnd("/")
-        $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).Path.Replace("\", "/").TrimEnd("/")
+        $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath.Replace("\", "/").TrimEnd("/")
+        $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).ProviderPath.Replace("\", "/").TrimEnd("/")
         if (Test-PathWithinDirectory -Path $bundleFull -Directory $rootFull) {
             $bundlePrefix = (Get-PathRelativeToDirectory -Path $bundleFull -Directory $rootFull -Separator "/") + "/"
         }

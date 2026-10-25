@@ -376,11 +376,11 @@ function Resolve-ConfigProjectRoot {
         $root = if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
     }
 
-    if ($PathResolution -eq "Existing" -and $root -and (Test-Path -LiteralPath $root)) {
-        $root = (Resolve-Path -LiteralPath $root).Path
-    }
     if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
-    if ($PathResolution -eq "Always") { $root = (Resolve-Path -LiteralPath $root).Path }
+    if ($PathResolution -eq "Existing" -and $root -and (Test-Path -LiteralPath $root)) {
+        $root = (Resolve-Path -LiteralPath $root).ProviderPath
+    }
+    if ($PathResolution -eq "Always") { $root = (Resolve-Path -LiteralPath $root).ProviderPath }
     return $root
 }
 

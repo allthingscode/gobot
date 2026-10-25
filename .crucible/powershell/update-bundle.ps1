@@ -165,13 +165,13 @@ function Remove-EmptiedBundleDirectory {
     # tracks files and not directories. Walk up from each pruned file's parent,
     # stopping at the first level that still holds something and never at or above
     # the bundle root.
-    $rootFull = [System.IO.Path]::GetFullPath($BundleRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $rootFull = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $BundleRoot)).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
     $removed = 0
     $ordered = @($Candidates | Select-Object -Unique | Sort-Object -Property Length -Descending)
     foreach ($candidate in $ordered) {
         $current = $candidate
         while (-not [string]::IsNullOrEmpty($current)) {
-            $currentFull = [System.IO.Path]::GetFullPath($current).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+            $currentFull = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $current)).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
             # Containment also covers the root itself: rootFull never starts with
             # rootFull + separator, so the walk stops there without a second check.
             if (-not $currentFull.StartsWith($rootFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) { break }

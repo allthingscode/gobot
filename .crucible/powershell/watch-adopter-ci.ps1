@@ -278,7 +278,7 @@ if ([string]::IsNullOrWhiteSpace($CrucibleRoot)) {
     $CrucibleRoot = Resolve-ConfigProjectRoot
 }
 if (Test-Path -LiteralPath $CrucibleRoot) {
-    $CrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot).Path
+    $CrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot).ProviderPath
 }
 
 $repoIdentity = $null

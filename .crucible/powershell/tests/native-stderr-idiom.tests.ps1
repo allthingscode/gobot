@@ -16,6 +16,11 @@ $results = @()
 # Each entry requires an exact RelativePath, a regex Pattern matching the line, and an explicit Decision reason.
 $PRODUCTION_2TO1_ALLOWLIST = @(
     @{
+        RelativePath = "powershell/check-merge-conflicts.ps1"
+        Pattern      = '^\s*\}\s*2>&1\)$'
+        Reason       = "Item 336: capture Invoke-GitChecked diagnostics from the task-ref and integrity probes so diagnostic exit 1 refuses instead of permitting No-Code Closure; native stderr handling stays in the checked wrapper."
+    },
+    @{
         RelativePath = "powershell/crucible-doctor.ps1"
         Pattern      = '(?i)\$output\s*=\s*&\s*\$Command\s*@Arguments\s*2>&1'
         Reason       = "Generic command runner in diagnostic doctor tool that executes arbitrary user/diagnostic commands and captures combined output."

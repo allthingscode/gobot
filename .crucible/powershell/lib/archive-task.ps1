@@ -302,13 +302,13 @@ function Invoke-BacklogTaskArchive {
 
     $hasShippedCode = $PSBoundParameters.ContainsKey("ShippedCode")
     return Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
-        $resolvedBacklog = (Resolve-Path -LiteralPath $BacklogPath).Path
-        $resolvedBacklogDir = (Resolve-Path -LiteralPath (Split-Path -Parent $resolvedBacklog)).Path
+        $resolvedBacklog = (Resolve-Path -LiteralPath $BacklogPath).ProviderPath
+        $resolvedBacklogDir = (Resolve-Path -LiteralPath (Split-Path -Parent $resolvedBacklog)).ProviderPath
         $specMatches = @(Resolve-Path -Path $SpecPath)
         if ($specMatches.Count -ne 1) {
             throw "SpecPath must resolve to exactly one spec file; found $($specMatches.Count): $SpecPath"
         }
-        $resolvedSpec = $specMatches[0].Path
+        $resolvedSpec = $specMatches[0].ProviderPath
 
         if (-not (Test-PathWithinDirectory -Path $resolvedSpec -Directory $resolvedBacklogDir)) {
             throw "Spec path is not under backlog directory: $resolvedSpec"

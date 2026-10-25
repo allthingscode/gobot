@@ -17,7 +17,7 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
         exit 1
     }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 }
 $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 if (-not (Test-Path -LiteralPath $crucibleLibPath)) {

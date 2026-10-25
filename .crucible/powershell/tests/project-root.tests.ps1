@@ -84,6 +84,19 @@ try {
         Assert-Result -Name "cwd accepted when it is a project" -Condition ($resolved -eq $project) -FailureMessage ("expected '" + $project + "', got '" + $resolved + "'")
     }
 
+    $results += Run-Test -Name "A non-FileSystem CWD is refused before project probing" -Body {
+        $framework = New-ProjectDir -Path (Join-Path $tempRoot 'framework-provider')
+        $scriptRoot = Join-Path $framework 'powershell'
+        New-Item -ItemType Directory -Path $scriptRoot -Force | Out-Null
+        $message = ''
+        Push-Location Env:/
+        try {
+            try { $null = Resolve-CrucibleProjectRoot -ProjectRoot '' -ScriptRoot $scriptRoot }
+            catch { $message = $_.Exception.Message }
+        } finally { Pop-Location }
+        Assert-Result 'explicit root requested' ($message -match 'Pass -ProjectRoot' -and $message -match 'Env:') $message
+    }
+
     # The defect itself. With nothing to derive and a working directory that is not a
     # project, the old code guessed and carried on; the caller then read a report about a
     # repository it had never named. An unanswered question has to be asked, not guessed.

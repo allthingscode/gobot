@@ -36,7 +36,7 @@ function Get-BundleCommittablePath {
         [Parameter(Mandatory=$true)][string]$BundleRoot
     )
 
-    $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
     $collected = New-Object System.Collections.Generic.List[string]
 
     foreach ($entry in Get-CommitByDefaultPath) {
@@ -46,7 +46,7 @@ function Get-BundleCommittablePath {
                 $collected.Add($file.FullName) | Out-Null
             }
         } elseif (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            $collected.Add((Resolve-Path -LiteralPath $candidate).Path) | Out-Null
+            $collected.Add((Resolve-Path -LiteralPath $candidate).ProviderPath) | Out-Null
         }
     }
 
@@ -95,6 +95,8 @@ function Test-GitignoreConformance {
         return $result
     }
 
+    $ProjectRoot = Resolve-FilesystemPath -Path $ProjectRoot
+    $BundleRoot = Resolve-FilesystemPath -Path $BundleRoot
     $topResult = Invoke-Git @("rev-parse", "--show-toplevel") -Directory $ProjectRoot
     $topLevel = ($topResult.Raw | Out-String).Trim()
     if ($topResult.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($topLevel)) {
@@ -103,7 +105,7 @@ function Test-GitignoreConformance {
         return $result
     }
 
-    if (-not (Test-PathWithinDirectory -Path (Resolve-Path -LiteralPath $BundleRoot).Path -Directory (Resolve-Path -LiteralPath $ProjectRoot).Path)) {
+    if (-not (Test-PathWithinDirectory -Path (Resolve-Path -LiteralPath $BundleRoot).ProviderPath -Directory (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath)) {
         $result.Status = "skipped"
         $result.Reason = "Bundle at " + $BundleRoot + " is outside the project; the project's ignore rules cannot exclude its files."
         return $result
@@ -117,7 +119,7 @@ function Test-GitignoreConformance {
         return $result
     }
 
-    $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).Path.Replace("\", "/").TrimEnd("/")
+    $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).ProviderPath.Replace("\", "/").TrimEnd("/")
     # A plain hashtable, not HashSet[string]: PowerShell 5.1 cannot resolve the
     # HashSet comparer constructor overload, and hashtable lookup is already
     # case-insensitive, which is what a Windows path comparison needs.

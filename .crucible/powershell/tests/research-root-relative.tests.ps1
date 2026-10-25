@@ -17,7 +17,12 @@ if ($DriveRoot) {
     Set-Location 'Item327:\project'
 } else { Set-Location -LiteralPath $Project }
 if ($FailQualification) {
-    function Resolve-FilesystemPath { param($Path) throw 'inert qualification failure' }
+    $qualifyFilesystemPath = (Get-Command Resolve-FilesystemPath).ScriptBlock
+    function Resolve-FilesystemPath {
+        param($Path)
+        if ((Split-Path -Leaf $Path) -eq 'research') { throw 'inert qualification failure' }
+        & $qualifyFilesystemPath -Path $Path
+    }
 }
 if ($FailRead) {
     function Get-Content {
