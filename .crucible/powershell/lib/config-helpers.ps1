@@ -458,6 +458,19 @@ function Resolve-PathFromRoot {
     return (Join-Path $Root $Path)
 }
 
+# Rooted Windows paths can still depend on the current PowerShell filesystem drive.
+# GetFullPath would instead choose the process drive; missing paths need no existence probe.
+function Resolve-FilesystemPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ([System.IO.Path]::IsPathFullyQualified($Path)) { return $Path }
+    $provider = $null
+    $drive = $null
+    $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path, [ref]$provider, [ref]$drive)
+    if ($provider.Name -ne 'FileSystem') { throw "Cannot qualify a filesystem path from provider '$($provider.Name)'." }
+    return $fullPath
+}
+
 # The one resolver of a bundle root (I13, item 301): an absolute crucible_root is used as is,
 # a relative one is joined to the project root. config.yaml must hold a relative value
 # (validate-config.ps1), but -CrucibleRoot and Context.CrucibleRoot may carry an absolute one,
@@ -542,9 +555,10 @@ function Get-PathRelativeToDirectory {
 function Test-ConfiguredRuntimePath {
     # Item 188: custom session/workspaces roots have the same runtime-data exemption.
     param([string]$Path, [string]$ProjectRoot)
-    $fullPath = Resolve-PathFromRoot -Root $ProjectRoot -Path $Path
+    $fullPath = Resolve-FilesystemPath -Path (Resolve-PathFromRoot -Root $ProjectRoot -Path $Path)
     foreach ($key in @("session", "workspaces")) {
-        if (Test-PathWithinDirectory -Path $fullPath -Directory (Get-ConfiguredPath -Key $key -ProjectRoot $ProjectRoot)) {
+        $directory = Resolve-FilesystemPath -Path (Get-ConfiguredPath -Key $key -ProjectRoot $ProjectRoot)
+        if (Test-PathWithinDirectory -Path $fullPath -Directory $directory) {
             return $true
         }
     }

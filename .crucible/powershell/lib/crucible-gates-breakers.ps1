@@ -115,13 +115,10 @@ function Invoke-CircuitBreakerGates {
                 # spec-artifact check reads it; joining an absolute one would skip it. Item 300.
                 $fullPath = Resolve-PathFromRoot -Root $repoRoot -Path $art
                 if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
-                    $resolvedPath = (Resolve-Path -LiteralPath $fullPath).Path
-                    $resolvedResearchDir = $researchDir
-                    if (Test-Path -LiteralPath $researchDir) {
-                        $resolvedResearchDir = (Resolve-Path -LiteralPath $researchDir).Path
-                    }
-                    if (Test-PathWithinDirectory -Path $resolvedPath -Directory $resolvedResearchDir) {
-                        try {
+                    try {
+                        $resolvedPath = Resolve-FilesystemPath -Path $fullPath
+                        $resolvedResearchDir = Resolve-FilesystemPath -Path $researchDir
+                        if (Test-PathWithinDirectory -Path $resolvedPath -Directory $resolvedResearchDir) {
                             $artContent = Get-Content -LiteralPath $resolvedPath -Raw -Encoding UTF8
                             $artMatches = Get-InjectionMatches -Text $artContent
                             foreach ($m in $artMatches) {
@@ -132,15 +129,15 @@ function Invoke-CircuitBreakerGates {
                                     break
                                 }
                             }
-                        } catch {
-                            $scanFailed = $true
-                            $scanFailureKind = "research_input"
-                            $scanFailedFile = $art
-                            $scanFailedError = $_.Exception.Message
-                            $detectedFile = $scanFailedFile
-                            $detectedRule = ""
-                            $hasBlockMatch = $true
                         }
+                    } catch {
+                        $scanFailed = $true
+                        $scanFailureKind = "research_input"
+                        $scanFailedFile = $art
+                        $scanFailedError = $_.Exception.Message
+                        $detectedFile = $scanFailedFile
+                        $detectedRule = ""
+                        $hasBlockMatch = $true
                     }
                 }
                 if ($hasBlockMatch) { break }

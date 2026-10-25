@@ -438,8 +438,8 @@ if ($isGitRepo) {
 $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $REPO_ROOT
 $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
 
-$resolvedWtPath = if (Test-Path $wtPath) { (Resolve-Path $wtPath).Path } else { $wtPath }
-$resolvedRepoRoot = if (Test-Path $REPO_ROOT) { (Resolve-Path $REPO_ROOT).Path } else { $REPO_ROOT }
+$resolvedWtPath = if (Test-Path $wtPath) { (Resolve-Path $wtPath).ProviderPath } else { $wtPath }
+$resolvedRepoRoot = if (Test-Path $REPO_ROOT) { (Resolve-Path $REPO_ROOT).ProviderPath } else { $REPO_ROOT }
 $normalizedArtifacts = @(Normalize-HandoffArtifactPaths -Artifacts $resolvedArtifacts -WorktreePath $resolvedWtPath -ProjectRoot $resolvedRepoRoot)
 $resolvedArtifacts = $normalizedArtifacts
 
@@ -462,7 +462,8 @@ if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
         else { -not (Test-Path -LiteralPath (Resolve-PathFromRoot -Root $resolvedWtPath -Path $_)) -and -not (Test-Path -LiteralPath (Resolve-PathFromRoot -Root $resolvedRepoRoot -Path $_)) }
     })
     if ($missingArtifacts.Count -gt 0) {
-        throw ("-Artifacts entry does not exist in the implementation worktree (" + $resolvedWtPath + ") or the project root (" + $resolvedRepoRoot + "): " + (($missingArtifacts | ForEach-Object { "[" + $_ + "]" }) -join ", ") + ". Create the file or correct the path, then write the handoff again.")
+        Write-Error -ErrorAction Continue ("-Artifacts entry does not exist in the implementation worktree (" + $resolvedWtPath + ") or the project root (" + $resolvedRepoRoot + "): " + (($missingArtifacts | ForEach-Object { "[" + $_ + "]" }) -join ", ") + ". Create the file or correct the path, then write the handoff again.")
+        exit 2
     }
 }
 
